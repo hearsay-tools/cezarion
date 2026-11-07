@@ -8,10 +8,10 @@ import { PiRunner } from './pi-runner.ts';
 import { OmpRunner } from './omp-runner.ts';
 
 /**
- * The single place that maps a backend id onto a concrete runner. Everything
- * that used to `new ClaudeCliRunner()` (the planner and the workflow engine)
- * goes through here so switching the agent backend is one function call.
- * `claude-cli` is the legacy id for `claude`.
+ * The production `RunnerFactory`: the single place that maps a backend id onto a concrete
+ * runner. The entry points pass it to `RunManager` and the planner; engine code never imports
+ * this module, so a test that drives one runner loads only that adapter
+ * (hearsay-tools/cezarion#2939). `claude-cli` is the legacy id for `claude`.
  */
 export function createRunner(backend: AgentBackend | RunnerId | undefined, options: { sessionTransport?: SessionTransport } = {}): AgentRunner {
   switch (backend) {
@@ -31,3 +31,4 @@ export function createRunner(backend: AgentBackend | RunnerId | undefined, optio
       return new ClaudeCliRunner();
   }
 }
+

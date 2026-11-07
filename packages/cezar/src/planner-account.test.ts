@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeWriteAgentAccounts } from './workspace/agent-accounts.ts';
+import type { AgentRunner } from './core/agent-runner.ts';
+import { planChain } from './planner.ts';
 
 const run = vi.fn(async () => ({ text: '' }));
-vi.mock('./core/runner-factory.ts', () => ({ createRunner: () => ({ run }) }));
-
-const { planChain } = await import('./planner.ts');
+const runners = () => ({ run }) as unknown as AgentRunner;
 
 /**
  * The planner bills the project's agent account like any task (spec 2026-07-29-agent-profiles), so
@@ -47,7 +47,7 @@ describe('planChain under an account cezar refuses to spawn (#1283)', () => {
     // `OMP_PROFILE=work` would now open `~/.omp-alt/profiles/work`.
     vi.stubEnv('PI_CONFIG_DIR', '.omp-alt');
 
-    const plan = await planChain(repoRoot, 'do it', undefined, testHome());
+    const plan = await planChain(repoRoot, 'do it', undefined, testHome(), runners);
 
     expect(plan.fallback).toBe(true);
     expect(run).not.toHaveBeenCalled();
@@ -61,7 +61,7 @@ describe('planChain under an account cezar refuses to spawn (#1283)', () => {
       store.selections[repoRoot] = { omp: 'work' };
     }, testHome());
 
-    await planChain(repoRoot, 'do it', undefined, testHome());
+    await planChain(repoRoot, 'do it', undefined, testHome(), runners);
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ env: { OMP_PROFILE: 'work' } }));
   });

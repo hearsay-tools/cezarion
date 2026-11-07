@@ -8,6 +8,7 @@ import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 import type { TaskWebhook } from '../runs/webhook.ts';
 import { createTaskWebhooks, createWorkspaceProjectContexts, createWorkspaceProjects } from './workspace-projects.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const { constructed } = vi.hoisted(() => ({ constructed: [] as ProjectContextDeps[] }));
 vi.mock('./project-context.ts', async (original) => {
@@ -126,10 +127,10 @@ describe('project build failure policies', () => {
 });
 
 it('keeps injected context and webhook services and builds absent services once', () => {
-  const options = { home: testHome(), listProjects: vi.fn() };
+  const options = { createRunner: noRunners, home: testHome(), listProjects: vi.fn() };
   const contexts = new ProjectContexts(options);
-  expect(createWorkspaceProjectContexts({ home: testHome(), contexts }, createTaskWebhooks({ home: testHome(),}), options)).toBe(contexts);
-  expect(createWorkspaceProjectContexts({ home: testHome(),}, createTaskWebhooks({ home: testHome(),}), options)).toBeInstanceOf(ProjectContexts);
+  expect(createWorkspaceProjectContexts({ home: testHome(), manager: { createRunner: noRunners }, contexts }, createTaskWebhooks({ home: testHome(),}), options)).toBe(contexts);
+  expect(createWorkspaceProjectContexts({ home: testHome(), manager: { createRunner: noRunners } }, createTaskWebhooks({ home: testHome(),}), options)).toBeInstanceOf(ProjectContexts);
   const webhooks = createTaskWebhooks({ home: testHome(),}, '');
   expect(webhooks.currentOrigin()).toBe('');
   expect(createTaskWebhooks({ home: testHome(),}).currentOrigin()).toBeUndefined();
@@ -145,7 +146,7 @@ it('assembles shared context options and keeps prepare/recovery side effects in 
     service: { armDestroyRetries: () => { order.push('destroy retries'); } },
   };
   const list = vi.fn();
-  createWorkspaceProjectContexts({ home: testHome(), delegation }, webhooks, {
+  createWorkspaceProjectContexts({ home: testHome(), manager: { createRunner: noRunners }, delegation }, webhooks, {
     listProjects: list,
     addressManager: () => { order.push('address'); },
   });

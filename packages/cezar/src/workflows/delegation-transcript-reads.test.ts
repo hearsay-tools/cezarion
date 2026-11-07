@@ -13,6 +13,7 @@ import { countTranscriptReads, restoreTranscriptReads } from '../runs/transcript
 import { RunManager } from './run.ts';
 import { seedSettledFamily } from './delegation-reconcile.testkit.ts';
 import { delegatingParent, manager as liveManager, store as liveStore, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const questions = [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }];
 
@@ -33,7 +34,7 @@ describe('delegation paths read no transcript (#880)', () => {
     const ask = store.appendEvent(family.workerId, { type: 'ask.requested', requestId: 'q', questions });
     store.appendEvent(family.workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: randomUUID(), parentRunId: family.parentId });
     for (let i = 0; i < 50; i++) store.appendEvent(family.parentId, { type: 'text', text: `parent token ${i}` });
-    manager = new RunManager(store, root, { home: testHome() });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
     const ids = [family.parentId, family.workerId];
     familyPaths = (path) => ids.some((id) => path.includes(id));
   });

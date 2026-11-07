@@ -11,11 +11,12 @@ import { selectDelegationExecutionSettings } from '../delegation/execution-setti
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { AGENT_MODELS_LOCKED_ERROR } from '../core/agent-model-policy.ts';
 import { workerIdentity } from '../delegation/execution-identity.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 it('keeps accepted run pins on the selected model policy through RunManager', () => {
   const { root, selected } = runtimeHomes();
   const store = RunStore.open(join(root, 'runs'));
-  const manager = new RunManager(store, root, { home: selected, semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+  const manager = new RunManager(store, root, { createRunner, home: selected, semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
   try {
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'Test isolation', model: 'sonnet', effort: 'high' });
     expect(run.model).toBeUndefined();

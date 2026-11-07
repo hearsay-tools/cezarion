@@ -43,6 +43,12 @@ single factory `createRunner(backend)` in `packages/cezar/src/core/runner-factor
 outside `packages/cezar/src/core/` should ever `new` a concrete runner or branch on the backend
 id — that is the whole point of the seam.
 
+The engine depends on the `RunnerFactory` type, not on that module. `RunManager` takes a
+factory in its options and puts it on `RunModuleContext`; the planner and the task namer take
+one as an argument. The entry points (`src/index.ts`, and serve through the boot manager)
+pass `createRunner`. A test that drives one runner passes a factory for that runner only, so
+its import closure holds one adapter (hearsay-tools/cezarion#2939).
+
 ### Identity
 
 ```ts
@@ -1367,6 +1373,13 @@ The cells are defined in `core/harness-parity-cells.testkit.ts`. Each runner's
 `core/harness-parity.test.ts` runs the matrix guard, the single-runner cells and
 a guard that every runner has its file (hearsay-tools/cezarion#1288). Below,
 `core/harness-parity.test.ts` names this whole matrix.
+
+A per-runner file chooses its runner with `useRunners(onlyRunner(<id>, ...))` from
+`core/runners-under-test.testkit.ts`, and its testkits build managers through
+`workflows/fixture-manager.testkit.ts` and `workflows/worker-wait-core.testkit.ts`, which
+import no adapter. `core/runner-closure.test.ts` fails when a `harness-<runner>-*` or
+`waits-<runner>-*` file reaches another runner's adapter or `runner-factory.ts`
+(hearsay-tools/cezarion#2939).
 
 **P1** (hearsay-tools/cezarion#1049, hearsay-tools/cezarion#1266) routes an
 approval from each native mock that carries one through `RunManager`, the

@@ -22,6 +22,7 @@ import {
   resolveExtraSystemPrompt,
   skillSystemPrompt,
 } from './run.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 // Publication guidance is additive for both fresh sessions and Continue; the
 // full prompt assertions below must still pin the unchanged handoff contract.
@@ -283,7 +284,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
         work: seamWork,
         semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }),
       });
-      const context: RunModuleContext = { home: testHome(), store: seamStore, repoRoot: seamRoot, dataDir: join(seamRoot, '.ai/cezar'),
+      const context: RunModuleContext = { createRunner, home: testHome(), store: seamStore, repoRoot: seamRoot, dataDir: join(seamRoot, '.ai/cezar'),
         semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }), work: seamWork, disposed: () => false };
       bookkeeper = new TurnBookkeeper(context, { isDisposedDelegatedRun: () => false,
         discoverSkills: () => discoverSkills(seamRoot, undefined, testHome()), reviveWorkflow: async () => skillWorkflow,

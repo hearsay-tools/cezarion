@@ -16,6 +16,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunModuleContext } from './run/types.ts';
 import type { Execution, ExecutionLaunch, StepLoop as LoopOutcome } from './run/types.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 function unused<T extends object>(name: string, values: Partial<T> = {}): T {
   return new Proxy(values, { get(target, key) {
@@ -46,7 +47,7 @@ describe('step completion mark at settlement callers', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-step-mark-'));
     store = RunStore.open(join(root, '.ai/cezar'));
-    context = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
+    context = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
       semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
     type SettlementArgs = ConstructorParameters<typeof RunSettlement>;
     settlement = new RunSettlement(context, unused<SettlementArgs[1]>('line'),

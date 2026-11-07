@@ -33,6 +33,7 @@ import { DEFAULT_SERVER_INSTANCE } from './paths.ts';
 import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
+import { createRunner } from './core/runner-factory.ts';
 import { loadWorkflows } from './workflows/load.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
 import {
@@ -298,7 +299,7 @@ async function serveCommand(
   // across projects, and the activity route reads every project's runs from it.
   const toolActivity = new ToolActivityTracker();
   const manager: RunManager = new RunManager(store, repoRoot, {
-    home, semaphore, preview: previewHost, cezarPort, cockpit, toolActivity,
+    home, createRunner, semaphore, preview: previewHost, cezarPort, cockpit, toolActivity,
     sweepBranches: (keep) => void sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
   const delegation = await DelegationController.start();
@@ -558,7 +559,7 @@ async function runHeadless(
     // 2.5) — one refreshed semaphore, even with just one manager in play.
     const semaphore = new WorkspaceSemaphore({ home });
     await semaphore.refresh();
-    const manager = new RunManager(store, repoRoot, { home, semaphore });
+    const manager = new RunManager(store, repoRoot, { home, createRunner, semaphore });
     delegation.attachProject({ id: 'headless', root: repoRoot, store, manager, home });
 
     store.on('event', ({ event }) => {

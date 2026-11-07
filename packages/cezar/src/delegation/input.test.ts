@@ -4,6 +4,7 @@ import { createActiveRun } from '../workflows/active-run.ts';
 import { InputDelivery } from '../workflows/run/input-delivery.ts';
 import { execFileSync } from 'node:child_process';
 import * as runners from '../core/runner-factory.ts';
+import type { RunnerFactory } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { TrackedWork } from '../workflows/run/tracked-work.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -21,6 +22,10 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { enqueueAgentInput, nextAgentInput, agentInputBatch } from './input.ts';
 import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
+
+/** Read at call time, so a test's `vi.spyOn(runners, 'createRunner')` reaches managers built before it. */
+const spiedRunners: RunnerFactory = (backend, options) => runners.createRunner(backend, options);
 
 it('bounds batches without splitting messages or crossing lifecycle inputs', () => {
   const make = (text: string): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text, createdAt: new Date().toISOString(),
@@ -97,7 +102,7 @@ async function withLiveInputRun(check: (fixture: LiveInputRun) => Promise<void> 
   execFileSync('git', ['init', '-q', '-b', 'main', dir]);
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: dir });
   const store = RunStore.open(dir, { keepLive: true }), work = new TrackedWork();
-  const manager = new RunManager(store, dir, { home: testHome(), work });
+  const manager = new RunManager(store, dir, { createRunner: spiedRunners, home: testHome(), work });
   let terminate!: (result: AgentRunResult) => void;
   let started!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
@@ -207,7 +212,7 @@ it('readiness rejects a replaced state independently of the session identity', (
   old.liveSession.attachSession(session); replacement.liveSession.attachSession(session);
   const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
   const host = unused<DeliveryHost>({ active: new Map([[record.id, replacement]]) });
-  const owner = new InputDelivery({ home: testHome(), store, repoRoot: dir, dataDir: dir, semaphore: new WorkspaceSemaphore({ home: testHome() }),
+  const owner = new InputDelivery({ createRunner: noRunners, home: testHome(), store, repoRoot: dir, dataDir: dir, semaphore: new WorkspaceSemaphore({ home: testHome() }),
     work: new TrackedWork(), disposed: () => false }, host, 10, 'unused');
   try {
     const before = JSON.stringify(store.getRun(record.id));
@@ -220,7 +225,7 @@ it('readiness rejects a replaced state independently of the session identity', (
 it('ask replay requires a validated successful-delivery checkpoint for the current ask', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-ask-checkpoint-'));
   const store = RunStore.open(dir);
-  const manager = new RunManager(store, dir, { home: testHome() });
+  const manager = new RunManager(store, dir, { createRunner: spiedRunners, home: testHome() });
   const pendingAsk = () => store.transcriptFacts(recordId).pendingGateSeq !== undefined;
   let recordId: string;
   try {
@@ -278,7 +283,7 @@ it.each(['replacement session', 'replacement state'] as const)(
     const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
     setRunStatus(store, record.id, RUN_STATUS.running); store.commitAgentInputs(record.id, [input]);
     const active = new Map([[record.id, state]]), move = vi.fn();
-    const owner = new InputDelivery({ home: testHome(), store, repoRoot: dir, dataDir: dir, semaphore: new WorkspaceSemaphore({ home: testHome() }),
+    const owner = new InputDelivery({ createRunner: noRunners, home: testHome(), store, repoRoot: dir, dataDir: dir, semaphore: new WorkspaceSemaphore({ home: testHome() }),
       work: new TrackedWork(), disposed: () => false }, unused<DeliveryHost>({
       active, move, owesWake: () => false,
       line: unused<DeliveryHost['line']>({ isAdmitted: () => false, unpark: vi.fn() }),
@@ -376,7 +381,7 @@ async function withInboxRun(check: (fixture: InboxFixture) => Promise<void> | vo
   }
   // Restart/refused-continuation cases deliberately have no step to reopen.
   const dir = mkdtempSync(join(tmpdir(), 'cez-inbox-durable-'));
-  const store = RunStore.open(dir, { keepLive: true }), manager = new RunManager(store, dir, { home: testHome() });
+  const store = RunStore.open(dir, { keepLive: true }), manager = new RunManager(store, dir, { createRunner: spiedRunners, home: testHome() });
   const record = store.createRun({ title: 'inbox', task: 'inbox', workflow: 'quick-task', steps: [] });
   setRunStatus(store, record.id, RUN_STATUS.running);
   try { await check(inboxFixture(store, manager, dir, record.id, [])); }
@@ -466,7 +471,7 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
     const reopened = RunStore.open(dir, { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
-    const recovered = new RunManager(reopened, dir, { home: testHome(), semaphore });
+    const recovered = new RunManager(reopened, dir, { createRunner: spiedRunners, home: testHome(), semaphore });
     // Hold scheduler admission while observing the real durable wake produced by expiry.
     try {
       await recovered.recover();
@@ -497,7 +502,7 @@ it('a continuation refused across several admission retries writes the retained 
     setRunStatus(store, runId, RUN_STATUS.waiting); store.close(); manager.dispose();
     const reopened = RunStore.open(dir, { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
-    const recovered = new RunManager(reopened, dir, { home: testHome(), semaphore });
+    const recovered = new RunManager(reopened, dir, { createRunner: spiedRunners, home: testHome(), semaphore });
     const resume = vi.spyOn(recovered, 'continueRun');
     const notes = () => reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '));
     try {
@@ -575,7 +580,7 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     manager.dispose(); store.close();
     const reopened = RunStore.open(dir, { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 0, memoryLimitMb: null }) });
-    const recovered = new RunManager(reopened, dir, { home: testHome(), semaphore });
+    const recovered = new RunManager(reopened, dir, { createRunner: spiedRunners, home: testHome(), semaphore });
     try {
       await recovered.recover();
       expect(reopened.getRun(runId)?.delegation).not.toHaveProperty('wait');

@@ -32,11 +32,11 @@ import { fileURLToPath } from 'node:url';
 
 import type { AgentRunSpec, AgentEvent, AgentRunResult, AgentSession, RunnerId, SessionOptions } from './agent-runner.ts';
 import { profileEnv } from './agent-profiles.ts';
-import { createRunner } from './runner-factory.ts';
+import { runnersUnderTest } from './runners-under-test.testkit.ts';
 import type { UiEvent } from './ui-events.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-manager.testkit.ts';
 import { DelegationController } from '../delegation/provision.ts';
 import { plannedWorkflow, skillTaskSteps } from '../workflows/types.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
@@ -1055,7 +1055,7 @@ export async function driveSeam(
   let session: AgentSession | undefined;
   let pid: number | undefined;
   try {
-    session = createRunner(backend, backend === 'cursor' ? { sessionTransport: 'cursor-print' } : {}).startSession(
+    session = runnersUnderTest()(backend, backend === 'cursor' ? { sessionTransport: 'cursor-print' } : {}).startSession(
       {
         userPrompt: promptFor(backend, scenario),
         cwd,

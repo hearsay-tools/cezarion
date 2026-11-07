@@ -2872,11 +2872,11 @@ export function createApp(deps: ServerDeps) {
   // ---- chained family: plan (project-scoped) ----
   const planRoutes = new Hono<ProjectApiEnv>()
     .post('/plan', jsonZodValidator(planSchema), async (c) => {
-      const { root: repoRoot } = c.get('project');
+      const { root: repoRoot, manager } = c.get('project');
       const parsed = { data: c.req.valid('json') };
       const blocked = await providerActionError([(await loadConfig(repoRoot, deps.home)).defaultRunner]);
       if (blocked) return c.json({ error: blocked }, 409);
-      return c.json(await planChain(repoRoot, parsed.data.task, builtinSkillsOf(c.get('project').manager), deps.home));
+      return c.json(await planChain(repoRoot, parsed.data.task, builtinSkillsOf(manager), deps.home, manager.createRunner));
     });
 
   // ---- GitHub automations --------------------------------------------------

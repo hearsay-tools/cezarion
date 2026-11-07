@@ -44,7 +44,7 @@ import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { join } from 'node:path';
 import { onUsage, type ProcessUsage } from '../core/process-usage.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
-import type { RunnerId } from '../core/agent-runner.ts';
+import type { RunnerFactory, RunnerId } from '../core/agent-runner.ts';
 import { seedHandoffFile } from '../handoff.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
@@ -123,6 +123,8 @@ export class RunManager {
   get previewHost(): PreviewHostLike | undefined {
     return this.#preview;
   }
+  /** The runner factory this manager was built with, for the planner beside it. */
+  get createRunner(): RunnerFactory { return this.#context.createRunner; }
   /** #781: cezar's own listening port, which no dev server may register. */
   readonly #cezarPort: (() => number | undefined) | undefined;
   #ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
@@ -160,7 +162,7 @@ export class RunManager {
   constructor(
     store: RunStore,
     repoRoot: string,
-    options: { home: Home; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined },
+    options: { home: Home; createRunner: RunnerFactory; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined },
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;
@@ -171,7 +173,7 @@ export class RunManager {
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.#semaphore = options.semaphore ?? new WorkspaceSemaphore({ home: options.home });
     this.#toolActivity = options.toolActivity?.attach(store);
-    this.#context = { home: options.home, store, repoRoot, dataDir: this.#dataDir, semaphore: this.#semaphore, disposed: () => this.#disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.#toolActivity };
+    this.#context = { home: options.home, createRunner: options.createRunner, store, repoRoot, dataDir: this.#dataDir, semaphore: this.#semaphore, disposed: () => this.#disposed, work: options.work ?? new TrackedWork(), sweepBranches: options.sweepBranches, toolActivity: this.#toolActivity };
     const facade = this;
     this.#modules = composeRunModules(this.#context, {
       unreadInputGraceMs: () => unreadInputGraceMs,

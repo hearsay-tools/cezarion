@@ -17,6 +17,7 @@ import type { AgentSession, AgentEvent } from '../../core/agent-runner.ts';
 import type { SessionTurn } from './types.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import * as processes from '../../core/process-usage.ts';
+import { noRunners } from '../../core/runners-under-test.testkit.ts';
 
 let root: string;
 let store: RunStore;
@@ -40,7 +41,7 @@ function opening() {
   state.inputState.selectOpeningInput(message.id);
   const host = { reconcileWorkerWaits: vi.fn(() => projectConversationEvents(store, store.getRun(parent.id)!)),
     flushAgentInputs: vi.fn(), isCurrentState: vi.fn(() => true) };
-  const context = { home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
+  const context = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   const saved = () => readPersistedRuns(root).find(run => run.id === recipient.id)!;
   const deliveries = (id: string) => store.readEvents(id).filter(event => event.type === 'conversation-message' && event.delivery === 'delivered');
   return { parent, recipient, state, host, context, saved, deliveries };

@@ -67,7 +67,7 @@ import {
   type RunnerId,
   type ToolGrant,
 } from './agent-runner.ts';
-import { createRunner } from './runner-factory.ts';
+import { runnersUnderTest } from './runners-under-test.testkit.ts';
 import { shellQuote } from './shell-env.ts';
 import { explicitToolGrant } from './tool-grant.testkit.ts';
 import { TOOL_GRANT_CASES, describeToolGrantParity } from './tool-grant-parity-cells.testkit.ts';
@@ -115,7 +115,7 @@ import {
 } from './harness-parity.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-manager.testkit.ts';
 
 /** One request the OpenCode serve mock recorded in `CEZ_MOCK_ARGS_FILE`. */
 type OpencodeRequestRow = { method?: string; url?: string; body?: { permission?: unknown } };
@@ -796,7 +796,7 @@ async function observeFollowOn(backend: RunnerId): Promise<FollowOnObservation> 
       await waitFor(() => answeredInItsTurn(v1, FOLLOW_ON_NEXT), 10_000).catch(() => undefined);
     },
   });
-  return { obs, consumed, observable: inputDeliveryOf(createRunner(backend)).consumption === 'observable' };
+  return { obs, consumed, observable: inputDeliveryOf(runnersUnderTest()(backend)).consumption === 'observable' };
 }
 const FOLLOW_ON_CRITERION: SeamCriterion<FollowOnObservation> = {
   id: 'I6',
@@ -1061,7 +1061,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
   describeRunners('input', 'harness parity — input delivery (#505)', () => {
     for (const backend of runners) {
       it(`${backend} I0 declares its input delivery`, () => {
-        expect(['steer', 'boundary']).toContain(inputDeliveryOf(createRunner(backend)).mode);
+        expect(['steer', 'boundary']).toContain(inputDeliveryOf(runnersUnderTest()(backend)).mode);
       });
       for (const criterion of INPUT_CRITERIA) {
         parityRow(backend, criterion, () => observeInput(backend, criterion.scenario, `parity-${criterion.id}`));
@@ -1442,7 +1442,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       // #505: a `steer` runner admits non-human input mid-turn; a `boundary` runner refuses
       // it until the turn ends. Either way the input is eventually read, and a closed session refuses.
       it(`${backend} S12 non-human input follows the runner's declared delivery mode`, async () => {
-        const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
+        const steer = inputDeliveryOf(runnersUnderTest()(backend)).mode === 'steer';
         await driveSeam(backend, 'hold', {
           whileOpen: async (session, { v1 }) => {
             let busy = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo retried steering' }]);
@@ -1723,7 +1723,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
           // it. A cezar_ask is the workflow's human wait, not the runner's: the parent's message
           // reaches a `boundary` runner at the turn boundary as an admitted wake beside the open
           // question, which stays pending and is never answered by it (hearsay-tools/cezarion#1235).
-          const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
+          const steer = inputDeliveryOf(runnersUnderTest()(backend)).mode === 'steer';
           const humanWait = store.getRun(runId)?.waits?.find(wait => wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open);
           const delivered = (id: string) => !!store.getRun(runId)?.agentInputs?.find(input => input.id === id)?.deliveredAt;
           if (!steer && humanWait?.via === WAIT_VIA.cezar_ask) {
@@ -2435,7 +2435,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
     if (scope === 'once') {
       it('every runner id builds its own runner, declaring every AgentRunSpec field with a reason', () => {
         for (const backend of RUNNER_IDS) {
-          const runner = createRunner(backend);
+          const runner = runnersUnderTest()(backend);
           // A new RUNNER_IDS member with no factory case falls through to claude; that is not a declaration.
           expect(runner.backend).toBe(backend);
           expect(Object.keys(runner.specSupport).sort()).toEqual([...AGENT_RUN_SPEC_FIELDS].sort());
@@ -2491,7 +2491,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
 
         for (const field of AGENT_RUN_SPEC_FIELDS) {
           it(`${backend} does with ${field} what it declares`, () => {
-            const declared = createRunner(backend).specSupport[field].honored;
+            const declared = runnersUnderTest()(backend).specSupport[field].honored;
             const probe = SPEC_FIELD_PROBES[field];
             let observed: boolean;
             if (probe.kind === 'boundary') {

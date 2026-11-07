@@ -12,7 +12,7 @@ import { MAX_AUTO_CONTINUES } from './run.ts';
 import { stateOf } from './run-states.ts';
 import { NO_WAIT_NUDGE_NOTE } from './turn-end.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait-core.testkit.ts';
 
 /**
  * Cezar's wait on native subagents (hearsay-tools/cezarion#2431) on each runner's own native mock

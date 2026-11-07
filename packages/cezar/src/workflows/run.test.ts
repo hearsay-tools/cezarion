@@ -28,6 +28,7 @@ import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { fileURLToPath } from 'node:url';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 describe('appendTurnText', () => {
   it.each(['initial execution', 'resumed execution'])(
@@ -350,7 +351,7 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    bookkeeper = new TurnBookkeeper({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    bookkeeper = new TurnBookkeeper({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeper.host', { isDisposedDelegatedRun: () => false }));
   });
@@ -1679,7 +1680,7 @@ describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-persist-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    attachments = new AttachmentWriter({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    attachments = new AttachmentWriter({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused('AttachmentWriter.host'));
   });
@@ -2014,7 +2015,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     const r = seedQueued();
     let accepts = false;
     const delivered: Array<Parameters<RunManager['sendMessage']>[1]> = [];
-    const queuedInput = new QueuedInput({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    const queuedInput = new QueuedInput({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work: new TrackedWork(), semaphore, disposed: () => false,
     }, unused<ConstructorParameters<typeof QueuedInput>[1]>('QueuedInput.host', {
       startingHas: () => true, activeGet: () => undefined,
@@ -2062,7 +2063,7 @@ describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-hydrate-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    queuedInput = new QueuedInput({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    queuedInput = new QueuedInput({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused('QueuedInput.host'));
   });

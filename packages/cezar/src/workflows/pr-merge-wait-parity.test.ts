@@ -14,6 +14,7 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, store, restart, root, semaphore, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 // Control only the supervisor's 30-second probe, keeping abort behavior and the real native
 // runner processes. Releasing the held probes stands for the merge loop's next poll.
@@ -71,7 +72,7 @@ function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitRe
   const host: Host = new Proxy(Object.create(null), {
     get(_target, property) { throw new Error(`Settled wait consulted ${String(property)}`); },
   });
-  const registry = new WaitRegistry({ home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
+  const registry = new WaitRegistry({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
   const before = structuredClone(store.getRun(runId));
   registry.resolveWait(runId, waitId, result);
   expect(store.getRun(runId)).toEqual(before);

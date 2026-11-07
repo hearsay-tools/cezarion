@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveClaudeExecutable } from './claude-cli-runner.ts';
+import { resolveClaudeExecutable } from './claude-executable.ts';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';

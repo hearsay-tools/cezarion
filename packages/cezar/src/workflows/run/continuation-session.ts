@@ -5,7 +5,6 @@ import type { WorkerQuestions } from './worker-questions.ts';
 import { join } from 'node:path';
 import type { AgentEvent, ContentBlock } from '../../core/agent-runner.ts';
 import { inputDeliveryOf } from '../../core/agent-runner.ts';
-import { createRunner } from '../../core/runner-factory.ts';
 import { startManagedSession } from '../../core/managed-session.ts';
 import { pastedAttachmentsText, type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
 import type { AutosaveReason } from '../../git-worktree.ts';
@@ -20,7 +19,7 @@ import * as inputReceipts from './input-receipts.ts';
 import type { HumanWaits } from './human-waits.ts';
 import type { RunSettlement } from './run-settlement.ts';
 import type { SessionTurn, ContinuationSessionLaunch, ContinuationClose, LaunchDelegation, LaunchCiTools } from './types.ts';
-import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';
+import type { AgentRunner, AgentSession, RunnerId } from '../../core/agent-runner.ts';
 import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import { seedHandoffFile } from '../../handoff.ts';
 import { atContinue } from './launch-read-resolver.ts';
@@ -482,7 +481,7 @@ export class ContinuationSession {
     if (state.liveSession.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
     if (this.host.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
     this.applyContinuationSettings(runId, stepId, state, backend, settings);
-    const { runner, skipSkillOnResume } = continuationRunner(backend, sessionId, settings.owningStep);
+    const { runner, skipSkillOnResume } = continuationRunner(backend, sessionId, settings.owningStep, this.context.createRunner);
     // Re-expand the continued step's skill from the current registry (#790) BEFORE
     // provisionSession. Materializing the skill used to sit after the pre-launch
     // revalidation, so Stop during that await still launched with revoked tools.
@@ -531,7 +530,7 @@ export class ContinuationSession {
   private startContinuationSession(
     runId: string,
     state: ActiveRun,
-    runner: ReturnType<typeof createRunner>,
+    runner: AgentRunner,
     launch: ContinuationSessionLaunch,
     onEvent: (event: AgentEvent) => void,
     turn: SessionTurn,
