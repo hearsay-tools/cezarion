@@ -59,22 +59,32 @@ export class WorkerScratchCleanup {
     this.arm(id, 0, 0);
   }
 
-  private arm(id: string, attempts: number, delay: number, from = Date.now()): void {
-    this.due.delete(id);
-    if (!this.enabled || this.store.unavailable) return;
+  /**
+   * Admission for one arm: no due entry when scratch is absent, foreign, live, or still running.
+   * Retain still runs before that last gate so older complete checkpoints stay reconstructed.
+   */
+  private scratchCleanupDue(id: string): false | Pick<Pending, 'generation' | 'resourceId'> {
+    if (!this.enabled || this.store.unavailable) return false;
     // The scratch check first: most ids have none, and a finished record is decoded to ask (#779).
-    if (!agentTmpDirMayExist(this.dataDir, id)) return;
+    if (!agentTmpDirMayExist(this.dataDir, id)) return false;
     // Another process's run (#779, plan step 3): cleaning up after it is its owner's job, or the
     // job of whoever adopts it once that owner is gone.
-    if (this.store.writeRefusal(id)) return;
+    if (this.store.writeRefusal(id)) return false;
     const run = this.store.getRun(id);
     if (run && (['queued', 'running', 'waiting'].includes(run.status) ||
-      (run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid'))) return;
+      (run.delegation?.role !== 'worker' && run.delegation?.role !== 'invalid'))) return false;
     // Reconstruct older complete checkpoints while the valid terminal index still exists.
     try { this.store.retainWorkerScratchCleanup(id); } catch { /* retry unreadable evidence */ }
     const proof = this.store.readWorkerExecution(id);
-    if (run?.delegation?.role === 'worker' && proof && proof.phase !== 'complete') return;
-    this.due.set(id, { at: from + delay, attempts, generation: proof?.generation, resourceId: proof?.scratchCleanup?.resourceId });
+    if (run?.delegation?.role === 'worker' && proof && proof.phase !== 'complete') return false;
+    return { generation: proof?.generation, resourceId: proof?.scratchCleanup?.resourceId };
+  }
+
+  private arm(id: string, attempts: number, delay: number, from = Date.now()): void {
+    this.due.delete(id);
+    const proof = this.scratchCleanupDue(id);
+    if (!proof) return;
+    this.due.set(id, { at: from + delay, attempts, generation: proof.generation, resourceId: proof.resourceId });
     if (!this.ticking) this.wake();
   }
 

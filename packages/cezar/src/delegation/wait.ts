@@ -46,6 +46,22 @@ function reconcileRequestWait(wait: WorkerWait, outcomes: readonly RequestOutcom
   return { ...wait, phase: 'wake-pending', reason, requestOutcomes: collected, wakeId: wait.wakeId ?? wait.id };
 }
 
+/** Open wait-list entry as the legacy `WorkerWait` `reconcileWorkerWait` already implements. */
+function legacyWorkerWait(entry: WorkerWaitEntry): WorkerWait {
+  return { id: entry.id, workerIds: entry.workerIds ?? [], deadline: entry.deadline ?? NEVER, phase: 'registered', outcomes: entry.outcomes ?? [],
+    ...(entry.mode === undefined ? {} : { mode: entry.mode }),
+    ...(entry.revisions === undefined ? {} : { revisions: entry.revisions }),
+    ...(entry.requestIds === undefined ? {} : { requestIds: entry.requestIds, requestOutcomes: entry.requestOutcomes ?? [] }) };
+}
+
+/** First observations stay on the entry object; an unchanged open entry is the same object. */
+function observedWorkerEntry<E extends WorkerWaitEntry>(entry: E, next: WorkerWait): E {
+  const changed = entry.requestIds
+    ? (next.requestOutcomes?.length ?? 0) !== (entry.requestOutcomes?.length ?? 0)
+    : next.outcomes.length !== (entry.outcomes?.length ?? 0) || next.outcomes.some((outcome, index) => outcome !== entry.outcomes?.[index]);
+  return !changed ? entry : entry.requestIds ? { ...entry, requestOutcomes: next.requestOutcomes ?? [] } : { ...entry, outcomes: next.outcomes };
+}
+
 /**
  * `reconcileWorkerWait` for a `worker` entry in the wait list (hearsay-tools/cezarion#1235): the
  * same revision matching, `all`/`any` rule and durable first observations, by running the entry
@@ -56,15 +72,8 @@ export function reconcileWorkerEntry<E extends WorkerWaitEntry>(entry: E, outcom
   if (entry.phase !== 'open') return { entry };
   // Cezar's completion wait has no deadline and never times out (hearsay-tools/cezarion#1301); the
   // legacy shape needs one, which stays inside this call.
-  const legacy: WorkerWait = { id: entry.id, workerIds: entry.workerIds ?? [], deadline: entry.deadline ?? NEVER, phase: 'registered', outcomes: entry.outcomes ?? [],
-    ...(entry.mode === undefined ? {} : { mode: entry.mode }),
-    ...(entry.revisions === undefined ? {} : { revisions: entry.revisions }),
-    ...(entry.requestIds === undefined ? {} : { requestIds: entry.requestIds, requestOutcomes: entry.requestOutcomes ?? [] }) };
-  const next = reconcileWorkerWait(legacy, outcomes, now, requestOutcomes);
+  const next = reconcileWorkerWait(legacyWorkerWait(entry), outcomes, now, requestOutcomes);
   const reason = next.reason === 'outcome' || next.reason === 'timeout' ? next.reason : undefined;
-  const changed = entry.requestIds
-    ? (next.requestOutcomes?.length ?? 0) !== (entry.requestOutcomes?.length ?? 0)
-    : next.outcomes.length !== (entry.outcomes?.length ?? 0) || next.outcomes.some((outcome, index) => outcome !== entry.outcomes?.[index]);
-  const observed = !changed ? entry : entry.requestIds ? { ...entry, requestOutcomes: next.requestOutcomes ?? [] } : { ...entry, outcomes: next.outcomes };
+  const observed = observedWorkerEntry(entry, next);
   return reason ? { entry: observed, reason } : { entry: observed };
 }
