@@ -1,3 +1,4 @@
+import { benchmarkHome } from './benchmark-home.ts';
 import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Family reconcile benchmark (hearsay-tools/cezarion#2378): what one reconcile pass over a settled
@@ -51,7 +52,6 @@ if (sizes.some(size => !Number.isInteger(size) || size < 1) || !Number.isInteger
 
 const { RunStore } = await import('../src/runs/store.ts');
 const { RunManager } = await import('../src/workflows/run.ts');
-const { benchmarkHome } = await import('./benchmark-home.ts');
 const home = benchmarkHome((await import('../src/home/resolve.ts')).resolveHome({ purpose: 'cli' }));
 
 const pad = 'x'.repeat(padBytes);
