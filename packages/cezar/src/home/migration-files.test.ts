@@ -11,12 +11,13 @@ afterEach(cleanStoreRoots);
 it('step 4: writes a private, standard ustar gzip archive with exact file bytes and exclusions', () => {
   const source = storeRoot(), target = join(storeRoot(), 'backups', 'legacy.tar.gz');
   mkdirSync(join(source, 'versions'));
+  mkdirSync(join(source, 'empty'));
   writeFileSync(join(source, 'config.json'), '{"secret":"token"}\n');
   writeFileSync(join(source, 'versions', 'cached'), 'not archived');
   const long = `${'directory-'.repeat(9)}/${'name-'.repeat(15)}.json`;
   mkdirSync(join(source, long, '..'), { recursive: true });
   writeFileSync(join(source, long), '{"long":true}');
-  writeLegacyArchive(source, target, migrationFiles(source, path => path === 'versions'));
+  writeLegacyArchive(source, target, migrationFiles(source, path => path === 'versions', true));
   const bytes = gunzipSync(readFileSync(target));
   expect(bytes.subarray(257, 263).toString()).toBe('ustar\0');
   expect(bytes.toString()).toContain('"secret":"token"');
@@ -27,6 +28,7 @@ it('step 4: writes a private, standard ustar gzip archive with exact file bytes 
     expect(statSync(join(target, '..')).mode & 0o777).toBe(0o700);
     const extracted = storeRoot();
     execFileSync('tar', ['-xzf', target, '-C', extracted]);
+    expect(statSync(join(extracted, 'empty')).isDirectory()).toBe(true);
     expect(readFileSync(join(extracted, long), 'utf8')).toBe('{"long":true}');
     expect(readFileSync(join(extracted, 'config.json'))).toEqual(readFileSync(join(source, 'config.json')));
   }

@@ -331,10 +331,10 @@ function parseWorkspaceConfig(raw: string): WorkspaceConfig | null {
 
 /** The snapshot is only worth restoring while it still holds projects — an
  *  empty one carries no information the defaults do not already have. */
-function loadWorkspaceConfigBackup(path: string, recovery?: { base?: Buffer }): WorkspaceConfig | null {
+function loadWorkspaceConfigBackup(path: string, recovery?: { base?: Buffer }, read = readHomeFile): WorkspaceConfig | null {
   let raw: string;
   try {
-    raw = readHomeFile(workspaceConfigBackupPath(path));
+    raw = read(workspaceConfigBackupPath(path));
   } catch {
     return null;
   }
@@ -348,10 +348,10 @@ function loadWorkspaceConfigBackup(path: string, recovery?: { base?: Buffer }): 
  * backup; preserve a valid empty primary. Failures degrade to defaults. Merge writers pass their
  * once-resolved path.
  */
-function loadWorkspaceConfigSync(path: string, recovery?: { base?: Buffer }): WorkspaceConfig {
+export function loadWorkspaceConfigSync(path: string, recovery?: { base?: Buffer }, read = readHomeFile): WorkspaceConfig {
   let raw: string | null = null;
   try {
-    raw = readHomeFile(path);
+    raw = read(path);
   } catch {
     // missing/unreadable — the backup below is the next chance
   }
@@ -359,7 +359,7 @@ function loadWorkspaceConfigSync(path: string, recovery?: { base?: Buffer }): Wo
     const parsed = parseWorkspaceConfig(raw);
     if (parsed) return parsed;
   }
-  const restored = loadWorkspaceConfigBackup(path, recovery);
+  const restored = loadWorkspaceConfigBackup(path, recovery, read);
   if (restored) {
     const cause = raw === null ? 'is missing' : 'is empty or corrupt';
     console.warn(
@@ -393,6 +393,14 @@ export async function mergeWriteWorkspaceConfig(
   mutator: (config: WorkspaceConfig) => WorkspaceConfig | void,
   home: Home,
 ): Promise<WorkspaceConfig> {
+  return mergeWriteWorkspaceConfigSync(mutator, home);
+}
+
+/** The migration uses the same recovery writer without yielding while it owns write.lock. */
+export function mergeWriteWorkspaceConfigSync(
+  mutator: (config: WorkspaceConfig) => WorkspaceConfig | void,
+  home: Home,
+): WorkspaceConfig {
   const store = new HomeStore(home);
   const backup = workspaceConfigBackupPath(home.workspaceConfig);
   let snapshotReady = true;

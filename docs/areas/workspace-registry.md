@@ -126,3 +126,66 @@ legacy-default `CEZ_HOME` counts as unset in split layout. Both names belong to
 `HOME_LAYOUT_ENV` list contains platform layout values, which still reach agents.
 The resolver has no filesystem access. New roots and the Windows current-user
 private ACL stay behind the disabled release switch.
+
+## Legacy migration (staged)
+
+`home/migrate.ts` exports synchronous `migrateLegacyHome(legacy, target,
+{ commit = true, env?, onStep? })`. Entry points call it only while
+`REBRAND_SWITCH` is enabled; tests inject a split Home. It returns
+`{ status: 'fresh' | 'migrated' | 'unchanged' | 'pending', record? }`.
+`home/migration-plan.ts` exports the shared read-only `planLegacyMigration`
+used by `cez migrate --dry-run`. The command is absent with the switch off.
+
+The legacy `.migrating` claim contains `{ pid, startToken? }`, uses exclusive
+creation, and reclaims proven-dead holders under the legacy write lock.
+Steps 2–8 run synchronously under that lock, then target config and state
+locks, without extending the short-lock protocol. HomeStore checks for the
+claim before waiting and inside its transaction. This one safety change is
+unconditional; ordinary reads do not probe `.migrating`.
+
+`installMarkerSchema.state` is `pending | committed | undefined`.
+`writeMigrationMarker` is the migration's only marker writer; ordinary marker
+creation never overwrites one. A pending home refuses HomeStore writes and
+permits reads and cockpit leases. Boot detects `install.json.state ===
+'pending'` and skips migration and seeding so P2c can check the group read-only.
+`prepareHomeLifecycle(home, instance?)` passes the instance into its lease.
+
+For P2c, `migrateLegacyHome(..., { commit: false })` leaves a pending copy.
+`commitLegacyMigration(target, env?)` rechecks the legacy hashes, commits the
+marker and writes `MOVED.json`. After the marker commits, a retry only finishes
+publication and PATH updates; later legacy changes belong to the canary.
+Profile symlinks stay intact; a profile inside the legacy home stays unchanged
+with a warning. `rollbackLegacyMigration(target)` renames a
+pending marker to `install.json.failed`; the next explicit migration overwrites
+the recorded pending destinations. Rollback never rewrites legacy registry data.
+
+`home/migration-record.ts` owns `migrationRecordSchema` (version 1) and the
+private `readMigrationRecord(home)` / `writeMigrationRecord(home, record)` pair.
+Writers hold config then state locks. A record contains `legacyRoot`, all five
+`roots`, `createdAt`, `backup`, `files`, `deferredAccounts`, and `notMoved`.
+Each file has its legacy-relative `path`, SHA-256 `hash`, `mtimeMs`, and a
+nullable `target: { kind: config | state | data, path }`. Unmapped legacy files
+are observed but not imported. `movedHomeSchema` is
+`{ version: 1, roots, migratedAt }`.
+
+Step 7 uses VersionLog under the migration locks to rewrite target account
+paths while pending. It preserves the legacy bytes and publishes HEAD; it
+does not add a HomeStore bypass. Deferred accounts finish at a later boot
+through ordinary HomeStore writes once no live registered run can use them.
+The read-only run-store probe uses live run rows and a live family owner's PID
+and start token. It defers unknown selections or unreadable stores too; dry-run
+lists the same deferrals. A non-cockpit owner can keep a closed session's account
+deferred until its claim ends. Live legacy cockpit leases already stop step 2.
+An internal omp account stays in place and records `notMoved` with reason
+`omp-profile-root-inside-legacy-home`; the warning asks to move `PI_CONFIG_DIR`
+outside the legacy home (planner decision for hearsay-tools/cezarion#2933).
+
+`isCezarMigrationJson` defines the strict JSON set. It covers cezar's registry,
+state, grants, connections, backups and update JSON. Opaque vendor account
+trees and managed `versions/` are verified byte for byte, since their `.json`
+files can be JSONC. Copies, archives, records and journals use private files
+and split-layout Windows ACLs. Managed executables and launchers use owner-only
+execute permission; the old launchers remain unchanged.
+The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
+keeps an external checkout only when its version manifest records that same
+checkout with `source: 'link'`. Other escaping links refuse migration.

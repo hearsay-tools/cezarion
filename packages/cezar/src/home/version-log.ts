@@ -3,7 +3,7 @@ import { linkSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { registryCount } from './registry-content.ts';
-import { atomicTmpPath, replacePrivate, syncDirectory } from './private-files.ts';
+import { atomicTmpPath, replacePrivate, syncDirectory, type PrivateFileOptions } from './private-files.ts';
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/).nullable();
 const versionSchema = z.object({ hash: hashSchema });
@@ -28,7 +28,7 @@ export function digest(bytes: Buffer | null): Hash {
 /** A journal belongs to the root that owns the live file, independent of runtime/env paths. */
 export class VersionLog {
   readonly directory: string;
-  constructor(readonly root: string, readonly relativePath: string) {
+  constructor(readonly root: string, readonly relativePath: string, private readonly privacy: PrivateFileOptions = {}) {
     this.directory = join(root, '.versions', relativePath);
   }
 
@@ -38,12 +38,12 @@ export class VersionLog {
   }
 
   setRecord(name: string, record: unknown): void {
-    replacePrivate(join(this.directory, name), `${JSON.stringify(record)}\n`);
+    replacePrivate(join(this.directory, name), `${JSON.stringify(record)}\n`, this.privacy);
   }
 
   private store(bytes: Buffer | null): Hash {
     const hash = digest(bytes);
-    if (bytes !== null) replacePrivate(join(this.directory, hash!), bytes);
+    if (bytes !== null) replacePrivate(join(this.directory, hash!), bytes, this.privacy);
     return hash;
   }
 
@@ -90,7 +90,7 @@ export class VersionLog {
       try { syncDirectory(dirname(path)); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
-    } else replacePrivate(path, bytes);
+    } else replacePrivate(path, bytes, this.privacy);
     this.setRecord('HEAD', { hash });
     this.clearPending();
   }
@@ -101,7 +101,7 @@ export class VersionLog {
     this.setRecord('PENDING', { hash });
     const stage = atomicTmpPath(path);
     try {
-      replacePrivate(stage, bytes);
+      replacePrivate(stage, bytes, this.privacy);
       linkSync(stage, path);
       syncDirectory(dirname(path));
       this.setRecord('HEAD', { hash });
