@@ -194,6 +194,15 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    `<legacy>/MOVED.json` with the new paths. Leave the rest of the legacy home as it is. The
    window-end cleanup never deletes it; it prints what still uses it.
 
+**Managed install** (`versions/`, `bin/`, the launchers and the PATH line): copied to
+`<data>/versions` and `<data>/bin`, launchers rewritten, PATH line updated; the old
+`~/.cezar/bin` launchers keep working. A copy works offline and can roll back.
+`application-updates/` goes to the state root.
+
+After commit, a watcher on the migrated legacy files reports a later change as a
+`legacy-change` row in the recovery banner with **Import changes from the old home** and
+**Ignore**.
+
 **`CEZ_HOME` set to a non-default dir** (containers, custom hosts): treat it as
 `HSQ_HOME` one-root, migrate in place into `config/`, `state/`, and so on. `CEZ_HOME`
 stays an accepted home variable after P5, unlike the other `CEZ_*` names: `resolveHome` uses
@@ -201,7 +210,7 @@ stays an accepted home variable after P5, unlike the other `CEZ_*` names: `resol
 rename it. So every custom install, container or not, keeps its own home with no pointer
 file. A test covers a restart after P5 with only `CEZ_HOME` set.
 
-**Server installs** (apptension-host serves 12 projects): `hsq server migrate` first stops
+**Server installs** (apptension-host serves 12 projects): `hsq server-migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
 `server.json` and `server-instances/`: install
 `hearsay-squawk[-<slug>].service` and the nginx site on the same port, start, check health.
@@ -211,7 +220,9 @@ refuses every write, so the cockpits serve read-only and no write can be lost by
 in the group fails its health check, every instance in the group stops, the old units and old
 sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
 migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
-success.
+success. `/etc/cezar/htpasswd[-<slug>]` is copied to `/etc/hearsay-squawk/`; the old file
+stays. Units and sites of an install made before the switch keep working with
+`server-uninstall` and `server-deploy`, which act on the recorded names.
 
 **Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
 as in section 2.
@@ -267,6 +278,14 @@ banner: restore the pinned version, or accept the file as found (stored as a new
 made `HEAD`). Blocking keeps a later merge from folding the outside content into the restore
 target.
 
+The banner (owner decisions, 2026-11-07) sits below the cockpit header on every page, one
+row per affected file. Reset rows offer Restore and Accept as found (accept keeps the empty
+registry or account list). Remote sessions see read-only rows ("Only the host operator can
+restore or accept this file"). A `config.json` that was deleted outside cezar is restored
+automatically when the next save starts from the pinned restore target; an edited file still
+blocks. Blocking ships with the banner (P1c), not before it, so no intermediate `main`
+blocks saves without a way to resolve them.
+
 The migration (section 4 step 5) stores each copied file as a version and sets `HEAD`
 before the new home goes live. The first build with `HomeStore` does the same on its first
 boot for each file of an existing home that has no `HEAD`, so an upgrade is never flagged.
@@ -301,14 +320,13 @@ release are the single user-visible change.
 | --- | --- | --- |
 | **P0 Safety** | (a) `buildChildEnv`, check steps (`workflows/run/step-loop.ts:508`, full `process.env` today) and the draft-PR `git push` never pass `CEZ_HOME` (or any later home variable); In-task commands that read the home today (`cez artifact publish` reads the registry at `artifacts/cli.ts:45` to build its link) get what they need from the task context or the cockpit API instead, so a host with a custom home keeps working. (`CEZ_HOME` reached agents only through the blanket `CEZ_*` allowance added in `fedab0ed1`, not by design.) (b) The guard compares against `os.userInfo().homedir` (passwd, not `$HOME`), runs for every env object, and covers `node:test`; `test:unit` and `test:package` load the sandbox setup. (c) Rotating backups for `config.json` and `agent-accounts.json`, and `cez backup list` and `cez backup restore`. (d) Issue to `apptension/toolkit-dev`: audit-agent-readiness probes run foreign suites with a scrubbed env and a temp `HOME`. | Only the new `cez backup` command |
 | **P1 Home object** | (a-1) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; `cezarHomeDir()` stays as a thin shim. (a-2) Remove the shim; tests use `Home.sandbox`; lint for `homedir()` and `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | Only the reset banner, which appears after a reset |
-| **P2 Layout and migration** | (a) XDG / macOS / Windows / `HSQ_HOME` resolver. (b) `migrateLegacyHome` with backup, `MOVED.json`, canary; it carries `~/.cezar/backups/` into `<state>/backups/`. (c) Server migration for systemd units and nginx sites, with rollback. (d) launchd label move. All behind the switch. | No |
+| **P2 Layout and migration** | (a-1) XDG / macOS / Windows / `HSQ_HOME` resolver, `Home` kind roots, Windows private-file ACL. (a-2) HomeStore, backups, version log and recovery routed by kind root. (b-1) `migrateLegacyHome` with backup, `pending`/`committed` marker, managed-install copy, `MOVED.json`; it carries `~/.cezar/backups/` into `<state>/backups/`. (b-2) Legacy-home canary with Import and Ignore. (c) `server-migrate` for systemd units and nginx sites, as a group with rollback. (d) launchd label move through `PlatformStrategy.migrate`. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `HSQ_*` first, `CEZ_*` fallback (additive). (b) `hsq` bin added beside `cezarion` and `cez` (additive). (c) Packages `@hearsay-tools/squawk` and unscoped `hsq` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
 | **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/squawk/` (additive). Built in P4, enabled in P5: `hsq migrate-project`: runs only under an exclusive project fence. A cockpit that owns the project (`server/cockpit-ownership.ts`) runs the migration itself: it stops accepting task starts and project reads for that project, waits until no task is live, and holds the fence until every rewrite ends. A CLI run asks the owning cockpit to do it, or, when no cockpit owns the project, takes the ownership lock itself so no cockpit can start on the project meanwhile. Every CLI operation on the project checks the fence. It first writes a journal (`.ai/squawk-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files under `gitCommonDir(repoRoot)/cezar-owned-workspaces` (`delegation/workspace.ts`; in a linked worktree `.git` is a file), then one run-store transaction for each run's `worktreePath`, `delegation.workspace.path`, cleanup checkpoints, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later start of the cockpit, the CLI or `migrate-project` that finds an unfinished journal resumes it before anything else reads the project, so a crash never leaves receipts, worktrees and the database on different paths. A dry run lists every rewrite first. Tracked files under `.ai/cezar/` (workflows, skills, `context.yaml`) are not moved by the command: it prints the `git mv` for the user to commit. The command ships with P5, after the deprecation window, because an older binary opens `.ai/cezar` directly and would create an empty run store after a move; until then `.ai/cezar` stays a real directory and both names are read. | Command only |
 | **Switch** | Turn `REBRAND_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
 | **P5 Window end** | Remove aliases and `CEZ_*` fallbacks (except `CEZ_HOME`, section 4) and enable `hsq migrate-project`, two minor releases or 60 days after the release. | Yes |
 
-Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P2(a) before P2(b–d); P2(b) before
-P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
+Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P1(a-2) before P1(b) (they share the test files); P2(a-1) before P2(a-2) before P2(b-1) and P2(d); P2(b-1) before P2(b-2); P2(b-1) and P2(d) before P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
 The switch needs P0 to P4 accepted on `main`; P5 follows the release.
 
 Every slice follows `BACKWARD_COMPATIBILITY.md` and updates `.env.example`, the README env table and the area docs it touches.
