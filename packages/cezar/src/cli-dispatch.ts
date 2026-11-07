@@ -94,7 +94,7 @@ export async function main(deps: CliDeps): Promise<void> {
     deps.process.exitCode = managedExit;
     return;
   }
-  // Subcommands with flags of their own run before the global deps.parseArgs (#504, #774, #1576).
+  // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
   const subcommandExit = await deps.runSubcommand(deps.process.argv.slice(2), deps.process.env, home);
   if (subcommandExit !== undefined) {
     deps.process.exitCode = subcommandExit;
