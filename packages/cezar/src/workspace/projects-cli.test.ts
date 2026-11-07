@@ -3,7 +3,7 @@ import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadWorkspaceConfig } from './config.ts';
@@ -137,7 +137,7 @@ describe('cezar projects CLI', () => {
     it('refuses a task worktree and $HOME, exactly like boot registration', async () => {
       const worktree = makeDir('host', '.ai', 'cezar', 'worktrees', 'abc12345');
       expect(await run('add', worktree)).toBe(1);
-      expect(await run('add', homedir())).toBe(1);
+      expect(await run('add', homedir())).toBe(1); // test-home-read: verify home registration is refused before any write
       expect(io.err.join('\n')).toContain('refusing to register');
       expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);
     });

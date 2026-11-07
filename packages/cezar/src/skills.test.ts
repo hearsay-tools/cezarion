@@ -2,7 +2,7 @@ import { Home } from './home/home.ts';
 import { useTestHome } from './home/test-home.testkit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importableSkillSchema , skillSchema } from '@open-mercato/cezar-contract/skills';
@@ -257,7 +257,7 @@ describe('discoverSkills global dirs', () => {
   it('does not merge the real (or planted) global skill dirs under vitest', async () => {
     const { home, repoRoot, restore } = await plantGlobalHome();
     try {
-      expect(homedir()).toBe(home);
+      expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
       const skills = await discoverSkills(repoRoot, undefined, testHome());
       expect(skills.find((skill) => skill.name === planted.agents)).toBeUndefined();
       expect(skills.find((skill) => skill.name === planted.claude)).toBeUndefined();
@@ -272,7 +272,7 @@ describe('discoverSkills global dirs', () => {
     const vitest = process.env.VITEST;
     delete process.env.VITEST;
     try {
-      expect(homedir()).toBe(home);
+      expect(homedir()).toBe(home); // test-home-read: verify the planted HOME before discovery
       const skills = (await discoverSkills(repoRoot, undefined, testHome())).filter((skill) => skill.source === 'global');
       expect(skills.map((skill) => skill.name).sort()).toEqual([planted.agents, planted.claude].sort());
     } finally {

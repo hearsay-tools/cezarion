@@ -7,6 +7,11 @@ and its `environment.ts` globalSetup uses the same environment bootstrap as the 
 `npm test` and `npm run test:watch` select only the four unit projects. Browser results
 are keyed by the server, cockpit and e2e sources that `squeal.config.json` lists as their
 inputs, not by built output; CI owns the full gate.
+Workers load `scripts/test-browser-home-env.mjs`, which uses the same script-only
+home setup as both unit runners and node:test. Each worker gets a marked test
+CEZ_HOME and private XDG config, data, state and cache paths. XDG_RUNTIME_DIR is
+unset. The P0b exception keeps host HOME and USERPROFILE so installed browser
+discovery still works; the shared test server keeps its separate fixture home.
 This page is about one thing: how a spec waits. Most red shards on `main`
 and on unrelated pull requests have been sampling races, not product bugs (#369, #393, #394,
 #405, #409), and every one of them looked like a flake until the page state was in hand.

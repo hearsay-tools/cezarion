@@ -54,6 +54,7 @@ never a pass.
 | `cez/contract-root-import` | A runtime import of a contract package root (hearsay-tools/cezarion#1237) | `contract-root-import.baseline.json`, shrink-only |
 | `cez/design-guardian` | The ten original cockpit design checks; each finding names its original rule, reason and token (hearsay-tools/cezarion#2422) | Original inline allowed predicates and reason comments; tests keep their original scope and the guardian suite excludes itself |
 | `cez/home-boundary` | `cezarHomeDir` references, `resolveHome` outside `home/` and CLI dispatch, unlisted `homedir()` calls in non-test `packages/cezar/src/`, and test-side CEZ_HOME writes/stubs/deletes | `home-readers.baseline.json`: reasoned OS-user readers with exact call counts, shrink-only; shared `vitest.setup.ts` selects test homes |
+| `cez/test-home-write` | An ambient `cezarHomeDir()` or `homedir()` result reaching a filesystem write in test code | None; use an explicit sandbox path (hearsay-tools/cezarion#2813) |
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
@@ -81,6 +82,68 @@ The home-boundary rule resolves statically known keys and callee forms; dynamic 
 Tests use `Home.sandbox(dir)` and the shared test selector. Reading CEZ_HOME and
 passing it in a child process environment remain allowed. Test fixtures prove each
 forbidden form, parser errors, stale entries and the CI growth ratchet.
+
+### Test home boundary
+
+`cez/test-home-write` and `cez/home-boundary` share `TEST_FILE`, the regular
+expression `\.(?:test|testkit)\.[cm]?[jt]sx?$`, across the repository. Both cover
+`.test` and `.testkit` files with `.js`, `.jsx`, `.ts`, `.tsx` extensions and
+their `m`/`c` variants, including JSX source in these files. The shared pattern keeps ambient-home syntax and CEZ_HOME selection
+checks on the same test surfaces. Oxlint scans package tests. The lint
+runner applies the same two scanners to tracked and unignored new test files outside
+`packages/`, including the two node:test projects. Neither rule has a test baseline.
+The guarded names are `homedir`, legacy `cezarHomeDir` and `resolveHome`.
+`home/resolve.ts` exports only `resolveHome` as an environment-to-Home resolver.
+The Cezar path helpers in `paths.ts` take an explicit `Home`; its agent-home
+and tilde APIs remain separate APIs.
+
+The rule checks syntax only. It reports these positions:
+
+- Bare calls and member calls ending in a guarded name.
+- Guarded keys in any destructuring pattern, including parameters, catch clauses,
+  loop targets, nesting, defaults, rest and TypeScript expression wrappers.
+- Guarded names in runtime import/export specifiers, including renamed imports
+  and re-exports. An import line needs its own annotation.
+- Member references ending in a guarded name, including values passed or assigned.
+
+A permitted use requires `// test-home-read: <reason>` on the same line. The
+reason must be nonempty. Only a real line comment grants an exception. Imports
+and each guarded use need their own comment. Existing uses were audited as pure
+comparisons, sandbox discovery, mocked writes, refusal probes or resolution of
+temporary sandbox envs. The annotation is a review contract, not proof of later
+read-only behavior. Use `Home.sandbox` or the selected sandbox HOME for writes.
+
+Repeated independent reviews found new binding forms and false positives in alias
+tracking. The syntactic rule has no binding or value-flow model. It ignores fixture
+strings/comments, explicit type-only syntax and unrelated data-property definitions such
+as `{ homedir: '/tmp' }`. Static identifier/string keys are checked directly;
+computed expressions such as `os['home' + 'dir']`, eval and cross-module flow are
+outside the scan. An allowed import alias is not followed to later calls under
+a different name. Runtime TypeScript namespaces/modules, enum initializers, export
+assignments, parameter properties and decorators are scanned. Only explicit type
+nodes, ambient/declare-only declarations and type import/export specifiers are
+skipped; `as`/`satisfies` expressions still scan their runtime operand.
+
+The following are operational tools or read-only helpers, not test source. This
+classification preserves existing commands and legacy paths (hearsay-tools/cezarion#2813).
+
+| Surface | Classification and reason |
+| --- | --- |
+| `packages/cezar/scripts/*benchmark*` | Developer tools; their sandbox/marker checks protect benchmark state while retaining explicit command environments |
+| `packages/cezar/scripts/measure-transcript-facts-health.mjs` | Developer measurement tool; it selects its own marked scratch home |
+| `.github/scripts/mutants-file.cjs` | Developer mutation tool; probe children use test homes and its host `~/.cache/cez/mutants` remains a cache |
+| `packages/cezar/scripts/pi-project-skills.mjs` | Runtime helper; it discovers the operator's installed agent skills |
+| `packages/web/e2e/browser-launch.ts` | Read-only discovery of installed browser launch settings |
+| `scripts/test-parity.mjs` | Read-only discovery of the installed Squeal launcher |
+| `packages/web/e2e/workspace-registry.ts` | Its homedir read is a refusal guard; writes use the explicit shared sandbox |
+
+All test entry points use `scripts/test-home-setup.mjs`. It imports no product
+modules, scrubs inherited CEZ flags once, and pins HOME, USERPROFILE, CEZ_HOME and
+all four XDG home overrides inside the sandbox. It removes XDG_RUNTIME_DIR and
+creates a `test` marker. Per-test repair retains test-owned beforeAll flags and
+the P1b Home selector. Browser workers load `scripts/test-browser-home-env.mjs`:
+they retain host HOME and USERPROFILE for installed browser discovery (the P0b
+exception), while CEZ_HOME and XDG overrides use a private marked sandbox.
 
 ## Add a rule
 

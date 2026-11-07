@@ -8,7 +8,7 @@ import { binDir, versionsDir, currentEntry } from '../self-update/layout.ts';
 import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
 import { bareDirFor, skillFilesCacheDirFor } from '../skills-remote.ts';
 import { cezCacheDir, resolveChromium } from '../preview/chromium.ts';
-import { resolveHome } from './resolve.ts';
+import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { REBRAND_SWITCH } from './switch.ts';
 
 // Shared setup now loads the write guard before this file installs its OS-home mock.
@@ -56,14 +56,14 @@ describe('legacy Home compatibility (release switch off)', () => {
   it('keeps the release gate off', () => { expect(REBRAND_SWITCH).toBe(false); });
 
   it.each(cases)('preserves every named path and public path helper: $name', ({ env, expected }) => {
-    const home = resolveHome({ purpose: 'cli', env });
+    const home = resolveHome({ purpose: 'cli', env }); // test-home-read: pure resolution; result only compared or used by read-only helpers
     const { serverState: _state, serverLock: _lock, rootOverride: _override, ...paths } = home;
     expect(slashPaths({ ...paths, serverState: home.serverState(), namedServerState: home.serverState('example-com'),
       serverLock: home.serverLock(), namedServerLock: home.serverLock('example-com'),
       currentEntry: currentEntry(env, home), bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),
     })).toEqual(expected);
     const readers = {
-      root: resolveHome({ purpose: 'cli', env }).root, workspaceConfig: workspaceConfigPath(env, home), workspaceUiState: workspaceUiStatePath(home),
+      root: resolveHome({ purpose: 'cli', env }).root, workspaceConfig: workspaceConfigPath(env, home), workspaceUiState: workspaceUiStatePath(home), // test-home-read: pure resolution; result only compared or used by read-only helpers
       agentAccounts: agentAccountsPath(home), remoteSettings: remoteSettingsPath(env, home), serverInstances: serverInstancesDir(home),
       versions: versionsDir(env, home), bin: binDir(env, home), cache: cezCacheDir(home),
       serverState: serverStatePath(undefined, home), namedServerState: serverStatePath('example-com', home),
@@ -74,7 +74,7 @@ describe('legacy Home compatibility (release switch off)', () => {
   });
 
   it.each(cases)('keeps both generated launchers byte for byte: $name', ({ name, env }) => {
-    const home = resolveHome({ purpose: 'cli', env });
+    const home = resolveHome({ purpose: 'cli', env }); // test-home-read: pure resolution; result only compared or used by read-only helpers
     expect(posixLauncher(env, home)).toBe(readFileSync(new URL(`./fixtures/${name}.sh.txt`, import.meta.url), 'utf8'));
     const windows = readFileSync(new URL(`./fixtures/${name}.cmd.txt`, import.meta.url), 'utf8');
     // The fixtures pin the old text. Only host path separators differ when run on Windows.
@@ -90,7 +90,7 @@ describe('legacy Home compatibility (release switch off)', () => {
       if (!HOME_LOCATING_ENV.includes(String(key))) throw new Error(`Unexpected env read: ${String(key)}`);
       return Reflect.get(target, key);
     } });
-    expect(resolveHome({ purpose: 'server', env }).root).toBe('/srv/cockpit');
+    expect(resolveHome({ purpose: 'server', env }).root).toBe('/srv/cockpit'); // test-home-read: pure resolution; result only compared or used by read-only helpers
     expect(read).toEqual(HOME_LOCATING_ENV);
   });
 
@@ -98,9 +98,9 @@ describe('legacy Home compatibility (release switch off)', () => {
     'keeps env-object root semantics for CEZ_HOME=%s', CEZ_HOME => {
       const env = { CEZ_HOME, HOME: '/ignored', HSQ_HOME: '/ignored', XDG_CACHE_HOME: '/ignored' };
       const root = CEZ_HOME || '/home/operator/.cezar';
-      expect(resolveHome({ purpose: 'cli', env }).root.replaceAll('\\', '/')).toBe(root);
-      expect(resolveHome({ purpose: 'cli', env }).root.replaceAll('\\', '/')).toBe(root);
-      expect(resolveHome({ purpose: 'cli', env }).cache.replaceAll('\\', '/')).toBe('/home/operator/.cache/cez');
+      expect(resolveHome({ purpose: 'cli', env }).root.replaceAll('\\', '/')).toBe(root); // test-home-read: pure resolution; result only compared or used by read-only helpers
+      expect(resolveHome({ purpose: 'cli', env }).root.replaceAll('\\', '/')).toBe(root); // test-home-read: pure resolution; result only compared or used by read-only helpers
+      expect(resolveHome({ purpose: 'cli', env }).cache.replaceAll('\\', '/')).toBe('/home/operator/.cache/cez'); // test-home-read: pure resolution; result only compared or used by read-only helpers
     });
 
   it('keeps agent home and tilde paths independent of CEZ_HOME', () => {
@@ -114,7 +114,7 @@ describe('legacy Home compatibility (release switch off)', () => {
   });
 
   it('finds the downloaded browser in the injected Home cache after the ambient user home changes', () => {
-    const home = resolveHome({ purpose: 'server' });
+    const home = resolveHome({ purpose: 'server' }); // test-home-read: pure resolution; result only compared or used by read-only helpers
     const cache = join('/home/operator/.cache/cez', 'chromium');
     const binary = join(cache, 'chrome-headless-shell-linux64', 'chrome-headless-shell');
     const fs = { existsSync: (path: string) => path === binary,

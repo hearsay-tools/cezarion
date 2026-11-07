@@ -1,11 +1,11 @@
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
-import { resolveHome } from '../home/resolve.ts';
-const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
+import { resolveHome } from '../home/resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env }); // test-home-read: resolve pinned fixtures or the fake-account refusal target
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir, tmpdir, userInfo } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -168,7 +168,7 @@ describe('cezar home write safety', () => {
 
     expect(() => assertCezarHomeWriteIsSandboxed(sandboxed)).not.toThrow();
     expect(() =>
-      assertCezarHomeWriteIsSandboxed(join(homedir(), '.cezar', 'config.json'), { VITEST: undefined }),
+      assertCezarHomeWriteIsSandboxed(join(homedir(), '.cezar', 'config.json'), { VITEST: undefined }), // test-home-read: probe the write refusal guard without writing
     ).not.toThrow();
   });
 });

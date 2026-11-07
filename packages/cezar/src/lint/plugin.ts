@@ -1,3 +1,4 @@
+import { testHomeWrite } from './test-home-write.ts';
 import { homeBoundary } from './home-boundary.ts';
 import { card2Contrast } from './card-2-contrast.ts';
 import { contractRootImport } from './contract-root-import.ts';
@@ -14,7 +15,7 @@ import { undocumentedEnvName } from './undocumented-env-name.ts';
 import { unitWaitDiscipline } from './unit-wait-discipline.ts';
 
 /** Every repository rule. `.oxlintrc.json` turns each one on as `cez/<name>`. */
-export const RULES: SourceRule[] = [homeBoundary, card2Contrast, contractRootImport, designGuardian, mockLifecycleBoundary, mockScenarioBoundary, nativeMockSource, rawQuerySetter, runFactReader, runHistoryReader, testWaitDiscipline, undocumentedEnvName, unitWaitDiscipline];
+export const RULES: SourceRule[] = [homeBoundary, testHomeWrite, card2Contrast, contractRootImport, designGuardian, mockLifecycleBoundary, mockScenarioBoundary, nativeMockSource, rawQuerySetter, runFactReader, runHistoryReader, testWaitDiscipline, undocumentedEnvName, unitWaitDiscipline];
 
 /** The `cez` oxlint JS plugin (hearsay-tools/cezarion#2416). */
 export default {

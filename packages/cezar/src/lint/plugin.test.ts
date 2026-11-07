@@ -44,6 +44,7 @@ afterAll(() => {
 });
 
 const VIOLATIONS: Record<string, [string, string]> = {
+  'test-home-write': ['packages/web/src/ambient-home.test.ts', "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}');\n"],
   'home-boundary': ['packages/cezar/src/ambient-home.ts', 'cezarHomeDir();\n'],
   'unit-wait-discipline': ['packages/web/src/wait-violation.test.tsx', 'await sleep(5);\n'],
   'test-wait-discipline': ['packages/cezar/src/wait-violation.test.ts', 'await sleep(5);\n'],
@@ -61,6 +62,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/web/src/sandbox-home.test.ts': "writeFileSync(join(Home.sandbox(dir).root, 'config.json'), '{}');\n",
   'packages/cezar/src/paths.ts': 'homedir();',
   'packages/cezar/src/index.ts': 'resolveHome({ purpose: "cli" });',
   'packages/cezar/vitest.setup.ts': 'process.env.CEZ_HOME = dir;',

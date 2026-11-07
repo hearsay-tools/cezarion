@@ -3,7 +3,7 @@ import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
@@ -318,8 +318,8 @@ describe('workspace projects', () => {
     });
 
     it('suppresses the home directory itself, in any spelling', async () => {
-      expect(await shouldRegisterProject(homedir())).toBe(false);
-      expect(await shouldRegisterProject(`${homedir()}/`)).toBe(false);
+      expect(await shouldRegisterProject(homedir())).toBe(false); // test-home-read: verify the home refusal predicate without registering
+      expect(await shouldRegisterProject(`${homedir()}/`)).toBe(false); // test-home-read: verify the home refusal predicate without registering
     });
   });
 

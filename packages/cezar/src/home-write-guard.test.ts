@@ -1,6 +1,6 @@
-import { resolveHome } from './home/resolve.ts';
+import { resolveHome } from './home/resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { randomUUID } from 'node:crypto';
-const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env });
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env }); // test-home-read: resolve refusal inputs; fixture blocks unowned mutations
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tmpdir, userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -46,7 +46,7 @@ import { acquireLock, saveServerState } from './server-install/state.ts';
 import { installFromRegistry } from './self-update/installer.ts';
 import { freshServerState } from './server-install/types.ts';
 
-const realHome = join(userInfo().homedir, '.cezar');
+const realHome = join(userInfo().homedir, '.cezar'); // test-home-read: refusal target; fixture rejects unowned mutations
 const mutations = [mkdirSync, openSync, writeFileSync, fsyncSync, renameSync, chmodSync, linkSync, unlinkSync, rmSync];
 beforeEach(() => { mutationScope.active = true; });
 afterEach(() => { mutationScope.active = false; mutationScope.root = undefined; vi.unstubAllEnvs(); vi.mocked(existsSync).mockRestore(); vi.mocked(realpathSync).mockRestore(); vi.mocked(lstatSync).mockRestore(); vi.mocked(userInfo).mockRestore(); vi.clearAllMocks(); });

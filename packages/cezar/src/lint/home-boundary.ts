@@ -10,13 +10,13 @@ export interface HomeSite { kind: 'cezarHomeDir' | 'resolveHome' | 'homedir' | '
 const ENTRY_POINTS = new Set(['packages/cezar/src/index.ts', 'packages/cezar/src/subcommands.ts']);
 const SHARED_SETUP = 'packages/cezar/vitest.setup.ts';
 const HOME_DIR = 'packages/cezar/src/home/';
-const TEST_FILE = /\.(?:test|testkit)\.[cm]?[jt]sx?$/;
+export const TEST_FILE = /\.(?:test|testkit)\.[cm]?[jt]sx?$/;
 
 export function readHomeReaders(path = join(repoRoot, homeReadersFile)): HomeReader[] {
   return (JSON.parse(readFileSync(path, 'utf8')) as { entries: HomeReader[] }).entries;
 }
 
-function visit(node: Node, accept: (node: Node) => void): void {
+export function visit(node: Node, accept: (node: Node) => void): void {
   accept(node);
   for (const value of Object.values(node)) {
     for (const child of Array.isArray(value) ? value : [value]) {
@@ -42,12 +42,12 @@ function name(node: Node | null | undefined): string | undefined {
   return node?.type === 'Identifier' ? node.name : staticKey(node);
 }
 
-function property(node: Node | null | undefined): string | undefined {
+export function property(node: Node | null | undefined): string | undefined {
   if (node?.type !== 'MemberExpression' && node?.type !== 'OptionalMemberExpression') return name(node);
   return node.computed ? staticKey(node.property) : name(node.property);
 }
 
-function unwrapped(node: Node): Node {
+export function unwrapped(node: Node): Node {
   if (node.type === 'TSAsExpression' || node.type === 'TSNonNullExpression' || node.type === 'TSTypeAssertion' || node.type === 'ParenthesizedExpression') return unwrapped(node.expression);
   return node;
 }
@@ -125,7 +125,7 @@ function selectsHome(node: Node): boolean {
 
 /** Parse failures propagate to lint. Strings and comments cannot hide or create sites. */
 export function homeSites(source: string, file = 'file.ts'): HomeSite[] {
-  const ast = parse(source, { sourceType: 'module', plugins: ['typescript', ...(file.endsWith('.tsx') ? ['jsx' as const] : [])] });
+  const ast = parse(source, { sourceType: 'module', plugins: ['typescript', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])] });
   const aliases = new Set(['homedir']);
   visit(ast, node => {
     if (node.type === 'ImportSpecifier' && name(node.imported) === 'homedir') aliases.add(node.local.name);
@@ -184,7 +184,7 @@ export function staleHomeReaders(root = repoRoot): string[] {
 export const homeBoundary: SourceRule = {
   name: 'home-boundary',
   description: 'Resolve cockpit homes at entry points; tests select Home.sandbox (hearsay-tools/cezarion#2810).',
-  applies: file => file !== SHARED_SETUP && /^packages\/cezar\/(?:src|test)\/.*\.[cm]?[jt]sx?$/.test(file),
+  applies: file => file !== SHARED_SETUP && (TEST_FILE.test(file) || /^packages\/cezar\/(?:src|test)\/.*\.[cm]?[jt]sx?$/.test(file)),
   check: (file, source) => scanHomeBoundary(file, source).map(site => ({
     line: lineAt(source, site.offset),
     message: `${site.kind}: pass an explicit Home from an entry point; tests select Home.sandbox through shared setup. OS-user readers belong to shrink-only home-readers.baseline.json (hearsay-tools/cezarion#2810).`,

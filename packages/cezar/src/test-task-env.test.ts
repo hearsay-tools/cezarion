@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir, userInfo } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { basename, isAbsolute, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -34,7 +34,7 @@ describe('test runs never inherit a task session (hearsay-tools/cezarion#953)', 
 // runner. vitest.setup.ts points HOME at a sandbox and clears every variable that moves an agent home.
 const AGENT_HOME_KEYS = [
   'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_CODING_AGENT_DIR', 'PI_CONFIG_DIR', 'OMP_PROFILE', 'PI_PROFILE',
-  'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'CURSOR_CONFIG_DIR',
+  'CURSOR_CONFIG_DIR',
 ];
 
 describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () => {
@@ -43,10 +43,10 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
 
   it('vitest.setup.ts points HOME at a sandbox, not the account home', () => {
     const home = process.env.HOME!;
-    expect(home).not.toBe(userInfo().homedir);
+    expect(home).not.toBe(userInfo().homedir); // test-home-read: compare sandbox HOME with the account home
     expect(basename(home)).toMatch(/^cez-vitest-user-home-/);
     expect(process.env.USERPROFILE).toBe(home);
-    expect(homedir()).toBe(home);
+    expect(homedir()).toBe(home); // test-home-read: verify the runner selected its sandbox HOME
   });
 
   it('keeps both sandbox homes inside the owned temp sandbox, so its cleanup removes them (hearsay-tools/cezarion#1395)', () => {
@@ -60,8 +60,16 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
     expect(agentHomeEnv()).toEqual(unset);
   });
 
+  it('pins every XDG home below the sandbox and removes the host runtime dir', () => {
+    for (const [key, suffix] of Object.entries({ XDG_CONFIG_HOME: '.config', XDG_DATA_HOME: '.local/share',
+      XDG_STATE_HOME: '.local/state', XDG_CACHE_HOME: '.cache' })) {
+      expect(process.env[key]).toBe(join(process.env.HOME!, suffix));
+    }
+    expect(process.env.XDG_RUNTIME_DIR).toBeUndefined();
+  });
+
   it('links the sandbox home to one omp natives cache outside every sandbox (hearsay-tools/cezarion#1911)', () => {
-    const natives = join(homedir(), '.omp', 'natives');
+    const natives = join(homedir(), '.omp', 'natives'); // test-home-read: inspect the sandbox native-cache symlink without writing
     expect(lstatSync(natives).isSymbolicLink()).toBe(true);
     const cache = readlinkSync(natives);
     expect(isAbsolute(cache)).toBe(true);

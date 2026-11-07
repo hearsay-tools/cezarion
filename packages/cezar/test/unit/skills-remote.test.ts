@@ -2,7 +2,7 @@ import { testHome } from '../../src/home/test-home.testkit.ts';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -72,7 +72,7 @@ test('safeRemoteFor keeps Windows local paths working (BC §5: local path)', () 
 
 test('safeRemoteFor expands ~/ so git (no shell) can actually find it', () => {
   // execFile gives git no shell, so a literal `~` would be a directory name.
-  assert.equal(safeRemoteFor('~/skills'), join(homedir(), 'skills'));
+  assert.equal(safeRemoteFor('~/skills'), join(homedir(), 'skills')); // test-home-read: compare tilde expansion without fetching or writing
 });
 
 test('node test Git fixtures use isolated config and a fixed identity', (t) => {
