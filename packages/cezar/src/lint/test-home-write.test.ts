@@ -209,6 +209,39 @@ describe('test writes use explicit sandbox paths', () => {
     expect(testHomeWrite.check('sample.test.ts', source).map(site => site.line)).toEqual([1]);
   });
 
+  it.each([
+    "namespace Fixtures { const dir = homedir(); writeFileSync(dir, '{}') }",
+    "enum Fixture { Path = homedir().length }",
+    "export = resolveHome({purpose: 'cli'})",
+    "namespace Outer.Inner { const home = resolveHome({purpose: 'cli'}) }",
+    "class Fixture { constructor(public home = homedir()) {} }",
+    "@decorate(os.homedir) class Fixture {}",
+  ])('scans runtime TypeScript containers: %s', source => {
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    "const dir: typeof os.homedir = safe",
+    "function read<T extends typeof os.homedir>() {}",
+    "safe<typeof os.homedir>()",
+    "interface Fixture extends os.homedir { resolveHome: string; homedir(): void }",
+    "type Fixture = typeof os.homedir",
+    "type Fixture = { [K in keyof typeof os.homedir]: string }",
+    "declare namespace Fixture { const home: typeof os.homedir }",
+    "declare class Fixture { homedir: typeof os.homedir }",
+    "declare function fixture(home: typeof os.homedir): void",
+    "declare enum Fixture { Path = 1 }",
+    'module "fixture" { import {homedir} from "node:os"; }',
+    "import type {homedir} from 'node:os'",
+    "export type {resolveHome} from './resolve.ts'",
+    "const home = safe as typeof os.homedir",
+    "const home = safe satisfies typeof os.homedir",
+    "type Fixture = import('node:os').homedir",
+    "function read(home: unknown): home is typeof os.homedir { return false }",
+  ])('skips explicit type-only syntax: %s', source => {
+    expect(unsafeHomeWrites(source)).toEqual([]);
+  });
+
   it.each(['writeFile', 'writeFileSync', 'mkdir', 'mkdirSync', 'rm', 'rmSync', 'rmdir', 'rmdirSync',
     'rename', 'renameSync', 'unlink', 'unlinkSync'])('covers fs.%s and promise/callback forms', method => {
     expect(unsafeHomeWrites(`fs.${method}(join(homedir(), 'x'), '/tmp/b', callback)`)).toHaveLength(1);

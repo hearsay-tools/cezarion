@@ -4,6 +4,15 @@ import { lineAt, type SourceRule } from './source-rule.ts';
 
 const SOURCES = new Set(['homedir', 'cezarHomeDir', 'resolveHome']);
 const EXPRESSIONS = new Set(['TSAsExpression', 'TSTypeAssertion', 'TSNonNullExpression', 'TSSatisfiesExpression', 'TSInstantiationExpression']);
+const TYPE_ONLY = new Set([
+  'TSTypeAnnotation', 'TSTypeParameterDeclaration', 'TSTypeParameterInstantiation', 'TSTypeParameter',
+  'TSInterfaceDeclaration', 'TSInterfaceBody', 'TSTypeAliasDeclaration', 'TSDeclareFunction', 'TSDeclareMethod',
+  'TSTypeReference', 'TSTypeLiteral', 'TSTypeQuery', 'TSImportType', 'TSExpressionWithTypeArguments', 'TSClassImplements',
+  'TSMappedType', 'TSUnionType', 'TSIntersectionType', 'TSConditionalType', 'TSInferType', 'TSParenthesizedType',
+  'TSTypeOperator', 'TSIndexedAccessType', 'TSArrayType', 'TSTupleType', 'TSNamedTupleMember', 'TSOptionalType', 'TSRestType',
+  'TSFunctionType', 'TSConstructorType', 'TSLiteralType', 'TSTypePredicate', 'TSMethodSignature', 'TSPropertySignature',
+  'TSCallSignatureDeclaration', 'TSConstructSignatureDeclaration', 'TSIndexSignature',
+]);
 
 /** Read syntax only. Computed expressions are never evaluated. */
 function guarded(node: Node | null | undefined): boolean {
@@ -23,8 +32,8 @@ function children(node: Node): Node[] {
 /** Type syntax cannot import or invoke a runtime home source. */
 function runtimeChildren(node: Node): Node[] | undefined {
   if (EXPRESSIONS.has(node.type)) return [(node as Node & { expression: Node }).expression];
-  if (node.type === 'TSParameterProperty') return [node.parameter];
-  if (node.type.startsWith('TS')) return [];
+  if (TYPE_ONLY.has(node.type) || ('declare' in node && node.declare)) return [];
+  if (node.type === 'TSModuleDeclaration' && node.id.type === 'StringLiteral') return [];
   if ('importKind' in node && node.importKind === 'type') return [];
   if ('exportKind' in node && node.exportKind === 'type') return [];
   return undefined;
@@ -49,7 +58,7 @@ function sites(node: Node, parent: Node | undefined): Node[] {
 
 /** Ban guarded syntax instead of attempting open-ended binding or value flow. */
 export function unsafeHomeWrites(source: string, file = 'file.test.ts'): number[] {
-  const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', ...(file.endsWith('.tsx') ? ['jsx' as const] : [])] });
+  const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', 'decorators', ...(file.endsWith('.tsx') ? ['jsx' as const] : [])] });
   const allowedLines = new Set((ast.comments ?? []).filter(comment => comment.type === 'CommentLine'
     && /^\s*test-home-read:\s*\S/.test(comment.value)).map(comment => comment.loc?.start.line));
   const offsets = new Set<number>();

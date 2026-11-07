@@ -113,11 +113,14 @@ read-only behavior. Use `Home.sandbox` or the selected sandbox HOME for writes.
 
 Repeated independent reviews found new binding forms and false positives in alias
 tracking. The syntactic rule has no binding or value-flow model. It ignores fixture
-strings/comments, type-only syntax and unrelated data-property definitions such
+strings/comments, explicit type-only syntax and unrelated data-property definitions such
 as `{ homedir: '/tmp' }`. Static identifier/string keys are checked directly;
 computed expressions such as `os['home' + 'dir']`, eval and cross-module flow are
 outside the scan. An allowed import alias is not followed to later calls under
-a different name.
+a different name. Runtime TypeScript namespaces/modules, enum initializers, export
+assignments, parameter properties and decorators are scanned. Only explicit type
+nodes, ambient/declare-only declarations and type import/export specifiers are
+skipped; `as`/`satisfies` expressions still scan their runtime operand.
 
 The following are operational tools or read-only helpers, not test source. This
 classification preserves existing commands and legacy paths (hearsay-tools/cezarion#2813).
