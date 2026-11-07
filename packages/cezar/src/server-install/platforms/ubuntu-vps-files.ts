@@ -43,10 +43,10 @@ export async function repairUnitEnv(ctx: InstallContext, scope: 'user' | 'system
   const next = systemdRemoteEnv(current.stdout);
   if (next === current.stdout || ctx.dryRun) return;
   if (scope === 'user') writeFileSync(path, next, 'utf8');
-  else await writeFileStep(ctx, {
+  else await sudoStep(ctx, {
     description: 'Add the preferred hosted-mode environment pin to the existing service.',
-    path, content: next,
+    // Keep operator env values out of the displayed privileged command.
+    command: `sed -i ${shquote('/^Environment=HSQ_REMOTE=/d; /^Environment=CEZ_REMOTE=1$/a Environment=HSQ_REMOTE=1')} ${shquote(path)}`,
     verify: async c => (await c.runner.capture('cat', [path])).stdout === next,
   });
 }
-

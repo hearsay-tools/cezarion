@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,8 +18,8 @@ it('repairs system units through the existing privilege path and verifies the re
       capture: async (program) => ({code: 0, stdout: program === 'cat' ? readFileSync(path, 'utf8') : '', stderr: ''}),
       interactive: async (program, args) => {
         expect(program).toBe('sudo');
-        const encoded = args.at(-1)!.match(/printf %s '([^']+)'/)![1]!;
-        writeFileSync(path, Buffer.from(encoded, 'base64')); writes++;
+        expect(args.at(-1)).not.toContain('ExecStart=/custom/entry');
+        execFileSync('sh', ['-c', args.at(-1)!]); writes++;
         return 0;
       },
     }, save: async () => {}, dryRun: false, assumeYes: true, reconfigure: new Set(), repoRoot: root,
