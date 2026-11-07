@@ -1,30 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon } from 'lucide-react'
-import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleXIcon, ChevronRightIcon, RefreshCwIcon, TriangleAlertIcon } from '@/components/design-icons'
+import { useQueryClient } from '@tanstack/react-query'
+import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon } from 'lucide-react'
+import { ArrowLeftIcon, ChevronRightIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { Link } from '@/lib/project-router'
 
-import { getGithubPrChanges, getGithubPrMergeState, mergeGithubPr } from '@/api/client'
-import { queryKeys, useGithubComments, useGithubPrChanges, useReferenceProjectId } from '@/api/queries'
+import { getGithubPrChanges } from '@/api/client'
+import { queryKeys, useGithubComments, useGithubPrChanges } from '@/api/queries'
 import type {
   GithubComment,
   GithubItem,
   GithubTimelineEvent,
   GithubTimelineEventKind,
-  GithubMergeMethod,
 } from '@open-mercato/cezar-api-client'
 import { Diff, type DiffFileChange } from '@/components/diff'
+import { GithubMergeBox } from '@/components/github-merge-box'
 import { TabLink } from '@/components/tab-link'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { shortAge } from '@/lib/format'
@@ -33,7 +25,6 @@ import { cn, isHttpUrl } from '@/lib/utils'
 import { Markdown } from '@/routes/task-thread/markdown'
 import { labelChipStyle } from '@/routes/github/github-filter'
 import { githubFilterPath, type GithubFilter } from '@/routes/github/github-sidebar-model'
-import { GITHUB_PAGE_SIZE } from '@/api/github-pages'
 
 /** A single label pill, tinted with its GitHub color (or neutral when unknown). */
 export function LabelChip({ label, color, plain = false }: { label: string; color: string | undefined; plain?: boolean }) {
@@ -192,224 +183,6 @@ export function GithubItemDetail({
       {item.kind === 'pr' ? <GithubMergeBox number={item.number} onRunAgent={onRunAgent} /> : null}
       {children}
     </article>
-  )
-}
-
-const mergeLabels: Record<GithubMergeMethod, string> = {
-  squash: 'Squash and merge',
-  merge: 'Create a merge commit',
-  rebase: 'Rebase and merge',
-}
-
-type MergeRequirementState = 'passing' | 'failing' | 'pending' | 'unknown'
-
-function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
-  const iconClass = 'size-4 shrink-0'
-  if (state === 'passing') return <CheckIcon size={16} aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
-  if (state === 'failing') return <CircleXIcon size={16} aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
-  if (state === 'pending') return <LoaderCircleIcon aria-hidden="true" data-slot="gh-merge-status-pending" className={cn(iconClass, 'animate-spin text-warning')} />
-  return <CircleIcon size={16} aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
-}
-
-function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (() => void) | undefined }) {
-  const queryClient = useQueryClient()
-  // Ref-status batches are keyed by the explicit project, not `queryScope()` (queries.ts).
-  const referenceProjectId = useReferenceProjectId()
-  const mergeState = useQuery({
-    queryKey: queryKeys.githubMergeState(number),
-    queryFn: ({ signal }) => getGithubPrMergeState(number, {}, { signal }),
-    retry: false,
-  })
-  const state = mergeState.data?.available ? mergeState.data.mergeState : null
-  const [method, setMethod] = useState<GithubMergeMethod | null>(null)
-  const [confirming, setConfirming] = useState(false)
-  const [overrideRules, setOverrideRules] = useState(false)
-  // The key is taken when Refresh is PRESSED, like the merge's below: a reader who left for another
-  // project before the answer landed must not get this repository's merge state under theirs.
-  const refreshMergeState = useMutation({
-    mutationFn: (_key: ReturnType<typeof queryKeys.githubMergeState>) => getGithubPrMergeState(number, { refresh: true }),
-    onSuccess: (data, key) => queryClient.setQueryData(key, data),
-    onError: (error) => toast(error instanceof Error ? error.message : String(error), { tone: 'danger' }),
-  })
-  const selectedMethod = method && state?.methods.includes(method)
-    ? method
-    : state?.defaultMethod ?? state?.methods[0] ?? null
-  // Every key this merge touches, taken when it STARTS: `queryKeys` reads the live project scope,
-  // and a merge that lands after the reader switched projects must refresh the project it merged
-  // in, not the one now on screen (review g3 #1).
-  const mergeKeys = () => ({
-    mergeState: queryKeys.githubMergeState(number),
-    list: queryKeys.githubPages(GITHUB_PAGE_SIZE),
-    comments: queryKeys.githubComments('pr', number),
-    item: queryKeys.githubItem('pr', number),
-    refStatus: referenceProjectId === undefined ? undefined : queryKeys.githubRefStatusOf(referenceProjectId),
-  })
-  const merge = useMutation({
-    mutationFn: (_keys: ReturnType<typeof mergeKeys>) => {
-      if (!state || !selectedMethod) throw new Error('No merge method is available.')
-      return mergeGithubPr(number, {
-        method: selectedMethod,
-        expectedHeadSha: state.headSha,
-        ...(overrideRules && state.canOverride ? { overrideRules: true } : {}),
-      })
-    },
-    onSuccess: (_data, keys) => {
-      setConfirming(false)
-      toast(`Pull request #${number} merged`)
-      void queryClient.invalidateQueries({ queryKey: keys.mergeState })
-      // The paged list (hearsay-tools/cezarion#1183) — a merged PR drops out of the open set on
-      // the next read of its pages.
-      void queryClient.invalidateQueries({ queryKey: keys.list })
-      void queryClient.invalidateQueries({ queryKey: keys.comments })
-      // The task tab's item (#692), and every chip and tab glyph of this project: the server
-      // forgot its cached status on merge, so a reread answers `merged` without a reload.
-      void queryClient.invalidateQueries({ queryKey: keys.item })
-      if (keys.refStatus) void queryClient.invalidateQueries({ queryKey: keys.refStatus })
-    },
-    onError: (error, keys) => {
-      toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
-      void queryClient.invalidateQueries({ queryKey: keys.mergeState })
-    },
-  })
-
-  if (mergeState.isPending) {
-    return <Skeleton data-slot="gh-merge-loading" className="mt-6 h-32 w-full" />
-  }
-  if (!state) {
-    return (
-      <section data-slot="gh-merge-unavailable" className="mt-6 rounded-lg border border-border bg-card p-4 text-sm">
-        <p className="font-medium">Merge status unavailable</p>
-        <p className="mt-1 text-xs text-soft-foreground">
-          {mergeState.data?.available === false ? mergeState.data.reason : 'GitHub could not load merge requirements.'}
-        </p>
-      </section>
-    )
-  }
-
-  const title =
-    state.state === 'merged' ? 'Merged'
-      : state.state === 'closed' ? 'Closed'
-        : state.isDraft ? 'Draft'
-          : state.mergeable === 'conflicting' ? 'Conflicts must be resolved'
-            : state.canMerge ? 'Ready to merge'
-              : state.eligibility === 'unknown' ? 'Merge blocked · Requirements unknown' : 'Merge blocked'
-  const reviewState: MergeRequirementState =
-    state.reviewDecision === 'approved' || state.reviewDecision === 'not-required' ? 'passing'
-      : state.reviewDecision === 'unknown' ? 'unknown'
-        : 'failing'
-  const conflictState: MergeRequirementState =
-    state.mergeable === 'mergeable' ? 'passing'
-      : state.mergeable === 'conflicting' ? 'failing'
-        : 'unknown'
-  const mergeEnabled = Boolean(selectedMethod && (state.canMerge || (state.canOverride && overrideRules)))
-
-  return (
-    <section data-slot="gh-merge-box" data-eligibility={state.eligibility} data-conflicting={state.mergeable === 'conflicting' ? 'true' : undefined} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
-      <div className="flex items-start gap-3">
-        {state.canMerge ? (
-          <CheckIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
-        ) : (
-          <TriangleAlertIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold">{title}</h3>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={refreshMergeState.isPending}
-              onClick={() => refreshMergeState.mutate(queryKeys.githubMergeState(number))}
-            >
-              <RefreshCwIcon size={16} aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
-              Refresh
-            </Button>
-          </div>
-          <p className="mt-1 font-mono text-[11px] text-soft-foreground">
-            {state.headRef} ({state.headSha.slice(0, 7)}) → {state.baseRef}
-          </p>
-          <ul className="mt-3 space-y-2 text-xs">
-            <li className="flex items-center gap-2">
-              <MergeRequirementIcon state={reviewState} />
-              <span>Reviews: {state.reviewDecision.replaceAll('-', ' ')}</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <MergeRequirementIcon state={conflictState} />
-              <span>Conflicts: {state.mergeable === 'conflicting' ? 'present' : state.mergeable === 'mergeable' ? 'none' : 'unknown'}</span>
-            </li>
-            {state.checks.length === 0 ? <li>No checks configured</li> : state.checks.map((check) => (
-              <li key={check.name} className="flex items-center justify-between gap-3">
-                <span className="flex min-w-0 items-center gap-2">
-                  <MergeRequirementIcon state={check.state} />
-                  <span>{check.name} · {check.state}{check.required === true ? ' · required' : check.required === null ? ' · requiredness unknown' : ''}</span>
-                </span>
-                {check.url && isHttpUrl(check.url) ? <a href={check.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground underline">details</a> : null}
-              </li>
-            ))}
-            {state.blockers.map((blocker) => <li key={blocker.code} className="text-soft-foreground">{blocker.message}</li>)}
-          </ul>
-          {state.mergeable === 'conflicting' && onRunAgent ? <Button className="mt-4" onClick={onRunAgent}>Run agent on this PR</Button> : null}
-          {state.canOverride ? (
-            <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
-              <input
-                type="checkbox"
-                checked={overrideRules}
-                onChange={(event) => setOverrideRules(event.target.checked)}
-                className="mt-0.5 size-4 accent-accent-strong"
-              />
-              <span>
-                <span className="block font-medium">Merge without waiting for requirements</span>
-                <span className="mt-0.5 block text-soft-foreground">GitHub will allow this only if your permissions can bypass the repository rules.</span>
-              </span>
-            </label>
-          ) : null}
-          {state.eligibility === 'unknown' ? (
-            <p className="mt-4 text-xs text-muted-foreground">
-              GitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.
-            </p>
-          ) : null}
-          {state.state === 'open' && state.methods.length > 0 ? (
-            <div className="mt-4 flex flex-col flex-wrap gap-2 sm:flex-row">
-              <select
-                aria-label="Merge method"
-                value={selectedMethod ?? ''}
-                onChange={(event) => setMethod(event.target.value as GithubMergeMethod)}
-                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {state.methods.map((candidate) => <option key={candidate} value={candidate}>{mergeLabels[candidate]}</option>)}
-              </select>
-              <Button disabled={!mergeEnabled} onClick={() => setConfirming(true)}>
-                {selectedMethod ? mergeLabels[selectedMethod] : 'Merge'}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent data-slot="gh-merge-confirm" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>{selectedMethod ? mergeLabels[selectedMethod] : 'Merge'} pull request #{number}?</DialogTitle>
-            <DialogDescription asChild>
-              <div>
-                <p>This will merge “{state.title}” into {state.baseRef}. GitHub will re-check the exact reviewed head before changing the repository.</p>
-                {overrideRules && state.canOverride ? (
-                  <p data-slot="gh-bypass-warning" className="mt-4 text-sm text-warning">
-                    You are asking GitHub to bypass unmet repository requirements; GitHub may refuse if your permissions do not allow it.
-                  </p>
-                ) : null}
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          {merge.error ? <p className="text-sm text-danger">{merge.error.message}</p> : null}
-          <DialogFooter>
-            <Button variant="outline" disabled={merge.isPending} onClick={() => setConfirming(false)}>Cancel</Button>
-            <Button disabled={merge.isPending} onClick={() => merge.mutate(mergeKeys())}>
-              {merge.isPending ? 'Merging…' : selectedMethod ? mergeLabels[selectedMethod] : 'Merge'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
   )
 }
 
