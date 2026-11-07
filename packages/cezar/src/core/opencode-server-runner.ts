@@ -77,6 +77,8 @@ interface PendingOpencodePermission {
   answer?: { optionId: string; reply: OpencodeReply } | undefined;
 }
 
+type PromptOrigin = 'opening' | 'human' | 'agent';
+
 const SERVER_START_TIMEOUT_MS = 30_000;
 
 /**
@@ -786,7 +788,7 @@ class OpencodeSession implements AgentSession {
     });
   }
 
-  private async prompt(text: string, origin: 'opening' | 'human' | 'agent' = 'human', signal?: AbortSignal): Promise<void> {
+  private async prompt(text: string, origin: PromptOrigin = 'human', signal?: AbortSignal): Promise<void> {
     // One turn at a time. `prompt_async` acknowledges before the turn runs,
     // so `ready` no longer serializes prompts the way the long-poll did — a
     // follow-up posted mid-turn would share the turnActive/turnEnded pair
@@ -816,36 +818,39 @@ class OpencodeSession implements AgentSession {
     try {
       await this.http('POST', `/session/${this.sessionId}/prompt_async`, body, signal);
     } catch (err) {
-      // No turn started server-side, so no `session.idle` will ever close it —
-      // surface the failure and end the turn here instead of parking the run.
-      const message = err instanceof Error ? err.message : String(err);
-      if (origin === 'agent' && this.providerErrorPending) {
-        // Latch the initiating provider failure before rejection reaches the
-        // manager's ACK handler (including grace expiry and explicit abort).
-        this.providerErrorPending.reported = true;
-        if (this.serverOpen) this.emit({ type: 'error', message: this.providerErrorPending.message });
-      } else if (origin === 'agent') {
-        // Fatal BEFORE the synthetic boundary: the rejected submission stays
-        // queued and must not drain more input or settle DONE.
-        if (this.serverOpen) {
-          this.emit({ type: 'error', message: `opencode: agent input failed: ${message}` });
-          this.interrupt();
-        }
-      } else if (origin === 'opening') {
-        this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
-        // A dropped ACK can be the first sign of a process crash. Retain HTTP
-        // rejection details, but let settlement choose one error before turn-end.
-        this.openingPromptFailed = true;
-        this.exitFailure = `opencode: ${message}`;
-        this.interrupt();
-      } else {
-        this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
-      }
-      if (!this.providerErrorPending && origin !== 'opening') this.finishTurn();
-      // Bootstrap still rejects; its result path reports the latched opening
-      // failure. Human follow-ups keep their nonfatal note and turn boundary.
+      this.reportPromptFailure(origin, err);
       throw err;
     }
+  }
+  private reportPromptFailure(origin: PromptOrigin, err: unknown): void {
+    // No turn started server-side, so no `session.idle` will ever close it —
+    // surface the failure and end the turn here instead of parking the run.
+    const message = err instanceof Error ? err.message : String(err);
+    if (origin === 'agent' && this.providerErrorPending) {
+      // Latch the initiating provider failure before rejection reaches the
+      // manager's ACK handler (including grace expiry and explicit abort).
+      this.providerErrorPending.reported = true;
+      if (this.serverOpen) this.emit({ type: 'error', message: this.providerErrorPending.message });
+    } else if (origin === 'agent') {
+      // Fatal BEFORE the synthetic boundary: the rejected submission stays
+      // queued and must not drain more input or settle DONE.
+      if (this.serverOpen) {
+        this.emit({ type: 'error', message: `opencode: agent input failed: ${message}` });
+        this.interrupt();
+      }
+    } else if (origin === 'opening') {
+      this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+      // A dropped ACK can be the first sign of a process crash. Retain HTTP
+      // rejection details, but let settlement choose one error before turn-end.
+      this.openingPromptFailed = true;
+      this.exitFailure = `opencode: ${message}`;
+      this.interrupt();
+    } else {
+      this.emit({ type: 'note', message: `opencode: prompt failed: ${message}` });
+    }
+    if (!this.providerErrorPending && origin !== 'opening') this.finishTurn();
+    // Bootstrap still rejects; its result path reports the latched opening
+    // failure. Human follow-ups keep their nonfatal note and turn boundary.
   }
 
   private promptBody(text: string): Record<string, unknown> {
