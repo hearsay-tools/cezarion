@@ -284,7 +284,8 @@ export interface VoiceScreen {
   openTask?: { title: string; status: string };
 }
 
-export async function decideVoice(args: {
+/** What `decideVoice` is given: the sentence, the open ask, the screen and the engine. */
+interface DecideArgs {
   request: VoiceDecideRequest;
   ask?: { requestId: string; questions: AskQuestion[] };
   screen: VoiceScreen;
@@ -292,11 +293,36 @@ export async function decideVoice(args: {
   engine: DecisionEngine;
   decisionId: string;
   signal: AbortSignal;
-}): Promise<{ decision: VoiceDecision; answers: Record<string, EngineAnswer>; latencyMs: number; state: VoiceEngineState }> {
-  const { request, ask, screen, recent, engine, decisionId, signal } = args;
+}
+
+/** What the routing reads once the engine has answered. */
+interface Routed {
+  request: VoiceDecideRequest;
+  ask?: { requestId: string; questions: AskQuestion[] } | undefined;
+  words: readonly VoiceWord[];
+  answers: Record<string, EngineAnswer>;
+  decisionId: string;
+}
+
+/** The engine's chosen option with its confidence. */
+type DecisionChoice = Extract<EngineAnswer, { type: 'choice' }>;
+
+/** The card entries the open ask's questions become, in the engine's record shape. */
+function cardEntriesOf(ask: { questions: AskQuestion[] }): NonNullable<VoiceEngineState['card']> {
+  return ask.questions.map((q, i) => ({
+    number: i + 1,
+    header: q.header,
+    question: q.question,
+    ...(q.options ? { options: q.options.map((o) => ({ label: o.label, ...(o.description ? { description: o.description } : {}) })) } : {}),
+    ...(q.multiSelect !== undefined ? { multiSelect: q.multiSelect } : {}),
+  }));
+}
+
+/** What the engine is told besides the questions: the sentence, its words, the screen, the card and the recent sentences. */
+function stateFor(args: DecideArgs, words: readonly VoiceWord[]): VoiceEngineState {
+  const { request, ask, screen, recent } = args;
   const open = request.openRunId !== undefined;
-  const words = splitWords(request.text);
-  const state: VoiceEngineState = {
+  return {
     sentence: request.text,
     words: words.map((word) => `${word.id} ${word.text}`),
     screen: {
@@ -306,76 +332,107 @@ export async function decideVoice(args: {
       ...(open ? { openTask: screen.openTask ?? { title: '', status: 'unknown' } } : {}),
     },
     ...(request.proposal ? { pendingProposal: request.proposal.action } : {}),
-    ...(open && ask
-      ? {
-          card: ask.questions.map((q, i) => ({
-            number: i + 1,
-            header: q.header,
-            question: q.question,
-            ...(q.options ? { options: q.options.map((o) => ({ label: o.label, ...(o.description ? { description: o.description } : {}) })) } : {}),
-            ...(q.multiSelect !== undefined ? { multiSelect: q.multiSelect } : {}),
-          })),
-        }
-      : {}),
+    ...(open && ask ? { card: cardEntriesOf(ask) } : {}),
     recent,
   };
+}
+
+/** A decision that does nothing, for the reason the palette shows. */
+function noneDecision(decisionId: string, reason: Extract<VoiceDecision, { action: 'none' }>['reason']): VoiceDecision {
+  return { action: 'none', decisionId, reason };
+}
+
+/** is_command only tells chatter from an unclear command; it never vetoes a confident action. */
+function notTakenDecision(answers: Record<string, EngineAnswer>, decisionId: string): VoiceDecision {
+  return noneDecision(decisionId, noulOf(answers, QUESTION_IDS.isCommand) < IS_COMMAND_MIN ? 'not-a-command' : 'unclear');
+}
+
+/** The project branch: open one task of this project's list by its status and position. */
+function openTaskDecision(routed: Routed): VoiceDecision {
+  const { answers, decisionId } = routed;
+  const action = pickOf(answers, QUESTION_IDS.projectAction);
+  if (action.choice !== 'open' || action.confidence < ACTION_MIN) return notTakenDecision(answers, decisionId);
+  const status = pickOf(answers, QUESTION_IDS.status);
+  const position = pickOf(answers, QUESTION_IDS.position);
+  const parsedStatus = voiceStatusSchema.safeParse(status.choice);
+  const parsedPosition = positionOf(position.choice);
+  if (!parsedStatus.success || parsedPosition === undefined) return noneDecision(decisionId, 'unclear');
+  const alternatives = status.confidence < OPEN_STATUS_SURE ? alternativesTo(status.choice, status.probabilities, parsedPosition) : [];
+  return {
+    action: 'open',
+    decisionId,
+    status: parsedStatus.data,
+    position: parsedPosition,
+    confidence: action.confidence,
+    ...(alternatives.length > 0 ? { alternatives } : {}),
+  };
+}
+
+/** The card answers the found reply targets name, in the ask's order. */
+function answerEntries(
+  found: Map<string, string>,
+  ask: { questions: AskQuestion[] },
+  answers: Record<string, EngineAnswer>,
+): VoiceAnswer[] {
+  return ask.questions.flatMap((question, i) => {
+    const text = found.get(questionLabel(i));
+    return text === undefined ? [] : [cardAnswer(answers, question, i, text)];
+  });
+}
+
+/** No answer words over several card questions: the engine could not tell which one the reply answers. */
+function noReplyReason(ask: { questions: AskQuestion[] } | undefined): Extract<VoiceDecision, { action: 'none' }>['reason'] {
+  return ask !== undefined && ask.questions.length > 1 ? 'ambiguous' : 'unclear';
+}
+
+/** The session branch: a reply to the agent of the open task — a card answer, else a message. */
+function respondDecision(routed: Routed, sessionAction: DecisionChoice | undefined): VoiceDecision {
+  const { request, ask, words, answers, decisionId } = routed;
+  if (request.openRunId === undefined || sessionAction === undefined) return noneDecision(decisionId, 'no-open-task');
+  if (sessionAction.choice !== 'respond' || sessionAction.confidence < ACTION_MIN) return notTakenDecision(answers, decisionId);
+  const confidence = sessionAction.confidence;
+  // A reply decided against another card than the one the user sees would land on the wrong question.
+  if (request.askRequestId !== undefined && request.askRequestId !== (ask?.requestId ?? null)) return noneDecision(decisionId, 'stale-context');
+
+  const found = replyTargets(request.text, words, answers, ask?.questions.map((q) => q.header));
+  if (found === 'ambiguous') return noneDecision(decisionId, 'ambiguous');
+  if (ask) {
+    const entries = answerEntries(found, ask, answers);
+    if (entries.length > 0) {
+      return { action: 'answer', decisionId, runId: request.openRunId, askRequestId: ask.requestId, answers: entries, confidence };
+    }
+  }
+  // No answer words: a message to the agent, shown with or without a card.
+  const text = found.get(MESSAGE_LABEL);
+  if (text === undefined) return noneDecision(decisionId, noReplyReason(ask));
+  return { action: 'tell', decisionId, runId: request.openRunId, text, confidence };
+}
+
+/** Which branch the sentence takes: the scope first, then the action within it. */
+function routeDecision(routed: Routed): VoiceDecision {
+  const { request, answers, decisionId } = routed;
+  const scope = pickOf(answers, QUESTION_IDS.scope);
+  const sessionAction = request.openRunId !== undefined ? pickOf(answers, QUESTION_IDS.sessionAction) : undefined;
+  if (scope.choice === 'session' && (sessionAction?.choice === 'confirm' || sessionAction?.choice === 'cancel')) {
+    // Only a pending proposal, said with enough confidence, is confirmed or dropped; the command gate does not apply.
+    const taken = request.proposal !== undefined && sessionAction.confidence >= CONFIRM_MIN;
+    return taken ? { action: sessionAction.choice, decisionId } : noneDecision(decisionId, 'unclear');
+  }
+  if (scope.choice === NONE || scope.confidence < ACTION_MIN) return notTakenDecision(answers, decisionId);
+  if (scope.choice === 'global') return noneDecision(decisionId, 'unsupported');
+  if (scope.choice === 'project') return openTaskDecision(routed);
+  return respondDecision(routed, sessionAction);
+}
+
+export async function decideVoice(args: DecideArgs): Promise<{ decision: VoiceDecision; answers: Record<string, EngineAnswer>; latencyMs: number; state: VoiceEngineState }> {
+  const { request, ask, engine, decisionId, signal } = args;
+  const words = splitWords(request.text);
+  const state = stateFor(args, words);
   const questions = buildVoiceQuestions(state, words);
 
   const started = performance.now();
   const { answers } = await engine.decide({ state, questions }, signal);
   const latencyMs = Math.round(performance.now() - started);
 
-  const none = (reason: Extract<VoiceDecision, { action: 'none' }>['reason']): VoiceDecision => ({ action: 'none', decisionId, reason });
-  const done = (decision: VoiceDecision) => ({ decision, answers, latencyMs, state });
-  /** is_command only tells chatter from an unclear command; it never vetoes a confident action. */
-  const notTaken = () => done(none(noulOf(answers, QUESTION_IDS.isCommand) < IS_COMMAND_MIN ? 'not-a-command' : 'unclear'));
-
-  const scope = pickOf(answers, QUESTION_IDS.scope);
-  const sessionAction = open ? pickOf(answers, QUESTION_IDS.sessionAction) : undefined;
-  if (scope.choice === 'session' && (sessionAction?.choice === 'confirm' || sessionAction?.choice === 'cancel')) {
-    // Only a pending proposal, said with enough confidence, is confirmed or dropped; the command gate does not apply.
-    const taken = request.proposal !== undefined && sessionAction.confidence >= CONFIRM_MIN;
-    return done(taken ? { action: sessionAction.choice, decisionId } : none('unclear'));
-  }
-  if (scope.choice === NONE || scope.confidence < ACTION_MIN) return notTaken();
-  if (scope.choice === 'global') return done(none('unsupported'));
-
-  if (scope.choice === 'project') {
-    const action = pickOf(answers, QUESTION_IDS.projectAction);
-    if (action.choice !== 'open' || action.confidence < ACTION_MIN) return notTaken();
-    const status = pickOf(answers, QUESTION_IDS.status);
-    const position = pickOf(answers, QUESTION_IDS.position);
-    const parsedStatus = voiceStatusSchema.safeParse(status.choice);
-    const parsedPosition = positionOf(position.choice);
-    if (!parsedStatus.success || parsedPosition === undefined) return done(none('unclear'));
-    const alternatives = status.confidence < OPEN_STATUS_SURE ? alternativesTo(status.choice, status.probabilities, parsedPosition) : [];
-    return done({
-      action: 'open',
-      decisionId,
-      status: parsedStatus.data,
-      position: parsedPosition,
-      confidence: action.confidence,
-      ...(alternatives.length > 0 ? { alternatives } : {}),
-    });
-  }
-
-  if (request.openRunId === undefined || sessionAction === undefined) return done(none('no-open-task'));
-  if (sessionAction.choice !== 'respond' || sessionAction.confidence < ACTION_MIN) return notTaken();
-  const confidence = sessionAction.confidence;
-  // A reply decided against another card than the one the user sees would land on the wrong question.
-  if (request.askRequestId !== undefined && request.askRequestId !== (ask?.requestId ?? null)) return done(none('stale-context'));
-
-  const found = replyTargets(request.text, words, answers, ask?.questions.map((q) => q.header));
-  if (found === 'ambiguous') return done(none('ambiguous'));
-  if (ask) {
-    const entries = ask.questions.flatMap((question, i) => {
-      const text = found.get(questionLabel(i));
-      return text === undefined ? [] : [cardAnswer(answers, question, i, text)];
-    });
-    if (entries.length > 0) return done({ action: 'answer', decisionId, runId: request.openRunId, askRequestId: ask.requestId, answers: entries, confidence });
-  }
-  // No answer words: a message to the agent, shown with or without a card.
-  const text = found.get(MESSAGE_LABEL);
-  if (text === undefined) return done(none(ask && ask.questions.length > 1 ? 'ambiguous' : 'unclear'));
-  return done({ action: 'tell', decisionId, runId: request.openRunId, text, confidence });
+  return { decision: routeDecision({ request, ask, words, answers, decisionId }), answers, latencyMs, state };
 }
