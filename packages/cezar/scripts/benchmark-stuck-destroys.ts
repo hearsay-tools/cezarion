@@ -33,6 +33,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import type { RunStore as RunStoreInstance } from '../src/runs/store.ts';
 import type { RunManager as RunManagerInstance } from '../src/workflows/run.ts';
+// This benchmark reads settled runs and starts no runner.
+import { noRunners } from '../src/core/runners-under-test.testkit.ts';
 
 process.env.CEZ_DRY_RUN = '1';
 process.env.CEZ_AUTONAME = '0';
@@ -83,7 +85,7 @@ const holders: ChildProcess[] = [];
 let store: RunStoreInstance | undefined, manager: RunManagerInstance | undefined, detach: (() => void) | undefined;
 try {
   store = RunStore.open(dataDir, { keepLive: true });
-  manager = new RunManager(store, root, { home, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
+  manager = new RunManager(store, root, { home, createRunner: noRunners, semaphore: new WorkspaceSemaphore({ home, initial: { maxParallel: 1 } }) });
   const service = new DelegationService();
   detach = service.registerProject({ id: 'bench', root, store, manager, home });
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });

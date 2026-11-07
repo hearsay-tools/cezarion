@@ -22,6 +22,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, QUEUE_WATCHDOG_MS, RunManager } from './run.ts';
 import { cleanupCheckpoint, seedSettledFamily } from './delegation-reconcile.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 describe('terminal delegation checkpoint reconciliation (#661)', () => {
   let root: string;
@@ -35,7 +36,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     root = mkdtempSync(join(tmpdir(), 'cez-reconcile-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     a = seedSettledFamily(store, root); b = seedSettledFamily(store, root);
-    manager = new RunManager(store, root, { home: testHome() });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
   });
   afterEach(() => {
     manager.dispose(); store.flush(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers();
@@ -67,7 +68,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
       rmSync(historyPaths(dataDir, id).facts, { force: true });
     }
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = new RunManager(store, root, { home: testHome() });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
     const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
     if (mode === 'boot') await manager.recover();
     else expect(await manager.adoptOrphanedRun(a.parentId)).toBe(true);
@@ -81,7 +82,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   it('does not let the queue watchdog revive a family awaiting recovery facts', async () => {
     manager.dispose();
     const work = new TrackedWork();
-    manager = new RunManager(store, root, { home: testHome(), work });
+    manager = new RunManager(store, root, { createRunner, home: testHome(), work });
     const tracked = vi.spyOn(work, 'track');
     setRunStatus(store, a.parentId, RUN_STATUS.queued);
     let release!: () => void;
@@ -108,7 +109,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     manager.dispose(); store.close();
     const dataDir = join(root, '.ai/cezar');
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = new RunManager(store, root, { home: testHome() });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
     let release!: () => void;
     let reject!: (reason: Error) => void;
     const gate = new Promise<void>((yes, no) => { release = yes; reject = no; });
@@ -145,7 +146,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     }));
     store = RunStore.open(dataDir, { keepLive: true });
     const work = new TrackedWork();
-    manager = new RunManager(store, root, { home: testHome(), work });
+    manager = new RunManager(store, root, { createRunner, home: testHome(), work });
     const tracked = vi.spyOn(work, 'track');
     let entered!: () => void; let release!: () => void;
     const ready = new Promise<void>(resolve => { entered = resolve; });

@@ -8,6 +8,7 @@ import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { createActiveRun } from '../active-run.ts';
 import { RepoRootLease } from './repo-root-lease.ts';
 import { TrackedWork } from './tracked-work.ts';
+import { noRunners } from '../../core/runners-under-test.testkit.ts';
 
 it('installs the waiter interrupt before park/release and restores it before unpark on cancellation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-lease-order-'));
@@ -17,7 +18,7 @@ it('installs the waiter interrupt before park/release and restores it before unp
   const log: string[] = [];
   const original = () => { log.push('interrupt'); };
   waiter.liveSession.installInterrupt(original);
-  const lease = new RepoRootLease({ home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }),
+  const lease = new RepoRootLease({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }),
     work: new TrackedWork(), disposed: () => false }, {
     park(id) {
       if (id !== 'waiter') return;

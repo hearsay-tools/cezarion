@@ -33,6 +33,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { handoffPath, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import { outcomeWord } from './turn-outcomes.testkit.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 // The completion gate's refusal of a live session's done outside a turn end (`settleTurn`'s `gate`
 // entry, hearsay-tools/cezarion#1525). Mid-turn, the live turn end decides the refusal; at the
@@ -69,7 +70,7 @@ describe('the completion gate outside a turn end', () => {
   }
   const settleBoundary = vi.fn(() => true);
   function modules() {
-    const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
+    const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), work: new TrackedWork(),
       semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false };
     gateHost = unused<CompletionGateHost>('gateHost', { active, pendingHumanAskSeq: () => undefined,
       parentCompletionBlockers: vi.fn(() => []), unansweredQuestions: () => [] });

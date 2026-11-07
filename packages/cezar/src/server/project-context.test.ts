@@ -14,6 +14,7 @@ import { processStartToken } from '../delegation/process-liveness.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContextSource } from './project-context.ts';
 import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const observed = vi.hoisted(() => ({
   options: new WeakMap<object, ConstructorParameters<typeof RunManager>[2]>(),
@@ -61,14 +62,14 @@ describe('ProjectContexts', () => {
   });
 
   function makeContexts(projects: ProjectContextSource[]): ProjectContexts {
-    return new ProjectContexts({ home: testHome(), listProjects: async () => projects });
+    return new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => projects });
   }
 
   it('leases a cold store without recovery, and context build waits for its release', async () => {
     const dataDir = join(rootA, '.ai/cezar');
     seedRuns(dataDir, [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: RUN_STATUS.running, tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }]);
     const prepared = vi.fn();
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let entered!: () => void;
@@ -104,7 +105,7 @@ describe('ProjectContexts', () => {
     const legacy = [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: RUN_STATUS.running, tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }];
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(legacy));
     const prepared = vi.fn();
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
     const visited = vi.fn();
     await contexts.withMaintenanceStore('a', async store => {
       visited();
@@ -145,7 +146,7 @@ describe('ProjectContexts', () => {
     vi.stubEnv('CEZ_PREVIEW', '1');
     const release = vi.fn(async () => undefined);
     const preview = { portOwner: () => undefined, probe: async () => false, release, ownsServer: () => false } as unknown as PreviewHost;
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview, cezarPort: () => 4321 });
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview, cezarPort: () => 4321 });
     try {
       const ctx = await contexts.context('a');
       const run = ctx.store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
@@ -167,7 +168,7 @@ describe('ProjectContexts', () => {
     const child: ChildProcess = spawn(process.execPath, [fixture, '--port', '0', '--delay', '600000'], { detached: true, stdio: 'ignore' });
     const release = vi.fn(async () => undefined);
     const preview = { portOwner: () => undefined, probe: async () => false, release, ownsServer: () => false } as unknown as PreviewHost;
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview });
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview });
     try {
       const ctx = await contexts.context('a');
       const run = ctx.store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
@@ -199,7 +200,7 @@ describe('ProjectContexts', () => {
 
   it('arms project cleanup only after recovery and once per live context', async () => {
     const order: string[] = [];
-    const contexts = new ProjectContexts({ home: testHome(),
+    const contexts = new ProjectContexts({ createRunner, home: testHome(),
       listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }],
       prepareManager: () => { order.push('prepare'); },
       afterRecover: () => { order.push('recovered'); },
@@ -213,7 +214,7 @@ describe('ProjectContexts', () => {
   it('uses the injected coordinator-owned automation store', async () => {
     const automationStore = AutomationStore.open(join(rootA, '.ai/cezar'));
     const resolveAutomationStore = vi.fn(() => automationStore);
-    const contexts = new ProjectContexts({ home: testHome(),
+    const contexts = new ProjectContexts({ createRunner, home: testHome(),
       listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }],
       automationStore: resolveAutomationStore,
     });

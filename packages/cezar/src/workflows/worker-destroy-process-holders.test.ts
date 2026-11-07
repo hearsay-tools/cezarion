@@ -18,6 +18,7 @@ import { DelegationService } from '../delegation/service.ts';
 import { processesWithCwdUnder } from '../delegation/process-liveness.ts';
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { until, root, store, manager, releases, worker, workspace, useWorkerDestroyFixture } from './worker-destroy.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 describe('worker termination barrier', { timeout: 30_000 }, () => {
  useWorkerDestroyFixture();
@@ -172,7 +173,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       // Only the leader dies: its member keeps the group, and the worktree, alive.
       const gone = new Promise(resolve => leader.once('exit', resolve)); process.kill(leader.pid!, 'SIGKILL'); await gone;
       expect(alive(member)).toBe(true);
-      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
       try {
         expect(await service(reopened, other).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         expect(alive(member)).toBe(false);

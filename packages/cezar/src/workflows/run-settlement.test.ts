@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type StepState } from '../runs/store.ts';
 import { worktreeDiff } from '../git-worktree.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 vi.mock('../git-worktree.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../git-worktree.ts')>(),
@@ -225,7 +226,7 @@ describe('successful run settlement (#473)', () => {
 
   function policy(active: Map<string, ActiveRun>, disposed: boolean | (() => boolean), asyncSuccess = false) {
     type Args = ConstructorParameters<typeof RunSettlement>;
-    return new RunSettlement({ home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+    return new RunSettlement({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
       work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => typeof disposed === 'function' ? disposed() : disposed },
       unused<Args[1]>('humanWaits'), unused<Args[2]>('workerQuestions'), unused<Args[3]>('autosave', asyncSuccess ? { autosaveCleanupBlocker: () => undefined } : {}),
       unused<Args[4]>('bookkeeper'), unused<Args[5]>('line'), unused<Args[6]>('resume'),

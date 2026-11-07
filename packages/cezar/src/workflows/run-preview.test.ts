@@ -13,6 +13,7 @@ import type { PreviewHostLike } from '../preview/registration.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -56,7 +57,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, { home: testHome(), preview, cezarPort: () => 4321 });
+    manager = new RunManager(store, repoRoot, { createRunner, home: testHome(), preview, cezarPort: () => 4321 });
   });
 
   afterEach(async () => {
@@ -177,7 +178,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
     // Recovered runs launch before `startServer` binds: `cezarPort()` is undefined in that window.
     let boundPort: number | undefined;
     manager!.dispose();
-    manager = new RunManager(store, repoRoot, { home: testHome(), preview, cezarPort: () => boundPort });
+    manager = new RunManager(store, repoRoot, { createRunner, home: testHome(), preview, cezarPort: () => boundPort });
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
     const record = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
     const register = await callbackAt(provision, 0);
@@ -193,7 +194,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
 
   it('answers headless without a preview host', async () => {
     manager!.dispose();
-    manager = new RunManager(store, repoRoot, { home: testHome() });
+    manager = new RunManager(store, repoRoot, { createRunner, home: testHome() });
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
     const record = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
     const register = await callbackAt(provision, 0);

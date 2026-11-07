@@ -1,4 +1,4 @@
-import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 
 // hearsay-tools/cezarion#2397: a turn monitors through `cezar_wait` (a timer) or live workers, asks

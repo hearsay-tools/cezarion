@@ -27,7 +27,6 @@ import type { UiEvent } from './ui-events.js';
 import { sessionGroupOf } from './session-process.js';
 import { buildOmpArgs, OMP_BUILTIN_TOOL_NAMES, OMP_SPEC_SUPPORT, OmpRunner, ompTools } from './omp-runner.js';
 import { ompProviderErrorMessage } from './omp-ui-mapper.js';
-import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
 import { readPids } from '../pid-file.testkit.js';
 import { z } from 'zod';
@@ -300,9 +299,8 @@ describe('OmpRunner session over the mock', () => {
   }
   const turnEnds = (events: AgentEvent[]) => events.filter(event => event.type === 'turn-end').length;
 
-  it('maps the "omp" id to an OmpRunner', () => {
-    const runner = createRunner('omp');
-    expect(runner).toBeInstanceOf(OmpRunner);
+  it('declares the omp backend, spec support and input delivery', () => {
+    const runner = new OmpRunner();
     expect(runner.backend).toBe('omp');
     expect(runner.specSupport).toBe(OMP_SPEC_SUPPORT);
     expect(runner.inputDelivery).toMatchObject({ mode: 'steer', consumption: 'observable' });

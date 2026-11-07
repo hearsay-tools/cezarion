@@ -12,6 +12,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { ProjectContexts } from './project-context.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 describe('task file links', () => {
   let root: string, working: string, dataDir: string, runId: string, store: RunStore;
@@ -110,7 +111,7 @@ describe('task file links', () => {
     const path = join(working, 'report.html'); writeFileSync(path, '<title>Owned</title>');
     const artifact = await publishArtifact(artifactDirectory(dataDir, runId), runId, path);
     const otherRoot = join(root, 'other'); mkdirSync(otherRoot);
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: async () => [{ id: 'other', root: otherRoot, status: 'not-git' }] });
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'other', root: otherRoot, status: 'not-git' }] });
     try {
       const app = createApp({ home: testHome(), repoRoot: root, store, contexts, manager: {} as RunManager, version: 'test' });
       expect((await apiRequest(app, `/api/v1/p/default/runs/${runId}/artifacts/${artifact.id}/metadata`)).status).toBe(200);

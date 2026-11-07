@@ -23,6 +23,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { setRunStatus, blockRunWrites } from '../runs/run-store.testkit.ts';
 
 import { HANG_GUARD_MS, until, gate, root, store, manager, parent, releases, worker, workspace, useWorkerDestroyFixture, replaceWorkerDestroyManager } from "./worker-destroy.testkit.ts";
+import { createRunner } from '../core/runner-factory.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -37,7 +38,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(store.commitWorkerExecutionComplete(w.id, first.generation)).toBe(false);
     await until(() => store.getRun(w.id)?.status === 'waiting'); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
-    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
     expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 

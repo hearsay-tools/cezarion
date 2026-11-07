@@ -11,6 +11,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
 import { startServer } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * #774: the cockpit hands every project's RunManager the address it BOUND (`--port 0` asks for an
@@ -48,7 +49,7 @@ describe('startServer cockpit address', () => {
     const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
     const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const setCockpitAddress = vi.fn();
     const server = startServer({ home: testHome(),
       repoRoot: bootRoot,

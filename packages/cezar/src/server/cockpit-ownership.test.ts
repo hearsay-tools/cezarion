@@ -9,6 +9,7 @@ import { CockpitOwnership } from './cockpit-ownership.ts';
 import { ProjectContexts } from './project-context.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { seedRuns } from '../runs/run-store.testkit.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 const roots: string[] = [];
 const owners: CockpitOwnership[] = [];
@@ -65,7 +66,7 @@ it('refuses a secondary project before its store opens or recovery runs', async 
   const { root, owner, dataDir } = fixture();
   await owner.acquire(dataDir);
   owner.publishUrl('http://127.0.0.1:4321');
-  const contexts = new ProjectContexts({ home: testHome(),
+  const contexts = new ProjectContexts({ createRunner, home: testHome(),
     ownership: fixture().owner,
     listProjects: async () => [{ id: 'busy', root, status: 'ok' }],
   });
@@ -77,7 +78,7 @@ it('refuses a secondary project before its store opens or recovery runs', async 
 it('secondary ownership lasts until process exit, even after context disposal', async () => {
   const { root, owner, dataDir } = fixture();
   owner.publishUrl('http://127.0.0.1:4321');
-  const contexts = new ProjectContexts({ home: testHome(),
+  const contexts = new ProjectContexts({ createRunner, home: testHome(),
     ownership: owner,
     listProjects: async () => [{ id: 'secondary', root, status: 'not-git' }],
   });
@@ -95,7 +96,7 @@ it.each([false, true])('releases a cold maintenance claim without releasing the 
   owner.publishUrl('http://127.0.0.1:4321');
   const bootClaim = readFileSync(join(boot.dataDir, 'cockpit.lock'), 'utf8');
   seedRuns(dataDir, []);
-  const contexts = new ProjectContexts({ home: testHome(),
+  const contexts = new ProjectContexts({ createRunner, home: testHome(),
     ownership: owner,
     listProjects: async () => [{ id: 'cold', root, status: 'not-git' }],
   });
@@ -121,7 +122,7 @@ it('borrows a pre-existing process claim for maintenance without releasing it', 
   await owner.acquire(dataDir);
   owner.publishUrl('http://127.0.0.1:4321');
   const claim = readFileSync(join(dataDir, 'cockpit.lock'), 'utf8');
-  const contexts = new ProjectContexts({ home: testHome(),
+  const contexts = new ProjectContexts({ createRunner, home: testHome(),
     ownership: owner,
     listProjects: async () => [{ id: 'cold', root, status: 'not-git' }],
   });

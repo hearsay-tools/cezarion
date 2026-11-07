@@ -21,6 +21,13 @@ named executable exemptions. Prove the relevant regression fails without the
 fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer this
 coverage to a separate issue.
 
+A per-runner parity file loads only its own adapter. It picks its runner with
+`useRunners(onlyRunner(...))`. The testkits it reaches import a kit's `-core` file, never
+`runner-factory.ts` or a kit's plain name (`fixture-cleanup`, `worker-wait`, `harness-parity`,
+`workflow-parity`), which chooses every adapter. A wait parity file also loads the Claude
+adapter for its workers, and an owned-workflows file the next runner for R14's mixed chain. `core/runner-closure.test.ts` enforces this
+(hearsay-tools/cezarion#2939).
+
 Keep each parity test file under about 300 s on an idle host, so that it stays
 inside Squeal's per-file cap (`runner.timeoutMs` in `squeal.config.json`) on a
 loaded host. When a parity suite grows past that, run its `RUNNER_IDS` cells

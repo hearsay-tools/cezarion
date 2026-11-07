@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWorktree } from '../git-worktree.ts';
 import { handoffPath, readHandoff, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
+import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -71,7 +72,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     dataDir = join(repoRoot, '.ai/cezar');
     store = RunStore.open(dataDir);
-    manager = new WorktreeAutosave({ home: testHome(), store, repoRoot, dataDir, work: new TrackedWork(),
+    manager = new WorktreeAutosave({ createRunner: noRunners, home: testHome(), store, repoRoot, dataDir, work: new TrackedWork(),
       semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false }, unused<ConstructorParameters<typeof WorktreeAutosave>[1]>('autosave host'));
     runId = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] }).id;
     const wt = await createWorktree(repoRoot, runId, 'main');

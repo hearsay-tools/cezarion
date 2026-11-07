@@ -43,6 +43,9 @@
       "sgconfig.yml",
       ".ai/ast-grep/**"
     ],
+    "packages/cezar/src/core/runner-closure.test.ts": [
+      "packages/cezar/src/**/*.ts"
+    ],
     "packages/cezar/src/contract-import-boundaries.test.ts": [
       "packages/contract/src/**/*.ts",
       "packages/api-client/src/contract/**/*.ts"

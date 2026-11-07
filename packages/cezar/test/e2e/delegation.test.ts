@@ -114,6 +114,7 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     const { RunStore } = await load('runs/store.js') as typeof import('../../src/runs/store.ts');
     const { Home } = await load('home/home.js') as typeof import('../../src/home/home.ts');
     const { RunManager } = await load('workflows/run.js') as typeof import('../../src/workflows/run.ts');
+    const { createRunner } = await load('core/runner-factory.js') as typeof import('../../src/core/runner-factory.ts');
     const { DelegationController, bundledWorkerInvocation } = await load('delegation/provision.js') as typeof import('../../src/delegation/provision.ts');
     const { WorkspaceSemaphore } = await load('workspace/semaphore.js') as typeof import('../../src/workspace/semaphore.ts');
     const { QUICK_TASK_WORKFLOW } = await load('workflows/types.js') as typeof import('../../src/workflows/types.ts');
@@ -170,7 +171,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     delete process.env.CEZ_DELEGATION_TOKEN; delete process.env.CEZ_DELEGATION_URL;
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ home: selectedHome, initial: { maxParallel: 1 } });
-    manager = new RunManager(store, repo, { home: selectedHome, semaphore, work });
+    manager = new RunManager(store, repo, { home: selectedHome, createRunner, semaphore, work });
     // Observe the real provisioner without replacing its identity, environment,
     // instructions, credential generation, or revocation behavior.
     const environments = new Map<string, Record<string, string>>();

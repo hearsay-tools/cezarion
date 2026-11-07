@@ -2,8 +2,7 @@ import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { resolveClaudeExecutable } from './claude-executable.ts';
 import {
   AUTO_END_DELAY_MS,
   DEFAULT_RUN_TIMEOUT_MS,
@@ -58,12 +57,6 @@ export interface ClaudeCliRunnerOptions {
   bin?: string;
   /** Wall-clock timeout for a run (ms); per-spec `timeoutMs` still wins. */
   timeoutMs?: number;
-}
-
-/** Resolve discovery and execution through the same binary and dry-run precedence. */
-export function resolveClaudeExecutable(override?: string): string {
-  return override ?? process.env.CEZ_CLAUDE_BIN ??
-    (process.env.CEZ_DRY_RUN === '1' ? mockClaudePath() : 'claude');
 }
 
 /**
@@ -861,13 +854,6 @@ export function buildAllowedTools(allowedTools: readonly string[], bashAllowlist
 
 function truncate(s: string, max = 200): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
-}
-
-/** Path to the bundled mock (`scripts/mock-claude.mjs`), for CEZ_DRY_RUN=1. */
-function mockClaudePath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  // here = <pkg>/dist/core (built) or <pkg>/src/core (tsx dev).
-  return resolvePath(here, '..', '..', 'scripts', 'mock-claude.mjs');
 }
 
 // ---- stream-json event handling -------------------------------------------

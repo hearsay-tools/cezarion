@@ -16,6 +16,7 @@ import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './launch-read-resolver.ts';
 import { TrackedWork } from './tracked-work.ts';
 import type { RunModuleContext } from './types.ts';
+import { noRunners } from '../../core/runners-under-test.testkit.ts';
 
 let root: string;
 let store: RunStore;
@@ -26,7 +27,7 @@ beforeEach(() => {
   useTestHome(join(root, 'home') ? Home.sandbox(join(root, 'home')) : undefined);
   vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '0');
   store = RunStore.open(root);
-  context = { home: testHome(), store, dataDir: root, repoRoot: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
+  context = { createRunner: noRunners, home: testHome(), store, dataDir: root, repoRoot: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   id = store.createRun({ title: 'Launch', workflow: 'accepted', task: 'original', steps: [{ id: 'first', name: 'First', kind: STEP_KIND.agent }] }).id;
 });
 afterEach(() => { vi.unstubAllEnvs(); store.flush(); rmSync(root, { recursive: true, force: true }); });

@@ -12,6 +12,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import type { AppType } from './app-type.ts';
 import { createApp } from './server.ts';
+import { createRunner } from '../core/runner-factory.ts';
 
 /**
  * The typed client, end to end (spec 2026-07-23-independent-server-web-packages, Phase 1).
@@ -47,7 +48,7 @@ describe('createCezarClient<AppType>', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     await registerProject(repoRoot, undefined, testHome());
     app = createApp({ home: testHome(),
       repoRoot,

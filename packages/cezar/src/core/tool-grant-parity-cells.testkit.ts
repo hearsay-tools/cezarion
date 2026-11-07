@@ -4,7 +4,7 @@ import { basename, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { TOOL_GRANT_KINDS, type AgentEvent, type RunnerId, type ToolGrant } from './agent-runner.ts';
-import { driveSeam } from './harness-parity.testkit.ts';
+import { driveSeam } from './harness-parity-core.testkit.ts';
 import { allowedToolsForStep } from '../workflows/types.ts';
 
 /**

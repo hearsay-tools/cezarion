@@ -222,6 +222,8 @@ export interface RunModuleContext {
   repoRoot: string;
   dataDir: string;
   semaphore: import('../../workspace/semaphore.ts').WorkspaceSemaphore;
+  /** Builds every runner this manager starts: the entry point's choice (hearsay-tools/cezarion#2939). */
+  createRunner: import('../../core/agent-runner.ts').RunnerFactory;
   disposed(): boolean;
   /** Sweeps the project's merged branches after a retention pass (hearsay-tools/cezarion#2268).
    *  `serve` supplies it; `cez run` and tests leave it out. */
