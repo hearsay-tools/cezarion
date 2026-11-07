@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
@@ -17,39 +17,50 @@ function canonical(path: string): string {
   }
 }
 
-export function assertHomePath(root: string, path: string): string {
-  const home = canonical(resolve(root));
-  const target = canonical(resolve(path));
-  assertCezarHomeWriteIsSandboxed(target);
-  const rel = relative(home, target);
-  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
-    throw new Error(`Path escapes canonical HomeStore root: ${path}`);
-  }
-  return target;
-}
-
-/** Regular entries inherit their checked parent's boundary; only links need another lookup. */
-export function assertHomeDirectory(root: string, directory: string, recursive = false, seen = new Set<string>()): void {
-  const target = assertHomePath(root, directory);
-  if (seen.has(target)) return;
-  seen.add(target);
-  let entries;
-  try { entries = readdirSync(directory, { withFileTypes: true }); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw error;
-  }
-  for (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isSymbolicLink()) assertHomePath(root, path);
-    if (recursive && (entry.isDirectory() || (entry.isSymbolicLink() && statSync(path).isDirectory()))) {
-      assertHomeDirectory(root, path, true, seen);
+/** Validate one operation's paths once per component, without retaining checks across mutations. */
+export function assertHomePaths(root: string, paths: readonly string[]): string[] {
+  const lexicalRoot = resolve(root);
+  const home = canonical(lexicalRoot);
+  assertCezarHomeWriteIsSandboxed(home);
+  const checked = new Map([[lexicalRoot, home]]);
+  return paths.map(path => {
+    const rel = relative(lexicalRoot, resolve(path));
+    if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+      throw new Error(`Path escapes canonical HomeStore root: ${path}`);
     }
-  }
+    let current = lexicalRoot;
+    let target = home;
+    for (const part of rel.split(sep).filter(Boolean)) {
+      current = join(current, part);
+      const known = checked.get(current);
+      if (known) { target = known; continue; }
+      // Ordinary components inherit the checked parent. Resolve links individually so a
+      // chain cannot leave the home and then return through a later link.
+      target = join(target, part);
+      try {
+        if (lstatSync(current).isSymbolicLink()) {
+          target = canonical(current);
+          assertCezarHomeWriteIsSandboxed(target);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      const inside = relative(home, target);
+      if (isAbsolute(inside) || inside === '..' || inside.startsWith(`..${sep}`)) {
+        throw new Error(`Path escapes canonical HomeStore root: ${path}`);
+      }
+      checked.set(current, target);
+    }
+    assertCezarHomeWriteIsSandboxed(target);
+    return target;
+  });
 }
 
-/** Check every existing metadata chain before the first claim, journal or marker mutation. */
+export function assertHomePath(root: string, path: string): string {
+  return assertHomePaths(root, [path])[0]!;
+}
+
+/** Only these paths can be mutated while acquiring a short write lock or marker. */
 export function assertHomeMetadata(root: string): void {
-  assertHomePath(root, join(root, 'install.json'));
-  assertHomeDirectory(root, join(root, '.locks'), true);
-  assertHomeDirectory(root, join(root, '.versions'), true);
+  assertHomePaths(root, [join(root, 'install.json'), join(root, '.locks', 'write.lock')]);
 }

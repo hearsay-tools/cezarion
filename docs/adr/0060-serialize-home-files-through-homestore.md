@@ -24,7 +24,14 @@ liveness helper. Each cockpit has its own lease; leases never exclude writers.
 
 Before a mutation, target files and parent directories must resolve inside the
 canonical home and pass the passwd-home guard. The same check covers install.json
-and existing lock and version directory chains, including symlinked journal records.
+and the lock and version directory chains used by the operation. Backup preflight
+checks the backup root and per-file directory before the first lock claim. An
+unavailable, escaping or dangling backup path disables every backup mutation,
+including pruning, and warns once per file; the primary save still succeeds. A named
+instance whose basename is config.json keeps its historical nested backup path.
+Checks inspect only those path components, never retained version entries. Atomic
+replacement replaces a file symlink; pruning unlinks the local snapshot name and
+cannot remove its target.
 An auxiliary failure during a read always falls back to the live file. This includes
 full disks, malformed auxiliary records and permission failures. Only failure to read
 the live file may propagate to the tolerant parser.
@@ -109,4 +116,4 @@ Crash recovery clears PENDING. A process killed during a staging write can leave
 private `*.tmp` file. It is not treated as a committed version or an outside write.
 Pruning it is deferred: an old-looking staging file can still belong to a live
 process, and deleting it is unnecessary for recovery. Content versions are retained
-so a pinned restore target cannot be pruned. Retention policy remains future work.
+so a pinned restore target cannot be pruned. Retention policy belongs to a follow-up after P1c; P1b does not add retention.

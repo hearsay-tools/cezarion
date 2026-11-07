@@ -35,7 +35,7 @@ function registryFiles(home: Home): string[] {
 export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env): void {
   const store = new HomeStore(home);
   const files = registryFiles(home);
-  store.assertBoundary(files);
+  store.assertBoundary(files, true);
   const kind = underTestRunner() ? 'test' : (entry === 'serve' || entry === 'init') && env.CEZ_DRY_RUN === '1' ? 'dev' : 'live';
   createInstallMarker(home.root, kind);
   assertHomeWritable(home.root);

@@ -1,11 +1,11 @@
 import type { Home } from './home.ts';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { backupBeforeWrite, isBackupFile } from '../workspace/backups.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomeWritable, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
 import { withHomeLock } from './write-lock.ts';
-import { assertHomeDirectory, assertHomePath } from './boundary.ts';
+import { assertHomePaths } from './boundary.ts';
 
 /** A path-derived reader preserves APIs that already accept a resolved Home path (ADR 0059). */
 export function homeFileRoot(path: string): string {
@@ -34,15 +34,26 @@ export class HomeStore {
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
   transaction<T>(operation: () => T, writePaths: readonly string[] = []): T {
     assertHomeWritable(this.root);
-    this.assertBoundary(writePaths);
+    this.assertBoundary(writePaths, true);
     return withHomeLock(this.root, () => { assertHomeWritable(this.root); return operation(); });
   }
 
-  assertBoundary(paths: readonly string[]): void {
+  assertBoundary(paths: readonly string[], backups = false): Map<string, unknown> {
+    const unavailable = new Map<string, unknown>();
+    const targets = [...paths];
     for (const path of paths) {
-      assertHomePath(this.root, path);
-      if (!/\.(?:json|bak|lock)$/.test(path)) assertHomeDirectory(this.root, path);
+      if (!/\.(?:json|bak|lock)$/.test(path)) continue;
+      const log = this.journal(path);
+      targets.push(join(log.directory, 'HEAD')); // Reads follow HEAD; other records publish by replacement.
     }
+    assertHomePaths(this.root, targets);
+    if (backups) for (const path of paths) {
+      if (!isBackupFile(basename(path))) continue;
+      // Named instances keep their historical basename-based backup location too.
+      try { assertHomePaths(this.root, [join(dirname(path), 'backups', basename(path))]); }
+      catch (error) { unavailable.set(path, error); }
+    }
+    return unavailable;
   }
 
   read(path: string): string {
@@ -80,10 +91,10 @@ export class HomeStore {
   }
 
   writeJson(path: string, value: unknown): void {
-    this.assertBoundary([path]);
+    const unavailable = this.assertBoundary([path], true).get(path);
     this.transaction(() => {
       assertCezarHomeWriteIsSandboxed(path);
-      if (isBackupFile(basename(path))) backupBeforeWrite(path, value);
+      if (isBackupFile(basename(path))) backupBeforeWrite(path, value, { unavailable });
       this.replace(path, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
     });
   }

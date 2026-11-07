@@ -1,3 +1,4 @@
+import { assertHomeWritable } from './home/install-marker.ts';
 /**
  * The host grants for remote settings administration (hearsay-tools/cezarion#2428).
  *
@@ -118,16 +119,19 @@ export async function enableRemoteSettings(
 /** Withdraw the grant for `port`, or every grant when no port is given. */
 export async function disableRemoteSettings(env: NodeJS.ProcessEnv = process.env, port: number | undefined, home: Home): Promise<RemoteSettingsState> {
   const store = new HomeStore(home);
-  store.transaction(() => {
-    if (port !== undefined) store.replace(grantFile(env, port, home), null);
-    else {
-      let names: string[];
-      try { names = readdirSync(remoteSettingsPath(env, home)); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-        throw error;
-      }
-      for (const name of names) if (GRANT_FILE.test(name)) store.replace(join(home.remoteSettings, name), null);
+  assertHomeWritable(home.root);
+  let paths: string[];
+  if (port !== undefined) paths = [grantFile(env, port, home)];
+  else {
+    let names: string[];
+    try { names = readdirSync(remoteSettingsPath(env, home)); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      names = [];
     }
-  }, [remoteSettingsPath(env, home)]);
+    paths = names.filter(name => GRANT_FILE.test(name)).map(name => join(home.remoteSettings, name));
+  }
+  store.transaction(() => {
+    for (const path of paths) store.replace(path, null);
+  }, [remoteSettingsPath(env, home), ...paths]);
   return readRemoteSettings(env, home);
 }
