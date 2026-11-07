@@ -26,6 +26,7 @@ import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
+import { warnLegacyHome } from './home/deprecation.ts';
 import { resolveHome } from './home/resolve.ts';
 import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
 import { DEFAULT_SERVER_INSTANCE } from './paths.ts';
@@ -109,6 +110,8 @@ Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
 Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 (team skills come from "skillsRepos" in .ai/cezar/config.json, which the Skills page edits; none by default);
 workflows in .ai/cezar/workflows/.`;
+
+warnLegacyHome(process.env);
 
 async function main(): Promise<void> {
   let resolvedHome: Home | undefined;

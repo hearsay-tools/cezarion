@@ -1,4 +1,6 @@
-import { join } from 'node:path';
+import { join, posix, sep, win32 } from 'node:path';
+import { oneRootKinds, type HomeLayout, type HomeRoots } from './kind-roots.ts';
+import { REBRAND_SWITCH } from './switch.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { createInstallMarker, readInstallMarker } from './install-marker.ts';
 import { HomeStore } from './store.ts';
@@ -6,6 +8,11 @@ import { HomeStore } from './store.ts';
 /** Resolved cockpit paths. Legacy cache paths deliberately have a different root. */
 export interface Home {
   readonly root: string;
+  readonly config: string;
+  readonly state: string;
+  readonly data: string;
+  readonly runtime: string;
+  readonly layout: HomeLayout;
   readonly workspaceConfig: string;
   readonly workspaceUiState: string;
   readonly agentAccounts: string;
@@ -20,45 +27,63 @@ export interface Home {
   readonly cache: string;
   readonly skillsCache: string;
   readonly skillFilesCache: string;
-  /** The nonempty legacy override, kept as data for the managed launcher. */
+  /** The selected one-root override, kept as data for the legacy managed launcher. */
   readonly rootOverride: string | undefined;
   serverState(instance?: string): string;
   serverLock(instance?: string): string;
 }
 
+/** Filesystem factories keep Node's native spelling even when a caller mocks process.platform. */
+const nativePathPlatform: NodeJS.Platform = sep === '\\' ? 'win32' : 'linux';
+
 /** Build the legacy path names from explicit roots. No environment or filesystem access. */
 export function homePaths(root: string, cache: string, override: string | undefined): Home {
-  const serverInstances = join(root, 'server-instances');
-  return Object.freeze({
-    root,
-    workspaceConfig: join(root, 'config.json'),
-    workspaceUiState: join(root, 'ui-state.json'),
-    agentAccounts: join(root, 'agent-accounts.json'),
-    remoteSettings: join(root, 'remote-settings'),
+  return kindHomePaths({ config: root, state: root, data: root, runtime: root, cache }, 'legacy', nativePathPlatform, override);
+}
+
+/** The only constructor for named paths. Legacy dry directories deliberately stay at root. */
+export function kindHomePaths(roots: HomeRoots, layout: HomeLayout, platform: NodeJS.Platform, override?: string): Home {
+  const { join } = platform === 'win32' ? win32 : posix;
+  const { config, state, data, cache } = roots;
+  const serverInstances = join(state, 'server-instances');
+  const dryRoot = layout === 'legacy' ? config : cache;
+  const paths = {
+    root: config,
+    workspaceConfig: join(config, 'config.json'),
+    workspaceUiState: join(state, 'ui-state.json'),
+    agentAccounts: join(config, 'agent-accounts.json'),
+    remoteSettings: join(config, 'remote-settings'),
     serverInstances,
-    versions: join(root, 'versions'),
-    bin: join(root, 'bin'),
-    dryCache: join(root, 'dry-cache'),
-    dryPrefix: join(root, 'dry-prefix'),
-    backups: join(root, 'backups'),
-    applicationUpdates: join(root, 'application-updates'),
+    versions: join(data, 'versions'),
+    bin: join(data, 'bin'),
+    dryCache: join(dryRoot, 'dry-cache'),
+    dryPrefix: join(dryRoot, 'dry-prefix'),
+    backups: join(state, 'backups'),
+    applicationUpdates: join(state, 'application-updates'),
     cache,
     skillsCache: join(cache, 'skills'),
     skillFilesCache: join(cache, 'skill-files'),
     rootOverride: override,
     serverState: (instance = 'default') => instance === 'default'
-      ? join(root, 'server.json') : join(serverInstances, `${instance}.json`),
+      ? join(state, 'server.json') : join(serverInstances, `${instance}.json`),
     serverLock: (instance = 'default') => instance === 'default'
-      ? join(root, 'server.install.lock') : join(serverInstances, `${instance}.install.lock`),
-  });
+      ? join(state, 'server.install.lock') : join(serverInstances, `${instance}.install.lock`),
+  };
+  // Preserve the enumerable legacy path contract (including P1's literal compatibility table).
+  return Object.freeze(Object.defineProperties(paths, {
+    config: { value: config }, state: { value: state }, data: { value: data },
+    runtime: { value: roots.runtime }, layout: { value: layout },
+  })) as Home;
 }
 
 /** Test homes contain every cockpit path, including caches, below the supplied directory. */
 export const Home = Object.freeze({
-  sandbox(dir: string): Home {
+  sandbox(dir: string, { layout = REBRAND_SWITCH ? 'split' : 'legacy' }: { layout?: HomeLayout } = {}): Home {
     assertCezarHomeWriteIsSandboxed(dir);
-    const home = homePaths(dir, join(dir, '.cache', 'cez'), dir);
-    createInstallMarker(dir, 'test');
+    const home = layout === 'split'
+      ? kindHomePaths(oneRootKinds(dir, nativePathPlatform), layout, nativePathPlatform, dir)
+      : homePaths(dir, join(dir, '.cache', 'cez'), dir);
+    createInstallMarker(home.root, 'test');
     return home;
   },
   /** Seed through the same journal and write lock as product writes. Never relabel a live home. */

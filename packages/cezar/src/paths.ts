@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
+import { platformKindRoots } from './home/kind-roots.ts';
 import type { Home } from './home/home.ts';
 
 /**
@@ -15,7 +16,8 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
   const testing = process.env.VITEST || process.env.NODE_TEST_CONTEXT || process.env.JEST_WORKER_ID
     || Object.keys(process.env).some((key) => key.startsWith('STRYKER_'));
   if (!testing) return;
-  const realHome = join(userInfo().homedir, '.cezar');
+  const accountHome = userInfo().homedir;
+  const protectedRoots = [join(accountHome, '.cezar'), ...Object.values(platformKindRoots(accountHome, { TMPDIR: process.env.TMPDIR }, process.platform))];
   const refusal = () => new Error(
     `[cez] refusing to write ${path} from a test run — CEZ_HOME is not pinned to a sandbox. ` +
       'Pin it to a test sandbox so the suite never touches the real cezar home.',
@@ -43,9 +45,11 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
       ancestor = parent;
     }
   }
-  const protectedHome = canonicalTarget(realHome, false);
   const destination = canonicalTarget(path);
-  if (destination === protectedHome || destination.startsWith(protectedHome + sep)) throw refusal();
+  for (const root of protectedRoots) {
+    const protectedHome = canonicalTarget(root, false);
+    if (destination === protectedHome || destination.startsWith(protectedHome + sep)) throw refusal();
+  }
 }
 
 /**

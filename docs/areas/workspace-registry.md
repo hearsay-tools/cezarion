@@ -94,3 +94,24 @@ Remote grant files remain host-CLI-only. Remote banner rows are read-only. Actio
 carry the incident time; resolved retries do nothing, while a different incident
 returns a conflict. See ADR 0060 for
 write ordering and the remaining version-retention and staging-file limits.
+
+## Split home roots (staged)
+
+ADR 0059 defines `Home.config`, `state`, `data`, `cache` and `runtime`.
+`root` remains the config root. `resolveHome({ purpose, env?, layout?, platform? })`
+selects legacy by default while `REBRAND_SWITCH` is false. Tests select split
+explicitly; do not mock the switch. `Home.sandbox(dir, { layout: 'split' })`
+creates a test marker under `<dir>/config` and keeps every kind under dir.
+
+In split layout, registry, accounts and remote settings use config. UI state,
+server files and locks, backups and application updates use state. Managed
+versions and bin use data. Skills and dry caches use cache. Runtime has no file
+consumer yet. Legacy paths and managed launcher fixtures remain unchanged.
+HomeStore routing across kinds is a separate P2a-2 slice.
+
+`HSQ_HOME` selects one-root subdirectories and wins over `CEZ_HOME`; an explicit
+legacy-default `CEZ_HOME` counts as unset in split layout. Both names belong to
+`HOME_LOCATING_ENV` and are always removed from child environments. The separate
+`HOME_LAYOUT_ENV` list contains platform layout values, which still reach agents.
+The resolver has no filesystem access. New roots and the Windows current-user
+private ACL stay behind the disabled release switch.

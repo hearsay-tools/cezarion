@@ -1,16 +1,69 @@
+import { execFileSync } from 'node:child_process';
+import { REBRAND_SWITCH } from './switch.ts';
+import type { HomeLayout } from './kind-roots.ts';
 import { randomBytes } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 
-export function privateDirectory(path: string): void {
+export interface PrivateFileOptions {
+  platform?: NodeJS.Platform;
+  layout?: HomeLayout;
+}
+
+/** Replace the Windows DACL, rather than adding a grant to an inherited public ACL. */
+export function protectPrivatePath(path: string, directory: boolean, {
+  platform = process.platform, layout = REBRAND_SWITCH ? 'split' : 'legacy',
+}: PrivateFileOptions = {}): void {
+  if (platform !== 'win32' || layout !== 'split') return;
+  const security = directory ? 'DirectorySecurity' : 'FileSecurity';
+  const inheritance = directory ? 'ContainerInherit, ObjectInherit' : 'None';
+  // PowerShell also treats typographic apostrophes as quote delimiters.
+  const literal = "'" + path.replace(/['\u2018-\u201B]/g, quote => quote + quote) + "'";
+  // A fresh descriptor has no old explicit grants. Disable inheritance and grant one SID.
+  const script = `$ErrorActionPreference = 'Stop';
+$acl = New-Object System.Security.AccessControl.${security};
+$acl.SetAccessRuleProtection($true, $false);
+$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User;
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', '${inheritance}', 'None', 'Allow');
+$acl.AddAccessRule($rule);
+Set-Acl -LiteralPath ${literal} -AclObject $acl;`;
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'pipe' });
+}
+
+const protectedDirectories = new Map<string, { dev: bigint; ino: bigint }>();
+
+function directoryIdentity(path: string): { dev: bigint; ino: bigint } | undefined {
+  try {
+    const { dev, ino } = statSync(path, { bigint: true });
+    return { dev, ino };
+  } catch { return undefined; }
+}
+
+/** Cache only successful grants for one directory identity; replacements need a fresh grant. */
+function protectDirectoryOnce(path: string, options: PrivateFileOptions, created: boolean): void {
+  const platform = options.platform ?? process.platform;
+  const layout = options.layout ?? (REBRAND_SWITCH ? 'split' : 'legacy');
+  if (platform !== 'win32' || layout !== 'split') return;
+  const canonical = realpathSync(path).toLowerCase();
+  const identity = directoryIdentity(path);
+  const previous = protectedDirectories.get(canonical);
+  if (!created && identity && previous?.dev === identity.dev && previous.ino === identity.ino) return;
+  protectedDirectories.delete(canonical);
+  protectPrivatePath(path, true, options);
+  if (identity) protectedDirectories.set(canonical, identity);
+}
+
+export function privateDirectory(path: string, options: PrivateFileOptions = {}): void {
   const created = mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (!created) return;
+  if (!created) { protectDirectoryOnce(path, options, false); return; }
   syncDirectory(dirname(created));
   let directory = created;
   for (const part of relative(created, path).split(/[\\/]/).filter(Boolean)) {
+    protectDirectoryOnce(directory, options, true);
     syncDirectory(directory);
     directory = join(directory, part);
   }
+  protectDirectoryOnce(directory, options, true);
   syncDirectory(directory);
 }
 
@@ -26,8 +79,8 @@ export function syncDirectory(path: string): void {
 }
 
 /** Private, durable atomic replacement. A failed write removes only its own staging file. */
-export function replacePrivate(path: string, bytes: string | Buffer): void {
-  privateDirectory(dirname(path));
+export function replacePrivate(path: string, bytes: string | Buffer, options: PrivateFileOptions = {}): void {
+  privateDirectory(dirname(path), options);
   const stage = atomicTmpPath(path);
   try {
     const fd = openSync(stage, 'wx', 0o600);

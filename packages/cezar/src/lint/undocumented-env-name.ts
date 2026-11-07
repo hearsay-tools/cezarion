@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { blankOnce, lineAt, repoRoot, type SourceRule } from './source-rule.ts';
 
 /**
- * `.env.example` is the env contract (AGENTS.md § Zero config): every `CEZ_*` name a shipped source
+ * `.env.example` is the env contract (AGENTS.md § Zero config): every `CEZ_*` or `HSQ_*` name a shipped source
  * or runner script reads or writes is documented there. This proves documentation coverage, not
  * correct default behavior.
  */
@@ -11,7 +11,7 @@ const SCANNED = ['packages/cezar/src/', 'packages/contract/src/', 'packages/api-
 export const envExamplePath = join(repoRoot, '.env.example');
 
 /**
- * Each `CEZ_*` name in `source`, with the offset of its first occurrence. A conservative source scan,
+ * Each `CEZ_*` or `HSQ_*` name in `source`, with the offset of its first occurrence. A conservative source scan,
  * not data-flow analysis. Match env parameters as well as process.env, and use blank() offsets so
  * examples in comments/strings are not reads.
  */
@@ -23,10 +23,10 @@ function envSites(source: string): Map<string, number> {
   };
   // Include literal keys passed through helpers or constants used for dynamic indexing.
   // This deliberately also requires documentation for env keys a source only writes.
-  for (const match of source.matchAll(/(['"`])(CEZ_[A-Z0-9_]*[A-Z0-9])\1/g)) {
+  for (const match of source.matchAll(/(['"`])((?:CEZ|HSQ)_[A-Z0-9_]*[A-Z0-9])\1/g)) {
     if (code[match.index] === match[1]) add(match[2]!, match.index);
   }
-  for (const match of code.matchAll(/\.\s*(CEZ_[A-Z0-9_]+)/g)) add(match[1]!, match.index);
+  for (const match of code.matchAll(/\.\s*((?:CEZ|HSQ)_[A-Z0-9_]+)/g)) add(match[1]!, match.index);
   return names;
 }
 
@@ -38,7 +38,7 @@ export const undocumented = (source: string, documented: Set<string>): string[] 
   envNames(source).filter((name) => !name.startsWith('CEZ_MOCK_') && !documented.has(name));
 
 export const documentedNames = (path = envExamplePath): Set<string> =>
-  new Set(readFileSync(path, 'utf8').match(/\bCEZ_[A-Z0-9_]+\b/g));
+  new Set(readFileSync(path, 'utf8').match(/\b(?:CEZ|HSQ)_[A-Z0-9_]+\b/g));
 
 /** Whether the rule reads `file`: shipped sources and runner scripts, never tests or fixtures. */
 export const scannedEnvFile = (file: string): boolean =>
@@ -51,7 +51,7 @@ let documented: Set<string> | undefined;
 
 export const undocumentedEnvName: SourceRule = {
   name: 'undocumented-env-name',
-  description: 'Document every CEZ_* environment name a shipped source or runner script uses in .env.example.',
+  description: 'Document every CEZ_* or HSQ_* environment name a shipped source or runner script uses in .env.example.',
   applies: scannedEnvFile,
   check: (_file, source) => {
     const sites = envSites(source);

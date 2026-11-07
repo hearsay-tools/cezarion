@@ -8,19 +8,20 @@ import { configureTestHome } from './test-home-setup.mjs'
 import { createTestSandbox } from './test-sandbox.mjs'
 
 const paths = { XDG_CONFIG_HOME: '.config', XDG_DATA_HOME: '.local/share',
-  XDG_STATE_HOME: '.local/state', XDG_CACHE_HOME: '.cache' }
+  XDG_STATE_HOME: '.local/state', XDG_CACHE_HOME: '.cache',
+  HSQ_HOME: '.cezar', APPDATA: 'AppData/Roaming', LOCALAPPDATA: 'AppData/Local' }
 
 test('one script-only setup removes inherited context and pins all home paths', () => {
   const userHome = createTestSandbox('cez-shared-home-proof-')
   const env = { HOME: '/host', USERPROFILE: '/host', CEZ_HOME: '/host/live', CEZ_TASK_ID: 'host-task',
-    cez_remote: '1', CODEX_HOME: '/host/codex', XDG_RUNTIME_DIR: '/host/run',
+    cez_remote: '1', hsq_remote: '1', HSQ_TASK_ID: 'host-task', CODEX_HOME: '/host/codex', XDG_RUNTIME_DIR: '/host/run',
     ...Object.fromEntries(Object.keys(paths).map(key => [key, '/host/' + key])) }
   const home = configureTestHome({ userHome }, env)
   assert.equal(env.HOME, userHome)
   assert.equal(env.USERPROFILE, userHome)
   assert.equal(env.CEZ_HOME, join(userHome, '.cezar'))
   assert.equal(JSON.parse(readFileSync(join(env.CEZ_HOME, 'install.json'), 'utf8')).kind, 'test')
-  for (const key of ['CEZ_TASK_ID', 'cez_remote', 'CODEX_HOME', 'XDG_RUNTIME_DIR']) assert.equal(env[key], undefined)
+  for (const key of ['CEZ_TASK_ID', 'cez_remote', 'hsq_remote', 'HSQ_TASK_ID', 'CODEX_HOME', 'XDG_RUNTIME_DIR']) assert.equal(env[key], undefined)
   for (const [key, suffix] of Object.entries(paths)) {
     assert.equal(env[key], join(userHome, suffix))
     assert.notEqual(env[key], '/host/' + key)
@@ -32,6 +33,7 @@ test('one script-only setup removes inherited context and pins all home paths', 
   home.select(join(userHome, 'explicit'))
   home.pinHome()
   assert.equal(env.CEZ_HOME, join(userHome, 'explicit'))
+  assert.equal(env.HSQ_HOME, join(userHome, 'explicit'))
   home.select(undefined)
   home.pinHome()
   home.pinUserHome()
