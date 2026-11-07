@@ -80,19 +80,16 @@ const hitRectExpression = `(el) => {
   return { left, top, right: left + width, bottom: top + height, width, height };
 }`
 
-function smallTargets() {
-  return waitForSettledSample(browser, `(() => {
-    return [...document.querySelectorAll(${JSON.stringify(controls)})]
+/** Small targets, overlapping targets and page overflow, from ONE held observation of an
+ * unchanged page state. Each part keeps its own assertion and diagnostic label. */
+function targetAudit() {
+  return waitForSettledSample<{ small: Array<{ name: string; width: number; height: number }>; overlaps: string[][]; fitsWidth: boolean }>(browser, `(() => {
+    const small = [...document.querySelectorAll(${JSON.stringify(controls)})]
       .filter(el => el.checkVisibility())
       .map(el => {
         const r = (${hitRectExpression})(el);
         return {name: el.getAttribute('aria-label') || el.textContent.trim().slice(0, 60), width: r.width, height: r.height};
       }).filter(r => r.width < 44 || r.height < 44);
-  })()`)
-}
-
-function overlappingTargets() {
-  return waitForSettledSample(browser, `(() => {
     const nodes = [...document.querySelectorAll(${JSON.stringify(controls + ', [data-slot="wb-count"]')})]
       .filter(el => el.checkVisibility() && getComputedStyle(el).opacity !== '0');
     const overlaps = [];
@@ -108,7 +105,7 @@ function overlappingTargets() {
           Math.min(x.bottom,y.bottom)-Math.max(x.top,y.top) > 1)
         overlaps.push([a.getAttribute('aria-label') || a.textContent.trim(), b.getAttribute('aria-label') || b.textContent.trim()]);
     }
-    return overlaps;
+    return { small, overlaps, fitsWidth: document.documentElement.scrollWidth <= innerWidth };
   })()`)
 }
 
@@ -146,6 +143,12 @@ function tapEdge(selector: string, mobile: boolean) {
   browser.tapAt(Math.round(x), Math.round(y))
 }
 
+/** A native click on a control the journey reaches below the fold: scroll it to the centre first. */
+function clickInView(selector: string) {
+  browser.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center', inline: 'center' })`)
+  browser.click(selector)
+}
+
 function focus(selector: string) {
   // Establish keyboard modality before focusing the control, then use a real key press.
   browser.press('Tab')
@@ -157,47 +160,48 @@ function focus(selector: string) {
   })()`), selector).toBe(true)
 }
 
+// The product supports one accent (`cezarion`), and no CSS reads `data-accent`, so the outline
+// matrix checks it once per density and theme (hearsay-tools/cezarion#2905).
 describe('density-independent mobile action targets (#166)', () => {
   for (const density of ['comfortable', 'compact', 'ultra']) {
     for (const theme of ['light', 'dark']) {
-      it(`${density}/${theme}: mobile keyboard outline contrast for both accents`, () => {
+      it(`${density}/${theme}: mobile keyboard outline contrast`, () => {
         browser.setViewport(360, 640)
         browser.goto(`${baseUrl}/settings/global/appearance`)
         browser.waitForFunction(`document.querySelector('[data-slot="appearance-density"]') !== null`)
         appearance(density, theme)
-        for (const accent of ['lime', 'violet']) {
-          browser.evaluate(`document.documentElement.dataset.accent = ${JSON.stringify(accent)}`)
-          browser.evaluate(`document.querySelector('.settings-section-picker').open = true`)
-          for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] [data-slot="drawer-global-settings"]', '[data-slot="mobile-nav-drawer"] a[data-slot="drawer-project"]']) {
-            if (selector.includes('mobile-nav-drawer') && !browser.count('[data-slot="mobile-nav-drawer"]')) {
-              browser.click('[aria-label^="Open projects"]')
-              browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
-            }
-            focusWithKeyboard(browser, selector)
-            region(selector, true)
-            const style = browser.evaluate(`(() => {
-              const el = document.querySelector(${JSON.stringify(selector)}), s = getComputedStyle(el);
-              return { active: document.activeElement === el && el.matches(':focus-visible'),
-                outline: s.outlineStyle, width: parseFloat(s.outlineWidth), offset: parseFloat(s.outlineOffset),
-                opaque: (() => { for (let node=el; node; node=node.parentElement) if (getComputedStyle(node).opacity !== '1') return false; return true })() };
-            })()`) as { active: boolean; outline: string; width: number; offset: number; opaque: boolean }
-            expect(style.active).toBe(true)
-            expect(style.outline).toBe('solid')
-            expect(style.width).toBeGreaterThanOrEqual(2)
-            expect(style.offset).toBeGreaterThanOrEqual(2)
-            expect(style.opaque).toBe(true)
-            const sample = browser.evaluate(contrastSampleExpression(selector, 'outline-color', 'parent')) as ContrastSample
-            appendFileSync(`${artifacts}/focus-${process.pid}.jsonl`, JSON.stringify({ density, theme, accent, selector, ...sample }) + '\n')
-            expect(sample.ratio, `${accent} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
+        browser.evaluate(`document.querySelector('.settings-section-picker').open = true`)
+        for (const selector of ['[data-slot="settings-nav-mobile"] a:last-child', '[data-slot="appearance-density"] button:nth-child(2)', '[data-slot="mobile-nav-drawer"] [data-slot="drawer-global-settings"]', '[data-slot="mobile-nav-drawer"] a[data-slot="drawer-project"]']) {
+          if (selector.includes('mobile-nav-drawer') && !browser.count('[data-slot="mobile-nav-drawer"]')) {
+            browser.click('[aria-label^="Open projects"]')
+            browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
           }
-          browser.screenshot(`${artifacts}/focus-${density}-${theme}-${accent}.png`, { viewport: true })
-          // Icon-only view tabs now have tooltips. Let the departed tab's tooltip
-          // close before Escape addresses the drawer rather than that nested layer.
-          browser.moveTo(0, 0)
-          browser.waitForFunction(`document.querySelector('[data-slot="tooltip-content"]') === null`)
-          browser.press('Escape')
-          browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
+          focusWithKeyboard(browser, selector)
+          region(selector, true)
+          // Focus, outline style, opacity and contrast come from one held observation.
+          const style = waitForSettledSample<{ active: boolean; outline: string; width: number; offset: number; opaque: boolean; contrast: ContrastSample }>(browser, `(() => {
+            const el = document.querySelector(${JSON.stringify(selector)}), s = getComputedStyle(el);
+            return { active: document.activeElement === el && el.matches(':focus-visible'),
+              outline: s.outlineStyle, width: parseFloat(s.outlineWidth), offset: parseFloat(s.outlineOffset),
+              opaque: (() => { for (let node=el; node; node=node.parentElement) if (getComputedStyle(node).opacity !== '1') return false; return true })(),
+              contrast: ${contrastSampleExpression(selector, 'outline-color', 'parent')} };
+          })()`)
+          expect(style.active).toBe(true)
+          expect(style.outline).toBe('solid')
+          expect(style.width).toBeGreaterThanOrEqual(2)
+          expect(style.offset).toBeGreaterThanOrEqual(2)
+          expect(style.opaque).toBe(true)
+          const sample = style.contrast
+          appendFileSync(`${artifacts}/focus-${process.pid}.jsonl`, JSON.stringify({ density, theme, selector, ...sample }) + '\n')
+          expect(sample.ratio, `${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
         }
+        browser.screenshot(`${artifacts}/focus-${density}-${theme}.png`, { viewport: true })
+        // Icon-only view tabs have tooltips. Let the departed tab's tooltip
+        // close before Escape addresses the drawer rather than that nested layer.
+        browser.moveTo(0, 0)
+        browser.waitForFunction(`document.querySelector('[data-slot="tooltip-content"]') === null`)
+        browser.press('Escape')
+        browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
       })
 
       it(`${density}/${theme}: mobile shell, composer, appearance and workflow targets`, () => {
@@ -212,14 +216,18 @@ describe('density-independent mobile action targets (#166)', () => {
             browser.click('[data-slot="execution-options"] summary')
           }
           browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
-          expect(smallTargets(), path).toEqual([])
-          expect(overlappingTargets(), path).toEqual([])
-          expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth'), path).toBe(true)
+          const audit = targetAudit()
+          expect(audit.small, path).toEqual([])
+          expect(audit.overlaps, path).toEqual([])
+          expect(audit.fitsWidth, path).toBe(true)
         }
       })
 
+      // Rendering and hit regions change with width, density and theme, so every variant keeps
+      // the real pointer edge taps, the hit tests and the screenshots. The keyboard, draft and
+      // choice journeys do not depend on the variant: they run once per width below.
       for (const [width, height] of [[360, 640], [1440, 900]] as const) {
-        it(`${density}/${theme}/${width}: edge taps, keyboard, drafts, pins and pending controls`, () => {
+        it(`${density}/${theme}/${width}: edge taps, hit regions, pending controls and rendering`, () => {
           const mobile = width === 360
           browser.setViewport(width, height)
           browser.goto(`${baseUrl}/p/${project}/new`)
@@ -250,13 +258,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.waitForFunction(`document.querySelector('${send}')?.disabled === false`)
           region(send, mobile)
           tapEdge('[data-slot="mode-plan"]', mobile)
-          expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('true')
-          for (const next of ['comfortable', 'compact', 'ultra', density]) appearance(next, theme)
-          expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Preserve this draft while changing density')
-          expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('true')
-          focus('[data-slot="mode-seg"] button:first-child')
-          browser.press('Enter')
-          expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('false')
+          browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked') === 'true'`)
           tapEdge('[data-slot="execution-options"] summary', mobile)
           tapEdge('[data-slot="model-pill"]', mobile)
           browser.waitForFunction(`document.querySelector('[role="menu"]') !== null`)
@@ -264,19 +266,12 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.press('ArrowDown')
           browser.press('Enter')
           browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
-          const model = browser.text('[data-slot="model-pill"]')
           if (!mobile) expect(region('[data-slot="model-pill"]', false).height).toBe(44)
-          appearance('ultra', theme)
-          appearance(density, theme)
-          expect(browser.text('[data-slot="model-pill"]')).toBe(model)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-composer.png`, { viewport: true })
           if (mobile) {
             tapEdge('[aria-label^="Open projects"]', true)
             browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
             region('[aria-label="Close menu"]', true)
-            focus('[aria-label="Close menu"]')
-            browser.press('Enter')
-            browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
           }
 
           browser.goto(`${baseUrl}/p/${project}`)
@@ -296,10 +291,6 @@ describe('density-independent mobile action targets (#166)', () => {
           region('[data-slot="run-tabs"] a', mobile)
           // Session controls keep the follow-up editor expanded in the integrated layout.
           expect(browser.isVisible(textarea)).toBe(true)
-          browser.fill(textarea, 'Follow-up draft')
-          appearance('compact', theme)
-          appearance(density, theme)
-          expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Follow-up draft')
           expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth')).toBe(true)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-follow-up.png`, { viewport: true })
 
@@ -311,7 +302,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.press('Backspace')
           browser.waitForFunction(`document.querySelector('[data-slot="wb-name"]').value === ''`)
           browser.fill('[data-slot="wb-name"]', 'Kept workflow draft')
-          expect(overlappingTargets()).toEqual([])
+          expect(targetAudit().overlaps).toEqual([])
           region('[data-slot="wb-step-grip"]', mobile)
           tapEdge('[data-slot="wb-step-actions"]', mobile)
           browser.waitForFunction(`document.querySelector('[data-slot="wb-step-remove"]') !== null`)
@@ -319,19 +310,8 @@ describe('density-independent mobile action targets (#166)', () => {
           expect(browser.count('[data-slot="wb-step"]')).toBe(0)
           tapEdge('[data-slot="wb-skill"][data-skill="touch-check"] [data-slot="wb-skill-add"]', mobile)
           expect(browser.count('[data-slot="wb-step"]')).toBe(1)
-          appearance('compact', theme)
-          appearance(density, theme)
-          expect(browser.evaluate(`document.querySelector('[data-slot="wb-name"]').value`)).toBe('Kept workflow draft')
           tapEdge('[data-slot="wb-yaml-toggle"]', mobile)
           expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(true)
-          focus('[data-slot="wb-yaml-toggle"]')
-          browser.press('Enter')
-          expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(false)
-          browser.press('Space')
-          expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(true)
-          focus('[data-slot="wb-copy"]')
-          browser.press('Enter')
-          expect(browser.text('[data-slot="wb-copy"]')).toContain('Copied')
           browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTop = 0`)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-workflow.png`, { viewport: true })
 
@@ -357,9 +337,6 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.tapAt(Math.round(pending.x), Math.round(pending.y))
           browser.evaluate('window.releaseTouchSave(); window.fetch = window.touchFetch')
           browser.waitForFunction(`!document.querySelector('${toggle}').disabled && document.querySelector('${toggle}').getAttribute('aria-checked') !== ${JSON.stringify(before)}`)
-          focus(toggle)
-          browser.press('Space')
-          browser.waitForFunction(`!document.querySelector('${toggle}').disabled && document.querySelector('${toggle}').getAttribute('aria-checked') === ${JSON.stringify(before)}`)
           browser.screenshot(`${artifacts}/${width}-${density}-${theme}-settings.png`, { viewport: true })
 
           browser.goto(`${baseUrl}/settings/global/appearance`)
@@ -368,7 +345,6 @@ describe('density-independent mobile action targets (#166)', () => {
           const choice = `[data-slot="appearance-density"] [data-value="${density}"]`
           tapEdge(choice, mobile)
           expect(browser.evaluate(`document.querySelector(${JSON.stringify(choice)}).getAttribute('aria-checked')`)).toBe('true')
-          focus(choice)
           if (mobile) {
             browser.click('.settings-section-picker summary')
             region('[data-slot="settings-nav-mobile"] a:last-child', true)
@@ -379,6 +355,111 @@ describe('density-independent mobile action targets (#166)', () => {
         }, 60_000)
       }
     }
+  }
+})
+
+// The state these journeys protect does not depend on the density or theme a case starts in:
+// each journey cycles density itself. The variant matrix above keeps the edge taps.
+describe('keyboard, draft and choice journeys across appearance changes (#166)', () => {
+  for (const [width, height] of [[360, 640], [1440, 900]] as const) {
+    it(`${width}: keyboard activation, drafts, model choice and pending state survive appearance changes`, () => {
+      const mobile = width === 360
+      const density = 'comfortable', theme = 'dark'
+      browser.setViewport(width, height)
+      browser.goto(`${baseUrl}/p/${project}/new`)
+      const textarea = '[data-slot="composer"] textarea'
+      browser.waitForFunction(`document.querySelector('${textarea}') !== null`)
+      appearance(density, theme)
+      browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]') !== null`)
+      clickInView('[data-slot="mode-seg"] button:first-child')
+      browser.click(textarea)
+      browser.press('Control+a')
+      browser.press('Backspace')
+      const send = '[data-slot="composer"] button[aria-label="Start task"]'
+      browser.waitForFunction(`document.querySelector('${send}')?.disabled === true`)
+      browser.fill(textarea, 'Preserve this draft while changing density')
+      browser.waitForFunction(`document.querySelector('${send}')?.disabled === false`)
+      clickInView('[data-slot="mode-plan"]')
+      browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked') === 'true'`)
+      for (const next of ['comfortable', 'compact', 'ultra', density]) appearance(next, theme)
+      expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Preserve this draft while changing density')
+      expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('true')
+      focus('[data-slot="mode-seg"] button:first-child')
+      browser.press('Enter')
+      expect(browser.evaluate(`document.querySelector('[data-slot="mode-plan"]').getAttribute('aria-checked')`)).toBe('false')
+      clickInView('[data-slot="execution-options"] summary')
+      clickInView('[data-slot="model-pill"]')
+      browser.waitForFunction(`document.querySelector('[role="menu"]') !== null`)
+      browser.press('ArrowDown')
+      browser.press('Enter')
+      browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
+      const model = browser.text('[data-slot="model-pill"]')
+      appearance('ultra', theme)
+      appearance(density, theme)
+      expect(browser.text('[data-slot="model-pill"]')).toBe(model)
+      if (mobile) {
+        clickInView('[aria-label^="Open projects"]')
+        browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]')?.getBoundingClientRect().x === 0`)
+        focus('[aria-label="Close menu"]')
+        browser.press('Enter')
+        browser.waitForFunction(`document.querySelector('[data-slot="mobile-nav-drawer"]') === null`)
+      }
+
+      browser.goto(`${baseUrl}/p/${project}/tasks/${runId}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="composer"] button[aria-label="Continue"]') !== null`)
+      appearance(density, theme)
+      browser.fill(textarea, 'Follow-up draft')
+      appearance('compact', theme)
+      appearance(density, theme)
+      expect(browser.evaluate(`document.querySelector('${textarea}').value`)).toBe('Follow-up draft')
+
+      browser.goto(`${baseUrl}/p/${project}/workflows`)
+      browser.waitForFunction(`document.querySelector('[data-slot="wb-step-actions"]') !== null`)
+      appearance(density, theme)
+      clickInView('[data-slot="wb-name"]')
+      browser.press('Control+a')
+      browser.press('Backspace')
+      browser.waitForFunction(`document.querySelector('[data-slot="wb-name"]').value === ''`)
+      browser.fill('[data-slot="wb-name"]', 'Kept workflow draft')
+      clickInView('[data-slot="wb-step-actions"]')
+      browser.waitForFunction(`document.querySelector('[data-slot="wb-step-remove"]') !== null`)
+      clickInView('[data-slot="wb-step-remove"]')
+      browser.waitForFunction(`document.querySelectorAll('[data-slot="wb-step"]').length === 0`)
+      clickInView('[data-slot="wb-skill"][data-skill="touch-check"] [data-slot="wb-skill-add"]')
+      browser.waitForFunction(`document.querySelectorAll('[data-slot="wb-step"]').length === 1`)
+      appearance('compact', theme)
+      appearance(density, theme)
+      expect(browser.evaluate(`document.querySelector('[data-slot="wb-name"]').value`)).toBe('Kept workflow draft')
+      // The variant matrix opens the YAML panel with an edge tap; here the keyboard toggles it.
+      clickInView('[data-slot="wb-yaml-toggle"]')
+      browser.waitForFunction(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open === true`)
+      focus('[data-slot="wb-yaml-toggle"]')
+      browser.press('Enter')
+      expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(false)
+      browser.press('Space')
+      expect(browser.evaluate(`document.querySelector('[data-slot="wb-yaml-toggle"]').parentElement.open`)).toBe(true)
+      focus('[data-slot="wb-copy"]')
+      browser.press('Enter')
+      expect(browser.text('[data-slot="wb-copy"]')).toContain('Copied')
+
+      browser.goto(`${baseUrl}/p/${project}/settings/agents`)
+      const toggle = '[data-slot="agents-review-gate"]'
+      browser.waitForFunction(`document.querySelector('${toggle}') !== null`)
+      appearance(density, theme)
+      const before = browser.evaluate(`document.querySelector('${toggle}').getAttribute('aria-checked')`)
+      focus(toggle)
+      browser.press('Space')
+      browser.waitForFunction(`!document.querySelector('${toggle}').disabled && document.querySelector('${toggle}').getAttribute('aria-checked') !== ${JSON.stringify(before)}`)
+      // The pending save disables the switch, which drops its focus: focus it again for the second key.
+      focus(toggle)
+      browser.press('Space')
+      browser.waitForFunction(`!document.querySelector('${toggle}').disabled && document.querySelector('${toggle}').getAttribute('aria-checked') === ${JSON.stringify(before)}`)
+
+      browser.goto(`${baseUrl}/settings/global/appearance`)
+      browser.waitForFunction(`document.querySelector('[data-slot="appearance-density"]') !== null`)
+      appearance(density, theme)
+      focus(`[data-slot="appearance-density"] [data-value="${density}"]`)
+    }, 60_000)
   }
 })
 
