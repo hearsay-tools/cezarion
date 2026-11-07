@@ -46,7 +46,8 @@
     "guards": [
       "workerWaitView",
       "computeWaitingOn",
-      "workerEntryOwed",
+      "workerWaitTargets",
+      "workersOwed",
       "oneModeTakesOneId"
     ]
   },
