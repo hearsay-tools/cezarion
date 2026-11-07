@@ -1,6 +1,6 @@
 import { EyeIcon } from 'lucide-react'
 import { CheckIcon, CircleSlashIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
 import { Link, useNavigate } from '@/lib/project-router'
@@ -440,6 +440,179 @@ function ProjectPill({
   )
 }
 
+/** True when no row — the none-row, every skill tier, every workflow — misses the query. */
+function nothingMatchesOf(noneMatches: boolean, groups: {
+  ranked: Skill[] | null
+  mostUsed: readonly Skill[]
+  project: readonly Skill[]
+  global: readonly Skill[]
+}, matchedWorkflows: readonly WorkflowDef[]): boolean {
+  return (
+    !noneMatches
+    && (groups.ranked ? groups.ranked.length === 0 : groups.mostUsed.length === 0 && groups.project.length === 0 && groups.global.length === 0)
+    && matchedWorkflows.length === 0
+  )
+}
+
+/** The "No skill" row's match signal: "none" and the built-in workflow's own name (#263). */
+function noneMatchesFor(quickTask: WorkflowDef | undefined, search: string): boolean {
+  return queryScore('no skill', `none plain ${QUICK_TASK} ${quickTask?.description ?? ''}`, search) > 0
+}
+
+/** The pill's trigger button: icon, honest label, token-clear keys, and the disabled ink.
+ *  A plain element, not a component: `PopoverTrigger asChild` merges its props into it. */
+function triggerFor({ source, ready, offersWorkflows, onPick }: {
+  source: TaskSource | null
+  ready: boolean
+  offersWorkflows: boolean
+  onPick: (source: TaskSource | null) => void
+}) {
+  const SourceIcon = source === null || source.source === 'skill' ? SparklesIcon : WorkflowIcon
+  return (
+    <button
+      type="button"
+      data-slot="source-pill"
+      data-source-kind={source?.source ?? 'none'}
+      aria-label="Choose a skill or workflow"
+      title={
+        source === null
+          ? 'No skill — the task runs as one plain agent step. Pick a skill or workflow to change that.'
+          : `Runs the ${source.source} "${source.ref}" — pick it again, or press ✕, to run without it`
+      }
+      disabled={!ready}
+      onKeyDown={(event) => {
+        // A filled pill clears like a token in a tag field. Modifiers stay out of it: ⌘⌫ is a
+        // text gesture in the composer this row belongs to, not a picker one.
+        if (source === null || event.metaKey || event.ctrlKey || event.altKey) return
+        if (event.key !== 'Backspace' && event.key !== 'Delete') return
+        event.preventDefault()
+        onPick(null)
+      }}
+      className={cn(
+        chipClass,
+        'font-mono text-[11px]',
+        source === null
+          ? 'text-muted-foreground'
+          : 'rounded-r-none border-r-0 border-foreground/60 pr-1.5 font-semibold text-foreground',
+      )}
+    >
+      <SourceIcon
+        aria-hidden="true"
+        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-accent-icon')}
+      />
+      <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? (offersWorkflows ? 'Skill or workflow' : 'Skill'))}</span>
+      {chevron}
+    </button>
+  )
+}
+
+/** The head "No skill" group: run it plain, with the built-in's own description. */
+function NoneGroup({ source, quickTask, onPick }: {
+  source: TaskSource | null
+  quickTask: WorkflowDef | undefined
+  onPick: (source: TaskSource | null) => void
+}) {
+  return (
+    <CommandGroup>
+      <CommandItem
+        value="none no-skill"
+        keywords={['none', 'plain', ...skillKeywords(QUICK_TASK)]}
+        data-slot="source-option"
+        data-source-kind="none"
+        onSelect={() => onPick(null)}
+      >
+        <CircleSlashIcon aria-hidden="true" className="size-3.5 shrink-0 text-soft-foreground" />
+        <span className="shrink-0 text-xs font-medium">No skill</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
+          {quickTask?.description ?? 'One agent run on your task — no ceremony.'}
+        </span>
+        {source === null ? (
+          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
+        ) : null}
+      </CommandItem>
+    </CommandGroup>
+  )
+}
+
+/** The skill rows: one ranked flat list under a query, or Most used then Project skills. */
+function SkillGroups({ ranked, mostUsed, project, skillItem }: {
+  ranked: Skill[] | null
+  mostUsed: readonly Skill[]
+  project: readonly Skill[]
+  skillItem: (skill: Skill, emphasized: boolean) => ReactNode
+}) {
+  return (
+    <>
+      {ranked ? (
+        ranked.length > 0 ? (
+          <CommandGroup>
+            {ranked.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+          </CommandGroup>
+        ) : null
+      ) : (
+        <>
+          {mostUsed.length > 0 ? (
+            <CommandGroup heading="Most used">
+              {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
+            </CommandGroup>
+          ) : null}
+          {project.length > 0 ? (
+            <CommandGroup heading="Project skills">
+              {project.map((skill) => skillItem(skill, true))}
+            </CommandGroup>
+          ) : null}
+        </>
+      )}
+    </>
+  )
+}
+
+/** The workflow rows: matched definitions, the built-in quick-task excluded. */
+function WorkflowGroup({ source, matchedWorkflows, toggle }: {
+  source: TaskSource | null
+  matchedWorkflows: readonly WorkflowDef[]
+  toggle: (next: TaskSource) => void
+}) {
+  return matchedWorkflows.length > 0 ? (
+    <CommandGroup heading="Workflows">
+      {matchedWorkflows.map((workflow) => {
+        const selected = source?.source === 'workflow' && source.ref === workflow.name
+        return (
+          <CommandItem
+            key={workflow.name}
+            value={`workflow ${workflow.name}`}
+            keywords={skillKeywords(workflow.name, workflow.description)}
+            data-slot="source-option"
+            data-source-kind="workflow"
+            data-source-ref={workflow.name}
+            onSelect={() => toggle({ source: 'workflow', ref: workflow.name })}
+          >
+            <span className="shrink-0 font-mono text-xs">{workflow.name}</span>
+            {workflow.description ? (
+              <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
+                {workflow.description}
+              </span>
+            ) : null}
+            {selected ? (
+              <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
+            ) : null}
+          </CommandItem>
+        )
+      })}
+    </CommandGroup>
+  ) : null
+}
+
+/** The global skills tail group. */
+function GlobalGroup({ global, skillItem }: {
+  global: readonly Skill[]
+  skillItem: (skill: Skill, emphasized: boolean) => ReactNode
+}) {
+  return global.length > 0 ? (
+    <CommandGroup heading="Global">{global.map((skill) => skillItem(skill, false))}</CommandGroup>
+  ) : null
+}
+
 /**
  * The workflow/skill picker (#385's searchable cmdk dropdown, #519's tier ordering): ONE pill
  * for both kinds of source — and one that can be EMPTY.
@@ -489,12 +662,8 @@ function SourcePill({
   // The empty row answers to what people type when they mean "none of these" — including the
   // built-in's own name, which is no longer a row of its own. Same match signal as every other
   // row, so one query ranks the whole list.
-  const noneMatches =
-    queryScore('no skill', `none plain ${QUICK_TASK} ${quickTask?.description ?? ''}`, search) > 0
-  const nothingMatches =
-    !noneMatches
-    && (ranked ? ranked.length === 0 : mostUsed.length === 0 && project.length === 0 && global.length === 0)
-    && matchedWorkflows.length === 0
+  const noneMatches = noneMatchesFor(quickTask, search)
+  const nothingMatches = nothingMatchesOf(noneMatches, { ranked, mostUsed, project, global }, matchedWorkflows)
   const pick = (next: TaskSource | null) => {
     onPick(next)
     setOpen(false)
@@ -546,45 +715,9 @@ function SourcePill({
     )
   }
 
-  const SourceIcon = source === null || source.source === 'skill' ? SparklesIcon : WorkflowIcon
   // The generic label distinguishes an empty choice. Keep its enabled boundary and ink
   // consistent with the other selectors; dashed boundaries mark disabled pills (#171).
-  const trigger = (
-    <button
-      type="button"
-      data-slot="source-pill"
-      data-source-kind={source?.source ?? 'none'}
-      aria-label="Choose a skill or workflow"
-      title={
-        source === null
-          ? 'No skill — the task runs as one plain agent step. Pick a skill or workflow to change that.'
-          : `Runs the ${source.source} "${source.ref}" — pick it again, or press ✕, to run without it`
-      }
-      disabled={!ready}
-      onKeyDown={(event) => {
-        // A filled pill clears like a token in a tag field. Modifiers stay out of it: ⌘⌫ is a
-        // text gesture in the composer this row belongs to, not a picker one.
-        if (source === null || event.metaKey || event.ctrlKey || event.altKey) return
-        if (event.key !== 'Backspace' && event.key !== 'Delete') return
-        event.preventDefault()
-        onPick(null)
-      }}
-      className={cn(
-        chipClass,
-        'font-mono text-[11px]',
-        source === null
-          ? 'text-muted-foreground'
-          : 'rounded-r-none border-r-0 border-foreground/60 pr-1.5 font-semibold text-foreground',
-      )}
-    >
-      <SourceIcon
-        aria-hidden="true"
-        className={cn('size-3 shrink-0', source === null ? 'text-muted-foreground' : 'text-accent-icon')}
-      />
-      <span className="max-w-44 truncate">{!ready ? '…' : (source?.ref ?? (offersWorkflows ? 'Skill or workflow' : 'Skill'))}</span>
-      {chevron}
-    </button>
-  )
+  const trigger = triggerFor({ source, ready, offersWorkflows, onPick })
 
   return (
     <>
@@ -638,77 +771,10 @@ function SourcePill({
               {nothingMatches ? <CommandEmpty>Nothing matches.</CommandEmpty> : null}
               {/* Heading-less and first: "run it plain" is not a kind of skill, and the way out
                   of a selection has to be the thing you see when the list opens. */}
-              {noneMatches ? (
-                <CommandGroup>
-                  <CommandItem
-                    value="none no-skill"
-                    keywords={['none', 'plain', ...skillKeywords(QUICK_TASK)]}
-                    data-slot="source-option"
-                    data-source-kind="none"
-                    onSelect={() => pick(null)}
-                  >
-                    <CircleSlashIcon aria-hidden="true" className="size-3.5 shrink-0 text-soft-foreground" />
-                    <span className="shrink-0 text-xs font-medium">No skill</span>
-                    <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
-                      {quickTask?.description ?? 'One agent run on your task — no ceremony.'}
-                    </span>
-                    {source === null ? (
-                      <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
-                    ) : null}
-                  </CommandItem>
-                </CommandGroup>
-              ) : null}
-              {ranked ? (
-                ranked.length > 0 ? (
-                  <CommandGroup>
-                    {ranked.map((skill) => skillItem(skill, isProjectSkill(skill)))}
-                  </CommandGroup>
-                ) : null
-              ) : (
-                <>
-                  {mostUsed.length > 0 ? (
-                    <CommandGroup heading="Most used">
-                      {mostUsed.map((skill) => skillItem(skill, isProjectSkill(skill)))}
-                    </CommandGroup>
-                  ) : null}
-                  {project.length > 0 ? (
-                    <CommandGroup heading="Project skills">
-                      {project.map((skill) => skillItem(skill, true))}
-                    </CommandGroup>
-                  ) : null}
-                </>
-              )}
-              {matchedWorkflows.length > 0 ? (
-                <CommandGroup heading="Workflows">
-                  {matchedWorkflows.map((workflow) => {
-                    const selected = source?.source === 'workflow' && source.ref === workflow.name
-                    return (
-                      <CommandItem
-                        key={workflow.name}
-                        value={`workflow ${workflow.name}`}
-                        keywords={skillKeywords(workflow.name, workflow.description)}
-                        data-slot="source-option"
-                        data-source-kind="workflow"
-                        data-source-ref={workflow.name}
-                        onSelect={() => toggle({ source: 'workflow', ref: workflow.name })}
-                      >
-                        <span className="shrink-0 font-mono text-xs">{workflow.name}</span>
-                        {workflow.description ? (
-                          <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">
-                            {workflow.description}
-                          </span>
-                        ) : null}
-                        {selected ? (
-                          <CheckIcon aria-hidden="true" className="ml-auto size-3.5 shrink-0 text-link-foreground" />
-                        ) : null}
-                      </CommandItem>
-                    )
-                  })}
-                </CommandGroup>
-              ) : null}
-              {global.length > 0 ? (
-                <CommandGroup heading="Global">{global.map((skill) => skillItem(skill, false))}</CommandGroup>
-              ) : null}
+              {noneMatches ? <NoneGroup source={source} quickTask={quickTask} onPick={pick} /> : null}
+              <SkillGroups ranked={ranked} mostUsed={mostUsed} project={project} skillItem={skillItem} />
+              <WorkflowGroup source={source} matchedWorkflows={matchedWorkflows} toggle={toggle} />
+              <GlobalGroup global={global} skillItem={skillItem} />
             </CommandList>
           </Command>
         </PopoverContent>
