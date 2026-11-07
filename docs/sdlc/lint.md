@@ -266,3 +266,45 @@ benchmark snapshots keep their original measurements.
 wait in `scripts/mock-lifecycle.mjs` (hearsay-tools/cezarion#1529). Other `mock-*.mjs`
 scripts cannot define the old lifecycle helpers or contain the `watchdog.pid` literal.
 Synthetic cases pin the scanner; tests never read native mock source.
+
+### Product environment reads
+
+`cez/product-env-read` requires shipped source and runner scripts to use
+`productEnv('SUFFIX', env?)` from `core/product-env.ts`. The helper selects `HSQ_`
+first by presence (an empty string wins), then `CEZ_`. Its optional third boolean
+keeps the child-env boundary's case-insensitive lookup. Home resolution uses
+`legacyHomeEnv(env)` for the migration source and `preferredHomeEnv(env)` for the
+split-layout override; it keeps its existing empty/default-home rules.
+
+The AST scanner covers dot and optional reads, literal brackets and static
+expressions, env arguments, simple env aliases, nested destructuring declarations,
+assignments, parameters and loop targets, and computed indexing on env objects.
+Object annotations support `ProcessEnv` under any qualification, queries of
+`process.env` and `globalThis.process.env` (including bracket types), object utility
+wrappers, unions, intersections and local type aliases. Arrays and scalar types
+are not env objects. Unresolved computed sites are
+recorded as `computed` with name `*`; conversion must inspect their possible
+suffixes. Tests, testkits, fixtures, plain assignments and deletes are exempt.
+Compound assignments and updates remain reads. Helper calls require literal
+suffixes; `cez/undocumented-env-name` derives both names from them.
+
+`product-env-read.baseline.json` records the initial inventory by file, access
+form and name for hearsay-tools/cezarion#2970. Remaining source reads and runner
+scripts belong to hearsay-tools/cezarion#2971. CI rejects baseline growth; lint
+rejects stale counts. Convert reads and shrink or remove their entries. Never
+add an allowance. `legacyEnvNames(env)` collects old names independently of
+reads so boot can also report shadowed, empty and retired settings without values.
+
+#### Known limits
+
+- Untyped values passed across files, function return values and values stored in
+  object containers do not carry env identity into the receiving expression.
+- Type aliases imported from other modules are not resolved. Local aliases support
+  object utility wrappers and generic substitutions. Interface inheritance,
+  conditional and mapped types require a type checker and are outside this scan.
+  Alias names are tracked conservatively within each file, without lexical scope resolution.
+- Dynamic property names cannot be expanded into a complete list of env names.
+  Computed reads on recognized env objects and rest copies are reported as `*`;
+  dynamic paths through unrecognized objects, reflection and `eval` are not followed.
+
+These limits need code review. They do not permit new baseline allowances.

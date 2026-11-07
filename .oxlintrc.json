@@ -18,6 +18,7 @@
     "nursery": "off"
   },
   "rules": {
+    "cez/product-env-read": "error",
     "cez/home-boundary": "error",
     "cez/test-home-write": "error",
     "cez/card-2-contrast": "error",
