@@ -74,88 +74,156 @@ export class ArchiveOnMergeCoordinator {
     try {
       if ((this.failures.get(project.id)?.nextAt ?? 0) > Date.now() || !await this.deps.enabled(project) || !current()) return;
       const repoBase = await this.deps.repository(project);
-      const snapshots = await this.deps.withStore(project, async (store, isActive, valid) => {
-        if (!current() || !valid()) return [];
-        const out: ArchiveOnMergeSnapshot[] = [];
-        // Finish admitted large sets before moving the page cursor. Revalidate even when
-        // a run stopped being a candidate so stale entries cannot hold capacity forever.
-        for (const [key, state] of this.pending) {
-          if (state.projectId !== project.id) continue;
-          await store.prepareArchiveOnMerge(state.rootId);
-          if (!current() || !valid()) return [];
-          const snapshot = store.archiveOnMergeSnapshot(state.rootId, repoBase, isActive);
-          if (!snapshot) this.pending.delete(key);
-          else out.push(snapshot);
-          if (out.length === 4) return out;
-        }
-        if (out.length) return out;
-        const page = store.listArchiveOnMergeCandidates(this.cursors.get(project.id) ?? 0, 64);
-        this.cursors.set(project.id, page.length === 64 ? page.at(-1)!.seq : 0);
-        for (const candidate of page) {
-          if (!store.hasArchiveOnMergeAssociations(candidate.id)) continue;
-          await store.prepareArchiveOnMerge(candidate.id);
-          if (!current() || !valid()) break;
-          const snapshot = store.archiveOnMergeSnapshot(candidate.id, repoBase, isActive);
-          if (snapshot) out.push(snapshot);
-          if (out.length === 4) { this.cursors.set(project.id, candidate.seq); break; }
-        }
-        return out;
-      });
+      const snapshots = await this.collectArchiveSnapshots(project, repoBase, current);
       if (!snapshots?.length || !current()) return;
       roots = snapshots.map(snapshot => snapshot.rootId);
-      const requests = new Map<string, ArchivePullRequestIdentity>();
-      for (const snapshot of snapshots) {
-        const key = `${project.id}:${snapshot.rootId}`;
-        let state = this.pending.get(key);
-        if (!state || state.token !== snapshot.token) {
-          if (!state && this.pending.size >= 32) continue;
-          state = { projectId: project.id, rootId: snapshot.rootId, token: snapshot.token, offset: 0, merged: new Map() }; this.pending.set(key, state);
-        }
-        // Large merge sets progress across ticks; never truncate a set into archive authority.
-        for (const pr of snapshot.pullRequests.slice(state.offset, state.offset + 64)) requests.set(pullRequestKey(pr), pr);
-      }
+      const requests = this.queueMergeLookups(project, snapshots);
       if (!requests.size) return;
       const observed = await this.deps.lookup(project.root, [...requests.values()], signal);
       if (!current()) return;
-      const observedByKey = new Map(observed.map(pr => [pullRequestKey(pr), pr]));
-      for (const snapshot of snapshots) {
-        const key = `${project.id}:${snapshot.rootId}`, state = this.pending.get(key);
-        if (!state) continue;
-        for (const pr of snapshot.pullRequests.slice(state.offset, state.offset + 64)) {
-          const observation = observedByKey.get(pullRequestKey(pr));
-          if (observation) state.merged.set(pullRequestKey(pr), observation);
-        }
-        state.offset += 64;
-        if (state.offset < snapshot.pullRequests.length) continue;
-        state.offset = 0;
-        if (state.merged.size !== snapshot.pullRequests.length) {
-          const missing = snapshot.pullRequests.find(pr => !state.merged.has(pullRequestKey(pr)));
-          if (missing) await this.deps.withStore(project, async (store, _active, valid) => {
-            if (current() && valid()) store.archiveMergeBlocker(snapshot, missing, repoBase);
-          });
-          this.pending.delete(key); continue;
-        }
-        await this.deps.withStore(project, async (store, isActive, valid) => {
-          if (!await this.deps.enabled(project) || !current() || !valid()) return;
-          const registered = (await this.deps.projects()).some(p => p.id === project.id && p.root === project.root && p.status !== 'missing');
-          if (!registered || !current() || !valid()) return;
-          if (await this.deps.repository(project) !== repoBase || !current() || !valid()) return;
-          await store.prepareArchiveOnMerge(snapshot.rootId);
-          if (!current() || !valid()) return;
-          store.archiveAfterMerge(snapshot, [...state.merged.values()], repoBase, isActive);
-        });
-        this.pending.delete(key);
-      }
+      await this.applyMergeObservations(project, snapshots, observed, repoBase, current);
       this.failures.delete(project.id);
     } catch {
-      if (current()) {
-        await this.deps.withStore(project, async (store, _active, valid) => {
-          if (current() && valid()) for (const id of roots) store.setArchiveBlocker(id, { message: 'Could not confirm PR merge status. Check GitHub or archive manually.' });
-        }).catch(() => undefined);
-        const count = Math.min(5, (this.failures.get(project.id)?.count ?? 0) + 1);
-        this.failures.set(project.id, { count, nextAt: Date.now() + Math.min(900_000, this.interval * 2 ** (count - 1)) });
-      }
+      await this.recordProjectFailure(project, roots, current);
     }
+  }
+
+  private async collectArchiveSnapshots(
+    project: ArchiveProject, repoBase: string | undefined, current: () => boolean,
+  ): Promise<ArchiveOnMergeSnapshot[] | undefined> {
+    return this.deps.withStore(project, async (store, isActive, valid) => {
+      if (!current() || !valid()) return [];
+      const pending = await this.pendingArchiveSnapshots(project, store, repoBase, isActive, current, valid);
+      if (!pending) return [];
+      if (pending.length) return pending;
+      return this.pageArchiveSnapshots(project, store, repoBase, isActive, current, valid);
+    });
+  }
+
+  private async pendingArchiveSnapshots(
+    project: ArchiveProject, store: RunStore, repoBase: string | undefined,
+    isActive: (id: string) => boolean, current: () => boolean, valid: () => boolean,
+  ): Promise<ArchiveOnMergeSnapshot[] | undefined> {
+    const out: ArchiveOnMergeSnapshot[] = [];
+    // Finish admitted large sets before moving the page cursor. Revalidate even when
+    // a run stopped being a candidate so stale entries cannot hold capacity forever.
+    for (const [key, state] of this.pending) {
+      if (state.projectId !== project.id) continue;
+      await store.prepareArchiveOnMerge(state.rootId);
+      if (!current() || !valid()) return;
+      const snapshot = store.archiveOnMergeSnapshot(state.rootId, repoBase, isActive);
+      if (!snapshot) this.pending.delete(key);
+      else out.push(snapshot);
+      if (out.length === 4) return out;
+    }
+    return out;
+  }
+
+  private async pageArchiveSnapshots(
+    project: ArchiveProject, store: RunStore, repoBase: string | undefined,
+    isActive: (id: string) => boolean, current: () => boolean, valid: () => boolean,
+  ): Promise<ArchiveOnMergeSnapshot[]> {
+    const out: ArchiveOnMergeSnapshot[] = [];
+    const page = store.listArchiveOnMergeCandidates(this.cursors.get(project.id) ?? 0, 64);
+    this.cursors.set(project.id, page.length === 64 ? page.at(-1)!.seq : 0);
+    for (const candidate of page) {
+      if (!store.hasArchiveOnMergeAssociations(candidate.id)) continue;
+      await store.prepareArchiveOnMerge(candidate.id);
+      if (!current() || !valid()) break;
+      const snapshot = store.archiveOnMergeSnapshot(candidate.id, repoBase, isActive);
+      if (snapshot) out.push(snapshot);
+      if (out.length === 4) { this.cursors.set(project.id, candidate.seq); break; }
+    }
+    return out;
+  }
+
+  private queueMergeLookups(
+    project: ArchiveProject, snapshots: readonly ArchiveOnMergeSnapshot[],
+  ): Map<string, ArchivePullRequestIdentity> {
+    const requests = new Map<string, ArchivePullRequestIdentity>();
+    for (const snapshot of snapshots) {
+      const key = `${project.id}:${snapshot.rootId}`;
+      let state = this.pending.get(key);
+      if (!state || state.token !== snapshot.token) {
+        if (!state && this.pending.size >= 32) continue;
+        state = { projectId: project.id, rootId: snapshot.rootId, token: snapshot.token, offset: 0, merged: new Map() }; this.pending.set(key, state);
+      }
+      // Large merge sets progress across ticks; never truncate a set into archive authority.
+      for (const pr of snapshot.pullRequests.slice(state.offset, state.offset + 64)) requests.set(pullRequestKey(pr), pr);
+    }
+    return requests;
+  }
+
+  private async applyMergeObservations(
+    project: ArchiveProject, snapshots: readonly ArchiveOnMergeSnapshot[],
+    observed: readonly MergedPullRequest[], repoBase: string | undefined, current: () => boolean,
+  ): Promise<void> {
+    const observedByKey = new Map(observed.map(pr => [pullRequestKey(pr), pr]));
+    for (const snapshot of snapshots) {
+      const key = `${project.id}:${snapshot.rootId}`, state = this.pending.get(key);
+      if (!state) continue;
+      for (const pr of snapshot.pullRequests.slice(state.offset, state.offset + 64)) {
+        const observation = observedByKey.get(pullRequestKey(pr));
+        if (observation) state.merged.set(pullRequestKey(pr), observation);
+      }
+      state.offset += 64;
+      if (state.offset < snapshot.pullRequests.length) continue;
+      await this.completePendingSnapshot(project, snapshot, state, key, repoBase, current);
+    }
+  }
+
+  private async completePendingSnapshot(
+    project: ArchiveProject, snapshot: ArchiveOnMergeSnapshot, state: PendingMergeSet,
+    key: string, repoBase: string | undefined, current: () => boolean,
+  ): Promise<void> {
+    state.offset = 0;
+    if (state.merged.size !== snapshot.pullRequests.length) {
+      const missing = snapshot.pullRequests.find(pr => !state.merged.has(pullRequestKey(pr)));
+      if (missing) await this.recordMissingMerge(project, snapshot, missing, repoBase, current);
+      this.pending.delete(key); return;
+    }
+    await this.commitMergedSnapshot(project, snapshot, state, repoBase, current);
+    this.pending.delete(key);
+  }
+
+  private async recordMissingMerge(
+    project: ArchiveProject, snapshot: ArchiveOnMergeSnapshot, missing: ArchivePullRequestIdentity,
+    repoBase: string | undefined, current: () => boolean,
+  ): Promise<void> {
+    await this.deps.withStore(project, async (store, _active, valid) => {
+      if (current() && valid()) store.archiveMergeBlocker(snapshot, missing, repoBase);
+    });
+  }
+
+  private async commitMergedSnapshot(
+    project: ArchiveProject, snapshot: ArchiveOnMergeSnapshot, state: PendingMergeSet,
+    repoBase: string | undefined, current: () => boolean,
+  ): Promise<void> {
+    await this.deps.withStore(project, async (store, isActive, valid) => {
+      if (!await this.archiveSnapshotStillValid(project, repoBase, current, valid)) return;
+      await store.prepareArchiveOnMerge(snapshot.rootId);
+      if (!current() || !valid()) return;
+      store.archiveAfterMerge(snapshot, [...state.merged.values()], repoBase, isActive);
+    });
+  }
+
+  private async archiveSnapshotStillValid(
+    project: ArchiveProject, repoBase: string | undefined, current: () => boolean, valid: () => boolean,
+  ): Promise<boolean> {
+    if (!await this.deps.enabled(project) || !current() || !valid()) return false;
+    const registered = (await this.deps.projects()).some(p => p.id === project.id && p.root === project.root && p.status !== 'missing');
+    if (!registered || !current() || !valid()) return false;
+    if (await this.deps.repository(project) !== repoBase || !current() || !valid()) return false;
+    return true;
+  }
+
+  private async recordProjectFailure(project: ArchiveProject, roots: readonly string[], current: () => boolean): Promise<void> {
+    if (!current()) return;
+    await this.deps.withStore(project, async (store, _active, valid) => {
+      if (current() && valid()) for (const id of roots) store.setArchiveBlocker(id, { message: 'Could not confirm PR merge status. Check GitHub or archive manually.' });
+    }).catch(() => undefined);
+    const count = Math.min(5, (this.failures.get(project.id)?.count ?? 0) + 1);
+    this.failures.set(project.id, { count, nextAt: Date.now() + Math.min(900_000, this.interval * 2 ** (count - 1)) });
   }
 
 }
