@@ -91,6 +91,32 @@ function resultOf(frames) {
   return frames.findLast(frame => frame.type === 'result');
 }
 
+function askQuestionQueryOf(frames) {
+  const request = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'request' && frame.query_type === 'askQuestionInteractionQuery');
+  const response = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'response' && frame.query_type === 'askQuestionInteractionQuery');
+  const rejection = response?.response?.askQuestionInteractionResponse?.result?.rejected?.reason;
+  return { request, response, rejection };
+}
+
+function askQuestionKindOf(response, rejection) {
+  return {
+    responseKind: rejection ? 'rejected' : response ? 'other' : 'none',
+    rejectionKind: typeof rejection === 'string' && rejection.includes('skipped') ? 'skipped' : rejection ? 'other' : 'none',
+  };
+}
+
+function askQuestionSessionOf(request, response) {
+  return {
+    sameSession: Boolean(request && response && request.session_id === response.session_id),
+    responseDelayMs: request && response ? response.timestamp_ms - request.timestamp_ms : null,
+  };
+}
+
+function nativeQuestionOutcome(run, request, response, rejection) {
+  return run.code === 0 && !run.timedOut && !run.truncated && request && response && request.session_id === response.session_id && rejection?.includes('skipped')
+    ? 'blocked' : request && response ? 'unqualified' : 'inconclusive';
+}
+
 async function probeNativeQuestion(version) {
   const run = await runAgent([
     '-p', '--force', '--trust', '--output-format', 'stream-json',
@@ -99,9 +125,7 @@ async function probeNativeQuestion(version) {
   ], checkout, 45_000);
 
   const frames = framesOf(run.stdout);
-  const request = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'request' && frame.query_type === 'askQuestionInteractionQuery');
-  const response = frames.find(frame => frame.type === 'interaction_query' && frame.subtype === 'response' && frame.query_type === 'askQuestionInteractionQuery');
-  const rejection = response?.response?.askQuestionInteractionResponse?.result?.rejected?.reason;
+  const { request, response, rejection } = askQuestionQueryOf(frames);
   return {
     schema: 1,
     case: 'native-question',
@@ -113,12 +137,9 @@ async function probeNativeQuestion(version) {
     outputTruncated: run.truncated,
     nativeQuestionRequested: Boolean(request),
     nativeQuestionAnswered: Boolean(response),
-    responseKind: rejection ? 'rejected' : response ? 'other' : 'none',
-    rejectionKind: typeof rejection === 'string' && rejection.includes('skipped') ? 'skipped' : rejection ? 'other' : 'none',
-    sameSession: Boolean(request && response && request.session_id === response.session_id),
-    responseDelayMs: request && response ? response.timestamp_ms - request.timestamp_ms : null,
-    outcome: run.code === 0 && !run.timedOut && !run.truncated && request && response && request.session_id === response.session_id && rejection?.includes('skipped')
-      ? 'blocked' : request && response ? 'unqualified' : 'inconclusive',
+    ...askQuestionKindOf(response, rejection),
+    ...askQuestionSessionOf(request, response),
+    outcome: nativeQuestionOutcome(run, request, response, rejection),
   };
 }
 
@@ -143,55 +164,70 @@ async function discoverSafeAllowedTools() {
   return { catalogRun, names, safeAllowedTools };
 }
 
+function writeCanary(name) {
+  const canary = randomBytes(16).toString('hex');
+  writeFileSync(join(checkout, name), `${canary}\n`, { mode: 0o600 });
+  return canary;
+}
+
+const delegationPrompt = name => `Use the native Read tool to read ${name}, then reply with its exact contents. Do not use any other tool.`;
+
+async function delegationReadTurn(args) {
+  return runAgent(['-p', '--force', '--trust', '--output-format', 'stream-json',
+    '--model', values.model, ...args], checkout, 45_000);
+}
+
+function delegationTurnFacts(frames, canary) {
+  return { tools: toolKindsOf(frames), sawCanary: String(resultOf(frames)?.result ?? '').includes(canary) };
+}
+
+function sameDelegationSession(firstId, secondFrames, thirdFrames) {
+  return Boolean(firstId && firstId === resultOf(secondFrames)?.session_id
+    && firstId === resultOf(thirdFrames)?.session_id);
+}
+
+function delegationCatalogVerified(catalogRun, names, noDelegationEntriesInAllowlist) {
+  return catalogRun.code === 1 && !catalogRun.timedOut
+    && names.includes('task_tool_call') && names.includes('create_agent_tool_call')
+    && nativeDelegationEntries.every(name => names.includes(name)) && noDelegationEntriesInAllowlist;
+}
+
+function delegationTurnVerified(run, facts, toolExpected) {
+  return run?.code === 0 && !run.timedOut && !run.truncated
+    && facts.tools.includes('readToolCall') === toolExpected && facts.sawCanary === toolExpected;
+}
+
+function delegationOutcome(catalogRun, names, noDelegationEntriesInAllowlist, first, firstFacts, second, secondFacts, third, thirdFacts, sameSession) {
+  return delegationCatalogVerified(catalogRun, names, noDelegationEntriesInAllowlist)
+    && delegationTurnVerified(first, firstFacts, true)
+    && delegationTurnVerified(second, secondFacts, false)
+    && delegationTurnVerified(third, thirdFacts, true)
+    && sameSession ? 'pass' : 'blocked';
+}
+
 async function probeDelegation(version) {
   const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
 
-  const firstCanary = randomBytes(16).toString('hex');
-  writeFileSync(join(checkout, 'probe-first.txt'), `${firstCanary}\n`, { mode: 0o600 });
-  const prompt = name => `Use the native Read tool to read ${name}, then reply with its exact contents. Do not use any other tool.`;
-  const first = await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json',
-    '--model', values.model, '--allowed-tools', 'read_tool_call', prompt('probe-first.txt'),
-  ], checkout, 45_000);
+  const firstCanary = writeCanary('probe-first.txt');
+  const first = await delegationReadTurn(['--allowed-tools', 'read_tool_call', delegationPrompt('probe-first.txt')]);
   const firstFrames = framesOf(first.stdout);
   const firstId = resultOf(firstFrames)?.session_id;
 
-  const secondCanary = randomBytes(16).toString('hex');
-  writeFileSync(join(checkout, 'probe-second.txt'), `${secondCanary}\n`, { mode: 0o600 });
-  const second = firstId ? await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json',
-    '--model', values.model, '--resume', firstId,
-    '--allowed-tools', 'read_todos_tool_call', prompt('probe-second.txt'),
-  ], checkout, 45_000) : undefined;
+  const secondCanary = writeCanary('probe-second.txt');
+  const second = firstId ? await delegationReadTurn(['--resume', firstId,
+    '--allowed-tools', 'read_todos_tool_call', delegationPrompt('probe-second.txt')]) : undefined;
   const secondFrames = second ? framesOf(second.stdout) : [];
 
-  const thirdCanary = randomBytes(16).toString('hex');
-  writeFileSync(join(checkout, 'probe-third.txt'), `${thirdCanary}\n`, { mode: 0o600 });
-  const third = firstId && second ? await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json',
-    '--model', values.model, '--resume', firstId,
-    '--allowed-tools', safeAllowedTools.join(','), prompt('probe-third.txt'),
-  ], checkout, 45_000) : undefined;
+  const thirdCanary = writeCanary('probe-third.txt');
+  const third = firstId && second ? await delegationReadTurn(['--resume', firstId,
+    '--allowed-tools', safeAllowedTools.join(','), delegationPrompt('probe-third.txt')]) : undefined;
   const thirdFrames = third ? framesOf(third.stdout) : [];
 
-  const firstTools = toolKindsOf(firstFrames);
-  const secondTools = toolKindsOf(secondFrames);
-  const firstSawCanary = String(resultOf(firstFrames)?.result ?? '').includes(firstCanary);
-  const secondSawCanary = String(resultOf(secondFrames)?.result ?? '').includes(secondCanary);
-  const thirdTools = toolKindsOf(thirdFrames);
-  const thirdSawCanary = String(resultOf(thirdFrames)?.result ?? '').includes(thirdCanary);
-  const sameSession = Boolean(firstId && firstId === resultOf(secondFrames)?.session_id
-    && firstId === resultOf(thirdFrames)?.session_id);
+  const firstFacts = delegationTurnFacts(firstFrames, firstCanary);
+  const secondFacts = delegationTurnFacts(secondFrames, secondCanary);
+  const thirdFacts = delegationTurnFacts(thirdFrames, thirdCanary);
+  const sameSession = sameDelegationSession(firstId, secondFrames, thirdFrames);
   const noDelegationEntriesInAllowlist = nativeDelegationEntries.every(name => !safeAllowedTools.includes(name));
-  const genericFilterVerified = catalogRun.code === 1 && !catalogRun.timedOut
-    && names.includes('task_tool_call') && names.includes('create_agent_tool_call')
-    && nativeDelegationEntries.every(name => names.includes(name)) && noDelegationEntriesInAllowlist
-    && first.code === 0 && !first.timedOut && !first.truncated
-    && firstTools.includes('readToolCall') && firstSawCanary
-    && second?.code === 0 && !second.timedOut && !second.truncated
-    && !secondTools.includes('readToolCall') && !secondSawCanary
-    && third?.code === 0 && !third.timedOut && !third.truncated
-    && thirdTools.includes('readToolCall') && thirdSawCanary && sameSession;
   return {
     schema: 1,
     case: 'delegation',
@@ -201,17 +237,27 @@ async function probeDelegation(version) {
     catalogValidatedBeforeInference: catalogRun.code === 1 && names.includes('task_tool_call'),
     nativeDelegationEntries,
     safeAllowedTools,
-    freshReadToolCalled: firstTools.includes('readToolCall'),
-    freshReadSucceeded: firstSawCanary,
-    resumedReadToolCalled: secondTools.includes('readToolCall'),
-    resumedReadSucceeded: secondSawCanary,
-    fullAllowlistReadToolCalled: thirdTools.includes('readToolCall'),
-    fullAllowlistReadSucceeded: thirdSawCanary,
+    freshReadToolCalled: firstFacts.tools.includes('readToolCall'),
+    freshReadSucceeded: firstFacts.sawCanary,
+    resumedReadToolCalled: secondFacts.tools.includes('readToolCall'),
+    resumedReadSucceeded: secondFacts.sawCanary,
+    fullAllowlistReadToolCalled: thirdFacts.tools.includes('readToolCall'),
+    fullAllowlistReadSucceeded: thirdFacts.sawCanary,
     noDelegationEntriesInAllowlist,
     sameNativeSession: sameSession,
     directTaskCallAttempted: false,
-    outcome: genericFilterVerified ? 'pass' : 'blocked',
+    outcome: delegationOutcome(catalogRun, names, noDelegationEntriesInAllowlist, first, firstFacts, second, secondFacts, third, thirdFacts, sameSession),
   };
+}
+
+function mcpCatalogSafe(catalogRun, names, safeAllowedTools) {
+  return catalogRun.code === 1 && names.includes('mcp_tool_call')
+    && nativeDelegationEntries.every(name => names.includes(name) && !safeAllowedTools.includes(name));
+}
+
+function mcpOutcome(catalogSafe, first, second) {
+  return catalogSafe && first.ok && second?.ok && first.id === second.id
+    && !first.stderrMentionsApproval && !second.stderrMentionsApproval ? 'pass' : 'blocked';
 }
 
 async function probeMcp(version) {
@@ -280,8 +326,7 @@ process.stdin.on('data', chunk => {
   };
   const first = await runTurn();
   const second = first.id ? await runTurn(first.id) : undefined;
-  const catalogSafe = catalogRun.code === 1 && names.includes('mcp_tool_call')
-    && nativeDelegationEntries.every(name => names.includes(name) && !safeAllowedTools.includes(name));
+  const catalogSafe = mcpCatalogSafe(catalogRun, names, safeAllowedTools);
   return {
     schema: 1, case: 'mcp', cliVersion: version, model: values.model,
     invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools <non-agent catalog>', '--plugin-dir <disposable local plugin>', '--resume <exact native id>'],
@@ -293,8 +338,7 @@ process.stdin.on('data', chunk => {
     resumedEnvironmentHashSeen: second?.environmentHashSeen ?? false,
     sameNativeSession: Boolean(first.id && first.id === second?.id),
     stderrMentionsApproval: first.stderrMentionsApproval || Boolean(second?.stderrMentionsApproval),
-    outcome: catalogSafe && first.ok && second?.ok && first.id === second.id
-      && !first.stderrMentionsApproval && !second.stderrMentionsApproval ? 'pass' : 'blocked',
+    outcome: mcpOutcome(catalogSafe, first, second),
   };
 }
 
@@ -394,13 +438,12 @@ function writeStripedPng(path) {
   return colors[0][0] === 255 ? 'RED_BLUE' : 'BLUE_RED';
 }
 
-async function probeFields(version) {
+async function fieldsModelChecks() {
   const modelListing = await runAgent(['--list-models'], checkout, 15_000);
-  const advertisedModel = modelListing.code === 0
-    && modelListing.stdout.split('\n').some(line => line.startsWith(`${values.model} - `));
+  const modelLines = modelListing.stdout.split('\n');
+  const advertisedModel = modelListing.code === 0 && modelLines.some(line => line.startsWith(`${values.model} - `));
   const lowEffortModel = values.model.replace(/-medium$/, '-low');
-  const lowEffortAdvertised = lowEffortModel !== values.model && modelListing.stdout.split('\n')
-    .some(line => line.startsWith(`${lowEffortModel} - `));
+  const lowEffortAdvertised = lowEffortModel !== values.model && modelLines.some(line => line.startsWith(`${lowEffortModel} - `));
   const lowEffort = lowEffortAdvertised ? await runAgent([
     '-p', '--force', '--trust', '--output-format', 'stream-json',
     '--model', lowEffortModel, '--allowed-tools', 'read_todos_tool_call', 'Reply OK.',
@@ -411,7 +454,14 @@ async function probeFields(version) {
   ], checkout, 15_000);
   const invalidRejectedBeforeInference = invalid.code !== 0
     && !framesOf(invalid.stdout).some(frame => frame.type === 'assistant' || frame.type === 'result');
+  return { advertisedModel, lowEffortAdvertised, lowEffort, invalidRejectedBeforeInference };
+}
 
+function effortVariantAdmitted(lowEffort) {
+  return lowEffort?.code === 0 && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success';
+}
+
+async function fieldsExtraRootTurns() {
   const extraRoot = join(scratch, 'extra-root');
   mkdirSync(extraRoot);
   const canary = randomBytes(12).toString('hex');
@@ -427,39 +477,66 @@ async function probeFields(version) {
     `Read ${join(extraRoot, 'root-canary.txt')} with the native Read tool. Then describe the image's colors from left to right as RED_BLUE or BLUE_RED. Reply with the file contents and that code only.`,
   ], checkout, 45_000);
   const firstFrames = framesOf(first.stdout);
-  const firstResult = resultOf(firstFrames);
-  const firstId = firstResult?.session_id;
+  const firstId = resultOf(firstFrames)?.session_id;
   const second = firstId ? await runAgent([
     '-p', '--force', '--trust', '--output-format', 'stream-json', '--model', values.model,
     '--resume', firstId, '--allowed-tools', 'read_todos_tool_call',
     'What was the image color-order code from the previous turn? Reply with just that code.',
   ], checkout, 45_000) : undefined;
   const secondResult = second ? resultOf(framesOf(second.stdout)) : undefined;
+  return { canary, colorOrder, first, firstFrames, firstId, second, secondResult };
+}
+
+function fieldsReadOf(firstFrames) {
   const rootRead = firstFrames.some(frame => frame.type === 'tool_call' && frame.tool_call?.readToolCall);
   const readCall = firstFrames.find(frame => frame.type === 'tool_call' && frame.subtype === 'completed'
     && frame.tool_call?.readToolCall)?.tool_call.readToolCall;
-  const text = String(firstResult?.result ?? '');
+  const text = String(resultOf(firstFrames)?.result ?? '');
+  return { rootRead, readCall, text };
+}
+
+function readCallKeys(readCall) {
+  return {
+    readArgKeys: readCall?.args && typeof readCall.args === 'object' ? Object.keys(readCall.args).sort() : [],
+    readResultKeys: readCall?.result && typeof readCall.result === 'object' ? Object.keys(readCall.result).sort() : [],
+  };
+}
+
+function fieldsFreshVerified(invalidRejectedBeforeInference, first, rootRead, text, canary, colorOrder) {
+  return invalidRejectedBeforeInference && first.code === 0 && rootRead
+    && text.includes(canary) && text.includes(colorOrder);
+}
+
+function fieldsResumedVerified(firstId, second, secondResult, colorOrder) {
+  return second?.code === 0 && secondResult?.session_id === firstId
+    && String(secondResult?.result ?? '').trim() === colorOrder;
+}
+
+function fieldsOutcome(checks, first, second, rootRead, text, canary, colorOrder, firstId, secondResult) {
+  return checks.advertisedModel && checks.lowEffortAdvertised && effortVariantAdmitted(checks.lowEffort)
+    && fieldsFreshVerified(checks.invalidRejectedBeforeInference, first, rootRead, text, canary, colorOrder)
+    && fieldsResumedVerified(firstId, second, secondResult, colorOrder) ? 'pass' : 'blocked';
+}
+
+async function probeFields(version) {
+  const checks = await fieldsModelChecks();
+  const turns = await fieldsExtraRootTurns();
+  const { rootRead, readCall, text } = fieldsReadOf(turns.firstFrames);
   return {
     schema: 1, case: 'fields', cliVersion: version, model: values.model,
     invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--model <advertised ID>', '--allowed-tools read_tool_call', '--add-dir <disposable root>', '--image <disposable PNG>', '--resume <exact native ID>'],
-    advertisedModel, invalidRejectedBeforeInference,
-    advertisedEffortVariant: lowEffortAdvertised,
-    advertisedEffortVariantAdmitted: lowEffort?.code === 0 && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success',
-    extraRootToolRead: rootRead, extraRootCanarySeen: text.includes(canary),
-    readArgKeys: readCall?.args && typeof readCall.args === 'object' ? Object.keys(readCall.args).sort() : [],
-    readResultKeys: readCall?.result && typeof readCall.result === 'object' ? Object.keys(readCall.result).sort() : [],
-    imageOrderSeen: text.includes(colorOrder),
-    sameNativeSession: Boolean(firstId && secondResult?.session_id === firstId),
-    currentInstructionFollowedOnResume: String(secondResult?.result ?? '').trim() === colorOrder,
-    freshExitCode: first.code, resumedExitCode: second?.code ?? null,
-    timedOut: first.timedOut || Boolean(second?.timedOut),
-    outputTruncated: first.truncated || Boolean(second?.truncated),
-    outcome: advertisedModel && lowEffortAdvertised && lowEffort?.code === 0
-      && resultOf(framesOf(lowEffort.stdout))?.subtype === 'success'
-      && invalidRejectedBeforeInference && first.code === 0
-      && second?.code === 0 && rootRead && text.includes(canary)
-      && text.includes(colorOrder) && secondResult?.session_id === firstId
-      && String(secondResult?.result ?? '').trim() === colorOrder ? 'pass' : 'blocked',
+    advertisedModel: checks.advertisedModel, invalidRejectedBeforeInference: checks.invalidRejectedBeforeInference,
+    advertisedEffortVariant: checks.lowEffortAdvertised,
+    advertisedEffortVariantAdmitted: effortVariantAdmitted(checks.lowEffort),
+    extraRootToolRead: rootRead, extraRootCanarySeen: text.includes(turns.canary),
+    ...readCallKeys(readCall),
+    imageOrderSeen: text.includes(turns.colorOrder),
+    sameNativeSession: Boolean(turns.firstId && turns.secondResult?.session_id === turns.firstId),
+    currentInstructionFollowedOnResume: String(turns.secondResult?.result ?? '').trim() === turns.colorOrder,
+    freshExitCode: turns.first.code, resumedExitCode: turns.second?.code ?? null,
+    timedOut: turns.first.timedOut || Boolean(turns.second?.timedOut),
+    outputTruncated: turns.first.truncated || Boolean(turns.second?.truncated),
+    outcome: fieldsOutcome(checks, turns.first, turns.second, rootRead, text, turns.canary, turns.colorOrder, turns.firstId, turns.secondResult),
   };
 }
 
@@ -491,9 +568,7 @@ async function probeErrors(version) {
   };
 }
 
-async function probePluginLifecycle(version) {
-  const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
-  const pluginDir = join(checkout, 'cez-print-qualification-plugin');
+function writeLifecyclePlugin(pluginDir) {
   const manifestDir = join(pluginDir, '.cursor-plugin');
   const hooksDir = join(pluginDir, 'hooks');
   const skillDir = join(pluginDir, 'skills', 'print-qualification');
@@ -513,7 +588,37 @@ async function probePluginLifecycle(version) {
   writeFileSync(join(hooksDir, 'hooks.json'), JSON.stringify({
     version: 1, hooks: { sessionStart: [{ command: `node ${join(hooksDir, 'start.mjs')}` }] },
   }));
-  const hookCount = () => existsSync(hookOutput) ? readFileSync(hookOutput, 'utf8').split('\n').filter(Boolean).length : 0;
+  return { heading, hookPhrase, hookOutput };
+}
+
+function lifecycleHookCount(hookOutput) {
+  return existsSync(hookOutput) ? readFileSync(hookOutput, 'utf8').split('\n').filter(Boolean).length : 0;
+}
+
+function lifecycleReadOf(frames, isTargetRead) {
+  return frames.some(frame => frame.type === 'tool_call'
+    && frame.tool_call?.readToolCall && isTargetRead(JSON.stringify(frame.tool_call.readToolCall)));
+}
+
+function lifecycleResultIncludes(frames, needle) {
+  return String(resultOf(frames)?.result ?? '').includes(needle);
+}
+
+function lifecycleRunsVerified(catalogRun, first, second, absent) {
+  return catalogRun.code === 1 && first.code === 0 && second?.code === 0 && absent.code === 0;
+}
+
+function lifecycleOutcome(runsVerified, evidence) {
+  return runsVerified && evidence.localSkillRead && evidence.localHeadingSeen
+    && evidence.marketplaceSkillRead && evidence.firstIdEqualsSecondId && evidence.freshHookRan
+    && evidence.hookContextRecalledOnResume && !evidence.absentLocalRead
+    && evidence.absentModelReportedMissing ? 'pass' : 'blocked';
+}
+
+async function probePluginLifecycle(version) {
+  const { catalogRun, names, safeAllowedTools } = await discoverSafeAllowedTools();
+  const pluginDir = join(checkout, 'cez-print-qualification-plugin');
+  const { heading, hookPhrase, hookOutput } = writeLifecyclePlugin(pluginDir);
   const base = ['-p', '--force', '--trust', '--output-format', 'stream-json',
     '--model', values.model, '--allowed-tools', safeAllowedTools.join(',')];
   const first = await runAgent([...base, '--plugin-dir', pluginDir,
@@ -521,42 +626,44 @@ async function probePluginLifecycle(version) {
   ], checkout, 45_000);
   const firstFrames = framesOf(first.stdout);
   const firstId = resultOf(firstFrames)?.session_id;
-  const firstHookCount = hookCount();
-  const localSkillRead = firstFrames.some(frame => frame.type === 'tool_call'
-    && frame.tool_call?.readToolCall && JSON.stringify(frame.tool_call.readToolCall).includes('print-qualification/SKILL.md'));
+  const firstHookCount = lifecycleHookCount(hookOutput);
+  const localSkillRead = lifecycleReadOf(firstFrames, text => text.includes('print-qualification/SKILL.md'));
   const second = firstId ? await runAgent([...base, '--resume', firstId, '--plugin-dir', pluginDir,
     'From your enabled marketplace plugins, read the Superpowers brainstorming SKILL.md with the native Read tool. Then report its first heading and the hook phrase injected at the start of this session.',
   ], checkout, 45_000) : undefined;
   const secondFrames = second ? framesOf(second.stdout) : [];
   const secondId = resultOf(secondFrames)?.session_id;
-  const secondHookCount = hookCount();
-  const marketplaceSkillRead = secondFrames.some(frame => frame.type === 'tool_call'
-    && frame.tool_call?.readToolCall
-    && /\.cursor\/plugins\/cache\/.*superpowers.*SKILL\.md/i.test(JSON.stringify(frame.tool_call.readToolCall)));
+  const secondHookCount = lifecycleHookCount(hookOutput);
+  const marketplaceSkillRead = lifecycleReadOf(secondFrames,
+    text => /\.cursor\/plugins\/cache\/.*superpowers.*SKILL\.md/i.test(text));
   rmSync(pluginDir, { recursive: true, force: true });
   const absent = await runAgent([...base,
     'If a loaded skill named print-qualification is available, read its SKILL.md. Otherwise reply ABSENT. Do not search the filesystem.',
   ], checkout, 45_000);
   const absentFrames = framesOf(absent.stdout);
-  const absentLocalRead = absentFrames.some(frame => frame.type === 'tool_call'
-    && frame.tool_call?.readToolCall && JSON.stringify(frame.tool_call.readToolCall).includes('print-qualification/SKILL.md'));
+  const absentLocalRead = lifecycleReadOf(absentFrames, text => text.includes('print-qualification/SKILL.md'));
+  const evidence = {
+    localSkillRead,
+    localHeadingSeen: lifecycleResultIncludes(firstFrames, heading),
+    marketplaceSkillRead,
+    firstIdEqualsSecondId: firstId === secondId,
+    freshHookRan: firstHookCount > 0,
+    hookContextRecalledOnResume: lifecycleResultIncludes(secondFrames, hookPhrase),
+    absentLocalRead,
+    absentModelReportedMissing: lifecycleResultIncludes(absentFrames, 'ABSENT'),
+  };
   return {
     schema: 1, case: 'plugin-lifecycle', cliVersion: version, model: values.model,
     invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools <non-agent catalog>', '--plugin-dir <disposable local plugin>', '--resume <exact native ID>'],
     catalogValidatedBeforeInference: catalogRun.code === 1 && names.includes('read_tool_call'),
-    localSkillRead, localHeadingSeen: String(resultOf(firstFrames)?.result ?? '').includes(heading),
+    localSkillRead, localHeadingSeen: evidence.localHeadingSeen,
     marketplaceSkillRead, sameNativeSession: Boolean(firstId && secondId === firstId),
-    freshHookRan: firstHookCount > 0, resumedHookRan: secondHookCount > firstHookCount,
-    hookContextRecalledOnResume: String(resultOf(secondFrames)?.result ?? '').includes(hookPhrase),
+    freshHookRan: evidence.freshHookRan, resumedHookRan: secondHookCount > firstHookCount,
+    hookContextRecalledOnResume: evidence.hookContextRecalledOnResume,
     absentLocalSkillRead: absentLocalRead,
-    absentModelReportedMissing: String(resultOf(absentFrames)?.result ?? '').includes('ABSENT'),
+    absentModelReportedMissing: evidence.absentModelReportedMissing,
     globalConfigurationWritten: false,
-    outcome: catalogRun.code === 1 && first.code === 0 && second?.code === 0 && absent.code === 0
-      && localSkillRead && String(resultOf(firstFrames)?.result ?? '').includes(heading)
-      && marketplaceSkillRead && firstId === secondId && firstHookCount > 0
-      && String(resultOf(secondFrames)?.result ?? '').includes(hookPhrase)
-      && !absentLocalRead
-      && String(resultOf(absentFrames)?.result ?? '').includes('ABSENT') ? 'pass' : 'blocked',
+    outcome: lifecycleOutcome(lifecycleRunsVerified(catalogRun, first, second, absent), evidence),
   };
 }
 
