@@ -736,35 +736,55 @@ export class AgentBrowser {
     const deadline = performance.now() + (timeoutMs ?? defaultWaitTimeoutMs())
     let lastValue: unknown = undefined
     let lastError: unknown = undefined
-    let holdStartedAt: number | null = null
-    let holdValue: unknown = undefined
+    const hold: { startedAt: number | null; value: unknown } = { startedAt: null, value: undefined }
     for (;;) {
       try {
         const value = this.run(['eval', js], deadline - performance.now()).result as T
-        // A hold starts at an observed sample, after transport/evaluation completes.
         const now = performance.now()
         if (now > deadline) break
         lastValue = value
         lastError = undefined
-        if (matcher(value) && (holdStartedAt === null || sameSample(value, holdValue))) {
-          if (holdStartedAt === null) {
-            holdStartedAt = now
-            holdValue = value
-          }
-          if (now - holdStartedAt >= holdMs) return value
-        } else if (matcher(value)) {
-          holdStartedAt = now
-          holdValue = value
-        } else {
-          holdStartedAt = null
-        }
+        if (this.advanceHold(hold, value, matcher, holdMs, now)) return value
       } catch (cause) {
         if (performance.now() < deadline || (lastError === undefined && lastValue === undefined)) lastError = cause
-        holdStartedAt = null
+        hold.startedAt = null
       }
       if (performance.now() >= deadline) break
       pause(Math.min(intervalMs, Math.max(0, deadline - performance.now())))
     }
+    this.failStableWait(js, holdMs, failure, lastValue, lastError)
+  }
+
+  /** One poll of the hold window (#415): consecutive matcher-passing samples with the same
+   *  JSON span `holdMs`. A hold starts at an observed sample, after transport/evaluation
+   *  completes; a different value restarts it and a failed sample drops it. Mutates `hold` and
+   *  returns whether the hold now spans `holdMs` — `holdMs: 0` is first truth, which is how
+   *  `waitForValue` is built on this rather than beside it. */
+  private advanceHold<T>(
+    hold: { startedAt: number | null; value: unknown },
+    value: T,
+    matcher: (value: T) => boolean,
+    holdMs: number,
+    now: number,
+  ): boolean {
+    if (matcher(value) && (hold.startedAt === null || sameSample(value, hold.value))) {
+      if (hold.startedAt === null) {
+        hold.startedAt = now
+        hold.value = value
+      }
+      if (now - hold.startedAt >= holdMs) return true
+    } else if (matcher(value)) {
+      hold.startedAt = now
+      hold.value = value
+    } else {
+      hold.startedAt = null
+    }
+    return false
+  }
+
+  /** The wait's failure: one bundle, one `WaitForValueError` naming the headline, the
+   *  expression and the last sample or error. Always throws. */
+  private failStableWait(js: string, holdMs: number, failure: string | undefined, lastValue: unknown, lastError: unknown): never {
     const reason: FailureReason = {
       kind: 'wait-value',
       expression: js,
