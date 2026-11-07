@@ -755,7 +755,7 @@ export class AgentBrowser {
     this.failStableWait(js, holdMs, failure, lastValue, lastError)
   }
 
-  /** One poll of the hold window (#415): consecutive matcher-passing samples with the same
+  /** One poll of the hold window (hearsay-tools/cezarion#415): consecutive matcher-passing samples with the same
    *  JSON span `holdMs`. A hold starts at an observed sample, after transport/evaluation
    *  completes; a different value restarts it and a failed sample drops it. Mutates `hold` and
    *  returns whether the hold now spans `holdMs` — `holdMs: 0` is first truth, which is how
