@@ -1,78 +1,74 @@
 import { parse } from '@babel/parser';
 import type { Node } from '@babel/types';
-import { property, unwrapped, visit } from './home-boundary.ts';
 import { lineAt, type SourceRule } from './source-rule.ts';
 
 const SOURCES = new Set(['homedir', 'cezarHomeDir', 'resolveHome']);
+const EXPRESSIONS = new Set(['TSAsExpression', 'TSTypeAssertion', 'TSNonNullExpression', 'TSSatisfiesExpression', 'TSInstantiationExpression']);
 
-function sourceRef(node: Node | undefined | null, aliases: Set<string>): boolean {
-  if (!node) return false;
-  const target = unwrapped(node);
-  if (target.type === 'Identifier') return aliases.has(target.name);
-  if (target.type === 'SequenceExpression') return sourceRef(target.expressions.at(-1), aliases);
-  if (target.type === 'CallExpression' || target.type === 'OptionalCallExpression') {
-    const callee = unwrapped(target.callee);
-    return (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression')
-      && property(callee) === 'bind' && sourceRef(callee.object, aliases);
-  }
-  if (target.type !== 'MemberExpression' && target.type !== 'OptionalMemberExpression') return false;
-  const key = property(target);
-  return SOURCES.has(key ?? '') || (['call', 'apply'].includes(key ?? '') && sourceRef(target.object, aliases));
+/** Read syntax only. Computed expressions are never evaluated. */
+function guarded(node: Node | null | undefined): boolean {
+  return node?.type === 'Identifier' ? SOURCES.has(node.name)
+    : node?.type === 'StringLiteral' && SOURCES.has(node.value);
 }
 
-function patternAliases(pattern: Node, aliases: Set<string>, source = false): void {
-  if (pattern.type === 'Identifier' && source) aliases.add(pattern.name);
-  if (pattern.type === 'AssignmentPattern') patternAliases(pattern.left, aliases, source);
-  if (pattern.type === 'RestElement') patternAliases(pattern.argument, aliases, source);
-  if (pattern.type === 'ArrayPattern') {
-    for (const element of pattern.elements) if (element) patternAliases(element, aliases, source);
-  }
-  if (pattern.type !== 'ObjectPattern') return;
-  for (const field of pattern.properties) {
-    if (field.type === 'RestElement') patternAliases(field.argument, aliases, source);
-    else patternAliases(field.value, aliases, source || SOURCES.has(property(field.key) ?? ''));
-  }
-}
-
-function sourceAliases(ast: Node): Set<string> {
-  const aliases = new Set(SOURCES);
-  visit(ast, node => {
-    if (node.type === 'ImportSpecifier' && SOURCES.has(property(node.imported) ?? '')) aliases.add(node.local.name);
-    if (node.type === 'VariableDeclarator') patternAliases(node.id, aliases);
-    if (node.type === 'AssignmentExpression') patternAliases(node.left, aliases);
+function children(node: Node): Node[] {
+  return Object.entries(node).flatMap(([key, value]) => {
+    if (['typeAnnotation', 'typeParameters', 'typeArguments'].includes(key)) return [];
+    return (Array.isArray(value) ? value : [value]).filter((child): child is Node => {
+      return child && typeof child === 'object' && typeof child.type === 'string';
+    });
   });
-  return aliases;
 }
 
-function ambientCall(node: Node, aliases: Set<string>): boolean {
-  if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
-  const callee = unwrapped(node.callee);
-  if ((callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression')
-    && property(callee) === 'apply' && callee.object.type === 'Identifier' && callee.object.name === 'Reflect') {
-    return sourceRef(node.arguments[0], aliases);
-  }
-  return sourceRef(callee, aliases);
+/** Type syntax cannot import or invoke a runtime home source. */
+function runtimeChildren(node: Node): Node[] | undefined {
+  if (EXPRESSIONS.has(node.type)) return [(node as Node & { expression: Node }).expression];
+  if (node.type === 'TSParameterProperty') return [node.parameter];
+  if (node.type.startsWith('TS')) return [];
+  if ('importKind' in node && node.importKind === 'type') return [];
+  if ('exportKind' in node && node.exportKind === 'type') return [];
+  return undefined;
 }
 
-/** Ban the source rather than trying to prove every possible filesystem sink safe. */
+function bareCall(node: Node): Node[] {
+  let callee = (node as Node & { callee: Node }).callee;
+  while (EXPRESSIONS.has(callee.type)) callee = (callee as Node & { expression: Node }).expression;
+  return callee.type === 'Identifier' && guarded(callee) ? [callee] : [];
+}
+
+function sites(node: Node, parent: Node | undefined): Node[] {
+  if (node.type === 'CallExpression' || node.type === 'OptionalCallExpression') return bareCall(node);
+  if (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') return guarded(node.property) ? [node.property] : [];
+  if (node.type === 'ObjectProperty' && parent?.type === 'ObjectPattern') return guarded(node.key) ? [node.key] : [];
+  if (node.type === 'ImportSpecifier') return [node.imported, node.local].filter(guarded);
+  if (node.type === 'ExportSpecifier') return [node.local, node.exported].filter(guarded);
+  if (node.type === 'ImportDefaultSpecifier' || node.type === 'ImportNamespaceSpecifier') return guarded(node.local) ? [node.local] : [];
+  if (node.type === 'ExportNamespaceSpecifier' || node.type === 'ExportDefaultSpecifier') return guarded(node.exported) ? [node.exported] : [];
+  return [];
+}
+
+/** Ban guarded syntax instead of attempting open-ended binding or value flow. */
 export function unsafeHomeWrites(source: string, file = 'file.test.ts'): number[] {
   const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', ...(file.endsWith('.tsx') ? ['jsx' as const] : [])] });
-  const aliases = sourceAliases(ast);
   const allowedLines = new Set((ast.comments ?? []).filter(comment => comment.type === 'CommentLine'
     && /^\s*test-home-read:\s*\S/.test(comment.value)).map(comment => comment.loc?.start.line));
-  const sites: number[] = [];
-  visit(ast, node => {
-    if (ambientCall(node, aliases) && !allowedLines.has(node.loc?.start.line)) sites.push(node.start ?? 0);
-  });
-  return sites;
+  const offsets = new Set<number>();
+  function scan(node: Node, parent?: Node): void {
+    const selected = runtimeChildren(node);
+    if (selected) { for (const child of selected) scan(child, node); return; }
+    for (const site of sites(node, parent)) if (!allowedLines.has(site.loc?.start.line)) offsets.add(site.start ?? 0);
+    for (const child of children(node)) scan(child, node);
+  }
+  scan(ast);
+  return [...offsets].sort((a, b) => a - b);
 }
 
 export const testHomeWrite: SourceRule = {
   name: 'test-home-write',
-  description: 'Test home sources require a reasoned read-only exception (hearsay-tools/cezarion#2813).',
+  description: 'Test home syntax requires a reasoned exception (hearsay-tools/cezarion#2813).',
   applies: file => /\.(?:test\.tsx?|testkit\.ts|test\.[mc]js)$/.test(file),
   check: (file, source) => unsafeHomeWrites(source, file).map(offset => ({
     line: lineAt(source, offset),
-    message: 'Ambient home call in a test; use Home.sandbox or add // test-home-read: <read-only reason> on the call line (hearsay-tools/cezarion#2813).',
+    message: 'Ambient home syntax in a test; use Home.sandbox or add // test-home-read: <reason> on this line (hearsay-tools/cezarion#2813).',
   })),
 };

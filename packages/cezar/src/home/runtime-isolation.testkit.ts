@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, vi } from 'vitest';
-import { resolveHome } from './resolve.ts';
+import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 
 const roots: string[] = [];
 afterEach(() => {

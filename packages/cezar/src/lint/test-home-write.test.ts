@@ -21,7 +21,7 @@ describe('test writes use explicit sandbox paths', () => {
     "writeFileSync(join((0, os.homedir)(), 'x'), 'x')",
     "fs.rmSync(paths['cezarHomeDir']())",
   ])('rejects an ambient home reaching a write: %s', source => {
-    expect(unsafeHomeWrites(source)).toHaveLength(1);
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -104,8 +104,8 @@ describe('test writes use explicit sandbox paths', () => {
     ['writer object assignment', "let save; ({writeFileSync: save} = fs); save(homedir(), '{}')"],
     ['writer array assignment', "let save; [save] = [fs.writeFileSync]; save(homedir(), '{}')"],
     ['cyclic binding', "let root = alias; let alias = root; root = homedir(); fs.rmSync(alias)"],
-  ])('tracks static bindings: %s', (_form, source) => {
-    expect(unsafeHomeWrites(source)).toHaveLength(1);
+  ])('finds source syntax regardless of binding form: %s', (_form, source) => {
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -117,7 +117,7 @@ describe('test writes use explicit sandbox paths', () => {
     "it('reads', () => { const root = homedir() }); it('writes', () => { const root = Home.sandbox(dir).root; writeFileSync(root, '{}') })",
     "const home = () => homedir(); rmSync(home())",
   ])('refuses ambient sources regardless of subsequent value flow: %s', source => {
-    expect(unsafeHomeWrites(source)).toHaveLength(1);
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -160,7 +160,53 @@ describe('test writes use explicit sandbox paths', () => {
     'homedir(); /* test-home-read: block comments cannot grant a line exception */',
     'homedir(); const fake = "// test-home-read: text is not a comment"',
   ])('requires a real line comment with a nonempty reason: %s', source => {
-    expect(unsafeHomeWrites(source)).toHaveLength(1);
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    "function go({homedir: read = fallback} = require('node:os')) { read() }",
+    "function go({default: {resolveHome: read} = fallback} = source) { read() }",
+    "let read; ({homedir: (read as any)} = require('node:os'))",
+    "let read; ({resolveHome: read} as any) = source",
+    "let read; for ({resolveHome: read} of [await import('./resolve.ts')]) read()",
+    "for (const {cezarHomeDir: read = fallback} of sources) read()",
+    "let read; for ({homedir: read} in sources) read()",
+    "try {} catch ({homedir: read = fallback}) { read() }",
+    "const {outer: [{resolveHome: read}]} = source",
+    "const {homedir: read, ...rest} = source",
+    "const {homedir: read} = source satisfies unknown",
+    "import {homedir as read} from 'node:os'",
+    "export {homedir as read} from 'node:os'",
+    "export {read as resolveHome} from './resolve.ts'",
+    "export * as resolveHome from './resolve.ts'",
+    "const read = os.homedir",
+    "accept(module.resolveHome)",
+    "const read = os?.homedir",
+    "const read = os['homedir']",
+    "(homedir satisfies any)()",
+    "(resolveHome as any)()",
+    "cezarHomeDir!()",
+  ])('refuses guarded keys, specifiers and member values: %s', source => {
+    expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    "function first() { const {homedir: read = fallback} = require('node:os') } // test-home-read: inspect sandbox path\nfunction second() { const read = () => Home.sandbox(dir).root; writeFileSync(read(), '{}') }",
+    "const data = {homedir: '/tmp', resolveHome() { return '/tmp' }, cezarHomeDir: value}",
+    "interface Data { homedir(): string; resolveHome: string }; type X = typeof os.homedir",
+    "import type {homedir} from 'node:os'; export type {homedir}",
+    "import {type homedir as read} from 'node:os'",
+    "export {type resolveHome} from './resolve.ts'",
+    "type T = {homedir: string}; const value: typeof os.homedir = safe",
+    "os['home' + 'dir']()",
+    "import {homedir as read} from 'node:os'; // test-home-read: compare the sandbox path\nread()",
+  ])('ignores binding identity, data properties and type-only syntax: %s', source => {
+    expect(unsafeHomeWrites(source)).toEqual([]);
+  });
+
+  it('reports the source syntax without flagging an unrelated function name', () => {
+    const source = "function first() { const {homedir: read = fallback} = source }\nfunction second() { const read = () => dir; rmSync(read()) }";
+    expect(testHomeWrite.check('sample.test.ts', source).map(site => site.line)).toEqual([1]);
   });
 
   it.each(['writeFile', 'writeFileSync', 'mkdir', 'mkdirSync', 'rm', 'rmSync', 'rmdir', 'rmdirSync',

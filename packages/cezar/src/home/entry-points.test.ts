@@ -2,7 +2,7 @@ import { Home } from './home.ts';
 import { testHome, useTestHome } from './test-home.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { resolveHome } from './resolve.ts';
+import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { runSubcommand } from '../subcommands.ts';
 import { runManagedCommand } from '../self-update/cli.ts';
 import { SelfUpdateService } from '../self-update/service.ts';

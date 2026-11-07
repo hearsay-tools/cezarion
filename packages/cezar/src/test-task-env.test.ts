@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir, userInfo } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { basename, isAbsolute, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -43,7 +43,7 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
 
   it('vitest.setup.ts points HOME at a sandbox, not the account home', () => {
     const home = process.env.HOME!;
-    expect(home).not.toBe(userInfo().homedir);
+    expect(home).not.toBe(userInfo().homedir); // test-home-read: compare sandbox HOME with the account home
     expect(basename(home)).toMatch(/^cez-vitest-user-home-/);
     expect(process.env.USERPROFILE).toBe(home);
     expect(homedir()).toBe(home); // test-home-read: verify the runner selected its sandbox HOME

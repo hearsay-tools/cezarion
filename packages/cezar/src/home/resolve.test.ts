@@ -8,7 +8,7 @@ import { binDir, versionsDir, currentEntry } from '../self-update/layout.ts';
 import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
 import { bareDirFor, skillFilesCacheDirFor } from '../skills-remote.ts';
 import { cezCacheDir, resolveChromium } from '../preview/chromium.ts';
-import { resolveHome } from './resolve.ts';
+import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { REBRAND_SWITCH } from './switch.ts';
 
 // Shared setup now loads the write guard before this file installs its OS-home mock.

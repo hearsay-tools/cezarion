@@ -1,4 +1,4 @@
-import { resolveHome } from '../home/resolve.ts';
+import { resolveHome } from '../home/resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 // Fake filesystem fixtures supply an OS home independently of this test process.
 const testHome = (env: NodeJS.ProcessEnv = process.env) => {
   const home = resolveHome({ purpose: 'cli', env }); // test-home-read: pure resolution for read-only browser discovery

@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { resolveHome } from './resolve.ts';
+import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { runSelfUpdateCommand } from '../self-update/cli.ts';
 import { activeId, listLinks } from '../self-update/layout.ts';
 import { SelfUpdateService } from '../self-update/service.ts';

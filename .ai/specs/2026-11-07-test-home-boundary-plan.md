@@ -28,19 +28,24 @@ is stronger: host config, data, state, cache and runtime directories never reach
 test. Other test outcomes stay unchanged.
 
 The coordinator directed a source ban after two review rounds found new flow-analysis
-bypasses. Calls to homedir/cezarHomeDir/resolveHome now need a reasoned read-only annotation;
+bypasses. Guarded calls, destructuring keys, imports/exports and member references now need
+a reasoned line annotation;
 writers use an explicit sandbox. CEZ_HOME assignment checks stay unchanged. The
 existing homedir calls were audited as read-only and annotated. Resolver calls
 were separately checked for pure comparisons, mocked writes, refusal probes or
 temporary sandbox envs. The guarded environment-to-Home source set is complete:
 resolveHome is the only such export in home/resolve.ts; paths.ts has no other one.
 
+The coordinator removed alias tracking after round4 found new binding bypasses
+and a false positive. The rule now checks only guarded syntax. Type-only syntax
+and data-property definitions stay outside it. Import lines have their own reasons.
+
 ## Behavior cases
 
 | Input or event | Required result | Evidence |
 | --- | --- | --- |
 | Test writes `join(cezarHomeDir(), 'config.json')` | Lint fails | Scanner fixture and real oxlint plugin fixture; baseline accepts, changed plugin refuses |
-| Test calls an ambient home source, with any later use | Lint fails at the source | Import/require alias, assignment, iterator, open and mkdtemp fixtures |
+| Test contains guarded call/key/specifier/member syntax, with any later use | Lint fails at that syntax | Import/export, pattern, member-reference, assignment, iterator, open and mkdtemp fixtures |
 | Rename uses ambient home as source or destination | Lint fails for either path | Scanner fixtures |
 | Explicit sandbox write or read-only ambient lookup with a reasoned line annotation | Lint passes | Scanner and annotation fixtures |
 | Test selects CEZ_HOME directly outside server package | Lint fails | External repository scanner fixture |

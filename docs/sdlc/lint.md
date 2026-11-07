@@ -90,25 +90,34 @@ forbidden form, parser errors, stale entries and the CI growth ratchet.
 refuses CEZ_HOME selection on these surfaces. Oxlint scans package tests. The lint
 runner applies the same two scanners to tracked and unignored new test files outside
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
-The scanner bans calls of `homedir()`, `cezarHomeDir()` and `resolveHome()` at their source,
-including named/renamed imports, default/namespace members and require/destructured
-require forms, including defaulted, nested and rest patterns. It does not need to follow values into assignments, iterators or
-filesystem writers. Two independent reviews found new binding forms that escaped
-the earlier flow analysis; the source ban removes that open-ended sink model.
+The guarded names are `homedir`, legacy `cezarHomeDir` and `resolveHome`.
 `home/resolve.ts` exports only `resolveHome` as an environment-to-Home resolver.
 The Cezar path helpers in `paths.ts` take an explicit `Home`; its agent-home
-and tilde helpers remain separate APIs. This rule does not ban those APIs.
+and tilde APIs remain separate APIs.
 
-A read-only call requires `// test-home-read: <reason>` on the call line. The
-reason must be nonempty. Only a real line comment grants an exception; strings,
-block comments and comments on other lines do not. Each existing exception was
-checked to compare a path, inspect a sandbox, probe a refusal guard, or resolve
-a temporary sandbox env. Resolver calls are pure. A sandbox env may feed writes
-inside that sandbox; a refusal probe must prove the write was blocked. The annotation is a review contract, not proof of read-only behavior.
-Strings and fixture text are data, not calls. Import-level source aliases are
-resolved; arbitrary value aliases, dynamic computed keys, cross-module flow and
-eval are outside this static scan. Use `Home.sandbox` or the selected sandbox HOME
-for all writes.
+The rule checks syntax only. It reports these positions:
+
+- Bare calls and member calls ending in a guarded name.
+- Guarded keys in any destructuring pattern, including parameters, catch clauses,
+  loop targets, nesting, defaults, rest and TypeScript expression wrappers.
+- Guarded names in runtime import/export specifiers, including renamed imports
+  and re-exports. An import line needs its own annotation.
+- Member references ending in a guarded name, including values passed or assigned.
+
+A permitted use requires `// test-home-read: <reason>` on the same line. The
+reason must be nonempty. Only a real line comment grants an exception. Imports
+and each guarded use need their own comment. Existing uses were audited as pure
+comparisons, sandbox discovery, mocked writes, refusal probes or resolution of
+temporary sandbox envs. The annotation is a review contract, not proof of later
+read-only behavior. Use `Home.sandbox` or the selected sandbox HOME for writes.
+
+Repeated independent reviews found new binding forms and false positives in alias
+tracking. The syntactic rule has no binding or value-flow model. It ignores fixture
+strings/comments, type-only syntax and unrelated data-property definitions such
+as `{ homedir: '/tmp' }`. Static identifier/string keys are checked directly;
+computed expressions such as `os['home' + 'dir']`, eval and cross-module flow are
+outside the scan. An allowed import alias is not followed to later calls under
+a different name.
 
 The following are operational tools or read-only helpers, not test source. This
 classification preserves existing commands and legacy paths (hearsay-tools/cezarion#2813).

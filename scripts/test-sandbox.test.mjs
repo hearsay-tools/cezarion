@@ -349,7 +349,7 @@ process.stdout.write(String(linkSharedOmpNatives(process.argv[1], process.argv[2
 })
 
 test('the shared omp natives cache lives in the account home, or under an absolute XDG_CACHE_HOME', () => {
-  const accountCache = join(userInfo().homedir, '.cache', 'cez', 'test-omp-natives')
+  const accountCache = join(userInfo().homedir, '.cache', 'cez', 'test-omp-natives') // test-home-read: compare the legacy cache path without writing
   assert.equal(sharedOmpNativesCache({}), accountCache)
   // A sandbox HOME never moves it: the setup has replaced HOME by the time it links.
   assert.equal(sharedOmpNativesCache({ HOME: '/tmp/cez-vitest-tmp-x/home' }), accountCache)

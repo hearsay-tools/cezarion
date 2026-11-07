@@ -1,8 +1,8 @@
-import { resolveHome } from './home/resolve.ts';
+import { resolveHome } from './home/resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 const env: NodeJS.ProcessEnv = {};
 const testHome = () => resolveHome({ purpose: 'cli', env }); // test-home-read: pure path resolution; result not written
 import { afterEach, describe, expect, it } from 'vitest';
-import { homedir } from 'node:os';
+import { homedir } from 'node:os'; // test-home-read: import for the annotated sandbox and refusal probes
 import { join } from 'node:path';
 import {
   DEFAULT_SERVER_INSTANCE,
