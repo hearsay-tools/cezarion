@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button'
 import { useHealth } from '@/api/queries'
 
 function recoveryMessage(file: HomeRecoveryFile): string {
-  if (file.reason === 'legacy-change') return `${file.file} changed in the old home. Import keeps live-only changes. Old-home changes win when both homes changed the same key or entry.`
+  if (file.reason === 'legacy-change') return file.canImport
+    ? `${file.file} changed in the old home. Import keeps live-only changes. Old-home changes win when both homes changed the same key or entry.`
+    : `${file.file} changed in the old home. Import is unavailable. Ignore keeps the live file and skips these old-home changes.`
   if (file.reason === 'outside-write') return `${file.file} changed outside Cezar. Restore the previous version or accept the file as found.`
   return file.file === 'config.json'
     ? 'The project registry was reset. Restore the previous projects?'

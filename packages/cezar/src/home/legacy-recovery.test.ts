@@ -9,7 +9,7 @@ import { writeMigrationMarker } from './install-marker.ts';
 import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, subscribeHomeRecovery } from './recovery.ts';
 import { legacyWatchDirectories } from './legacy-source.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
-import { digest } from './version-log.ts';
+import { digest, VersionLog } from './version-log.ts';
 import { listBackups } from '../workspace/backups.ts';
 import * as fs from 'node:fs';
 
@@ -142,8 +142,32 @@ it('reuses the base check on repeated polls and refreshes it when the retained c
   expect(row(home).canImport).toBe(true);
   writeFileSync(path, Buffer.alloc(bytes.length, '!')); // Same-size corruption invalidates the successful check.
   expect(row(home).canImport).toBe(false);
-  expect(row(home).canImport).toBe(false);
   expect(read.mock.calls.filter(([file]) => file === path)).toHaveLength(3);
+});
+
+it('retries a transient retained-base read failure without a metadata change', () => {
+  const { legacy, home } = fixture();
+  writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
+  vi.spyOn(VersionLog.prototype, 'recoveryBytes').mockImplementationOnce(() => {
+    throw Object.assign(new Error('Temporary base read failure'), { code: 'EIO' });
+  });
+  expect(row(home).canImport).toBe(false);
+  expect(row(home).canImport).toBe(true);
+});
+
+it('caches invalid JSON after successfully reading and verifying the retained bytes', () => {
+  const { legacy, home, store } = fixture();
+  const record = readMigrationRecord(home)!;
+  const entry = record.files.find(file => file.path === 'config.json')!;
+  const bytes = Buffer.from('{');
+  entry.hash = digest(bytes);
+  store.transaction(() => writeMigrationRecord(home, record), [home.workspaceConfig, home.workspaceUiState]);
+  writeFileSync(join(home.config, '.versions/config.json', entry.hash!), bytes);
+  writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
+  const read = vi.spyOn(VersionLog.prototype, 'recoveryBytes');
+  expect(row(home).canImport).toBe(false);
+  expect(row(home).canImport).toBe(false);
+  expect(read).toHaveBeenCalledTimes(1);
 });
 
 it('rechecks the base at action time after offering Import', () => {

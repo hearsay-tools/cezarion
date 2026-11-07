@@ -278,8 +278,8 @@ in `config.json` projects and `agent-accounts.json` accounts; other arrays chang
 one value. Live-only changes survive. Legacy wins where both changed the same key
 or entry, as the row explains. Missing, unreadable, corrupt or non-object JSON bases
 make the row Ignore-only; Import rechecks the base at action time. A recorded absent
-file remains a valid empty base for later creations. Unchanged retained versions reuse
-the hash and JSON check across polls. Unlike ordinary writes,
+file remains a valid empty base for later creations. Unchanged verified retained versions reuse
+the JSON check across polls; read failures are retried. Unlike ordinary writes,
 Import requires its HomeStore backup to succeed before replacement. A deleted legacy
 file offers Ignore only. Import and Ignore retain the exact observed legacy bytes
 as the next base, then update the migration hash (null for deletion). Incident times

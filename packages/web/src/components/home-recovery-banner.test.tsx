@@ -158,6 +158,7 @@ it.each([true, false])('gives host CLI actions for legacy grants with canImport=
 it('offers only Ignore when a legacy file cannot be imported', () => {
   state([{ ...file('config.json', 'legacy-change'), reason: 'legacy-change', canImport: false }])
   render(<HomeRecoveryBanner />)
+  expect(screen.getByRole('status').textContent).toContain('Import is unavailable. Ignore keeps the live file and skips these old-home changes.')
   expect(screen.queryByRole('button', { name: 'Import changes from the old home' })).toBeNull()
   expect(screen.getAllByRole('button')).toHaveLength(1)
   expect(screen.getByRole('button', { name: 'Ignore' }).hasAttribute('disabled')).toBe(false)

@@ -51,12 +51,12 @@ function baseAvailable(log: VersionLog, flag: OutsideWrite): boolean {
     const stamp = `${flag.restoreHash}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
     const cached = baseChecks.get(log.directory);
     if (cached?.stamp === stamp) return cached.available;
+    const bytes = log.recoveryBytes(flag); // Read failures are transient: the outer catch retries next poll.
     let available = false;
     try {
-      const bytes = log.recoveryBytes(flag);
       const base: unknown = bytes === null ? null : JSON.parse(bytes.toString('utf8'));
       available = base !== null && typeof base === 'object' && !Array.isArray(base);
-    } catch { /* An unchanged bad copy stays Ignore-only without another read per poll. */ }
+    } catch { /* Invalid JSON stays Ignore-only without another read per poll. */ }
     baseChecks.set(log.directory, { stamp, available });
     return available;
   } catch {
