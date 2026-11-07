@@ -206,6 +206,8 @@ export interface Runner {
 /** Live install/uninstall context, threaded through every step. */
 export interface InstallContext {
   home: Home;
+  /** OS-user LaunchAgents path; tests inject a sandbox directory. */
+  launchAgentsDir?: () => string;
   state: ServerState;
   ui: Ui;
   runner: Runner;
@@ -259,6 +261,13 @@ export interface InstallStep {
   undo(ctx: InstallContext, created: StepCreated): Promise<void>;
 }
 
+/** Platform-neutral migration ledger. No credentials or file contents belong here. */
+export interface PlatformMigrationReport {
+  moved: Array<{ stepId: string; from: StepArtifact; to: StepArtifact; backup?: StepArtifact }>;
+  leftAloneForeign: StepArtifact[];
+  errors: Array<{ artifact: StepArtifact; message: string }>;
+}
+
 export interface PlatformStrategy {
   id: PlatformId;
   label: string;
@@ -273,6 +282,11 @@ export interface PlatformStrategy {
    * to report a failed deploy.
    */
   redeploy?(ctx: InstallContext): Promise<void>;
+  /** Change platform resources without mutating state or saving a pending home.
+   * The caller applies the report and persists only after the group commits. */
+  migrate?(ctx: InstallContext): Promise<PlatformMigrationReport>;
+  /** Reverse successful moves after a group failure; repeat calls are safe. */
+  rollbackMigration?(ctx: InstallContext, report: PlatformMigrationReport): Promise<PlatformMigrationReport>;
 }
 
 /** Thrown by `preflight` to stop with a clean, user-facing reason (no stack). */
