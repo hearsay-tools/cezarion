@@ -39,6 +39,11 @@ export function recordedUnit(ctx: InstallContext, rebrand: boolean): StepArtifac
   return { kind: 'owned', type: 'service', ...recorded, name };
 }
 
+/** The unit as operators type it in hints (`cezar`, `cezar-shop`, `hearsay-squawk`). */
+export function unitHint(ctx: InstallContext, rebrand: boolean): string {
+  return recordedUnit(ctx, rebrand).name.replace(/\.service$/, '');
+}
+
 /** The ledger's site, symlink and htpasswd paths; the pre-switch names fill any gap. */
 export function ledgerSite(ctx: InstallContext): Pick<UbuntuNames, 'vhostAvailable' | 'vhostEnabled' | 'htpasswd'> {
   const names = ubuntuNames(ctx.instance, false);

@@ -49,6 +49,15 @@ describe('after the switch, a pre-switch install keeps its recorded cezar names'
     expect(proxy).toEqual(['/etc/nginx/sites-available/hearsay-squawk', '/etc/nginx/sites-enabled/hearsay-squawk', '/etc/hearsay-squawk/htpasswd']);
     expect((await step('autostart').run(ctx))?.artifacts[0]?.name).toBe('hearsay-squawk.service');
   });
+
+  it.each([[true, 'hearsay-squawk-shop'], [false, 'cezar-shop']])('service hints name the selected unit (rebrand %s)', async (rebrand, hint) => {
+    const lines: string[] = [];
+    const ctx = { home: Home.sandbox(storeRoot()), state: { schema: 1, installed: false, primaryPort: 4322, steps: {} }, instance: 'shop',
+      ui: { ...createAutoUi(), info: (m: string) => { lines.push(m); } } as Ui, runner: serverFixture().host,
+      save: async () => {}, dryRun: true, assumeYes: true, reconfigure: new Set(), repoRoot: '/srv/repo', now: '2026-11-07T00:00:00.000Z', prefs: {} } as InstallContext;
+    await createUbuntuVps({ rebrand }).steps(ctx).find(s => s.id === 'autostart')!.run(ctx);
+    expect(lines.join('\n')).toContain(`systemctl --user enable --now ${hint})`);
+  });
 });
 
 describe('with the switch off', () => {

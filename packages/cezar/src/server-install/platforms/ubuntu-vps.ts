@@ -7,7 +7,7 @@ import { CANCEL, PreflightError, type InstallContext, type InstallStep, type Pla
 import { depCheckStep, generatePassword, owned, shared, shquote, StepAborted, StepCancelled, StepSkipped, sudoStep, verifyCommand } from '../steps.ts';
 import { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 import { failedRestart, freshRestartOrFail, readExecStart, resolveRedeployScope, restartSystemService, restartUserService, serviceDiagnostics, serviceSnapshot } from './ubuntu-vps-redeploy.ts';
-import { recordedSite, recordedUnit, sitePathsToRemove } from './ubuntu-vps-names.ts';
+import { recordedSite, recordedUnit, sitePathsToRemove, unitHint } from './ubuntu-vps-names.ts';
 import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuService } from './ubuntu-vps-migration.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
 
@@ -698,7 +698,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     return false; // always (re)assert the service is installed and running
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    const UNIT_NAME = recordedUnit(ctx, rebrand).name;
+    const UNIT_NAME = recordedUnit(ctx, rebrand).name, hint = unitHint(ctx, rebrand);
     const execStart = await resolveExecStart(ctx);
     // Prefer a rootless `systemd --user` service + linger; fall back to a system
     // unit (via sudoStep) when the user bus is not reachable. `show-environment`
@@ -709,7 +709,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     if (userBus) {
       const unitPath = join(homedir(), '.config', 'systemd', 'user', UNIT_NAME);
       if (ctx.dryRun) {
-        ctx.ui.info(`DRY RUN — would write ${unitPath} and enable it (systemctl --user enable --now cezar).`);
+        ctx.ui.info(`DRY RUN — would write ${unitPath} and enable it (systemctl --user enable --now ${hint}).`);
       } else {
         mkdirSync(join(homedir(), '.config', 'systemd', 'user'), { recursive: true });
         writeFileSync(
@@ -720,7 +720,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
         await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
         await ctx.runner.interactive('systemctl', ['--user', 'enable', '--now', UNIT_NAME]);
         if ((await ctx.runner.capture('systemctl', ['--user', 'is-enabled', UNIT_NAME])).code !== 0) {
-          ctx.ui.warn('The user service did not enable cleanly — check `systemctl --user status cezar`.');
+          ctx.ui.warn(`The user service did not enable cleanly — check \`systemctl --user status ${hint}\`.`);
         }
       }
       // Linger lets the user service survive logout / start at boot — usually
@@ -739,7 +739,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
             r.stdout.includes('Linger=yes'),
           ),
       });
-      await confirmCezarRunning(ctx, 'systemctl --user status cezar', 'journalctl --user -u cezar -n 50 --no-pager');
+      await confirmCezarRunning(ctx, `systemctl --user status ${hint}`, `journalctl --user -u ${hint} -n 50 --no-pager`);
       const artifacts: StepArtifact[] = [owned('service', { name: UNIT_NAME, scope: 'user', path: unitPath })];
       if (!lingerWasOn) artifacts.push(owned('linger', { name: osUser }));
       return { artifacts };
@@ -753,7 +753,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
       extra: `systemctl daemon-reload && systemctl enable --now ${UNIT_NAME}`,
       verify: (c) => verifyCommand(c, 'systemctl', ['is-enabled', UNIT_NAME]),
     });
-    await confirmCezarRunning(ctx, 'sudo systemctl status cezar', 'sudo journalctl -u cezar -n 50 --no-pager');
+    await confirmCezarRunning(ctx, `sudo systemctl status ${hint}`, `sudo journalctl -u ${hint} -n 50 --no-pager`);
     return { artifacts: [owned('service', { name: UNIT_NAME, scope: 'system', path: `/etc/systemd/system/${UNIT_NAME}` })] };
   },
   async undo(ctx, created) {
@@ -928,7 +928,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
       `The cockpit is NOT fully working yet:\n` +
         problems.map((p) => `  • ${p}`).join('\n') +
         `\n\nDiagnostics on the server:\n` +
-        `  • systemctl --user status cezar   (or: sudo systemctl status cezar)\n` +
+        `  • systemctl --user status ${unitHint(ctx, rebrand)}   (or: sudo systemctl status ${unitHint(ctx, rebrand)})\n` +
         `  • sudo systemctl status nginx && sudo nginx -t\n` +
         `  • sudo ss -ltnp | grep -E ':80|:443|:${port}'\n` +
         `  • ports 80/443 open in ufw AND any cloud firewall (Hetzner/AWS)`,
