@@ -2,7 +2,7 @@ import type { ModelDiscoveryOptions } from './model-discovery-options.ts';
 import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
-import { trackChildExit } from './agent-runner.ts';
+import { modelProbeTeardown } from './model-probe-teardown.ts';
 import { buildChildEnv } from './agent-env.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
@@ -59,7 +59,7 @@ export async function discoverOmpModels(options: OmpModelDiscoveryOptions): Prom
 }
 
 async function collectOmpOutput(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<string> {
-  const kill = teardown(child);
+  const kill = modelProbeTeardown(child, KILL_GRACE_MS);
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await new Promise<string>((resolve, reject) => {
@@ -187,27 +187,4 @@ export function spawnOmp(
     cwd,
     env: buildChildEnv({ backend: 'omp' }),
   });
-}
-
-/**
- * Returns the probe's teardown: SIGTERM now, SIGKILL once the grace window elapses.
- * Copy of `teardown` in pi-model-catalog.ts.
- *
- * Both steps gate on the child's *real* termination, never on `child.killed` — Node flips that
- * flag the moment a signal is delivered. Called from both the failure path and the `finally`,
- * so the escalation is armed at most once.
- */
-function teardown(child: ChildProcessWithoutNullStreams): () => void {
-  const hasExited = trackChildExit(child);
-  let signalled = false;
-  return () => {
-    if (signalled || hasExited()) return;
-    signalled = true;
-    child.kill('SIGTERM');
-    const escalation = setTimeout(() => {
-      if (hasExited()) return;
-      child.kill('SIGKILL');
-    }, KILL_GRACE_MS);
-    escalation.unref?.();
-  };
 }

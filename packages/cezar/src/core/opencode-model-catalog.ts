@@ -2,7 +2,7 @@ import type { ModelDiscoveryOptions } from './model-discovery-options.ts';
 import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
-import { trackChildExit } from './agent-runner.ts';
+import { modelProbeTeardown } from './model-probe-teardown.ts';
 import { buildChildEnv } from './agent-env.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
@@ -67,7 +67,7 @@ async function runOpencodeProbe(
   deadline: number,
 ): Promise<ModelOption[]> {
   const child = spawn(bin, args, cwd);
-  const kill = teardown(child);
+  const kill = modelProbeTeardown(child, KILL_GRACE_MS);
   let timeout: NodeJS.Timeout | undefined;
   try {
     const result = new Promise<ModelOption[]>((resolve, reject) => {
@@ -205,30 +205,4 @@ function spawnOpencode(
     cwd,
     env: buildChildEnv({ backend: 'opencode' }),
   });
-}
-
-/**
- * Returns the probe's teardown: SIGTERM now, SIGKILL once the grace window elapses.
- *
- * Both steps gate on the child's *real* termination, never on `child.killed` — Node flips that
- * flag the moment a signal is delivered, so the old `exitCode === null && !child.killed` test
- * went false the instant our own SIGTERM landed. A probe that installs a SIGTERM handler then
- * survived every teardown, leaking one process per cache refresh (#858, the shape #841 fixed for
- * the Claude probe in `a67b327d`).
- *
- * Called from both the failure path and the `finally`, so the escalation is armed at most once.
- */
-function teardown(child: ChildProcessWithoutNullStreams): () => void {
-  const hasExited = trackChildExit(child);
-  let signalled = false;
-  return () => {
-    if (signalled || hasExited()) return;
-    signalled = true;
-    child.kill('SIGTERM');
-    const escalation = setTimeout(() => {
-      if (hasExited()) return;
-      child.kill('SIGKILL');
-    }, KILL_GRACE_MS);
-    escalation.unref?.();
-  };
 }

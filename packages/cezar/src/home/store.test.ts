@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
@@ -9,7 +9,7 @@ import { readInstallMarker } from './install-marker.ts';
 import { prepareHome } from './entry.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { enableRemoteSettings } from '../remote-settings.ts';
-import { benchmarkHome, setBenchmarkEnv } from '../../scripts/benchmark-home.ts';
+import { benchmarkHome, prepareBenchmarkEnv, setBenchmarkEnv } from '../../scripts/benchmark-home.ts';
 import { childEnv, cleanStoreRoots, storeChild, storeFixture, storeRoot } from './store.testkit.ts';
 
 afterEach(cleanStoreRoots);
@@ -143,4 +143,16 @@ it('benchmark controls override conflicting preferred values and preserve unrela
   const env = { HSQ_DRY_RUN: '0', CEZ_DRY_RUN: '', HSQ_AUTONAME: '1', CEZ_HOME: '/chosen', KEEP: '' };
   setBenchmarkEnv(env);
   expect(env).toEqual({ HSQ_DRY_RUN: '1', CEZ_DRY_RUN: '1', HSQ_AUTONAME: '0', CEZ_AUTONAME: '0', CEZ_HOME: '/chosen', KEEP: '' });
+});
+
+it('benchmark home preparation retains explicit legacy selection and pins owned homes under both names', () => {
+  const selected = { CEZ_HOME: '/selected', HSQ_HOME: '/preferred' };
+  expect(prepareBenchmarkEnv(selected)).toBeUndefined();
+  expect(selected).toMatchObject({ CEZ_HOME: '/selected', HSQ_HOME: '/preferred' });
+  const env: NodeJS.ProcessEnv = { HSQ_HOME: '/inherited' };
+  const ownHome = prepareBenchmarkEnv(env);
+  try {
+    expect(ownHome).toBeDefined();
+    expect(env).toMatchObject({ HSQ_HOME: ownHome, CEZ_HOME: ownHome, HSQ_DRY_RUN: '1', CEZ_DRY_RUN: '1' });
+  } finally { if (ownHome) rmSync(ownHome, { recursive: true, force: true }); }
 });

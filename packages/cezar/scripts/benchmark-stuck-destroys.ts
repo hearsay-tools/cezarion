@@ -1,5 +1,4 @@
-import { legacyHomeEnv } from '../src/core/product-env.ts';
-import { benchmarkHome, setBenchmarkEnv } from './benchmark-home.ts';
+import { benchmarkHome, prepareBenchmarkEnv } from './benchmark-home.ts';
 import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Stuck-destroy benchmark (hearsay-tools/cezarion#879): what permanently stuck worker destroys
@@ -37,11 +36,9 @@ import type { RunManager as RunManagerInstance } from '../src/workflows/run.ts';
 // This benchmark reads settled runs and starts no runner.
 import { noRunners } from '../src/core/runners-under-test.testkit.ts';
 
-setBenchmarkEnv();
 // The repo's own sandbox for ~/.cezar, so a benchmark never touches the user's registry; one this
 // run creates is removed with the rest of its teardown.
-const ownHome = legacyHomeEnv(process.env) ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
-if (ownHome) process.env.HSQ_HOME = process.env.CEZ_HOME = ownHome;
+const ownHome = prepareBenchmarkEnv();
 
 const { values } = parseArgs({ options: {
   workers: { type: 'string', default: '20' },
