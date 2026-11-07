@@ -13,6 +13,7 @@ import { runMigrationCommand } from './migration-cli.ts';
 import { migrationFiles } from './migration-files.ts';
 import { json, migrationFixture, rawJson } from './migration.testkit.ts';
 import { cleanStoreRoots } from './store.testkit.ts';
+import { useTestHome } from './test-home.testkit.ts';
 import { installInstance, serverFixture, serverMigrate, sharedHome } from '../server-install/server-migrate.testkit.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
@@ -57,6 +58,23 @@ it('a rolled-back group serves legacy through both serve preparations, with one 
     await closed;
   }
   expect(readCockpitLeases(served)).toEqual([]);
+});
+
+it('direct server preparation refuses a rolled-back target before its consumers or lease can use it', async () => {
+  const f = sharedHome();
+  f.host.unhealthy.add('hearsay-squawk-shop.service');
+  await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'rolled-back' });
+  const before = targetSnapshot(f.target);
+  useTestHome(f.legacy);
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // startServer calls this synchronously before constructing consumers of deps.home.
+  expect(() => prepareHomeLifecycle(f.target, undefined, { rebrand: true })).toThrow(
+    `[hsq] refusing to serve home ${f.target.root}: preparation selected ${f.legacy.root}. Prepare the home before starting the server.`,
+  );
+  expect(targetSnapshot(f.target)).toEqual(before);
+  expect(readInstallMarker(f.target.config)).toBeUndefined();
+  expect(existsSync(join(f.target.config, '.locks/cockpits'))).toBe(false);
+  expect(readCockpitLeases(f.legacy)).toEqual([]);
 });
 
 it.each(['default', 'shop'])('recognizes a completed %s server record after rollback', instance => {

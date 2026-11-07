@@ -190,6 +190,10 @@ rollback. The signal is an `installed` record without `dryRun` in the legacy
 a committed marker. Boot warns once to run `hsq server-migrate`. The selected
 legacy Home passes through CLI boot and the server lifecycle, including leases;
 the second preparation never tries to migrate that legacy Home into itself.
+The lifecycle refuses startup if preparation selects a different Home from the
+one the caller supplied. Its error names both roots. `startServer` runs this
+check before constructing home consumers, so an embedded caller must pass the
+Home returned by `prepareOperatorHome`, as CLI boot does.
 
 | Boot state | Selected home and action |
 | --- | --- |
