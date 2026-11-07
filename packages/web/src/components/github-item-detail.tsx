@@ -1,30 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon, LoaderCircleIcon } from 'lucide-react'
-import { ArrowLeftIcon, CheckIcon, CircleIcon, CircleXIcon, ChevronRightIcon, RefreshCwIcon, TriangleAlertIcon } from '@/components/design-icons'
+import { useQueryClient } from '@tanstack/react-query'
+import { ChevronLeftIcon, ExternalLinkIcon, MessageSquareIcon } from 'lucide-react'
+import { ArrowLeftIcon, ChevronRightIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { Link } from '@/lib/project-router'
 
-import { getGithubPrChanges, getGithubPrMergeState, mergeGithubPr } from '@/api/client'
-import { queryKeys, useGithubComments, useGithubPrChanges, useReferenceProjectId } from '@/api/queries'
+import { getGithubPrChanges } from '@/api/client'
+import { queryKeys, useGithubComments, useGithubPrChanges } from '@/api/queries'
 import type {
   GithubComment,
   GithubItem,
   GithubTimelineEvent,
   GithubTimelineEventKind,
-  GithubMergeMethod,
 } from '@open-mercato/cezar-api-client'
 import { Diff, type DiffFileChange } from '@/components/diff'
+import { GithubMergeBox } from '@/components/github-merge-box'
 import { TabLink } from '@/components/tab-link'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { shortAge } from '@/lib/format'
@@ -33,7 +25,6 @@ import { cn, isHttpUrl } from '@/lib/utils'
 import { Markdown } from '@/routes/task-thread/markdown'
 import { labelChipStyle } from '@/routes/github/github-filter'
 import { githubFilterPath, type GithubFilter } from '@/routes/github/github-sidebar-model'
-import { GITHUB_PAGE_SIZE } from '@/api/github-pages'
 
 /** A single label pill, tinted with its GitHub color (or neutral when unknown). */
 export function LabelChip({ label, color, plain = false }: { label: string; color: string | undefined; plain?: boolean }) {
@@ -46,6 +37,155 @@ export function LabelChip({ label, color, plain = false }: { label: string; colo
     >
       {label}
     </span>
+  )
+}
+
+function itemKindWord(kind: GithubItem['kind']): 'pull request' | 'issue' {
+  return kind === 'pr' ? 'pull request' : 'issue'
+}
+
+function itemHasDiffStat(kind: GithubItem['kind'], additions: number | undefined, deletions: number | undefined): boolean {
+  return kind === 'pr' && Boolean(additions || deletions)
+}
+
+function GithubItemBackLink({ backLink }: { backLink: { to: string } | null }) {
+  if (!backLink) return null
+  return (
+    <Link
+      to={backLink.to}
+      data-slot="gh-back"
+      className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
+    >
+      <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
+      Back to the list
+    </Link>
+  )
+}
+
+function GithubItemMeta({
+  item,
+  kindWord,
+  commentCount,
+  hasDiffStat,
+  additions,
+  deletions,
+}: {
+  item: GithubItem
+  kindWord: string
+  commentCount: number | undefined
+  hasDiffStat: boolean
+  additions: number | undefined
+  deletions: number | undefined
+}) {
+  return (
+    <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
+      <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
+      <span>{shortAge(item.createdAt)} ago</span>
+      {commentCount ? (
+        <>
+          ·<CommentCount count={commentCount} />
+        </>
+      ) : null}
+      {hasDiffStat ? (
+        <>
+          ·
+          <span data-slot="gh-diffstat">
+            <span className="text-success">+{additions ?? 0}</span>{' '}
+            <span className="text-danger">−{deletions ?? 0}</span>
+          </span>
+        </>
+      ) : null}
+      ·
+      {/* href protocol guard (#431): link only for http(s) URLs. */}
+      {isHttpUrl(item.url) ? (
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-slot="gh-open-link"
+          className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground hover:underline"
+        >
+          open on GitHub
+          <ExternalLinkIcon aria-hidden="true" className="size-2.5" />
+        </a>
+      ) : (
+        <span data-slot="gh-open-link" className="text-muted-foreground">
+          open on GitHub
+        </span>
+      )}
+    </p>
+  )
+}
+
+function GithubItemSubNav({
+  item,
+  subNav,
+  changes,
+}: {
+  item: GithubItem
+  subNav: { filter: GithubFilter | null; changes: boolean } | null
+  changes: boolean
+}) {
+  if (item.kind !== 'pr') return null
+  if (subNav) {
+    return (
+      <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
+        <TabLink to={githubFilterPath('prs', subNav.filter, item.number)} active={!changes}>Conversation</TabLink>
+        <TabLink to={githubFilterPath('prs', subNav.filter, item.number, '/changes')} active={changes}>Changes</TabLink>
+      </nav>
+    )
+  }
+  return (
+    <Link
+      to={githubFilterPath('prs', null, item.number, '/changes')}
+      data-slot="gh-files-changed"
+      className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+    >
+      Files changed
+    </Link>
+  )
+}
+
+function GithubItemLabels({
+  item,
+  colors,
+  checks,
+}: {
+  item: GithubItem
+  colors: Record<string, string>
+  checks: GithubItem['checks']
+}) {
+  if (!(item.labels.length > 0 || checks)) return null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      {item.labels.map((label) => (
+        <LabelChip key={label} label={label} color={colors[label]} />
+      ))}
+      {checks ? <ChecksBadge checks={checks} url={item.url} /> : null}
+    </div>
+  )
+}
+
+function GithubItemConversation({
+  item,
+  colors,
+  body,
+}: {
+  item: GithubItem
+  colors: Record<string, string>
+  body: string | undefined
+}) {
+  return (
+    <>
+      <div data-slot="gh-body" className="mt-5 text-sm">
+        {body ? (
+          <Markdown>{body}</Markdown>
+        ) : (
+          <p className="text-soft-foreground">(no description)</p>
+        )}
+      </div>
+      <GithubThread item={item} colors={colors} />
+    </>
   )
 }
 
@@ -86,7 +226,7 @@ export function GithubItemDetail({
   children?: ReactNode
 }) {
   const changes = subNav?.changes ?? false
-  const kindWord = item.kind === 'pr' ? 'pull request' : 'issue'
+  const kindWord = itemKindWord(item.kind)
   // The detail tier (hearsay-tools/cezarion#1183): the thread request also carries the item's own
   // body and diffstat, so the pane no longer depends on the list row having shipped them. The same
   // query `GithubThread` reads; on the Changes tab it serves only what is already cached.
@@ -94,322 +234,38 @@ export function GithubItemDetail({
   const body = detail?.body ?? item.body
   const additions = detail?.additions ?? item.additions
   const deletions = detail?.deletions ?? item.deletions
-  const hasDiffStat = item.kind === 'pr' && Boolean(additions || deletions)
+  const hasDiffStat = itemHasDiffStat(item.kind, additions, deletions)
   const commentCount = comments ?? item.comments
   return (
     <article data-slot="gh-detail-inner" className="min-w-0 px-4 py-4 md:px-7 md:py-5">
-      {backLink ? (
-        <Link
-          to={backLink.to}
-          data-slot="gh-back"
-          className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
-        >
-          <ArrowLeftIcon size={16} aria-hidden="true" className="size-3.5" />
-          Back to the list
-        </Link>
-      ) : null}
+      <GithubItemBackLink backLink={backLink} />
 
       <div data-slot="gh-description-card" className={item.kind === 'pr' ? 'rounded-xl border border-border bg-card p-6' : undefined}>
       {item.kind === 'pr' ? <h2 className="mb-4 text-[22px] leading-snug font-normal">#{item.number} {item.title}</h2> : null}
-      <p data-slot="gh-meta" className="flex flex-wrap items-center gap-x-1.5 font-mono text-[11px] text-soft-foreground">
-        <span>#{item.number}</span>·<span>{kindWord}</span>·<span>opened by {item.author}</span>·
-        <span>{shortAge(item.createdAt)} ago</span>
-        {commentCount ? (
-          <>
-            ·<CommentCount count={commentCount} />
-          </>
-        ) : null}
-        {hasDiffStat ? (
-          <>
-            ·
-            <span data-slot="gh-diffstat">
-              <span className="text-success">+{additions ?? 0}</span>{' '}
-              <span className="text-danger">−{deletions ?? 0}</span>
-            </span>
-          </>
-        ) : null}
-        ·
-        {/* href protocol guard (#431): link only for http(s) URLs. */}
-        {isHttpUrl(item.url) ? (
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            data-slot="gh-open-link"
-            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground hover:underline"
-          >
-            open on GitHub
-            <ExternalLinkIcon aria-hidden="true" className="size-2.5" />
-          </a>
-        ) : (
-          <span data-slot="gh-open-link" className="text-muted-foreground">
-            open on GitHub
-          </span>
-        )}
-      </p>
+      <GithubItemMeta
+        item={item}
+        kindWord={kindWord}
+        commentCount={commentCount}
+        hasDiffStat={hasDiffStat}
+        additions={additions}
+        deletions={deletions}
+      />
 
       {item.kind !== 'pr' ? <h2 className="mt-2 text-[22px] leading-snug font-normal">{item.title}</h2> : null}
 
       {afterHeading}
 
-      {item.kind === 'pr' && subNav ? (
-        <nav aria-label="Pull request detail" className="mt-4 flex border-b border-border">
-          <TabLink to={githubFilterPath('prs', subNav.filter, item.number)} active={!changes}>Conversation</TabLink>
-          <TabLink to={githubFilterPath('prs', subNav.filter, item.number, '/changes')} active={changes}>Changes</TabLink>
-        </nav>
-      ) : item.kind === 'pr' ? (
-        <Link
-          to={githubFilterPath('prs', null, item.number, '/changes')}
-          data-slot="gh-files-changed"
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
-        >
-          Files changed
-        </Link>
-      ) : null}
+      <GithubItemSubNav item={item} subNav={subNav} changes={changes} />
 
-      {item.labels.length > 0 || checks ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {item.labels.map((label) => (
-            <LabelChip key={label} label={label} color={colors[label]} />
-          ))}
-          {checks ? <ChecksBadge checks={checks} url={item.url} /> : null}
-        </div>
-      ) : null}
+      <GithubItemLabels item={item} colors={colors} checks={checks} />
 
-      {changes && item.kind === 'pr' ? <GithubPrChanges item={item} /> : <>
-      <div data-slot="gh-body" className="mt-5 text-sm">
-        {body ? (
-          <Markdown>{body}</Markdown>
-        ) : (
-          <p className="text-soft-foreground">(no description)</p>
-        )}
-      </div>
-
-      <GithubThread item={item} colors={colors} />
-
-      </>}
+      {changes && item.kind === 'pr' ? <GithubPrChanges item={item} /> : (
+        <GithubItemConversation item={item} colors={colors} body={body} />
+      )}
       </div>
       {item.kind === 'pr' ? <GithubMergeBox number={item.number} onRunAgent={onRunAgent} /> : null}
       {children}
     </article>
-  )
-}
-
-const mergeLabels: Record<GithubMergeMethod, string> = {
-  squash: 'Squash and merge',
-  merge: 'Create a merge commit',
-  rebase: 'Rebase and merge',
-}
-
-type MergeRequirementState = 'passing' | 'failing' | 'pending' | 'unknown'
-
-function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
-  const iconClass = 'size-4 shrink-0'
-  if (state === 'passing') return <CheckIcon size={16} aria-hidden="true" data-slot="gh-merge-status-passing" className={cn(iconClass, 'text-success')} />
-  if (state === 'failing') return <CircleXIcon size={16} aria-hidden="true" data-slot="gh-merge-status-failing" className={cn(iconClass, 'text-danger')} />
-  if (state === 'pending') return <LoaderCircleIcon aria-hidden="true" data-slot="gh-merge-status-pending" className={cn(iconClass, 'animate-spin text-warning')} />
-  return <CircleIcon size={16} aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
-}
-
-function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (() => void) | undefined }) {
-  const queryClient = useQueryClient()
-  // Ref-status batches are keyed by the explicit project, not `queryScope()` (queries.ts).
-  const referenceProjectId = useReferenceProjectId()
-  const mergeState = useQuery({
-    queryKey: queryKeys.githubMergeState(number),
-    queryFn: ({ signal }) => getGithubPrMergeState(number, {}, { signal }),
-    retry: false,
-  })
-  const state = mergeState.data?.available ? mergeState.data.mergeState : null
-  const [method, setMethod] = useState<GithubMergeMethod | null>(null)
-  const [confirming, setConfirming] = useState(false)
-  const [overrideRules, setOverrideRules] = useState(false)
-  // The key is taken when Refresh is PRESSED, like the merge's below: a reader who left for another
-  // project before the answer landed must not get this repository's merge state under theirs.
-  const refreshMergeState = useMutation({
-    mutationFn: (_key: ReturnType<typeof queryKeys.githubMergeState>) => getGithubPrMergeState(number, { refresh: true }),
-    onSuccess: (data, key) => queryClient.setQueryData(key, data),
-    onError: (error) => toast(error instanceof Error ? error.message : String(error), { tone: 'danger' }),
-  })
-  const selectedMethod = method && state?.methods.includes(method)
-    ? method
-    : state?.defaultMethod ?? state?.methods[0] ?? null
-  // Every key this merge touches, taken when it STARTS: `queryKeys` reads the live project scope,
-  // and a merge that lands after the reader switched projects must refresh the project it merged
-  // in, not the one now on screen (review g3 #1).
-  const mergeKeys = () => ({
-    mergeState: queryKeys.githubMergeState(number),
-    list: queryKeys.githubPages(GITHUB_PAGE_SIZE),
-    comments: queryKeys.githubComments('pr', number),
-    item: queryKeys.githubItem('pr', number),
-    refStatus: referenceProjectId === undefined ? undefined : queryKeys.githubRefStatusOf(referenceProjectId),
-  })
-  const merge = useMutation({
-    mutationFn: (_keys: ReturnType<typeof mergeKeys>) => {
-      if (!state || !selectedMethod) throw new Error('No merge method is available.')
-      return mergeGithubPr(number, {
-        method: selectedMethod,
-        expectedHeadSha: state.headSha,
-        ...(overrideRules && state.canOverride ? { overrideRules: true } : {}),
-      })
-    },
-    onSuccess: (_data, keys) => {
-      setConfirming(false)
-      toast(`Pull request #${number} merged`)
-      void queryClient.invalidateQueries({ queryKey: keys.mergeState })
-      // The paged list (hearsay-tools/cezarion#1183) — a merged PR drops out of the open set on
-      // the next read of its pages.
-      void queryClient.invalidateQueries({ queryKey: keys.list })
-      void queryClient.invalidateQueries({ queryKey: keys.comments })
-      // The task tab's item (#692), and every chip and tab glyph of this project: the server
-      // forgot its cached status on merge, so a reread answers `merged` without a reload.
-      void queryClient.invalidateQueries({ queryKey: keys.item })
-      if (keys.refStatus) void queryClient.invalidateQueries({ queryKey: keys.refStatus })
-    },
-    onError: (error, keys) => {
-      toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
-      void queryClient.invalidateQueries({ queryKey: keys.mergeState })
-    },
-  })
-
-  if (mergeState.isPending) {
-    return <Skeleton data-slot="gh-merge-loading" className="mt-6 h-32 w-full" />
-  }
-  if (!state) {
-    return (
-      <section data-slot="gh-merge-unavailable" className="mt-6 rounded-lg border border-border bg-card p-4 text-sm">
-        <p className="font-medium">Merge status unavailable</p>
-        <p className="mt-1 text-xs text-soft-foreground">
-          {mergeState.data?.available === false ? mergeState.data.reason : 'GitHub could not load merge requirements.'}
-        </p>
-      </section>
-    )
-  }
-
-  const title =
-    state.state === 'merged' ? 'Merged'
-      : state.state === 'closed' ? 'Closed'
-        : state.isDraft ? 'Draft'
-          : state.mergeable === 'conflicting' ? 'Conflicts must be resolved'
-            : state.canMerge ? 'Ready to merge'
-              : state.eligibility === 'unknown' ? 'Merge blocked · Requirements unknown' : 'Merge blocked'
-  const reviewState: MergeRequirementState =
-    state.reviewDecision === 'approved' || state.reviewDecision === 'not-required' ? 'passing'
-      : state.reviewDecision === 'unknown' ? 'unknown'
-        : 'failing'
-  const conflictState: MergeRequirementState =
-    state.mergeable === 'mergeable' ? 'passing'
-      : state.mergeable === 'conflicting' ? 'failing'
-        : 'unknown'
-  const mergeEnabled = Boolean(selectedMethod && (state.canMerge || (state.canOverride && overrideRules)))
-
-  return (
-    <section data-slot="gh-merge-box" data-eligibility={state.eligibility} data-conflicting={state.mergeable === 'conflicting' ? 'true' : undefined} aria-live="polite" className="mt-6 rounded-lg border border-border bg-card p-4">
-      <div className="flex items-start gap-3">
-        {state.canMerge ? (
-          <CheckIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-success" />
-        ) : (
-          <TriangleAlertIcon size={16} aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-warning" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold">{title}</h3>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={refreshMergeState.isPending}
-              onClick={() => refreshMergeState.mutate(queryKeys.githubMergeState(number))}
-            >
-              <RefreshCwIcon size={16} aria-hidden="true" className={cn('size-3.5', refreshMergeState.isPending && 'animate-spin')} />
-              Refresh
-            </Button>
-          </div>
-          <p className="mt-1 font-mono text-[11px] text-soft-foreground">
-            {state.headRef} ({state.headSha.slice(0, 7)}) → {state.baseRef}
-          </p>
-          <ul className="mt-3 space-y-2 text-xs">
-            <li className="flex items-center gap-2">
-              <MergeRequirementIcon state={reviewState} />
-              <span>Reviews: {state.reviewDecision.replaceAll('-', ' ')}</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <MergeRequirementIcon state={conflictState} />
-              <span>Conflicts: {state.mergeable === 'conflicting' ? 'present' : state.mergeable === 'mergeable' ? 'none' : 'unknown'}</span>
-            </li>
-            {state.checks.length === 0 ? <li>No checks configured</li> : state.checks.map((check) => (
-              <li key={check.name} className="flex items-center justify-between gap-3">
-                <span className="flex min-w-0 items-center gap-2">
-                  <MergeRequirementIcon state={check.state} />
-                  <span>{check.name} · {check.state}{check.required === true ? ' · required' : check.required === null ? ' · requiredness unknown' : ''}</span>
-                </span>
-                {check.url && isHttpUrl(check.url) ? <a href={check.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground underline">details</a> : null}
-              </li>
-            ))}
-            {state.blockers.map((blocker) => <li key={blocker.code} className="text-soft-foreground">{blocker.message}</li>)}
-          </ul>
-          {state.mergeable === 'conflicting' && onRunAgent ? <Button className="mt-4" onClick={onRunAgent}>Run agent on this PR</Button> : null}
-          {state.canOverride ? (
-            <label className="mt-4 flex cursor-pointer items-start gap-2 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
-              <input
-                type="checkbox"
-                checked={overrideRules}
-                onChange={(event) => setOverrideRules(event.target.checked)}
-                className="mt-0.5 size-4 accent-accent-strong"
-              />
-              <span>
-                <span className="block font-medium">Merge without waiting for requirements</span>
-                <span className="mt-0.5 block text-soft-foreground">GitHub will allow this only if your permissions can bypass the repository rules.</span>
-              </span>
-            </label>
-          ) : null}
-          {state.eligibility === 'unknown' ? (
-            <p className="mt-4 text-xs text-muted-foreground">
-              GitHub could not confirm review and branch-protection requirements. Passing checks do not establish merge readiness.
-            </p>
-          ) : null}
-          {state.state === 'open' && state.methods.length > 0 ? (
-            <div className="mt-4 flex flex-col flex-wrap gap-2 sm:flex-row">
-              <select
-                aria-label="Merge method"
-                value={selectedMethod ?? ''}
-                onChange={(event) => setMethod(event.target.value as GithubMergeMethod)}
-                className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {state.methods.map((candidate) => <option key={candidate} value={candidate}>{mergeLabels[candidate]}</option>)}
-              </select>
-              <Button disabled={!mergeEnabled} onClick={() => setConfirming(true)}>
-                {selectedMethod ? mergeLabels[selectedMethod] : 'Merge'}
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <Dialog open={confirming} onOpenChange={setConfirming}>
-        <DialogContent data-slot="gh-merge-confirm" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>{selectedMethod ? mergeLabels[selectedMethod] : 'Merge'} pull request #{number}?</DialogTitle>
-            <DialogDescription asChild>
-              <div>
-                <p>This will merge “{state.title}” into {state.baseRef}. GitHub will re-check the exact reviewed head before changing the repository.</p>
-                {overrideRules && state.canOverride ? (
-                  <p data-slot="gh-bypass-warning" className="mt-4 text-sm text-warning">
-                    You are asking GitHub to bypass unmet repository requirements; GitHub may refuse if your permissions do not allow it.
-                  </p>
-                ) : null}
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          {merge.error ? <p className="text-sm text-danger">{merge.error.message}</p> : null}
-          <DialogFooter>
-            <Button variant="outline" disabled={merge.isPending} onClick={() => setConfirming(false)}>Cancel</Button>
-            <Button disabled={merge.isPending} onClick={() => merge.mutate(mergeKeys())}>
-              {merge.isPending ? 'Merging…' : selectedMethod ? mergeLabels[selectedMethod] : 'Merge'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
   )
 }
 
@@ -752,63 +608,72 @@ function EventRow({ event, colors }: { event: GithubTimelineEvent; colors: Recor
   )
 }
 
+function CommittedPhrase({ event }: { event: GithubTimelineEvent }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0">committed</span>
+      {event.sha ? <span className="shrink-0 text-muted-foreground">{event.sha.slice(0, 7)}</span> : null}
+      {event.message ? (
+        <span className="truncate font-sans text-foreground">{event.message}</span>
+      ) : null}
+      <CommitChecks checks={event.checks} />
+    </span>
+  )
+}
+
+function LabeledPhrase({ event, colors }: { event: GithubTimelineEvent; colors: Record<string, string> }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0">{event.kind === 'labeled' ? 'added the' : 'removed the'}</span>
+      {event.label ? (
+        <span
+          data-slot="gh-event-label"
+          style={labelChipStyle(event.label.color ?? colors[event.label.name])}
+          className="max-w-[12rem] truncate rounded-full border px-1.5 py-px font-sans text-[12px]"
+        >
+          {event.label.name}
+        </span>
+      ) : null}
+      <span className="shrink-0">label</span>
+    </span>
+  )
+}
+
+function AssignedPhrase({ event }: { event: GithubTimelineEvent }) {
+  return (
+    <span className="truncate">
+      {event.kind === 'assigned' ? 'assigned' : 'unassigned'} {event.subject ?? 'someone'}
+    </span>
+  )
+}
+
+function CrossReferencedPhrase({ event }: { event: GithubTimelineEvent }) {
+  return (
+    <span className="truncate">
+      referenced this in {event.refNumber ? `#${event.refNumber}` : 'another thread'}
+      {event.refTitle ? ` ${event.refTitle}` : ''}
+    </span>
+  )
+}
+
+const EVENT_PHRASE: Record<GithubTimelineEventKind, (event: GithubTimelineEvent, colors: Record<string, string>) => ReactNode> = {
+  committed: (event) => <CommittedPhrase event={event} />,
+  labeled: (event, colors) => <LabeledPhrase event={event} colors={colors} />,
+  unlabeled: (event, colors) => <LabeledPhrase event={event} colors={colors} />,
+  assigned: (event) => <AssignedPhrase event={event} />,
+  unassigned: (event) => <AssignedPhrase event={event} />,
+  merged: () => <span>merged this</span>,
+  closed: () => <span>closed this</span>,
+  reopened: () => <span>reopened this</span>,
+  head_ref_force_pushed: () => <span>force-pushed</span>,
+  renamed: (event) => <span className="truncate">renamed this to {event.subject ?? '—'}</span>,
+  'cross-referenced': (event) => <CrossReferencedPhrase event={event} />,
+}
+
 /** The kind-specific middle of an event row. Split out so `EventRow` stays a layout shell and
  *  each phrase can be asserted on its own in tests. */
 function EventPhrase({ event, colors }: { event: GithubTimelineEvent; colors: Record<string, string> }) {
-  switch (event.kind) {
-    case 'committed':
-      return (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">committed</span>
-          {event.sha ? <span className="shrink-0 text-muted-foreground">{event.sha.slice(0, 7)}</span> : null}
-          {event.message ? (
-            <span className="truncate font-sans text-foreground">{event.message}</span>
-          ) : null}
-          <CommitChecks checks={event.checks} />
-        </span>
-      )
-    case 'labeled':
-    case 'unlabeled':
-      return (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">{event.kind === 'labeled' ? 'added the' : 'removed the'}</span>
-          {event.label ? (
-            <span
-              data-slot="gh-event-label"
-              style={labelChipStyle(event.label.color ?? colors[event.label.name])}
-              className="max-w-[12rem] truncate rounded-full border px-1.5 py-px font-sans text-[12px]"
-            >
-              {event.label.name}
-            </span>
-          ) : null}
-          <span className="shrink-0">label</span>
-        </span>
-      )
-    case 'assigned':
-    case 'unassigned':
-      return (
-        <span className="truncate">
-          {event.kind === 'assigned' ? 'assigned' : 'unassigned'} {event.subject ?? 'someone'}
-        </span>
-      )
-    case 'merged':
-      return <span>merged this</span>
-    case 'closed':
-      return <span>closed this</span>
-    case 'reopened':
-      return <span>reopened this</span>
-    case 'head_ref_force_pushed':
-      return <span>force-pushed</span>
-    case 'renamed':
-      return <span className="truncate">renamed this to {event.subject ?? '—'}</span>
-    case 'cross-referenced':
-      return (
-        <span className="truncate">
-          referenced this in {event.refNumber ? `#${event.refNumber}` : 'another thread'}
-          {event.refTitle ? ` ${event.refTitle}` : ''}
-        </span>
-      )
-  }
+  return EVENT_PHRASE[event.kind]?.(event, colors) ?? null
 }
 
 /** The rolled-up CI glyph on a commit row (#525) — reuses `CHECKS_GLYPH`/`CHECKS_TONE`, the same

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ExternalLinkIcon, LinkIcon, SearchXIcon } from 'lucide-react'
 import { CircleDotIcon, GitPullRequestIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useParams } from 'react-router'
+import type { ReactNode } from 'react'
 
 import { Link } from '@/lib/project-router'
 
@@ -78,6 +79,143 @@ function ItemView({ run, kind }: { run: ApiRun; kind: 'issue' | 'pr' }) {
   )
 }
 
+function itemHasPr(kind: 'issue' | 'pr', item: ReturnType<typeof useGithubItem>): boolean {
+  return kind === 'pr' && item.data?.available === true && item.data.item !== null
+}
+
+function itemChecksFor(
+  kind: 'issue' | 'pr',
+  number: number,
+  checksMap: Record<number, GithubItem['checks']> | undefined,
+  itemChecks: GithubItem['checks'],
+): GithubItem['checks'] {
+  return kind === 'pr' ? checksMap?.[number] ?? itemChecks : itemChecks
+}
+
+function ItemRetryButton({
+  retry,
+  kind,
+  number,
+}: {
+  retry: { isPending: boolean; mutate: (key: ReturnType<typeof queryKeys.githubItem>) => void }
+  kind: 'issue' | 'pr'
+  number: number
+}) {
+  return (
+    <Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(queryKeys.githubItem(kind, number))}>
+      Retry
+    </Button>
+  )
+}
+
+function ItemLoadError({
+  kind,
+  number,
+  error,
+  retryButton,
+}: {
+  kind: 'issue' | 'pr'
+  number: number
+  error: Error
+  retryButton: ReactNode
+}) {
+  return (
+    <CenteredState
+      icon={<TriangleAlertIcon size={16} />}
+      tone="danger"
+      heading="h2"
+      title={`Could not load ${KIND_LABEL[kind].toLowerCase()} #${number}`}
+      subtitle={error.message}
+      actions={retryButton}
+    />
+  )
+}
+
+function ItemUnavailable({
+  run,
+  kind,
+  number,
+  repoBase,
+  reason,
+  retryError,
+  retryButton,
+}: {
+  run: ApiRun
+  kind: 'issue' | 'pr'
+  number: number
+  repoBase: string | undefined
+  reason: string
+  retryError: Error | null
+  retryButton: ReactNode
+}) {
+  const KindIcon = kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
+  const url = taskReferences(run, repoBase).find((reference) => {
+    return (reference.kind === 'PR') === (kind === 'pr') && reference.number === number
+  })?.url
+  return (
+    <CenteredState
+      icon={<KindIcon size={16} />}
+      tone="neutral"
+      heading="h2"
+      title="GitHub is unavailable"
+      // A retry that itself failed in transport says so; one gh answered replaces `data`.
+      subtitle={retryError?.message ?? reason}
+      actions={
+        <>
+          {retryButton}
+          {url && isHttpUrl(url) ? (
+            <Button asChild variant="outline">
+              <a href={url} target="_blank" rel="noopener noreferrer">
+                open on GitHub
+                <ExternalLinkIcon aria-hidden="true" />
+              </a>
+            </Button>
+          ) : null}
+        </>
+      }
+    />
+  )
+}
+
+function ItemNotFound({ label, repoBase }: { label: string; repoBase: string | undefined }) {
+  return (
+    <CenteredState
+      icon={<SearchXIcon />}
+      tone="neutral"
+      heading="h2"
+      title={`${label} was not found in ${repoName(repoBase)}`}
+      subtitle="It may have been deleted, or the number points at a different repository."
+    />
+  )
+}
+
+function ItemLoaded({
+  kind,
+  item,
+  labelColors,
+  checks,
+}: {
+  kind: 'issue' | 'pr'
+  item: GithubItem
+  labelColors: Record<string, string> | undefined
+  checks: GithubItem['checks']
+}) {
+  return (
+    // The detail's own padding is the GitHub pane's; nudged so its edge lines up with the header's.
+    <div className="min-w-0 px-0.5 md:px-2">
+      <GithubItemDetail
+        item={item}
+        colors={labelColors ?? {}}
+        checks={checks}
+        backLink={null}
+        subNav={null}
+      >
+        {kind === 'issue' ? <IssueHandToAgent key={item.url} item={item} /> : null}
+      </GithubItemDetail>
+    </div>
+  )
+}
+
 function ItemBody({
   run,
   kind,
@@ -104,87 +242,42 @@ function ItemBody({
   // checks route for this one PR, exactly as the GitHub view hydrates its selection (#664).
   // Unavailable or unknown falls back to the item's own value, as it does there. The tab glyphs
   // keep reading the header's ref-status batch; this asks about the open PR alone.
-  const hasPr = kind === 'pr' && item.data?.available === true && item.data.item !== null
+  const hasPr = itemHasPr(kind, item)
   const checksQuery = useGithubChecks(hasPr ? [number] : [], hasPr)
   const checksMap = checksQuery.data?.available ? checksQuery.data.checks : undefined
   const label = `${KIND_LABEL[kind]} #${number}`
-  const KindIcon = kind === 'pr' ? GitPullRequestIcon : CircleDotIcon
-
   // One Retry for both failures: a request that never landed, and gh answering `available: false`
   // (auth, transport, no remote) — a 200 the client would otherwise keep for its whole staleTime.
-  const retryButton = (
-    <Button variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(queryKeys.githubItem(kind, number))}>
-      Retry
-    </Button>
-  )
+  const retryButton = <ItemRetryButton retry={retry} kind={kind} number={number} />
 
   if (item.isPending) return <TaskGithubItemLoading kind={kind} number={number} heading="h2" />
   if (item.isError) {
-    const error = retry.error ?? item.error
-    return (
-      <CenteredState
-        icon={<TriangleAlertIcon size={16} />}
-        tone="danger"
-        heading="h2"
-        title={`Could not load ${KIND_LABEL[kind].toLowerCase()} #${number}`}
-        subtitle={error.message}
-        actions={retryButton}
-      />
-    )
+    return <ItemLoadError kind={kind} number={number} error={retry.error ?? item.error} retryButton={retryButton} />
   }
   const data = item.data
   if (!data.available) {
-    const url = taskReferences(run, repoBase).find(
-      (reference) => (reference.kind === 'PR') === (kind === 'pr') && reference.number === number,
-    )?.url
     return (
-      <CenteredState
-        icon={<KindIcon size={16} />}
-        tone="neutral"
-        heading="h2"
-        title="GitHub is unavailable"
-        // A retry that itself failed in transport says so; one gh answered replaces `data`.
-        subtitle={retry.error?.message ?? data.reason}
-        actions={
-          <>
-            {retryButton}
-            {url && isHttpUrl(url) ? (
-              <Button asChild variant="outline">
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  open on GitHub
-                  <ExternalLinkIcon aria-hidden="true" />
-                </a>
-              </Button>
-            ) : null}
-          </>
-        }
+      <ItemUnavailable
+        run={run}
+        kind={kind}
+        number={number}
+        repoBase={repoBase}
+        reason={data.reason}
+        retryError={retry.error}
+        retryButton={retryButton}
       />
     )
   }
   if (!data.item) {
-    return (
-      <CenteredState
-        icon={<SearchXIcon />}
-        tone="neutral"
-        heading="h2"
-        title={`${label} was not found in ${repoName(repoBase)}`}
-        subtitle="It may have been deleted, or the number points at a different repository."
-      />
-    )
+    return <ItemNotFound label={label} repoBase={repoBase} />
   }
   return (
-    // The detail's own padding is the GitHub pane's; nudged so its edge lines up with the header's.
-    <div className="min-w-0 px-0.5 md:px-2">
-      <GithubItemDetail
-        item={data.item}
-        colors={data.labelColors ?? {}}
-        checks={kind === 'pr' ? checksMap?.[number] ?? data.item.checks : data.item.checks}
-        backLink={null}
-        subNav={null}
-      >
-        {kind === 'issue' ? <IssueHandToAgent key={data.item.url} item={data.item} /> : null}
-      </GithubItemDetail>
-    </div>
+    <ItemLoaded
+      kind={kind}
+      item={data.item}
+      labelColors={data.labelColors}
+      checks={itemChecksFor(kind, number, checksMap, data.item.checks)}
+    />
   )
 }
 
