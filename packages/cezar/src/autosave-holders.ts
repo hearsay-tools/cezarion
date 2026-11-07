@@ -20,47 +20,80 @@ function inspect(command: string, args: string[], timeout: number) {
 }
 
 async function snapshot(cwd: string): Promise<Snapshot> {
-  if (process.platform === 'linux') {
-    const pids = processesWithCwdUnder(cwd);
-    return pids === 'unknown' ? pids : new Map(pids.map(pid => [pid, processStartToken(pid)]));
-  }
+  if (process.platform === 'linux') return linuxSnapshot(cwd);
   // No process-tree proof exists on other platforms. Refuse before spawning,
   // rather than start work whose shutdown could retain the guard forever.
   if (process.platform !== 'darwin') return 'unknown';
+  return darwinSnapshot(cwd);
+}
+
+function linuxSnapshot(cwd: string): Snapshot {
+  const pids = processesWithCwdUnder(cwd);
+  return pids === 'unknown' ? pids : new Map(pids.map(pid => [pid, processStartToken(pid)]));
+}
+
+/** One bounded probe result from `inspect`. */
+type Inspection = Awaited<ReturnType<typeof inspect>>;
+
+/** Darwin proof needs two independent bounded probes; neither alone is evidence. */
+async function darwinSnapshot(cwd: string): Promise<Snapshot> {
   const uid = process.getuid?.();
   if (uid === undefined) return 'unknown';
   const [lsof, ps] = await Promise.all([
     inspect('lsof', ['-a', '-u', String(uid), '-d', 'cwd', '-Fpn'], 5_000),
     inspect('ps', ['-U', String(uid), '-o', 'pid=,lstart='], 2_000),
   ]);
+  return darwinHolders(cwd, lsof, ps);
+}
+
+/** Reconcile the two probe outputs into the holder set under the worktree root. */
+function darwinHolders(cwd: string, lsof: Inspection, ps: Inspection): Snapshot {
   if (!ps.ok || !lsof.ok || !lsof.stdout) return 'unknown';
   let root = resolve(cwd);
   try { root = realpathSync(cwd); } catch { /* Git will report an absent directory. */ }
+  const holders = holdersUnderRoot(lsof.stdout, root);
+  const excluded = new Set<number | undefined>([process.pid, ps.pid, lsof.pid]);
+  const result = psIdentities(ps.stdout, holders, excluded);
+  addUnattributed(result, holders, excluded);
+  return result;
+}
+
+/** lsof prints one `p` line per PID followed by an `n` line for each path it holds open. */
+function holdersUnderRoot(lsofOutput: string, root: string): Set<number> {
   const holders = new Set<number>();
   let pid: number | undefined;
-  for (const line of lsof.stdout.split('\n')) {
+  for (const line of lsofOutput.split('\n')) {
     if (line.startsWith('p')) pid = Number(line.slice(1));
     else if (line.startsWith('n') && pid !== undefined) {
       const path = line.slice(1);
       if (path === root || path.startsWith(root + sep)) holders.add(pid);
     }
   }
+  return holders;
+}
+
+/**
+ * As in orphan recovery, a process lsof could not read is no evidence (hearsay-tools/cezarion#889);
+ * `ps` only supplies each holder's identity.
+ */
+function psIdentities(psOutput: string, holders: Set<number>, excluded: Set<number | undefined>): Map<number, string | undefined> {
   const result = new Map<number, string | undefined>();
-  for (const line of ps.stdout.split('\n')) {
+  for (const line of psOutput.split('\n')) {
     const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(line);
     if (!match) continue;
     const id = Number(match[1]);
-    if (id === process.pid || id === ps.pid || id === lsof.pid) continue;
-    // As in orphan recovery, a process lsof could not read is no evidence (hearsay-tools/cezarion#889);
-    // `ps` only supplies each holder's identity.
-    if (holders.has(id)) result.set(id, match[2]);
-  }
-  // A holder born between the two snapshots may be absent from ps. Missing
-  // identity is uncertainty, never grounds to drop the lsof observation.
-  for (const id of holders) {
-    if (id !== process.pid && id !== ps.pid && id !== lsof.pid && !result.has(id)) result.set(id, undefined);
+    if (excluded.has(id) || !holders.has(id)) continue;
+    result.set(id, match[2]);
   }
   return result;
+}
+
+/** A holder born between the two snapshots may be absent from ps. Missing
+ * identity is uncertainty, never grounds to drop the lsof observation. */
+function addUnattributed(result: Map<number, string | undefined>, holders: Set<number>, excluded: Set<number | undefined>) {
+  for (const id of holders) {
+    if (!excluded.has(id) && !result.has(id)) result.set(id, undefined);
+  }
 }
 
 async function live(entry: RecordedProcess): Promise<boolean> {
