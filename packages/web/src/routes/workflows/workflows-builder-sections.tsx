@@ -855,8 +855,10 @@ function CopyYamlButton({ yaml }: { yaml: string }) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
-    () => () => {
-      if (timer.current !== null) clearTimeout(timer.current)
+    () => {
+      return () => {
+        if (timer.current !== null) clearTimeout(timer.current)
+      }
     },
     [],
   )
