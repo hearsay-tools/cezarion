@@ -125,17 +125,7 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
         Off by default. Re-drag the launchers after changing this option.
       </p>
 
-      {key === null || launchKey.isError ? (
-        <p
-          data-slot="bm-key-state"
-          role={launchKey.isError ? 'alert' : 'status'}
-          className={`text-xs leading-relaxed ${launchKey.isError ? 'text-destructive' : 'text-soft-foreground'}`}
-        >
-          {launchKey.isError
-            ? `Could not load this project's launch key, so these launchers only prefill the form and auto-start cannot arm: ${launchKey.error.message}`
-            : "Loading this project's launch key…"}
-        </p>
-      ) : null}
+      <LaunchKeyNote launchKey={launchKey} hasKey={key !== null} />
 
       <div data-slot="bm-generic" className="rounded-lg border border-border bg-muted/30 p-3.5">
         {/* Generic launcher: no skill, auto forced off — it only prefills the form. */}
@@ -159,21 +149,15 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
         data-slot="bm-list"
         className="flex flex-col divide-y divide-border [&>[data-slot=bm-row]]:py-3.5"
       >
-        {shown.length > 0 ? (
-          shown.map((skill) => (
-            <BookmarkletRow
-              key={skill.path}
-              label={repoName ? `/${skill.name} (${repoName})` : `/${skill.name}`}
-              url={key === null ? null : bookmarkletUrl(skill.name, auto, key, origin, projectId)}
-            />
-          ))
-        ) : (
-          <p className="text-xs text-soft-foreground">
-            {skills.length > 0
-              ? '(no skills match)'
-              : '(no skills yet — the generic launcher above still works)'}
-          </p>
-        )}
+        <BookmarkletList
+          skills={skills}
+          shown={shown}
+          repoName={repoName}
+          auto={auto}
+          keyValue={key}
+          origin={origin}
+          projectId={projectId}
+        />
       </div>
       <p className="text-xs leading-relaxed text-soft-foreground">
         These are bookmarklet drag sources, not run buttons. Clicking one here explains
@@ -184,6 +168,79 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
         install using a desktop browser.
       </p>
     </div>
+  )
+}
+
+/** Role and tone classes of the launch-key note: an alert when the fetch failed, a quiet status
+ *  line while it loads. */
+function keyNoteTone(isError: boolean) {
+  return isError
+    ? { role: 'alert' as const, className: 'text-xs leading-relaxed text-destructive' }
+    : { role: 'status' as const, className: 'text-xs leading-relaxed text-soft-foreground' }
+}
+
+/** The launch-key note under the auto-submit switch (hearsay-tools/cezarion#896): an alert while
+ *  the key fetch failed, a status line while it is still loading, nothing once the key exists.
+ *  Extracted from BookmarkletPanel (hearsay-tools/cezarion#2862). */
+function LaunchKeyNote({
+  launchKey,
+  hasKey,
+}: {
+  launchKey: ReturnType<typeof useLaunchKey>
+  /** False while the key is unavailable (`null`): the note shows and rows lose their href. */
+  hasKey: boolean
+}) {
+  if (hasKey && !launchKey.isError) return null
+  const tone = keyNoteTone(launchKey.isError)
+  return (
+    <p data-slot="bm-key-state" role={tone.role} className={tone.className}>
+      {launchKey.isError
+        ? `Could not load this project's launch key, so these launchers only prefill the form and auto-start cannot arm: ${launchKey.error.message}`
+        : "Loading this project's launch key…"}
+    </p>
+  )
+}
+
+/** The filtered launcher list inside the bookmarklet panel: one row per matching skill, or the
+ *  "(no skills match)" / "(no skills yet)" hint. Extracted from BookmarkletPanel
+ *  (hearsay-tools/cezarion#2862). */
+function BookmarkletList({
+  skills,
+  shown,
+  repoName,
+  auto,
+  keyValue,
+  origin,
+  projectId,
+}: {
+  skills: readonly Skill[]
+  shown: readonly Skill[]
+  repoName: string | null
+  auto: boolean
+  /** The launch key, or null while it is unavailable: rows render without an href. */
+  keyValue: string | null
+  origin: string
+  projectId: string | null
+}) {
+  if (shown.length === 0) {
+    return (
+      <p className="text-xs text-soft-foreground">
+        {skills.length > 0
+          ? '(no skills match)'
+          : '(no skills yet — the generic launcher above still works)'}
+      </p>
+    )
+  }
+  return (
+    <>
+      {shown.map((skill) => (
+        <BookmarkletRow
+          key={skill.path}
+          label={repoName ? `/${skill.name} (${repoName})` : `/${skill.name}`}
+          url={keyValue === null ? null : bookmarkletUrl(skill.name, auto, keyValue, origin, projectId)}
+        />
+      ))}
+    </>
   )
 }
 
