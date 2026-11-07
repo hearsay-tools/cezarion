@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Command, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 
+import { useNow } from '@/lib/use-now'
 import { formatElapsed } from './dictation'
 import {
   composerAriaBusy,
@@ -65,10 +66,12 @@ export function ComposerDictationButton({
   )
 }
 
-export function composerFinishLabel(finishing: boolean): string {
-  return finishing ? 'Finishing…' : 'Finish'
-}
-
+// Deliberately NOT gated on `disabled`, which is the SENDING gate — a disconnected or
+// disabled provider cannot carry a message, but finishing only settles the run the engine
+// already owns and needs no credentials. `stopControl` above has always been independent of
+// it for exactly that reason. Gating Finish here would strand a Needs-you task whose
+// provider went away with no way out of the list, since the Session tab's kebab no longer
+// carries Finish once this button has it.
 export function ComposerFinishButton({
   mode,
   onFinish,
@@ -192,6 +195,8 @@ export function ComposerSubmitRow({
         </div>
       ) : null}
       <div className="flex min-w-[100px] items-center justify-end gap-1" data-slot="composer-actions">
+        {/* One outline slot: Stop while the host offers it, the host's own control
+            otherwise. Never both — the host hands over one or the other. */}
         {stopControl ?? secondaryAction}
         {finishControl}
         {composerShowSend(mode.primaryStop, mode.primaryFinish) ? (
@@ -276,6 +281,8 @@ export function ComposerMenuList({
         ref={menuListRef}
         data-slot="composer-menu"
         data-trigger={trigger}
+        // Clamped to the popper's reported space so the open keyboard (collisionPadding
+        // via the shared PopoverContent) shrinks the menu instead of hiding its tail.
         className="max-h-[min(16rem,var(--radix-popover-content-available-height))] p-1"
       >
         {candidates.length === 0 ? (
@@ -307,6 +314,10 @@ export function ComposerMenuList({
   )
 }
 
+/**
+ * The recording overlay (paseo `DictationOverlay`): swaps in for the footer bar — pulsing
+ * indicator, mm:ss, the growing partial transcript, then ✕ cancel / ✓ insert / ↑ insert-and-send.
+ */
 export function ComposerDictationBar({
   recording,
   insertionDisabled,
@@ -416,6 +427,7 @@ export function ComposerSkillHint() {
   )
 }
 
+/** The paperclip + its hidden multi-file input (legacy `#msg-attach`). */
 export function ComposerAttachButton({
   disabled,
   onFiles,
@@ -439,6 +451,8 @@ export function ComposerAttachButton({
       >
         <PaperclipIcon aria-hidden="true" className="size-[15px]" />
       </Button>
+      {/* Both spellings of every type: an OS dialog filters on the extension as often as on the
+          MIME type, and `accept="image/*,text/plain"` alone greys out a `.md` on Windows (#950). */}
       <input
         ref={inputRef}
         type="file"
@@ -478,7 +492,6 @@ export function ComposerEditor({
   onCancelDictation,
   onInsertTranscript,
   onInsertAndSend,
-  now,
   stopControl,
   mobileCollapsible,
   mobileOpen,
@@ -514,7 +527,6 @@ export function ComposerEditor({
   onCancelDictation: () => void
   onInsertTranscript: () => void
   onInsertAndSend: () => void
-  now: number
   stopControl: ReactNode
   mobileCollapsible: boolean
   mobileOpen: boolean
@@ -555,7 +567,7 @@ export function ComposerEditor({
         {executionOptions ? <ComposerSkillHint /> : null}
         {sessionControls && recording ? <div data-slot="session-controls" inert={composerInert(mode.readOnly)}>{sessionControls}</div> : null}
         {recording ? (
-          <ComposerRecordingFooter recording={recording} mode={mode} onCancel={onCancelDictation} onInsert={onInsertTranscript} onInsertAndSend={onInsertAndSend} now={now} stopControl={stopControl} />
+          <ComposerRecordingFooter recording={recording} mode={mode} onCancel={onCancelDictation} onInsert={onInsertTranscript} onInsertAndSend={onInsertAndSend} stopControl={stopControl} />
         ) : (
           <ComposerToolbar
             mode={mode}
@@ -585,16 +597,17 @@ export function ComposerEditor({
 }
 
 function ComposerRecordingFooter({
-  recording, mode, onCancel, onInsert, onInsertAndSend, now, stopControl,
+  recording, mode, onCancel, onInsert, onInsertAndSend, stopControl,
 }: {
   recording: ComposerRecordingView
   mode: ComposerSubmitMode
   onCancel: () => void
   onInsert: () => void
   onInsertAndSend: () => void
-  now: number
   stopControl: ReactNode
 }) {
+  // The clock starts when recording starts: this footer mounts only then.
+  const now = useNow(1000)
   return (
     <div>
       <ComposerDictationBar
@@ -610,6 +623,8 @@ function ComposerRecordingFooter({
   )
 }
 
+// The footer may WRAP (the /new pill row on narrow widths), but the trailing
+// controls wrap on phones to keep long model/account labels inside the viewport.
 function ComposerToolbar(input: {
   mode: ComposerSubmitMode
   sessionControls: ReactNode
@@ -630,12 +645,14 @@ function ComposerToolbar(input: {
   return (
     <div data-slot="composer-toolbar" className="flex flex-wrap items-center gap-1 gap-y-1 px-1.5 pbs-1 pbe-1.5 md:gap-y-1.5 md:px-2 md:pbs-1.5 md:pbe-2">
       {input.sessionControls ? <div data-slot="session-controls" inert={composerInert(input.mode.readOnly)}>{input.sessionControls}</div> : null}
+      {/* Tools and context wrap together. New-task execution options get their own
+          section; thread composers retain their compact, wrapping footer. */}
       <div data-slot="composer-footer-start" className={composerFooterStartClass(input.executionOptions)}>
         <ComposerAttachButton disabled={input.disabled || input.mode.readOnly} onFiles={input.addFiles} inputRef={input.attachInputRef} />
         {input.mobileCollapsible ? (
           <ComposerExpandButton
             mobileOpen={input.mobileOpen}
-            controls={composerAriaControls(input.footerEnd != null, input.textareaId, input.optionsId)}
+            controls={composerAriaControls(Boolean(input.footerEnd), input.textareaId, input.optionsId)}
             onToggle={input.onToggleMobile}
           />
         ) : null}
@@ -708,7 +725,10 @@ export function ComposerFrame({
         align="start"
         sideOffset={8}
         className="w-80 max-w-[calc(100vw-2rem)] p-0"
+        // Focus stays in the textarea — the menu is a suggestion surface, not a focus trap.
         onOpenAutoFocus={(event) => event.preventDefault()}
+        // Interacting with the composer itself (typing, clicking the textarea) is not
+        // "outside" — only a genuine elsewhere-click dismisses.
         onInteractOutside={(event) => {
           if (rootRef.current?.contains(event.target as Node)) event.preventDefault()
         }}

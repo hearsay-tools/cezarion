@@ -22,7 +22,6 @@ import { toast } from '@/components/ui/toaster'
 import { insertTemplate } from '@/lib/prompt-templates'
 import { isEditableTarget } from '@/lib/use-command-shortcut'
 import { bumpSkillUsage, filterSkills, fuzzyMatch, isProjectSkill } from '@/lib/skills'
-import { useNow } from '@/lib/use-now'
 import { isSubmitShortcut } from '@/lib/use-submit-shortcut'
 
 import {
@@ -37,7 +36,6 @@ import {
   ComposerDictationButton,
   ComposerEditor,
   ComposerFeedback,
-  composerFinishLabel,
   ComposerFinishButton,
   ComposerFrame,
   ComposerMenuList,
@@ -53,6 +51,7 @@ import {
   composerEditsBlocked,
   composerErrorMessage,
   composerFeedbackShown,
+  composerFinishLabel,
   composerFieldSizing,
   composerHasCompactFeedback,
   composerHasContent,
@@ -224,6 +223,8 @@ const COMPOSER_DEFAULTS = {
   voiceProposal: false,
 }
 
+// Optionally controlled: `value` (when given) shadows the internal state, and every write is
+// mirrored to both — updater functions resolve against whichever is authoritative end now.
 function defined<T>(value: T | undefined, fallback: T): T {
   return value === undefined ? fallback : value
 }
@@ -255,6 +256,7 @@ function composerInput(props: ComposerProps): Required<Pick<ComposerProps,
   }
 }
 
+// The path suffix keeps values unique when a project skill shadows a global one.
 function composerMenuCandidates(
   trigger: TriggerState | null,
   skills: readonly Skill[],
@@ -375,11 +377,15 @@ export function Composer(props: ComposerProps) {
   const menuListRef = useRef<HTMLDivElement>(null)
   const pendingCaretRef = useRef<number | null>(null)
 
+  // The `/` list orders most-used first (#519) and a pick bumps `skillUsage`, so this — the
+  // highest-traffic skill surface — both reads and feeds the same stats as the pickers.
   const skills = useSkills(autocompleteSkills && skillsWanted)
   const uiState = useUiState()
   const queryClient = useQueryClient()
   const disabledRef = useRef(disabled)
   disabledRef.current = disabled
+  // A recognition error leaves the draft alone; Try again goes through the same guard as the mic,
+  // read at click time: the toast outlives the render that raised it.
   const dictation = useDictation((message, retry) =>
     toast(message, {
       tone: 'danger',
@@ -394,6 +400,8 @@ export function Composer(props: ComposerProps) {
     if (autoFocus) textareaRef.current?.focus()
   }, []) // deliberately not [autoFocus]
 
+  // ---- autocomplete ------------------------------------------------------------------------
+  /** Re-read the trigger from the real textarea (value + caret) — the one source of truth. */
   const syncTrigger = useCallback(() => {
     const element = textareaRef.current
     if (!element || disabled || editsBlocked()) {
@@ -414,6 +422,8 @@ export function Composer(props: ComposerProps) {
   const activeValue = composerActiveValue(candidates, menuValue)
   const menuOpen = trigger !== null
 
+  // Arrow keys are handled by the textarea, so cmdk never gets its own keyboard event to
+  // scroll the active result. Read the committed selection before paint and keep it visible.
   useLayoutEffect(() => {
     if (!menuOpen || !activeValue) return
     const items = menuListRef.current?.querySelectorAll('[data-slot="composer-menu-item"]')
@@ -428,6 +438,10 @@ export function Composer(props: ComposerProps) {
     if (!element || trigger === null || editsBlocked()) return
     const caret = composerCaret(element.selectionStart, element.value.length)
     const next = applyCompletion(element.value, trigger, caret, candidate.insert)
+    // Frequency sort (#519): a `/` completion is a skill pick, so it counts — same guard as
+    // /new's submit (#408): only bump once the CURRENT map is known. The PUT merge is shallow,
+    // so bumping off an unresolved/errored ui-state query would send a one-entry map and wipe
+    // every accumulated count. Fire-and-forget; a lost bump costs one count, nothing more.
     if (trigger.trigger === '/' && uiState.data !== undefined) {
       putUiState({ skillUsage: bumpSkillUsage(uiState.data.skillUsage, candidate.insert) })
         .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
@@ -439,6 +453,7 @@ export function Composer(props: ComposerProps) {
     element.focus()
   }
 
+  // Restore the caret after a completion replaced the token mid-draft.
   useLayoutEffect(() => {
     const caret = pendingCaretRef.current
     const element = textareaRef.current
@@ -448,9 +463,13 @@ export function Composer(props: ComposerProps) {
     }
   }, [text])
 
+  // ---- sizing (44px phone / 54px desktop; CSS caps reading mode without remounting) ----------
   useLayoutEffect(() => {
     const element = textareaRef.current
     if (!element || composerFieldSizing()) return
+    // Native sizing follows line wrapping and font loading, including width-only changes.
+    // Older Safari/Firefox keep the shipped growth behavior. Watch inline size only:
+    // observing our own block-size writes would create a ResizeObserver feedback loop.
     const resize = () => {
       element.style.height = 'auto'
       element.style.height = `${Math.min(element.scrollHeight, 220)}px`
@@ -468,7 +487,12 @@ export function Composer(props: ComposerProps) {
     return () => { disposed = true; observer?.disconnect() }
   }, [text, mobileOpen])
 
+  // ---- attachments ---------------------------------------------------------------------------
   const addFiles = useCallback((files: readonly File[]) => {
+    // Side effects (screening toasts + async encode) run OUTSIDE any setState updater: React
+    // StrictMode double-invokes updater functions in dev, so screening here would encode and
+    // append each pasted file twice (#double-paste). `imagesRef` gives the current count
+    // without reading through state; each async append re-checks the cap functionally.
     if (disabled || editsBlocked()) return
     const epoch = attachmentEpoch.current
     const intake = screenFiles(files, imagesRef.current.length)
@@ -476,6 +500,7 @@ export function Composer(props: ComposerProps) {
     for (const file of intake.accepted) {
       void fileToPendingAttachment(file).then(
         (attachment) => {
+          // Stop never submits the draft: finish reads already accepted before it.
           const stale = !mounted.current
             || (retainDraftUntilSuccess && busyRef.current && !stopPendingRef.current)
             || epoch !== attachmentEpoch.current
@@ -494,6 +519,9 @@ export function Composer(props: ComposerProps) {
     addFiles(files)
   }
 
+  // ---- submit --------------------------------------------------------------------------------
+  /** The one rule for "a send would not start": the composer is disabled, stopping or busy, or
+   *  the message is empty. `send` and the handle's `submit` both ask it, so they cannot differ. */
   const sendRefused = useCallback(
     (messageText: string, messageImages: PendingAttachment[]) => composerSendRefused(
       disabled, stopping, busyRef.current, allowEmptySubmit, messageText, messageImages.length,
@@ -504,6 +532,7 @@ export function Composer(props: ComposerProps) {
   const send = useCallback(async (messageText: string, messageImages: PendingAttachment[], restoreOnError: boolean) => {
     const body = messageText.trim()
     if (sendRefused(messageText, messageImages)) return
+    // Lock before any callback/state update: two keyboard events can share a render.
     busyRef.current = true
     if (retainDraftUntilSuccess) attachmentEpoch.current += 1
     setBusy(true)
@@ -518,6 +547,7 @@ export function Composer(props: ComposerProps) {
       await onSubmit(body, messageImages.map(({ mediaType, data }) => ({ mediaType, data })))
       composerClearSuccessfulDraft(
         mounted.current, retainDraftUntilSuccess, clearOnSuccess,
+        // A controlled host may have supplied a newer draft while the request was pending.
         textRef.current === messageText, imagesRef.current === messageImages,
         () => setText(''), () => setImages([]),
       )
@@ -536,12 +566,16 @@ export function Composer(props: ComposerProps) {
     }
   }, [sendRefused, onSubmit, retainDraftUntilSuccess, clearOnSuccess, onPendingChange, setText])
 
+  /** Returns whether the send started: false when `sendRefused` (disabled, stopping, busy, empty). */
   const submitDraft = useCallback(() => {
     if (sendRefused(textRef.current, imagesRef.current)) return false
     void send(textRef.current, imagesRef.current, true)
     return true
   }, [sendRefused, send])
 
+  // Rides the same `pendingCaretRef` + layout-effect restore the `/` autocomplete uses, rather
+  // than a rAF: the caret is set in the same paint as the text, so there is no window in which a
+  // closing dropdown can take the focus back (the QA finding on #413's first cut).
   useImperativeHandle(ref, () => ({
     insertAtCaret: (snippet: string) => {
       if (editsBlocked()) return
@@ -552,12 +586,17 @@ export function Composer(props: ComposerProps) {
       pendingCaretRef.current = result.caret
       element?.focus()
     },
+    // The voice proposal (spec 2026-10-21-voice-mode) reads, fills and sends the draft. Both
+    // writes keep the composer's own guards: `submit` is the send button's `submitDraft`.
     getDraft: () => textRef.current,
     setDraft: (next: string) => {
       if (editsBlocked()) return false
       setText(next)
       return true
     },
+    // Removes text a voice proposal put there, never the user's own: it ignores the Stop-pending
+    // guard (a draft left behind would become the next task's), but not a send in flight, which
+    // owns the text now, nor an edit, which makes the draft the user's.
     clearVoiceDraft: (voiceText: string) => {
       const outcome = composerVoiceClear(textRef.current, busyRef.current, voiceText)
       if (outcome === 'empty') return true
@@ -616,25 +655,30 @@ export function Composer(props: ComposerProps) {
         pick(active)
         return true
       }
+      // No match to accept: the menu is inert — close it and let Enter mean "send".
       closeMenu()
     }
     return false
   }
 
+  // ---- quick replies (legacy parity: window-global, only while the composer can send) --------
   useEffect(() => {
     if (!quickReplies || disabled) return
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      // Option composes characters on macOS; leave typing and character insertion alone.
       if (!event.altKey || event.metaKey || event.ctrlKey || event.repeat) return
       if (isEditableTarget(event.target)) return
       const reply = QUICK_REPLIES[event.code]
       if (reply === undefined) return
       event.preventDefault()
+      // Canned replies bypass the draft entirely — nothing to restore on failure.
       void send(reply, [], false)
     }
     window.addEventListener('keydown', onWindowKeyDown)
     return () => window.removeEventListener('keydown', onWindowKeyDown)
   }, [disabled, quickReplies, send])
 
+  // ---- dictation actions -----------------------------------------------------------------------
   const insertTranscript = (alsoSend: boolean) => {
     if (composerDictationBlocked(disabled, stopPendingRef.current, busyRef.current, alsoSend, retainDraftUntilSuccess)) return
     const transcript = dictation.finish()
@@ -669,12 +713,11 @@ export function Composer(props: ComposerProps) {
     readOnly: composerReadOnly(stopPending, retainDraftUntilSuccess, busy),
     mobileCompact: composerMobileCompact(mobileCollapsible, mobileOpen),
     mobileCollapsible,
-    executionOptions: executionOptions != null,
-    sessionControls: sessionControls != null,
+    executionOptions: Boolean(executionOptions),
+    sessionControls: Boolean(sessionControls),
     showStop: composerShowStop(onStop, stopPending),
   }
   const recording = dictation.recording
-  const now = useNow(1000)
   const dictationButton = dictation.supported ? <ComposerDictationButton mode={mode} onStart={() => { if (!editsBlocked()) dictation.start() }} /> : null
   const finishControl = mode.primaryFinish ? <ComposerFinishButton mode={mode} onFinish={() => void onFinish?.()} /> : null
   const stopControl = mode.showStop ? <ComposerStopButton mode={mode} onStop={() => void stop()} /> : null
@@ -745,6 +788,9 @@ export function Composer(props: ComposerProps) {
         onKeyDown={onKeyDown}
         onSelect={syncTrigger}
         onPaste={(event) => {
+          // `kind: 'file'` rather than an `image/` type test (#950): the clipboard carries a pasted
+          // `.md` as a file item too, and `screenFiles` is what decides whether cezar takes it. The
+          // text half of the clipboard is start alone so an ordinary ⌘V still types.
           const files = composerPasteFiles(event.clipboardData?.items)
           if (files.length === 0) return
           event.preventDefault()
@@ -754,7 +800,6 @@ export function Composer(props: ComposerProps) {
         onCancelDictation={dictation.cancel}
         onInsertTranscript={() => insertTranscript(false)}
         onInsertAndSend={() => insertTranscript(true)}
-        now={now}
         stopControl={stopControl}
         mobileCollapsible={mobileCollapsible}
         mobileOpen={mobileOpen}

@@ -59,10 +59,17 @@ export function composerPrimaryStop(
   return !hasContent && ((onStop !== undefined && stopOnEmpty) || stopPending)
 }
 
+// Never displaces a live primary (#281): Stop keeps the slot wherever it already had it, and a
+// host only passes `onFinish` for a status whose empty-draft primary would otherwise be a
+// disabled Send. The `!hasContent` guard is the whole affordance — a typed draft means Send.
 export function composerPrimaryFinish(hasContent: boolean, primaryStop: boolean, onFinish: unknown): boolean {
   return !hasContent && !primaryStop && onFinish !== undefined
 }
 
+// Stop wears its word whenever the control beside it does (#281). Next to the bare arrow Send it
+// reads fine as an icon — two icons, one row — but next to a labelled Finish or Continue it read
+// as an unexplained square beside a verb. The condition follows the PRIMARY's own label rule
+// rather than naming Finish, so a future promoted primary cannot reintroduce the mismatch.
 export function composerLabelledStop(
   primaryStop: boolean,
   primaryFinish: boolean,
@@ -124,6 +131,9 @@ export function composerAttachmentReadError(name: string): string {
   return `${name || 'Attachment'} could not be read — try attaching it again`
 }
 
+// `kind: 'file'` rather than an `image/` type test (#950): the clipboard carries a pasted
+// `.md` as a file item too, and `screenFiles` is what decides whether cezar takes it. The
+// text half of the clipboard is start alone so an ordinary ⌘V still types.
 export function composerPasteFiles(items: DataTransferItemList | undefined): File[] {
   return [...(items ?? [])]
     .filter((item) => item.kind === 'file')
@@ -241,6 +251,8 @@ export function composerEditorClass(executionOptions: ReactNode): string {
   )
 }
 
+// An image previews; a file (#950) has nothing to look at, so it gets its own
+// name instead — the one place the user's filename is used at all.
 export function composerThumbClass(isImage: boolean): string {
   return cn(
     'group relative shrink-0 overflow-hidden rounded-md border border-border',
@@ -248,6 +260,8 @@ export function composerThumbClass(isImage: boolean): string {
   )
 }
 
+// One intrinsic row on phones; desktop minimum and autosize retain the full input.
+// 16px on touch widths — iOS zooms any focused input below 16px (spec mobile rule).
 export function composerTextareaClass(mobileCompact: boolean, executionOptions: ReactNode): string {
   return cn(
     'block field-sizing-content min-h-11 w-full overflow-y-auto resize-none bg-transparent px-3 pbs-2.5 pbe-1 text-base leading-normal outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed md:min-h-[54px] md:px-4 md:pbs-3 md:text-sm',
@@ -260,6 +274,8 @@ export function composerLabelText(executionOptions: ReactNode, ariaLabel: string
   return executionOptions ? 'Task description' : ariaLabel
 }
 
+// A real label keeps password managers from treating nearby page text as a
+// one-time-code prompt on client-side navigation (#71); aria-label alone doesn't.
 export function composerLabelClass(executionOptions: ReactNode): string {
   return executionOptions ? 'hidden px-5 pbs-5 text-xs text-muted-foreground md:block' : 'sr-only'
 }
@@ -323,5 +339,9 @@ export function composerShowSubmitLabel(mode: ComposerSubmitMode, emptySubmitLab
 
 export function composerShowSendIcon(mode: ComposerSubmitMode, emptySubmitLabel: string | undefined): boolean {
   return mode.sessionControls || mode.hasContent || !emptySubmitLabel
+}
+
+export function composerFinishLabel(finishing: boolean): string {
+  return finishing ? 'Finishing…' : 'Finish'
 }
 
