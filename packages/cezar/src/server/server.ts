@@ -3093,8 +3093,8 @@ export function createApp(deps: ServerDeps) {
         scheduleHandle,
         emitChange: emitAutomationChange,
       });
-      if ('error' in result.body) return c.json({ error: result.body.error }, result.status);
-      return c.json(result.body, result.status);
+      if (result.status === 202) return c.json(result.body, 202);
+      return result.status === 404 ? c.json(result.body, 404) : c.json(result.body, 409);
     });
 
   // ---- chained family: manual automation checks (workspace-level) ----

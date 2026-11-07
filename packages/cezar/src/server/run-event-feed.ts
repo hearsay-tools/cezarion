@@ -50,7 +50,7 @@ function acceptSnapshotsBefore(scan: RunEventBatchScan, seq: number, byteLimit: 
   return true;
 }
 
-/** Persist one complete history line, or stop the scan when the batch is full. */
+/** Accept or skip one complete history line and advance the offset, or stop the scan when the batch is full. */
 function consumePersistedLine(
   scan: RunEventBatchScan,
   line: Buffer,

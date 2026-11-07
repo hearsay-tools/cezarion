@@ -214,14 +214,10 @@ function parseCreateProjectRequest(opts: CreateProjectOptions): ParsedCreateProj
   };
 }
 
-interface TemplateCreateInput {
+interface GithubCreateInput {
   opts: CreateProjectOptions;
   slug: string;
-  template: string;
-  root: string;
-  target: string;
   say: (line: string) => void;
-  refuse: <F extends CreateProjectFailure>(failure: F) => F;
   exec: ProjectCommand;
   fail: (status: 400 | 500, error: string) => Promise<CreateProjectFailure>;
   finishAfterCreate: (steps: FinishingStep[]) => Promise<string | undefined>;
@@ -230,13 +226,36 @@ interface TemplateCreateInput {
   credentialStep: FinishingStep;
 }
 
+interface TemplateCreateInput extends GithubCreateInput {
+  template: string;
+  root: string;
+  target: string;
+  refuse: <F extends CreateProjectFailure>(failure: F) => F;
+}
+
+/** `gh repo create` after the abort check; extra args follow `--private`. */
+async function createPrivateGithubRepo(
+  input: GithubCreateInput,
+  message: string,
+  extraArgs: string[] = [],
+): Promise<CreateProjectFailure | undefined> {
+  const { opts, slug, say, exec, fail, createFailed } = input;
+  if (opts.signal?.aborted) return fail(500, CANCELLED);
+  say(message);
+  const created = await exec('gh', ['repo', 'create', slug, '--private', ...extraArgs], false);
+  if (!created.ok) return createFailed(created.error);
+  return undefined;
+}
+
 /** `gh repo create --template`, wait for the first commit, clone, then credentials. */
 async function createFromTemplate(input: TemplateCreateInput): Promise<CreateProjectResult> {
-  const { opts, slug, template, root, target, say, refuse, exec, fail, finishAfterCreate, createFailed, done, credentialStep } = input;
-  if (opts.signal?.aborted) return fail(500, CANCELLED);
-  say(`Creating private repository ${slug} from ${template}…`);
-  const created = await exec('gh', ['repo', 'create', slug, '--private', '--template', template], false);
-  if (!created.ok) return createFailed(created.error);
+  const { opts, slug, template, root, target, say, refuse, exec, finishAfterCreate, done, credentialStep } = input;
+  const created = await createPrivateGithubRepo(
+    input,
+    `Creating private repository ${slug} from ${template}…`,
+    ['--template', template],
+  );
+  if (created) return created;
   // Template generation is asynchronous on GitHub: an immediate clone can
   // land an empty repo. Wait until the first commit is visible — and since
   // the wait gives up eventually, the clone is checked for a commit below.
@@ -392,22 +411,10 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
 }
 
 /** Empty GitHub-backed project: `gh repo create`, origin, credentials, then push. */
-async function attachEmptyGithubRepo(input: {
-  opts: CreateProjectOptions;
-  slug: string;
-  say: (line: string) => void;
-  exec: ProjectCommand;
-  fail: (status: 400 | 500, error: string) => Promise<CreateProjectFailure>;
-  finishAfterCreate: (steps: FinishingStep[]) => Promise<string | undefined>;
-  createFailed: (error: string) => Promise<CreateProjectFailure>;
-  done: (kind: 'local' | 'github' | 'template', warning: string | undefined) => CreateProjectResult;
-  credentialStep: FinishingStep;
-}): Promise<CreateProjectResult> {
-  const { opts, slug, say, exec, fail, finishAfterCreate, createFailed, done, credentialStep } = input;
-  if (opts.signal?.aborted) return fail(500, CANCELLED);
-  say(`Creating private repository ${slug}…`);
-  const created = await exec('gh', ['repo', 'create', slug, '--private'], false);
-  if (!created.ok) return createFailed(created.error);
+async function attachEmptyGithubRepo(input: GithubCreateInput): Promise<CreateProjectResult> {
+  const { slug, say, exec, finishAfterCreate, done, credentialStep } = input;
+  const created = await createPrivateGithubRepo(input, `Creating private repository ${slug}…`);
+  if (created) return created;
   // HTTPS remote + gh credential helper, exactly as a clone gets (#968); the
   // push then goes through plain git, proving the setup a task push relies on.
   const warning = await finishAfterCreate([

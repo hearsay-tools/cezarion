@@ -1,9 +1,9 @@
 /**
  * The field merge behind `PUT /workspace/config` (hearsay-tools/cezarion#2849).
  *
- * The handler in `server.ts` still owns the writable-root probe and the family
- * chain — this module only mutates the in-memory config the write lock already
- * loaded. Roots stay as written (`~` kept); only the probe expands them.
+ * The PUT handler owns the writable-root probe and the family chain. This
+ * module mutates the in-memory config the write lock already loaded. Roots stay
+ * as written (`~` kept); only the probe expands them.
  */
 import type { SetWorkspaceConfigInput } from '@open-mercato/cezar-contract/workspace';
 import { PROVIDER_IDS } from '../core/provider-auth.ts';

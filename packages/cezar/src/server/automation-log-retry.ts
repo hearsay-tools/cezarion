@@ -6,7 +6,7 @@
  * route stays on `AppType`. This module looks up the receipt and either fires
  * a schedule again under the lease or relaunches a GitHub candidate.
  */
-import { AutomationCandidateChangedError } from '../automations/github-poller.ts';
+import { AutomationCandidateChangedError, type GithubCandidate } from '../automations/github-poller.ts';
 import {
   SCHEDULE_LEASE_HELD_REASON,
   ScheduleRunner,
@@ -24,7 +24,8 @@ import type { ProjectContext } from './project-context.ts';
 
 export type AutomationLogRetryResult =
   | { status: 202; body: { receiptId: string; runId: string } }
-  | { status: 404 | 409; body: { error: string } };
+  | { status: 404; body: { error: string } }
+  | { status: 409; body: { error: string } };
 
 export interface AutomationLogRetryInput {
   project: ProjectContext;
@@ -57,13 +58,10 @@ async function retryGithubReceipt(
   input: AutomationLogRetryInput,
   definition: GithubAutomationDefinition,
   receipt: AutomationReceipt,
+  candidate: GithubCandidate,
 ): Promise<AutomationLogRetryResult> {
   const { project } = input;
   const store = project.automationStore;
-  const candidate = receipt.candidate;
-  if (!candidate) {
-    return { status: 409, body: { error: 'receipt predates retry context and cannot be retried safely' } };
-  }
   const lease = store.acquireLease();
   if (!lease) return { status: 409, body: { error: 'automation polling lease is held by another process' } };
   const reserved = { ...receipt, status: 'reserved' as const, error: undefined, updatedAt: new Date().toISOString() };
@@ -109,5 +107,5 @@ export async function retryAutomationLogReceipt(input: AutomationLogRetryInput):
   if (!receipt.candidate) return { status: 409, body: { error: 'receipt predates retry context and cannot be retried safely' } };
   if (!scheduled) return { status: 404, body: { error: 'automation not found' } };
   if (!isGithubAutomation(scheduled)) return { status: 409, body: { error: 'receipt is not retryable' } };
-  return retryGithubReceipt(input, scheduled, receipt);
+  return retryGithubReceipt(input, scheduled, receipt, receipt.candidate);
 }
