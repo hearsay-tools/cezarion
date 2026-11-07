@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -41,7 +44,7 @@ describe('single-project registry boundary', () => {
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-discovery-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-discovery-other-'));
     mkdirSync(join(bootRoot, '.ai/cezar'), { recursive: true });
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     // Warm-up would build the other project with no request; this test asks about the lookup only.
     process.env.CEZ_PROJECT_WARMUP = '0';
@@ -49,8 +52,8 @@ describe('single-project registry boundary', () => {
     delete process.env.CEZ_AUTOMATIONS;
     clearProjectProbeCache();
     vi.mocked(sweepRegisteredPreviewLeftovers).mockClear();
-    bootId = (await registerProject(bootRoot)).id;
-    otherId = (await registerProject(otherRoot)).id;
+    bootId = (await registerProject(bootRoot, undefined, testHome())).id;
+    otherId = (await registerProject(otherRoot, undefined, testHome())).id;
   });
 
   afterEach(() => {
@@ -66,7 +69,7 @@ describe('single-project registry boundary', () => {
   const bootDeps = () => {
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
     cleanups.push(() => store.close());
-    return { repoRoot: bootRoot, bootProjectId: bootId, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' };
+    return { home: testHome(), repoRoot: bootRoot, bootProjectId: bootId, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' };
   };
 
   const viaCreateApp = async (path: string): Promise<number> => {
@@ -118,7 +121,7 @@ describe('single-project registry boundary', () => {
       expect(await request(`/api/v1/p/${otherId}/runs`)).toBe(404);
       expect(otherStoreOpens(open)).toBe(0);
       // The hidden row stays registered, so turning the mode off restores it with no migration.
-      expect((await loadWorkspaceConfig()).projects.map((project) => project.id).sort()).toEqual([bootId, otherId].sort());
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((project) => project.id).sort()).toEqual([bootId, otherId].sort());
     }, 15_000);
 
     it(`${entry}: without single-project mode a registered non-launch project is discoverable`, async () => {

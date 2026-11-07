@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,7 +33,7 @@ describe('a project whose run store cannot be opened', () => {
   let contexts: ProjectContexts;
   const stores: RunStore[] = [];
 
-  const app = (store: RunStore): Hono => createApp({
+  const app = (store: RunStore): Hono => createApp({ home: testHome(),
     repoRoot: bootRoot,
     store,
     manager: { isActive: () => false, finishBlockedReason: () => 'no open session' } as unknown as RunManager,
@@ -42,12 +45,12 @@ describe('a project whose run store cannot be opened', () => {
     home = mkdtempSync(join(tmpdir(), 'cez-unavailable-home-'));
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-unavailable-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-unavailable-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_SINGLE_PROJECT;
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
-    contexts = new ProjectContexts({ listProjects });
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
   });
 
   afterEach(() => {
@@ -64,8 +67,8 @@ describe('a project whose run store cannot be opened', () => {
     const boot = RunStore.open(join(bootRoot, '.ai/cezar'));
     stores.push(boot);
     const server = app(boot);
-    await registerProject(bootRoot);
-    const other = await registerProject(otherRoot);
+    await registerProject(bootRoot, undefined, testHome());
+    const other = await registerProject(otherRoot, undefined, testHome());
     const database = join(otherRoot, '.ai/cezar', RUNS_DB_FILE);
     writeFileSync(database, DAMAGED);
 
@@ -92,7 +95,7 @@ describe('a project whose run store cannot be opened', () => {
   it('the boot project: every spelling of every route answers 409 with the reason; workspace routes still answer', async () => {
     const failure = new RunStoreOpenError('unsupported-schema', join(bootRoot, '.ai/cezar', RUNS_DB_FILE), 'runs.db was written by a newer cezar. Upgrade cezar to open this project\'s runs.');
     const server = app(RunStore.unavailable(join(bootRoot, '.ai/cezar'), failure));
-    const boot = await registerProject(bootRoot);
+    const boot = await registerProject(bootRoot, undefined, testHome());
     for (const prefix of ['/api/v1', `/api/v1/p/${boot.id}`, '/api/v1/p/default']) {
       for (const [method, path] of [['GET', '/run-summaries'], ['GET', '/runs'], ['POST', '/runs'], ['GET', '/workflows']] as const) {
         const res = await apiRequest(server, `${prefix}${path}`, method === 'POST' ? post({ task: 'x' }) : undefined);

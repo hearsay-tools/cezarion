@@ -397,8 +397,8 @@ export class ContinuationSession {
         const timeout = setTimeout(resolve, 1_500);
         timeout.unref?.();
         const settle = () => { clearTimeout(timeout); resolve(); };
-        waitForTeamSkills(this.context.repoRoot).then(settle, settle);
-        waitForCachedTeamSkills(this.context.repoRoot).then((cached) => {
+        waitForTeamSkills(this.context.repoRoot, this.context.home).then(settle, settle);
+        waitForCachedTeamSkills(this.context.repoRoot, this.context.home).then((cached) => {
           if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
         }, () => undefined);
       });

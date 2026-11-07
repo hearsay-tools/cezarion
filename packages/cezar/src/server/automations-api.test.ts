@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -19,7 +22,7 @@ import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { ProviderAuthService } from '../core/provider-auth.ts';
-import { registerProject, listProjects } from '../workspace/projects.ts';
+import { registerProject, listProjects} from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
 import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -58,7 +61,7 @@ describe('GitHub automation API', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cezar-automation-api-'));
     home = mkdtempSync(join(tmpdir(), 'cezar-automation-home-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_AUTOMATIONS = '1';
     mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(root, '.ai/cezar'));
@@ -67,7 +70,7 @@ describe('GitHub automation API', () => {
     store.flush();
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
-    delete process.env.CEZ_HOME;
+    useTestHome(undefined);
     if (savedAutomations === undefined) delete process.env.CEZ_AUTOMATIONS;
     else process.env.CEZ_AUTOMATIONS = savedAutomations;
   });
@@ -91,7 +94,7 @@ describe('GitHub automation API', () => {
       store.createRun({ title: 'automation', workflow: workflow.name, task: start.task, automation: start.automation, automationTrigger: start.automationTrigger, steps: [] })),
   }) as unknown as RunManager & { startRun: ReturnType<typeof vi.fn> };
   const app = (over: Partial<Parameters<typeof createApp>[0]> = {}) =>
-    createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', ...discovery(), ...over });
+    createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test', ...discovery(), ...over });
   const json = (body: unknown, method = 'POST'): RequestInit => ({
     method,
     headers: { 'content-type': 'application/json' },
@@ -722,8 +725,8 @@ describe('GitHub automation API', () => {
     const manager = Object.assign(recordingManager(), { isActive: () => false });
     // Registered, as `cez` registers the repo it boots in: the coordinator only keeps a store for
     // a project the registry lists, so an unregistered root would never reach the timer at all.
-    const project = await registerProject(root);
-    const server = startServer({ ...discovery(), repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
+    const project = await registerProject(root, undefined, testHome());
+    const server = startServer({ home: testHome(), ...discovery(), repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
@@ -789,10 +792,10 @@ describe('GitHub automation API', () => {
     };
     pastDue();
     const manager = Object.assign(recordingManager(), { isActive: () => false });
-    const project = await registerProject(root);
+    const project = await registerProject(root, undefined, testHome());
     const boot = async (awaited: 'launched' | 'duplicate') => {
       const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
-      const server = startServer({ ...discovery(), repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
+      const server = startServer({ home: testHome(), ...discovery(), repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
       try {
         await new Promise<void>((resolve) => server.once('listening', () => resolve()));
         await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
@@ -847,8 +850,8 @@ describe('GitHub automation API', () => {
     const manager = Object.assign(recordingManager(), { isActive: () => false });
     const fired = vi.spyOn(ScheduleRunner.prototype, 'fire');
     const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
-    const project = await registerProject(root);
-    const server = startServer({ ...discovery(), repoRoot: project.root, bootProjectId: project.id, store: unavailable, manager, version: '0.0.0-test' }, 0);
+    const project = await registerProject(root, undefined, testHome());
+    const server = startServer({ home: testHome(), ...discovery(), repoRoot: project.root, bootProjectId: project.id, store: unavailable, manager, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
@@ -896,8 +899,7 @@ describe('GitHub automation API', () => {
     }));
     writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
     const startRun = vi.fn();
-    const contexts = new ProjectContexts({
-      listProjects,
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome()),
       prepareManager: ({ store: projectStore, manager }) => {
         const launch = vi.spyOn(manager, 'startRun').mockImplementation((workflow, input) => {
           startRun();
@@ -906,9 +908,9 @@ describe('GitHub automation API', () => {
         return () => launch.mockRestore();
       },
     });
-    const boot = await registerProject(root);
-    const second = await registerProject(other);
-    const server = startServer({ ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), contexts, version: '0.0.0-test' }, 0);
+    const boot = await registerProject(root, undefined, testHome());
+    const second = await registerProject(other, undefined, testHome());
+    const server = startServer({ home: testHome(), ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), contexts, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       const automations = AutomationStore.open(dataDir);

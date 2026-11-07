@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,57 +48,57 @@ describe('linked checkouts', () => {
 
   it('links a built checkout in place, lists it, activates it, and unlinks without touching it', () => {
     const pkg = fakeCheckout(join(home, 'wt'));
-    const result = linkCheckout(pkg, 'cez/cb28888e', env);
+    const result = linkCheckout(pkg, 'cez/cb28888e', env, undefined, testHome(env));
     expect(result.id).toBe('0.13.0+cez-cb28888e');
-    const link = join(versionDir(result.id, env), 'node_modules', '@wjarka', 'cezarion');
+    const link = join(versionDir(result.id, env, testHome(env)), 'node_modules', '@wjarka', 'cezarion');
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(realpathSync(link)).toBe(pkg);
 
-    const [entry] = listInstalled(env);
+    const [entry] = listInstalled(env, testHome(env));
     expect(entry).toMatchObject({ id: result.id, source: 'link', branch: 'cez/cb28888e', checkout: pkg, version: '0.13.0' });
 
-    activate(result.id, env);
-    expect(activeId(env)).toBe(result.id);
-    expect(readFileSync(currentEntry(env), 'utf8')).toBe('// entry\n');
+    activate(result.id, env, testHome(env));
+    expect(activeId(env, testHome(env))).toBe(result.id);
+    expect(readFileSync(currentEntry(env, testHome(env)), 'utf8')).toBe('// entry\n');
 
-    expect(() => removeInstalled(result.id, env)).toThrow(/is active/);
+    expect(() => removeInstalled(result.id, env, testHome(env))).toThrow(/is active/);
   });
 
   it('removes the link, never the checkout', () => {
     const pkg = fakeCheckout(join(home, 'wt'));
-    const { id } = linkCheckout(pkg, 'main', env);
-    removeInstalled(id, env);
-    expect(existsSync(versionDir(id, env))).toBe(false);
+    const { id } = linkCheckout(pkg, 'main', env, undefined, testHome(env));
+    removeInstalled(id, env, testHome(env));
+    expect(existsSync(versionDir(id, env, testHome(env)))).toBe(false);
     expect(existsSync(join(pkg, 'dist', 'index.js'))).toBe(true);
   });
 
   it('re-linking a checkout replaces its old entry; another checkout with the same id gets its own', () => {
     const pkg = fakeCheckout(join(home, 'a'));
-    linkCheckout(pkg, 'feature', env);
+    linkCheckout(pkg, 'feature', env, undefined, testHome(env));
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '0.14.0' }));
-    const again = linkCheckout(pkg, 'feature', env);
+    const again = linkCheckout(pkg, 'feature', env, undefined, testHome(env));
     expect(again.id).toBe('0.14.0+feature');
-    expect(listLinks(env).map((entry) => entry.id)).toEqual(['0.14.0+feature']);
+    expect(listLinks(env, testHome(env)).map((entry) => entry.id)).toEqual(['0.14.0+feature']);
 
     const other = fakeCheckout(join(home, 'b'), '0.14.0');
-    const second = linkCheckout(other, 'feature', env);
+    const second = linkCheckout(other, 'feature', env, undefined, testHome(env));
     expect(second.id).toMatch(/^0\.14\.0\+feature\.[0-9a-z]+$/);
-    expect(listLinks(env)).toHaveLength(2);
+    expect(listLinks(env, testHome(env))).toHaveLength(2);
   });
 
   it('refuses what is not a built cezar package', () => {
-    expect(() => linkCheckout(join(home, 'nothing'), 'x', env)).toThrow(/is not a @wjarka\/cezarion package/);
+    expect(() => linkCheckout(join(home, 'nothing'), 'x', env, undefined, testHome(env))).toThrow(/is not a @wjarka\/cezarion package/);
     const unbuilt = fakeCheckout(join(home, 'raw'), '0.13.0', false);
-    expect(() => linkCheckout(unbuilt, 'x', env)).toThrow(/not built/);
+    expect(() => linkCheckout(unbuilt, 'x', env, undefined, testHome(env))).toThrow(/not built/);
   });
 
   it('hides a link whose worktree is gone, but still finds it to prune', () => {
     const tree = join(home, 'gone');
-    const { id } = linkCheckout(fakeCheckout(tree), 'gone', env);
+    const { id } = linkCheckout(fakeCheckout(tree), 'gone', env, undefined, testHome(env));
     rmSync(tree, { recursive: true, force: true });
-    expect(listInstalled(env)).toEqual([]);
-    expect(listLinks(env).map((entry) => entry.id)).toEqual([id]);
-    expect(existsSync(versionsDir(env))).toBe(true);
+    expect(listInstalled(env, testHome(env))).toEqual([]);
+    expect(listLinks(env, testHome(env)).map((entry) => entry.id)).toEqual([id]);
+    expect(existsSync(versionsDir(env, testHome(env)))).toBe(true);
   });
 
   it('finds the cezar package root in the monorepo layout and the single-package one', () => {
@@ -122,14 +123,14 @@ describe('linked checkouts', () => {
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
 
-    const found = await discoverCheckouts(env);
+    const found = await discoverCheckouts(env, testHome(env));
     expect(found.map((c) => [c.branch, c.built, c.linked, c.id])).toEqual([
       ['main', true, false, '0.13.0+main'],
       ['cez/abc12345', false, false, '0.13.0+cez-abc12345'],
     ]);
 
-    linkCheckout(found[0]!.packageRoot, 'main', env);
-    expect((await discoverCheckouts(env))[0]).toMatchObject({ linked: true, id: '0.13.0+main' });
+    linkCheckout(found[0]!.packageRoot, 'main', env, undefined, testHome(env));
+    expect((await discoverCheckouts(env, testHome(env)))[0]).toMatchObject({ linked: true, id: '0.13.0+main' });
   });
 
   // Forty `cez/<id8>` branches read the same: discovery names each by the task that owns it, its
@@ -162,7 +163,7 @@ describe('linked checkouts', () => {
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
 
-    const found = await discoverCheckouts(env);
+    const found = await discoverCheckouts(env, testHome(env));
     expect(found.map((c) => c.branch)).toEqual(['cez/abc12345', 'main']);
     expect(found[0]).toMatchObject({
       task: { id: 'abc12345-run', title: 'Fix the version dialog', status: RUN_STATUS.review },
@@ -191,7 +192,7 @@ describe('linked checkouts', () => {
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
 
-    const found = await discoverCheckouts(env);
+    const found = await discoverCheckouts(env, testHome(env));
     expect(found.find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run', title: 'Newest owner' });
     expect(found.find((c) => c.branch === 'main')?.task).toBeNull();
   });
@@ -208,22 +209,22 @@ describe('linked checkouts', () => {
     utimesSync(join(pkg, 'dist', 'index.js'), future, future);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
-    expect((await discoverCheckouts(env))[0]?.stale).toBe(false);
+    expect((await discoverCheckouts(env, testHome(env)))[0]?.stale).toBe(false);
     if (change === 'deleted') rmSync(source);
     else writeFileSync(change === 'untracked' ? join(pkg, 'new-source.ts') : source, 'new source');
     if (change === 'staged') git(repo, 'add', '.');
-    const [checkout] = await discoverCheckouts(env);
+    const [checkout] = await discoverCheckouts(env, testHome(env));
     expect(checkout?.stale).toBe(true);
     const build = vi.fn(async () => { writeFileSync(join(pkg, 'dist', 'index.js'), '// rebuilt dirty source'); });
-    const svc = new SelfUpdateService({
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion', version: '0.13.0',
-      entry: join(versionsDir(env), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
+      entry: join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
       env, restart: () => {}, buildCheckout: build,
     });
     const job = svc.apply(checkout!.id);
     await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 10_000 });
     expect(build).toHaveBeenCalledOnce();
-    expect(readFileSync(currentEntry(env), 'utf8')).toBe('// rebuilt dirty source');
+    expect(readFileSync(currentEntry(env, testHome(env)), 'utf8')).toBe('// rebuilt dirty source');
   });
 
   it('builds a checkout: npm install only when dependencies are missing, then server and cockpit', async () => {
@@ -277,15 +278,15 @@ describe('linked checkouts', () => {
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'a', root: a }, { id: 'b', root: b }] }));
 
-    const ids = async () => new Map((await discoverCheckouts(env)).map((c) => [c.worktree, c.id]));
+    const ids = async () => new Map((await discoverCheckouts(env, testHome(env))).map((c) => [c.worktree, c.id]));
     const before = await ids();
     expect(before.get(a)).toBe('0.13.0+main');
     expect(before.get(b)).toMatch(/^0\.13\.0\+main\.[0-9a-z]+$/);
 
-    const svc = new SelfUpdateService({
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
-      entry: join(versionsDir(env), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
+      entry: join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
       restart: () => {},
       env,
       // The clones are built, but a commit landing in a later second than the build reads as
@@ -297,8 +298,8 @@ describe('linked checkouts', () => {
     const job = svc.apply(before.get(b)!);
     await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 10_000 });
     expect(job.error).toBeUndefined();
-    expect(activeId(env)).toBe(before.get(b));
-    expect(listLinks(env).find((link) => link.id === before.get(b))?.checkout).toBe(join(b, 'packages', 'cezar'));
+    expect(activeId(env, testHome(env))).toBe(before.get(b));
+    expect(listLinks(env, testHome(env)).find((link) => link.id === before.get(b))?.checkout).toBe(join(b, 'packages', 'cezar'));
     // Linking B under its suffixed id leaves A's plain id free — and both stay put.
     expect(await ids()).toEqual(before);
   });
@@ -318,10 +319,10 @@ describe('linked checkouts', () => {
 
     const built: string[] = [];
     let restarted = false;
-    const svc = new SelfUpdateService({
+    const svc = new SelfUpdateService({ home: testHome(env),
       pkgName: '@wjarka/cezarion',
       version: '0.13.0',
-      entry: join(versionsDir(env), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
+      entry: join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js'),
       restart: () => (restarted = true),
       env,
       buildCheckout: async (checkout, log) => {
@@ -335,7 +336,7 @@ describe('linked checkouts', () => {
     expect(job.error).toBeUndefined();
     expect(built).toEqual([realpathSync(task)]);
     expect(job.log).toContain('building cez/abc12345 first');
-    expect(activeId(env)).toBe('0.13.0+cez-abc12345');
+    expect(activeId(env, testHome(env))).toBe('0.13.0+cez-abc12345');
     await vi.waitFor(() => expect(restarted).toBe(true), { timeout: 10_000 });
   });
 });

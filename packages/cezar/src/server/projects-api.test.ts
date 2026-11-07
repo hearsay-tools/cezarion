@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import {
   mkdirSync,
@@ -75,7 +78,7 @@ describe('workspace projects API', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-workspace-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-projects-boot-'));
     otherRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-projects-other-'));
-    process.env.CEZ_HOME = home; // paths.ts sends all workspace paths here
+    useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_FOLLOWUPS;
@@ -89,8 +92,8 @@ describe('workspace projects API', () => {
   afterEach(() => {
     store.flush();
     for (const dir of [home, repoRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
@@ -104,7 +107,7 @@ describe('workspace projects API', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({
+    createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -135,8 +138,8 @@ describe('workspace projects API', () => {
     });
 
     it('lists registered projects with root + status and derives bootProject from the registry', async () => {
-      const boot = await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       const body = await getProjects(); // no bootProjectId — legacy caller path
       expect(body.projects).toHaveLength(2);
       const byId = new Map(body.projects.map((p) => [p.id, p]));
@@ -162,8 +165,8 @@ describe('workspace projects API', () => {
     it('keeps an unregistered boot project distinct from a registered project with the same slug', async () => {
       const registeredRoot = join(otherRoot, basename(repoRoot));
       mkdirSync(registeredRoot);
-      const registered = await registerProject(registeredRoot);
-      const contexts = new ProjectContexts({ listProjects });
+      const registered = await registerProject(registeredRoot, undefined, testHome());
+      const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
       const body = await getProjects({ contexts });
       expect(registered.id).toBe(allocateProjectSlug(repoRoot, []));
@@ -176,21 +179,21 @@ describe('workspace projects API', () => {
     });
 
     it('pins flagged reads to the boot project without pruning stored projects', async () => {
-      const boot = await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       process.env.CEZ_SINGLE_PROJECT = '1';
 
       const body = await getProjects({ bootProjectId: boot.id });
       expect(body.projects.map((project) => project.id)).toEqual([boot.id]);
       expect(body.bootProject).toBe(boot.id);
-      expect((await loadWorkspaceConfig()).projects.map((project) => project.id)).toEqual([
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((project) => project.id)).toEqual([
         boot.id,
         other.id,
       ]);
     });
 
     it('reports a deleted root as missing', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       rmSync(otherRoot, { recursive: true, force: true });
       clearProjectProbeCache(); // drop the TTL cache so the probe re-looks
       const body = await getProjects();
@@ -198,18 +201,18 @@ describe('workspace projects API', () => {
     });
 
     it('prefers the plumbed deps.bootProjectId over any lookup', async () => {
-      await registerProject(repoRoot);
+      await registerProject(repoRoot, undefined, testHome());
       const body = await getProjects({ bootProjectId: 'plumbed-boot' });
       expect(body.bootProject).toBe('plumbed-boot');
     });
 
     it('serializes a per-project maxParallel when set, and omits it when absent (2026-07-22)', async () => {
-      await registerProject(repoRoot); // boot, no override → inherits
-      await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome()); // boot, no override → inherits
+      await registerProject(otherRoot, undefined, testHome());
       await mergeWriteWorkspaceConfig((config) => {
         const entry = config.projects.find((p) => p.root === realpathSync(otherRoot));
         if (entry) entry.maxParallel = 3;
-      });
+      }, testHome());
       const body = await getProjects();
       const byRoot = new Map(body.projects.map((p) => [p.root, p]));
       expect(byRoot.get(realpathSync(otherRoot))?.maxParallel).toBe(3);
@@ -237,7 +240,7 @@ describe('workspace projects API', () => {
         error: 'single-project mode is enabled; adding projects is disabled',
       });
       expect(cloneCalls).toBe(0);
-      expect((await loadWorkspaceConfig()).projects).toEqual([]);
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects).toEqual([]);
     });
 
     it('refuses filesystem browsing with the stable error', async () => {
@@ -270,7 +273,7 @@ describe('workspace projects API', () => {
     };
 
     it('refuses registration in single-project mode before registry or event side effects', async () => {
-      const existing = await registerProject(repoRoot);
+      const existing = await registerProject(repoRoot, undefined, testHome());
       const bus = new WorkspaceEventBus();
       const seen: string[] = [];
       bus.on((event) => seen.push(event));
@@ -282,7 +285,7 @@ describe('workspace projects API', () => {
       expect(body).toEqual({
         error: 'single-project mode is enabled; adding projects is disabled',
       });
-      expect((await loadWorkspaceConfig()).projects.map((project) => project.id)).toEqual([
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((project) => project.id)).toEqual([
         existing.id,
       ]);
       expect(seen).toEqual([]);
@@ -320,7 +323,7 @@ describe('workspace projects API', () => {
     });
 
     it('re-registering answers 409 with the EXISTING entry and emits nothing', async () => {
-      const first = await registerProject(otherRoot);
+      const first = await registerProject(otherRoot, undefined, testHome());
       const bus = new WorkspaceEventBus();
       const seen: string[] = [];
       bus.on((event) => seen.push(event));
@@ -364,7 +367,7 @@ describe('workspace projects API', () => {
       mkdirSync(inside, { recursive: true });
       await mergeWriteWorkspaceConfig((config) => {
         config.browseRoot = checkoutRoot;
-      });
+      }, testHome());
       process.env.CEZ_REMOTE = '1';
       const refused = await post({ root: otherRoot });
       expect(refused.status).toBe(400);
@@ -384,7 +387,7 @@ describe('workspace projects API', () => {
       mkdirSync(checkoutRoot, { recursive: true });
       await mergeWriteWorkspaceConfig((config) => {
         config.browseRoot = checkoutRoot;
-      });
+      }, testHome());
       process.env.CEZ_REMOTE = '1';
       const exists = await post({ root: otherRoot }); // real folder, outside
       const absent = await post({ root: join(otherRoot, 'nope') }); // never existed
@@ -406,7 +409,7 @@ describe('workspace projects API', () => {
       mkdirSync(checkoutRoot, { recursive: true });
       await mergeWriteWorkspaceConfig((config) => {
         config.browseRoot = checkoutRoot;
-      });
+      }, testHome());
       process.env.CEZ_REMOTE = '1';
       const typo = join(checkoutRoot, 'my-porject');
       const answer = await post({ root: typo });
@@ -422,7 +425,7 @@ describe('workspace projects API', () => {
       mkdirSync(checkoutRoot, { recursive: true });
       await mergeWriteWorkspaceConfig((config) => {
         config.browseRoot = checkoutRoot;
-      });
+      }, testHome());
       const escape = join(checkoutRoot, 'escape');
       symlinkSync(otherRoot, escape);
       process.env.CEZ_REMOTE = '1';
@@ -451,8 +454,8 @@ describe('workspace projects API', () => {
     };
 
     it('refuses removal in single-project mode before registry or context side effects', async () => {
-      const other = await registerProject(otherRoot);
-      const contexts = new ProjectContexts({ listProjects });
+      const other = await registerProject(otherRoot, undefined, testHome());
+      const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
       process.env.CEZ_SINGLE_PROJECT = '1';
 
       const { status, body } = await del(other.id, { contexts });
@@ -461,7 +464,7 @@ describe('workspace projects API', () => {
       expect(body).toEqual({
         error: 'single-project mode is enabled; removing projects is disabled',
       });
-      expect((await loadWorkspaceConfig()).projects.map((project) => project.id)).toEqual([
+      expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((project) => project.id)).toEqual([
         other.id,
       ]);
       expect(contexts.peek(other.id)).toBeUndefined();
@@ -492,7 +495,7 @@ describe('workspace projects API', () => {
       writeFileSync(join(otherRoot, '.git/HEAD'), 'ref: refs/heads/main\n', 'utf8');
       seedRuns(join(otherRoot, '.ai/cezar'), []);
       clearProjectProbeCache();
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       const before = snapshot(otherRoot);
 
       const bus = new WorkspaceEventBus();
@@ -511,8 +514,8 @@ describe('workspace projects API', () => {
     });
 
     it('409s while the project has running tasks, and removes nothing', async () => {
-      const contexts = new ProjectContexts({ listProjects });
-      const other = await registerProject(otherRoot);
+      const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+      const other = await registerProject(otherRoot, undefined, testHome());
       // Build the context the way a first API touch would, THEN put a live run in its store —
       // seeding first would make `manager.recover()` resume it, which is not what is under test.
       await contexts.context(other.id);
@@ -553,8 +556,8 @@ describe('workspace projects API', () => {
       const gate = new Promise<void>((resolve) => { release = resolve; });
       // Past the registry lookup, as a real build is when recovery is what takes the time.
       const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
-      const contexts = new ProjectContexts({ listProjects, ownership });
-      const other = await registerProject(otherRoot);
+      const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome()), ownership });
+      const other = await registerProject(otherRoot, undefined, testHome());
       const building = contexts.context(other.id);
       setTimeout(release, 100);
 
@@ -568,7 +571,7 @@ describe('workspace projects API', () => {
     });
 
     it('404s an unknown id and a malformed one, without touching the registry', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       for (const id of ['nope', 'Not%20A%20Slug', 'a'.repeat(120)]) {
         const { status, body } = await del(id);
         expect(status, id).toBe(404);
@@ -578,7 +581,7 @@ describe('workspace projects API', () => {
     });
 
     it('refuses the boot project (and its `default` alias) — it re-registers itself at every start', async () => {
-      const boot = await registerProject(repoRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
       for (const id of [boot.id, 'default']) {
         const { status, body } = await del(id);
         expect(status, id).toBe(409);
@@ -593,7 +596,7 @@ describe('workspace projects API', () => {
      *  new ceiling applies without a restart (mirrors PUT /api/v1/workspace/config). */
     const countingSemaphore = () => {
       let refreshes = 0;
-      const semaphore = new WorkspaceSemaphore({
+      const semaphore = new WorkspaceSemaphore({ home: testHome(),
         load: () => {
           refreshes += 1;
           return Promise.resolve({ maxParallel: 2, memoryLimitMb: null });
@@ -615,8 +618,8 @@ describe('workspace projects API', () => {
     };
 
     it('refuses edits in single-project mode before registry or semaphore side effects', async () => {
-      const other = await registerProject(otherRoot);
-      const before = readFileSync(workspaceConfigPath(), 'utf8');
+      const other = await registerProject(otherRoot, undefined, testHome());
+      const before = readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8');
       const { semaphore, refreshes } = countingSemaphore();
       process.env.CEZ_SINGLE_PROJECT = '1';
 
@@ -626,12 +629,12 @@ describe('workspace projects API', () => {
       expect(body).toEqual({
         error: 'single-project mode is enabled; editing projects is disabled',
       });
-      expect(readFileSync(workspaceConfigPath(), 'utf8')).toBe(before);
+      expect(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toBe(before);
       expect(refreshes()).toBe(0);
     });
 
     it('sets the per-project value, persists it, and refreshes the semaphore', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       const { semaphore, refreshes } = countingSemaphore();
       const { status, body } = await patch(other.id, { maxParallel: 1 }, { semaphore });
       expect(status).toBe(200);
@@ -645,11 +648,11 @@ describe('workspace projects API', () => {
     });
 
     it('clears the override when maxParallel is null (back to inherit)', async () => {
-      await registerProject(otherRoot);
+      await registerProject(otherRoot, undefined, testHome());
       await mergeWriteWorkspaceConfig((config) => {
         const entry = config.projects.find((p) => p.root === realpathSync(otherRoot));
         if (entry) entry.maxParallel = 4;
-      });
+      }, testHome());
       const other = (await getProjects()).projects.find((p) => p.root === realpathSync(otherRoot))!;
       expect(other.maxParallel).toBe(4);
 
@@ -661,7 +664,7 @@ describe('workspace projects API', () => {
     });
 
     it('rejects an out-of-range value with a 400 and persists nothing', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       for (const bad of [{ maxParallel: 0 }, { maxParallel: 99 }, { maxParallel: 1.5 }, {}]) {
         const { status } = await patch(other.id, bad);
         expect(status, JSON.stringify(bad)).toBe(400);
@@ -670,11 +673,11 @@ describe('workspace projects API', () => {
     });
 
     it('sets tags, normalized, and leaves maxParallel alone', async () => {
-      await registerProject(otherRoot);
+      await registerProject(otherRoot, undefined, testHome());
       await mergeWriteWorkspaceConfig((config) => {
         const entry = config.projects.find((p) => p.root === realpathSync(otherRoot));
         if (entry) entry.maxParallel = 3;
-      });
+      }, testHome());
       const other = (await getProjects()).projects.find((p) => p.root === realpathSync(otherRoot))!;
 
       const { status, body } = await patch(other.id, {
@@ -692,7 +695,7 @@ describe('workspace projects API', () => {
     });
 
     it('clears tags on null and on [], storing no key at all', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       await patch(other.id, { tags: ['api'] });
       for (const cleared of [null, []]) {
         await patch(other.id, { tags: ['api'] });
@@ -700,7 +703,7 @@ describe('workspace projects API', () => {
         expect(status, JSON.stringify(cleared)).toBe(200);
         expect(body.project.tags, JSON.stringify(cleared)).toBeUndefined();
         // Absent, not `[]`: an untagged project costs nothing in the registry file.
-        const raw = JSON.parse(readFileSync(workspaceConfigPath(), 'utf8')) as {
+        const raw = JSON.parse(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')) as {
           projects: { id: string; tags?: unknown }[];
         };
         expect(Object.keys(raw.projects.find((p) => p.id === other.id)!)).not.toContain('tags');
@@ -708,7 +711,7 @@ describe('workspace projects API', () => {
     });
 
     it('leaves tags alone for a maxParallel-only body (the pre-tags client)', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       await patch(other.id, { tags: ['storefront'] });
       const { status, body } = await patch(other.id, { maxParallel: 2 });
       expect(status).toBe(200);
@@ -717,7 +720,7 @@ describe('workspace projects API', () => {
     });
 
     it('rejects a tag list the registry could not hold, and persists nothing', async () => {
-      const other = await registerProject(otherRoot);
+      const other = await registerProject(otherRoot, undefined, testHome());
       const bodies = [
         { tags: ['x'.repeat(PROJECT_TAG_MAX_LENGTH + 1)] },
         { tags: Array.from({ length: PROJECT_TAGS_MAX + 1 }, (_, i) => `t${i}`) },
@@ -732,24 +735,24 @@ describe('workspace projects API', () => {
     });
 
     it('404s an unknown id and a malformed one, and rewrites nothing (read-first, like DELETE)', async () => {
-      await registerProject(otherRoot);
+      await registerProject(otherRoot, undefined, testHome());
       // The config bytes before any 404 PATCH — a well-formed-unknown id must not
       // rewrite the file (else a read-only home would 500 where 404 is honest).
-      const before = readFileSync(workspaceConfigPath(), 'utf8');
+      const before = readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8');
       for (const id of ['nope', 'Not%20A%20Slug', 'a'.repeat(120)]) {
         const { status, body } = await patch(id, { maxParallel: 1 });
         expect(status, id).toBe(404);
         expect(body.error, id).toContain('unknown project');
       }
-      expect(readFileSync(workspaceConfigPath(), 'utf8')).toBe(before);
+      expect(readFileSync(workspaceConfigPath(undefined, testHome()), 'utf8')).toBe(before);
     });
 
   });
 
   describe('GET /api/v1/health — additive projects + bootProject', () => {
     it('pins flagged health listings to the explicit boot identity', async () => {
-      const boot = await registerProject(repoRoot);
-      await registerProject(otherRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
+      await registerProject(otherRoot, undefined, testHome());
       process.env.CEZ_SINGLE_PROJECT = '1';
 
       const body = await getHealth({ bootProjectId: boot.id });
@@ -758,8 +761,8 @@ describe('workspace projects API', () => {
     });
 
     it('keeps the pre-workspace shape byte-identical and adds only projects + bootProject', async () => {
-      const boot = await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       const body = await getHealth();
       // The exact key set: every pre-existing field (BACKWARD_COMPATIBILITY.md
       // — the bookmarklet contract) plus the two new additive fields, and
@@ -802,8 +805,8 @@ describe('workspace projects API', () => {
     });
 
     it('health project entries carry id + name ONLY — never root (#431)', async () => {
-      await registerProject(repoRoot);
-      await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      await registerProject(otherRoot, undefined, testHome());
       const body = await getHealth();
       expect(body.projects.length).toBeGreaterThan(0);
       for (const entry of body.projects) {
@@ -812,8 +815,8 @@ describe('workspace projects API', () => {
     });
 
     it("regression: the health payload never contains another project's absolute root", async () => {
-      await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       const raw = JSON.stringify(await getHealth());
       // Health is CORS-open: a cross-origin reader must not learn the
       // absolute path (and thus username) of any registered project (#431).
@@ -822,8 +825,8 @@ describe('workspace projects API', () => {
     });
 
     it('hosted mode (CEZ_REMOTE=1): no absolute root at all — boot repo included (#431)', async () => {
-      const boot = await registerProject(repoRoot);
-      const other = await registerProject(otherRoot);
+      const boot = await registerProject(repoRoot, undefined, testHome());
+      const other = await registerProject(otherRoot, undefined, testHome());
       process.env.CEZ_REMOTE = '1';
       const body = await getHealth();
       expect(body.repoRoot).toBe(basename(repoRoot)); // existing trim, untouched

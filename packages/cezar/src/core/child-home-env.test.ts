@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +13,7 @@ for (const backend of RUNNER_IDS) {
   it.each(['0', '1'])(`${backend} native child omits the cockpit home with full-env=%s`, async (full) => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-child-home-'));
     try {
-      vi.stubEnv('CEZ_HOME', '/live/home');
+      useTestHome(Home.sandbox(testHome().root));
       vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
       vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
       const record = join(dir, 'env.json');

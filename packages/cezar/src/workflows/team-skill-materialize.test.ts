@@ -1,3 +1,5 @@
+import { Home } from '../home/home.ts';
+import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 /**
  * #1024: a team directory skill must never be copied into the main checkout. A
  * run without its own task worktree gets a per-commit copy under the cache, and
@@ -56,6 +58,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     home = mkdtempSync(join(tmpdir(), 'cez-team-dir-home-'));
     cleanup.push(home);
     vi.stubEnv('HOME', home);
+    useTestHome(Home.sandbox(home));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-team-dir-root-'));
     await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
     await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
@@ -151,7 +154,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
       'references/notes.md': NOTES,
     });
     cleanup.push(source.sourceDir);
-    await refreshTeamSkills(repoRoot);
+    await refreshTeamSkills(repoRoot, testHome());
     return { repo, source };
   }
 
@@ -159,7 +162,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     const { repo, source } = await seedTeamSource();
 
     const offRun = await runToEnd(false);
-    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)), source.commit, TEAM_SKILL);
+    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
     expect(offRun.spec.cwd).toBe(repoRoot);
     expect(offRun.spec.systemPrompt).toContain(V1_BODY);
     expect(offRun.spec.systemPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
@@ -178,8 +181,8 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     await runToEnd(false);
 
     await source.update({ 'SKILL.md': `---\ndescription: team dir playbook\n---\n${V2_BODY}\n` });
-    await refreshTeamSkills(repoRoot);
-    expect((await discoverSkills(repoRoot)).find((skill) => skill.name === TEAM_SKILL)?.source).toBe('team');
+    await refreshTeamSkills(repoRoot, testHome());
+    expect((await discoverSkills(repoRoot, undefined, testHome())).find((skill) => skill.name === TEAM_SKILL)?.source).toBe('team');
 
     const worktreeRun = await runToEnd(undefined);
     expect(worktreeRun.spec.cwd).not.toBe(repoRoot);
@@ -205,7 +208,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', 'linked agent dirs'], { cwd: repoRoot });
 
     const worktreeRun = await runToEnd(undefined);
-    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)), source.commit, TEAM_SKILL);
+    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
     expect(worktreeRun.spec.cwd).not.toBe(repoRoot);
     expect(lstatSync(join(worktreeRun.spec.cwd, '.claude')).isSymbolicLink()).toBe(true);
     for (const agentDir of AGENT_SKILL_DIRS) {
@@ -315,7 +318,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   it('a worktree-off /name opening prompt names the cache copy (#1118)', async () => {
     const { repo, source } = await seedTeamSource();
     const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`, false);
-    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)), source.commit, TEAM_SKILL);
+    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
     expect(run.spec.userPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
     expect(readFileSync(join(filesDir, 'references', 'notes.md'), 'utf8')).toBe(NOTES);
     await run.finish();

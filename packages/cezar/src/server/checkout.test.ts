@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -419,7 +422,7 @@ describe('POST /api/v1/projects/checkout', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-checkout-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-checkout-boot-'));
     checkoutRoot = join(home, 'cezar', 'projects');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_PROJECTS_DIR;
     delete process.env.CEZ_REMOTE;
@@ -430,8 +433,8 @@ describe('POST /api/v1/projects/checkout', () => {
   afterEach(() => {
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
     if (savedProjectsDir === undefined) delete process.env.CEZ_PROJECTS_DIR;
@@ -441,7 +444,7 @@ describe('POST /api/v1/projects/checkout', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({
+    createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -468,7 +471,7 @@ describe('POST /api/v1/projects/checkout', () => {
   const useCheckoutRoot = () =>
     mergeWriteWorkspaceConfig((config) => {
       config.projectsDir = checkoutRoot;
-    });
+    }, testHome());
 
   it('clones into projectsDir, registers the result as source=checkout, and streams progress', async () => {
     await useCheckoutRoot();
@@ -597,7 +600,7 @@ describe('POST /api/v1/projects/checkout', () => {
     mkdirSync(checkoutRoot, { recursive: true });
     const target = join(checkoutRoot, 'cezar');
     mkdirSync(target, { recursive: true });
-    const existing = await registerProject(target, 'local');
+    const existing = await registerProject(target, 'local', testHome());
     rmSync(target, { recursive: true, force: true });
     clearProjectProbeCache();
 

@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,7 +77,7 @@ describe('automations gate (#801)', () => {
   });
 
   const app = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
+    createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over });
 
   const json = (body: unknown, method = 'POST'): RequestInit => ({
     method,
@@ -190,14 +193,14 @@ describe('automations gate (#801)', () => {
 
     beforeEach(() => {
       home = mkdtempSync(join(tmpdir(), 'cez-automations-gate-home-'));
-      process.env.CEZ_HOME = home;
+      useTestHome(home ? Home.sandbox(home) : undefined);
       process.env.CEZ_DRY_RUN = '1';
     });
 
     afterEach(() => {
       rmSync(home, { recursive: true, force: true });
-      if (savedHome === undefined) delete process.env.CEZ_HOME;
-      else process.env.CEZ_HOME = savedHome;
+      if (savedHome === undefined) useTestHome(undefined);
+      else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
       vi.restoreAllMocks();
@@ -218,7 +221,7 @@ describe('automations gate (#801)', () => {
         return originalSweep(...args);
       });
       const server = startServer(
-        { repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' },
+        { home: testHome(), repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' },
         0,
       );
       try {
@@ -262,7 +265,7 @@ describe('automations gate (#801)', () => {
       let release!: () => void;
       const reached = new Promise<void>((resolve) => { entered = resolve; });
       const pending = new Promise<void>((resolve) => { release = resolve; });
-      const workspace = createWorkspaceProjects({ bootRoot: repoRoot });
+      const workspace = createWorkspaceProjects({ home: testHome(), bootRoot: repoRoot });
       vi.spyOn(workspace, 'listVisibleProjects').mockImplementation(async () => {
         if (stage === 'project discovery') {
           entered();
@@ -278,7 +281,7 @@ describe('automations gate (#801)', () => {
         }
         return null;
       });
-      const server = startServer({ repoRoot, store, workspaceProjects: workspace,
+      const server = startServer({ home: testHome(), repoRoot, store, workspaceProjects: workspace,
         manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' }, 0);
       try {
         await reached;

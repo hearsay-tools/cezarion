@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -79,7 +82,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     // `~/.cezar/agent-accounts.json`, so this suite must own one — without `CEZ_HOME` it would read the
     // developer's real workspace and its answers would depend on who ran it.
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-open-in-cli-home-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     delete process.env.CEZ_REMOTE;
     mockOpenInTerminal.mockClear();
@@ -90,12 +93,12 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
     for (const dir of [repoRoot, home]) rmSync(dir, { recursive: true, force: true });
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const app = (options: { disabled?: ProviderId[]; disconnected?: ProviderId[] } = {}) =>
-    createApp({
+    createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager,
@@ -326,7 +329,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
       writeFileSync(join(dir, 'settings.json'), '{}', 'utf8');
       await mergeWriteAgentAccounts((store) => {
         store.accounts.push({ id, provider, configDir: dir, label: id, addedAt: '' });
-      });
+      }, testHome());
     };
 
     it('resumes under the account recorded on the step', async () => {
@@ -349,7 +352,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
       await addAccount('client', 'claude', join(home, 'claude-client'));
       await mergeWriteAgentAccounts((store) => {
         store.selections[realpathSync(repoRoot)] = { claude: 'client' };
-      });
+      }, testHome());
       const run = makeRun('claude', 'sess-1');
       store.updateStep(run.id, 'work', { profileId: 'work' });
 
@@ -365,7 +368,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
       await addAccount('work', 'claude', dir);
       await mergeWriteAgentAccounts((store) => {
         store.selections[realpathSync(repoRoot)] = { claude: 'work' };
-      });
+      }, testHome());
       const run = makeRun('claude'); // no session — the fresh-launch branch
 
       await openIn(run.id, 'cli:claude');
@@ -404,7 +407,7 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
         await mergeWriteAgentAccounts((store) => {
           store.accounts.push({ id: 'work', provider: 'omp', configDir: profile, label: 'work', addedAt: '' });
           store.selections[realpathSync(repoRoot)] = { omp: 'work' };
-        });
+        }, testHome());
         const resumed = makeRun('omp', 'sess-1');
         store.updateStep(resumed.id, 'work', { profileId: 'work' });
         const fresh = makeRun('claude'); // a foreign runner: `cli:omp` launches fresh on the project's account

@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -52,7 +55,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     home = mkdtempSync(join(tmpdir(), 'cez-parity-home-'));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-parity-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-parity-other-'));
-    process.env.CEZ_HOME = home; // paths.ts sends all workspace paths here
+    useTestHome(home ? Home.sandbox(home) : undefined); // paths.ts sends all workspace paths here
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_FOLLOWUPS;
     delete process.env.CEZ_SINGLE_PROJECT;
@@ -73,9 +76,9 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
       task: 'parity',
       steps: [],
     }).id;
-    contexts = new ProjectContexts({ listProjects });
-    bootId = (await registerProject(repoRoot)).id;
-    app = createApp({
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    bootId = (await registerProject(repoRoot, undefined, testHome())).id;
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       // Only routes that never reach the manager are exercised, plus
@@ -90,8 +93,8 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     contexts.disposeAll();
     store.flush();
     for (const dir of [home, repoRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
@@ -250,7 +253,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     setRunStatus(store, runId, RUN_STATUS.done);
     store.flush();
     seedRuns(join(otherRoot, '.ai/cezar'), [store.getRun(runId)!]);
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     for (const path of spellings(bootId, `/runs/${runId}/pin`)) {
       const response = await apiRequest(app, path, { method: 'POST' });
       expect(response.status).toBe(200);
@@ -336,7 +339,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('a registered project whose folder is gone answers 409 {error}', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     rmSync(otherRoot, { recursive: true, force: true });
     clearProjectProbeCache(); // drop the status-probe TTL so the loss is seen
     const res = await apiRequest(app, `/api/v1/p/${other.id}/runs`);
@@ -347,7 +350,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('a non-boot project builds lazily and answers with its own state', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     expect(contexts.peek(other.id)).toBeUndefined(); // nothing until first touch
     const runs = await apiRequest(app, `/api/v1/p/${other.id}/runs`);
     expect(runs.status).toBe(200);
@@ -368,7 +371,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('agent config resolves repo-local files from the selected project only', async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     mkdirSync(join(repoRoot, '.claude'), { recursive: true });
     mkdirSync(join(otherRoot, '.claude'), { recursive: true });
     writeFileSync(join(repoRoot, '.claude', 'settings.json'), '{"project":"boot"}', 'utf8');

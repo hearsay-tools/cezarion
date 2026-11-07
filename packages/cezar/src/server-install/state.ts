@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import {
   chmodSync,
   existsSync,
@@ -24,8 +25,8 @@ import { freshServerState, serverStateSchema, type ServerState, type StepOutcome
  */
 
 /** Load a host-level instance record, degrading to a fresh record on any error. */
-export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE): ServerState {
-  const path = serverStatePath(instance);
+export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home?: Home): ServerState {
+  const path = serverStatePath(instance, home);
   let raw: string;
   try {
     raw = readFileSync(path, 'utf8');
@@ -48,21 +49,21 @@ export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE): Ser
  * uninstall/deploy resolve which instance to act on. Never throws — an
  * unreadable dir or a corrupt file is simply skipped.
  */
-export function listServerInstances(): Array<{ instance: string; state: ServerState }> {
+export function listServerInstances(home?: Home): Array<{ instance: string; state: ServerState }> {
   const out: Array<{ instance: string; state: ServerState }> = [];
-  if (existsSync(serverStatePath(DEFAULT_SERVER_INSTANCE))) {
-    out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE) });
+  if (existsSync(serverStatePath(DEFAULT_SERVER_INSTANCE, home))) {
+    out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE, home) });
   }
   let entries: string[] = [];
   try {
-    entries = readdirSync(serverInstancesDir());
+    entries = readdirSync(serverInstancesDir(home));
   } catch {
     entries = [];
   }
   for (const file of entries) {
     if (!file.endsWith('.json')) continue;
     const instance = basename(file, '.json');
-    out.push({ instance, state: loadServerState(instance) });
+    out.push({ instance, state: loadServerState(instance, home) });
   }
   return out;
 }
@@ -73,16 +74,16 @@ export function listServerInstances(): Array<{ instance: string; state: ServerSt
  * another instance. Deterministic (recorded-state only, no network probe) so it
  * stays unit-testable; the operator can always override it with `--port`.
  */
-export function nextFreeInstancePort(startAt = 4321): number {
-  const used = new Set(listServerInstances().map((i) => i.state.primaryPort));
+export function nextFreeInstancePort(startAt = 4321, home?: Home): number {
+  const used = new Set(listServerInstances(home).map((i) => i.state.primaryPort));
   let port = startAt;
   while (used.has(port)) port++;
   return port;
 }
 
 /** Atomically persist state as `0600`, creating its dir (`0700`) if needed. */
-export function saveServerState(state: ServerState, instance: string = DEFAULT_SERVER_INSTANCE): void {
-  const path = serverStatePath(instance);
+export function saveServerState(state: ServerState, instance: string = DEFAULT_SERVER_INSTANCE, home?: Home): void {
+  const path = serverStatePath(instance, home);
   assertCezarHomeWriteIsSandboxed(path);
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -103,11 +104,11 @@ export function saveServerState(state: ServerState, instance: string = DEFAULT_S
  * its absence vs. an empty-but-present record has historically meant the same
  * thing, so we don't change that behavior. Best-effort; never throws.
  */
-export function deleteServerState(instance: string): void {
+export function deleteServerState(instance: string, home?: Home): void {
   if (instance === DEFAULT_SERVER_INSTANCE) return;
-  assertCezarHomeWriteIsSandboxed(serverStatePath(instance));
+  assertCezarHomeWriteIsSandboxed(serverStatePath(instance, home));
   try {
-    rmSync(serverStatePath(instance), { force: true });
+    rmSync(serverStatePath(instance, home), { force: true });
   } catch {
     // non-fatal — an empty record left behind is harmless
   }
@@ -133,8 +134,8 @@ export class LockHeldError extends Error {}
  * process already holds it; a stale lock (dead pid) is reclaimed. Returns a
  * release function.
  */
-export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE): () => void {
-  const path = serverLockPath(instance);
+export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home?: Home): () => void {
+  const path = serverLockPath(instance, home);
   assertCezarHomeWriteIsSandboxed(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 

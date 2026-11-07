@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -121,7 +122,7 @@ export async function replyAfterRestart(crashed: boolean, holdResources = false)
     try {
       const parentCaller = credentials.authenticate(credentials.issue('project', f.p.id, randomUUID()))!;
       const service = new DelegationService();
-      service.registerProject({ id: 'project', root, store, manager });
+      service.registerProject({ home: testHome(), id: 'project', root, store, manager });
       // Recovery resumes the parent; the worker's session stays closed on its pending question.
       await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
       await parentIdle();

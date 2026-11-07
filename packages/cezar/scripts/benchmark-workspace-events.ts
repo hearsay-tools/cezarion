@@ -1,3 +1,4 @@
+import { resolveHome } from '../src/home/resolve.ts';
 /**
  * Workspace stream benchmark (hearsay-tools/cezarion#2730): what one large delegation family costs
  * on `GET /api/v1/workspace/events`, full records versus summary rows, with a task detail open or
@@ -72,6 +73,7 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-bench-wsev-repo-'));
   cleanups.push(() => { for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true }); });
   process.env.CEZ_HOME = home;
+  const selectedHome = resolveHome({ purpose: 'server' });
   mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
 
   const { values } = parseArgs({ args: argv, options: {
@@ -107,11 +109,11 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
 
   clearProjectProbeCache();
   const store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-  const contexts = new ProjectContexts({ listProjects });
+  const contexts = new ProjectContexts({ home: selectedHome, listProjects: () => listProjects(undefined, selectedHome) });
   cleanups.push(() => { contexts.disposeAll(); store.flush(); });
-  await registerProject(repoRoot);
+  await registerProject(repoRoot, undefined, selectedHome);
   const app = createApp({
-    repoRoot, store, version: '0.0.0-bench', contexts, workspaceEvents: new WorkspaceEventBus(),
+    home: selectedHome, repoRoot, store, version: '0.0.0-bench', contexts, workspaceEvents: new WorkspaceEventBus(),
     manager: { isActive: () => false, finishBlockedReason: () => undefined } as unknown as RunManager,
   });
 

@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,7 +46,7 @@ describe('new-project routes', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-create-api-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-create-boot-'));
     projectsDir = join(home, 'projects');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
     delete process.env.CEZ_SINGLE_PROJECT;
     process.env.CEZ_DRY_RUN = '1';
@@ -52,7 +55,7 @@ describe('new-project routes', () => {
     clearProjectProbeCache();
     await mergeWriteWorkspaceConfig((config) => {
       config.projectsDir = projectsDir;
-    });
+    }, testHome());
   });
 
   afterEach(() => {
@@ -69,7 +72,7 @@ describe('new-project routes', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', projectCommandRunner: recording(), ...over });
+    createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', projectCommandRunner: recording(), ...over });
 
   const create = async (body: unknown, over: Partial<ServerDeps> = {}) => {
     const res = await apiRequest(makeApp(over), '/api/v1/projects/create', {
@@ -93,7 +96,7 @@ describe('new-project routes', () => {
     expect(body.warning).toBeUndefined();
     expect('warning' in body).toBe(false);
     expect(execFileSync('git', ['-C', target, 'rev-list', '--count', 'main'], { encoding: 'utf8' }).trim()).toBe('1');
-    expect((await loadWorkspaceConfig()).projects.map((p) => p.root)).toContain(realpathSync(target));
+    expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.root)).toContain(realpathSync(target));
   });
 
   it('a GitHub-backed project registers as checkout', async () => {
@@ -126,7 +129,7 @@ describe('new-project routes', () => {
     process.env.CEZ_REMOTE = '1';
     await mergeWriteWorkspaceConfig((config) => {
       config.browseRoot = home;
-    });
+    }, testHome());
     const refused = await create({ name: 'fresh', github: { owner: 'acme' } });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe('Creating GitHub repositories is available from a local cockpit only');
@@ -143,7 +146,7 @@ describe('new-project routes', () => {
     process.env.CEZ_REMOTE = '1';
     await mergeWriteWorkspaceConfig((config) => {
       config.browseRoot = home;
-    });
+    }, testHome());
     const { status, body } = await create({ name: 'fresh' });
     expect(status).toBe(200);
     expect(body.project.source).toBe('local');
@@ -155,7 +158,7 @@ describe('new-project routes', () => {
     mkdirSync(browseRoot);
     await mergeWriteWorkspaceConfig((config) => {
       config.browseRoot = browseRoot;
-    });
+    }, testHome());
     const res = await create({ name: 'fresh' });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'folder is outside the browsable root' });
@@ -172,7 +175,7 @@ describe('new-project routes', () => {
     await mergeWriteWorkspaceConfig((config) => {
       config.browseRoot = browseRoot;
       config.projectsDir = join(browseRoot, 'link', 'projects');
-    });
+    }, testHome());
     try {
       const res = await create({ name: 'fresh' });
       expect(res.status).toBe(400);

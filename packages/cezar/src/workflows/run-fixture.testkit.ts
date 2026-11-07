@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -127,8 +128,8 @@ export function setupMonitoringFixture() {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    semaphore = new WorkspaceSemaphore();
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    semaphore = new WorkspaceSemaphore({ home: testHome() });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     currentId = undefined;
   });
 

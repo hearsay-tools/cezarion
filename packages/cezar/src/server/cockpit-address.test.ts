@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -25,7 +28,7 @@ describe('startServer cockpit address', () => {
     bootRoot = mkdtempSync(join(tmpdir(), 'cez-address-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-address-other-'));
     mkdirSync(join(bootRoot, '.ai/cezar'), { recursive: true });
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_DRY_RUN = '1';
     delete process.env.CEZ_PROJECT_WARMUP;
     delete process.env.CEZ_SINGLE_PROJECT;
@@ -42,12 +45,12 @@ describe('startServer cockpit address', () => {
   });
 
   it('addresses the boot manager and every built project with the bound port and its own id', async () => {
-    const bootId = (await registerProject(bootRoot)).id;
-    const otherId = (await registerProject(otherRoot)).id;
+    const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
+    const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ listProjects });
+    const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const setCockpitAddress = vi.fn();
-    const server = startServer({
+    const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,
       store,

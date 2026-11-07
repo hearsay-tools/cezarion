@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 
 /**
@@ -204,6 +205,7 @@ export interface Runner {
 
 /** Live install/uninstall context, threaded through every step. */
 export interface InstallContext {
+  home?: Home | undefined;
   state: ServerState;
   ui: Ui;
   runner: Runner;

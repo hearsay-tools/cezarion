@@ -31,6 +31,7 @@ import { ownedByAnotherCockpit, CockpitOwnership } from './cockpit-ownership.ts'
 
 /** The per-project bundle the routes operate on. */
 export interface ProjectContext {
+  home?: Home | undefined;
   /** Registry project id (slug). */
   id: string;
   /** Realpath'd repo root the registry holds for this project. */
@@ -69,9 +70,9 @@ export interface ProjectContextDeps {
   /** CLI process ownership, acquired before opening any secondary store. */
   ownership?: CockpitOwnership | undefined;
   /** Install controller session capabilities before recovery starts any backend. */
-  prepareManager?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => (() => void) | void;
+  prepareManager?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager' | 'home'>) => (() => void) | void;
   /** Arm persisted cleanup only after recovered execution/process state is available. */
-  afterRecover?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => void;
+  afterRecover?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager' | 'home'>) => void;
   /** Registry lookup — the workspace `listProjects()` in production. */
   listProjects: () => Promise<readonly ProjectContextSource[]>;
   home?: Home | undefined;
@@ -450,7 +451,7 @@ export class ProjectContexts {
     });
     this.buildingManagers.set(projectId, manager);
     try {
-      const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager });
+      const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager, home: this.deps.home });
       if (cleanup) this.managerCleanups.set(manager, cleanup);
       const launchKey = ensureLaunchKey(dataDir);
       // Startup reconcile (spec 006) + count-based retention (#483) — the same
@@ -472,7 +473,7 @@ export class ProjectContexts {
       // Archived transcripts left plain (or both-present after a crash) — fire-and-forget,
       // never delays boot (#818).
       store.compressArchivedHistory();
-      this.deps.afterRecover?.({ id: project.id, root: project.root, store, manager });
+      this.deps.afterRecover?.({ id: project.id, root: project.root, store, manager, home: this.deps.home });
       // Which repository this project IS (#945), so the referenced tier stops adopting another
       // repo's PR/issue as a task's subject. Fire-and-forget on purpose — it costs a `gh` spawn
       // and building a context must not wait on the network. `project.root` is already realpath'd.
@@ -485,7 +486,7 @@ export class ProjectContexts {
       this.repoHandleControllers.set(store, repoHandleController);
       armRepoHandle(store, project.root, repoHandleController.signal, this.deps.forgeFactory);
       store.reports.start();
-      return { id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
+      return { home: this.deps.home, id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.
       this.managerCleanups.get(manager)?.();

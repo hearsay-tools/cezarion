@@ -1,3 +1,4 @@
+import type { Home } from '../home/home.ts';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { workspaceConfigPath } from '../paths.ts';
@@ -51,33 +52,33 @@ const SINGLE_PROJECT_EDIT_ERROR = 'single-project mode is enabled; editing proje
  */
 export async function runProjectsCommand(
   args: string[],
-  opts: { defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
+  opts: { home?: Home; defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
 ): Promise<number> {
   const io = opts.io ?? defaultIo;
   const singleProject = (opts.env ?? process.env).CEZ_SINGLE_PROJECT === '1';
   const [sub = 'list', ...rest] = args;
   switch (sub) {
     case 'list':
-      return listCommand(io, singleProject, opts.bootProjectId);
+      return listCommand(io, singleProject, opts.bootProjectId, opts.home);
     case 'add':
       if (singleProject) {
         io.error(SINGLE_PROJECT_ADD_ERROR);
         return 1;
       }
-      return addCommand(rest[0] ? resolve(rest[0]) : opts.defaultRoot, io);
+      return addCommand(rest[0] ? resolve(rest[0]) : opts.defaultRoot, io, opts.home);
     case 'remove':
     case 'rm':
       if (singleProject) {
         io.error(SINGLE_PROJECT_REMOVE_ERROR);
         return 1;
       }
-      return removeCommand(rest[0], io);
+      return removeCommand(rest[0], io, opts.home);
     case 'tag':
       if (singleProject) {
         io.error(SINGLE_PROJECT_EDIT_ERROR);
         return 1;
       }
-      return tagCommand(rest[0], rest.slice(1), io);
+      return tagCommand(rest[0], rest.slice(1), io, opts.home);
     default:
       io.error(`unknown projects subcommand: ${sub}\n`);
       io.error(USAGE);
@@ -100,13 +101,14 @@ function statusMark(status: string): string {
 async function listCommand(
   io: ProjectsCommandIo,
   singleProject: boolean,
-  bootProjectId?: string,
+  bootProjectId: string | undefined,
+  home?: Home,
 ): Promise<number> {
   const projects = bootProjectId
-    ? await listProjects({ projectId: bootProjectId })
+    ? await listProjects({ projectId: bootProjectId }, home)
     : singleProject
       ? []
-      : await listProjects();
+      : await listProjects(undefined, home);
   if (projects.length === 0) {
     io.log('\n  no projects registered yet');
     io.log('  start the cockpit in a repo (npx cezarion) or add one: cez projects add <dir>\n');
@@ -122,11 +124,11 @@ async function listCommand(
     const tags = project.tags?.length ? `  [${project.tags.join(' ')}]` : '';
     io.log(`  ${statusMark(project.status)} ${project.id.padEnd(idWidth)}  ${label}  ${project.root}${tags}`);
   }
-  io.log(`\n  ${projects.length} project(s) — registry: ${workspaceConfigPath()}\n`);
+  io.log(`\n  ${projects.length} project(s) — registry: ${workspaceConfigPath(undefined, home)}\n`);
   return 0;
 }
 
-async function addCommand(root: string, io: ProjectsCommandIo): Promise<number> {
+async function addCommand(root: string, io: ProjectsCommandIo, home?: Home): Promise<number> {
   try {
     if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
   } catch {
@@ -140,15 +142,15 @@ async function addCommand(root: string, io: ProjectsCommandIo): Promise<number> 
     io.error(`refusing to register ${root} — cezar task worktrees and your home directory are not projects`);
     return 1;
   }
-  const known = new Set((await loadWorkspaceConfig()).projects.map((p) => p.id));
-  const entry = await registerProject(root);
+  const known = new Set((await loadWorkspaceConfig(home?.workspaceConfig)).projects.map((p) => p.id));
+  const entry = await registerProject(root, undefined, home);
   // Registration dedupes by realpath, so a second `add` of the same folder
   // (or a symlink to it) reports the entry that already exists.
   io.log(known.has(entry.id) ? `  = ${entry.id} (already registered)  ${entry.root}` : `  + ${entry.id}  ${entry.root}`);
   return 0;
 }
 
-async function removeCommand(id: string | undefined, io: ProjectsCommandIo): Promise<number> {
+async function removeCommand(id: string | undefined, io: ProjectsCommandIo, home?: Home): Promise<number> {
   if (!id) {
     io.error(USAGE);
     return 1;
@@ -158,7 +160,7 @@ async function removeCommand(id: string | undefined, io: ProjectsCommandIo): Pro
   // sidebar, and the CLI runs with no server and no boot project. Removing the
   // repo you normally serve is therefore allowed — and self-healing, since the
   // next `cezar serve` in it registers it again (said in the note below).
-  if (!(await removeProject(id))) {
+  if (!(await removeProject(id, home))) {
     io.error(`unknown project: ${id}`);
     return 1;
   }
@@ -180,6 +182,7 @@ async function tagCommand(
   id: string | undefined,
   tags: string[],
   io: ProjectsCommandIo,
+  home?: Home,
 ): Promise<number> {
   if (!id) {
     io.error(USAGE);
@@ -195,7 +198,7 @@ async function tagCommand(
     // is DELETED rather than set to `[]`: an untagged project stores nothing.
     if (normalized === undefined) delete entry.tags;
     else entry.tags = normalized;
-  });
+  }, home);
   if (!known) {
     io.error(`unknown project: ${id}`);
     return 1;

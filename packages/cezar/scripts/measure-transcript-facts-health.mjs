@@ -24,6 +24,8 @@ const watchdog = setTimeout(() => { console.error('health measurement exceeded 3
 try {
   const { RunStore } = await import(new URL('runs/store.js', runtime.url));
   const { startServer } = await import(new URL('server/server.js', runtime.url));
+  const { resolveHome } = await import(new URL('home/resolve.js', runtime.url));
+  const home = resolveHome({ purpose: 'cli' });
   // Keep git discovery away from the user's parent repository, even if TMPDIR
   // was set inside a cezar worktree. This repo contains only the experiment.
   execFileSync('git', ['init', '--initial-branch=main'], { cwd: root, stdio: 'ignore' });
@@ -33,7 +35,7 @@ try {
   // second cold store on this same event loop. No transcript sidecar is primed.
   bootStore = RunStore.open(join(root, '.ai/cezar'));
   await bootStore.factsWarmIdle();
-  server = startServer({ repoRoot: root, store: bootStore, manager: {}, version: 'task4-measurement', bindHost: '127.0.0.1' }, 0);
+  server = startServer({ home, repoRoot: root, store: bootStore, manager: {}, version: 'task4-measurement', bindHost: '127.0.0.1' }, 0);
   if (!server.listening) await once(server, 'listening');
   const address = server.address();
   assert.ok(address && typeof address !== 'string');

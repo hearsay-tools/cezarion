@@ -551,11 +551,11 @@ function acceptInput(repoRoot: string, input: StartRunInput, home?: Home): Start
   return agentModelsLocked(repoRoot, process.env, home) ? { ...input, model: undefined, effort: undefined } : input;
 }
 
-function discoverRunSkills(repoRoot: string, builtin: Skill[]): Promise<Skill[]> {
-  return discoverSkills(repoRoot, { builtin });
+function discoverRunSkills(repoRoot: string, builtin: Skill[], home?: Home): Promise<Skill[]> {
+  return discoverSkills(repoRoot, { builtin }, home);
 }
-function teamSkills(repoRoot: string): Skill[] {
-  return filterDisabledTeamSources(getTeamSkillsCached(repoRoot), readDisabledSkillsReposSync(repoRoot));
+function teamSkills(repoRoot: string, home?: Home): Skill[] {
+  return filterDisabledTeamSources(getTeamSkillsCached(repoRoot, home), readDisabledSkillsReposSync(repoRoot));
 }
 
 function continuationOwningStep(record: RunRecord | undefined, sessionId: string | undefined): RunRecord['steps'][number] | undefined {

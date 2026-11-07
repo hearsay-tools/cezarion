@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { agentEnv, agentEnvForStep } from './run/launch-context.ts';
 import { terminalScratchDisposition } from './run/run-settlement.ts';
@@ -42,7 +45,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   let manager: RunManager;
 
   const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
-    const context = { store, repoRoot, dataDir };
+    const context = { home: testHome(), store, repoRoot, dataDir };
     return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
 
@@ -50,10 +53,10 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-agent-tmpdir-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-agent-tmpdir-repo-'));
     dataDir = join(repoRoot, '.ai/cezar');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(dataDir);
     manager = createFixtureManager(store, repoRoot);
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
   });
 
   afterEach(async () => {
@@ -63,8 +66,8 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const newRun = () =>
@@ -277,7 +280,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
   let manager: RunManager;
 
   const resolveStepEnv = (runId: string, backend: Parameters<typeof agentEnvForStep>[3], options?: Parameters<typeof agentEnvForStep>[4]) => {
-    const context = { store, repoRoot, dataDir };
+    const context = { home: testHome(), store, repoRoot, dataDir };
     return agentEnvForStep(context, { agentEnv: id => agentEnv(context, undefined, id), workerStep: () => undefined }, runId, backend, options);
   };
 
@@ -287,10 +290,10 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     // the shape Cezar's own nested task worktrees produce.
     repoRoot = join(realpathSync(tmpdir()), `cez-deep-tmp-${'r'.repeat(80)}`, 'repo');
     dataDir = join(repoRoot, '.ai/cezar');
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     store = RunStore.open(dataDir);
     manager = createFixtureManager(store, repoRoot);
-    await registerProject(repoRoot);
+    await registerProject(repoRoot, undefined, testHome());
   });
 
   afterEach(async () => {
@@ -300,8 +303,8 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     for (const run of store.listRuns()) removeAgentTmpDir(dataDir, run.id);
     store.flush();
     for (const dir of [home, repoRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   const newRun = () =>

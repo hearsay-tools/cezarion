@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -38,7 +41,7 @@ describe('POST /api/v1/runs/:id/continue override', () => {
     // Agent accounts resolve against `~/.cezar/` — pinned to a temp home so the machine's real
     // logins can neither be read nor decide the outcome.
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-continue-home-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-continue-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     captured = undefined;
@@ -54,7 +57,7 @@ describe('POST /api/v1/runs/:id/continue override', () => {
         return { ok: true };
       },
     } as unknown as RunManager;
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
@@ -62,13 +65,13 @@ describe('POST /api/v1/runs/:id/continue override', () => {
     for (const dir of [repoRoot, home]) rmSync(dir, { recursive: true, force: true });
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
   });
 
   /** One stored Claude login beside the discovered account. */
   const writeAccounts = () => {
-    const path = agentAccountsPath();
+    const path = agentAccountsPath(testHome());
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,

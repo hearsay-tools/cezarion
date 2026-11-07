@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,7 +45,7 @@ describe('GET /api/v1/workspace/events', () => {
     home = mkdtempSync(join(tmpdir(), 'cez-wsev-home-'));
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-wsev-boot-'));
     otherRoot = mkdtempSync(join(tmpdir(), 'cez-wsev-other-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_REMOTE;
     process.env.CEZ_DRY_RUN = '1';
     for (const root of [repoRoot, otherRoot]) {
@@ -50,10 +53,10 @@ describe('GET /api/v1/workspace/events', () => {
     }
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    contexts = new ProjectContexts({ listProjects });
+    contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     bus = new WorkspaceEventBus();
-    bootId = (await registerProject(repoRoot)).id;
-    app = createApp({
+    bootId = (await registerProject(repoRoot, undefined, testHome())).id;
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { isActive: () => false } as unknown as RunManager,
@@ -71,8 +74,8 @@ describe('GET /api/v1/workspace/events', () => {
     contexts.disposeAll();
     store.flush();
     for (const dir of [home, repoRoot, otherRoot]) rmSync(dir, { recursive: true, force: true });
-    if (savedHome === undefined) delete process.env.CEZ_HOME;
-    else process.env.CEZ_HOME = savedHome;
+    if (savedHome === undefined) useTestHome(undefined);
+    else useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
@@ -84,7 +87,7 @@ describe('GET /api/v1/workspace/events', () => {
     id: string;
     store: RunStore;
   }> => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     expect((await apiRequest(app, `/api/v1/p/${other.id}/runs`)).status).toBe(200);
     const otherStore = contexts.peek(other.id)?.store;
     expect(otherStore).toBeDefined();
@@ -240,7 +243,7 @@ describe('GET /api/v1/workspace/events', () => {
   });
 
   it("a late-built context's events appear after its first touch — and subscribing never force-instantiates", async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
 
     const ws = await openStream('/api/v1/workspace/events');
     await ws.readUntil('event: ping');
@@ -266,7 +269,7 @@ describe('GET /api/v1/workspace/events', () => {
   });
 
   it("announces a built context as project-ready, so cockpits refetch what its recovery changed (#667)", async () => {
-    const other = await registerProject(otherRoot);
+    const other = await registerProject(otherRoot, undefined, testHome());
     const ws = await openStream('/api/v1/workspace/events');
     await ws.readUntil('event: ping');
 
@@ -389,7 +392,7 @@ describe('GET /api/v1/workspace/events', () => {
     // …so that the SAME slug, re-registered and rebuilt, attaches its NEW
     // store (regression: the attach guard kept the stale entry, and the
     // rebuilt context's events were silently lost until reconnect).
-    const readded = await registerProject(otherRoot);
+    const readded = await registerProject(otherRoot, undefined, testHome());
     expect(readded.id).toBe(other.id);
     expect((await apiRequest(app, `/api/v1/p/${readded.id}/runs`)).status).toBe(200);
     const rebuilt = contexts.peek(readded.id)?.store;

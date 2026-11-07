@@ -1,10 +1,11 @@
+import { Home } from './home.ts';
+import { useTestHome } from './test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { resolveHome } from './resolve.ts';
-import type { Home } from './home.ts';
 import { atomicWriteJsonSync } from '../workspace/config.ts';
 import { currentEntry, linkCheckout, readManifest, writeManifest } from '../self-update/layout.ts';
 import { SelfUpdateService } from '../self-update/service.ts';
@@ -45,7 +46,7 @@ function fixture() {
   linkCheckout(ambientLink, 'main', process.env, undefined, ambient);
   // This ambient install must not force a suffix on the selected registry checkout's id.
   writeManifest('1.2.3+registry', { version: '1.2.3', source: 'local', installedAt: '' }, process.env, ambient);
-  vi.stubEnv('CEZ_HOME', ambient.root);
+  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
   return { selected, ambient, selectedRegistry, selectedLink, ambientLink };
 }
 

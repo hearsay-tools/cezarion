@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ArchivePullRequestIdentity } from '@open-mercato/cezar-contract';
 import { execFileSync } from 'node:child_process';
@@ -31,7 +34,7 @@ function dir() { const path = mkdtempSync(join(tmpdir(), 'cez-merge-boot-')); di
 it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, { single: false, repository: 'upstream' }])('uses the verified gh default repository without recovery: %j', async ({ single, repository }) => {
   vi.mocked(discoverRepoHandle).mockResolvedValue({ status: 'resolved', handle: { owner: 'o', name: repository } });
   vi.mocked(lookupMergedPullRequests).mockClear();
-  vi.stubEnv('CEZ_HOME', dir()); vi.stubEnv('CEZ_PROJECT_WARMUP', '0'); vi.stubEnv('CEZ_DRY_RUN', '1');
+  useTestHome(dir() ? Home.sandbox(dir()) : undefined); vi.stubEnv('CEZ_PROJECT_WARMUP', '0'); vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_ARCHIVE_ON_MERGE', '1'); vi.stubEnv('CEZ_SINGLE_PROJECT', single ? '1' : '0');
   const boot = dir(), cold = dir();
   for (const root of [boot, cold]) {
@@ -39,18 +42,18 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
     execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '--no-gpg-sign', '-qm', 'initial']);
     execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/o/r.git']);
   }
-  const bootProject = await registerProject(boot), other = await registerProject(cold);
+  const bootProject = await registerProject(boot, undefined, testHome()), other = await registerProject(cold, undefined, testHome());
   const id = randomUUID(), dataDir = join(cold, '.ai/cezar');
   seedRuns(dataDir, [{ id, title: 't', task: 't', workflow: 'quick-task', steps: [], tokensUsed: 0, status: RUN_STATUS.done, archived: false, createdAt: '2026-01-01T00:00:00Z', pullRequests: [{ number: 42, source: 'declared' }] }]);
   const recover = vi.spyOn(RunManager.prototype, 'recover');
-  const contexts = new ProjectContexts({ listProjects });
+  const contexts = new ProjectContexts({ home: testHome(), listProjects: () => listProjects(undefined, testHome())});
   const store = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });
   // The real post-listen hook starts the coordinator; drive an additional tick to avoid
   // waiting a minute for the project cursor to move beyond the empty boot project.
   let coordinator: ArchiveOnMergeCoordinator | undefined;
   const tick = ArchiveOnMergeCoordinator.prototype.tick;
   vi.spyOn(ArchiveOnMergeCoordinator.prototype, 'tick').mockImplementation(function (this: ArchiveOnMergeCoordinator) { coordinator = this; return tick.call(this); });
-  const server = startServer({ repoRoot: boot, bootProjectId: bootProject.id, store, manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts, forgeFactory }, 0);
+  const server = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootProject.id, store, manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts, forgeFactory }, 0);
   try {
     await new Promise<void>(resolve => server.once('listening', () => resolve()));
     await vi.waitFor(() => expect(coordinator).toBeDefined(), { timeout: HANG_GUARD_MS });

@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,12 +29,12 @@ describe('GET /runs/:id/handoff', () => {
   beforeEach(async () => {
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-handoff-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-handoff-repo-'));
-    process.env.CEZ_HOME = home;
+    useTestHome(home ? Home.sandbox(home) : undefined);
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
     dataDir = join(repoRoot, '.ai/cezar');
     store = RunStore.open(dataDir);
-    projectId = (await registerProject(repoRoot)).id;
+    projectId = (await registerProject(repoRoot, undefined, testHome())).id;
   });
 
   afterEach(() => {
@@ -44,7 +47,7 @@ describe('GET /runs/:id/handoff', () => {
   });
 
   const get = async (id: string) => {
-    const app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: projectId });
+    const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: projectId });
     const res = await apiRequest(app, `/api/v1/runs/${id}/handoff`);
     return { status: res.status, text: await res.text() };
   };

@@ -1,3 +1,6 @@
+import { Home } from '../home/home.ts';
+import { useTestHome } from '../home/test-home.testkit.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +40,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
     home = realpathSync(mkdtempSync(join(tmpdir(), 'cez-fs-browse-home-')));
     outside = realpathSync(mkdtempSync(join(tmpdir(), 'cez-fs-browse-outside-')));
     process.env.HOME = home;
-    process.env.CEZ_HOME = join(home, '.cezar');
+    useTestHome(join(home, '.cezar') ? Home.sandbox(join(home, '.cezar')) : undefined);
     delete process.env.CEZ_REMOTE; // local mode is the default under test
     delete process.env.CEZ_BROWSE_ROOT;
 
@@ -53,7 +56,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
     const repoRoot = join(home, 'boot');
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -200,7 +203,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
       // it — so this also proves the hosted root expands the tilde.
       mkdirSync(join(home, '.cezar'), { recursive: true });
       writeFileSync(
-        workspaceConfigPath(),
+        workspaceConfigPath(undefined, testHome()),
         JSON.stringify({ browseRoot: '~/projects', projectsDir: '~/checkouts' }),
         'utf8',
       );
@@ -223,7 +226,7 @@ describe('GET /api/v1/fs/browse (step 4.1)', () => {
     });
 
     it('404s when browseRoot does not exist yet', async () => {
-      writeFileSync(workspaceConfigPath(), JSON.stringify({ browseRoot: '~/not-created' }), 'utf8');
+      writeFileSync(workspaceConfigPath(undefined, testHome()), JSON.stringify({ browseRoot: '~/not-created' }), 'utf8');
       const res = await browse();
       expect(res.status).toBe(404);
       expect(await error(res)).toBe('browse root is not available');

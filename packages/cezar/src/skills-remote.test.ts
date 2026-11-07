@@ -1,3 +1,6 @@
+import { Home } from './home/home.ts';
+import { useTestHome } from './home/test-home.testkit.ts';
+import { testHome } from './home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -103,9 +106,9 @@ describe('last-fetch stamp IO', () => {
 
 describe('bareDirFor', () => {
   it('keys the global cache on owner__name regardless of URL shape', () => {
-    const expected = bareDirFor('open-mercato/skills');
-    expect(bareDirFor('https://github.com/open-mercato/skills.git')).toBe(expected);
-    expect(bareDirFor('git@github.com:open-mercato/skills')).toBe(expected);
+    const expected = bareDirFor('open-mercato/skills', testHome());
+    expect(bareDirFor('https://github.com/open-mercato/skills.git', testHome())).toBe(expected);
+    expect(bareDirFor('git@github.com:open-mercato/skills', testHome())).toBe(expected);
     expect(expected.endsWith('open-mercato__skills')).toBe(true);
   });
 });
@@ -140,7 +143,7 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
     const repo = `org-${randomUUID().slice(0, 8)}/skills`;
     writeSkillsReposConfig(repoRoot, [repo]);
     let release!: () => void;
-    __holdFetchForTests(repo, new Promise<void>((resolve) => { release = resolve; }));
+    __holdFetchForTests(repo, new Promise<void>((resolve) => { release = resolve; }), testHome());
     releases.push(release);
     return { repoRoot, repo, release };
   }
@@ -154,18 +157,18 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
     const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
     dirs.push(clone.sourceDir);
 
-    expect(getTeamSkillsCached(repoRoot)).toEqual([]);
-    const cached = await waitForCachedTeamSkills(repoRoot);
+    expect(getTeamSkillsCached(repoRoot, testHome())).toEqual([]);
+    const cached = await waitForCachedTeamSkills(repoRoot, testHome());
     expect(names(cached)).toEqual(['alpha']);
     expect(cached[0]).toMatchObject({ body: 'ALPHA-BODY', source: 'team', team: { repo, ref: 'main' } });
-    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha']);
-    expect(await settledWithin(waitForTeamSkills(repoRoot), 200)).toBe(false);
+    expect(names(getTeamSkillsCached(repoRoot, testHome()))).toEqual(['alpha']);
+    expect(await settledWithin(waitForTeamSkills(repoRoot, testHome()), 200)).toBe(false);
 
     await clone.addSkill('beta', 'BETA-BODY');
     release();
-    expect(names(await waitForTeamSkills(repoRoot))).toEqual(['alpha', 'beta']);
-    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
-    expect(names(await waitForCachedTeamSkills(repoRoot))).toEqual(['alpha']);
+    expect(names(await waitForTeamSkills(repoRoot, testHome()))).toEqual(['alpha', 'beta']);
+    expect(names(getTeamSkillsCached(repoRoot, testHome()))).toEqual(['alpha', 'beta']);
+    expect(names(await waitForCachedTeamSkills(repoRoot, testHome()))).toEqual(['alpha']);
   });
 
   it('a passive load that listed the old clone never overwrites a concurrent refresh', async () => {
@@ -176,19 +179,19 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
     const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
     dirs.push(clone.sourceDir);
     let resume!: () => void;
-    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }));
+    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }), testHome());
     releases.push(resume);
 
     // The passive load snapshots [alpha], then a refresh fetches beta, stamps
     // the clone fresh and publishes first; the passive load must not undo it.
-    const passive = waitForTeamSkills(repoRoot);
+    const passive = waitForTeamSkills(repoRoot, testHome());
     await parked;
     await clone.addSkill('beta', 'BETA-BODY');
-    expect(names(await refreshTeamSkills(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(await refreshTeamSkills(repoRoot, testHome()))).toEqual(['alpha', 'beta']);
     resume();
 
     const passiveList = await passive;
-    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(getTeamSkillsCached(repoRoot, testHome()))).toEqual(['alpha', 'beta']);
     expect(names(passiveList)).toEqual(['alpha', 'beta']);
   });
 
@@ -202,26 +205,26 @@ describe('cached team-skill list before the passive fetch (#859)', () => {
     const clone = await seedTeamSkillsClone(repo, { alpha: 'ALPHA-BODY' });
     dirs.push(clone.sourceDir);
     let resume!: () => void;
-    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }));
+    const parked = __pauseAfterCachedListForTests(repoRoot, new Promise<void>((resolve) => { resume = resolve; }), testHome());
     releases.push(resume);
 
     // The bare clone and its stamp are shared by every project (and process);
     // this project's own publications never see a refresh made from another.
-    const passive = waitForTeamSkills(repoRoot);
+    const passive = waitForTeamSkills(repoRoot, testHome());
     await parked;
     await clone.addSkill('beta', 'BETA-BODY');
-    expect(names(await refreshTeamSkills(otherRoot))).toEqual(['alpha', 'beta']);
+    expect(names(await refreshTeamSkills(otherRoot, testHome()))).toEqual(['alpha', 'beta']);
     resume();
 
     expect(names(await passive)).toEqual(['alpha', 'beta']);
-    expect(names(getTeamSkillsCached(repoRoot))).toEqual(['alpha', 'beta']);
+    expect(names(getTeamSkillsCached(repoRoot, testHome()))).toEqual(['alpha', 'beta']);
   });
 
   it('resolves empty without waiting on the fetch when no clone exists', async () => {
     const { repoRoot } = heldFetchProject();
 
-    expect(await waitForCachedTeamSkills(repoRoot)).toEqual([]);
-    expect(await settledWithin(waitForTeamSkills(repoRoot), 200)).toBe(false);
+    expect(await waitForCachedTeamSkills(repoRoot, testHome())).toEqual([]);
+    expect(await settledWithin(waitForTeamSkills(repoRoot, testHome()), 200)).toBe(false);
   });
 });
 
@@ -240,7 +243,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
 
   /** The skill as a fresh listing reads it now — its body and `team.commit` at the current `main`. */
   async function listGreeter(repo: string) {
-    const greeter = (await listRemoteSkills({ repo, ref: 'main' })).find((skill) => skill.name === 'greeter');
+    const greeter = (await listRemoteSkills({ repo, ref: 'main' }, testHome())).find((skill) => skill.name === 'greeter');
     if (!greeter) throw new Error('expected the directory skill to be listed');
     return greeter;
   }
@@ -249,6 +252,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
   async function greeterSource() {
     const home = scratch('cez-team-home-');
     vi.stubEnv('HOME', home);
+    useTestHome(Home.sandbox(home));
     const repo = `org-${randomUUID().slice(0, 8)}/skills`;
     const source = await seedTeamDirSkillClone(repo, 'greeter', {
       'SKILL.md': 'say hi v1\n',
@@ -257,27 +261,27 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
     dirs.push(source.sourceDir);
     const greeter = await listGreeter(repo);
     // Keyed exactly like the bare clone, under a sibling cache root.
-    const cacheRoot = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo)));
+    const cacheRoot = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())));
     return { home, repo, source, greeter, cacheRoot };
   }
 
   it('copies the whole directory into <cache>/<commit>/<name> and reuses it for the same commit', async () => {
     const { repo, source, greeter, cacheRoot } = await greeterSource();
-    expect(skillFilesCacheDirFor(repo)).toBe(cacheRoot);
+    expect(skillFilesCacheDirFor(repo, testHome())).toBe(cacheRoot);
 
-    const first = await materializeSkillToCache(greeter);
+    const first = await materializeSkillToCache(greeter, testHome());
     expect(first).toBe(join(cacheRoot, source.commit, 'greeter'));
     expect(readFileSync(join(first!, 'SKILL.md'), 'utf8')).toBe('say hi v1\n');
     expect(readFileSync(join(first!, 'references', 'notes.md'), 'utf8')).toBe('notes v1\n');
 
     // Same commit: the complete copy is reused as-is, not rebuilt.
     writeFileSync(join(first!, 'sentinel'), 'kept\n');
-    expect(await materializeSkillToCache(greeter)).toBe(first);
+    expect(await materializeSkillToCache(greeter, testHome())).toBe(first);
     expect(readFileSync(join(first!, 'sentinel'), 'utf8')).toBe('kept\n');
 
     // A newer commit gets its own directory; the old one is still fresh, so it stays.
     const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
-    const second = await materializeSkillToCache(await listGreeter(repo));
+    const second = await materializeSkillToCache(await listGreeter(repo), testHome());
     expect(second).toBe(join(cacheRoot, v2, 'greeter'));
     expect(readFileSync(join(second!, 'SKILL.md'), 'utf8')).toBe('say hi v2\n');
     expect(existsSync(join(second!, 'references'))).toBe(false);
@@ -289,7 +293,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
     // Another project fetches main to v2 between listing and materializing.
     await source.update({ 'SKILL.md': 'say hi v2\n' });
 
-    const dir = await materializeSkillToCache(greeter);
+    const dir = await materializeSkillToCache(greeter, testHome());
     expect(dir).toBe(join(cacheRoot, source.commit, 'greeter'));
     expect(readFileSync(join(dir!, 'SKILL.md'), 'utf8')).toBe('say hi v1\n');
     expect(readFileSync(join(dir!, 'references', 'notes.md'), 'utf8')).toBe('notes v1\n');
@@ -300,7 +304,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
     const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
     const team = greeter.team!;
     for (const commit of [undefined, 'f'.repeat(40)]) {
-      const dir = await materializeSkillToCache({ ...greeter, team: { ...team, commit } });
+      const dir = await materializeSkillToCache({ ...greeter, team: { ...team, commit } }, testHome());
       expect(dir, String(commit)).toBe(join(cacheRoot, v2, 'greeter'));
       expect(readFileSync(join(dir!, 'SKILL.md'), 'utf8')).toBe('say hi v2\n');
     }
@@ -308,29 +312,29 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
 
   it('prunes commit dirs untouched for a week', async () => {
     const { repo, source, greeter, cacheRoot } = await greeterSource();
-    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(await materializeSkillToCache(greeter, testHome())).toBe(join(cacheRoot, source.commit, 'greeter'));
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000);
     utimesSync(join(cacheRoot, source.commit), eightDaysAgo, eightDaysAgo);
 
     const v2 = await source.update({ 'SKILL.md': 'say hi v2\n' });
-    expect(await materializeSkillToCache(await listGreeter(repo))).toBe(join(cacheRoot, v2, 'greeter'));
+    expect(await materializeSkillToCache(await listGreeter(repo), testHome())).toBe(join(cacheRoot, v2, 'greeter'));
     expect(existsSync(join(cacheRoot, source.commit))).toBe(false);
   });
 
   it('touches a reused commit dir so pruning measures last use, not creation', async () => {
     const { source, greeter, cacheRoot } = await greeterSource();
-    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(await materializeSkillToCache(greeter, testHome())).toBe(join(cacheRoot, source.commit, 'greeter'));
     const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000);
     utimesSync(join(cacheRoot, source.commit), eightDaysAgo, eightDaysAgo);
 
-    expect(await materializeSkillToCache(greeter)).toBe(join(cacheRoot, source.commit, 'greeter'));
+    expect(await materializeSkillToCache(greeter, testHome())).toBe(join(cacheRoot, source.commit, 'greeter'));
     expect(statSync(join(cacheRoot, source.commit)).mtimeMs).toBeGreaterThan(Date.now() - 60_000);
   });
 
   it('degrades to null, never a throw, when the cache cannot be written', async () => {
     const { home, greeter } = await greeterSource();
     writeFileSync(join(home, '.cache', 'cez', 'skill-files'), 'not a directory\n');
-    await expect(materializeSkillToCache(greeter)).resolves.toBeNull();
+    await expect(materializeSkillToCache(greeter, testHome())).resolves.toBeNull();
   });
 });
 
@@ -350,7 +354,7 @@ describe('team skills from several sources (#1494)', () => {
   /** Two real sources both offering `shared`; A is listed twice (two refs), so its copies repeat. */
   async function twoSourceProject(uiState?: Record<string, unknown>): Promise<{ repoRoot: string; a: string; b: string }> {
     vi.stubEnv('HOME', scratch('cez-team-home-'));
-    vi.stubEnv('CEZ_HOME', scratch('cez-team-cezhome-'));
+    useTestHome(scratch('cez-team-cezhome-') ? Home.sandbox(scratch('cez-team-cezhome-')) : undefined);
     const repoRoot = scratch('cez-team-root-');
     const a = `org-${randomUUID().slice(0, 8)}/skills`;
     const b = `org-${randomUUID().slice(0, 8)}/skills`;
@@ -372,19 +376,19 @@ describe('team skills from several sources (#1494)', () => {
 
   it('keeps one copy per source and name in the team list', async () => {
     const { repoRoot, a, b } = await twoSourceProject();
-    expect(refs(await waitForTeamSkills(repoRoot))).toEqual([`${a}:onlya`, `${a}:shared`, `${b}:shared`].sort());
-    expect(refs(getTeamSkillsCached(repoRoot))).toEqual([`${a}:onlya`, `${a}:shared`, `${b}:shared`].sort());
+    expect(refs(await waitForTeamSkills(repoRoot, testHome()))).toEqual([`${a}:onlya`, `${a}:shared`, `${b}:shared`].sort());
+    expect(refs(getTeamSkillsCached(repoRoot, testHome()))).toEqual([`${a}:onlya`, `${a}:shared`, `${b}:shared`].sort());
   });
 
   it('the first source wins a name until its copy is switched off, then the next source shows', async () => {
     const on = await twoSourceProject();
-    await waitForTeamSkills(on.repoRoot);
-    expect((await discoverSkills(on.repoRoot)).find((skill) => skill.name === 'shared')).toMatchObject({ body: 'A-SHARED', team: { repo: on.a } });
+    await waitForTeamSkills(on.repoRoot, testHome());
+    expect((await discoverSkills(on.repoRoot, undefined, testHome())).find((skill) => skill.name === 'shared')).toMatchObject({ body: 'A-SHARED', team: { repo: on.a } });
 
     const off = await twoSourceProject();
     writeFileSync(join(off.repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify({ disabledTeamSkills: [{ repo: off.a, name: 'shared' }] }));
-    await waitForTeamSkills(off.repoRoot);
-    const shared = (await discoverSkills(off.repoRoot)).filter((skill) => skill.name === 'shared');
+    await waitForTeamSkills(off.repoRoot, testHome());
+    const shared = (await discoverSkills(off.repoRoot, undefined, testHome())).filter((skill) => skill.name === 'shared');
     expect(shared).toHaveLength(1);
     expect(shared[0]).toMatchObject({ body: 'B-SHARED', team: { repo: off.b } });
   });

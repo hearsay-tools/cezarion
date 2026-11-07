@@ -1,3 +1,5 @@
+import { Home } from './home/home.ts';
+import { testHome, useTestHome } from './home/test-home.testkit.ts';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -177,6 +179,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), 'cez-provision-home-'));
     vi.stubEnv('HOME', home);
+    useTestHome(Home.sandbox(home));
     main = realpathSync(mkdtempSync(join(tmpdir(), 'cez-provision-main-')));
     await git(main, 'init', '-q', '-b', 'main');
     writeFileSync(join(main, 'a.txt'), 'one\n');
@@ -211,7 +214,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
 
   it('links a local directory skill and its single-file companion into all three dirs', async () => {
     const mainStatus = await status(main);
-    const result = await provisionSkills(worktree, [lead], [lead, helper]);
+    const result = await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
     expect(result.installed).toEqual(['lead-skill', 'helper-skill']);
     for (const dir of AGENT_DIRS) {
       const leadDest = join(worktree, dir, 'skills', 'lead-skill');
@@ -233,7 +236,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     writeFileSync(grillingFile, '---\nname: grilling\n---\nGRILL\n');
     const root: Skill = { name: 'improve-codebase-architecture', body: GRILLING_INSTRUCTION, path: rootFile, source: 'global' };
     const grilling: Skill = { name: 'grilling', body: 'GRILL', path: grillingFile, source: 'global' };
-    const result = await provisionSkills(worktree, [root], [root, grilling, helper]);
+    const result = await provisionSkills(worktree, [root], [root, grilling, helper], { home: testHome() });
     expect(result.installed).toEqual(['improve-codebase-architecture', 'grilling']);
     for (const dir of AGENT_DIRS) {
       expect(readlinkSync(join(worktree, dir, 'skills', 'grilling'))).toBe(join(src, 'grilling'));
@@ -243,7 +246,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
 
   it('writes a generated SKILL.md for a built-in skill', async () => {
     const builtin: Skill = { name: 'auto-skill', description: 'Built in.', body: 'BUILTIN-BODY', path: 'builtin:auto-skill', source: 'builtin' };
-    await provisionSkills(worktree, [builtin], [builtin]);
+    await provisionSkills(worktree, [builtin], [builtin], { home: testHome() });
     const text = readFileSync(join(worktree, '.agents', 'skills', 'auto-skill', 'SKILL.md'), 'utf8');
     expect(text).toBe('---\nname: "auto-skill"\ndescription: "Built in."\n---\n\nBUILTIN-BODY\n');
   });
@@ -256,7 +259,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
         name: 'team-skill', body: 'TEAM-BODY', path: `${repo}@main:skills/team-skill/SKILL.md`, source: 'team',
         team: { repo, ref: 'main', path: 'skills/team-skill/SKILL.md', dir: true, commit: seeded.commit },
       };
-      const result = await provisionSkills(worktree, [team], [team]);
+      const result = await provisionSkills(worktree, [team], [team], { home: testHome() });
       expect(result.installed).toEqual(['team-skill']);
       expect(result.teamCopies['team-skill']).toHaveLength(3);
       expect(readFileSync(join(worktree, '.claude', 'skills', 'team-skill', 'references', 'r.md'), 'utf8')).toBe('ref\n');
@@ -271,7 +274,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     writeFileSync(join(worktree, '.agents', 'skills', 'lead-skill', 'SKILL.md'), 'TRACKED\n');
     await git(worktree, 'add', '-A');
     await git(worktree, ...GIT_ID, 'commit', '-q', '-m', 'tracked skill');
-    await provisionSkills(worktree, [lead], [lead]);
+    await provisionSkills(worktree, [lead], [lead], { home: testHome() });
     expect(readFileSync(join(worktree, '.agents', 'skills', 'lead-skill', 'SKILL.md'), 'utf8')).toBe('TRACKED\n');
     expect(lstatSync(join(worktree, '.agents', 'skills', 'lead-skill')).isSymbolicLink()).toBe(false);
     expect(await status(worktree)).toBe('');
@@ -279,14 +282,14 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
 
   it('rejects an unsafe skill name', async () => {
     const bad: Skill = { ...helper, name: '../escape' };
-    expect((await provisionSkills(worktree, [bad], [bad])).installed).toEqual([]);
+    expect((await provisionSkills(worktree, [bad], [bad], { home: testHome() })).installed).toEqual([]);
     expect(existsSync(join(worktree, '.agents'))).toBe(false);
   });
 
   it('skips a skills dir that links out of the worktree', async () => {
     mkdirSync(join(main, 'outside-claude'), { recursive: true });
     symlinkSync(join(main, 'outside-claude'), join(worktree, '.claude'));
-    const result = await provisionSkills(worktree, [lead], [lead]);
+    const result = await provisionSkills(worktree, [lead], [lead], { home: testHome() });
     expect(result.installed).toEqual(['lead-skill']);
     expect(existsSync(join(main, 'outside-claude', 'skills'))).toBe(false);
     expect(lstatSync(join(worktree, '.agents', 'skills', 'lead-skill')).isSymbolicLink()).toBe(true);
@@ -295,7 +298,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   });
 
   it('writes the owned .gitignore with the marker line', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
     expect(readFileSync(join(worktree, '.agents', 'skills', '.gitignore'), 'utf8'))
       .toBe(`${PROVISION_IGNORE_MARK}\n/.gitignore\n/helper-skill\n/lead-skill\n`);
   });
@@ -305,7 +308,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     writeFileSync(join(worktree, '.agents', 'skills', '.gitignore'), '# repo rules\n*.tmp\n');
     await git(worktree, 'add', '-A');
     await git(worktree, ...GIT_ID, 'commit', '-q', '-m', 'repo gitignore');
-    await provisionSkills(worktree, [lead], [lead]);
+    await provisionSkills(worktree, [lead], [lead], { home: testHome() });
     expect(readFileSync(join(worktree, '.agents', 'skills', '.gitignore'), 'utf8')).toBe('# repo rules\n*.tmp\n');
     expect(readFileSync(join(main, '.git', 'info', 'exclude'), 'utf8').split('\n')).toContain('.agents/skills/lead-skill');
     expect(await status(worktree)).toBe('');
@@ -319,13 +322,13 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     const mine = join(worktree, '.agents', 'skills', 'lead-skill');
     mkdirSync(mine);
     writeFileSync(join(mine, 'SKILL.md'), 'MINE\n');
-    await provisionSkills(worktree, [lead], [lead]);
+    await provisionSkills(worktree, [lead], [lead], { home: testHome() });
     expect(readFileSync(join(mine, 'SKILL.md'), 'utf8')).toBe('MINE\n');
     expect(await status(worktree)).toContain('.agents/skills/lead-skill/SKILL.md');
   });
 
   it('records every entry in the worktree git dir, nothing in the working tree or a link target', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
     const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as {
       version: number; skills: { roots: string[] }; entries: Array<{ path: string; writer: string }>;
     };
@@ -340,38 +343,38 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   });
 
   it('keeps a root from an earlier pass and its companions', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
-    await provisionSkills(worktree, [], [lead, helper]);
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
+    await provisionSkills(worktree, [], [lead, helper], { home: testHome() });
     expect(existsSync(join(worktree, '.agents', 'skills', 'helper-skill'))).toBe(true);
   });
 
   it('removes an owned entry whose skill left the closure', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
     const plainLead: Skill = { ...lead, body: 'no companions now' };
-    await provisionSkills(worktree, [], [plainLead, helper]);
+    await provisionSkills(worktree, [], [plainLead, helper], { home: testHome() });
     expect(existsSync(join(worktree, '.agents', 'skills', 'helper-skill'))).toBe(false);
     expect(readFileSync(join(worktree, '.agents', 'skills', '.gitignore'), 'utf8'))
       .toBe(`${PROVISION_IGNORE_MARK}\n/.gitignore\n/lead-skill\n`);
   });
 
   it('rewrites a link whose source moved', async () => {
-    await provisionSkills(worktree, [lead], [lead]);
+    await provisionSkills(worktree, [lead], [lead], { home: testHome() });
     const movedDir = join(home, 'moved', 'lead-skill');
     mkdirSync(movedDir, { recursive: true });
     writeFileSync(join(movedDir, 'SKILL.md'), 'moved\n');
     const moved: Skill = { ...lead, path: join(movedDir, 'SKILL.md') };
-    const result = await provisionSkills(worktree, [], [moved]);
+    const result = await provisionSkills(worktree, [], [moved], { home: testHome() });
     expect(result.installed).toEqual(['lead-skill']);
     expect(readlinkSync(join(worktree, '.agents', 'skills', 'lead-skill'))).toBe(movedDir);
   });
 
   it('keeps a user-replaced entry and drops its record', async () => {
-    await provisionSkills(worktree, [lead], [lead]);
+    await provisionSkills(worktree, [lead], [lead], { home: testHome() });
     const dest = join(worktree, '.agents', 'skills', 'lead-skill');
     rmSync(dest);
     mkdirSync(dest);
     writeFileSync(join(dest, 'SKILL.md'), 'MINE\n');
-    await provisionSkills(worktree, [], [{ ...lead, body: 'changed' }]);
+    await provisionSkills(worktree, [], [{ ...lead, body: 'changed' }], { home: testHome() });
     await removeProvisionedSkills(worktree);
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
     expect(existsSync(join(worktree, '.claude', 'skills', 'lead-skill'))).toBe(false);
@@ -380,7 +383,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   it('removeProvisionedSkills removes owned entries and owned ignore files only', async () => {
     mkdirSync(join(worktree, '.claude', 'skills', 'mine'), { recursive: true });
     writeFileSync(join(worktree, '.claude', 'skills', 'mine', 'SKILL.md'), 'mine\n');
-    await provisionSkills(worktree, [lead], [lead, helper]);
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
     await removeProvisionedSkills(worktree);
     for (const dir of AGENT_DIRS) {
       expect(existsSync(join(worktree, dir, 'skills', 'lead-skill'))).toBe(false);
@@ -394,7 +397,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
 
   it('falls back to a copy when a link cannot be made', async () => {
     const refuse = async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
-    await provisionSkills(worktree, [lead], [lead, helper], { symlink: refuse });
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome(), symlink: refuse });
     const dest = join(worktree, '.agents', 'skills', 'lead-skill');
     expect(lstatSync(dest).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(dest, 'references', 'notes.txt'), 'utf8')).toBe('notes\n');
@@ -422,7 +425,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
       const mine = join(worktree, '.agents', 'skills', 'team-mine');
       mkdirSync(mine, { recursive: true });
       writeFileSync(join(mine, 'SKILL.md'), 'MINE\n');
-      const result = await provisionSkills(worktree, [team], [team]);
+      const result = await provisionSkills(worktree, [team], [team], { home: testHome() });
       expect(readFileSync(join(mine, 'SKILL.md'), 'utf8')).toBe('MINE\n');
       expect(existsSync(join(mine, 'references'))).toBe(false);
       expect(result.teamCopies['team-mine']).toHaveLength(2);
@@ -434,12 +437,12 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   it('keeps a user-replaced team copy on the next pass', async () => {
     const { team, cleanup } = await seedTeam('team-replaced');
     try {
-      await provisionSkills(worktree, [team], [team]);
+      await provisionSkills(worktree, [team], [team], { home: testHome() });
       const dest = join(worktree, '.agents', 'skills', 'team-replaced');
       rmSync(dest, { recursive: true, force: true });
       mkdirSync(dest);
       writeFileSync(join(dest, 'SKILL.md'), 'MINE\n');
-      await provisionSkills(worktree, [], [team]);
+      await provisionSkills(worktree, [], [team], { home: testHome() });
       expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
       expect(existsSync(join(dest, '.cezar-team-skill.json'))).toBe(false);
     } finally {
@@ -448,11 +451,11 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   });
 
   it('deletes nothing outside the worktree after an agent dir is redirected out of it', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome() });
     const moved = join(main, 'moved-claude');
     renameSync(join(worktree, '.claude'), moved);
     symlinkSync(moved, join(worktree, '.claude'));
-    await provisionSkills(worktree, [], [{ ...lead, body: 'no companions now' }, helper]);
+    await provisionSkills(worktree, [], [{ ...lead, body: 'no companions now' }, helper], { home: testHome() });
     expect(existsSync(join(moved, 'skills', 'helper-skill', 'SKILL.md'))).toBe(true);
     await removeProvisionedSkills(worktree);
     expect(lstatSync(join(moved, 'skills', 'lead-skill')).isSymbolicLink()).toBe(true);
@@ -460,7 +463,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   });
 
   it('writes nothing once the run is cancelled', async () => {
-    const result = await provisionSkills(worktree, [lead], [lead, helper], { cancelled: () => true });
+    const result = await provisionSkills(worktree, [lead], [lead, helper], { home: testHome(), cancelled: () => true });
     expect(result.installed).toEqual([]);
     for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir))).toBe(false);
     expect(existsSync(await manifestPath())).toBe(false);
@@ -469,8 +472,8 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   it('two overlapping passes keep both roots, entries and ignore lines', async () => {
     const other: Skill = { ...helper, name: 'other-skill' };
     await Promise.all([
-      provisionSkills(worktree, [lead], [lead, other]),
-      provisionSkills(worktree, [other], [lead, other]),
+      provisionSkills(worktree, [lead], [lead, other], { home: testHome() }),
+      provisionSkills(worktree, [other], [lead, other], { home: testHome() }),
     ]);
     const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as { skills: { roots: string[] }; entries: Array<{ path: string }> };
     expect([...manifest.skills.roots].sort()).toEqual(['lead-skill', 'other-skill']);
@@ -491,11 +494,11 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     };
 
   it('an entry interrupted before its record stays out of git and is reinstalled', async () => {
-    await provisionSkills(worktree, [helper], [lead, helper]);
-    await provisionSkills(worktree, [lead], [lead, helper], { faults: crashAt('placed', '.claude/skills/lead-skill') });
+    await provisionSkills(worktree, [helper], [lead, helper], { home: testHome() });
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome(), faults: crashAt('placed', '.claude/skills/lead-skill') });
     expect(lstatSync(join(worktree, '.claude', 'skills', 'lead-skill')).isSymbolicLink()).toBe(true);
     expect(await status(worktree)).toBe('');
-    await provisionSkills(worktree, [], [lead, helper]);
+    await provisionSkills(worktree, [], [lead, helper], { home: testHome() });
     expect(await status(worktree)).toBe('');
     for (const dir of AGENT_DIRS) {
       expect(readlinkSync(join(worktree, dir, 'skills', 'lead-skill'))).toBe(join(home, 'skills-src', 'lead-skill'));
@@ -506,15 +509,15 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   });
 
   it('an interrupted entry the user then changed stays theirs, and out of git', async () => {
-    await provisionSkills(worktree, [lead], [lead], { faults: crashAt('placed', '.claude/skills/lead-skill') });
+    await provisionSkills(worktree, [lead], [lead], { home: testHome(), faults: crashAt('placed', '.claude/skills/lead-skill') });
     const dest = join(worktree, '.claude', 'skills', 'lead-skill');
     rmSync(dest);
     mkdirSync(dest);
     writeFileSync(join(dest, 'SKILL.md'), 'MINE\n');
-    await provisionSkills(worktree, [], [lead]);
+    await provisionSkills(worktree, [], [lead], { home: testHome() });
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
     expect(await status(worktree)).toBe('');
-    await provisionSkills(worktree, [], [{ ...lead, body: 'still lead' }]);
+    await provisionSkills(worktree, [], [{ ...lead, body: 'still lead' }], { home: testHome() });
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
     await removeProvisionedSkills(worktree);
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
@@ -523,10 +526,10 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
 
   it('a copied skill follows its source when the source changes in place', async () => {
     const refuse = async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
-    await provisionSkills(worktree, [lead], [lead, helper], { symlink: refuse });
+    await provisionSkills(worktree, [lead], [lead, helper], { home: testHome(), symlink: refuse });
     writeFileSync(join(home, 'skills-src', 'lead-skill', 'references', 'notes.txt'), 'new notes\n');
     writeFileSync(helper.path, 'NEW-HELPER\n');
-    const result = await provisionSkills(worktree, [], [lead, helper], { symlink: refuse });
+    const result = await provisionSkills(worktree, [], [lead, helper], { home: testHome(), symlink: refuse });
     expect(result.installed).toEqual(['lead-skill', 'helper-skill']);
     expect(readFileSync(join(worktree, '.agents', 'skills', 'lead-skill', 'references', 'notes.txt'), 'utf8')).toBe('new notes\n');
     expect(readFileSync(join(worktree, '.agents', 'skills', 'helper-skill', 'SKILL.md'), 'utf8')).toBe('NEW-HELPER\n');
@@ -573,7 +576,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     copy: {
       rel: '.agents/skills/lead-skill',
       setup: async () => ({
-        root: lead, catalog: [lead, helper], options: { symlink: refuse },
+        root: lead, catalog: [lead, helper], options: { home: testHome(), symlink: refuse },
         changed: async () => {
           writeFileSync(join(home, 'skills-src', 'lead-skill', 'references', 'notes.txt'), 'new notes\n');
           return [lead, helper];
@@ -609,16 +612,16 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     const c = KINDS[kind]!;
     const { root, catalog, changed, options = {}, cleanup } = await c.setup();
     try {
-      await provisionSkills(worktree, [root], catalog, options);
+      await provisionSkills(worktree, [root], catalog, { home: testHome(), ...options });
       const dest = join(worktree, c.rel);
       c.changes[change]!(dest);
       const theirs = await identityOf(dest);
-      await provisionSkills(worktree, [], catalog, options);
+      await provisionSkills(worktree, [], catalog, { home: testHome(), ...options });
       expect(await identityOf(dest), 'the same pass').toBe(theirs);
       const next = await changed();
-      await provisionSkills(worktree, [], next, options);
+      await provisionSkills(worktree, [], next, { home: testHome(), ...options });
       expect(await identityOf(dest), 'a changed source').toBe(theirs);
-      await provisionSkills(worktree, [], next.filter((skill) => skill.name !== root.name), options);
+      await provisionSkills(worktree, [], next.filter((skill) => skill.name !== root.name), { home: testHome(), ...options });
       expect(await identityOf(dest), 'a closure that drops it').toBe(theirs);
       await removeProvisionedSkills(worktree);
       expect(await identityOf(dest), 'removeProvisionedSkills').toBe(theirs);
@@ -632,11 +635,11 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     const c = KINDS[kind]!;
     const { root, catalog, options = {}, cleanup } = await c.setup();
     try {
-      await provisionSkills(worktree, [root], catalog, options);
+      await provisionSkills(worktree, [root], catalog, { home: testHome(), ...options });
       const dest = join(worktree, c.rel);
       const ours = await identityOf(dest);
       rmSync(dest, { recursive: true, force: true });
-      await provisionSkills(worktree, [], catalog, options);
+      await provisionSkills(worktree, [], catalog, { home: testHome(), ...options });
       expect(await identityOf(dest)).toBe(ours);
       expect(await uncoveredPaths(worktree)).toEqual([]);
       expect(await status(worktree)).toBe('');
@@ -653,7 +656,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
       writeFileSync(join(dest, 'SKILL.md'), 'OLD\n');
       const { repo, ref, path, commit } = team.team!;
       writeFileSync(join(dest, '.cezar-team-skill.json'), `${JSON.stringify({ repo, ref, path, commit }, null, 2)}\n`);
-      const result = await provisionSkills(worktree, [team], [team]);
+      const result = await provisionSkills(worktree, [team], [team], { home: testHome() });
       expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('OLD\n');
       expect(existsSync(join(dest, 'references'))).toBe(false);
       expect(result.teamCopies['team-unrecorded']).toEqual([
@@ -690,7 +693,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
         ],
       }));
       // The closure drops both: the link goes, as before; the team copy stays, and out of git.
-      await provisionSkills(worktree, [], [helper]);
+      await provisionSkills(worktree, [], [helper], { home: testHome() });
       expect(readFileSync(join(copy, 'SKILL.md'), 'utf8')).toBe('OLD\n');
       expect(existsSync(leadLink)).toBe(false);
       expect(existsSync(legacy)).toBe(false);
@@ -704,7 +707,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   it('writes nothing outside a git worktree', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'cez-provision-plain-'));
     try {
-      expect((await provisionSkills(plain, [lead], [lead])).installed).toEqual([]);
+      expect((await provisionSkills(plain, [lead], [lead], { home: testHome() })).installed).toEqual([]);
       expect(existsSync(join(plain, '.agents'))).toBe(false);
     } finally {
       rmSync(plain, { recursive: true, force: true });

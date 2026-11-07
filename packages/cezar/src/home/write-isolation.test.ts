@@ -1,8 +1,9 @@
+import { Home } from './home.ts';
+import { useTestHome } from './test-home.testkit.ts';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { resolveHome } from './resolve.ts';
 import { atomicWriteJsonSync, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { loadAgentAccounts, mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { restoreBackup } from '../workspace/backup-cli.ts';
@@ -17,8 +18,8 @@ afterEach(() => {
 
 function homes() {
   const root = mkdtempSync(join(tmpdir(), 'cez-home-writes-')); roots.push(root);
-  return { selected: resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'selected') } }),
-    ambient: resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'ambient') } }), root };
+  return { selected: Home.sandbox(join(root, 'selected')),
+    ambient: Home.sandbox(join(root, 'ambient')), root };
 }
 
 it.each(['config.json', 'agent-accounts.json'] as const)('restores %s only in the injected Home', async file => {
@@ -30,7 +31,7 @@ it.each(['config.json', 'agent-accounts.json'] as const)('restores %s only in th
   atomicWriteJsonSync(ambientPath, { ...snapshot, extra: 'ambient' });
   const before = readFileSync(ambientPath, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
-  vi.stubEnv('CEZ_HOME', ambient.root);
+  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
   if (file === 'config.json') await mergeWriteWorkspaceConfig(value => { value.extra = 'replaced'; }, selected);
   else await mergeWriteAgentAccounts(value => { value.extra = 'replaced'; }, selected);
 
@@ -53,7 +54,7 @@ it('keeps migration reads, imports, UI state and schemaVersion in the injected H
   const repo = join(root, 'repo');
   atomicWriteJsonSync(join(repo, '.ai/cezar/config.json'), { maxParallel: 5, memoryLimitMb: 1024 });
   atomicWriteJsonSync(join(repo, '.ai/cezar/ui-state.json'), { appearance: { accent: 'violet' }, notifications: { enabled: false } });
-  vi.stubEnv('CEZ_HOME', ambient.root);
+  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
 
   await runMigrations({ bootRepoRoot: repo, home: selected });
   await runMigrations({ bootRepoRoot: repo, home: selected });
@@ -72,7 +73,7 @@ it('imports legacy accounts from the injected Home without writing to the ambien
   atomicWriteJsonSync(ambient.workspaceConfig, { agentProfiles: [{ ...account, id: 'ambient' }] });
   const before = readFileSync(ambient.workspaceConfig, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
-  vi.stubEnv('CEZ_HOME', ambient.root);
+  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
 
   expect((await loadAgentAccounts(selected)).accounts).toEqual([account]);
   expect(JSON.parse(readFileSync(selected.agentAccounts, 'utf8')).accounts).toEqual([account]);
@@ -86,7 +87,7 @@ it('reads and writes the update channel in the injected Home', async () => {
   atomicWriteJsonSync(ambient.workspaceConfig, { updateChannel: 'stable' });
   const before = readFileSync(ambient.workspaceConfig, 'utf8');
   const ambientFiles = readdirSync(ambient.root);
-  vi.stubEnv('CEZ_HOME', ambient.root);
+  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
   const service = new SelfUpdateService({ pkgName: '@wjarka/cezarion', version: '1.2.3', entry: '/entry', home: selected, restart: () => {} });
 
   expect(await service.channel()).toBe('nightly');

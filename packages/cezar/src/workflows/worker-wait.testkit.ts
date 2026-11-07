@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { observeWaitTimers } from './waits.testkit.ts';
@@ -148,11 +149,11 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     work = new TrackedWork(); toolGenerations.clear();
-    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     manager = new RunManager(store, root, { semaphore, work, ...(options.unreadInputGraceMs === undefined ? {} : { unreadInputGraceMs: options.unreadInputGraceMs }),
-      ...(options.subagentGraceMs === undefined ? {} : { subagentGraceMs: options.subagentGraceMs }),
-      ...(options.subagentDeadlineMs === undefined ? {} : { subagentDeadlineMs: options.subagentDeadlineMs }) }); track();
+      ...(options.subagentGraceMs === undefined ? { home: testHome(),} : { home: testHome(), subagentGraceMs: options.subagentGraceMs }),
+      ...(options.subagentDeadlineMs === undefined ? { home: testHome(),} : { home: testHome(), subagentDeadlineMs: options.subagentDeadlineMs }) }); track();
   });
   afterEach(async () => {
     const errors: unknown[] = [];
@@ -263,7 +264,7 @@ export function parent(task = 'mock:hold', runner: RunnerId = 'claude') {
 export async function delegatingParent(options: { permissions: WorkerOperation[]; task?: string; runner?: RunnerId }) {
   const p = await startParent(options.task ?? 'mock:hold', options.runner ?? 'claude', [...options.permissions]);
   const service = new DelegationService();
-  const detach = service.registerProject({ id: 'project', root, store, manager });
+  const detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
   const credentials = new CredentialRegistry();
   const callers = new Map<string, Caller>();
   let closed = false;
@@ -325,7 +326,7 @@ export async function restart(fakeClock = false, diskCheckpoint?: readonly unkno
   for (const [path, content] of events ?? []) writeFileSync(path, content);
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-  manager = new RunManager(store, root, { semaphore, work }); track(); checkpoint('restart-recover-start');
+  manager = new RunManager(store, root, { home: testHome(), semaphore, work }); track(); checkpoint('restart-recover-start');
   await manager.recover(); checkpoint('restart-recovered');
 }
 
@@ -372,6 +373,6 @@ export function reopenRuntime() {
     if (!(error instanceof RunStoreOpenError)) throw error;
     store = RunStore.unavailable(join(root, '.ai/cezar'), error);
   }
-  manager = new RunManager(store, root, { semaphore, work });
+  manager = new RunManager(store, root, { home: testHome(), semaphore, work });
   track();
 }

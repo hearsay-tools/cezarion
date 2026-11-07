@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { workerCollectedResultSchema, workerInspectionSchema } from '@open-mercato/cezar-contract/delegation';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -92,8 +93,8 @@ export function registerDelegationIntegrationGroup(group: 'reviewed-integration'
     for (const [name, value] of Object.entries({ CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '0', CEZ_AUTONAME: '0', CEZ_REVIEW_GATE: '1',
       CEZ_CLAUDE_BIN: wire, CEZ_CODEX_BIN: wire, CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: codexHome })) vi.stubEnv(name, value);
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
-    manager = createFixtureManager(store, repo, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 3 } }) }); track();
-    controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });
+    manager = createFixtureManager(store, repo, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 3 } }) }); track();
+    controller = await DelegationController.start(); controller.attachProject({ home: testHome(), id: 'integration', root: repo, store, manager });
   });
 
   afterEach(async () => {
@@ -247,7 +248,7 @@ if (group === 'reviewed-integration') {
     manager.dispose(); store.close(); await controller.close();
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repo); track();
-    controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });
+    controller = await DelegationController.start(); controller.attachProject({ home: testHome(), id: 'integration', root: repo, store, manager });
     await manager.recover();
     expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.review);
     expect(store.readWorkerResultDiff(p.id, a)).toContain('+alpha');
@@ -257,7 +258,7 @@ if (group === 'reviewed-integration') {
     await input(p.id); rmSync(lockPath);
     expect(await destroy(p.id, a)).toMatchObject({ state: 'complete', remaining: [] });
     expect(await destroy(p.id, a)).toMatchObject({ state: 'complete', remaining: [] });
-    const app = createApp({ repoRoot: repo, store, manager, version: 'test', bootProjectId: 'integration' });
+    const app = createApp({ home: testHome(), repoRoot: repo, store, manager, version: 'test', bootProjectId: 'integration' });
     for (const id of [a, b]) {
       const response = await app.request(`http://127.0.0.1/api/v1/runs/${id}`, { method: 'DELETE', headers: { host: '127.0.0.1' } });
       expect(response.status, await response.text()).toBe(200);

@@ -1,3 +1,5 @@
+import type { Home } from './home/home.ts';
+import { testHome } from './home/test-home.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +23,7 @@ export interface SeededTeamSkillsClone {
  * bare clone of a local repo holding one `commands/<name>.md` per entry. No stamp
  * is written, so a passive load treats the clone as due for a fetch.
  */
-export async function seedTeamSkillsClone(repo: string, skills: Record<string, string>): Promise<SeededTeamSkillsClone> {
+export async function seedTeamSkillsClone(repo: string, skills: Record<string, string>, home: Home = testHome()): Promise<SeededTeamSkillsClone> {
   const sourceDir = mkdtempSync(join(tmpdir(), 'cez-team-skills-src-'));
   await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: sourceDir });
   const commit = async (files: Record<string, string>, message: string) => {
@@ -31,7 +33,7 @@ export async function seedTeamSkillsClone(repo: string, skills: Record<string, s
     await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', message], { cwd: sourceDir });
   };
   await commit(skills, 'skills');
-  const bareDir = bareDirFor(repo);
+  const bareDir = bareDirFor(repo, home);
   mkdirSync(join(bareDir, '..'), { recursive: true });
   await execFileAsync('git', ['clone', '-q', '--bare', '--', sourceDir, bareDir]);
   return {
@@ -78,7 +80,7 @@ export async function seedTeamDirSkillClone(
     return (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir })).stdout.trim();
   };
   const first = await commit(files);
-  const bareDir = bareDirFor(repo);
+  const bareDir = bareDirFor(repo, testHome());
   mkdirSync(join(bareDir, '..'), { recursive: true });
   await execFileAsync('git', ['clone', '-q', '--bare', '--', sourceDir, bareDir]);
   return {

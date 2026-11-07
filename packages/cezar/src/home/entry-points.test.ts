@@ -1,3 +1,5 @@
+import { Home } from './home.ts';
+import { testHome, useTestHome } from './test-home.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
 import { resolveHome } from './resolve.ts';
@@ -74,7 +76,7 @@ it('passes the resolved boot home to migrations', async () => {
 
 it('restarts through the injected Home current entry after the ambient home changes', async () => {
   const home = resolveHome({ purpose: 'server', env: { CEZ_HOME: '/resolved/home' } });
-  vi.stubEnv('CEZ_HOME', '/later/home');
+  useTestHome(Home.sandbox(join(testHome().root, 'later')));
   const restart = vi.fn();
   const server = { shutdownForRestart: vi.fn(async () => {}), address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 4321 }) };
   await restartServe(server as unknown as Parameters<typeof restartServe>[0], restart, { forward: vi.fn() }, home);

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import type { Caller } from './credentials.ts';
 import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
@@ -60,7 +61,7 @@ export function provisionWorkflowFixture() {
       const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false, discardQueuedMessages: () => {}, holdsHumanInput: () => false, interrupt: finish, end: finish };
       sessions.push({ spec, session, emit: event => emit?.(event), finish }); return session;
     } }));
-    controller = await DelegationController.start(); controller.attachProject({ id: 'project', root: f.root, manager: f.manager, store: f.store });
+    controller = await DelegationController.start(); controller.attachProject({ home: testHome(), id: 'project', root: f.root, manager: f.manager, store: f.store });
   });
   afterEach(async () => {
     for (const manager of recoveredManagers) {
@@ -80,7 +81,7 @@ export function provisionWorkflowFixture() {
   // Real acceptance/store/manager and account registry; only the external agent wire is fake.
   async function acceptIdentityWorker(settings: { model?: string; effort?: string } = { model: 'haiku', effort: 'high' }, grants?: { allowedTools: string[]; bashAllowlist: string[] }, spawnInputs: Pick<WorkerSpawnRequest, 'context' | 'backend' | 'model' | 'workflow'> = {}, prepare?: (parentId: string) => void): Promise<AcceptedIdentityWorker> {
     const home = join(f.root, 'account-a'); mkdirSync(home);
-    await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'account-a', provider: 'claude', configDir: home, label: 'A', addedAt: '' }]; });
+    await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'account-a', provider: 'claude', configDir: home, label: 'A', addedAt: '' }]; }, testHome());
     const workflow = grants ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, ...grants }] } : QUICK_TASK_WORKFLOW;
     const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', ...settings, agentProfile: 'account-a', worktree: false });
     await until(() => sessions.length === 1);
@@ -106,7 +107,7 @@ export function provisionWorkflowFixture() {
       const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
       const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
       observeTools(manager);
-      controller.attachProject({ id: 'restarted', root: f.root, store, manager });
+      controller.attachProject({ home: testHome(), id: 'restarted', root: f.root, store, manager });
       await manager.recover(); return { manager, store };
     }
     await acceptedBeforeLaunch(accepted.child.workerId);

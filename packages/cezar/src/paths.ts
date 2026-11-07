@@ -1,5 +1,6 @@
 import { homedir, userInfo } from 'node:os';
-import { dirname, join, resolve, sep } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
@@ -21,12 +22,36 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
     || Object.keys(process.env).some((key) => key.startsWith('STRYKER_'));
   if (!testing) return;
   const realHome = join(userInfo().homedir, '.cezar');
-  const destination = resolve(path);
-  if (destination !== realHome && !destination.startsWith(realHome + sep)) return;
-  throw new Error(
+  const refusal = () => new Error(
     `[cez] refusing to write ${path} from a test run — CEZ_HOME is not pinned to a sandbox. ` +
       'Pin it to a test sandbox so the suite never touches the real cezar home.',
   );
+  // Resolve existing ancestors too: the destination itself may not exist yet.
+  function canonicalTarget(target: string, rejectDangling = true): string {
+    let ancestor = resolve(target);
+    const remaining: string[] = [];
+    for (;;) {
+      try { return join(realpathSync(ancestor), ...remaining); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
+      }
+      // A dangling link has no canonical target; fail closed instead of treating it as a missing directory.
+      try {
+        if (lstatSync(ancestor).isSymbolicLink()) {
+          if (!rejectDangling) return resolve(target);
+          throw refusal();
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
+      }
+      const parent = dirname(ancestor);
+      if (parent === ancestor) throw refusal();
+      remaining.unshift(basename(ancestor));
+      ancestor = parent;
+    }
+  }
+  const protectedHome = canonicalTarget(realHome, false);
+  const destination = canonicalTarget(path);
+  if (destination === protectedHome || destination.startsWith(protectedHome + sep)) throw refusal();
 }
 
 /**

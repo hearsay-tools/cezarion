@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HOME_LOCATING_ENV } from '../core/agent-env.ts';
-import { cezarHomeDir, workspaceConfigPath, workspaceUiStatePath, agentAccountsPath, serverInstancesDir, serverStatePath, serverLockPath, agentHomePaths, expandTilde, ompProfilesDir, claudeStateFilePath } from '../paths.ts';
+import { workspaceConfigPath, workspaceUiStatePath, agentAccountsPath, serverInstancesDir, serverStatePath, serverLockPath, agentHomePaths, expandTilde, ompProfilesDir, claudeStateFilePath } from '../paths.ts';
 import { remoteSettingsPath } from '../remote-settings.ts';
 import { binDir, versionsDir, currentEntry } from '../self-update/layout.ts';
 import { posixLauncher, windowsLauncher } from '../self-update/launcher.ts';
@@ -11,6 +11,8 @@ import { cezCacheDir, resolveChromium } from '../preview/chromium.ts';
 import { resolveHome } from './resolve.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 
+// Shared setup now loads the write guard before this file installs its OS-home mock.
+vi.hoisted(() => vi.resetModules());
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => '/home/operator' }));
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
@@ -54,7 +56,6 @@ describe('legacy Home compatibility (release switch off)', () => {
   it('keeps the release gate off', () => { expect(REBRAND_SWITCH).toBe(false); });
 
   it.each(cases)('preserves every named path and public path helper: $name', ({ env, expected }) => {
-    vi.stubEnv('CEZ_HOME', env.CEZ_HOME ?? '');
     const home = resolveHome({ purpose: 'cli', env });
     const { serverState: _state, serverLock: _lock, rootOverride: _override, ...paths } = home;
     expect(slashPaths({ ...paths, serverState: home.serverState(), namedServerState: home.serverState('example-com'),
@@ -62,12 +63,12 @@ describe('legacy Home compatibility (release switch off)', () => {
       currentEntry: currentEntry(env, home), bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),
     })).toEqual(expected);
     const readers = {
-      root: cezarHomeDir(env), workspaceConfig: workspaceConfigPath(env), workspaceUiState: workspaceUiStatePath(),
-      agentAccounts: agentAccountsPath(), remoteSettings: remoteSettingsPath(env), serverInstances: serverInstancesDir(),
-      versions: versionsDir(env), bin: binDir(env), cache: cezCacheDir(),
-      serverState: serverStatePath(), namedServerState: serverStatePath('example-com'),
-      serverLock: serverLockPath(), namedServerLock: serverLockPath('example-com'), currentEntry: currentEntry(env),
-      bareSkills: bareDirFor('team/skills'), skillFiles: skillFilesCacheDirFor('team/skills'),
+      root: resolveHome({ purpose: 'cli', env }).root, workspaceConfig: workspaceConfigPath(env, home), workspaceUiState: workspaceUiStatePath(home),
+      agentAccounts: agentAccountsPath(home), remoteSettings: remoteSettingsPath(env, home), serverInstances: serverInstancesDir(home),
+      versions: versionsDir(env, home), bin: binDir(env, home), cache: cezCacheDir(home),
+      serverState: serverStatePath(undefined, home), namedServerState: serverStatePath('example-com', home),
+      serverLock: serverLockPath(undefined, home), namedServerLock: serverLockPath('example-com', home), currentEntry: currentEntry(env, home),
+      bareSkills: bareDirFor('team/skills', home), skillFiles: skillFilesCacheDirFor('team/skills', home),
     };
     for (const [name, value] of Object.entries(slashPaths(readers))) expect(value, name).toBe(expected[name as keyof typeof expected]);
   });
@@ -94,11 +95,11 @@ describe('legacy Home compatibility (release switch off)', () => {
   });
 
   it.each([undefined, '', 'relative/home', '  ', "/srv/operator's home"])(
-    'keeps env-object and shim semantics for CEZ_HOME=%s', CEZ_HOME => {
+    'keeps env-object root semantics for CEZ_HOME=%s', CEZ_HOME => {
       const env = { CEZ_HOME, HOME: '/ignored', HSQ_HOME: '/ignored', XDG_CACHE_HOME: '/ignored' };
       const root = CEZ_HOME || '/home/operator/.cezar';
       expect(resolveHome({ purpose: 'cli', env }).root.replaceAll('\\', '/')).toBe(root);
-      expect(cezarHomeDir(env).replaceAll('\\', '/')).toBe(root);
+      expect(resolveHome({ purpose: 'cli', env }).root.replaceAll('\\', '/')).toBe(root);
       expect(resolveHome({ purpose: 'cli', env }).cache.replaceAll('\\', '/')).toBe('/home/operator/.cache/cez');
     });
 

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { observationClock } from './observation-clock.testkit.ts';
@@ -93,7 +94,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -132,7 +133,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId }) => {
             const startSeq = store.readEvents(runId).length;
             const clock = replyObservationClock();
@@ -169,7 +170,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           const gateRoot = mkdtempSync(join(tmpdir(), 'cez-late-reply-'));
           const release = join(gateRoot, 'release');
           try {
@@ -208,7 +209,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           const gateRoot = mkdtempSync(join(tmpdir(), 'cez-late-turn-'));
           const release = join(gateRoot, 'release');
           try {
@@ -236,7 +237,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
       }
       if (row.id === 'F10') {
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           const gateRoot = backend === 'cursor' ? mkdtempSync(join(tmpdir(), 'cez-nudge-content-')) : undefined;
           try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId }) => {
             const startSeq = store.readEvents(runId).length;
@@ -270,7 +271,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
       }
       for (const mode of ['fresh', 'continuation'] as const) {
         it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
-          const semaphore = new WorkspaceSemaphore();
+          const semaphore = new WorkspaceSemaphore({ home: testHome() });
           await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId }) => {
             if (mode === 'continuation') {
               manager.enqueueOwnedRun(runId);
