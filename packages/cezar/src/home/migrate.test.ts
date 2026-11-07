@@ -11,6 +11,7 @@ import { HomeStore } from './store.ts';
 import { holdCockpitLease } from './leases.ts';
 import { VersionLog } from './version-log.ts';
 import { migrationFixture, json, rawJson } from './migration.testkit.ts';
+import { prepareOperatorHome } from './entry.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
@@ -75,16 +76,33 @@ it('B3: a reset interrupted after replacement but before HEAD advanced refuses m
   expect(getHomeRecovery(legacy).files).toContainEqual(expect.objectContaining({ file: 'agent-accounts.json', reason: 'reset', canRestore: true }));
 });
 
-it.each(['absent', 'empty'])('step 1: an %s legacy home creates only a fresh target marker', kind => {
+it.each(['absent', 'empty'])('step 1: an %s legacy home commits a fresh decision with an empty inventory', kind => {
   const root = storeRoot(), old = join(root, 'legacy');
   if (kind === 'empty') mkdirSync(old);
   const legacy = homePaths(old, join(root, 'cache'), old);
   const target = Home.sandbox(join(root, 'new'), { layout: 'split' });
   expect(migrateLegacyHome(legacy, target).status).toBe('fresh');
-  expect(readInstallMarker(target.config)?.state).toBeUndefined();
-  expect(readMigrationRecord(target)).toBeUndefined();
+  expect(readInstallMarker(target.config)).toMatchObject({ state: 'committed', migratedFrom: old });
+  expect(readMigrationRecord(target)).toMatchObject({ files: [], backup: '', legacyRoot: old });
   expect(existsSync(join(legacy.root, '.migrating'))).toBe(false);
-  expect(kind === 'absent' ? !existsSync(old) : readdirSync(old).length === 0).toBe(true);
+  if (kind === 'absent') expect(existsSync(old)).toBe(false);
+  else expect(readdirSync(old).filter(name => name !== '.locks')).toEqual(['MOVED.json']);
+  expect(migrateLegacyHome(legacy, target).status).toBe('unchanged');
+  if (kind === 'absent') expect(existsSync(old)).toBe(false);
+});
+
+it('T1: after a fresh boot, an older binary that writes legacy config.json does not block the next boot', () => {
+  const root = storeRoot(), old = join(root, 'legacy');
+  const legacy = homePaths(old, join(root, 'cache'), old);
+  const target = Home.sandbox(join(root, 'new'), { layout: 'split' });
+  const env = { HOME: root, SHELL: '/bin/bash' };
+  prepareOperatorHome(target, 'serve', env, { enabled: true, legacy });
+  new HomeStore(target).writeJson(target.workspaceConfig, { projects: [], saved: 'split home' });
+  rawJson(legacy.workspaceConfig, { projects: [{ id: 'old', root: '/old' }] }); // Older binary.
+  expect(prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toBe(target);
+  expect(json(target.workspaceConfig).saved).toBe('split home');
+  expect(readMigrationRecord(target)!.files).toEqual([]);
+  expect(json(legacy.workspaceConfig).projects[0].id).toBe('old');
 });
 
 it('step 1: a .bak-only legacy home recovers through the loader and merge writer before migrating', () => {

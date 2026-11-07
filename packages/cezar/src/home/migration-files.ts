@@ -50,7 +50,8 @@ export function copyPrivateTree(source: string, target: string,
       assertHomePath(target, to);
       privateDirectory(to, migrationPrivacy);
     } else if (stat.isSymbolicLink()) {
-      const link = realpathSync(from);
+      const link = existingLinkTarget(from);
+      if (link === undefined) { copyDanglingLink(canonical, key, from, to, finalRoot); continue; }
       const external = !insideDirectory(canonical, link);
       if (external && !allowExternalLink(key, link)) throw new Error(`Migration link escapes source: ${from}`);
       const destination = external ? link : join(finalRoot, relative(canonical, link));
@@ -69,6 +70,23 @@ export function copyPrivateTree(source: string, target: string,
       if (stat.mode & 0o100) chmodSync(to, 0o700);
     }
   }
+}
+
+function existingLinkTarget(path: string): string | undefined {
+  try { return realpathSync(path); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+/** A dangling link inventories like any link. Keep it when its lexical target stays inside. */
+function copyDanglingLink(canonical: string, key: string, from: string, to: string, finalRoot: string): void {
+  const written = readlinkSync(from);
+  const lexical = resolve(dirname(join(canonical, key)), written);
+  if (!insideDirectory(canonical, lexical)) throw new Error(`Migration link escapes source: ${from}`);
+  privateDirectory(dirname(to), migrationPrivacy);
+  rmSync(to, { force: true });
+  symlinkSync(isAbsolute(written) ? join(finalRoot, relative(canonical, lexical)) : written, to, 'file');
 }
 
 /** A pending destination is disposable. Publish only a complete fresh copy, never merge trees. */

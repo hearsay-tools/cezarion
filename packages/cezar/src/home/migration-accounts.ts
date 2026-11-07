@@ -146,7 +146,9 @@ export function finishDeferredAccounts(legacy: Home, target: Home): void {
       if (current && resolve(expandTilde(current.configDir)) === resolve(destination)) continue;
       if (!current || current.configDir !== deferred.configDir) { pending.push(deferred); continue; }
       const account = accounts.find(account => account.id === deferred.id && account.configDir === deferred.configDir);
-      if (!account || accountInUse(legacy, deferred.id)) { pending.push(deferred); continue; }
+      // Projects registered after commit live only in the target registry; older binaries
+      // still register in the legacy one. Either can hold a live run on the account.
+      if (!account || accountInUse(target, deferred.id) || accountInUse(legacy, deferred.id)) { pending.push(deferred); continue; }
       replacePrivateTree(account.source, account.target);
       store.transaction(() => {
         const source = readAgentAccountSource(target).value;

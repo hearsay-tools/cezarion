@@ -94,6 +94,20 @@ it.skipIf(process.platform === 'win32')('refuses copy links that escape the sour
   expect(readFileSync(join(outside, 'secret'), 'utf8')).toBe('private');
 });
 
+it.skipIf(process.platform === 'win32')('copies dangling links that stay inside the source and refuses dangling links that escape it', () => {
+  const source = storeRoot(), target = join(storeRoot(), 'account');
+  mkdirSync(join(source, 'hooks'));
+  writeFileSync(join(source, 'auth.json'), '{}');
+  symlinkSync('../missing.json', join(source, 'hooks', 'relative'));
+  symlinkSync(join(source, 'gone', 'cache'), join(source, 'absolute'));
+  replacePrivateTree(source, target);
+  expect(readlinkSync(join(target, 'hooks', 'relative'))).toBe('../missing.json');
+  expect(readlinkSync(join(target, 'absolute'))).toBe(join(target, 'gone', 'cache'));
+  expect(readFileSync(join(target, 'auth.json'), 'utf8')).toBe('{}');
+  symlinkSync('../../outside-missing', join(source, 'hooks', 'escape'));
+  expect(() => replacePrivateTree(source, join(storeRoot(), 'refused'))).toThrow(/escapes source/);
+});
+
 it('an absent source inventories no files and a failed archive leaves no staging copy', () => {
   expect(migrationFiles(join(storeRoot(), 'missing'))).toEqual([]);
   const target = join(storeRoot(), 'archive.tar.gz');

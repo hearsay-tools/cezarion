@@ -185,6 +185,27 @@ it('step 7: a live registered run defers its account; the next boot copies it af
   expect(getHomeRecovery(target)).toEqual({ files: [] });
 });
 
+it('a deferred account stays deferred while a project registered only in the migrated home runs it', () => {
+  const { legacy, target, account, env } = accountFixture();
+  const legacyProject = storeRoot(), targetProject = storeRoot();
+  Home.seed(legacy, legacy.workspaceConfig, { projects: [{ id: 'legacy-project', root: legacyProject }] });
+  const first = RunStore.open(join(legacyProject, '.ai', 'cezar'), { keepLive: true });
+  const run = first.createRun({ title: 'defer', workflow: 'quick-task', task: 'test', steps: [], agentProfile: account.id });
+  first.move(run.id, 'start'); first.flush();
+  try { migrateLegacyHome(legacy, target); } finally { first.close(); }
+  new HomeStore(target).writeJson(target.workspaceConfig, { ...json(target.workspaceConfig), projects: [{ id: 'new-project', root: targetProject }] });
+  const second = RunStore.open(join(targetProject, '.ai', 'cezar'), { keepLive: true });
+  const live = second.createRun({ title: 'live in migrated home', workflow: 'quick-task', task: 'test', steps: [], agentProfile: account.id });
+  second.move(live.id, 'start'); second.flush();
+  try {
+    prepareMigrationHome(target, env, { enabled: true, legacy });
+    expect(readMigrationRecord(target)!.deferredAccounts).toEqual([{ id: account.id, configDir: account.configDir }]);
+    expect(json(target.agentAccounts).accounts[0].configDir).toBe(account.configDir);
+  } finally { second.close(); }
+  prepareMigrationHome(target, env, { enabled: true, legacy });
+  expect(json(target.agentAccounts).accounts[0].configDir).toBe(join(target.data, 'accounts', account.id));
+});
+
 it('step 7: accounts outside the legacy realpath keep their configDir', () => {
   const { legacy, target } = migrationFixture();
   const outside = storeRoot();

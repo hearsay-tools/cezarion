@@ -8,7 +8,7 @@ import { createInstallMarker, readInstallMarker, underTestRunner, writeMigration
 import { claimMigration, removeStaleMigrationClaim } from './migration-claim.ts';
 import { copyMigrationAccounts } from './migration-accounts.ts';
 import { insideDirectory, migrationFiles, migrationPrivacy, replacePrivateTree, writeLegacyArchive } from './migration-files.ts';
-import { archiveExcludes, isCezarMigrationJson, migrationRecordFor, planLegacyMigration } from './migration-plan.ts';
+import { archiveExcludes, isCezarMigrationJson, migrationRecordFor, planLegacyMigration, type MigrationPlan } from './migration-plan.ts';
 import { migrationRecordSchema, movedHomeSchema, readMigrationRecord, writeMigrationRecord, type MigrationFile, type MigrationRecord } from './migration-record.ts';
 import { registryFiles } from './entry-authorization.ts';
 import { privateDirectory, protectPrivatePath, replacePrivate, syncDirectory } from './private-files.ts';
@@ -207,6 +207,20 @@ function settleCopies(legacy: Home, target: Home, options: MigrationOptions, rec
   throw new Error('Unreachable migration state');
 }
 
+/** An empty legacy home commits an explicit decision with an empty inventory. Later legacy
+ *  writes by older binaries then belong to the canary (P2b-2), never to another migration. */
+function recordFreshDecision(legacy: Home, target: Home, plan: MigrationPlan, env: NodeJS.ProcessEnv | undefined): MigrationRecord {
+  createInstallMarker(target.config, underTestRunner() ? 'test' : 'live');
+  const record: MigrationRecord = { ...migrationRecordFor(plan), files: [], backup: '', deferredAccounts: [], notMoved: [] };
+  // The record publishes before the committed marker: a committed home always has a record.
+  withHomeLock(target.config, () => withHomeLock(target.state, () => {
+    writeMigrationRecord(target, record);
+    writeMigrationMarker(target.config, resolve(legacy.root), 'committed');
+  }));
+  if (existsSync(legacy.root)) commitLegacyMigration(target, env);
+  return record;
+}
+
 /** Explicit split-layout API. Entry points gate calls with REBRAND_SWITCH. No async lock holds. */
 export function migrateLegacyHome(legacy: Home, target: Home, options: MigrationOptions = {}): MigrationResult {
   if (heldMigrations.has(resolve(legacy.root))) throw new Error(`Home migration already running: ${legacy.root}`);
@@ -214,16 +228,15 @@ export function migrateLegacyHome(legacy: Home, target: Home, options: Migration
   if (marker?.migratedFrom && marker.state === 'committed') {
     if (resolve(marker.migratedFrom) !== resolve(legacy.root)) throw new Error(`Home already migrated from ${marker.migratedFrom}`);
     if (existsSync(join(legacy.root, '.migrating'))) withMigration(legacy.root, () => {});
-    if (!existsSync(join(legacy.root, 'MOVED.json'))) commitLegacyMigration(target, options.env);
+    // A fresh decision over an absent legacy home never creates that home to publish MOVED.json.
+    if (!existsSync(join(legacy.root, 'MOVED.json'))) { if (existsSync(legacy.root)) commitLegacyMigration(target, options.env); }
     else if (existsSync(target.versions)) updateManagedPath(legacy, target, options.env ?? process.env);
     return { status: 'unchanged', record: readMigrationRecord(target) };
   }
   recoverLegacyConfig(legacy);
   options.onStep?.('recovered', 0);
-  if (planLegacyMigration(legacy, target).empty) {
-    createInstallMarker(target.config, underTestRunner() ? 'test' : 'live');
-    return { status: 'fresh' };
-  }
+  const plan = planLegacyMigration(legacy, target);
+  if (plan.empty) return { status: 'fresh', record: recordFreshDecision(legacy, target, plan, options.env) };
   createInstallMarker(legacy.root, underTestRunner() ? 'test' : 'live');
   assertHomeReadable(legacy.root);
   return withMigration(legacy.root, () => {

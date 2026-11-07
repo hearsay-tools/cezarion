@@ -153,6 +153,15 @@ They then run the normal journal interpretation on a report-only VersionLog,
 which keeps every record change in memory: a reset interrupted after its
 replacement (PENDING, stale HEAD) still reports, and no journal file changes.
 
+An empty or absent legacy home returns `fresh` and commits an explicit
+decision: a v1 record with `files: []` and `backup: ''`, then the marker with
+`migratedFrom` and `state: 'committed'`. A fresh home therefore carries
+`migratedFrom` and `committed` too. `MOVED.json` is written only when the
+legacy directory exists; a new install never creates `~/.cezar`. A later
+older-binary write to the legacy home then never re-runs migration: step 3
+returns `unchanged`, and P2b-2 treats a legacy file absent from `files` as a
+legacy change.
+
 `installMarkerSchema.state` is `pending | committed | undefined`.
 `writeMigrationMarker` is the migration's only marker writer; ordinary marker
 creation never overwrites one. A pending home refuses HomeStore writes and
@@ -183,7 +192,8 @@ are observed but not imported. `movedHomeSchema` is
 Step 7 uses VersionLog under the migration locks to rewrite target account
 paths while pending. It preserves the legacy bytes and publishes HEAD; it
 does not add a HomeStore bypass. Deferred accounts finish at a later boot
-through ordinary HomeStore writes once no live registered run can use them.
+through ordinary HomeStore writes once no live run registered in either the
+target or the legacy registry can use them.
 The read-only run-store probe uses live run rows and a live family owner's PID
 and start token. It defers unknown selections or unreadable stores too; dry-run
 lists the same deferrals. A non-cockpit owner can keep a closed session's account
@@ -223,6 +233,8 @@ replaces the line `pathHook` defines for `cez install`.
 The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
 keeps an external checkout only when its version manifest records that same
 checkout with `source: 'link'`. Other escaping links refuse migration.
+A dangling link is copied as written when its lexical target stays inside
+the source tree, and refuses migration otherwise.
 Staged tree copies compute link targets against the final destination;
 absolute links and Windows junctions never retain staging paths.
 The archive writes one gzip member per tar entry, followed by tar end blocks.
