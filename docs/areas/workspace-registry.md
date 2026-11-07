@@ -40,10 +40,15 @@ It uses unique process claims; stale claims use the process identity checks in
 Mutual exclusion requires one PID namespace; cross-container bind-mounted homes
 are a stated limit. An unconfirmed process claim expires after 30 seconds to recover
 from PID reuse. A confirmed live process token never expires. See ADR 0060 for
-the stalled-write trade-off and cross-namespace lease collisions.
+the long-running-holder trade-off and cross-namespace lease collisions.
 
-Operator entry points create an install marker before calling library writers.
-Library writes require a marker. The marker check uses the actual process to refuse
+Serve, init, run and backup restore prepare an install marker unconditionally.
+Other authorized operator entries prepare existing registry files at entry. On an
+empty home, they record authorization in process memory and create nothing until
+the first write. That write creates the marker and seeds HEAD under the same lock.
+Help, invalid commands and pure reads leave an empty home untouched. Managed-layout
+writes consume their entry authorization after validation too. Library writes
+without entry authorization still require a marker. The marker check uses the actual process to refuse
 a `live` home under Vitest, node:test, Jest or Stryker. An env argument cannot bypass
 it. The passwd-home guard remains a separate check. Read-only homes stay readable,
 even when their auxiliary lock or version directory cannot be written.

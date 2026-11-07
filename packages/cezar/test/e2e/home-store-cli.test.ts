@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -36,6 +36,14 @@ test('operator commands bootstrap unmarked homes and retain their write contract
       const config = name === 'remote' ? join(home, 'remote-settings/4321.json') : join(home, 'config.json');
       assert.ok(readFileSync(config).length > 0, name);
     }
+    const checkout = join(root, 'checkout');
+    mkdirSync(join(checkout, 'dist'), { recursive: true });
+    writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '0.0.0' }));
+    writeFileSync(join(checkout, 'dist/index.js'), '');
+    const linkedHome = join(root, 'link');
+    run(linkedHome, ['link', checkout]);
+    assert.equal(JSON.parse(readFileSync(join(linkedHome, 'install.json'), 'utf8')).kind, 'live');
+    assert.ok(readdirSync(join(linkedHome, 'versions')).length > 0);
     const backupHome = Home.sandbox(join(root, 'backup'));
     Home.seed(backupHome, backupHome.agentAccounts, { version: 1, accounts: [], value: 'old' });
     Home.seed(backupHome, backupHome.agentAccounts, { version: 1, accounts: [], value: 'new' });
@@ -50,5 +58,29 @@ test('operator commands bootstrap unmarked homes and retain their write contract
     run(testHome, ['update', '--channel', 'development'], env);
     run(testHome, ['update', '--channel', 'development'], env);
     assert.equal(JSON.parse(readFileSync(join(testHome, 'install.json'), 'utf8')).kind, 'test');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('read-only and invalid conditional commands leave a fresh home untouched', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-home-cli-read-'));
+  const cli = resolve('dist/index.js');
+  const commands = [
+    ['projects', 'list'], ['remote-settings', '--help'], ['install', '--invalid-option'],
+    ['update', '--channel', 'invalid'], ['use'], ['link', join(root, 'missing')], ['unlink'],
+    ['server-install', '--platform', 'invalid'], ['server-deploy', '--platform', 'invalid'],
+    ['server-uninstall', '--platform', 'invalid'], ['backup', 'list'],
+  ];
+  try {
+    for (const [index, args] of commands.entries()) {
+      const home = join(root, String(index));
+      try {
+        execFileSync(process.execPath, [cli, ...args], { env: cleanEnv(home), stdio: 'pipe',
+          timeout: 60_000, // bound: invalid commands must return without starting host services.
+        });
+      } catch (error) {
+        assert.equal((error as { status?: number }).status, 1, args.join(' '));
+      }
+      assert.deepEqual(existsSync(home) ? readdirSync(home) : [], [], args.join(' '));
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

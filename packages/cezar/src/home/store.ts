@@ -2,10 +2,11 @@ import type { Home } from './home.ts';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { backupBeforeWrite, isBackupFile } from '../workspace/backups.ts';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
-import { assertHomeWritable, readInstallMarker, underTestRunner } from './install-marker.ts';
+import { assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
 import { withHomeLock } from './write-lock.ts';
 import { assertHomePaths } from './boundary.ts';
+import { homeEntryAuthorization, registryFiles, seedHomeRegistry } from './entry-authorization.ts';
 
 /** A path-derived reader preserves APIs that already accept a resolved Home path (ADR 0059). */
 export function homeFileRoot(path: string): string {
@@ -33,9 +34,17 @@ export class HomeStore {
 
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
   transaction<T>(operation: () => T, writePaths: readonly string[] = []): T {
-    assertHomeWritable(this.root);
-    this.assertBoundary(writePaths, true);
-    return withHomeLock(this.root, () => { assertHomeWritable(this.root); return operation(); });
+    const entry = readInstallMarker(this.root) ? undefined : homeEntryAuthorization(this.root);
+    if (!entry) assertHomeWritable(this.root);
+    const files = entry ? registryFiles(entry.home) : [];
+    const required = files.filter(path => path !== `${entry?.home.workspaceConfig}.bak`);
+    this.assertBoundary([...writePaths, ...required], true);
+    return withHomeLock(this.root, () => {
+      if (entry) createInstallMarker(this.root, underTestRunner() ? 'test' : entry.kind);
+      assertHomeWritable(this.root);
+      if (entry) seedHomeRegistry(this, entry.home, files);
+      return operation();
+    });
   }
 
   assertBoundary(paths: readonly string[], backups = false): Map<string, unknown> {
@@ -135,4 +144,9 @@ export class HomeStore {
 
 export function readHomeFile(path: string): string {
   return new HomeStore(homeFileRoot(path)).read(path);
+}
+
+/** Managed-layout files stay outside HomeStore, but their entry's first write still marks it. */
+export function prepareAuthorizedHomeWrite(home: Home): void {
+  if (homeEntryAuthorization(home.root)) new HomeStore(home).transaction(() => {});
 }

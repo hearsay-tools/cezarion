@@ -41,7 +41,7 @@ An auxiliary failure during a read always falls back to the live file. This incl
 full disks, malformed auxiliary records and permission failures. Only failure to read
 the live file may propagate to the tolerant parser.
 
-Only sandbox construction and operator entry preparation create install markers.
+Only sandbox construction and authorized operator entries create install markers.
 Preparation selects `test` under the actual test process, `dev` for dry `serve`/`init`,
 and `live` otherwise. An existing marker keeps its identity and kind. Tests cannot
 write a live marker home, even through a different env object. The canonical
@@ -49,7 +49,7 @@ passwd-home guard runs before marker, lock or journal mutation as a second check
 
 ## Entry and caller audit
 
-CLI `index.ts` prepares the selected Home before operator dispatch. Managed commands
+CLI `index.ts` authorizes the selected Home before operator dispatch. Managed commands
 use the same lazy factory. `startServer` also prepares its injected Home for embedded
 server consumers. Task subcommands still receive no Home and do no home preparation.
 The following library calls now refuse an unmarked home. At shipped defaults each
@@ -64,10 +64,22 @@ is reached after one of those entry points:
 | `saveServerState`, `deleteServerState`, `acquireLock` | server install/deploy/uninstall engine |
 | `atomicWriteJsonSync` | compatibility helper; no remaining product caller outside its definition |
 
-The marker-creating command set includes `serve`, `init`, `run`, `projects`, `backup`,
+`serve`, `init`, `run` and `backup restore` prepare unconditionally. `projects`,
 `remote-settings`, `install`, `update`, `use`, `link`, `unlink`, `server-install`,
-`server-deploy`, and `server-uninstall`. Preparation failure warns and leaves boot
-available; each actual write keeps its caller's existing failure contract.
+`server-deploy` and `server-uninstall` record their entry and marker kinds in process
+memory. If any registry file exists, they also prepare the marker and seed HEAD
+at entry. Otherwise their help, validation failures and pure reads create no home,
+marker, lock or journal. Backup listing remains read-only too.
+
+The first authorized HomeStore write preflights all seeding paths, takes write.lock,
+creates the marker, seeds HEAD and performs the write without releasing the lock.
+An unmarked library writer without that process-local authorization still refuses.
+Authorization is not inherited by child processes. Managed-layout writers remain
+outside HomeStore; after validation, their first mutation consumes the same entry
+authorization before writing versions or links. A layout library caller with no
+entry authorization keeps its existing passwd-home guard contract.
+Preparation failure warns and leaves boot available; actual writes keep their
+caller's existing failure contract.
 
 The reader sweep covers the existing five store modules, workspace migrations,
 model policy, scripts, CLI tests, browser source and e2e fixtures. Project-scoped

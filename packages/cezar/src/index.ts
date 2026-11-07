@@ -27,7 +27,7 @@ import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
 import { resolveHome } from './home/resolve.ts';
-import { prepareOperatorHome } from './home/entry.ts';
+import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
 import type { Home } from './home/home.ts';
 import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
@@ -111,7 +111,7 @@ workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
   let resolvedHome: Home | undefined;
-  let homeEntry = process.argv[2] as string;
+  let homeEntry = operatorHomeEntry(process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.
   const home = () => resolvedHome ??= prepareOperatorHome(resolveHome({ purpose: 'cli' }), homeEntry);
   const managedExit = await runManagedCommand(process.argv.slice(2), { pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? '') }, home);

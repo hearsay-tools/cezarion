@@ -1,10 +1,10 @@
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { Home } from './home.ts';
 import type { ServerType } from '@hono/node-server';
 import { assertHomeWritable, createInstallMarker, underTestRunner } from './install-marker.ts';
 import { holdCockpitLease } from './leases.ts';
 import { HomeStore } from './store.ts';
+import { authorizeHomeEntry, registryFiles, seedHomeRegistry } from './entry-authorization.ts';
 
 export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remote-settings'
   | 'install' | 'update' | 'use' | 'link' | 'unlink' | 'server-install' | 'server-deploy' | 'server-uninstall';
@@ -12,23 +12,28 @@ export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remo
 const entries: readonly string[] = ['serve', 'init', 'run', 'projects', 'backup', 'remote-settings',
   'install', 'update', 'use', 'link', 'unlink', 'server-install', 'server-deploy', 'server-uninstall'];
 
+/** Backup listing is a pure read; restore retains its unconditional preparation. */
+export function operatorHomeEntry(argv: readonly string[]): string | undefined {
+  return argv[0] === 'backup' && argv[1] !== 'restore' ? 'backup-read' : argv[0];
+}
+
 /** Boot must still work with a read-only home. Mutations retain their own throwing contracts. */
 export function prepareOperatorHome(home: Home, command: string | undefined, env = process.env): Home {
   command ??= 'serve';
   if (!entries.includes(command)) return home;
-  try { prepareHome(home, command as HomeEntry, env); } catch (error) {
+  authorizeHomeEntry(home, command, markerKind(command, env));
+  try {
+    if (['serve', 'init', 'run', 'backup'].includes(command) || registryFiles(home).some(path => existsSync(path))) {
+      prepareHome(home, command as HomeEntry, env);
+    }
+  } catch (error) {
     console.warn(`[cez] home registry unavailable (${error instanceof Error ? error.message : String(error)}) — continuing without it`);
   }
   return home;
 }
 
-function registryFiles(home: Home): string[] {
-  const files = [home.workspaceConfig, `${home.workspaceConfig}.bak`, home.agentAccounts, home.workspaceUiState, home.serverState()];
-  for (const dir of [home.remoteSettings, home.serverInstances]) {
-    try { files.push(...readdirSync(dir).filter(name => /^[a-zA-Z0-9-]+\.json$/.test(name)).map(name => join(dir, name))); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  }
-  return files;
+function markerKind(entry: string, env: NodeJS.ProcessEnv) {
+  return underTestRunner() ? 'test' : (entry === 'serve' || entry === 'init') && env.CEZ_DRY_RUN === '1' ? 'dev' : 'live';
 }
 
 /** Explicit authorization at operator entry points. Resolution itself stays free of IO. */
@@ -37,18 +42,9 @@ export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv
   const backup = `${home.workspaceConfig}.bak`;
   const files = registryFiles(home).filter(path => path !== backup);
   store.assertBoundary(files, true);
-  const kind = underTestRunner() ? 'test' : (entry === 'serve' || entry === 'init') && env.CEZ_DRY_RUN === '1' ? 'dev' : 'live';
-  createInstallMarker(home.root, kind);
+  createInstallMarker(home.root, markerKind(entry, env));
   assertHomeWritable(home.root);
-  store.transaction(() => {
-    for (const path of files) {
-      try { store.read(path); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-    }
-  });
-  // The recovery snapshot and its journal must never prevent entry authorization.
-  try { store.read(backup); } catch { /* Its writer reports an unavailable snapshot when needed. */ }
+  store.transaction(() => seedHomeRegistry(store, home, files));
 }
 
 /** Prepare before server consumers read, then hold presence only for the listener's lifetime. */
