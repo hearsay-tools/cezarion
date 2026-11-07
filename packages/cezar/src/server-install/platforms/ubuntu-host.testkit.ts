@@ -276,11 +276,16 @@ export class FakeUbuntuHost implements Runner {
   }
 }
 
+/** nginx: no address, `*` or `0.0.0.0` is every IPv4 address; `[::]` is every IPv6 address, and
+ *  IPv4 too only with `ipv6only=off`. A concrete address matches only itself. */
 function listens(site: string, address: string, port: number, ssl: boolean): boolean {
+  const ipv6 = address.startsWith('[');
   return [...site.matchAll(/^\s*listen\s+([^;\s]+)([^;]*);/gm)].some(([, where, rest]) => {
     const match = /^(?:(.+):)?(\d+)$/.exec(where!);
-    if (!match || Number(match[2]) !== port) return false;
+    if (!match || Number(match[2]) !== port || (ssl && !/\bssl\b/.test(rest!))) return false;
     const bound = match[1];
-    return (!bound || bound === '[::]' || bound === address) && (!ssl || /\bssl\b/.test(rest!));
+    if (!bound || bound === '*' || bound === '0.0.0.0') return !ipv6;
+    if (bound === '[::]') return ipv6 || /\bipv6only=off\b/.test(rest!);
+    return bound === address;
   });
 }

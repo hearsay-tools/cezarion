@@ -307,15 +307,20 @@ async function withProbeLogin(ctx: InstallContext, htpasswd: string, run: (login
 interface Login { user: string; password: string }
 interface PublicTarget { url: string; resolve?: string }
 
-/** The address a site listens on for `port`; all addresses (or none parsed) connect over loopback. */
+/** The address to probe, from the site's listeners for `port`: an IPv4 wildcard (or no address) is
+ *  127.0.0.1 and wins, a concrete address stays as given (IPv6 in brackets), an IPv6 wildcard is [::1]. */
 export function listenAddress(site: string, port: number): string {
+  const found = { v4: false, v6: false, concrete: undefined as string | undefined };
   for (const [, where] of site.matchAll(/^\s*listen\s+([^;\s]+)[^;]*;/gm)) {
     const match = /^(?:(.+):)?(\d+)$/.exec(where!);
     if (!match || Number(match[2]) !== port) continue;
     const address = match[1];
-    if (address && !['*', '0.0.0.0', '[::]'].includes(address)) return address;
+    if (!address || address === '*' || address === '0.0.0.0') found.v4 = true;
+    else if (address === '[::]') found.v6 = true;
+    else found.concrete ??= address;
   }
-  return '127.0.0.1';
+  if (found.v4) return '127.0.0.1';
+  return found.concrete ?? (found.v6 ? '[::1]' : '127.0.0.1');
 }
 
 /** The recorded public URL: HTTPS when the site has TLS. curl --resolve keeps SNI and Host public. */

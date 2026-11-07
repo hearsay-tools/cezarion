@@ -10,6 +10,7 @@ import { cleanStoreRoots } from '../home/store.testkit.ts';
 import { readServerMigrateJournal } from './migrate-journal.ts';
 import { loadServerState } from './state.ts';
 import { fakeHash } from './platforms/ubuntu-host.testkit.ts';
+import { listenAddress } from './platforms/ubuntu-vps-migration.ts';
 import { installInstance, serverFixture, serverMigrate, sharedHome, type ServerFixture } from './server-migrate.testkit.ts';
 
 afterEach(cleanStoreRoots);
@@ -211,9 +212,13 @@ describe('server-migrate sites and credentials', () => {
     expect(f.host.read('/etc/nginx/sites-available/cezar')).toBe(old);
   });
 
-  it('checks the public URL on the address the site listens on', async () => {
+  it.each([
+    ['a public IPv4 address', '203.0.113.5:443 ssl', '203.0.113.5'],
+    ['an IPv6-only wildcard', '[::]:443 ssl ipv6only=on', '[::1]'],
+    ['a concrete IPv6 address', '[2001:db8::5]:443 ssl', '[2001:db8::5]'],
+  ])('checks the public URL on the address the site listens on: %s', async (_case, listen, address) => {
     const f = serverFixture();
-    installInstance(f, { instance: 'default', port: 4321, domain: 'cockpit.example.com', tls: true, listen: '203.0.113.5' });
+    installInstance(f, { instance: 'default', port: 4321, domain: 'cockpit.example.com', tls: true, listen });
     const urls: string[] = [];
     const capture = f.host.capture.bind(f.host);
     f.host.capture = async (program, args, opts) => {
@@ -221,7 +226,17 @@ describe('server-migrate sites and credentials', () => {
       return capture(program, args, opts);
     };
     await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
-    expect(urls).toContain('cockpit.example.com:443:203.0.113.5 https://cockpit.example.com/');
+    expect(urls).toContain(`cockpit.example.com:443:${address} https://cockpit.example.com/`);
+  });
+
+  it('chooses the probe address from the listeners of the port', () => {
+    const site = (...lines: string[]) => lines.map(line => `    listen ${line};\n`).join('');
+    expect(listenAddress(site('443 ssl', '[::]:443 ssl'), 443)).toBe('127.0.0.1');
+    expect(listenAddress(site('[::]:443 ssl', '*:443 ssl'), 443)).toBe('127.0.0.1');
+    expect(listenAddress(site('[::]:443 ssl ipv6only=on'), 443)).toBe('[::1]');
+    expect(listenAddress(site('[2001:db8::5]:443 ssl', '[::]:443 ssl'), 443)).toBe('[2001:db8::5]');
+    expect(listenAddress(site('203.0.113.5:80', '[::]:443 ssl'), 443)).toBe('[::1]');
+    expect(listenAddress(site('80'), 443)).toBe('127.0.0.1');
   });
 
   it('rolls back when the copied site does not serve the public name', async () => {
