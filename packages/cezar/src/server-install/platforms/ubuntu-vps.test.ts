@@ -666,7 +666,6 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
     journalUnreadable?: boolean;
     sudoJournal?: string;
     sudoJournalCode?: number;
-    unitPath?: string;
     sudoAllowed?: boolean;
     curlCode?: string;
   } = {}) {
@@ -675,7 +674,6 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
     const runner: Runner = {
       capture: async (program, args) => {
         calls.push(`${program} ${args.join(' ')}`);
-        if (program === 'cat' && opts.unitPath) return { code: 0, stdout: readFileSync(opts.unitPath, 'utf8'), stderr: '' };
         if (program === 'systemctl' && args.includes('ExecStart')) return { code: 0, stdout: '', stderr: '' };
         if (program === 'systemctl' && args.includes('show')) {
           const stdout = shows++ === 0 ? opts.before : shows === 2 ? opts.after : opts.final ?? opts.after;
@@ -700,7 +698,7 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
       dryRun: opts.dryRun,
       state: {
         externalProxy: true,
-        steps: { autostart: { status: STEP_STATUS.done, created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user', ...(opts.unitPath ? {path: opts.unitPath} : {}) }] } } },
+        steps: { autostart: { status: STEP_STATUS.done, created: { artifacts: [{ kind: 'owned', type: 'service', name: 'cezar.service', scope: opts.scope ?? 'user' }] } } },
       },
     });
     ctx.instance = opts.instance ?? 'default';
@@ -723,13 +721,21 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
       .replace('Environment=HSQ_REMOTE=1\n', '') + '# operator annotation\n';
     writeFileSync(path, old);
     try {
-      const first = redeployContext({before, after, unitPath: path});
+      const withUnit = () => {
+        const { ctx } = redeployContext({before, after});
+        ctx.state.steps.autostart!.created!.artifacts[0]!.path = path;
+        const capture = ctx.runner.capture;
+        ctx.runner.capture = async (program, args) => program === 'cat'
+          ? {code: 0, stdout: readFileSync(path, 'utf8'), stderr: ''} : capture(program, args);
+        return ctx;
+      };
+      const first = {ctx: withUnit()};
       expect(await ubuntuVps.steps(first.ctx).find(step => step.id === 'autostart')!.check(first.ctx)).toBe(false);
       await ubuntuVps.redeploy!(first.ctx);
       const repaired = readFileSync(path, 'utf8');
       expect(repaired).toContain('Environment=HSQ_REMOTE=1');
       expect(repaired.replace('Environment=HSQ_REMOTE=1\n', '')).toBe(old);
-      await ubuntuVps.redeploy!(redeployContext({before, after, unitPath: path}).ctx);
+      await ubuntuVps.redeploy!(withUnit());
       expect(readFileSync(path, 'utf8')).toBe(repaired);
     } finally { rmSync(root, {recursive: true, force: true}); }
   });
