@@ -1,12 +1,6 @@
 import { z } from 'zod';
 import type { ForgeTimelineEvent, ForgeTimelineEventKind } from './types.ts';
 
-// ---- timeline events (hearsay-tools/cezarion#525) -------------------------------------------------
-// The thread's non-comment history — commits, label changes, assignments, merges, force-pushes,
-// cross-references. Sourced from `/issues/{n}/timeline`, which returns comments AND events in one
-// chronological stream, so the `commented` rows keep flowing through `normalizeComments` unchanged
-// and `comments[]` keeps its existing shape.
-
 /** The event kinds rendered in v1 — an allowlist, so a new GitHub event type is dropped rather
  *  than rendered and can never crash or clutter the thread. Real timelines carry plenty that
  *  github.com itself doesn't surface (`subscribed`, `mentioned`, `review_requested`).
@@ -32,16 +26,6 @@ export const TIMELINE_EVENT_KINDS = new Set<ForgeTimelineEventKind>([
  *  thread with 150 comments and 100 events returns ~120 comments — silently removing contents
  *  from a §2-protected response. */
 export const TIMELINE_EVENT_CAP = 200;
-/** `gh api --paginate` has no page limit, so the timeline fetch hand-rolls a bounded loop. */
-export const TIMELINE_MAX_PAGES = 10;
-/** ONE budget shared by every page. `gh()`'s timeout is per invocation, so ten pages at the 15 s
- *  default would put the ceiling at 150 s — an order of magnitude worse than the single
- *  `--paginate` spawn this replaces. The loop tracks a deadline and passes what's left. */
-export const TIMELINE_BUDGET_MS = 15_000;
-/** Never spawn a page that cannot finish. A bare `remaining <= 0` guard catches only the exact
- *  boundary; the realistic case is 300 ms left, which spawns `gh` with a 300 ms timeout, throws,
- *  and is indistinguishable from a real endpoint failure. */
-export const TIMELINE_MIN_PAGE_MS = 2_000;
 /** `committed` messages are trimmed to their first line, then this. */
 const COMMIT_MESSAGE_CAP = 120;
 
@@ -81,6 +65,115 @@ export const ghTimelineEventSchema = z.object({
     .nullish(),
 });
 
+type TimelineRow = z.infer<typeof ghTimelineEventSchema>;
+
+/** Per-kind timestamp resolution — `committed` rows return `created_at: null`; the real timestamp
+ *  is at `author.date`. `author.date` arrives with a numeric offset (`+02:00`); normalize so the
+ *  string compare the thread sorts by stays correct across zones. No resolvable timestamp → drop,
+ *  rather than merge at an arbitrary spot. */
+function timelineCreatedAt(kind: ForgeTimelineEventKind, row: TimelineRow): string | undefined {
+  const rawAt = kind === 'committed' ? row.author?.date : row.created_at;
+  if (!rawAt) return;
+  const parsedAt = new Date(rawAt);
+  if (Number.isNaN(parsedAt.getTime())) return;
+  return parsedAt.toISOString();
+}
+
+/** Per-kind actor resolution — `committed` carries a git author, not a GitHub actor. */
+function timelineActor(kind: ForgeTimelineEventKind, row: TimelineRow): string {
+  return (kind === 'committed' ? row.author?.name : row.actor?.login) ?? '?';
+}
+
+function applyCommittedFields(event: ForgeTimelineEvent, row: TimelineRow): void {
+  // Enforce the full-40-hex invariant the rollup query depends on rather than assuming it:
+  // `oid` rejects anything else, and a malformed value embedded in the batched query would
+  // cost the whole chunk its glyphs instead of just this commit.
+  if (row.sha && /^[0-9a-f]{40}$/i.test(row.sha)) event.sha = row.sha;
+  if (row.message) event.message = (row.message.split('\n')[0] ?? '').slice(0, COMMIT_MESSAGE_CAP);
+  if (row.html_url) event.url = row.html_url;
+}
+
+function applyLabeledFields(event: ForgeTimelineEvent, row: TimelineRow): void {
+  if (row.label) {
+    event.label = { name: row.label.name };
+    if (row.label.color) event.label.color = row.label.color;
+  }
+}
+
+function applyAssignedFields(event: ForgeTimelineEvent, row: TimelineRow): void {
+  if (row.assignee?.login) event.subject = row.assignee.login;
+}
+
+function applyRenamedFields(event: ForgeTimelineEvent, row: TimelineRow): void {
+  if (row.rename?.to) event.subject = row.rename.to;
+}
+
+function applyCrossReferencedFields(event: ForgeTimelineEvent, row: TimelineRow): void {
+  const issue = row.source?.issue;
+  if (issue?.number != null) event.refNumber = issue.number;
+  if (issue?.title) event.refTitle = issue.title;
+  if (issue) event.refIsPr = Boolean(issue.pull_request);
+  if (issue?.html_url) event.url = issue.html_url;
+}
+
+function applyTimelineKindFields(event: ForgeTimelineEvent, row: TimelineRow): void {
+  switch (event.kind) {
+    case 'committed': {
+      applyCommittedFields(event, row);
+      break;
+    }
+    case 'labeled':
+    case 'unlabeled': {
+      applyLabeledFields(event, row);
+      break;
+    }
+    case 'assigned':
+    case 'unassigned': {
+      applyAssignedFields(event, row);
+      break;
+    }
+    case 'renamed': {
+      applyRenamedFields(event, row);
+      break;
+    }
+    case 'cross-referenced': {
+      applyCrossReferencedFields(event, row);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function mapTimelineEvent(row: TimelineRow, index: number): ForgeTimelineEvent | undefined {
+  const kind = row.event as ForgeTimelineEventKind;
+  if (!TIMELINE_EVENT_KINDS.has(kind)) return; // unknown//noise → dropped, never rendered
+
+  const createdAt = timelineCreatedAt(kind, row);
+  if (!createdAt) return;
+
+  const actor = timelineActor(kind, row);
+
+  // Identity: `sha` sits ahead of `node_id` deliberately. `committed` rows carry both, and a
+  // node_id-first order would key commits by an opaque `C_kwDO…` blob instead of the SHA, which
+  // is the natural, debuggable identifier and is already the rollup key. The bare-index fallback
+  // reaches only `cross-referenced`, the one kind with no identity at all — as a general scheme
+  // it would be wrong, since the id becomes the React key and an index over the post-sort array
+  // shifts for every row below an insertion, remounting them on each 60 s refetch.
+  const identity = row.id ?? row.sha ?? row.node_id ?? index;
+
+  const event: ForgeTimelineEvent = {
+    id: `evt-${identity}`,
+    kind,
+    actor,
+    createdAt,
+  };
+  // A git author has no avatar, so `committed` deliberately carries none.
+  if (kind !== 'committed' && row.actor?.avatar_url) event.avatarUrl = row.actor.avatar_url;
+  applyTimelineKindFields(event, row);
+  return event;
+}
+
 /**
  * `gh api …/issues/{n}/timeline` JSON → `ForgeTimelineEvent[]`, plus whether the cap fired.
  *
@@ -108,78 +201,8 @@ export function normalizeEvents(
   const mapped: ForgeTimelineEvent[] = [];
 
   rows.forEach((row, index) => {
-    const kind = row.event as ForgeTimelineEventKind;
-    if (!TIMELINE_EVENT_KINDS.has(kind)) return; // unknown//noise → dropped, never rendered
-
-    // Per-kind timestamp resolution — see (1) above.
-    const rawAt = kind === 'committed' ? row.author?.date : row.created_at;
-    if (!rawAt) return; // no resolvable timestamp → drop, rather than merge at an arbitrary spot
-    // `author.date` arrives with a numeric offset (`+02:00`); normalize so the string compare the
-    // thread sorts by stays correct across zones.
-    const parsedAt = new Date(rawAt);
-    if (Number.isNaN(parsedAt.getTime())) return;
-    const createdAt = parsedAt.toISOString();
-
-    // Per-kind actor resolution — see (2) above.
-    const actor = (kind === 'committed' ? row.author?.name : row.actor?.login) ?? '?';
-
-    // Identity: `sha` sits ahead of `node_id` deliberately. `committed` rows carry both, and a
-    // node_id-first order would key commits by an opaque `C_kwDO…` blob instead of the SHA, which
-    // is the natural, debuggable identifier and is already the rollup key. The bare-index fallback
-    // reaches only `cross-referenced`, the one kind with no identity at all — as a general scheme
-    // it would be wrong, since the id becomes the React key and an index over the post-sort array
-    // shifts for every row below an insertion, remounting them on each 60 s refetch.
-    const identity = row.id ?? row.sha ?? row.node_id ?? index;
-
-    const event: ForgeTimelineEvent = {
-      id: `evt-${identity}`,
-      kind,
-      actor,
-      createdAt,
-    };
-    // A git author has no avatar, so `committed` deliberately carries none.
-    if (kind !== 'committed' && row.actor?.avatar_url) event.avatarUrl = row.actor.avatar_url;
-
-    switch (kind) {
-      case 'committed': {
-        // Enforce the full-40-hex invariant the rollup query depends on rather than assuming it:
-        // `oid` rejects anything else, and a malformed value embedded in the batched query would
-        // cost the whole chunk its glyphs instead of just this commit.
-        if (row.sha && /^[0-9a-f]{40}$/i.test(row.sha)) event.sha = row.sha;
-        if (row.message) event.message = (row.message.split('\n')[0] ?? '').slice(0, COMMIT_MESSAGE_CAP);
-        if (row.html_url) event.url = row.html_url;
-        break;
-      }
-      case 'labeled':
-      case 'unlabeled': {
-        if (row.label) {
-          event.label = { name: row.label.name };
-          if (row.label.color) event.label.color = row.label.color;
-        }
-        break;
-      }
-      case 'assigned':
-      case 'unassigned': {
-        if (row.assignee?.login) event.subject = row.assignee.login;
-        break;
-      }
-      case 'renamed': {
-        if (row.rename?.to) event.subject = row.rename.to;
-        break;
-      }
-      case 'cross-referenced': {
-        const issue = row.source?.issue;
-        if (issue?.number != null) event.refNumber = issue.number;
-        if (issue?.title) event.refTitle = issue.title;
-        if (issue) event.refIsPr = Boolean(issue.pull_request);
-        if (issue?.html_url) event.url = issue.html_url;
-        break;
-      }
-      default:
-        break;
-    }
-
-    mapped.push(event);
+    const event = mapTimelineEvent(row, index);
+    if (event) mapped.push(event);
   });
 
   const truncated = mapped.length > cap;
@@ -187,6 +210,16 @@ export function normalizeEvents(
   return { events: truncated ? mapped.slice(-cap) : mapped, truncated };
 }
 
+/** `gh api --paginate` has no page limit, so the timeline fetch hand-rolls a bounded loop. */
+export const TIMELINE_MAX_PAGES = 10;
+/** ONE budget shared by every page. `gh()`'s timeout is per invocation, so ten pages at the 15 s
+ *  default would put the ceiling at 150 s — an order of magnitude worse than the single
+ *  `--paginate` spawn this replaces. The loop tracks a deadline and passes what's left. */
+export const TIMELINE_BUDGET_MS = 15_000;
+/** Never spawn a page that cannot finish. A bare `remaining <= 0` guard catches only the exact
+ *  boundary; the realistic case is 300 ms left, which spawns `gh` with a 300 ms timeout, throws,
+ *  and is indistinguishable from a real endpoint failure. */
+export const TIMELINE_MIN_PAGE_MS = 2_000;
 export const TIMELINE_PER_PAGE = 100;
 
 /** What the bounded timeline page loop returns. `stoppedShort` means "the timeline may have more
