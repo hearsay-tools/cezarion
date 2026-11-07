@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { InstallContext, InstallStep, PlatformMigrationReport, StepArtifact } from '../types.ts';
-import { generatePassword, shquote, StepAborted, sudoStep, verifyCommand } from '../steps.ts';
+import { shquote, StepAborted, sudoStep, verifyCommand } from '../steps.ts';
 import { ledgerSite, recordedSite, recordedUnit, ubuntuNames } from './ubuntu-vps-names.ts';
 
 /**
@@ -269,10 +269,12 @@ export interface UbuntuHealth {
   waitForCezar(ctx: InstallContext, port: number): Promise<boolean>;
 }
 
-/** Prove nginx reads the recorded htpasswd: a probe login added there must pass the public site. */
+/** Prove nginx reads the recorded htpasswd: a probe login added there must pass the public site.
+ *  `finally` removes it; after a crash, journal recovery removes the whole new htpasswd copy. */
 async function withProbeLogin(ctx: InstallContext, htpasswd: string, run: () => Promise<unknown>): Promise<void> {
   const user = `cez-migrate-probe-${randomBytes(6).toString('hex')}`;
-  const password = generatePassword();
+  // 192 random bits, sent only on stdin to openssl and curl; never printed or saved.
+  const password = randomBytes(24).toString('base64url');
   const hashed = await ctx.runner.capture('openssl', ['passwd', '-apr1', '-stdin'], { input: `${password}\n` });
   if (hashed.code !== 0 || !hashed.stdout.trim()) throw new StepAborted('failed to hash the probe password (openssl)');
   const present = (c: InstallContext) => verifyCommand(c, 'test', ['-f', htpasswd]);

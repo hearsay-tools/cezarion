@@ -103,6 +103,39 @@ describe('server-migrate group', () => {
     expect(readInstallMarker(f.target.config)?.state).toBe('committed');
   });
 
+  it('leaves no probe login after a crash between its append and its removal', async () => {
+    const f = sharedHome();
+    let crashed!: () => void;
+    const crash = new Promise<void>(resolve => { crashed = resolve; });
+    f.host.hang = command => command.startsWith('sed -i') && command.includes('cez-migrate-probe-') && (crashed(), true);
+    void serverMigrate(f);
+    await crash;
+    expect(f.host.read('/etc/hearsay-squawk/htpasswd')).toMatch(/^cez-migrate-probe-[0-9a-f]{12}:/m);
+    delete f.host.hang;
+    await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
+    for (const file of ['/etc/hearsay-squawk/htpasswd', '/etc/hearsay-squawk/htpasswd-shop', '/etc/cezar/htpasswd', '/etc/cezar/htpasswd-shop']) {
+      expect(f.host.read(file)).not.toContain('cez-migrate-probe');
+    }
+  });
+
+  it('never prints the probe password and draws it from 192 random bits', async () => {
+    const f = sharedHome();
+    const inputs: string[] = [];
+    const capture = f.host.capture.bind(f.host);
+    f.host.capture = async (program, args, opts) => {
+      if (program === 'curl' && opts?.input?.includes('cez-migrate-probe')) inputs.push(opts.input);
+      return capture(program, args, opts);
+    };
+    const result = await serverMigrate(f);
+    expect(result.status).toBe('migrated');
+    const passwords = inputs.map(input => /user = "[^:]+:(.*)"/.exec(input)![1]!);
+    expect(passwords.length).toBeGreaterThan(0);
+    for (const password of passwords) {
+      expect(password).toMatch(/^[A-Za-z0-9_-]{32}$/);
+      expect([...result.lines, ...f.host.commands].join('\n')).not.toContain(password);
+    }
+  });
+
   it('keeps the journal after a failed compensation and finishes the rollback on the next run', async () => {
     const f = sharedHome();
     f.host.unhealthy.add('hearsay-squawk-shop.service');
