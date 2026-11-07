@@ -99,6 +99,12 @@ app before any connection or reset action can clear an accidental copy. Each
 stage runs in a separate process and must report an executed pass; skips fail the
 check. The scripts are `scripts/side-by-side-android.sh` and
 `scripts/side-by-side-ios.sh`. Their reports join the existing CI test artifacts.
+The iOS patcher supports xctestrun format 1 (schemes without a test plan) and format 2
+(test configurations), selected by the file's metadata. Unsupported versions or
+shapes fail before a patched file is written. Run the portable input/output fixtures
+with `python3 packages/mobile/scripts/side-by-side-fixtures.py` from the repository
+root. Android CI also runs them. They cover both plist formats and Android raw
+instrumentation pass, skip and failure results, including CRLF output.
 
 The check reuses each legacy job's native test device and build outputs. It builds
 the second ID without an extra emulator/simulator job. The Android script restores

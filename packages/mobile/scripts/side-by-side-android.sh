@@ -37,8 +37,8 @@ check() {
         -e class "tools.hearsay.cezarion.SideBySideTest#$method" \
         "$app_id.test/androidx.test.runner.AndroidJUnitRunner" | tee "$reports/$method.txt"
     # am instrument can exit zero even when the test fails. Require an executed pass.
-    grep -q '^INSTRUMENTATION_STATUS_CODE: 0' "$reports/$method.txt"
-    grep -q '^OK (1 test)' "$reports/$method.txt"
+    grep -Eq '^INSTRUMENTATION_STATUS_CODE: 0[[:space:]]*$' "$reports/$method.txt"
+    grep -Eq '^OK \(1 test\)[[:space:]]*$' "$reports/$method.txt"
 }
 check "$legacy_id" seedLegacySession
 check "$rebrand_id" newAppNeedsConnectionAndSignIn

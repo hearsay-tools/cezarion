@@ -48,9 +48,35 @@ if len(sources) != 1:
     raise SystemExit(f'Expected one xctestrun in {products}, got {sources}')
 with sources[0].open('rb') as source:
     run = plistlib.load(source)
-targets = [target for config in run['TestConfigurations'] for target in config['TestTargets']]
+
+def require_shape(valid, message):
+    if not valid:
+        raise SystemExit(f'Unsupported xctestrun shape: {message}')
+
+require_shape(isinstance(run, dict), 'root must be a dictionary')
+metadata = run.get('__xctestrun_metadata__')
+require_shape(isinstance(metadata, dict), 'missing metadata dictionary')
+version = metadata.get('FormatVersion')
+if type(version) is not int or version not in (1, 2):
+    raise SystemExit(f'Unsupported xctestrun FormatVersion: {version!r}; expected 1 or 2')
+if version == 1:
+    # Schemes without a test plan put target dictionaries at the top level.
+    targets = [value for key, value in run.items() if key != '__xctestrun_metadata__']
+else:
+    configurations = run.get('TestConfigurations')
+    require_shape(isinstance(configurations, list), 'TestConfigurations must be a list')
+    targets = []
+    for configuration in configurations:
+        require_shape(isinstance(configuration, dict), 'test configuration must be a dictionary')
+        entries = configuration.get('TestTargets')
+        require_shape(isinstance(entries, list), 'TestTargets must be a list')
+        targets.extend(entries)
+require_shape(bool(targets), 'no test targets')
 for target in targets:
+    require_shape(isinstance(target, dict), 'test target must be a dictionary')
+    require_shape(isinstance(target.get('TestBundlePath'), str) and bool(target['TestBundlePath']), 'test target needs TestBundlePath')
     env = target.setdefault('EnvironmentVariables', {})
+    require_shape(isinstance(env, dict), 'EnvironmentVariables must be a dictionary')
     env['MOBILE_SIDE_BY_SIDE'] = '1'
     env['MOBILE_SIDE_BY_SIDE_APP_ID'] = sys.argv[2]
 destination = products / 'side-by-side.xctestrun'
