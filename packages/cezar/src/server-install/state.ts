@@ -25,7 +25,7 @@ import { freshServerState, serverStateSchema, type ServerState, type StepOutcome
  */
 
 /** Load a host-level instance record, degrading to a fresh record on any error. */
-export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home?: Home): ServerState {
+export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): ServerState {
   const path = serverStatePath(instance, home);
   let raw: string;
   try {
@@ -49,7 +49,7 @@ export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home
  * uninstall/deploy resolve which instance to act on. Never throws — an
  * unreadable dir or a corrupt file is simply skipped.
  */
-export function listServerInstances(home?: Home): Array<{ instance: string; state: ServerState }> {
+export function listServerInstances(home: Home): Array<{ instance: string; state: ServerState }> {
   const out: Array<{ instance: string; state: ServerState }> = [];
   if (existsSync(serverStatePath(DEFAULT_SERVER_INSTANCE, home))) {
     out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE, home) });
@@ -74,7 +74,7 @@ export function listServerInstances(home?: Home): Array<{ instance: string; stat
  * another instance. Deterministic (recorded-state only, no network probe) so it
  * stays unit-testable; the operator can always override it with `--port`.
  */
-export function nextFreeInstancePort(startAt = 4321, home?: Home): number {
+export function nextFreeInstancePort(startAt = 4321, home: Home): number {
   const used = new Set(listServerInstances(home).map((i) => i.state.primaryPort));
   let port = startAt;
   while (used.has(port)) port++;
@@ -82,7 +82,7 @@ export function nextFreeInstancePort(startAt = 4321, home?: Home): number {
 }
 
 /** Atomically persist state as `0600`, creating its dir (`0700`) if needed. */
-export function saveServerState(state: ServerState, instance: string = DEFAULT_SERVER_INSTANCE, home?: Home): void {
+export function saveServerState(state: ServerState, instance: string = DEFAULT_SERVER_INSTANCE, home: Home): void {
   const path = serverStatePath(instance, home);
   assertCezarHomeWriteIsSandboxed(path);
   const dir = dirname(path);
@@ -104,7 +104,7 @@ export function saveServerState(state: ServerState, instance: string = DEFAULT_S
  * its absence vs. an empty-but-present record has historically meant the same
  * thing, so we don't change that behavior. Best-effort; never throws.
  */
-export function deleteServerState(instance: string, home?: Home): void {
+export function deleteServerState(instance: string, home: Home): void {
   if (instance === DEFAULT_SERVER_INSTANCE) return;
   assertCezarHomeWriteIsSandboxed(serverStatePath(instance, home));
   try {
@@ -134,7 +134,7 @@ export class LockHeldError extends Error {}
  * process already holds it; a stale lock (dead pid) is reclaimed. Returns a
  * release function.
  */
-export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home?: Home): () => void {
+export function acquireLock(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): () => void {
   const path = serverLockPath(instance, home);
   assertCezarHomeWriteIsSandboxed(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

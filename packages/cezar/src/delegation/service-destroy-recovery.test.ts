@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 
 import { existsSync } from 'node:fs';
@@ -25,7 +26,7 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     const explicit = f.service.destroy(f.caller, { workerId });
     await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
-    const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const armed = () => [...workerCleanupInternals(f.service)].some(cleanup => cleanup.destroyRetryTimers.get('project')?.has(workerId));
     try {
       f.service.armDestroyRetries('project');
@@ -54,7 +55,7 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
       remaining: ['worktree', 'branch'] } } }]);
     f.store.commitDestroyRetry(workerId, { attempts: 7, nextAt: new Date(Date.now() + 2_000).toISOString() });
     const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
-    const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       restarted.armDestroyRetries('project');
       // bound: negative window. The persisted next attempt is 2 s out; a restart that ignored it would tick at the 40 ms floor and reach attempt 8 well within 300 ms.
@@ -100,7 +101,7 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(termination).toHaveBeenCalled(), { timeout: 10_000 });
     const before = structuredClone(destroyOf(workerId));
     const replacementManager = createFixtureManager(f.store, f.root);
-    const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const detachReplacement = f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const writes = vi.spyOn(f.store, 'commitDelegation'), retries = vi.spyOn(f.store, 'commitDestroyRetry');
     try {
       release(true);

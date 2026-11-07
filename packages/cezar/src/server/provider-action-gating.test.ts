@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
@@ -90,7 +91,7 @@ describe('provider action gating', () => {
     sendMessage = vi.fn(() => true);
     continueRun = vi.fn(() => ({ ok: true }));
     const manager = { startRun, sendMessage, continueRun } as unknown as RunManager;
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,
@@ -223,7 +224,7 @@ describe('provider action gating', () => {
   });
 
   it.each(['step', 'config'] as const)('allows a Codex-only untouched replay via %s when Claude is disabled', async (source) => {
-    app = createApp({ repoRoot, store, manager: { continueRun } as unknown as RunManager,
+    app = createApp({ home: testHome(), repoRoot, store, manager: { continueRun } as unknown as RunManager,
       version: 'test', providerAuth: providerAuth(), workspaceConfig: memoryWorkspaceConfig(['claude']),
     });
     writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: source === 'config' ? 'codex' : 'claude' }));
@@ -240,9 +241,9 @@ describe('provider action gating', () => {
 
   it.each([false, true])('preserves inherited account affinity through a real replay (switch provider: %s)', async (switchProvider) => {
     writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ defaultRunner: 'codex' }));
-    const manager = createFixtureManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    const manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     try {
-      app = createApp({ repoRoot, store, manager, version: 'test', providerAuth: providerAuth(),
+      app = createApp({ home: testHome(), repoRoot, store, manager, version: 'test', providerAuth: providerAuth(),
         workspaceConfig: memoryWorkspaceConfig([]),
       });
       const run = store.createRun({ title: 'Untouched', task: 'Task', workflow: 'original', agentProfile: 'saved-codex-account',
@@ -354,7 +355,7 @@ describe('the gate verifies before it refuses', () => {
         return { stdout: '└  1 credential', stderr: '', exitCode: 0 };
       },
     });
-    const app = createApp({
+    const app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: { startRun, sendMessage: vi.fn(() => true), continueRun: vi.fn(() => ({ ok: true })) } as unknown as RunManager,
@@ -446,8 +447,8 @@ describe('provider availability preserves existing execution', () => {
     );
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-provider-continuity-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: 1, memoryLimitMb: 0 }) });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
   });
 
   afterEach(async () => {
@@ -471,7 +472,7 @@ describe('provider availability preserves existing execution', () => {
 
   it('dequeues a task created before disable and reaches its later provider step', async () => {
     const workspaceConfig = memoryWorkspaceConfig([]);
-    const app = createApp({
+    const app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,

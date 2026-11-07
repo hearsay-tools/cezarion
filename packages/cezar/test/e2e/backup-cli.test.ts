@@ -17,7 +17,9 @@ test('backup list and restore work without a cockpit', () => {
     writeFileSync(accounts, '{"version":1,"accounts":[],"legacy":"before"}');
     execFileSync(process.execPath, ['--input-type=module', '-e', `
       import { mergeWriteAgentAccounts } from './dist/workspace/agent-accounts.js';
-      await mergeWriteAgentAccounts(store => { store.legacy = 'after'; });
+      import { resolveHome } from './dist/home/resolve.js';
+      const selectedHome = resolveHome({ purpose: 'cli' });
+      await mergeWriteAgentAccounts(store => { store.legacy = 'after'; }, selectedHome);
     `], { env });
     const entries = JSON.parse(call('list', 'agent-accounts.json'));
     assert.equal(entries.length, 1);

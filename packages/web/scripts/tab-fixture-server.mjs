@@ -21,6 +21,8 @@ const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')
 const { startServer } = await load('server/server.js')
 const { ProjectContexts } = await load('server/project-context.js')
+const { resolveHome } = await load('home/resolve.js')
+const home = resolveHome({ purpose: 'cli' })
 const other = join(root, 'other')
 mkdirSync(other, { recursive: true })
 const projectDefinitions = taskList === 'project' ? [{ id: 'boot', root, name: 'Boot' }] : taskList === 'global'
@@ -69,8 +71,8 @@ const seed = (dir, projectId) => {
 }
 const store = seed(root, 'boot')
 for (const project of projects.slice(1)) { const extra = seed(project.root, project.id); extra.close() }
-const manager = new RunManager(store, root)
-const contexts = new ProjectContexts({ listProjects: async () => projects })
+const manager = new RunManager(store, root, { home })
+const contexts = new ProjectContexts({ home, listProjects: async () => projects })
 const stores = new Map([['boot', store]])
 for (const project of projects.slice(1)) stores.set(project.id, (await contexts.context(project.id)).store)
 const runs = [...stores].flatMap(([projectId, value]) => value.listRunIds().map(runId => ({ projectId, runId })))
@@ -140,7 +142,7 @@ const control = createServer(async (req, res) => {
   res.end(JSON.stringify({ runs, published, ticks, family, indexRoots, ...reports.state(), reportIo, listeners: [...stores].map(([projectId, value]) => ({ projectId, event: value.listenerCount('event'), run: value.listenerCount('run'), deleted: value.listenerCount('deleted') })) }))
 })
 control.listen(0, '127.0.0.1', () => console.log(`control → http://127.0.0.1:${control.address().port}`))
-const server = startServer({ repoRoot: root, store, manager, contexts, version: 'tab-fixture', bootProjectId: 'boot' }, 0)
+const server = startServer({ home, repoRoot: root, store, manager, contexts, version: 'tab-fixture', bootProjectId: 'boot' }, 0)
 server.once('listening', () => {
   if (authMode !== 'basic-auth') { console.log(`cockpit → http://127.0.0.1:${server.address().port}`); return }
   // Synthetic fixture credentials only; exercise authenticated finite reads through a proxy.

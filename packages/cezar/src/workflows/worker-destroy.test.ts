@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, fixtureWork } from './fixture-cleanup.testkit.ts';
@@ -38,7 +39,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete' });
     expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/execution|generation/);
     expect(existsSync(workspace(w).path)).toBe(false);
-    const other = new RunManager(reopened, root); expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
+    const other = new RunManager(reopened, root, { home: testHome() }); expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 
   it('requeues a stopped untouched owned worker under normal capacity and preserves parent guards', async () => {
@@ -46,7 +47,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.updateRun(w.id, { workflowDef: { name: 'quick-task', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}' }] } });
     expect(manager.requestWorkerStop(w.id).state).toBe('terminated');
     manager.dispose();
-    replaceWorkerDestroyManager(createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) }));
+    replaceWorkerDestroyManager(createFixtureManager(store, root, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) }));
     setRunStatus(store, parent.id, RUN_STATUS.review);
     expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
     setRunStatus(store, parent.id, RUN_STATUS.waiting);
@@ -80,8 +81,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const w = await worker(); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(true);
     manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    const other = new RunManager(reopened, root);
-    const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+    const other = new RunManager(reopened, root, { home: testHome() });
+    const service = new DelegationService(); const detach = service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
     try {
       // The flag stays in the checkpoint as a record of the queued completion; destroy no longer reads it.
       expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', neverMaterialized: true });
@@ -131,8 +132,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.dispose(); store.close();
     // The schema refuses the flag outside `complete`, so this generation's termination is never proven.
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: randomUUID(), phase: 'starting', neverMaterialized: true }), { mode: 0o600 });
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
-    const service = new DelegationService({ terminationTimeoutMs: 50 }); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
+    const service = new DelegationService({ terminationTimeoutMs: 50 }); const detach = service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
     try {
       expect(reopened.readWorkerExecution(w.id)).toBeUndefined();
       expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
@@ -144,7 +145,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete', neverMaterialized: true });
     const dir = join(root, '.git/cezar-owned-workspaces'); mkdirSync(dir, { recursive: true });
     const receipt = join(dir, `${workspace(w).resourceId}.json`); writeFileSync(receipt, '{broken');
-    const service = new DelegationService(); const detach = service.registerProject({ id: 'p', root, store, manager });
+    const service = new DelegationService(); const detach = service.registerProject({ home: testHome(), id: 'p', root, store, manager });
     try {
       expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
     } finally { detach(); }
@@ -256,7 +257,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     mkdirSync(scratchDir, { recursive: true });
     const scratch = join(scratchDir, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
     manager.dispose(); setRunStatus(store, w.id, status); store.flush();
-    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
     try {
       await other.recover();
       await until(() => !other.isActive(w.id) && reopened.getRun(w.id)?.status !== 'queued');
@@ -264,7 +265,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect.soft(existsSync(scratch)).toBe(true);
       expect.soft(other.continueRun(w.id, { text: 'try again' })).toMatchObject({ ok: false, error: expect.stringContaining('checkpoint') });
       await until(() => !other.isActive(w.id));
-      const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+      const service = new DelegationService(); service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
       expect.soft(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']) });
       expect.soft(launches).toBe(1); expect.soft(existsSync(workspace(w).path)).toBe(true);
       expect.soft(existsSync(scratch)).toBe(true);
@@ -339,7 +340,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('queued destruction recovery never launches and missing or stale private evidence remains incomplete', async () => {
     const w = await worker(); destroy(w);
-    manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+    manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
     await other.recover(); expect(reopened.getRun(w.id)?.status).toBe('queued');
     expect(other.isActive(w.id)).toBe(false); expect(existsSync(workspace(w).path)).toBe(false);
     rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));

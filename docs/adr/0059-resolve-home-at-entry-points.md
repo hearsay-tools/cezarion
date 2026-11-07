@@ -10,7 +10,7 @@ never derive `homedir()` elsewhere. The new layout itself remains deferred to P2
 
 `home/resolve.ts` resolves a `Home` object without filesystem access. CLI dispatch
 resolves it lazily once for operator commands. Server updater consumers reuse the injected
-object, or resolve one when called directly. Task commands (`artifact`, `message`,
+object. Library APIs require that object or a path derived from it. Task commands (`artifact`, `message`,
 `worker`, `task`, `automation`, `webhook`, `discover`) receive no `Home` and do not
 invoke the factory. The selected object passes through migrations, managed update
 services, checkout discovery, managed restart, application update boot, backup listing
@@ -38,18 +38,21 @@ unfinished XDG layout. P2a will add that layout behind this release gate.
 
 ## Transition
 
-The one-function `cezarHomeDir(env?)` shim delegates to `resolveHome` and returns
-its legacy root. Existing callers and test expectations remain valid. Optional
-`Home` parameters retain the existing env-object and explicit-path APIs while
-entry points pass their resolved object. Other ambient readers remain on the shim;
-P1a-2 (hearsay-tools/cezarion#2810) migrates them and removes it. The PR inventories
-those callers. P1a-2a threads the same object through runtime config, accounts,
-model policy, workflow launch and Continue, delegation, planner/namer calls,
-webhooks, provider runtime auth, discovery, the semaphore and lazy project contexts.
-The runtime APIs still accept an omitted Home during this transition; P1a-2b
-removes that fallback with the remaining skills, installer and remote readers.
-HomeStore, install markers, test migration and the desktop Rust home are separate
-slices.
+P1a-2 (hearsay-tools/cezarion#2810) removes the `cezarHomeDir` shim and every
+compatibility default. CLI entry and operator subcommand dispatch resolve a Home
+once, then pass it through stores, runtime contexts, skills, installers, managed
+updates, remote settings and preview paths. Task subcommands still receive none.
+The process scripts listed in `docs/sdlc/lint.md` resolve once at their existing
+environment boundary. The source lint rule allows resolution only in `home/`,
+`index.ts` and `subcommands.ts`; OS-user readers have a shrink-only reasoned list.
+
+Tests select `Home.sandbox(dir)`. Its paths, including caches, remain under that
+root. It exclusively creates a config-root `install.json` marker containing
+`installId`, `kind: "test"` and `createdAt`, preserving an existing marker. This
+slice does not read or enforce markers. Shared Vitest setup bridges that selection
+to process entry tests; child processes still receive CEZ_HOME in their environment.
+HomeStore, marker enforcement and leases belong to P1b. One shared setup across
+all runners belongs to P1d. The desktop Rust home remains separate.
 
 Backups still derive their write directory from the file being replaced. An
 explicit backup-list root still selects that root's `backups/` directory. Home

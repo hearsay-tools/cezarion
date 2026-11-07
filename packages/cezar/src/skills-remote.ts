@@ -1,4 +1,3 @@
-import { resolveHome } from './home/resolve.ts';
 import type { Home } from './home/home.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -99,7 +98,7 @@ function cacheKeyFor(repo: string): string {
 }
 
 /** The source's bare clone: `~/.cache/cez/skills/<owner>__<name>`. */
-export function bareDirFor(repo: string, home = resolveHome({ purpose: 'compatibility' })): string {
+export function bareDirFor(repo: string, home: Home): string {
   return join(home.skillsCache, cacheKeyFor(repo));
 }
 
@@ -107,7 +106,7 @@ export function bareDirFor(repo: string, home = resolveHome({ purpose: 'compatib
  * Per-commit copies of the source's directory skills for runs without a task
  * worktree (#1024): `~/.cache/cez/skill-files/<owner>__<name>/<commit>/<skill>/`.
  */
-export function skillFilesCacheDirFor(repo: string, home = resolveHome({ purpose: 'compatibility' })): string {
+export function skillFilesCacheDirFor(repo: string, home: Home): string {
   return join(home.skillFilesCache, cacheKeyFor(repo));
 }
 
@@ -128,7 +127,7 @@ function warnUnsafeRemoteOnce(repo: string): void {
 }
 
 /** Clone the skills repo bare (no checkout) into the global cache, once. */
-export async function ensureBareClone(repo: string, home = resolveHome({ purpose: 'compatibility' })): Promise<{ bareDir: string; created: boolean }> {
+export async function ensureBareClone(repo: string, home: Home): Promise<{ bareDir: string; created: boolean }> {
   // Validate before anything else, cache hit or not: "this source is refusable"
   // should never depend on whether a clone happens to exist already.
   const remote = safeRemoteFor(repo);
@@ -225,8 +224,8 @@ function matchSkillPath(line: string): SkillPathHit | null {
 export async function readRemoteSkill(
   src: SkillsRepoRef,
   path: string,
-  atCommit?: string,
-  home = resolveHome({ purpose: 'compatibility' }),
+  atCommit: string | undefined,
+  home: Home,
 ): Promise<string | null> {
   const bareDir = bareDirFor(src.repo, home);
   if (!existsSync(join(bareDir, 'HEAD'))) return null;
@@ -241,7 +240,7 @@ export async function readRemoteSkill(
  * clone only — no network. Empty list when the clone doesn't exist yet or
  * the ref can't be resolved.
  */
-export async function listRemoteSkills(src: SkillsRepoRef, home = resolveHome({ purpose: 'compatibility' })): Promise<Skill[]> {
+export async function listRemoteSkills(src: SkillsRepoRef, home: Home): Promise<Skill[]> {
   return (await listRemoteSource(src, home)).skills;
 }
 
@@ -422,7 +421,7 @@ export async function materializeSkillDir(
   skill: Skill,
   /** Keeps one written copy out of git; defaults to the shared `info/exclude`. */
   ignore: (agentDir: string) => Promise<void> = (agentDir) => excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`),
-  home = resolveHome({ purpose: 'compatibility' }),
+  home: Home,
 ): Promise<string[]> {
   const source = await resolveSkillDirSource(skill, home);
   if (!source || !skill.team) return [];
@@ -461,7 +460,7 @@ const SKILL_FILES_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
  * worktree. Stage then rename complete copies, prune unused old commits and return null on
  * failure. Never write project files or info/exclude.
  */
-export async function materializeSkillToCache(skill: Skill, home = resolveHome({ purpose: 'compatibility' })): Promise<string | null> {
+export async function materializeSkillToCache(skill: Skill, home: Home): Promise<string | null> {
   try {
     const source = await resolveSkillDirSource(skill, home);
     if (!source || !skill.team) return null;
@@ -613,12 +612,12 @@ export function shouldRecordFetchFailure(opts: {
 }
 
 /** Test hook: simulate a process-local failed attempt for this source. */
-export function __markCloneAttemptedForTests(repo: string, home = resolveHome({ purpose: 'compatibility' })): void {
+export function __markCloneAttemptedForTests(repo: string, home: Home): void {
   cloneAttempted.add(bareDirFor(repo, home));
 }
 
 /** Test hook: hold this source's clone/fetch open until `until` settles (#859). */
-export function __holdFetchForTests(repo: string, until: Promise<void>, home = resolveHome({ purpose: 'compatibility' })): void {
+export function __holdFetchForTests(repo: string, until: Promise<void>, home: Home): void {
   const held = until.finally(() => {
     if (fetchInFlight.get(bareDirFor(repo, home)) === held) fetchInFlight.delete(bareDirFor(repo, home));
   });
@@ -631,7 +630,7 @@ const cachedListPauses = new Map<string, { reached: () => void; until: Promise<v
  * Test hook: park this project's next passive load right after its list-only
  * pass until `until` settles (#859). Resolves once the load has parked there.
  */
-export function __pauseAfterCachedListForTests(repoRoot: string, until: Promise<void>, home = resolveHome({ purpose: 'compatibility' })): Promise<void> {
+export function __pauseAfterCachedListForTests(repoRoot: string, until: Promise<void>, home: Home): Promise<void> {
   return new Promise((reached) => { cachedListPauses.set(teamCacheKey(repoRoot, home), { reached, until }); });
 }
 
@@ -667,7 +666,7 @@ function initialTeamSkillsLoad(repoRoot: string, home: Home): Promise<Skill[]> {
  * and returns immediately — the GUI refetches, so remote skills appear moments
  * later instead of blocking the first `GET /api/skills`.
  */
-export function getTeamSkillsCached(repoRoot: string, home = resolveHome({ purpose: 'compatibility' })): Skill[] {
+export function getTeamSkillsCached(repoRoot: string, home: Home): Skill[] {
   void initialTeamSkillsLoad(repoRoot, home);
   return teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? [];
 }
@@ -677,7 +676,7 @@ export function getTeamSkillsCached(repoRoot: string, home = resolveHome({ purpo
  * The normal catalog read stays immediate; callers use this only for a
  * background convergence read after they have already rendered local skills.
  */
-export function waitForTeamSkills(repoRoot: string, home = resolveHome({ purpose: 'compatibility' })): Promise<Skill[]> {
+export function waitForTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
   return initialTeamSkillsLoad(repoRoot, home);
 }
 
@@ -687,13 +686,13 @@ export function waitForTeamSkills(repoRoot: string, home = resolveHome({ purpose
  * empty list, not a clone. When a refresh started this project's first load
  * there is no list-only pass, and this answers with the current list.
  */
-export function waitForCachedTeamSkills(repoRoot: string, home = resolveHome({ purpose: 'compatibility' })): Promise<Skill[]> {
+export function waitForCachedTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
   void initialTeamSkillsLoad(repoRoot, home);
   return cachedListByRoot.get(teamCacheKey(repoRoot, home)) ?? Promise.resolve(teamSkillsByRoot.get(teamCacheKey(repoRoot, home)) ?? []);
 }
 
 /** Refresh: clone missing sources, `git fetch` existing ones, reload the list. */
-export async function refreshTeamSkills(repoRoot: string, home = resolveHome({ purpose: 'compatibility' })): Promise<Skill[]> {
+export async function refreshTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
   return publishLoad(repoRoot, 'all', home);
 }
 
@@ -701,7 +700,7 @@ export async function refreshTeamSkills(repoRoot: string, home = resolveHome({ p
  * Fetch only the named sources, then reload the list (hearsay-tools/cezarion#279): the Skills page's Add and Retry.
  * The other sources are listed from their clones as they are, with no fetch.
  */
-export async function refreshTeamSources(repoRoot: string, sources: readonly SkillsRepoRef[], home = resolveHome({ purpose: 'compatibility' })): Promise<Skill[]> {
+export async function refreshTeamSources(repoRoot: string, sources: readonly SkillsRepoRef[], home: Home): Promise<Skill[]> {
   // Loading from this call on, so the answer that started the fetch already says so.
   for (const src of sources) setSourceStatus(repoRoot, src, { state: 'loading' }, home);
   return publishLoad(repoRoot, { only: new Set(sources.map(sourceKey)) }, home);
@@ -711,7 +710,7 @@ export async function refreshTeamSources(repoRoot: string, sources: readonly Ski
  * Reload the list from the clones on disk with no fetch (hearsay-tools/cezarion#279), after a source was removed,
  * disabled or enabled, so the change shows at once.
  */
-export async function reloadTeamSkills(repoRoot: string, home = resolveHome({ purpose: 'compatibility' })): Promise<Skill[]> {
+export async function reloadTeamSkills(repoRoot: string, home: Home): Promise<Skill[]> {
   return publishLoad(repoRoot, 'none', home);
 }
 
@@ -739,7 +738,7 @@ const sourceStatusByRoot = new Map<string, Map<string, TeamSourceStatus>>();
  * Each configured source's state for this project, as the last load left it. A source no load
  * has reached yet is absent; the caller shows it as `idle`.
  */
-export function getTeamSourceStatuses(repoRoot: string, home = resolveHome({ purpose: 'compatibility' })): ReadonlyMap<string, TeamSourceStatus> {
+export function getTeamSourceStatuses(repoRoot: string, home: Home): ReadonlyMap<string, TeamSourceStatus> {
   void initialTeamSkillsLoad(repoRoot, home);
   return sourceStatusByRoot.get(teamCacheKey(repoRoot, home)) ?? new Map();
 }

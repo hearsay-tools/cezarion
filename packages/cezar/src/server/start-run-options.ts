@@ -77,7 +77,7 @@ export function replayedRun(
 export function modelLockRefusal(
   repoRoot: string,
   pins: { model?: string | undefined; effort?: string | undefined },
-  home?: Home,
+  home: Home,
 ): StartRunRefusal | undefined {
   if (!agentModelsLocked(repoRoot, process.env, home)) return undefined;
   return pins.model?.trim() || pins.effort?.trim() ? { error: AGENT_MODELS_LOCKED_ERROR, status: 409 } : undefined;

@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +20,7 @@ let owner: RunSkills;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'cez-skill-owner-'));
   store = RunStore.open(root);
-  owner = new RunSkills({ store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore(),
+  owner = new RunSkills({ home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }),
     work: new TrackedWork(), disposed: () => false }, {
     builtinSkills: () => [], workerExecutionStopped: unused, isCurrentState: unused, flushAgentInputs: unused,
   });

@@ -224,7 +224,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     const coldRoot = join(root, 'cold');
     const fixtureBytes = seedRunStore(bootDir, records);
     seedRunStore(join(coldRoot, '.ai/cezar'), records);
-    await registerProject(coldRoot);
+    await registerProject(coldRoot, undefined, home);
     const has = (metric: Metric) => options.metrics.includes(metric);
     // Each open stands for a freshly started process, so the store opened before it is closed
     // first, untimed: left open, its claims (#779, plan step 3) would keep the new one off every

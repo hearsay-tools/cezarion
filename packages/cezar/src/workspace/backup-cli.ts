@@ -12,7 +12,7 @@ const HELP = `usage:
 Restore the newest backup, or the newest at or before an ISO UTC time.
 Only JSON is restored. Account config directories are not restored.`;
 
-export async function restoreBackup(file: BackupFile, at?: string, home?: Home): Promise<string> {
+export async function restoreBackup(file: BackupFile, at: string | undefined, home: Home): Promise<string> {
   const utc = at === undefined || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at);
   const limit = at === undefined ? Infinity : utc ? Date.parse(at) : NaN;
   if (Number.isNaN(limit)) throw new Error('Invalid --at time; use an ISO UTC time');
@@ -39,7 +39,7 @@ function warnDroppedEntries(raw: object, key: 'projects' | 'accounts', kept: num
   }
 }
 
-export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home?: Home): Promise<number> {
+export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home): Promise<number> {
   try {
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
       at: { type: 'string' }, help: { type: 'boolean', short: 'h' },

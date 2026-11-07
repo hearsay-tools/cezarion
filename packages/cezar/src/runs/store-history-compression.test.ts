@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from './run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
@@ -196,7 +197,7 @@ describe('RunStore history compression', () => {
     roots.push(root);
     const store = RunStore.open(join(root, '.ai/cezar'));
     stores.push(store);
-    const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     managers.push(manager);
     const run = store.createRun({
       title: 'task', task: 'task', workflow: 'original', worktree: false,

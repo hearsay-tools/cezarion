@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ describe('delegation paths read no transcript (#880)', () => {
     const ask = store.appendEvent(family.workerId, { type: 'ask.requested', requestId: 'q', questions });
     store.appendEvent(family.workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: randomUUID(), parentRunId: family.parentId });
     for (let i = 0; i < 50; i++) store.appendEvent(family.parentId, { type: 'text', text: `parent token ${i}` });
-    manager = new RunManager(store, root);
+    manager = new RunManager(store, root, { home: testHome() });
     const ids = [family.parentId, family.workerId];
     familyPaths = (path) => ids.some((id) => path.includes(id));
   });

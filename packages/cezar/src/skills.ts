@@ -78,7 +78,7 @@ function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
  *
  * Caller-supplied builtin skills come last; discovered skills of the same name take precedence.
  */
-export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}, home?: Home): Promise<Skill[]> {
+export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}, home: Home): Promise<Skill[]> {
   const [lists, uiState] = await Promise.all([
     Promise.all([
       ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),

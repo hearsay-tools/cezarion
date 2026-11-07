@@ -127,7 +127,7 @@ function parse(argv: string[]): { command: 'enable' | 'status' | 'disable'; port
   }
 }
 
-async function run(argv: string[], env: NodeJS.ProcessEnv, io: RemoteSettingsIo, home?: Home): Promise<Record<string, unknown>> {
+async function run(argv: string[], env: NodeJS.ProcessEnv, io: RemoteSettingsIo, home: Home): Promise<Record<string, unknown>> {
   const { command, port } = parse(argv);
   if (command === 'enable') {
     const granted = await portToEnable(port, env, io);
@@ -152,7 +152,7 @@ export async function runRemoteSettingsCommand(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
   io: RemoteSettingsIo = { stdout: (line) => console.log(line) },
-  home?: Home,
+  home: Home,
 ): Promise<number> {
   if (['help', '--help', '-h'].includes(argv[0] ?? '')) {
     io.stdout(USAGE);

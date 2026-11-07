@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -554,7 +555,7 @@ describe('session git API routes', () => {
     g(repoRoot, 'commit', '-m', 'root base');
     repoBaseSha = g(repoRoot, 'rev-parse', 'HEAD').trim();
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as unknown as RunManager, // these routes never touch it
@@ -912,7 +913,7 @@ describe('repo git API routes (R5 Step 1.3 — main working tree)', () => {
     g(repoRoot, 'add', '-A');
     g(repoRoot, 'commit', '-m', 'base');
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as unknown as RunManager, // these routes never touch it

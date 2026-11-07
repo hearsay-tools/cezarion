@@ -166,7 +166,7 @@ export function workerWorkflowHash(workflow: WorkflowDef): string {
  * `stepId`, the step's own pinned entry is checked too (#452): its account must still be
  * available and its model/effort must clear the lock, exactly as the run-level fields must.
  */
-export function workerIdentity(store: RunStore, repoRoot: string, runId: string, stepId?: string, home?: Home) {
+export function workerIdentity(store: RunStore, repoRoot: string, runId: string, stepId: string | undefined, home: Home) {
   const run = store.getRun(runId);
   if (run?.delegation?.role !== 'worker') return undefined;
   const identity = store.readWorkerIdentity(runId);
@@ -188,7 +188,7 @@ export function workerIdentity(store: RunStore, repoRoot: string, runId: string,
   return identity;
 }
 
-function validateWorkerIdentity(repoRoot: string, run: RunRecord, identity: AcceptedWorkerIdentity, context: WorkerInputRecipe | undefined, home?: Home): void {
+function validateWorkerIdentity(repoRoot: string, run: RunRecord, identity: AcceptedWorkerIdentity, context: WorkerInputRecipe | undefined, home: Home): void {
   if (identity.contextHash !== undefined && (!context || workerContextHash(context) !== identity.contextHash)) {
     throw new WorkerIdentityError('Accepted worker context recipe is unavailable or changed');
   }

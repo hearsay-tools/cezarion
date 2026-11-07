@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -84,11 +85,11 @@ describe('watchProviderRuntimeAuthFailures', () => {
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });
 
-  const watch = (resolveProfile?: RuntimeAuthProfileResolver) => {
+  const watch = (resolveProfile?: RuntimeAuthProfileResolver, home = testHome()) => {
     const onInvalidated = vi.fn();
     unwatchers.push(resolveProfile
-      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile)
-      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated));
+      ? watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, resolveProfile, home)
+      : watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, undefined, home));
     return onInvalidated;
   };
 
@@ -477,7 +478,8 @@ describe('watchProviderRuntimeAuthFailures', () => {
           ? { kind: 'profile' as const, id: 'work', configDir: '/work' }
           : { kind: 'default' as const }
       ));
-      const onProviderStatus = watch(profileResolver);
+      const home = testHome();
+      const onProviderStatus = watch(profileResolver, home);
       const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
 
       const run = store.createRun({
@@ -498,7 +500,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
 
       // The codex step ran under codex's DEFAULT login — the run's claude profile is not asked
       // about, and codex is verified bare.
-      expect(profileResolver).toHaveBeenCalledWith('codex', undefined);
+      expect(profileResolver).toHaveBeenCalledWith('codex', undefined, home);
       expect(runCommand).toHaveBeenCalledWith('codex', ['login', 'status'], 10_000);
       expect(onProviderStatus.mock.calls.map(([status]) => status)).toEqual([
         expect.objectContaining({ provider: 'codex', status: 'disconnected' }),
@@ -666,7 +668,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
           label: 'Work',
           addedAt: '',
         }],
-      }));
+      }), testHome());
       const runCommand = vi.fn<RunProviderCommand>(async (_executable, _args, _timeout, env) => (
         env?.CLAUDE_CONFIG_DIR === '/work-from-store'
           ? { stdout: '{"loggedIn":true}', stderr: '', exitCode: 0 }
@@ -711,13 +713,13 @@ describe('watchProviderRuntimeAuthFailures', () => {
       await mergeWriteAgentAccounts((current) => ({
         ...current,
         accounts: current.accounts.filter((account) => account.id !== 'work'),
-      }));
+      }), testHome());
     });
   });
 
   it('unsubscribes cleanly', () => {
     const onInvalidated = vi.fn();
-    const unwatch = watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated);
+    const unwatch = watchProviderRuntimeAuthFailures(store, providerAuth, onInvalidated, undefined, testHome());
     const run = store.createRun({
       title: 'unsubscribed',
       workflow: 'quick-task',
@@ -737,7 +739,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
 
   it('deduplicates observation when startup and app construction watch the same store', () => {
     const onInvalidated = vi.fn();
-    const observer = new ProviderRuntimeAuthObserver(providerAuth, onInvalidated);
+    const observer = new ProviderRuntimeAuthObserver(providerAuth, onInvalidated, undefined, testHome());
     const run = store.createRun({
       title: 'deduplicated',
       workflow: 'quick-task',
@@ -767,7 +769,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
     // A CLI that agrees the credentials are gone, so the self-check leaves the latch standing and
     // this case stays about its own subject: observation is attached BEFORE recovery runs.
     providerAuth = loggedOutClaudeProviderAuth();
-    const observer = new ProviderRuntimeAuthObserver(providerAuth, vi.fn());
+    const observer = new ProviderRuntimeAuthObserver(providerAuth, vi.fn(), undefined, testHome());
 
     await recoverWithProviderRuntimeAuthObservation(
       store,

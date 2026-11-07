@@ -7,7 +7,6 @@ import { z } from 'zod';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-contract/agent-profiles';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
 import { ompProfileName, supportsProfiles } from '../core/agent-profiles.ts';
-import { agentAccountsPath, workspaceConfigPath } from '../paths.ts';
 import { atomicWriteJsonSync } from './config.ts';
 
 /**
@@ -169,8 +168,8 @@ export function defaultAgentAccountStore(): AgentAccountStore {
  * one-line warning and is left on disk untouched, so the user can repair it by hand — the next
  * successful merge-write is what replaces it.
  */
-export async function loadAgentAccounts(home?: Home): Promise<AgentAccountStore> {
-  const path = home?.agentAccounts ?? agentAccountsPath();
+export async function loadAgentAccounts(home: Home): Promise<AgentAccountStore> {
+  const path = home.agentAccounts;
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');
@@ -199,11 +198,11 @@ export async function loadAgentAccounts(home?: Home): Promise<AgentAccountStore>
  */
 export async function mergeWriteAgentAccounts(
   mutator: (store: AgentAccountStore) => AgentAccountStore | void,
-  home?: Home,
+  home: Home,
 ): Promise<AgentAccountStore> {
   const current = await loadAgentAccounts(home);
   const next = mutator(current) ?? current;
-  const path = home?.agentAccounts ?? agentAccountsPath();
+  const path = home.agentAccounts;
   backupBeforeWrite(path, next);
   atomicWriteJsonSync(path, next);
   return next;
@@ -218,10 +217,10 @@ export async function mergeWriteAgentAccounts(
  * `config.json`: an older cezar sharing this home keeps reading what it has always read, and this
  * import is idempotent because it only runs while `agent-accounts.json` is absent.
  */
-async function importLegacyAccounts(home?: Home): Promise<AgentAccountStore> {
+async function importLegacyAccounts(home: Home): Promise<AgentAccountStore> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(home?.workspaceConfig ?? workspaceConfigPath(), 'utf8'));
+    parsed = JSON.parse(await readFile(home.workspaceConfig, 'utf8'));
   } catch {
     return defaultAgentAccountStore();
   }
@@ -244,7 +243,7 @@ async function importLegacyAccounts(home?: Home): Promise<AgentAccountStore> {
   // exists for no reason.
   if (imported.data.accounts.length === 0) return imported.data;
   try {
-    const path = home?.agentAccounts ?? agentAccountsPath();
+    const path = home.agentAccounts;
     backupBeforeWrite(path, imported.data);
     atomicWriteJsonSync(path, imported.data);
   } catch {

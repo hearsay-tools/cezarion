@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
@@ -50,7 +51,7 @@ describe('claims that admit work on a finished run', () => {
   }
 
   function managerFor(store: RunStore): RunManager {
-    return createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    return createFixtureManager(store, root, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
   }
 
   const claims: Array<[string, (manager: RunManager, id: string) => (() => void) | null]> = [

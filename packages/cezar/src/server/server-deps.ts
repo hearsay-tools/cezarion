@@ -44,8 +44,8 @@ export function resolveServerDeps(deps: Pick<ServerDeps, HostServiceKey> & Pick<
     modelCatalog: deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) }),
     providerAuth: deps.providerAuth ?? new ProviderAuthService(),
     workspaceConfig: deps.workspaceConfig ?? {
-      load: home ? (path = home.workspaceConfig) => loadWorkspaceConfig(path) : loadWorkspaceConfig,
-      mergeWrite: home ? (mutate, selected = home) => mergeWriteWorkspaceConfig(mutate, selected) : mergeWriteWorkspaceConfig,
+      load: (path = home.workspaceConfig) => loadWorkspaceConfig(path),
+      mergeWrite: (mutate, selected = home) => mergeWriteWorkspaceConfig(mutate, selected),
     },
     openTerminal: deps.openTerminal ?? openInTerminal,
     openFile: deps.openFile ?? openFileInDefaultApp,

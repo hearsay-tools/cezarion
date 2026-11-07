@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,7 +36,7 @@ describe('PUT /api/v1/ui-state — promptTemplates', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-ui-state-'));
     const dataDir = join(repoRoot, '.ai/cezar');
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store: RunStore.open(dataDir),
       manager: {} as unknown as RunManager,

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { runnerHook, setupMonitoringFixture, waitForProduct } from './run-fixture.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,8 +22,8 @@ describe('human permission lifecycle', () => {
     session = undefined;
     open = true;
     f.manager.dispose();
-    semaphore = new WorkspaceSemaphore();
-    f.manager = createFixtureManager(f.store, f.repoRoot, { semaphore });
+    semaphore = new WorkspaceSemaphore({ home: testHome() });
+    f.manager = createFixtureManager(f.store, f.repoRoot, { home: testHome(), semaphore });
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},

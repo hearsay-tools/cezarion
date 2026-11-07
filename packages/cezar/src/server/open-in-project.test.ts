@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,7 +52,7 @@ describe('POST /api/v1/open-in — the project folder in a local app', () => {
 
   const post = (body: unknown, over: Partial<ServerDeps> = {}) =>
     apiRequest(
-      createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over }),
+      createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over }),
       '/api/v1/open-in',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
     );

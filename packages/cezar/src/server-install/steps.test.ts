@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { createAutoUi } from './ui.ts';
 import { depCheckStep, generatePassword, sudoStep, StepAborted, StepSkipped, verifyCommand } from './steps.ts';
@@ -16,7 +17,7 @@ function makeCtx(over: {
     capture: over.runner?.capture ?? (async (): Promise<CommandResult> => ({ code: 0, stdout: '', stderr: '' })),
     interactive: over.runner?.interactive ?? (async () => 0),
   };
-  return {
+  return { home: testHome(),
     state: { schema: 1, installed: false, primaryPort: 4321, steps: {} },
     ui: over.ui ?? createAutoUi(),
     instance: 'default',

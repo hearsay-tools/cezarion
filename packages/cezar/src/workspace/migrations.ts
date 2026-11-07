@@ -1,9 +1,7 @@
-import { resolveHome } from '../home/resolve.ts';
 import type { Home } from '../home/home.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { workspaceUiStateSchema } from '@open-mercato/cezar-contract/workspace';
-import { workspaceConfigPath } from '../paths.ts';
 import { readUiState } from '../ui-state.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
 import { mergeWriteWorkspaceUiState } from './ui-state.ts';
@@ -25,7 +23,7 @@ export interface WorkspaceMigration {
   /** Stable id for the warning line, e.g. `'001-workspace-config'`. */
   id: string;
   /** The migration body — MUST be idempotent (see module docs). */
-  run(ctx: { home: string; bootRepoRoot: string | null }, paths?: Home): Promise<void>;
+  run(ctx: { home: string; bootRepoRoot: string | null }, paths: Home): Promise<void>;
 }
 
 /** Tolerant raw-JSON read: missing/unreadable/malformed/non-object → null. */
@@ -94,7 +92,7 @@ const migration001: WorkspaceMigration = {
     // Raw presence check BEFORE the first write: after any merge-write the
     // global file contains every defaulted key, so "already set globally"
     // must be decided against what the user's file held coming in.
-    const rawGlobal = await readRawObject(paths?.workspaceConfig ?? workspaceConfigPath());
+    const rawGlobal = await readRawObject(paths.workspaceConfig);
     const rawResources = asObject(rawGlobal?.resources);
     const imported = bootRepoRoot ? await readRepoResourceKeys(bootRepoRoot) : {};
     await mergeWriteWorkspaceConfig((config) => {
@@ -147,10 +145,10 @@ export const WORKSPACE_MIGRATIONS: readonly WorkspaceMigration[] = [migration001
  * `migrations` is injectable for tests only; production callers pass nothing.
  */
 export async function runMigrations(
-  opts: { bootRepoRoot: string | null; home?: Home },
+  opts: { bootRepoRoot: string | null; home: Home },
   migrations: readonly WorkspaceMigration[] = WORKSPACE_MIGRATIONS,
 ): Promise<void> {
-  const resolvedHome = opts.home ?? resolveHome({ purpose: 'compatibility' });
+  const resolvedHome = opts.home;
   const home = resolvedHome.root;
   const ordered = [...migrations].sort((a, b) => a.to - b.to);
   let current = (await loadWorkspaceConfig(resolvedHome.workspaceConfig)).schemaVersion;

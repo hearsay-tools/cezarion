@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { resolveForgeRoot } from './forge/index.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,7 +41,7 @@ describe('the github search API', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-ghsearch-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {
@@ -104,7 +105,7 @@ describe('the github search API', () => {
     expect(await numbers(scoped)).toEqual(await numbers(plain));
   });
   it('degrades when the driver omits searchItems', async () => {
-    const withoutCapability = createApp({
+    const withoutCapability = createApp({ home: testHome(),
       repoRoot, store, manager: {} as RunManager, version: 'test',
       forgeFactory: (root) => {
         const driver = resolveForgeRoot(root);

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus, openTestRunStore, runPersistence } from '../runs/run-store.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -274,7 +275,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     setRunStatus(f.store, a.parent.id, RUN_STATUS.waiting); f.store.close();
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
-    controller.attachProject({ id: 'restarted', root: f.root, store, manager });
+    controller.attachProject({ home: testHome(), id: 'restarted', root: f.root, store, manager });
     await manager.recover();
     await until(() => sessions.length === 4 || store.getRun(worker.id)?.status === 'failed');
     expect(store.getRun(worker.id)?.error).toBeUndefined();

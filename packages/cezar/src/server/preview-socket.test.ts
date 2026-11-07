@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -241,7 +242,7 @@ describe('startServer routes both sockets through one upgrade listener', () => {
     store.updateRun(run.id, { worktreePath: join(repoRoot, 'wt') });
     const { host, calls } = fakeHost();
     const previewHost = { ...host, release: vi.fn(async () => undefined), close: vi.fn(async () => undefined) } as unknown as PreviewHost;
-    const server = startServer({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: 'boot', previewHost }, 0);
+    const server = startServer({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bootProjectId: 'boot', previewHost }, 0);
     try {
       if (!server.listening) await once(server, 'listening');
       const base = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;

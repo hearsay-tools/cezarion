@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,8 +28,8 @@ describe('POST /api/v1/runs clientRequestId', () => {
     process.env.CEZ_DRY_RUN = '1';
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-idempotent-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
-    app = createApp({ repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
+    manager = new RunManager(store, repoRoot, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+    app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 
   afterEach(() => {

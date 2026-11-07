@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,7 +44,7 @@ describe('family reconcile decodes each cold run once per pass', () => {
     seeding.close();
     // Reopened, nothing is held: every member of the settled family is a cold row.
     store = RunStore.open(join(root, '.ai/cezar'));
-    manager = new RunManager(store, root);
+    manager = new RunManager(store, root, { home: testHome() });
     decodes.clear();
   });
   afterEach(() => {

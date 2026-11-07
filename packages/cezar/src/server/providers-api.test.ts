@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { defined } from '../core/defined.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -122,7 +123,7 @@ describe('workspace provider API', () => {
     workspaceEvents?: WorkspaceEventBus;
     workspaceConfig?: ReturnType<typeof memoryWorkspaceConfig>;
     contexts?: ProjectContexts;
-  } = {}) => createApp({
+  } = {}) => createApp({ home: testHome(),
     repoRoot: root,
     store,
     manager: {} as RunManager,
@@ -443,7 +444,7 @@ describe('workspace provider API', () => {
     lazyStore.close();
     lazyStore.removeAllListeners();
 
-    const contexts = new ProjectContexts({
+    const contexts = new ProjectContexts({ home: testHome(),
       listProjects: async () => [{ id: 'lazy', root: lazyRoot, status: 'not-git' }],
       prepareManager: ({ store: recoveringStore, manager }) => {
         const recover = vi.spyOn(manager, 'recover').mockImplementationOnce(async () => {

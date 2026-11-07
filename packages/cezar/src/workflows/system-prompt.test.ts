@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -186,8 +187,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
     process.env.CEZ_TODOS_FILE = inheritedTodos;
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // Cap 1 (workspace-level since step 2.5) serializes the suite's runs.
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }),
     });
   });
 
@@ -278,14 +279,14 @@ describe('systemPrompt end-to-end (dry run)', () => {
     beforeAll(async () => {
       seamRoot = await seedRepo('cez-sysprompt-seams-');
       seamStore = RunStore.open(join(seamRoot, '.ai/cezar'));
-      seamManager = createFixtureManager(seamStore, seamRoot, {
+      seamManager = createFixtureManager(seamStore, seamRoot, { home: testHome(),
         work: seamWork,
-        semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
+        semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }),
       });
-      const context: RunModuleContext = { store: seamStore, repoRoot: seamRoot, dataDir: join(seamRoot, '.ai/cezar'),
-        semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }), work: seamWork, disposed: () => false };
+      const context: RunModuleContext = { home: testHome(), store: seamStore, repoRoot: seamRoot, dataDir: join(seamRoot, '.ai/cezar'),
+        semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }), work: seamWork, disposed: () => false };
       bookkeeper = new TurnBookkeeper(context, { isDisposedDelegatedRun: () => false,
-        discoverSkills: () => discoverSkills(seamRoot), reviveWorkflow: async () => skillWorkflow,
+        discoverSkills: () => discoverSkills(seamRoot, undefined, testHome()), reviveWorkflow: async () => skillWorkflow,
         trackTurn: (_id, task) => { seamWork.track('turn', task); } });
     });
 
@@ -505,8 +506,8 @@ describe('generated inbox retirement (dry run)', () => {
     );
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // Cap 1 (workspace-level since step 2.5) serializes the suite's runs.
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }),
     });
   });
 

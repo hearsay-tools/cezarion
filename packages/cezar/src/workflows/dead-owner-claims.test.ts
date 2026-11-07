@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -71,7 +72,7 @@ describe('a crashed owner\'s claim on a settled family', () => {
     try { expect(raw.listClaims().map((claim) => claim.family).sort()).toEqual([parent.id, plain.id].sort()); } finally { raw.close(); }
 
     const store = RunStore.open(dataDir, { keepLive: true });
-    const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     const reconciled = vi.spyOn(manager, 'reconcileWorkerWaits');
     const settled = vi.spyOn(manager, 'settleOrphanedWorkerExecution');
     try {

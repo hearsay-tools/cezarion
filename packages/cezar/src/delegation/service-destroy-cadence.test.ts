@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 
 import { existsSync, readdirSync } from 'node:fs';
@@ -49,7 +50,7 @@ describe('destroy backoff cadence', { timeout: 30_000 }, () => {
       try { await sleep(150); return await termination(...args); } finally { inFlight--; }
     });
     const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 300 }, attentionAttempts: 5 });
-    const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       restarted.armDestroyRetries('project');
       await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(1); }, { timeout: 10_000 });

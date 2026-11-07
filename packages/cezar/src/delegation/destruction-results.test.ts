@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { workerExecutionStopped } from '../workflows/run/run-guards.ts';
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
@@ -107,7 +108,7 @@ describe('verified destruction retains results through explicit history deletion
     for (const name of [`${workerId}.ndjson`, `${workerId}.handoff.md`, `${workerId}-images`]) expect(existsSync(join(files, name))).toBe(false);
     f.store.close(); // a restart: the old store must not still own the parent's family
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
-    f.service.registerProject({ id: 'project', root: f.root, store: reopened, manager: f.manager });
+    f.service.registerProject({ home: testHome(), id: 'project', root: f.root, store: reopened, manager: f.manager });
     const result = await f.service.collect(f.caller, { workerId });
     expect(result).toMatchObject({ settled: true, summary: { text: 'Completed implementation' }, workspace: { state: 'deleted' },
       artifacts: { state: 'available', items: [{ state: 'deleted', id: 'worker-context-0.input' }] } });
@@ -324,8 +325,8 @@ describe('verified destruction retains results through explicit history deletion
   it.each(['queued', 'running'] as const)('does not revive a %s parent with interrupted deletion on restart', async status => {
     interruptedParentDeletion(); setRunStatus(f.store, f.parent.id, status); f.store.close();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-    const manager = createFixtureManager(reopened, f.root, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
+    const manager = createFixtureManager(reopened, f.root, { home: testHome(), semaphore });
     try {
       await manager.recover();
       await semaphore.release();

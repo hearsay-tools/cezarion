@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { spawn } from 'node:child_process';
@@ -77,7 +78,7 @@ describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 or
     const exited = once(holder, 'exit'); await once(holder.stdout, 'data');
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', parent.id, 'test'))!;
-    const service = new DelegationService(); const detach = service.registerProject({ id: 'project', root, store, manager });
+    const service = new DelegationService(); const detach = service.registerProject({ home: testHome(), id: 'project', root, store, manager });
     try {
       setTmpRoot('/tmp');
       expect(readlinkSync(`/proc/${holder.pid}/cwd`)).toBe(scratch);

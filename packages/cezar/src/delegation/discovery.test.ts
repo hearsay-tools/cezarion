@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,7 +51,7 @@ describe('parent discovery and model admission', () => {
       const accepted = await spawn();
       expect(f.store.readWorkerIdentity(accepted.workerId)).toMatchObject({ model: 'gpt-retired', account: { profileId: 'work' } });
     } else {
-      await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'work', provider: 'codex', configDir: home, label: 'Work', addedAt: '' }]; });
+      await mergeWriteAgentAccounts(store => { store.accounts = [{ id: 'work', provider: 'codex', configDir: home, label: 'Work', addedAt: '' }]; }, testHome());
       const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'profiled.yaml'), 'name: profiled\nsteps:\n  - id: task\n    prompt: "{{task}}"\n    runner: codex\n    agentProfile: work\n');
       const accepted = await spawn({ workflow: 'profiled' });

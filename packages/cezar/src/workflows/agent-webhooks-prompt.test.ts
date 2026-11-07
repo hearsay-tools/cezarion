@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -64,7 +65,7 @@ describe('agent webhooks prompt part (#1576)', () => {
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    projectId = (await registerProject(repoRoot)).id;
+    projectId = (await registerProject(repoRoot, undefined, testHome())).id;
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
   });
@@ -76,7 +77,7 @@ describe('agent webhooks prompt part (#1576)', () => {
     store.flush();
     await mergeWriteWorkspaceConfig((config) => {
       config.projects = config.projects.filter((project) => project.id !== projectId);
-    });
+    }, testHome());
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -85,7 +86,7 @@ describe('agent webhooks prompt part (#1576)', () => {
       config.projects.find((project) => project.id === projectId)!.webhooks = webhooks.map((webhook) => ({
         ...webhook, url: `https://${webhook.id}.example/hook`, token: 'never-in-a-prompt', tasks: false,
       }));
-    });
+    }, testHome());
 
   async function specAt(index: number): Promise<AgentRunSpec> {
     await expect.poll(() => captured.specs.length, { timeout: 15_000 }).toBeGreaterThan(index);

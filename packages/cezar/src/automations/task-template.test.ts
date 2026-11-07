@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { appendFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -88,7 +89,7 @@ describe('automation task templates', () => {
   ))('copies completion controls to a $kind task or refuses retired variants (count $variants)', async ({ kind, variants }) => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-completion-template-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     // These queued tasks exercise saved options, without invoking the title model.
     vi.stubEnv('CEZ_AUTONAME', '0');
     try {

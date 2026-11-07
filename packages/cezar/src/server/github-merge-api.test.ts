@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,7 +34,7 @@ describe('the GitHub merge API', () => {
     execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoRoot });
     execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
   });
 
   afterEach(() => {

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -46,7 +47,7 @@ describe('request validation bounds (#429)', () => {
         return { ok: true };
       },
     } as unknown as RunManager;
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,
@@ -343,7 +344,7 @@ describe('request validation bounds (#429)', () => {
     const sidebarLimits = { overall: null, needsYou: 3, finished: 2, working: null };
     expect((await putJson('/api/v1/ui-state', { sidebarLimits })).status).toBe(200);
     expect(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), 'utf8')).sidebarLimits).toEqual(sidebarLimits);
-    const reopened = createApp({ repoRoot, store, manager: {} as RunManager, version: 'test', providerAuth: connectedProviderAuth() });
+    const reopened = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: 'test', providerAuth: connectedProviderAuth() });
     expect(await (await apiRequest(reopened, '/api/v1/p/default/ui-state')).json()).toMatchObject({ sidebarLimits });
   });
 

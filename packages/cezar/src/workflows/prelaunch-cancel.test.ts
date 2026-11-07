@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { staleContinuationDisposition } from './run/continuation-session.ts';
 import { createActiveRun } from './active-run.ts';
 import { launchPreamble, launchStale, type SessionHelperHost, type LaunchPreambleHost } from './run/session-events.ts';
@@ -58,7 +59,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   function project(semaphore: WorkspaceSemaphore) {
     const root = mkdtempSync(join(tmpdir(), 'cez-prelaunch-cancel-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = createFixtureManager(store, root, { semaphore });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore });
     const result = { root, store, manager, semaphore };
     projects.push(result);
     return result;
@@ -118,7 +119,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   });
 
   it.each(modes)('%s never launches after Stop during setup and releases queued capacity', async mode => {
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     const a = project(semaphore);
     const b = project(semaphore);
     const revoke = vi.fn();
@@ -158,7 +159,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   });
 
   it.each(modes)('%s revokes capability prepared as Stop arrives before launch', async mode => {
-    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const p = project(new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }));
     const provision = controller.provision.bind(controller);
     const id = start(p, mode);
     let revoke: Mock<() => void> | undefined;
@@ -184,7 +185,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   });
 
   it('fresh setup cannot tear down replacement launch authority', async () => {
-    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const p = project(new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }));
     const record = p.store.createRun({ title: 'replacement', task: 'replacement', workflow: workflow.name,
       steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
     setRunStatus(p.store, record.id, RUN_STATUS.waiting);
@@ -232,7 +233,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   });
 
   it('Continue stale setup leaves replacement launch authority and its durable row untouched', () => {
-    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const p = project(new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }));
     const record = p.store.createRun({ title: 'replacement', task: 'replacement', workflow: workflow.name,
       steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
     setRunStatus(p.store, record.id, RUN_STATUS.waiting);
@@ -254,7 +255,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   });
 
   it.each(modes)('%s still launches after setup when not stopped', async mode => {
-    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const p = project(new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }));
     const provision = vi.spyOn(controller, 'provision');
     const id = start(p, mode);
     await setupEntered;
@@ -274,7 +275,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   // Finish arrives during setup. Only that check sees the Finish, and only it revokes the
   // delegation the launch was given: Stop and `dropActive` do not reach it here.
   it.each(modes)('%s holds the launch when a root Finish arrives during setup, and revokes what it provisioned', async mode => {
-    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const p = project(new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }));
     const revokeDelegation = vi.fn();
     p.manager.setDelegationProvisioner(() => ({ env: {}, instructions: '', restrictCrossSessionMessaging: true, revoke: revokeDelegation }));
     const provision = controller.provision.bind(controller);
@@ -310,7 +311,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
   // hearsay-tools/cezarion#1632: a run whose execution stops during setup (here an invalid
   // delegation, one of the stops `workerExecutionStopped` reads) settles cancelled and never launches.
   it.each(modes)('%s never launches when its execution stops during setup', async mode => {
-    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const p = project(new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } }));
     const id = start(p, mode);
     await setupEntered;
     const stepId = p.store.getRun(id)!.currentStepId!;

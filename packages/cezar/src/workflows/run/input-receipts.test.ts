@@ -1,3 +1,4 @@
+import { testHome } from '../../home/test-home.testkit.ts';
 import { TrackedWork } from './tracked-work.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -39,7 +40,7 @@ function opening() {
   state.inputState.selectOpeningInput(message.id);
   const host = { reconcileWorkerWaits: vi.fn(() => projectConversationEvents(store, store.getRun(parent.id)!)),
     flushAgentInputs: vi.fn(), isCurrentState: vi.fn(() => true) };
-  const context = { store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false };
+  const context = { home: testHome(), store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   const saved = () => readPersistedRuns(root).find(run => run.id === recipient.id)!;
   const deliveries = (id: string) => store.readEvents(id).filter(event => event.type === 'conversation-message' && event.delivery === 'delivered');
   return { parent, recipient, state, host, context, saved, deliveries };

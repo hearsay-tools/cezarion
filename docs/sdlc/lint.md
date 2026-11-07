@@ -53,6 +53,7 @@ never a pass.
 | `cez/card-2-contrast` | Unsafe small text on card-2 (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423) | `packages/web/src/test/card-2-contrast.baseline.json`, shrink-only |
 | `cez/contract-root-import` | A runtime import of a contract package root (hearsay-tools/cezarion#1237) | `contract-root-import.baseline.json`, shrink-only |
 | `cez/design-guardian` | The ten original cockpit design checks; each finding names its original rule, reason and token (hearsay-tools/cezarion#2422) | Original inline allowed predicates and reason comments; tests keep their original scope and the guardian suite excludes itself |
+| `cez/home-boundary` | `cezarHomeDir` references, `resolveHome` outside `home/` and CLI dispatch, unlisted `homedir()` calls in non-test `packages/cezar/src/`, and test-side CEZ_HOME writes/stubs/deletes | `home-readers.baseline.json`: reasoned OS-user readers with exact call counts, shrink-only; shared `vitest.setup.ts` selects test homes |
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
@@ -63,6 +64,23 @@ never a pass.
 
 The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter and card-2 contrast baselines,
 which keep their paths. CI's baseline-growth gate refuses a `*.baseline.json` that grows.
+
+Home resolution has two named source entry points: `src/index.ts` and
+`src/subcommands.ts`. Operator dispatch resolves once; task commands receive no Home.
+The process scripts `packages/cezar/scripts/benchmark-workspace-events.ts`,
+`benchmark-family-reconcile.ts`, `benchmark-stuck-destroys.ts`, `benchmark-run-store.ts`,
+`measure-transcript-facts-health.mjs`, and `.ai/scripts/probe-questions.ts` resolve
+once at their existing environment boundary. Scripts are outside this rule's scope.
+The OS-user reader list has one entry per file, with a reason and a call count.
+New calls fail per-file lint. Removed calls or files fail the whole-repository
+stale-entry check until the count or entry shrinks. CI's baseline-growth gate
+refuses additions and increased counts after this list lands.
+
+The home-boundary rule resolves statically known keys and callee forms; dynamic keys, computed variables and eval are out of scope.
+
+Tests use `Home.sandbox(dir)` and the shared test selector. Reading CEZ_HOME and
+passing it in a child process environment remain allowed. Test fixtures prove each
+forbidden form, parser errors, stale entries and the CI growth ratchet.
 
 ## Add a rule
 

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,8 +35,9 @@ describe('preview browser launch', () => {
   it('resolves with the supplied environment and returns the attached page and a working close callback', async () => {
     const { proc, connection, root } = browserFixture();
     const env = { PATH: '/fake/bin' };
-    const handle = await launchBrowser('/fake/profile', env);
-    expect(resolveChromium).toHaveBeenCalledExactlyOnceWith(undefined, env);
+    const home = testHome(env);
+    const handle = await launchBrowser('/fake/profile', env, home);
+    expect(resolveChromium).toHaveBeenCalledExactlyOnceWith(undefined, env, undefined, undefined, home);
     expect(launchChromium).toHaveBeenCalledExactlyOnceWith('/fake/chrome', '/fake/profile', env);
     expect(root.send).toHaveBeenNthCalledWith(1, 'Target.getTargets');
     expect(root.send).toHaveBeenNthCalledWith(2, 'Target.attachToTarget', { targetId: 'page', flatten: true });
@@ -51,7 +53,7 @@ describe('preview browser launch', () => {
   it('throws the missing-browser error before launching', async () => {
     browserFixture();
     vi.mocked(resolveChromium).mockReturnValue(undefined);
-    const result = launchBrowser('/profile', {});
+    const result = launchBrowser('/profile', {}, testHome({}));
     await expect(result).rejects.toBeInstanceOf(ChromiumMissingError);
     await expect(result).rejects.toMatchObject({ message: 'No Chromium found' });
     expect(launchChromium).not.toHaveBeenCalled();
@@ -61,7 +63,7 @@ describe('preview browser launch', () => {
     browserFixture();
     const error = new ChromiumError('sandbox', 'sandbox stderr', 'sandbox refused');
     vi.mocked(launchChromium).mockRejectedValue(error);
-    await expect(launchBrowser('/profile', {})).rejects.toBe(error);
+    await expect(launchBrowser('/profile', {}, testHome({}))).rejects.toBe(error);
   });
 
   it('closes and kills a browser without a page and includes its stderr in the error', async () => {
@@ -70,7 +72,7 @@ describe('preview browser launch', () => {
       proc.stderr.emit('data', Buffer.from('no page stderr'));
       return { targetInfos: [] };
     });
-    const result = launchBrowser('/profile', {});
+    const result = launchBrowser('/profile', {}, testHome({}));
     await expect(result).rejects.toBeInstanceOf(ChromiumError);
     await expect(result).rejects.toMatchObject({ kind: 'exited', message: 'Chromium opened no page', stderrTail: 'no page stderr' });
     expect(connection.close).toHaveBeenCalledOnce();
@@ -85,7 +87,7 @@ describe('preview browser launch', () => {
       if (method === 'Target.getTargets') return kind === 'targets' ? {} : { targetInfos: [{ type: 'page', targetId: 'page' }] };
       return { sessionId: 42 };
     });
-    const result = launchBrowser('/profile', {});
+    const result = launchBrowser('/profile', {}, testHome({}));
     if (kind === 'transport') await expect(result).rejects.toBe(error);
     else await expect(result).rejects.toMatchObject({ name: 'ZodError' });
     expect(connection.close).toHaveBeenCalledOnce();
@@ -100,7 +102,7 @@ describe('preview browser launch', () => {
     { code: null, signal: null, exit: {} },
   ])('reports process exit $code/$signal and the newest 4096 stderr characters', async ({ code, signal, exit }) => {
     const { proc } = browserFixture();
-    const handle = await launchBrowser('/profile', {});
+    const handle = await launchBrowser('/profile', {}, testHome({}));
     proc.stderr.emit('data', Buffer.from('old'.repeat(2000)));
     proc.stderr.emit('data', Buffer.from('é'.repeat(4090) + 'newest'));
     proc.emit('exit', code, signal);
@@ -110,7 +112,7 @@ describe('preview browser launch', () => {
   it('accepts a process without stderr', async () => {
     const { proc, connection } = browserFixture();
     vi.mocked(launchChromium).mockResolvedValue({ proc: Object.assign(proc, { stderr: null }), browser: connection } as unknown as Awaited<ReturnType<typeof launchChromium>>);
-    const handle = await launchBrowser('/profile', {});
+    const handle = await launchBrowser('/profile', {}, testHome({}));
     proc.emit('exit', 0, null);
     await expect(handle.exited).resolves.toEqual({ exitCode: 0, stderrTail: '' });
   });
@@ -118,7 +120,7 @@ describe('preview browser launch', () => {
   it('waits for exit and clears the release timeout', async () => {
     vi.useFakeTimers();
     const { proc } = browserFixture();
-    const browser = await launchBrowser('/profile', {});
+    const browser = await launchBrowser('/profile', {}, testHome({}));
     const done = vi.fn();
     const waiting = waitForExit(browser).then(done);
     await vi.advanceTimersByTimeAsync(4999);

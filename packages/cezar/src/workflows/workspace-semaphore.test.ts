@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -105,7 +106,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   ): { store: RunStore; manager: RunManager; root: string } {
     const root = fixtureRepo(prefix, roots);
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const manager = createFixtureManager(store, root, { semaphore });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore });
     stores.push(store);
     managers.push(manager);
     return { store, manager, root };
@@ -117,7 +118,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   });
 
   it('exempts only the configured number of durable monitoring sessions', async () => {
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2, maxMonitoringSessions: 2 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2, maxMonitoringSessions: 2 } });
     const projectA = project('cez-monitor-cap-', semaphore);
     const ordinary = projectA.manager.startRun(AGENT, { task: 'ordinary human wait' });
     await waitFor(() => projectA.store.getRun(ordinary.id)?.status === 'waiting', 'ordinary session to park');
@@ -148,7 +149,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   });
 
   it('caps concurrent runs across two projects: with cap 2, the third run queues', async () => {
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } });
     const a = project('cez-wsem-a-', semaphore);
     const b = project('cez-wsem-b-', semaphore);
 
@@ -186,7 +187,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     // another — it only ever started if B happened to start or finish a run of
     // its own. The fix routes every slot-freeing transition through
     // `WorkspaceSemaphore.release()`, which pumps every manager.
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } });
     const a = project('cez-wsem-cross-a-', semaphore);
     const b = project('cez-wsem-cross-b-', semaphore);
 
@@ -216,7 +217,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   }, 45_000);
 
   it('a freed slot goes to the longest-waiting run across projects', async () => {
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     const a = project('cez-wsem-fair-a-', semaphore);
     const b = project('cez-wsem-fair-b-', semaphore);
 
@@ -245,7 +246,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   }, 45_000);
 
   it('#347 across projects: a waiting run resumes immediately even when other projects saturate the cap', async () => {
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 2 } });
     const a = project('cez-wsem-347a-', semaphore);
     const b = project('cez-wsem-347b-', semaphore);
 
@@ -293,7 +294,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     // Shared snapshot the load hook copies on each refresh — mutating the map
     // and calling refresh() mirrors a settings write to a project's maxParallel.
     const projectLimits = new Map<string, number>();
-    const semaphore = new WorkspaceSemaphore({
+    const semaphore = new WorkspaceSemaphore({ home: testHome(),
       load: () =>
         Promise.resolve({ maxParallel: 4, memoryLimitMb: null, projectLimits: new Map(projectLimits) }),
       initial: { maxParallel: 4 },
@@ -351,14 +352,14 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: taskRoot });
     execFileSync('git', [...GIT_ID, 'commit', '--allow-empty', '-q', '-m', 'base'], { cwd: taskRoot });
 
-    const semaphore = new WorkspaceSemaphore({
+    const semaphore = new WorkspaceSemaphore({ home: testHome(),
       initial: {
         maxParallel: 10,
         projectLimits: new Map([[realpathSync(ownerRoot), 4]]),
       },
     });
     const store = RunStore.open(join(taskRoot, '.ai/cezar'));
-    const manager = createFixtureManager(store, taskRoot, { semaphore });
+    const manager = createFixtureManager(store, taskRoot, { home: testHome(), semaphore });
     stores.push(store);
     managers.push(manager);
 
@@ -383,14 +384,14 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   it('restart recovery queues interrupted continuations behind the per-project cap', async () => {
     const root = fixtureRepo('cez-wsem-recover-cap-', roots);
     const projectLimits = new Map([[realpathSync(root), 1]]);
-    const semaphore = new WorkspaceSemaphore({
+    const semaphore = new WorkspaceSemaphore({ home: testHome(),
       load: () =>
         Promise.resolve({ maxParallel: 3, memoryLimitMb: null, projectLimits }),
       initial: { maxParallel: 3 },
     });
     await semaphore.refresh();
     const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    const firstManager = createFixtureManager(store, root, { semaphore });
+    const firstManager = createFixtureManager(store, root, { home: testHome(), semaphore });
     stores.push(store);
 
     for (const suffix of ['one', 'two', 'three']) {
@@ -452,7 +453,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       // Simulate another process start before the queued continuations receive a
       // slot. They must reconstruct those same Continue jobs, not revive the
       // original quick-task workflow or append duplicate continuation steps.
-      const secondManager = createFixtureManager(store, root, { semaphore });
+      const secondManager = createFixtureManager(store, root, { home: testHome(), semaphore });
       recoveryManager = secondManager;
       managers.push(secondManager);
       await secondManager.recover();
@@ -495,9 +496,9 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
 
   it('restart continuation releases its starting slot after becoming active', async () => {
     const root = fixtureRepo('cez-wsem-recover-starting-', roots);
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    const manager = createFixtureManager(store, root, { semaphore });
+    const manager = createFixtureManager(store, root, { home: testHome(), semaphore });
     stores.push(store);
     managers.push(manager);
 
@@ -529,7 +530,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
 
   it('#347 with a per-project cap: a waiting run on the capped project still resumes immediately', async () => {
     const projectLimits = new Map<string, number>();
-    const semaphore = new WorkspaceSemaphore({
+    const semaphore = new WorkspaceSemaphore({ home: testHome(),
       load: () =>
         Promise.resolve({ maxParallel: 4, memoryLimitMb: null, projectLimits: new Map(projectLimits) }),
       initial: { maxParallel: 4 },
@@ -560,7 +561,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
 
   it('refresh() applies a raised cap without a restart: the queued run starts', async () => {
     let limits = { maxParallel: 1, memoryLimitMb: null as number | null };
-    const semaphore = new WorkspaceSemaphore({
+    const semaphore = new WorkspaceSemaphore({ home: testHome(),
       load: () => Promise.resolve({ ...limits }),
       initial: { maxParallel: 1 },
     });

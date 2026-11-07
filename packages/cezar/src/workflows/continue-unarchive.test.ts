@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -26,7 +27,7 @@ const managers: RunManager[] = [];
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-unarchive-')); roots.push(root);
   const store = RunStore.open(join(root, '.ai/cezar'));
-  const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+  const manager = createFixtureManager(store, root, { home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
   managers.push(manager);
   return { store, manager };
 }

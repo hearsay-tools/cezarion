@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,7 +52,7 @@ describe("POST /api/v1/runs/:id/open-in — target 'default' (local-mode file op
 
   const post = (body: unknown, over: Partial<ServerDeps> = {}) =>
     apiRequest(
-      createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over }),
+      createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', ...over }),
       `/api/v1/runs/${runId}/open-in`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
     );
@@ -162,7 +163,7 @@ describe("POST /api/v1/runs/:id/open-in — target 'default' (local-mode file op
   });
 
   it('404s for an unknown run before any gate', async () => {
-    const app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
     const res = await apiRequest(app, '/api/v1/runs/nope/open-in', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

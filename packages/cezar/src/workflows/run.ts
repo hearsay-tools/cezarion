@@ -160,7 +160,7 @@ export class RunManager {
   constructor(
     store: RunStore,
     repoRoot: string,
-    options: { home?: Home | undefined; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined } = {},
+    options: { home: Home; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined },
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;

@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,8 +14,8 @@ describe('scheduler repository probe budget (#364)', () => {
   function fixture() {
     const root = mkdtempSync(join(tmpdir(), 'cez-pump-repo-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 } });
-    const manager = new RunManager(store, root, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } });
+    const manager = new RunManager(store, root, { home: testHome(), semaphore });
     fixtures.push({ root, store, manager });
     return { root, pump: () => semaphore.release() };
   }

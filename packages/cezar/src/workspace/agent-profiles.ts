@@ -118,9 +118,9 @@ export function selectProfile(
 export async function resolveProfileEnvForRoot(
   repoRoot: string | undefined,
   provider: ProviderId,
-  profileId?: string,
+  profileId: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
-  home?: Home,
+  home: Home,
 ): Promise<{ profile: ResolvedAgentProfile; env: Record<string, string> }> {
   let store: AgentAccountStore;
   try {
@@ -172,7 +172,7 @@ export type RuntimeAuthVerificationTarget =
 export async function resolveRuntimeAuthVerificationTarget(
   provider: ProviderId,
   profileId: string | undefined,
-  home?: Home,
+  home: Home,
 ): Promise<RuntimeAuthVerificationTarget | null> {
   if (profileId === undefined || profileId === DEFAULT_AGENT_ACCOUNT_ID) return { kind: 'default' };
   let store: AgentAccountStore;

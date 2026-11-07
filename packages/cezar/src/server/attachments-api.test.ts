@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -56,7 +57,7 @@ describe('attachment routes (#950)', () => {
         return true;
       },
     } as unknown as RunManager;
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager,

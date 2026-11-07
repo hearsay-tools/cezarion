@@ -44,6 +44,7 @@ afterAll(() => {
 });
 
 const VIOLATIONS: Record<string, [string, string]> = {
+  'home-boundary': ['packages/cezar/src/ambient-home.ts', 'cezarHomeDir();\n'],
   'unit-wait-discipline': ['packages/web/src/wait-violation.test.tsx', 'await sleep(5);\n'],
   'test-wait-discipline': ['packages/cezar/src/wait-violation.test.ts', 'await sleep(5);\n'],
   'card-2-contrast': ['packages/web/src/unsafe.tsx', '<p className="bg-card-2 text-danger text-xs">bad</p>'],
@@ -60,6 +61,10 @@ const VIOLATIONS: Record<string, [string, string]> = {
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/cezar/src/paths.ts': 'homedir();',
+  'packages/cezar/src/index.ts': 'resolveHome({ purpose: "cli" });',
+  'packages/cezar/vitest.setup.ts': 'process.env.CEZ_HOME = dir;',
+
   'packages/cezar/scripts/mock-scenario-approved.mjs': "import { play } from './mock-scenario.mjs';\nconst x = 'mock:backend-resume';\n",
   'packages/web/src/wait-approved.test.tsx': 'await sleep(5); // bound: a negative window\n',
   'packages/cezar/src/wait-approved.test.ts': 'await sleep(5); // bound: a negative window\n',
@@ -133,6 +138,118 @@ describe('the cez rules under oxlint', () => {
     expect(result).toEqual([expect.stringContaining('cez(run-history-reader)')]);
   }, OXLINT_TIMEOUT_MS);
 
+  it.each([
+    ['packages/cezar/src/ambient.ts', 'resolveHome({ purpose: "cli" });'],
+    ['packages/cezar/src/ambient.ts', 'homedir();'],
+    ...[
+      'os.homedir()',
+      'os["homedir"]()',
+      'import { homedir as h } from "node:os"; h()',
+      'const { homedir: h } = os; h()',
+      '(0, os.homedir)()',
+      'const h = (0, os.homedir); h()',
+      'os.homedir.call(null)',
+      'os.homedir.apply(null, [])',
+      'const h = os.homedir.call; h(null)',
+      'os.homedir?.()',
+      'os?.homedir()',
+      'os?.homedir?.()',
+      'const h = os?.homedir; h?.()',
+      'os.homedir.bind(null)()',
+      'const h = os.homedir.bind(null); h()',
+      'os?.homedir.bind?.(null)?.()',
+      'Reflect.apply(os.homedir, null, [])',
+      'Reflect["apply"]((0, os["homedir"]), null, [])',
+      'Reflect.apply?.(os?.homedir, null, [])',
+      'const h = os.homedir; Reflect.apply(h, null, [])',
+      '(os.homedir as (() => string))()',
+      'os.homedir!()',
+    ].map(source => {
+      return ['packages/cezar/src/ambient.ts', source];
+    }),
+    ...[
+      "process.env.CEZ_HOME = dir",
+      "process.env[\"CEZ_HOME\"] = dir",
+      "process[\"env\"].CEZ_HOME ||= dir",
+      "(process.env.CEZ_HOME as string) = dir",
+      "delete process.env.CEZ_HOME",
+      "process.env.CEZ_HOME++",
+      "vi.stubEnv(\"CEZ_HOME\", dir)",
+      "vi[\"stubEnv\"](\"CEZ_HOME\", dir)",
+      "vi.stubEnv?.('CEZ_HOME', dir)",
+      "vi?.stubEnv('CEZ_HOME', dir)",
+      "[process.env.CEZ_HOME] = [dir]",
+      "({ a: process.env.CEZ_HOME } = source)",
+      "({ a: [process.env.CEZ_HOME = dir] } = source)",
+      "[...process.env.CEZ_HOME] = dirs",
+      "({ ...process.env.CEZ_HOME } = source)",
+      "for (process.env.CEZ_HOME of dirs) {}",
+      "for (process.env.CEZ_HOME in dirs) {}",
+      "for ([process.env[\"CEZ_HOME\"]] of dirs) {}",
+      "delete process?.env?.[\"CEZ_HOME\"]",
+      "Object.assign(process.env, { CEZ_HOME })",
+      "Object.assign(process[\"env\"], {}, { [\"CEZ_HOME\"]: dir })",
+      "Reflect.set(process.env, \"CEZ_HOME\", dir)",
+      "Reflect.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
+      "Object.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
+    ].map(source => {
+      return ['packages/cezar/src/ambient.test.ts', source];
+    }),
+  ])('oxlint refuses ambient home access in %s: %s', async (file, source) => {
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each(['"CEZ_HOME"', '`CEZ_HOME`', '"CEZ_" + "HOME"'].flatMap(key => {
+    return [
+      `vi.stubEnv(${key}, dir)`,
+      `process.env[${key}] = dir`,
+      `delete process.env[${key}]`,
+      `process.env[${key}]++`,
+      `Object.assign(process.env, { [${key}]: dir })`,
+      `Reflect.set(process.env, ${key}, dir)`,
+      `Reflect.defineProperty(process.env, ${key}, { value: dir })`,
+      `Object.defineProperty(process.env, ${key}, { value: dir })`,
+    ];
+  }))('oxlint rejects static selection keys: %s', async source => {
+    const file = 'packages/cezar/src/ambient.test.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each([
+    'os["homedir"]()',
+    'os[`homedir`]()',
+    'os["home" + "dir"]()',
+    'homes[`resolveHome`]()',
+    'homes["resolve" + "Home"]()',
+    'paths[`cezarHomeDir`]()',
+    'paths["cezar" + "HomeDir"]()',
+  ])('oxlint rejects static callee keys: %s', async source => {
+    const file = 'packages/cezar/src/ambient.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each([
+    'vi[`stubEnv`]("CEZ_HOME", dir)',
+    'vi["stub" + "Env"]("CEZ_HOME", dir)',
+    'process[`env`].CEZ_HOME = dir',
+    'process["en" + "v"].CEZ_HOME = dir',
+  ])('oxlint rejects static selection path keys: %s', async source => {
+    const file = 'packages/cezar/src/ambient.test.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }, OXLINT_TIMEOUT_MS);
+
+  it.each([
+    'process.env[name] = dir',
+    'process.env[`CEZ_${suffix}`] = dir',
+    'process.env["CEZ_" + suffix] = dir',
+    'Reflect.set(process.env, name, dir)',
+    'Object.assign(process.env, { [name]: dir })',
+    'vi.stubEnv(CEZ_HOME, dir)',
+  ])('oxlint leaves unresolved keys outside the static rule: %s', async source => {
+    const file = 'packages/cezar/src/ambient.test.ts';
+    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([]);
+  }, OXLINT_TIMEOUT_MS);
+
   it('fails a file oxlint cannot parse', () => {
     expect(problems).toContainEqual(expect.stringMatching(/^packages\/cezar\/src\/broken\.ts:1:\d+ oxlint: /));
   });
@@ -179,6 +296,7 @@ describe('stale entries', () => {
     'packages/web/src/test/card-2-contrast.baseline.json': JSON.stringify(['gone.tsx: <p className="bg-card-2 text-danger">']),
     'packages/cezar/src/lint/contract-root-import.baseline.json': JSON.stringify({ files: { 'packages/api-client/src/index.ts': 'barrel', 'packages/web/src/gone.ts': 'gone' } }),
     'packages/cezar/src/lint/run-history-readers.json': JSON.stringify({ entries: [] }),
+    'packages/cezar/src/lint/home-readers.baseline.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/resume-time-readers.json': JSON.stringify({ files: { 'packages/web/src/lib/reads.ts': 'reads', 'packages/web/src/lib/stopped.ts': 'stopped' } }),
     'packages/web/src/test/search-params-discipline.baseline.json': JSON.stringify({ sites: [{ file: 'routes/x.tsx', site: '[query, setQuery] = useSearchParams()', reason: 'r' }] }),
     'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",

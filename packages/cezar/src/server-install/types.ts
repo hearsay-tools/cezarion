@@ -205,7 +205,7 @@ export interface Runner {
 
 /** Live install/uninstall context, threaded through every step. */
 export interface InstallContext {
-  home?: Home | undefined;
+  home: Home;
   state: ServerState;
   ui: Ui;
   runner: Runner;

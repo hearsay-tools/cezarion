@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
@@ -29,7 +30,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const generation = store.commitWorkerExecutionStart(w.id);
       await ensureOwnedWorkspace(root, w);
       setRunStatus(store, w.id, RUN_STATUS.done); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
-      const service = new DelegationService(); const detach = service.registerProject({ id: 'p', root, store, manager });
+      const service = new DelegationService(); const detach = service.registerProject({ home: testHome(), id: 'p', root, store, manager });
       return { w, service, detach };
     }
 
@@ -149,7 +150,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
     });
 
     const service = (projectStore: RunStore, projectManager: RunManager) => {
-      const delegation = new DelegationService(); delegation.registerProject({ id: 'p', root, store: projectStore, manager: projectManager });
+      const delegation = new DelegationService(); delegation.registerProject({ home: testHome(), id: 'p', root, store: projectStore, manager: projectManager });
       return delegation;
     };
 
@@ -171,7 +172,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       // Only the leader dies: its member keeps the group, and the worktree, alive.
       const gone = new Promise(resolve => leader.once('exit', resolve)); process.kill(leader.pid!, 'SIGKILL'); await gone;
       expect(alive(member)).toBe(true);
-      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { home: testHome() });
       try {
         expect(await service(reopened, other).destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         expect(alive(member)).toBe(false);

@@ -42,13 +42,15 @@ async function serveFixture() {
   syncBuiltinESMExports();
   const { listProjects, clearProjectProbeCache } = await import('../src/workspace/projects.ts');
   const { mergeWriteWorkspaceConfig } = await import('../src/workspace/config.ts');
+  const { resolveHome } = await import('../src/home/resolve.ts');
+  const home = resolveHome({ purpose: 'cli' });
   const hz = Number(childProcess.execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim());
   const gitCpuMs = () => {
     const fields = readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ');
     return (Number(fields[13]) + Number(fields[14])) * 1000 / hz;
   };
   const server = createServer((_request, response) => {
-    listProjects().then((projects) => {
+    listProjects(undefined, home).then((projects) => {
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(projects));
     }).catch((error) => { response.statusCode = 500; response.end(String(error)); });
   });
@@ -63,7 +65,7 @@ async function serveFixture() {
           id: `project-${i}`, name: `Project ${i}`, root, source: 'local',
           addedAt: '2026-11-06T00:00:00Z', lastOpenedAt: '2026-11-06T00:00:00Z',
         }));
-      });
+      }, home);
     }
     if (message.kind === 'clear') clearProjectProbeCache();
     if (message.kind === 'begin') { commands = {}; cpu = process.cpuUsage(); childCpu = gitCpuMs(); }

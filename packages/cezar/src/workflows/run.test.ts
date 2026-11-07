@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { AttachmentWriter } from './run/attachment-writer.ts';
 import { QueuedInput } from './run/queued-input.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
@@ -82,8 +83,8 @@ describe('RunManager directional usage accounting', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-usage-accounting-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
+    manager = createFixtureManager(store, repoRoot, { home: testHome(),
+      semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }),
     });
   });
 
@@ -349,8 +350,8 @@ describe('TurnBookkeeper.recordTurnEnd', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    bookkeeper = new TurnBookkeeper({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
-      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    bookkeeper = new TurnBookkeeper({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused<ConstructorParameters<typeof TurnBookkeeper>[1]>('TurnBookkeeper.host', { isDisposedDelegatedRun: () => false }));
   });
 
@@ -1038,8 +1039,8 @@ describe('RunManager monitoring turns', () => {
   const { SINGLE_STEP, waitFor } = fixture;
   it('nested Codex subagent items after park do not unpark monitoring (#121)', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.01 } });
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.01 } });
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(), semaphore });
     const clock = fixture.observeWakeTimers();
     const competing = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup competing park', runner: 'claude' });
     await waitFor(competing.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
@@ -1110,8 +1111,8 @@ describe('RunManager monitoring turns', () => {
 
   it('parent turn.started after park still unparks monitoring (#61, #121)', async () => {
     fixture.manager.dispose();
-    const semaphore = new WorkspaceSemaphore({ initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.02 } });
-    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { semaphore });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxMonitoringSessions: 1, monitoringWakeIntervalMinutes: 0.02 } });
+    fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot, { home: testHome(), semaphore });
     fixture.observeWakeTimers();
     const competing = fixture.manager.startRun(SINGLE_STEP, { task: 'mock:schedule-wakeup competing park', runner: 'claude' });
     await waitFor(competing.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
@@ -1678,8 +1679,8 @@ describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-persist-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    attachments = new AttachmentWriter({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
-      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    attachments = new AttachmentWriter({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused('AttachmentWriter.host'));
   });
 
@@ -1761,9 +1762,9 @@ describe('RunManager queued-stack mutators (#472)', () => {
     await run('git', ['add', 'base.txt'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     capacity = 0;
-    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
+    semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
   });
 
   afterEach(async () => {
@@ -2013,7 +2014,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     const r = seedQueued();
     let accepts = false;
     const delivered: Array<Parameters<RunManager['sendMessage']>[1]> = [];
-    const queuedInput = new QueuedInput({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+    const queuedInput = new QueuedInput({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
       work: new TrackedWork(), semaphore, disposed: () => false,
     }, unused<ConstructorParameters<typeof QueuedInput>[1]>('QueuedInput.host', {
       startingHas: () => true, activeGet: () => undefined,
@@ -2061,8 +2062,8 @@ describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-hydrate-'));
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    queuedInput = new QueuedInput({ store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
-      work: new TrackedWork(), semaphore: new WorkspaceSemaphore(), disposed: () => false,
+    queuedInput = new QueuedInput({ home: testHome(), store, repoRoot, dataDir: join(repoRoot, '.ai/cezar'),
+      work: new TrackedWork(), semaphore: new WorkspaceSemaphore({ home: testHome() }), disposed: () => false,
     }, unused('QueuedInput.host'));
   });
 
@@ -2240,9 +2241,9 @@ describe('queued stacking reaches the backend (#472)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
+    semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
   });
 
   afterAll(async () => {
@@ -2326,7 +2327,7 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
 
     const expected = 'the original task\n\nthe stacked bit';
     let capacity = 0;
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
     let delivered: AgentRunSpec | undefined;
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
@@ -2341,7 +2342,7 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
     let manager!: RunManager;
     // Two successive restarts, each re-adopting the same record.
     for (let restart = 0; restart < 2; restart += 1) {
-      manager = createFixtureManager(store, repoRoot, { semaphore });
+      manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
       // Keep each recovered task queued until both restarts have rebuilt its input.
       await manager.recover();
       expect(store.getRun(r.id)?.status).toBe(RUN_STATUS.queued);

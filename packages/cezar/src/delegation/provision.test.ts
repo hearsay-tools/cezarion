@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture } from './service.testkit.ts';
@@ -140,7 +141,7 @@ describe('session provisioning', () => {
     vi.stubEnv('CEZ_DELEGATION', '0'); const on = await DelegationController.start(); expect(listen).toHaveBeenCalledTimes(1); expect(on.url).toBeDefined(); await on.close();
     listen.mockRejectedValue(Error('unavailable'));
     const broken = await DelegationController.start();
-    broken.attachProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
+    broken.attachProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     expect(broken.url).toBeUndefined(); expect(warn).toHaveBeenCalledTimes(1); await broken.close();
   });
   // hearsay-tools/cezarion#2784: the per-task switches decide what a root session is taught and issued.

@@ -102,7 +102,7 @@ export interface ProvisionResult {
 }
 
 export interface ProvisionOptions extends WorktreeFilesOptions {
-  home?: Home | undefined;
+  home: Home;
   /** True once the run stopped: the pass writes nothing more from its next step on. */
   cancelled?: () => boolean;
 }
@@ -139,7 +139,7 @@ const entryPath = (agentDir: string, name: string) => `${agentDir}/skills/${name
 
 /** One pass's shared state: what it installed, and every path its closure still wants. */
 interface Pass {
-  home?: Home | undefined;
+  home: Home;
   files: WorktreeFiles;
   installed: Set<string>;
   wanted: Set<string>;
@@ -156,7 +156,7 @@ export function provisionSkills(
   worktree: string,
   roots: readonly Skill[],
   catalog: readonly Skill[],
-  options: ProvisionOptions = {},
+  options: ProvisionOptions,
 ): Promise<ProvisionResult> {
   return withWorktreeFiles(worktree, 'skills', options, { installed: [], teamCopies: {} },
     (files) => provisionPass(files, roots, catalog, options));

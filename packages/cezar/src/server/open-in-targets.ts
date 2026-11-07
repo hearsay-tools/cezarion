@@ -16,7 +16,7 @@ import type { openInTerminal } from './open-in-terminal.ts';
 import type { resumeCommand } from './server.ts';
 
 interface CliHandoffDeps {
-  home?: Home | undefined;
+  home: Home;
   providerActionError: (required: readonly RunnerId[]) => Promise<string | null>;
   resumeCommand: typeof resumeCommand;
   handoffEnv: (provider: RunnerId, profileId: string | undefined) => Promise<{ env: Record<string, string> } | { error: string }>;

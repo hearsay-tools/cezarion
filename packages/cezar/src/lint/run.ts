@@ -1,3 +1,4 @@
+import { staleHomeReaders } from './home-boundary.ts';
 import { guardianCssProblems } from './design-guardian-css.ts';
 import { serverWaitProblems, unitWaitProblems } from './wait-discipline-runner.ts';
 import { execFile } from 'node:child_process';
@@ -166,7 +167,7 @@ export function staleEntries(root = repoRoot): string[] {
       problems.push(`${READERS} cez/run-fact-reader: ${file} no longer reads autoResumeAt; remove it from the list`);
     }
   }
-  problems.push(...staleHistoryReaders(root));
+  problems.push(...staleHistoryReaders(root), ...staleHomeReaders(root));
   const baseline = readSetterBaseline(join(root, SETTERS));
   const actual = [...new Set(baseline.map((entry) => entry.file))].flatMap((file) => {
     const text = source(`${WEB_SRC}${file}`);

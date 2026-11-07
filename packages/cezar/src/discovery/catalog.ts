@@ -13,10 +13,10 @@ export interface HostDiscovery {
 }
 
 /** Initialize before recovery or headless execution; the cockpit reuses this same model cache. */
-export function createHostDiscovery(root: string, auth: ProviderAuthService, home?: Home): HostDiscovery & { models: RunnerModelCatalog } {
+export function createHostDiscovery(root: string, auth: ProviderAuthService, home: Home): HostDiscovery & { models: RunnerModelCatalog } {
   return {
     models: new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(root) }),
-    providers: async () => applyProviderEnablement(await auth.status(), providerAuthChecksDisabled() ? [] : (await loadWorkspaceConfig(home?.workspaceConfig)).disabledProviders),
+    providers: async () => applyProviderEnablement(await auth.status(), providerAuthChecksDisabled() ? [] : (await loadWorkspaceConfig(home.workspaceConfig)).disabledProviders),
   };
 }
 

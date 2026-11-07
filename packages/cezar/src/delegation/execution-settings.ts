@@ -19,7 +19,7 @@ export function delegationExecutionSettings(state: Pick<ActiveRun, 'liveSession'
   return structuredClone(state.liveSession.delegationSettings);
 }
 
-export async function selectDelegationExecutionSettings(repoRoot: string, parent: DelegationExecutionSettings, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>, home?: Home): Promise<DelegationExecutionSettings> {
+export async function selectDelegationExecutionSettings(repoRoot: string, parent: DelegationExecutionSettings, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel: ((settings: DelegationExecutionSettings) => Promise<void>) | undefined, home: Home): Promise<DelegationExecutionSettings> {
   const runner = selection.backend ?? parent.runner;
   const sameBackend = runner === parent.runner;
   try {
@@ -32,7 +32,7 @@ export async function selectDelegationExecutionSettings(repoRoot: string, parent
   }
 }
 
-function refuseModelLock(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, sameBackend: boolean, home?: Home) {
+function refuseModelLock(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, sameBackend: boolean, home: Home) {
   const effortPin = parseDelegationEffort(selection.effort);
   const locked = agentModelsLocked(repoRoot, process.env, home);
   if (locked && (selection.model !== undefined || effortPin !== undefined || (sameBackend && (parent.model !== undefined || parent.effort !== undefined)))) {
@@ -41,7 +41,7 @@ function refuseModelLock(repoRoot: string, parent: DelegationExecutionSettings, 
   return { effortPin, locked };
 }
 
-async function bindAccount(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, runner: RunnerId, sameBackend: boolean, home?: Home) {
+async function bindAccount(repoRoot: string, parent: DelegationExecutionSettings, selection: ExecutionSelection, runner: RunnerId, sameBackend: boolean, home: Home) {
   let accountBinding = parent.accountBinding;
   let env = buildChildEnv({ backend: runner });
   if (!sameBackend || selection.agentProfile !== undefined) {

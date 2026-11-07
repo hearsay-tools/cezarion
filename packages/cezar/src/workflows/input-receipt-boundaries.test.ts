@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { fixture as ownedFixture } from '../delegation/service.testkit.ts';
 import { createActiveRun } from './active-run.ts';
 import { sessionResultWithReceipts, type InputReceiptsHost, type InputReceiptSteps } from './run/input-receipts.ts';
@@ -159,8 +160,8 @@ for (const mode of ['fresh', 'continuation'] as const) {
 it('the receipt setup contract propagates recordProcess failure before marking prepared or reading the result', () => {
   const runner = controlledRunner();
   Object.defineProperty(runner.session, 'pid', { value: 12345 });
-  const context: RunModuleContext = { store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
-    semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false };
+  const context: RunModuleContext = { home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
+    semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   const state = createActiveRun({ cwd: root, autonomous: false, pendingHumanAsk: false });
   const calls: string[] = [];
   const host = unused<InputReceiptsHost>('receipts', { flushAgentInputs: () => { calls.push('inputs'); } });

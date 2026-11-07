@@ -22,7 +22,7 @@ import {
  */
 
 export interface RunOptions {
-  home?: Home;
+  home: Home;
   dryRun: boolean;
   assumeYes: boolean;
   reconfigure: ReadonlySet<string>;
@@ -303,7 +303,7 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
       );
     }
 
-    const registeredProjects = (await loadWorkspaceConfig(opts.home?.workspaceConfig)).projects.length;
+    const registeredProjects = (await loadWorkspaceConfig(opts.home.workspaceConfig)).projects.length;
     if (registeredProjects > 0) {
       ctx.ui.warn(
         `${registeredProjects} ${registeredProjects === 1 ? 'project is' : 'projects are'} registered in ~/.cezar/config.json.`,

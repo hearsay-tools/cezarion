@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,7 +28,7 @@ describe('the agent-config API', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-agentcfg-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({
+    app = createApp({ home: testHome(),
       repoRoot,
       store,
       manager: {} as RunManager,
@@ -148,12 +149,12 @@ describe('the agent-config API', () => {
   // hearsay-tools/cezarion#2428: the host switch grants the remote cockpit settings administration.
   describe('remote settings administration', () => {
     afterEach(async () => {
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
     });
 
     it('enabled on the host: the listing is editable, home files are served and writes land', async () => {
       process.env.CEZ_REMOTE = '1';
-      await enableRemoteSettings(4321);
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
       const body = (await (await apiRequest(app, '/api/v1/agent-config')).json()) as { editable: boolean; userMcp: unknown };
       expect(body.editable).toBe(true);
       expect(body.userMcp).not.toBeNull();
@@ -165,9 +166,9 @@ describe('the agent-config API', () => {
 
     it('disabled again: the next request is refused without a restart', async () => {
       process.env.CEZ_REMOTE = '1';
-      await enableRemoteSettings(4321);
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
       expect((await put('claude.project.settings', { content: '{}', version: null })).status).toBe(200);
-      await disableRemoteSettings();
+      await disableRemoteSettings(undefined, undefined, testHome());
       const refused = await put('claude.project.settings', { content: '{"hooks":{}}', version: null });
       expect(refused.status).toBe(409);
       expect(((await refused.json()) as { error: string }).error).toContain('cez remote-settings enable');
@@ -177,7 +178,7 @@ describe('the agent-config API', () => {
 
     it('enabled on the host: a cross-origin browser write is still rejected', async () => {
       process.env.CEZ_REMOTE = '1';
-      await enableRemoteSettings(4321);
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
       const res = await apiRequest(app, '/api/v1/agent-config/claude.project.settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json', host: 'cezar.example.ts.net', origin: 'https://evil.example' },
@@ -190,12 +191,12 @@ describe('the agent-config API', () => {
     // The multi-domain installer runs one cockpit per domain under one user and CEZ_HOME.
     it('a grant for one cockpit leaves another cockpit sharing the home read-only', async () => {
       process.env.CEZ_REMOTE = '1';
-      await enableRemoteSettings(4322);
+      await enableRemoteSettings(4322, undefined, undefined, testHome());
       const body = (await (await apiRequest(app, '/api/v1/agent-config')).json()) as { editable: boolean };
       expect(body.editable).toBe(false);
       expect((await put('claude.project.settings', { content: '{"hooks":{}}', version: null })).status).toBe(409);
       expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(409);
-      const granted = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4322 });
+      const granted = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4322 });
       const saved = await apiRequest(granted, '/api/v1/agent-config/claude.project.settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -206,8 +207,8 @@ describe('the agent-config API', () => {
 
     it('a non-loopback bind never takes the switch', async () => {
       process.env.CEZ_REMOTE = '1';
-      await enableRemoteSettings(4321);
-      const exposed = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bindHost: '172.17.0.1', cezarPort: () => 4321 });
+      await enableRemoteSettings(4321, undefined, undefined, testHome());
+      const exposed = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bindHost: '172.17.0.1', cezarPort: () => 4321 });
       const res = await apiRequest(exposed, '/api/v1/agent-config/claude.project.settings', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },

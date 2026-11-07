@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ function setup(bindHost?: string) {
     apply: vi.fn(async () => ({ status: 'ready' as const, supported: true, targetVersion: '2.0.0' })),
     restart: vi.fn(async () => ({ status: 'restarting' as const, supported: true, targetVersion: '2.0.0' })),
   };
-  const app = createApp({
+  const app = createApp({ home: testHome(),
     repoRoot: root,
     store: RunStore.open(join(root, '.ai/cezar')),
     manager: {} as RunManager,
@@ -91,7 +92,7 @@ describe('application update routes', () => {
     delete process.env.CEZ_REMOTE;
     const root = mkdtempSync(join(tmpdir(), 'cez-app-update-api-'));
     roots.push(root);
-    const app = createApp({ repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: '1.0.0' });
+    const app = createApp({ home: testHome(), repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')), manager: {} as RunManager, version: '1.0.0' });
     const response = await app.request('/api/v1/workspace/application-update/apply', {
       method: 'POST', headers: { 'content-type': 'application/json', host: 'localhost' }, body: '{}',
     });
@@ -118,7 +119,7 @@ describe('application update routes', () => {
     process.env.CEZ_DRY_RUN = '1';
     const root = mkdtempSync(join(tmpdir(), 'cez-app-update-api-')); roots.push(root);
     const calls: string[] = [];
-    const server = startServer({ repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')),
+    const server = startServer({ home: testHome(), repoRoot: root, store: RunStore.open(join(root, '.ai/cezar')),
       manager: {} as RunManager, version: '1.0.0', applicationUpdate: {
         snapshot: () => ({ status: 'ready', supported: true, targetVersion: '2.0.0' }),
         apply: async () => ({ status: 'ready', supported: true, targetVersion: '2.0.0' }),
@@ -151,7 +152,7 @@ describe('application update routes', () => {
       setRunStatus(store, run.id, status as 'queued' | 'waiting' | 'running');
       return run.id;
     });
-    const server = startServer({ repoRoot: root, store, manager: {} as RunManager, version: '1.0.0' }, 0);
+    const server = startServer({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: '1.0.0' }, 0);
     if (!server.listening) await once(server, 'listening');
     await server.shutdownForRestart();
     // The replacement process finds these runs nobody's, as a clean stop leaves them (#779).

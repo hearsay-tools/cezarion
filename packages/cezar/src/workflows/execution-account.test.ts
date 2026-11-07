@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
@@ -97,8 +98,8 @@ describe('account holds read the execution account', () => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-exec-account-'));
     initRepo(repoRoot);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    semaphore = new WorkspaceSemaphore();
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    semaphore = new WorkspaceSemaphore({ home: testHome() });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     vi.stubEnv('CEZ_AUTONAME', '0');
   });
   afterEach(async () => {
@@ -183,13 +184,13 @@ describe('a held wake does not advertise itself to the workspace line', () => {
   it('reports only wakes that could leave, so another project\'s eligible wake goes first', async () => {
     const launched = controlledSessions();
     let capacity = 0;
-    const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
+    const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 }, load: async () => ({ maxParallel: capacity, memoryLimitMb: null }) });
     manager.dispose();
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     const otherRoot = mkdtempSync(join(tmpdir(), 'cez-eligible-wake-'));
     initRepo(otherRoot);
     const otherStore = RunStore.open(join(otherRoot, '.ai/cezar'));
-    const other = createFixtureManager(otherStore, otherRoot, { semaphore });
+    const other = createFixtureManager(otherStore, otherRoot, { home: testHome(), semaphore });
     const queuedWake = (target: RunStore, manager: RunManager, runner: 'claude' | 'codex') => {
       const run = target.createRun({ title: 'parked', task: 'parked', workflow: 'quick-task', runner,
         steps: [{ id: 'task', name: 'task', kind: STEP_KIND.agent }] });
@@ -232,9 +233,9 @@ describe('a held wake does not advertise itself to the workspace line', () => {
 
   it('keeps a recovered runnerless task queued while the configured default account is held', async () => {
     const launched = controlledSessions();
-    const semaphore = new WorkspaceSemaphore();
+    const semaphore = new WorkspaceSemaphore({ home: testHome() });
     manager.dispose();
-    manager = createFixtureManager(store, repoRoot, { semaphore });
+    manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ defaultRunner: 'codex' }));
     const holder = store.createRun({ title: 'holder', workflow: 'quick-task', task: 'hold', runner: 'codex', steps: [] });
     setRunStatus(store, holder.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 600_000).toISOString() });

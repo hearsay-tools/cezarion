@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -66,6 +67,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
+  let managerHome: ReturnType<typeof testHome>;
   let launches: Array<{ spec: AgentRunSpec }>;
   let sessions: Array<{ spec: AgentRunSpec; finish: (text?: string) => void }>;
   let releases: Array<() => void>;
@@ -92,7 +94,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
     await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-    manager = createFixtureManager(store, repoRoot);
+    managerHome = testHome();
+    manager = createFixtureManager(store, repoRoot, { home: managerHome });
     vi.spyOn(runners, 'createRunner').mockImplementation((backend) => ({
       backend: backend ?? 'claude',
       specSupport: CLAUDE_SPEC_SUPPORT,
@@ -249,8 +252,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     vi.stubEnv('HOME', home);
     const repo = `org-${randomUUID().slice(0, 8)}/skills`;
     writeSkillsReposConfig(repoRoot, [repo]);
-    if (skillsInClone) cleanup.push((await seedTeamSkillsClone(repo, skillsInClone)).sourceDir);
-    skillsRemote.__holdFetchForTests(repo, new Promise<void>((resolve) => { releases.push(resolve); }));
+    if (skillsInClone) cleanup.push((await seedTeamSkillsClone(repo, skillsInClone, managerHome)).sourceDir);
+    skillsRemote.__holdFetchForTests(repo, new Promise<void>((resolve) => { releases.push(resolve); }), managerHome);
   }
 
   it('recovers a team skill from the on-disk clone while the first fetch still runs (#859)', async () => {

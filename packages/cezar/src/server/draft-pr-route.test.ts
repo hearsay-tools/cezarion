@@ -1,3 +1,4 @@
+import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,7 +41,7 @@ describe('the Draft PR route', () => {
     mkdirSync(join(dir, '.ai/cezar'), { recursive: true });
     mkdirSync(join(dir, 'worktree'));
     store = RunStore.open(join(dir, '.ai/cezar'));
-    app = createApp({ repoRoot: dir, store, manager, version: '0.0.0-test', forgeFactory });
+    app = createApp({ home: testHome(), repoRoot: dir, store, manager, version: '0.0.0-test', forgeFactory });
   });
   afterEach(() => {
     store.close();
