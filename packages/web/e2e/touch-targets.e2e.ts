@@ -282,7 +282,7 @@ describe('density-independent mobile action targets (#166)', () => {
           browser.goto(`${baseUrl}/p/${project}`)
           browser.waitForFunction(`document.querySelector('[data-slot="main"] [data-slot="pin-toggle"]') !== null`)
           appearance(density, theme)
-          const pin = mobile ? '[data-slot="task-card"] [data-slot="pin-toggle"]' : '[data-slot="main"] table [data-slot="pin-toggle"]'
+          const pin = mobile ? '[data-slot="task-card"] [data-slot="pin-toggle"]' : '[data-slot="main"] [role="table"] [data-slot="pin-toggle"]'
           const wasPinned = browser.evaluate(`document.querySelector('${pin}').getAttribute('aria-pressed')`)
           tapEdge(pin, mobile)
           browser.waitForFunction(`document.querySelector('${pin}').getAttribute('aria-pressed') !== ${JSON.stringify(wasPinned)}`)

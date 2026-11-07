@@ -470,7 +470,7 @@ describe('tasks table overview', () => {
     const diffs = browser.evaluate(`Object.fromEntries(
       [...document.querySelectorAll('${TABLE_ROW}')].map((tr) => [
         tr.dataset.runId,
-        tr.querySelector('td:nth-child(5)').textContent,
+        tr.querySelector('[role=cell][data-column-id="diff"]').textContent,
       ])
     )`) as Record<string, string>
 
@@ -828,14 +828,14 @@ describe('the tasks table under worst-case row content', () => {
         // frame between the class change and it.
         browser.waitForFunction(
           `document.documentElement.dataset.density === ${density === 'ultra' ? "'ultra'" : 'undefined'}
-             && document.querySelector('${wrappingRow} td[data-column-id="cpu"]') !== null`,
+             && document.querySelector('${wrappingRow} [role=cell][data-column-id="cpu"]') !== null`,
         )
 
         const facts = waitForSettledSample(browser, `(() => {
           const metricsRow = document.querySelector('${wrappingRow}')
-          const firstCell = metricsRow.querySelector('td[data-column-id="task"]')
+          const firstCell = metricsRow.querySelector('[role=cell][data-column-id="task"]')
           const firstLink = firstCell.querySelector('a[href*="/tasks/"]')
-          const secondCell = document.querySelector('${unbrokenRow} td[data-column-id="task"]')
+          const secondCell = document.querySelector('${unbrokenRow} [role=cell][data-column-id="task"]')
           const secondLink = secondCell.querySelector('a[href*="/tasks/"]')
           const suffix = 'documentation outcome'
           const textNode = firstLink.firstChild
@@ -847,17 +847,17 @@ describe('the tasks table under worst-case row content', () => {
           const secondRect = secondLink.getBoundingClientRect()
           const secondCellRect = secondCell.getBoundingClientRect()
           const lineHeight = Number.parseFloat(getComputedStyle(firstLink).lineHeight)
-          const workflow = metricsRow.querySelector('td[data-column-id="workflow"]')
-          const status = metricsRow.querySelector('td[data-column-id="status"]')
+          const workflow = metricsRow.querySelector('[role=cell][data-column-id="workflow"]')
+          const status = metricsRow.querySelector('[role=cell][data-column-id="status"]')
           const statusPill = status.querySelector('[data-slot="pill"]')
-          const reference = metricsRow.querySelector('td[data-column-id="reference"]')
+          const reference = metricsRow.querySelector('[role=cell][data-column-id="reference"]')
           const referenceChip = reference.querySelector('[data-slot="pr-chip"]')
-          const diff = metricsRow.querySelector('td[data-column-id="diff"]')
-          const workflowHeader = document.querySelector('th[data-column-id="workflow"]')
+          const diff = metricsRow.querySelector('[role=cell][data-column-id="diff"]')
+          const workflowHeader = document.querySelector('[role=columnheader][data-column-id="workflow"]')
           const workflowHeaderButton = workflowHeader.querySelector('button')
           const secondaryIds = ['tokens', 'cost', 'cpu', 'memory', 'started']
           const secondary = secondaryIds.map((id) => {
-            const cell = metricsRow.querySelector('td[data-column-id="' + id + '"]')
+            const cell = metricsRow.querySelector('[role=cell][data-column-id="' + id + '"]')
             const style = getComputedStyle(cell)
             const rect = cell.getBoundingClientRect()
             const target = cell.firstElementChild || cell
@@ -879,7 +879,7 @@ describe('the tasks table under worst-case row content', () => {
               title: cell.firstElementChild?.getAttribute('title') || cell.getAttribute('title'),
             }
           })
-          const memoryCell = metricsRow.querySelector('td[data-column-id="memory"]')
+          const memoryCell = metricsRow.querySelector('[role=cell][data-column-id="memory"]')
           const workflowStyle = getComputedStyle(workflow)
           const diffStyle = getComputedStyle(diff)
           const diffRect = diff.getBoundingClientRect()
@@ -911,7 +911,7 @@ describe('the tasks table under worst-case row content', () => {
             workflowHeaderContained: workflowHeaderChildren.every((rect) => rect.left >= workflowHeaderRect.left + Number.parseFloat(workflowHeaderStyle.paddingLeft) - 1 && rect.right <= workflowHeaderContentRight + 1),
             memoryLabel: memoryCell.textContent,
             metricsBeforeNeighbors: secondary.slice(0, -1).every((metric, index) => {
-              const nextCell = metricsRow.querySelector('td[data-column-id="' + secondaryIds[index + 1] + '"]')
+              const nextCell = metricsRow.querySelector('[role=cell][data-column-id="' + secondaryIds[index + 1] + '"]')
               const nextStyle = getComputedStyle(nextCell)
               return metric.right < nextCell.getBoundingClientRect().left + Number.parseFloat(nextStyle.paddingLeft)
             }),
@@ -985,7 +985,7 @@ describe('the tasks table under worst-case row content', () => {
           })()`,
         )
         const actions = waitForSettledSample(browser, `(() => {
-          const cell = document.querySelector('${wrappingRow} td[data-column-id="task"]')
+          const cell = document.querySelector('${wrappingRow} [role=cell][data-column-id="task"]')
           const bounds = cell.getBoundingClientRect()
           return [...cell.querySelectorAll('button')].map((button) => {
             const rect = button.getBoundingClientRect()
@@ -1009,7 +1009,7 @@ describe('the tasks table under worst-case row content', () => {
   it('gives the task column the width the Workflow fold releases, and remembers a resized sidebar', () => {
     const taskWidth = () =>
       Number(waitForSettledSample(browser,
-        `document.querySelector('${wrappingRow} td[data-column-id="task"]').getBoundingClientRect().width`,
+        `document.querySelector('${wrappingRow} [role=cell][data-column-id="task"]').getBoundingClientRect().width`,
       ))
 
     const widthBeforeFold = taskWidth()
@@ -1027,7 +1027,7 @@ describe('the tasks table under worst-case row content', () => {
     const resized = waitForSettledSample(browser, `({
       preference: localStorage.getItem('cez-sidebar-width'),
       sidebarWidth: document.querySelector('[data-slot="sidebar"]').getBoundingClientRect().width,
-      taskWidth: document.querySelector('${wrappingRow} td[data-column-id="task"]').getBoundingClientRect().width,
+      taskWidth: document.querySelector('${wrappingRow} [role=cell][data-column-id="task"]').getBoundingClientRect().width,
     })`) as { preference: string; sidebarWidth: number; taskWidth: number }
     expect(resized.preference).toBe('360')
     expect(resized.sidebarWidth).toBe(360)

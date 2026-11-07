@@ -1,0 +1,61 @@
+{
+  "revision": "95311b18684bd9cd63181cebe1914cac64c92fa7",
+  "productionProfilingBuild": true,
+  "workloadSha256": "7a296c786f742d98637e06b4d0ade7ef8f3bbce75d430a80aedc332ebefb619b",
+  "builtContentSha256": "4a3a2d30bf2e65539324e5ce1ea23e6afd0755526fedf69be6f6a808d1efe5f7",
+  "sourceDirty": false,
+  "quick": false,
+  "host": {
+    "cpu": "AMD Ryzen 9 5950X 16-Core Processor",
+    "affinity": "23"
+  },
+  "pendingCase": null,
+  "lastClick": {
+    "expected": "document.querySelector('input[aria-label=\"Search tasks\"],input[placeholder*=\"Search\"]')",
+    "point": {
+      "x": 770.140625,
+      "y": 274.5
+    }
+  },
+  "fixtureExits": [
+    {
+      "scope": "global",
+      "pid": 1549122,
+      "spawnfile": "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+      "spawnargs": [
+        "/home/agent/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/web/scripts/tab-fixture-server.mjs",
+        "/tmp/cez-tabs-oWthbS",
+        "/home/agent/projects/cezar/.ai/cezar/worktrees/be11c106-852d-4943-811c-057c0ba1248d/packages/cezar",
+        "none",
+        "global"
+      ],
+      "elapsedMs": 74212,
+      "exitCode": 0,
+      "signalCode": null,
+      "lifecycle": [
+        {
+          "kind": "exit",
+          "elapsedMs": 74212,
+          "detail": "code=0 signal=null"
+        }
+      ],
+      "stdout": "",
+      "stderr": "",
+      "stdoutDropped": 0,
+      "stderrDropped": 0
+    }
+  ],
+  "caseFiles": [
+    "global-1440-summary-active-flat-r1.json",
+    "global-1440-summary-active-virtual-r1.json",
+    "global-1440-summary-active-virtual-r2.json",
+    "global-1440-summary-active-flat-r2.json",
+    "global-1440-summary-active-flat-r3.json",
+    "global-1440-summary-active-virtual-r3.json",
+    "global-1440-summary-active-virtual-r4.json",
+    "global-1440-summary-active-flat-r4.json",
+    "global-1440-summary-active-flat-r5.json",
+    "global-1440-summary-active-virtual-r5.json"
+  ]
+}

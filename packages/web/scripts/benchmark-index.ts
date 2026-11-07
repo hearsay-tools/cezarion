@@ -54,7 +54,7 @@ const HOOK_SHIM = `(() => {
 const VIEWS = ['closed', 'all-tasks', 'detail'] as const
 type View = (typeof VIEWS)[number]
 
-interface RequestRow { url: string; at: number; startTs?: number; durationMs?: number; ended?: boolean; chunks: Array<[number, number]> }
+interface RequestRow { sessionId: string | undefined; requestId: string; completedAt?: number; url: string; at: number; startTs?: number; durationMs?: number; ended?: boolean; chunks: Array<[number, number]> }
 
 export async function runIndexWorkload(options: {
   buildRoot: string; report: { cases: unknown[] }; save: () => void; views?: string[] | undefined; cpu?: string | undefined
@@ -81,23 +81,25 @@ export async function runIndexWorkload(options: {
       await browser.withCdp(async (request, subscribe) => {
         const requests = new Map<string, RequestRow>()
         const off = subscribe(event => {
-          if (event.method === 'Target.attachedToTarget' && event.params.targetInfo.type === 'shared_worker') {
+          if (event.method === 'Target.attachedToTarget' && ['shared_worker', 'worker'].includes(event.params.targetInfo.type)) {
             const sessionId = event.params.sessionId as string
             void request('Network.enable', {}, sessionId).then(() => request('Runtime.runIfWaitingForDebugger', {}, sessionId)).catch(() => {})
           }
           const key = `${event.sessionId}/${event.params?.requestId}`
-          if (event.method === 'Network.requestWillBeSent') requests.set(key, { url: event.params.request.url, at: performance.now(), startTs: event.params.timestamp, chunks: [] })
+          if (event.method === 'Network.requestWillBeSent') requests.set(key, { sessionId: event.sessionId, requestId: event.params.requestId, url: event.params.request.url, at: performance.now(), startTs: event.params.timestamp, chunks: [] })
           if (event.method === 'Network.dataReceived') requests.get(key)?.chunks.push([performance.now(), event.params.dataLength])
           if (event.method === 'Network.loadingFinished') {
             const row = requests.get(key)
             if (row?.startTs !== undefined) row.durationMs = 1000 * (event.params.timestamp - row.startTs)
-            if (row) row.ended = true
+            if (row) { row.ended = true; row.completedAt = performance.now() }
           }
           if (event.method === 'Network.loadingFailed') { const row = requests.get(key); if (row) row.ended = true }
         })
-        await request('Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: true, filter: [{ type: 'shared_worker', exclude: false }, { exclude: true }] })
+        await request('Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: true, filter: [{ type: 'shared_worker', exclude: false }, { type: 'worker', exclude: false }, { exclude: true }] })
         const { targetId } = await request('Target.createTarget', { url: 'about:blank' })
         const { sessionId } = await request('Target.attachToTarget', { targetId, flatten: true })
+        // Dedicated workers are descendants of this page; shared workers attach at browser scope.
+        await request('Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: true, filter: [{ type: 'worker', exclude: false }, { exclude: true }] }, sessionId)
         await request('Network.enable', {}, sessionId); await request('Performance.enable', {}, sessionId); await request('Page.enable', {}, sessionId)
         await request('Page.addScriptToEvaluateOnNewDocument', { source: HOOK_SHIM }, sessionId)
         const { profileOut } = options
@@ -164,7 +166,20 @@ export async function runIndexWorkload(options: {
           return { main: await evaluate('!!document.querySelector("[data-slot=main]")') }
         })
         await measure('update', async () => {
-          const target = otherRoots[0]!
+          let target = otherRoots[0]!
+          if (view === 'all-tasks') {
+            // Read the cold phase's existing index response, without another request or a scroll.
+            const coldIndex = [...requests.values()].filter(row => row.url.includes('/workspace/runs-index') && row.completedAt !== undefined).sort((a, b) => a.completedAt! - b.completedAt!).at(-1)
+            if (!coldIndex) throw new Error('Index update workload has no cold index response')
+            const response = await request('Network.getResponseBody', { requestId: coldIndex.requestId }, coldIndex.sessionId)
+            const index = JSON.parse(response.base64Encoded ? Buffer.from(response.body, 'base64').toString() : response.body) as { runs: Array<{ id: string; projectId: string }> }
+            // Fixture other-project roots share status and pin state, so index order is display order.
+            const first = index.runs.find(row => row.projectId === 'other' && otherRoots.some(root => root.runId === row.id))
+            if (!first || !await evaluate(`!!document.querySelector('[data-route="global-tasks"] [data-project="other"][data-run-id="${first.id}"]')`)) {
+              throw new Error('Index update workload needs the first other-project root in display order to be mounted')
+            }
+            target = { projectId: first.projectId, runId: first.id }
+          }
           const title = `Renamed ${Date.now()}`
           const at = performance.now()
           await fixture.control({ update: [{ projectId: target.projectId, runId: target.runId, patch: { title } }] })
