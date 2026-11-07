@@ -772,6 +772,32 @@ describe('WorkspaceAutomationScheduler', () => {
       } finally { vi.useRealTimers(); }
     });
 
+    it('a workspace whose registry once listed a project keeps its idle wake through an empty read', async () => {
+      vi.useFakeTimers();
+      try {
+        const { root, dataDir } = await workspace();
+        AutomationStore.open(dataDir).create({ name: 'Paused', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'x' } }, 'paused');
+        let projects: { id: string; root: string; status: 'ok' }[] = [{ id: 'a', root, status: 'ok' }];
+        const coordinator = new AutomationCoordinator({ listProjects: async () => projects });
+        const scheduler = new WorkspaceAutomationScheduler({
+          coordinator,
+          handle: (projectId, store) => ({ projectId, store, timeZone: 'UTC' }),
+        });
+        try {
+          await scheduler.start();
+          expect(scheduler.hasTimer()).toBe(true);
+          projects = [];
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(coordinator.ids()).toEqual([]);
+          expect(scheduler.hasTimer()).toBe(true);
+          projects = [{ id: 'a', root, status: 'ok' }];
+          await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+          expect(coordinator.ids()).toEqual(['a']);
+          expect(scheduler.hasTimer()).toBe(true);
+        } finally { scheduler.stop(); }
+      } finally { vi.useRealTimers(); }
+    });
+
     it('a registered project without definitions keeps an idle wake that discovers a schedule another process creates and exits (finding 4172236277)', async () => {
       vi.useFakeTimers();
       try {
