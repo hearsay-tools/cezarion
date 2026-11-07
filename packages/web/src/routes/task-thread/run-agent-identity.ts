@@ -1,7 +1,9 @@
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { AgentProfile } from '@open-mercato/cezar-api-client/contract/agent-profiles'
+import type { ApiRun, Runner } from '@open-mercato/cezar-api-client'
 
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
+import type { RunnerAccountChoice } from '@/components/picker-pill'
 import { useAgentProfiles, useConfig } from '@/api/queries'
 
 /** What ran this task (#416, #546): runner, account, model, effort and the canonical model
@@ -13,6 +15,35 @@ export interface AgentIdentity {
   model: string
   effort: string
   identity?: string
+}
+
+/** The account label for the step that actually spawned, in priority order: nothing recorded or
+ *  the catalog still loading stays silent, a failed catalog shows the raw id, the backend's own
+ *  `default` only when it is a real choice, a known account shows its label under the same count
+ *  rule, and an otherwise unknown id is the `(removed)` pointer to a deleted login's folder.
+ *
+ *  The recorded `default` is the backend's own home: discovered, never deletable — so an empty or
+ *  failed catalog cannot make it "(removed)" (hearsay-tools/cezarion#411), and a lone default
+ *  stays omitted exactly as the count rule above intends. */
+function accountLabel(options: {
+  accountId: string | undefined
+  profilesPending: boolean
+  profilesError: boolean
+  known: AgentProfile | undefined
+  accounts: readonly RunnerAccountChoice[]
+  accountBackend: Runner
+}): string | undefined {
+  return options.accountId === undefined || options.profilesPending
+    ? undefined
+    : options.profilesError
+      ? options.accountId
+      : options.accountId === DEFAULT_AGENT_ACCOUNT_ID
+        ? hasAccountChoice(options.accounts, options.accountBackend) ? 'default' : undefined
+        : options.known
+          ? hasAccountChoice(options.accounts, options.accountBackend)
+            ? options.known.label
+            : undefined
+          : `${options.accountId} (removed)`
 }
 
 export function useAgentIdentity(run: ApiRun): AgentIdentity {
@@ -60,20 +91,14 @@ export function useAgentIdentity(run: ApiRun): AgentIdentity {
   const known = profiles.data?.profiles.find(
     (p) => p.id === accountId && p.provider === accountBackend,
   )
-  const account = accountId === undefined || profiles.isPending
-    ? undefined
-    : profiles.isError
-      ? accountId
-      : accountId === DEFAULT_AGENT_ACCOUNT_ID
-        // The recorded `default` is the backend's own home: discovered, never deletable — so an
-        // empty or failed catalog cannot make it "(removed)" (#411), and a lone default stays
-        // omitted exactly as the count rule above intends.
-        ? hasAccountChoice(accounts, accountBackend) ? 'default' : undefined
-        : known
-          ? hasAccountChoice(accounts, accountBackend)
-            ? known.label
-            : undefined
-          : `${accountId} (removed)`
+  const account = accountLabel({
+    accountId,
+    profilesPending: profiles.isPending,
+    profilesError: profiles.isError,
+    known,
+    accounts,
+    accountBackend,
+  })
   // The canonical `provider/model` the run actually resolved to (#405), shown only when it says
   // something `model` does not (#546). `model` is the free-text the caller ASKED for — `opus`,
   // `auto`, a gateway id — so on a repo whose Claude runner points at a custom endpoint the two
