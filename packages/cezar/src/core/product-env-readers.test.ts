@@ -24,9 +24,9 @@ it.each([
   expect(previewToolEnabled(env)).toBe(expected);
 });
 
-it('keeps host exposure and metrics defaults when preferred values clear legacy opt-ins', () => {
+it('keeps D8 hosted mode pinned while ordinary preferred clears still win', () => {
   const caps = resolveCapabilities({HSQ_REMOTE: '', CEZ_REMOTE: '1', HSQ_HIDE_TOKEN_METRICS: '', CEZ_HIDE_TOKEN_METRICS: '1', HSQ_SINGLE_PROJECT: '', CEZ_SINGLE_PROJECT: '1'});
-  expect(caps).toMatchObject({localHandoff: true, tokenMetrics: true, singleProject: false});
+  expect(caps).toMatchObject({localHandoff: false, tokenMetrics: true, singleProject: false});
   expect(resolveCapabilities({HSQ_REMOTE: '1', CEZ_REMOTE: '0', HSQ_HIDE_COST: '1'})).toMatchObject({localHandoff: false, costMetrics: false, tokenUsageMetrics: true});
 });
 

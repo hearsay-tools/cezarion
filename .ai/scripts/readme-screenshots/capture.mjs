@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { productEnvEntries } from '../../../packages/cezar/src/core/product-env.ts';
 import { ensureTestInstallMarker } from '../../../scripts/test-install-marker.mjs';
 // Recapture the README gallery (hearsay-tools/cezarion#1456). See docs/screenshots/README.md.
 //
@@ -90,8 +91,8 @@ export function serverEnv(base, { home, gitConfig, extra }) {
     GIT_AUTHOR_EMAIL: 'cezarion@users.noreply.github.com',
     GIT_COMMITTER_NAME: 'Cezarion',
     GIT_COMMITTER_EMAIL: 'cezarion@users.noreply.github.com',
-    CEZ_PROJECT_WARMUP: '0',
-    ...extra,
+    ...productEnvEntries('PROJECT_WARMUP', '0', true),
+    ...Object.assign({}, ...Object.entries(extra).map(([name, value]) => name.startsWith('CEZ_') ? productEnvEntries(name.slice(4), value, true) : { [name]: value })),
   };
 }
 

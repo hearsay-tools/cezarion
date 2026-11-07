@@ -305,6 +305,12 @@ reject named product reads and altered expressions in those same files.
 report shadowed, empty and retired settings without values. The generated legacy
 launcher shell keeps its explicit permanent `CEZ_HOME` fallback (spec section 4).
 
+Computed-key resolution accepts only string literals, static templates and immutable
+literal aliases. Member access, calls, mutable bindings, cycles and duplicate or
+shadowed binding names remain unknown computed reads. REMOTE uses the explicit
+`remoteEnvEnabled` accessor: either prefix's exact `1` keeps hosted mode enabled,
+including for old CEZ-only service files awaiting their next deploy.
+
 #### Known limits
 
 - Untyped values passed across files, function return values and values stored in

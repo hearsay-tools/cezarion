@@ -1,3 +1,5 @@
+import { scrubProbeSessionEnv } from '../../scripts/probe-session-env.ts';
+import { resolveCapabilities } from '../server/capabilities.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,10 +70,22 @@ it('generated intentional clears and native adapter allowlists preserve preferre
 });
 
 it.each([false, true])('service installers emit matching REMOTE env names with rebrand=%s', rebrand => {
-  const legacyUnit = systemdUnit('/repo', 4321, 'user', '/bin/cez', undefined, false);
   const unit = systemdUnit('/repo', 4321, 'user', '/bin/cez', undefined, rebrand);
-  expect(unit).toBe(rebrand ? legacyUnit.replace('Environment=CEZ_REMOTE=1', 'Environment=HSQ_REMOTE=1\nEnvironment=CEZ_REMOTE=1') : legacyUnit);
+  expect(unit).toContain('Environment=CEZ_REMOTE=1');
+  expect(unit).toContain('Environment=HSQ_REMOTE=1');
+  const installed = Object.fromEntries([...unit.matchAll(/^Environment=(\w+)=(.*)$/gm)].map(match => [match[1]!, match[2]!]));
+  expect(resolveCapabilities({HSQ_REMOTE: '0', ...installed}, '127.0.0.1')).toMatchObject({localHandoff: false, settingsAdmin: false});
   const plist = cezarLaunchdPlist('/repo', 4321, ['/bin/cez'], rebrand);
   expect(plist).toContain('<key>CEZ_REMOTE</key>\n      <string>1</string>');
-  expect(plist.includes('<key>HSQ_REMOTE</key>\n      <string>1</string>')).toBe(rebrand);
+  expect(plist).toContain('<key>HSQ_REMOTE</key>\n      <string>1</string>');
+  const agent = Object.fromEntries([...plist.matchAll(/<key>((?:CEZ|HSQ)_REMOTE)<\/key>\s*<string>([^<]*)<\/string>/g)].map(match => [match[1]!, match[2]!]));
+  expect(resolveCapabilities({HSQ_REMOTE: '0', ...agent}, '127.0.0.1')).toMatchObject({localHandoff: false, settingsAdmin: false});
+});
+
+it('approval probes drop both session prefixes and retain matching operator auth names', () => {
+  const env: NodeJS.ProcessEnv = {CEZ_TOOL_TOKEN: 'parent', HSQ_TOOL_TOKEN: 'parent', CLAUDE_CODE_SESSION: 'parent',
+    CEZ_ENV_PASSTHROUGH: 'KEY', HSQ_ENV_PASSTHROUGH: 'OTHER', CEZ_AGENT_ENV_FULL: '1', HSQ_AGENT_ENV_FULL: '0',
+    CEZ_CODEX_BIN: '/legacy', HSQ_CODEX_BIN: '/preferred', PATH: '/bin'};
+  scrubProbeSessionEnv(env);
+  expect(env).toEqual({CEZ_ENV_PASSTHROUGH: 'KEY', HSQ_ENV_PASSTHROUGH: 'OTHER', CEZ_AGENT_ENV_FULL: '1', HSQ_AGENT_ENV_FULL: '0', CEZ_CODEX_BIN: '/legacy', HSQ_CODEX_BIN: '/preferred', PATH: '/bin'});
 });

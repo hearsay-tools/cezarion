@@ -234,6 +234,8 @@ test('serverEnv drops the caller CEZ_* and GIT_* settings and pins HOME, Git and
   assert.equal(env.GIT_CONFIG_GLOBAL, '/w/gitconfig');
   assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
   assert.equal(env.CEZ_HOME, '/w/cez');
+  assert.equal(env.HSQ_HOME, '/w/cez');
+  assert.equal(env.HSQ_PROJECT_WARMUP, '0');
   assert.equal(env.CEZ_PROJECT_WARMUP, '0');
   for (const key of ['CEZ_DRY_RUN', 'HSQ_DRY_RUN', 'hsq_automations', 'cez_automations', 'GIT_DIR']) assert.equal(env[key], undefined, key);
   assert.equal(ghConfigDir({ GH_CONFIG_DIR: '/gh' }), '/gh');

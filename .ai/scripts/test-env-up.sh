@@ -123,13 +123,13 @@ done
 
 # CEZ_DRY_RUN=1 swaps the agent CLIs for the bundled mock, so booting needs no
 # `claude` login and reaches no network — the whole point for CI/e2e.
-export CEZ_DRY_RUN=1
+export CEZ_DRY_RUN=1 HSQ_DRY_RUN=1
 
 # The real CLI writes workspace state at boot (~/.cezar migrations + project
 # registration) — pin CEZ_HOME under .ai/qa so a test boot never touches the
 # developer's real ~/.cezar. Kept stable (not per-boot) so the reuse path
 # attaches to the same workspace the running instance was booted with.
-export CEZ_HOME="$QA_DIR/cez-home"
+export CEZ_HOME="$QA_DIR/cez-home" HSQ_HOME="$QA_DIR/cez-home"
 node "$REPO_ROOT/scripts/test-install-marker.mjs" "$CEZ_HOME"
 
 FORCE=0
@@ -158,7 +158,7 @@ for arg in "$@"; do
       case " $SERVER_ENV " in
         *" $name="*) echo "invalid --server-env: $name is given twice" >&2; exit 2 ;;
       esac
-      export "$assignment"
+      export "$assignment" "HSQ_${assignment#CEZ_}"
       SERVER_ENV="$SERVER_ENV $assignment" ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac

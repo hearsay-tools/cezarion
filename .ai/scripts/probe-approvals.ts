@@ -1,3 +1,4 @@
+import { scrubProbeSessionEnv } from '../../packages/cezar/scripts/probe-session-env.ts';
 // Manual real-harness probe for hearsay-tools/cezarion#1343: does cezar answer Codex's MCP tool
 // approvals as AGENT_PROTOCOL.md § MCP tool approvals says? cezar's own server must run with no
 // approval request, and another server's tool call must reach cezar as permission.requested and get
@@ -62,7 +63,6 @@ const END_GRACE_MS = 15_000; // bound: an ended session that never settles still
 const TEXT_LIMIT = 200;
 // The session's own wiring (CEZ_TOOL_SOCKET, CEZ_HANDOFF_FILE, CLAUDE_CODE_SESSION_ID, …) must not
 // reach the run. These host settings stay, as cezar would read them.
-const KEPT_ENV = new Set(['CEZ_ENV_PASSTHROUGH', 'CEZ_AGENT_ENV_FULL', 'CEZ_CODEX_BIN']);
 
 // smol-toml is cezar's dependency. It is installed under packages/cezar, which the resolution of a
 // file in .ai/scripts does not reach.
@@ -134,11 +134,6 @@ function parseCli(argv: string[]): { answer: AnswerName; model?: string } {
   }
 }
 
-function scrubSessionEnv(): void {
-  for (const name of Object.keys(process.env)) {
-    if ((name.startsWith('CEZ_') && !KEPT_ENV.has(name)) || name.startsWith('CLAUDE_CODE_')) delete process.env[name];
-  }
-}
 
 const isInside = (dir: string, path: string) => {
   const rel = relative(dir, path);
@@ -239,7 +234,7 @@ function stubHandlers(calls: Frame[]): CezarToolHandlers {
 
 const { answer, model } = parseCli(process.argv.slice(2));
 const sourceConfigPath = join(agentHomePaths(process.env).codex, 'config.toml');
-scrubSessionEnv();
+scrubProbeSessionEnv();
 const codexBin = resolveCodexExecutable();
 const scratch = mkdtempSync(join(scratchBase(), 'probe-approvals-'));
 const codexHome = join(scratch, 'codex-home');

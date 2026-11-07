@@ -20,7 +20,11 @@ export function setBenchmarkEnv(env: NodeJS.ProcessEnv = process.env): void {
 /** Retain an explicit legacy sandbox or allocate an isolated benchmark home. */
 export function prepareBenchmarkEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
   setBenchmarkEnv(env);
-  if (legacyHomeEnv(env)) return undefined;
+  const existing = legacyHomeEnv(env);
+  if (existing) {
+    Object.assign(env, productEnvEntries('HOME', existing, true));
+    return undefined;
+  }
   const ownHome = mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
   Object.assign(env, productEnvEntries('HOME', ownHome, true));
   return ownHome;

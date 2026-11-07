@@ -148,7 +148,7 @@ it('benchmark controls override conflicting preferred values and preserve unrela
 it('benchmark home preparation retains explicit legacy selection and pins owned homes under both names', () => {
   const selected = { CEZ_HOME: '/selected', HSQ_HOME: '/preferred' };
   expect(prepareBenchmarkEnv(selected)).toBeUndefined();
-  expect(selected).toMatchObject({ CEZ_HOME: '/selected', HSQ_HOME: '/preferred' });
+  expect(selected).toMatchObject({ CEZ_HOME: '/selected', HSQ_HOME: '/selected' });
   const env: NodeJS.ProcessEnv = { HSQ_HOME: '/inherited' };
   const ownHome = prepareBenchmarkEnv(env);
   try {

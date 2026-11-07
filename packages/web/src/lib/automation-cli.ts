@@ -114,6 +114,6 @@ export function cliOf(draft: AutomationDraft, address?: CliAddress): string {
   const body = toCreateBody(draft)
   const command = bodyFlagExpressible(body) ? flagsOf(body) : `cez automation create --json ${shellQuote(JSON.stringify(body))}`
   return address
-    ? `CEZ_COCKPIT_URL=${shellQuote(address.origin)} CEZ_PROJECT_ID=${shellQuote(address.projectId)} ${command}`
+    ? `CEZ_COCKPIT_URL=${shellQuote(address.origin)} CEZ_PROJECT_ID=${shellQuote(address.projectId)} HSQ_COCKPIT_URL=${shellQuote(address.origin)} HSQ_PROJECT_ID=${shellQuote(address.projectId)} ${command}`
     : command
 }

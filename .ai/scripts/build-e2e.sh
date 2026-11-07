@@ -60,4 +60,4 @@ node packages/cezar/scripts/inline-contract.mjs "$OUT/dist"
 # (`touch` this file, then `npm exec -- vitest run --config packages/web/e2e/vitest.config.ts`).
 # Pinned here, on the bundle step only, so every caller gets the production bundle CI tests.
 # Not exported: `pnpm install` before this script must still install devDependencies.
-NODE_ENV=production VITE_CEZ_E2E=1 npm run build -w @open-mercato/cezar-web -- --outDir "$OUT/web/dist"
+NODE_ENV=production VITE_CEZ_E2E=1 VITE_HSQ_E2E=1 npm run build -w @open-mercato/cezar-web -- --outDir "$OUT/web/dist"

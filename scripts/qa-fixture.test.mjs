@@ -129,7 +129,9 @@ test('up serves a registered project and down leaves no process or directory beh
   assert.equal(stub.env.CEZ_STUB_MODE, 'serve');
   assert.equal(stub.env.CEZ_AMBIENT, undefined, 'an ambient CEZ_* reached the server');
   assert.equal(stub.env.HSQ_AMBIENT, undefined);
-  assert.equal(stub.env.HSQ_DRY_RUN, undefined);
+  assert.equal(stub.env.HSQ_DRY_RUN, '1');
+  assert.equal(stub.env.HSQ_HOME, stub.env.CEZ_HOME);
+  assert.equal(stub.env.HSQ_STUB_MODE, 'serve');
   assert.equal(stub.env.GIT_DIR, undefined, 'an ambient GIT_* reached the server');
   assert.equal(stub.env.GIT_CONFIG_GLOBAL, join(root, 'gitconfig'));
 

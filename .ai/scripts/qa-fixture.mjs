@@ -1,3 +1,4 @@
+import { productEnvEntries } from '../../packages/cezar/src/core/product-env.ts';
 // A registered throwaway project for a manual UI check (hearsay-tools/cezarion#1406).
 //
 //   node .ai/scripts/qa-fixture.mjs up [--server-env=CEZ_NAME=value]...
@@ -71,8 +72,8 @@ function serverEnv(ambient, root, optIns) {
     GIT_AUTHOR_EMAIL: 'tests@cezar.invalid',
     GIT_COMMITTER_NAME: 'Cezar Tests',
     GIT_COMMITTER_EMAIL: 'tests@cezar.invalid',
-    ...optIns,
-    CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'),
+    ...Object.assign({}, ...Object.entries(optIns).map(([name, value]) => productEnvEntries(name.slice(4), value, true))),
+    ...productEnvEntries('DRY_RUN', '1', true), ...productEnvEntries('HOME', join(root, 'home'), true),
   };
 }
 

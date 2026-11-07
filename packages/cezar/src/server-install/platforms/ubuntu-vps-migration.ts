@@ -17,7 +17,7 @@ import { ledgerSite, recordedSite, recordedUnit, ubuntuNames } from './ubuntu-vp
 type Move = PlatformMigrationReport['moved'][number];
 const emptyReport = (): PlatformMigrationReport => ({ moved: [], leftAloneForeign: [], errors: [] });
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
-const INSTALLER_ENV = new Set(['CEZ_REMOTE', 'PATH']);
+const INSTALLER_ENV = new Set(['CEZ_REMOTE', 'HSQ_REMOTE', 'PATH']);
 
 interface UnitPlan { move: Move; next: string; scope: 'user' | 'system'; details: string[] }
 interface SitePlan { moves: Move[]; next: string; details: string[] }

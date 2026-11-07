@@ -193,3 +193,27 @@ it('exempts only fixture control names in mock scripts, not product settings or 
   expect(scanProductEnvReads('packages/cezar/src/mock-native.ts', 'env.CEZ_MOCK_CONTROL;', [])).toHaveLength(1);
   expect(scanProductEnvReads(mock, 'process.env.HSQ_MOCK_CONTROL;', [])).toHaveLength(1);
 });
+
+it.each(['config.key', "config['PATH']", 'config?.key', 'getKey()', '42', 'true', '`prefix_${key}`'])(
+  'keeps nonliteral key initializers visible: %s', initializer => {
+    expect(productEnvReads(`const name = ${initializer}; process.env[name];`).map(({form, name}) => [form, name]))
+      .toEqual([['computed', '*']]);
+  },
+);
+
+it('resolves only immutable literal key aliases and keeps mutable or cyclic keys unknown', () => {
+  expect(productEnvReads("const root = 'CEZ_DRY_RUN'; const name = root; env[name];").map(({form, name}) => [form, name]))
+    .toEqual([['bracket', 'CEZ_DRY_RUN']]);
+  expect(productEnvReads('const root = `HSQ_DRY_RUN`; const next = root; const name = next; env[name];').map(read => read.name))
+    .toEqual(['HSQ_DRY_RUN']);
+  expect(productEnvReads("let name = 'PATH'; name = config.key; env[name];").map(read => read.form)).toEqual(['computed']);
+  expect(productEnvReads('const name = next; const next = name; env[name];').map(read => read.form)).toEqual(['computed']);
+});
+
+it('keeps shadowed literal names unknown in computed reads', () => {
+  for (const source of [
+    "const key = 'PATH'; function f(key) { return process.env[key]; }",
+    "const key = 'PATH'; function f() { const key = config.key; return process.env[key]; }",
+    "const key = 'PATH'; try {} catch (key) { process.env[key]; }",
+  ]) expect(productEnvReads(source).map(({form, name}) => [form, name])).toEqual([['computed', '*']]);
+});

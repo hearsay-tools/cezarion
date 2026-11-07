@@ -28,3 +28,9 @@ export function legacyEnvNames(env: NodeJS.ProcessEnv): string[] {
 export function productEnvEntries(suffix: string, value: string, rebrand = REBRAND_SWITCH): Record<string, string> {
   return rebrand ? { [`HSQ_${suffix}`]: value, [`CEZ_${suffix}`]: value } : { [`CEZ_${suffix}`]: value };
 }
+
+/** Hosted mode fails closed across old service files and inherited preferred names.
+ * Neither an empty value nor 0 may disable a hosted-mode pin under the other prefix. */
+export function remoteEnvEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.HSQ_REMOTE === '1' || env.CEZ_REMOTE === '1';
+}

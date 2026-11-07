@@ -163,6 +163,44 @@ function memberRead(node: Node, aliases: EnvBindings, writes: Set<Node>, source:
   return [{ form: node.computed ? name === undefined ? 'computed' : 'bracket' : 'dot', name: name ?? '*', offset: node.start ?? 0, expression: source.slice(node.start ?? 0, node.end ?? 0) }];
 }
 
+/** Only immutable literal strings can identify a computed environment key. */
+function literalEnvKey(node: Node, bindings: Map<string, Node>, seen = new Set<string>()): string | undefined {
+  const target = unwrapped(node);
+  if (target.type === 'StringLiteral') return target.value;
+  if (target.type === 'TemplateLiteral' && target.expressions.length === 0) return target.quasis[0]?.value.cooked ?? undefined;
+  if (target.type !== 'Identifier' || seen.has(target.name)) return undefined;
+  const bound = bindings.get(target.name);
+  return bound ? literalEnvKey(bound, bindings, new Set(seen).add(target.name)) : undefined;
+}
+
+/** Duplicate or shadowed bindings stay unknown rather than borrowing an outer value. */
+function staticEnvNames(ast: Node): Map<string, string> {
+  const constants = new Map<string, Node>();
+  const counts = new Map<string, number>();
+  const count = (pattern: Node) => visit(pattern, node => {
+    if (node.type === 'Identifier') counts.set(node.name, (counts.get(node.name) ?? 0) + 1);
+  });
+  visit(ast, node => {
+    if (node.type === 'VariableDeclaration') {
+      for (const declaration of node.declarations) {
+        count(declaration.id);
+        if (node.kind === 'const' && declaration.id.type === 'Identifier' && declaration.init) constants.set(declaration.id.name, declaration.init);
+      }
+    }
+    if ('params' in node && Array.isArray(node.params)) node.params.forEach(count);
+    if (node.type === 'CatchClause' && node.param) count(node.param);
+    if (node.type === 'ImportSpecifier' || node.type === 'ImportDefaultSpecifier' || node.type === 'ImportNamespaceSpecifier') count(node.local);
+    if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration' || node.type === 'FunctionExpression') && node.id) count(node.id);
+  });
+  for (const [name, total] of counts) if (total !== 1) constants.delete(name);
+  const names = new Map<string, string>();
+  for (const [name, value] of constants) {
+    const literal = literalEnvKey(value, constants);
+    if (literal !== undefined) names.set(name, literal);
+  }
+  return names;
+}
+
 /** AST scanning avoids strings/comments, supports env arguments, brackets, aliases and destructuring. */
 export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
   const ast = parse(source, { sourceType: 'unambiguous', plugins: ['typescript', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])] });
@@ -170,14 +208,7 @@ export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
   visit(ast, node => {
     if (node.type === 'TSTypeAliasDeclaration') types.set(node.id.name, node);
   });
-  // Resolve literal key constants before permanent anonymous-read exemptions.
-  const staticNames = new Map<string, string>();
-  visit(ast, node => {
-    if (node.type !== 'VariableDeclarator' || node.id.type !== 'Identifier' || !node.init) return;
-    const target = unwrapped(node.init);
-    const value = target.type === 'Identifier' ? undefined : property(target);
-    if (value !== undefined) staticNames.set(node.id.name, value);
-  });
+  const staticNames = staticEnvNames(ast);
   const aliases = envBindings(ast, types);
   const writes = writeTargets(ast);
   const reads: EnvRead[] = [];

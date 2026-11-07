@@ -1,4 +1,4 @@
-import { productEnv } from '../core/product-env.ts';
+import { productEnv, remoteEnvEnabled } from '../core/product-env.ts';
 /**
  * Server capabilities reported by `/api/health` — the UI hides what the server
  * says isn't there, and the matching endpoints refuse as defense in depth.
@@ -141,7 +141,7 @@ export function resolveCapabilities(env?: NodeJS.ProcessEnv, bindHost?: string):
 export function resolveCapabilities(env: NodeJS.ProcessEnv | undefined, bindHost: string | undefined, port: number | undefined, home: Home): Capabilities;
 export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHost?: string, port?: number, home?: Home): Capabilities {
   const loopbackBind = isLoopbackHost(bindHost);
-  const localHandoff = productEnv('REMOTE', env) !== '1' && loopbackBind;
+  const localHandoff = !remoteEnvEnabled(env) && loopbackBind;
   // The host file is read only where it can matter: a remote cockpit bound to loopback.
   const remoteSettingsAdmin = !localHandoff && loopbackBind && port !== undefined && home !== undefined && isPortGranted(env, port, home);
   const hideAllUsage = productEnv('HIDE_TOKEN_METRICS', env) === '1';
