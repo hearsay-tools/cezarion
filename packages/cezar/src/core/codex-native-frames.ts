@@ -69,18 +69,29 @@ export function cezarAskedForExit(exitCode: number | null, signalCode: NodeJS.Si
   return isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null);
 }
 
-export type SessionExitKind = 'timeout' | 'cezar-teardown' | 'signal' | 'nonzero' | 'clean';
-
-/** Which exit branch owns the result, in the order the runner checks them. */
-export function sessionExitKind(exit: {
+export interface SessionExit {
   timedOut: boolean;
   terminatedByCezar: boolean;
   exitCode: number | null;
   signalCode: NodeJS.Signals | null;
-}): SessionExitKind {
-  if (exit.timedOut) return 'timeout';
-  if (exit.terminatedByCezar && cezarAskedForExit(exit.exitCode, exit.signalCode)) return 'cezar-teardown';
-  if (exit.exitCode === null && exit.signalCode !== null) return 'signal';
-  if (exit.exitCode !== 0 && exit.exitCode !== null) return 'nonzero';
-  return 'clean';
+  limitMs: number;
+  stderrSummary: string;
+}
+
+/** The one event a settled exit emits before `done`, or the error it throws. `undefined` is a clean exit. */
+export function sessionExitEvent(exit: SessionExit): { event: 'error' | 'note'; message: string } | { failure: string } | undefined {
+  if (exit.timedOut) {
+    const mins = Math.round((exit.limitMs / 60_000) * 10) / 10;
+    return { event: 'error', message: `codex app-server timed out after ${mins}m and was killed` };
+  }
+  // 143/137 from our own EOF watchdog or cancel is the teardown cezar asked for (#703).
+  if (exit.terminatedByCezar && cezarAskedForExit(exit.exitCode, exit.signalCode)) {
+    const how = exit.exitCode === null ? exit.signalCode : `code ${exit.exitCode}`;
+    return { event: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` };
+  }
+  if (exit.exitCode === null && exit.signalCode !== null) return { failure: `codex app-server was killed by signal ${exit.signalCode}` };
+  if (exit.exitCode !== 0 && exit.exitCode !== null) {
+    return { failure: `codex app-server exited with code ${exit.exitCode}${exit.stderrSummary ? ` — ${exit.stderrSummary}` : ''}` };
+  }
+  return undefined;
 }

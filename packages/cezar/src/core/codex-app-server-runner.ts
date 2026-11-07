@@ -27,7 +27,7 @@ import {
 } from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
-import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, sessionExitKind, sessionStderrIsUnexpected, startupCrashOwnsFailure, stringField, turnIdOf } from './codex-native-frames.ts';
+import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, sessionExitEvent, sessionStderrIsUnexpected, startupCrashOwnsFailure, stringField, turnIdOf } from './codex-native-frames.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
@@ -297,7 +297,8 @@ class CodexSession implements AgentSession {
     this.result = this.finishSession(hasExited, exited, reader, deadline, () => cancelDrain?.(), stderrChunks, limitMs, spec);
   }
 
-  /** Wait out the child, then map its exit onto the v1 result. */
+  /** Wait out the child, then map its exit onto the v1 result. Both awaits stay here, so
+   *  the cleanup and the result mapping run in the same continuation as the second await. */
   private async finishSession(
     hasExited: () => boolean, exited: Promise<number | null>, reader: Promise<void>,
     deadline: NodeJS.Timeout | undefined, cancelDrain: () => void,
@@ -305,25 +306,21 @@ class CodexSession implements AgentSession {
   ): Promise<AgentRunResult> {
     let exitCode: number | null;
     try {
-      exitCode = await this.awaitSessionExit(hasExited, exited, reader);
+      try {
+        await Promise.all([this.ready, reader]);
+      } catch (err) {
+        if (this.stdinOpen && !hasExited()) this.fail(err instanceof Error ? err : new Error(String(err)));
+      }
+      // RPC cancellation is not a receipt for process termination. Keep the
+      // TERM→KILL watchdog alive until this independently owned promise settles.
+      exitCode = await exited;
+      await reader;
     } finally {
       if (deadline) clearTimeout(deadline);
       cancelDrain();
       this.releaseSession();
     }
     return this.resultFromExit(exitCode, stderrChunks.join(''), limitMs, spec);
-  }
-  private async awaitSessionExit(hasExited: () => boolean, exited: Promise<number | null>, reader: Promise<void>): Promise<number | null> {
-    try {
-      await Promise.all([this.ready, reader]);
-    } catch (err) {
-      if (this.stdinOpen && !hasExited()) this.fail(err instanceof Error ? err : new Error(String(err)));
-    }
-    // RPC cancellation is not a receipt for process termination. Keep the
-    // TERM→KILL watchdog alive until this independently owned promise settles.
-    const exitCode = await exited;
-    await reader;
-    return exitCode;
   }
   private releaseSession(): void {
     if (this.stopKillTimer) clearTimeout(this.stopKillTimer);
@@ -340,7 +337,8 @@ class CodexSession implements AgentSession {
       this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
     }
     // Before the first prompt ACK, process/pipe closure can own the failure
-    // before the ordinary crash branch.
+    // before the ordinary crash branch. Keep its phase context and expose
+    // the drained terminal exception on the same v1 error seam as later exits.
     if (this.failure) this.throwOwnedFailure(stderr, exitCode, this.startupComplete, this.timedOut, this.terminatedByCezar);
     return this.resultFromCleanExit(exitCode, stderr, limitMs, spec);
   }
@@ -358,25 +356,12 @@ class CodexSession implements AgentSession {
       text: this.textChunks.join('\n').trim(), toolCalls: this.toolCalls,
       tokensUsed: this.tokensUsed, sessionId: this.threadId ?? spec.sessionId,
     };
-    const kind = sessionExitKind({ timedOut: this.timedOut, terminatedByCezar: this.terminatedByCezar, exitCode, signalCode: this.child.signalCode });
-    if (kind === 'timeout') {
-      const mins = Math.round((limitMs / 60_000) * 10) / 10;
-      this.emit({ type: 'error', message: `codex app-server timed out after ${mins}m and was killed` });
-    } else if (kind === 'cezar-teardown') {
-      // Our own EOF watchdog / cancel signal coming back as 143/137 — the
-      // teardown cezar asked for, not a codex failure (#703).
-      const how = exitCode === null ? this.child.signalCode : `code ${exitCode}`;
-      this.emit({ type: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` });
-    } else if (kind === 'signal') {
-      const message = `codex app-server was killed by signal ${this.child.signalCode}`;
-      this.emit({ type: 'error', message });
-      throw new Error(message);
-    } else if (kind === 'nonzero') {
-      const summary = summarizeRunnerStderr(stderr);
-      const message = `codex app-server exited with code ${exitCode}${summary ? ` — ${summary}` : ''}`;
-      this.emit({ type: 'error', message });
-      throw new Error(message);
-    }
+    const settled = sessionExitEvent({
+      timedOut: this.timedOut, terminatedByCezar: this.terminatedByCezar, exitCode, signalCode: this.child.signalCode,
+      limitMs, stderrSummary: summarizeRunnerStderr(stderr),
+    });
+    if (settled && 'failure' in settled) { this.emit({ type: 'error', message: settled.failure }); throw new Error(settled.failure); }
+    if (settled) this.emit({ type: settled.event, message: settled.message });
     this.emit({ type: 'done' });
     return base;
   }
@@ -709,25 +694,35 @@ class CodexSession implements AgentSession {
     // Echoed as the consumed userMessage item's `clientId` (#505).
     const ids = clientUserMessageId ? { clientUserMessageId } : {};
     const humanId = clientUserMessageId && this.humanSteerIds.has(clientUserMessageId) ? clientUserMessageId : undefined;
-    if (this.activeTurnId && await this.steerLiveTurn(input, ids, clientUserMessageId, humanId, text)) return;
-    await this.startTurn(input, ids, clientUserMessageId, humanId);
+    if (this.activeTurnId) {
+      if (await this.steerLiveTurn(input, ids, clientUserMessageId, humanId, text)) return;
+    } else {
+      await this.startTurn(input, ids, clientUserMessageId, humanId);
+    }
   }
 
-  /** True when the live steer settled this input. False falls through to turn/start. */
+  /** The steer and, when it falls through, the turn/start request run in one continuation.
+   *  True when the steer settled the input. */
   private async steerLiveTurn(
     input: TurnTextInput, ids: TurnClientIds, clientUserMessageId: string | undefined, humanId: string | undefined, text: string,
   ): Promise<boolean> {
     const boundary = this.turnBoundaryVersion;
     const onSteerId = humanId ? (id: number) => this.trackHumanRpc(id, humanId, 'steer') : undefined;
+    let settled = false;
     try {
       await this.rpc.request('turn/steer', { threadId: this.threadId, input, expectedTurnId: this.activeTurnId, ...ids }, onSteerId);
-      return this.steerWasRead(clientUserMessageId, humanId, text, boundary);
+      settled = this.steerWasRead(clientUserMessageId, humanId, text, boundary);
     } catch (err) {
-      return this.steerRefusalSettled(err, clientUserMessageId, humanId, boundary);
+      settled = this.steerRefusalSettled(err, clientUserMessageId, humanId, boundary);
     }
+    if (!settled) await this.startTurn(input, ids, clientUserMessageId, humanId);
+    return true;
   }
 
-  /** Accepted, but a turn that ended unread falls through so turn/start can carry the same client id (#505, #486). */
+  /** Accepted, but the turn completed before the model read it: nothing will read it now,
+   *  so start a turn with it under the same client id (#505). Human steers get the same
+   *  restart so a coalesced steer+completed chunk cannot drop them (#486). Skip when the
+   *  turn already echoed this client id — it was read in-turn. */
   private steerWasRead(clientUserMessageId: string | undefined, humanId: string | undefined, text: string, boundary: number): boolean {
     const echoed = clientUserMessageId !== undefined && this.echoedHuman.has(clientUserMessageId);
     const stranded = clientUserMessageId !== undefined && this.turnBoundaryVersion !== boundary && !this.activeTurnId && !echoed
@@ -739,7 +734,9 @@ class CodexSession implements AgentSession {
     return true;
   }
 
-  /** Only a definitive refusal falls back. A timeout or closed transport may have landed, so it rejects (#505). */
+  /** Only a definitive refusal falls back: the server answered with an error AND the turn
+   *  ended meanwhile. A timeout or closed transport is ambiguous — the steer may have
+   *  landed — so it rejects without a retry (#505). */
   private steerRefusalSettled(err: unknown, clientUserMessageId: string | undefined, humanId: string | undefined, boundary: number): boolean {
     if (!(err instanceof CodexRpcResponseError) || this.turnBoundaryVersion === boundary || this.activeTurnId) throw err;
     if (clientUserMessageId && this.echoedHuman.has(clientUserMessageId)) {
@@ -769,7 +766,8 @@ class CodexSession implements AgentSession {
     if (this.turnBoundaryVersion === boundaryVersion) this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
   }
 
-  /** This turn's own input: its completion proves the model processed it (#505). A late response settles from the recorded outcome. */
+  /** This turn's own input: its completion proves the model processed it (#505). A response
+   *  can arrive after that turn already completed; settle it from the recorded outcome. */
   private recordStartedSubmission(clientUserMessageId: string, res: Record<string, unknown>, completionsBefore: number): void {
     const startedTurn = turnIdOf(res);
     const outcome = startedTurn && this.turnCompletions > completionsBefore ? this.completedTurns.get(startedTurn) : undefined;
