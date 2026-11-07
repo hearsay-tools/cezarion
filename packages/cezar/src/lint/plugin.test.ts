@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { oxlintBin, oxlintProblems, staleEntries } from './run.ts';
 import { DESIGN_SAMPLES } from './design-guardian.testkit.ts';
@@ -14,8 +14,8 @@ import { repoRoot } from './source-rule.ts';
  * (hearsay-tools/cezarion#2416). Each rule must report its seeded violation and pass its approved
  * exception, and every tool failure must fail lint.
  */
-// bound: each case starts oxlint once, about a second on an idle host; this is a hang guard for a
-// loaded host, and the runner's own 300 s process timeout stays the outer limit.
+// bound: the shared fixture scan and separate config-failure scans each start oxlint; this
+// guards a loaded host, and the runner's own 300 s process timeout stays the outer limit.
 const OXLINT_TIMEOUT_MS = 120_000;
 
 const config = JSON.parse(readFileSync(join(repoRoot, '.oxlintrc.json'), 'utf8')) as { jsPlugins: string[]; plugins: string[]; rules: Record<string, string | [string, object]> };
@@ -42,6 +42,20 @@ const seeded = (files: Record<string, string>, oxlintrc?: object) => {
 afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
+
+// Every normal fixture shares one CLI startup. Keep its basename and scope, but give it
+// a unique path so another fixture's diagnostic can never satisfy its assertion.
+const fixtureFiles: Record<string, string> = {};
+let fixtureFindings: string[] = [];
+function registerFixture(file: string, source: string): [string, string] {
+  const unique = `${dirname(file)}/fixture-${Object.keys(fixtureFiles).length}/${basename(file)}`;
+  fixtureFiles[unique] = source;
+  return [unique, source];
+}
+function fixtureCases(cases: [string, string][]): [string, string][] {
+  return cases.map(([file, source]) => registerFixture(file, source));
+}
+const findingsFor = (file: string): string[] => fixtureFindings.filter(problem => problem.startsWith(`${file}:`));
 
 const VIOLATIONS: Record<string, [string, string]> = {
   'test-home-write': ['packages/web/src/ambient-home.test.ts', "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}');\n"],
@@ -93,13 +107,17 @@ const APPROVED: Record<string, string> = {
   'packages/cezar/src/k.test.ts': 'const c = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n',
 };
 
-describe('the cez rules under oxlint', () => {
-  let problems: string[] = [];
-  beforeAll(async () => {
-    const files = { ...Object.fromEntries(Object.values(VIOLATIONS)), ...APPROVED, 'packages/cezar/src/broken.ts': 'let x = ;\n' };
-    problems = await oxlintProblems(seeded(files), ['packages']);
-  }, OXLINT_TIMEOUT_MS);
+let problems: string[] = [];
+beforeAll(async () => {
+  const original = { ...Object.fromEntries(Object.values(VIOLATIONS)), ...APPROVED, 'packages/cezar/src/broken.ts': 'let x = ;\n' };
+  const files = { ...original, ...fixtureFiles };
+  fixtureFindings = await oxlintProblems(seeded(files), ['packages']);
+  // Tool/config errors and diagnostics without a seeded path must also fail the suite.
+  expect(fixtureFindings.filter(problem => !Object.keys(files).some(file => problem.startsWith(`${file}:`)))).toEqual([]);
+  problems = fixtureFindings.filter(problem => Object.keys(original).some(file => problem.startsWith(`${file}:`)));
+}, OXLINT_TIMEOUT_MS);
 
+describe('the cez rules under oxlint', () => {
   it('selects the lint bridge when the contrast palette stylesheet changes', () => {
     const squeal = JSON.parse(readFileSync(join(repoRoot, 'squeal.config.json'), 'utf8')) as { inputs: Record<string, string[]> };
     expect(squeal.inputs['packages/cezar/src/lint/lint-runner.test.ts']).toContain('packages/web/src/styles/index.css');
@@ -122,7 +140,7 @@ describe('the cez rules under oxlint', () => {
     expect(problems.filter((p) => Object.keys(APPROVED).some((file) => p.startsWith(`${file}:`)))).toEqual([]);
   });
 
-  it.each([
+  it.each(fixtureCases([
     'readFileSync(this.eventsPath(id))',
     'readFileSync(`${id}.ndjson`)',
     'readFileSync(id + ".ndjson.br")',
@@ -134,13 +152,12 @@ describe('the cez rules under oxlint', () => {
     'readFileSync(prefix.concat(runId, ".ndjson"))',
     'readFileSync(`${id}` + ".ndjson")',
     'import { historyPaths as pathsForRun } from "./runs/history-file.ts"; readFileSync(pathsForRun(dir, id).plain);',
-  ])('refuses direct transcript access under oxlint: %s', async (source) => {
-    const file = 'packages/cezar/src/raw.ts';
-    const result = await oxlintProblems(seeded({ [file]: source }), ['packages']);
+  ].map(source => ['packages/cezar/src/raw.ts', source])))('refuses direct transcript access under oxlint in %s: %s', (file) => {
+    const result = findingsFor(file);
     expect(result).toEqual([expect.stringContaining('cez(run-history-reader)')]);
   }, OXLINT_TIMEOUT_MS);
 
-  it.each([
+  it.each(fixtureCases([
     ['packages/cezar/src/ambient.ts', 'resolveHome({ purpose: "cli" });'],
     ['packages/cezar/src/ambient.ts', 'homedir();'],
     ...[
@@ -166,7 +183,7 @@ describe('the cez rules under oxlint', () => {
       'const h = os.homedir; Reflect.apply(h, null, [])',
       '(os.homedir as (() => string))()',
       'os.homedir!()',
-    ].map(source => {
+    ].map((source): [string, string] => {
       return ['packages/cezar/src/ambient.ts', source];
     }),
     ...[
@@ -194,14 +211,14 @@ describe('the cez rules under oxlint', () => {
       "Reflect.set(process.env, \"CEZ_HOME\", dir)",
       "Reflect.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
       "Object.defineProperty(process.env, \"CEZ_HOME\", { value: dir })",
-    ].map(source => {
+    ].map((source): [string, string] => {
       return ['packages/cezar/src/ambient.test.ts', source];
     }),
-  ])('oxlint refuses ambient home access in %s: %s', async (file, source) => {
-    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  ]))('oxlint refuses ambient home access in %s: %s', (file) => {
+    expect(findingsFor(file)).toEqual([expect.stringContaining('cez(home-boundary)')]);
   }, OXLINT_TIMEOUT_MS);
 
-  it.each(['"CEZ_HOME"', '`CEZ_HOME`', '"CEZ_" + "HOME"'].flatMap(key => {
+  it.each(fixtureCases(['"CEZ_HOME"', '`CEZ_HOME`', '"CEZ_" + "HOME"'].flatMap(key => {
     return [
       `vi.stubEnv(${key}, dir)`,
       `process.env[${key}] = dir`,
@@ -212,12 +229,11 @@ describe('the cez rules under oxlint', () => {
       `Reflect.defineProperty(process.env, ${key}, { value: dir })`,
       `Object.defineProperty(process.env, ${key}, { value: dir })`,
     ];
-  }))('oxlint rejects static selection keys: %s', async source => {
-    const file = 'packages/cezar/src/ambient.test.ts';
-    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  }).map(source => ['packages/cezar/src/ambient.test.ts', source])))('oxlint rejects static selection keys in %s: %s', file => {
+    expect(findingsFor(file)).toEqual([expect.stringContaining('cez(home-boundary)')]);
   }, OXLINT_TIMEOUT_MS);
 
-  it.each([
+  it.each(fixtureCases([
     'os["homedir"]()',
     'os[`homedir`]()',
     'os["home" + "dir"]()',
@@ -225,31 +241,28 @@ describe('the cez rules under oxlint', () => {
     'homes["resolve" + "Home"]()',
     'paths[`cezarHomeDir`]()',
     'paths["cezar" + "HomeDir"]()',
-  ])('oxlint rejects static callee keys: %s', async source => {
-    const file = 'packages/cezar/src/ambient.ts';
-    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  ].map(source => ['packages/cezar/src/ambient.ts', source])))('oxlint rejects static callee keys in %s: %s', file => {
+    expect(findingsFor(file)).toEqual([expect.stringContaining('cez(home-boundary)')]);
   }, OXLINT_TIMEOUT_MS);
 
-  it.each([
+  it.each(fixtureCases([
     'vi[`stubEnv`]("CEZ_HOME", dir)',
     'vi["stub" + "Env"]("CEZ_HOME", dir)',
     'process[`env`].CEZ_HOME = dir',
     'process["en" + "v"].CEZ_HOME = dir',
-  ])('oxlint rejects static selection path keys: %s', async source => {
-    const file = 'packages/cezar/src/ambient.test.ts';
-    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
+  ].map(source => ['packages/cezar/src/ambient.test.ts', source])))('oxlint rejects static selection path keys in %s: %s', file => {
+    expect(findingsFor(file)).toEqual([expect.stringContaining('cez(home-boundary)')]);
   }, OXLINT_TIMEOUT_MS);
 
-  it.each([
+  it.each(fixtureCases([
     'process.env[name] = dir',
     'process.env[`CEZ_${suffix}`] = dir',
     'process.env["CEZ_" + suffix] = dir',
     'Reflect.set(process.env, name, dir)',
     'Object.assign(process.env, { [name]: dir })',
     'vi.stubEnv(CEZ_HOME, dir)',
-  ])('oxlint leaves unresolved keys outside the static rule: %s', async source => {
-    const file = 'packages/cezar/src/ambient.test.ts';
-    expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([]);
+  ].map(source => ['packages/cezar/src/ambient.test.ts', source])))('oxlint leaves unresolved keys outside the static rule in %s: %s', file => {
+    expect(findingsFor(file)).toEqual([]);
   }, OXLINT_TIMEOUT_MS);
 
   it('fails a file oxlint cannot parse', () => {
@@ -322,9 +335,11 @@ describe('stale entries', () => {
 });
 
 // Each original guardian rule runs through the real oxlint adapter, including e2e scope.
-it.each(Object.entries(DESIGN_SAMPLES))('oxlint runs guardian %s', async (name, token) => {
+it.each(Object.entries(DESIGN_SAMPLES).map(([name, token]) => {
   const file = name === 'fixture-serve-must-pin-cez-home' ? 'packages/web/e2e/design.e2e.ts' : 'packages/web/src/design.tsx';
-  const result = await oxlintProblems(seeded({ [file]: `// first line\nconst token = "${token}";` }), ['packages']);
+  return [name, ...registerFixture(file, `// first line\nconst token = "${token}";`)] as const;
+}))('oxlint runs guardian %s', (name, file) => {
+  const result = findingsFor(file);
   expect(result).toEqual([expect.stringContaining(`${file}:2:`)]);
   expect(result[0]).toContain(`${name} —`);
 }, OXLINT_TIMEOUT_MS);
