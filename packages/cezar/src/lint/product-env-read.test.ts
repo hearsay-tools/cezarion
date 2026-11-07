@@ -18,8 +18,11 @@ it('inventories dot, bracket, optional, env-argument, alias and computed reads',
 it('supports destructuring declarations and assignments with renames and defaults', () => {
   const reads = productEnvReads(`const {CEZ_X, HSQ_Y: renamed = 'default', ['CEZ_Z']: z} = process.env;
     ({CEZ_A: value} = env); const { ordinary } = process.env;
-    function f({ CEZ_B, HSQ_C: c }: NodeJS.ProcessEnv) { return c; }`);
-  expect(reads.map(({form, name}) => [form, name])).toEqual(['CEZ_X', 'HSQ_Y', 'CEZ_Z', 'CEZ_A', 'CEZ_B', 'HSQ_C'].map(name => ['destructure', name]));
+    function f({ CEZ_B, HSQ_C: c }: NodeJS.ProcessEnv) { return c; }
+    function g({ CEZ_D }: NodeJS.ProcessEnv = process.env) {}
+    function h({ HSQ_E } = process.env) {}
+    function typed({ CEZ_F }: NodeJS.ProcessEnv = {}) {}`);
+  expect(reads.map(({form, name}) => [form, name])).toEqual(['CEZ_X', 'HSQ_Y', 'CEZ_Z', 'CEZ_A', 'CEZ_B', 'HSQ_C', 'CEZ_D', 'HSQ_E', 'CEZ_F'].map(name => ['destructure', name]));
 });
 
 it('permits plain writes, deletes, comments and fixtures, but flags compound updates and computed-key reads', () => {

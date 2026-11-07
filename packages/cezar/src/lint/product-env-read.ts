@@ -88,10 +88,13 @@ function memberRead(node: Node, aliases: Set<string>, writes: Set<Node>): EnvRea
 function parameterReads(node: Node, aliases: Set<string>): EnvRead[] {
   if (!('params' in node) || !Array.isArray(node.params)) return [];
   return node.params.flatMap(param => {
-    if (param.type !== 'ObjectPattern' || param.typeAnnotation?.type !== 'TSTypeAnnotation') return [];
-    const type = param.typeAnnotation.typeAnnotation;
+    const pattern = param.type === 'AssignmentPattern' ? param.left : param;
+    if (pattern.type !== 'ObjectPattern') return [];
+    if (param.type === 'AssignmentPattern' && envReference(param.right, aliases)) return destructuredReads(pattern, param.right, aliases);
+    if (pattern.typeAnnotation?.type !== 'TSTypeAnnotation') return [];
+    const type = pattern.typeAnnotation.typeAnnotation;
     return type.type === 'TSTypeReference' && type.typeName.type === 'TSQualifiedName' && type.typeName.right.name === 'ProcessEnv'
-      ? destructuredReads(param, { type: 'Identifier', name: 'env' }, aliases) : [];
+      ? destructuredReads(pattern, { type: 'Identifier', name: 'env' }, aliases) : [];
   });
 }
 
