@@ -122,6 +122,152 @@ function stringField(event: RunEvent, key: string): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
+interface CanonicalScan {
+  items: Map<string, CanonicalItem>;
+  turn: number;
+  turnHasV2: boolean;
+  v1Tools: Array<{ key: string; call: RunEvent; result?: RunEvent }>;
+  v1Texts: RunEvent[];
+  v2Texts: string[];
+  requestOutcomes: Array<{ key: string; event: RunEvent }>;
+}
+
+function upsertCanonicalItem(items: Map<string, CanonicalItem>, key: string, event: RunEvent): void {
+  const existing = items.get(key);
+  if (existing) {
+    existing.firstSeq = Math.min(existing.firstSeq, event.seq);
+    existing.lastSeq = Math.max(existing.lastSeq, event.seq);
+  } else {
+    items.set(key, { key, firstSeq: event.seq, lastSeq: event.seq });
+  }
+}
+
+function flushCanonicalTurn(scan: CanonicalScan): void {
+  if (!scan.turnHasV2) {
+    for (const { key, call, result } of scan.v1Tools) {
+      upsertCanonicalItem(scan.items, key, call);
+      if (result) upsertCanonicalItem(scan.items, key, result);
+    }
+    for (const event of scan.v1Texts) upsertCanonicalItem(scan.items, `v1-text:${scan.turn}:${event.seq}`, event);
+  } else if (scan.v2Texts.length > 0) {
+    const normalize = (text: string) =>
+      text
+        .replace(/\s*CEZ:DONE\s*$/, '')
+        .replace(/\s*CEZ:MONITORING\s*$/, '')
+        .replace(/\s*CEZ:ASK[ \t]+\{[\s\S]*\}\s*$/, '')
+        .split('\n')
+        .filter((line) => !/^CEZ:(?:PR=\d+|ISSUE=\d+|TITLE=.+)\s*$/.test(line))
+        .join('\n')
+        .replace(/\s+/g, '');
+    const v2Normalized = new Set(scan.v2Texts.map(normalize));
+    v2Normalized.add(normalize(scan.v2Texts.join('')));
+    for (let index = 0; index < scan.v1Texts.length;) {
+      const event = scan.v1Texts[index]!;
+      const text = stringField(event, 'text') ?? '';
+      if (v2Normalized.has(normalize(text))) {
+        index += 1;
+        continue;
+      }
+      let matchedEnd = -1;
+      let combined = text;
+      for (let end = index + 1; end < scan.v1Texts.length; end += 1) {
+        combined += stringField(scan.v1Texts[end]!, 'text') ?? '';
+        if (v2Normalized.has(normalize(combined))) {
+          matchedEnd = end;
+          break;
+        }
+      }
+      if (matchedEnd >= index + 1) {
+        index = matchedEnd + 1;
+        continue;
+      }
+      upsertCanonicalItem(scan.items, `v1-text:${scan.turn}:${event.seq}`, event);
+      index += 1;
+    }
+  } else {
+    for (const event of scan.v1Texts) upsertCanonicalItem(scan.items, `v1-text:${scan.turn}:${event.seq}`, event);
+  }
+  scan.v1Tools.length = 0;
+  scan.v1Texts.length = 0;
+  scan.v2Texts.length = 0;
+  scan.turnHasV2 = false;
+}
+
+function observeV2Item(scan: CanonicalScan, event: RunEvent): void {
+  const raw = event.item;
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const id = (raw as { id?: unknown }).id;
+    if (typeof id === 'string' && id !== '') {
+      scan.turnHasV2 = true;
+      upsertCanonicalItem(scan.items, `v2:${event.stepId ?? ''}:${id}`, event);
+      const item = raw as { kind?: unknown; text?: unknown };
+      if (item.kind === 'message' && typeof item.text === 'string') scan.v2Texts.push(item.text);
+    }
+  }
+}
+
+function observeStandaloneOrConversation(scan: CanonicalScan, event: RunEvent): void {
+  if (event.type === 'conversation-message') {
+    const parsed = conversationMessageEventSchema.safeParse(event);
+    if (parsed.success) upsertCanonicalItem(scan.items, `conversation-message:${parsed.data.message.id}`, event);
+    return;
+  }
+  if (event.type === 'request-outcome') {
+    const parsed = requestOutcomeEventSchema.safeParse(event);
+    // An outcome has no sender, recipient, title, or request text of its own. It is the
+    // terminal projection of the request card, so pagination must keep both events under
+    // one canonical identity rather than allowing a standalone outcome at a page boundary.
+    if (parsed.success) scan.requestOutcomes.push({
+      key: `conversation-message:${parsed.data.outcome.requestId}`,
+      event,
+    });
+    return;
+  }
+  if (event.type === 'agent-input') {
+    const parsed = agentInputEventSchema.safeParse(event);
+    if (parsed.success) {
+      upsertCanonicalItem(
+        scan.items,
+        `${parsed.data.input.conversation ? 'conversation-message' : 'agent-input'}:${parsed.data.input.id}`,
+        event,
+      );
+    }
+    return;
+  }
+  if (STANDALONE_TYPES.has(event.type)) upsertCanonicalItem(scan.items, `standalone:${event.seq}`, event);
+}
+
+function observeCanonicalEvent(scan: CanonicalScan, event: RunEvent): void {
+  if (event.type === 'user-message' || event.type === 'turn.started') {
+    flushCanonicalTurn(scan);
+    scan.turn += 1;
+  }
+  if (event.type === 'item.started' || event.type === 'item.updated' || event.type === 'item.completed') {
+    observeV2Item(scan, event);
+    return;
+  }
+  if (event.type === 'tool-call') {
+    const id = stringField(event, 'id') ?? `seq:${event.seq}`;
+    scan.v1Tools.push({ key: `v1-tool:${scan.turn}:${id}`, call: event });
+    return;
+  }
+  if (event.type === 'tool-result') {
+    const id = stringField(event, 'toolCallId');
+    const tool = id === undefined ? undefined : scan.v1Tools.find(({ call }) => call.id === id);
+    if (tool) tool.result = event;
+    return;
+  }
+  if (event.type === 'text') {
+    scan.v1Texts.push(event);
+    return;
+  }
+  if (event.type === 'step-end' && event.status === 'failed') {
+    upsertCanonicalItem(scan.items, `standalone:${event.seq}`, event);
+    return;
+  }
+  observeStandaloneOrConversation(scan, event);
+}
+
 /**
  * Classify the source events into the same protocol-level item units the cockpit renders.
  *
@@ -129,142 +275,23 @@ function stringField(event: RunEvent, key: string): string | undefined {
  * tool twins; lifecycle snapshots sharing a step/item identity collapse to one item.
  */
 export function canonicalSessionItems(events: readonly RunEvent[]): CanonicalItem[] {
-  const items = new Map<string, CanonicalItem>();
-  let turn = 0;
-  let turnHasV2 = false;
-  const v1Tools: Array<{ key: string; call: RunEvent; result?: RunEvent }> = [];
-  const v1Texts: RunEvent[] = [];
-  const v2Texts: string[] = [];
-  const requestOutcomes: Array<{ key: string; event: RunEvent }> = [];
-
-  const upsert = (key: string, event: RunEvent) => {
-    const existing = items.get(key);
-    if (existing) {
-      existing.firstSeq = Math.min(existing.firstSeq, event.seq);
-      existing.lastSeq = Math.max(existing.lastSeq, event.seq);
-    } else {
-      items.set(key, { key, firstSeq: event.seq, lastSeq: event.seq });
-    }
+  const scan: CanonicalScan = {
+    items: new Map(),
+    turn: 0,
+    turnHasV2: false,
+    v1Tools: [],
+    v1Texts: [],
+    v2Texts: [],
+    requestOutcomes: [],
   };
-
-  const flushTurn = () => {
-    if (!turnHasV2) {
-      for (const { key, call, result } of v1Tools) {
-        upsert(key, call);
-        if (result) upsert(key, result);
-      }
-      for (const event of v1Texts) upsert(`v1-text:${turn}:${event.seq}`, event);
-    } else if (v2Texts.length > 0) {
-      const normalize = (text: string) =>
-        text
-          .replace(/\s*CEZ:DONE\s*$/, '')
-          .replace(/\s*CEZ:MONITORING\s*$/, '')
-          .replace(/\s*CEZ:ASK[ \t]+\{[\s\S]*\}\s*$/, '')
-          .split('\n')
-          .filter((line) => !/^CEZ:(?:PR=\d+|ISSUE=\d+|TITLE=.+)\s*$/.test(line))
-          .join('\n')
-          .replace(/\s+/g, '');
-      const v2Normalized = new Set(v2Texts.map(normalize));
-      v2Normalized.add(normalize(v2Texts.join('')));
-      for (let index = 0; index < v1Texts.length;) {
-        const event = v1Texts[index]!;
-        const text = stringField(event, 'text') ?? '';
-        if (v2Normalized.has(normalize(text))) {
-          index += 1;
-          continue;
-        }
-        let matchedEnd = -1;
-        let combined = text;
-        for (let end = index + 1; end < v1Texts.length; end += 1) {
-          combined += stringField(v1Texts[end]!, 'text') ?? '';
-          if (v2Normalized.has(normalize(combined))) {
-            matchedEnd = end;
-            break;
-          }
-        }
-        if (matchedEnd >= index + 1) {
-          index = matchedEnd + 1;
-          continue;
-        }
-        upsert(`v1-text:${turn}:${event.seq}`, event);
-        index += 1;
-      }
-    } else {
-      for (const event of v1Texts) upsert(`v1-text:${turn}:${event.seq}`, event);
-    }
-    v1Tools.length = 0;
-    v1Texts.length = 0;
-    v2Texts.length = 0;
-    turnHasV2 = false;
-  };
-
-  for (const event of events) {
-    if (event.type === 'user-message' || event.type === 'turn.started') {
-      flushTurn();
-      turn += 1;
-    }
-    if (event.type === 'item.started' || event.type === 'item.updated' || event.type === 'item.completed') {
-      const raw = event.item;
-      if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
-        const id = (raw as { id?: unknown }).id;
-        if (typeof id === 'string' && id !== '') {
-          turnHasV2 = true;
-          upsert(`v2:${event.stepId ?? ''}:${id}`, event);
-          const item = raw as { kind?: unknown; text?: unknown };
-          if (item.kind === 'message' && typeof item.text === 'string') v2Texts.push(item.text);
-        }
-      }
-      continue;
-    }
-    if (event.type === 'tool-call') {
-      const id = stringField(event, 'id') ?? `seq:${event.seq}`;
-      v1Tools.push({ key: `v1-tool:${turn}:${id}`, call: event });
-      continue;
-    }
-    if (event.type === 'tool-result') {
-      const id = stringField(event, 'toolCallId');
-      const tool = id === undefined ? undefined : v1Tools.find(({ call }) => call.id === id);
-      if (tool) tool.result = event;
-      continue;
-    }
-    if (event.type === 'text') {
-      v1Texts.push(event);
-      continue;
-    }
-    if (event.type === 'step-end' && event.status === 'failed') {
-      upsert(`standalone:${event.seq}`, event);
-      continue;
-    }
-    if (event.type === 'conversation-message') {
-      const parsed = conversationMessageEventSchema.safeParse(event);
-      if (parsed.success) upsert(`conversation-message:${parsed.data.message.id}`, event);
-      continue;
-    }
-    if (event.type === 'request-outcome') {
-      const parsed = requestOutcomeEventSchema.safeParse(event);
-      // An outcome has no sender, recipient, title, or request text of its own. It is the
-      // terminal projection of the request card, so pagination must keep both events under
-      // one canonical identity rather than allowing a standalone outcome at a page boundary.
-      if (parsed.success) requestOutcomes.push({
-        key: `conversation-message:${parsed.data.outcome.requestId}`,
-        event,
-      });
-      continue;
-    }
-    if (event.type === 'agent-input') {
-      const parsed = agentInputEventSchema.safeParse(event);
-      if (parsed.success) upsert(`${parsed.data.input.conversation ? 'conversation-message' : 'agent-input'}:${parsed.data.input.id}`, event);
-      continue;
-    }
-    if (STANDALONE_TYPES.has(event.type)) upsert(`standalone:${event.seq}`, event);
-  }
-  flushTurn();
+  for (const event of events) observeCanonicalEvent(scan, event);
+  flushCanonicalTurn(scan);
   // Keep the projection in the returned event slice for attachment after an older page loads,
   // but do not let an outcome whose request is outside this scan consume a visible item slot.
-  for (const { key, event } of requestOutcomes) {
-    if (items.has(key)) upsert(key, event);
+  for (const { key, event } of scan.requestOutcomes) {
+    if (scan.items.has(key)) upsertCanonicalItem(scan.items, key, event);
   }
-  return [...items.values()].sort((a, b) => a.firstSeq - b.firstSeq);
+  return [...scan.items.values()].sort((a, b) => a.firstSeq - b.firstSeq);
 }
 
 async function withHistorySource<T>(dataDir: string, id: string, fn: (source: HistorySource) => Promise<T>): Promise<T> {
