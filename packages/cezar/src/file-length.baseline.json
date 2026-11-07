@@ -14,7 +14,6 @@
     "packages/web/src/api/queries.ts": 2349,
     "packages/web/src/routes/github/github.tsx": 1244,
     "packages/web/src/routes/global-tasks.tsx": 1070,
-    "packages/web/src/routes/tasks-overview.tsx": 1629,
-    "packages/web/src/routes/workflows/workflows.tsx": 1174
+    "packages/web/src/routes/tasks-overview.tsx": 1629
   }
 }
