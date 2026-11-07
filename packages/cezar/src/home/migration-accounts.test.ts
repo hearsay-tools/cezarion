@@ -123,6 +123,25 @@ it('H2: accounts imported from config.json agentProfiles relocate like stored ac
   expect(getHomeRecovery(target)).toEqual({ files: [] });
 });
 
+it.each(['config', 'stored'] as const)('B5: a step-6 recopy rebuilds %s accounts and their trees from the final legacy source', async source => {
+  const { legacy, target } = migrationFixture();
+  const dir = (id: string) => join(legacy.root, 'credentials', id);
+  for (const id of ['work', 'second']) rawJson(join(dir(id), 'auth.json'), { secret: id });
+  const path = source === 'config' ? legacy.workspaceConfig : legacy.agentAccounts;
+  const value = (id: string, provider: string) => source === 'config'
+    ? { projects: [], agentProfiles: [{ id, provider, configDir: dir(id) }] }
+    : { accounts: [{ id, provider, configDir: dir(id) }] };
+  Home.seed(legacy, path, value('work', 'claude'));
+  migrateLegacyHome(legacy, target, { onStep(step, attempt) {
+    if (step === 'accounts' && attempt === 0) rawJson(path, value('second', 'codex')); // Older writer.
+  } });
+  const loaded = await loadAgentAccounts(target);
+  expect(loaded.accounts).toEqual([expect.objectContaining({ id: 'second', provider: 'codex', configDir: join(target.data, 'accounts', 'second') })]);
+  expect(json(join(target.data, 'accounts', 'second', 'auth.json')).secret).toBe('second');
+  expect(existsSync(join(target.data, 'accounts', 'work'))).toBe(false);
+  expect(getHomeRecovery(target)).toEqual({ files: [] });
+});
+
 it('step 7: copies internal account credentials, rewrites configDir with HEAD, and leaves legacy untouched', () => {
   const { legacy, target, account } = accountFixture();
   const before = readFileSync(legacy.agentAccounts);

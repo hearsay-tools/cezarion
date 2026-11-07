@@ -199,6 +199,10 @@ like a stored one; the rewrite publishes the store that import would persist.
 Account inventory uses the loader's first-wins ID rule. Later duplicate IDs
 stay in place and record `notMoved` with reason `duplicate-account-id`.
 Each pending account or managed tree is rebuilt in a fresh staging directory.
+Every accounts pass rebuilds all targets derived from the account sources: it
+drops account trees the pass no longer copies, and it rebuilds the target
+`agent-accounts.json` from the legacy source. A step-6 recopy of
+`agent-accounts.json` or `config.json` therefore never leaves stale accounts.
 Deferred retries first check the target registry: an already rewritten
 configDir repairs the migration record without copying over live credentials.
 

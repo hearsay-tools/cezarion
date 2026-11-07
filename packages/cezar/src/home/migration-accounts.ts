@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -9,7 +9,8 @@ import { recordedProcessLive } from '../delegation/process-liveness.ts';
 import type { Home } from './home.ts';
 import { replacePrivateTree, insideDirectory, migrationPrivacy } from './migration-files.ts';
 import { HomeStore } from './store.ts';
-import { VersionLog } from './version-log.ts';
+import { digest, readBytes, VersionLog } from './version-log.ts';
+import { assertHomePath } from './boundary.ts';
 import { readMigrationRecord, writeMigrationRecord, type MigrationRecord } from './migration-record.ts';
 import { withHomeLock } from './write-lock.ts';
 
@@ -103,11 +104,30 @@ export function copyMigrationAccounts(legacy: Home, target: Home, accounts: Migr
       rewrites.set(account.id, account.target);
     }
   }
-  if (!rewrites.size) return;
-  // The copy, or the store the loader would import from the copied config.json.
-  const source = readAgentAccountSource(target, readUtf8).value;
+  // Step 6 can recopy the account sources. Rebuild every derived target from them on each pass:
+  // the account trees and the registry (the legacy file, or the store its config.json import
+  // would persist). The recheck after this pass catches a legacy change during the rebuild.
+  pruneAccountTrees(target, rewrites);
+  const source = readAgentAccountSource(legacy, readUtf8).value;
   const value = source && rewriteConfigDirs(source, account => rewrites.get(account.id));
-  if (value) new VersionLog(target.config, 'agent-accounts.json', migrationPrivacy).replace(target.agentAccounts, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
+  const bytes = value ? Buffer.from(`${JSON.stringify(value, null, 2)}\n`) : readBytes(legacy.agentAccounts);
+  if (digest(readBytes(target.agentAccounts)) !== digest(bytes)) {
+    new VersionLog(target.config, 'agent-accounts.json', migrationPrivacy).replace(target.agentAccounts, bytes);
+  }
+}
+
+/** A pending accounts directory holds only this pass's copies; drop trees a recopy no longer names. */
+function pruneAccountTrees(target: Home, keep: ReadonlyMap<string, string>): void {
+  const root = join(target.data, 'accounts');
+  let names: string[];
+  try { names = readdirSync(root); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  for (const name of names.filter(name => !keep.has(name))) {
+    assertHomePath(root, join(root, name));
+    rmSync(join(root, name), { recursive: true, force: true });
+  }
 }
 
 /** Only boot calls this, before it starts any sessions. Normal committed writes use HomeStore. */
