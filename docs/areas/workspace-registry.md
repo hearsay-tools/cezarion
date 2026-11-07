@@ -84,8 +84,9 @@ projects. Acceptance records the current hash, so an accepted empty registry doe
 not raise the same banner again.
 
 `GET /api/v1/home/recovery` exposes file names, reasons, times and restore availability;
-it never exposes file contents. Metadata fingerprints avoid repeated HomeStore
-transactions for unchanged files. The trusted-only `home:recovery` topic uses
+it never exposes file contents. Metadata and content fingerprints avoid repeated
+HomeStore transactions for unchanged files, including on coarse-timestamp filesystems.
+The trusted-only `home:recovery` topic uses
 filesystem watches only while subscribed, including journal directories so another
 cockpit's acceptance clears the banner. Restore and accept POST routes use the
 normal origin guard, `localHandoff`, and the contract's HomeStore file allowlist.

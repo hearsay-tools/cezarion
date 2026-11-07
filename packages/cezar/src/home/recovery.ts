@@ -4,6 +4,7 @@ import { homeFileSchema, type HomeFile, type HomeRecovery, type HomeRecoveryFile
 import type { Home } from './home.ts';
 import { registryFiles } from './entry-authorization.ts';
 import { HomeStore } from './store.ts';
+import { digest, readBytes } from './version-log.ts';
 import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
 export { subscribeHomeRecovery } from './recovery-watch.ts';
 
@@ -11,7 +12,13 @@ interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined;
 const caches = new Map<string, Map<HomeFile, CachedFile>>();
 
 function stamp(path: string): string {
-  try { const s = statSync(path, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
+  try {
+    const s = statSync(path, { bigint: true });
+    const metadata = `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
+    // Filesystems can report identical metadata for different bytes. Read content without
+    // taking a HomeStore lock; unchanged fingerprints still reuse the recovery snapshot.
+    return s.isFile() ? `${metadata}:${digest(readBytes(path))}` : metadata;
+  }
   catch { return 'unavailable'; }
 }
 
@@ -30,7 +37,7 @@ export function recoveryFiles(home: Home): HomeFile[] {
   return [...files].filter((file): file is HomeFile => homeFileSchema.safeParse(file).success).sort();
 }
 
-/** Metadata checks avoid reacquiring every HomeStore lock on repeated cockpit requests. */
+/** Content fingerprints avoid reacquiring every HomeStore lock on repeated cockpit requests. */
 export function getHomeRecovery(home: Home): HomeRecovery {
   let cache = caches.get(home.root);
   if (!cache) { cache = new Map(); caches.set(home.root, cache); }
