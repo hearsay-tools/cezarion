@@ -511,6 +511,24 @@ interface RunOutcome { failures: { job: string; error: string }[]; missing: stri
 function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions, env: ReturnType<typeof environment>, order: string[],
   results: readonly ChildResult[], outcome: RunOutcome): { markdown: string; gate: unknown } {
   const lines: string[] = ['# Run-store benchmark (#779)', ''];
+  reportHeader(env, options, results, lines);
+  reportProfileTables(aggregated, options, lines);
+  if (options.metrics.includes('active')) lines.push('Loop-delay cells are the median across processes of each process\'s p50, p99 and max.', '');
+  if (options.metrics.includes('getRun')) {
+    lines.push(`\`getRun\` ids: every live record; finished = up to ${GET_RUN_FINISHED_IDS - 1} evenly spaced finished records plus the largest (${
+      Object.values(aggregated).flatMap((bySize) => Object.entries(bySize)).filter(([, entry]) => entry.getRunIds)
+        .map(([size, entry]) => `${size} runs: ${entry.getRunIds!.live} live, ${entry.getRunIds!.finished} finished`)
+        .filter((value, index, all) => all.indexOf(value) === index).join('; ')}).`, '');
+  }
+
+  // Gate: does single-run save blocking grow with run count beyond noise, and is it the largest?
+  const gate = reportGate(aggregated, options, lines);
+  reportIncomplete(outcome, lines);
+  lines.push('## Run order', '', order.join(', '), '');
+  return { markdown: lines.join('\n'), gate };
+}
+
+function reportHeader(env: ReturnType<typeof environment>, options: ParentOptions, results: readonly ChildResult[], lines: string[]): void {
   const revisions = new Map<string, number>();
   for (const result of results) revisions.set(result.revision ?? 'unrecorded', (revisions.get(result.revision ?? 'unrecorded') ?? 0) + 1);
   lines.push(`- Revision: \`${env.revision}\`${env.dirty ? ' (uncommitted changes)' : ''}`,
@@ -519,6 +537,9 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
     `- Metrics: ${options.metrics.length === METRICS.length ? 'all' : options.metrics.join(', ')}`,
     `- ${options.processes} fresh processes per size x profile, shuffled; up to ${options.samples} samples per operation after ${WARM_UP} warm-ups, stopping after ${options.budgetSeconds} s once ${MIN_SAMPLES} are taken; ${options.duration} s active simulation; fixture seed ${options.seed}`,
     '- Cells: median / p95 over all processes\' samples, in ms unless the row says otherwise; `n` when the time budget cut sampling short', '');
+}
+
+function reportProfileTables(aggregated: ReturnType<typeof aggregate>, options: ParentOptions, lines: string[]): void {
   for (const [profile, bySize] of Object.entries(aggregated)) {
     const sizes = Object.keys(bySize).map(Number);
     if (sizes.length === 0) continue;
@@ -571,50 +592,51 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
     }
     lines.push('');
   }
-  if (options.metrics.includes('active')) lines.push('Loop-delay cells are the median across processes of each process\'s p50, p99 and max.', '');
-  if (options.metrics.includes('getRun')) {
-    lines.push(`\`getRun\` ids: every live record; finished = up to ${GET_RUN_FINISHED_IDS - 1} evenly spaced finished records plus the largest (${
-      Object.values(aggregated).flatMap((bySize) => Object.entries(bySize)).filter(([, entry]) => entry.getRunIds)
-        .map(([size, entry]) => `${size} runs: ${entry.getRunIds!.live} live, ${entry.getRunIds!.finished} finished`)
-        .filter((value, index, all) => all.indexOf(value) === index).join('; ')}).`, '');
-  }
+}
 
-  // Gate: does single-run save blocking grow with run count beyond noise, and is it the largest?
+function reportGate(aggregated: ReturnType<typeof aggregate>, options: ParentOptions, lines: string[]): Record<string, unknown> {
   const gate: Record<string, unknown> = {};
   lines.push('## Gate', '', '`GET /runs` is left out of the comparison: since #817 the cockpit lists through `GET /run-summaries`, and `GET /runs` serves older clients only.', '');
   const missingInputs = [...new Set(Object.values(BLOCKING_INPUTS))].filter((metric) => !options.metrics.includes(metric));
-  for (const [profile, bySize] of Object.entries(aggregated)) {
-    const sizes = Object.keys(bySize).map(Number).sort((a, b) => a - b);
-    if (sizes.length < 2) { lines.push(`- ${profile}: needs at least two sizes.`); continue; }
-    const small = sizes[0]!;
-    const large = sizes[sizes.length - 1]!;
-    const absent = [...new Set([...missingInputs.map((metric) => `\`${metric}\` (not selected)`),
-      ...(missingInputs.includes('save') || bySize[small]!.metrics['save (flush)'] ? [] : [`save (flush) at ${small} runs`]),
-      ...BLOCKING_METRICS.filter((metric) => !missingInputs.includes(BLOCKING_INPUTS[metric]!) && !bySize[large]!.metrics[metric])
-        .map((metric) => `${metric} at ${large} runs`)])];
-    if (absent.length > 0) {
-      gate[profile] = { small, large, verdict: null, missingInputs: absent };
-      lines.push(`### ${profile}`, '', `- No verdict: this pass is missing gate inputs: ${absent.join(', ')}. Rerun with every metric (the default) for one.`, '');
-      continue;
-    }
-    const save = (size: number) => bySize[size]!.metrics['save (flush)']!;
-    const grows = save(large).median > save(small).p95;
-    const threshold = save(small).median + Math.max(0.25 * save(small).median, 1);
-    const ranking = BLOCKING_METRICS.map((metric) => ({ metric, median: bySize[large]!.metrics[metric]!.median }))
-      .sort((a, b) => b.median - a.median);
-    const recurring = ranking.filter((entry) => entry.metric !== 'open');
-    const saveLargest = SAVE_METRICS.includes(ranking[0]!.metric);
-    const saveLargestRecurring = SAVE_METRICS.includes(recurring[0]!.metric);
-    gate[profile] = { small, large, saveSmall: save(small), saveLarge: save(large), grows, threshold, ranking, saveLargest, saveLargestRecurring };
-    lines.push(`### ${profile}`, '',
-      `- Single-run save (\`updateRun\` + \`flush\`): median ${fmt(save(small).median)} ms (p95 ${fmt(save(small).p95)}) at ${small} runs, ${fmt(save(large).median)} ms (p95 ${fmt(save(large).p95)}) at ${large} runs. ` +
-      (grows ? `**It grows beyond noise**: the ${large}-run median is above the ${small}-run p95.` : `**It does not grow beyond noise**: the ${large}-run median is within the ${small}-run p95.`),
-      `- For reference, the post-migration criterion x_N <= x_${small} + max(0.25 x_${small}, 1 ms) allows ${fmt(threshold)} ms; today's ${large}-run median ${save(large).median <= threshold ? 'meets' : 'misses'} it.`,
-      `- Largest synchronous block at ${large} runs: ${ranking.slice(0, 4).map((entry) => `${entry.metric} ${fmt(entry.median)} ms`).join(', ')}. ` +
-      (saveLargest ? '**A save is the largest component.**' : `**A save is not the largest component**; ${ranking[0]!.metric} is.`) +
-      (ranking[0]!.metric === 'open' ? ` Excluding open (once per boot), the largest is ${recurring[0]!.metric}${saveLargestRecurring ? ', a save' : ''}.` : ''),
-      `- Verdict: ${grows && saveLargest ? 'the evidence gate passes' : grows && saveLargestRecurring ? 'save grows beyond noise and is the largest recurring block, but open is larger' : 'the evidence gate does not pass'} for ${profile}.`, '');
+  for (const [profile, bySize] of Object.entries(aggregated)) gateProfile(profile, bySize, options, missingInputs, gate, lines);
+  return gate;
+}
+
+function gateProfile(profile: string, bySize: Record<number, SizeAggregate>, options: ParentOptions, missingInputs: Metric[],
+  gate: Record<string, unknown>, lines: string[]): void {
+  const sizes = Object.keys(bySize).map(Number).sort((a, b) => a - b);
+  if (sizes.length < 2) { lines.push(`- ${profile}: needs at least two sizes.`); return; }
+  const small = sizes[0]!;
+  const large = sizes[sizes.length - 1]!;
+  const absent = [...new Set([...missingInputs.map((metric) => `\`${metric}\` (not selected)`),
+    ...(missingInputs.includes('save') || bySize[small]!.metrics['save (flush)'] ? [] : [`save (flush) at ${small} runs`]),
+    ...BLOCKING_METRICS.filter((metric) => !missingInputs.includes(BLOCKING_INPUTS[metric]!) && !bySize[large]!.metrics[metric])
+      .map((metric) => `${metric} at ${large} runs`)])];
+  if (absent.length > 0) {
+    gate[profile] = { small, large, verdict: null, missingInputs: absent };
+    lines.push(`### ${profile}`, '', `- No verdict: this pass is missing gate inputs: ${absent.join(', ')}. Rerun with every metric (the default) for one.`, '');
+    return;
   }
+  const save = (size: number) => bySize[size]!.metrics['save (flush)']!;
+  const grows = save(large).median > save(small).p95;
+  const threshold = save(small).median + Math.max(0.25 * save(small).median, 1);
+  const ranking = BLOCKING_METRICS.map((metric) => ({ metric, median: bySize[large]!.metrics[metric]!.median }))
+    .sort((a, b) => b.median - a.median);
+  const recurring = ranking.filter((entry) => entry.metric !== 'open');
+  const saveLargest = SAVE_METRICS.includes(ranking[0]!.metric);
+  const saveLargestRecurring = SAVE_METRICS.includes(recurring[0]!.metric);
+  gate[profile] = { small, large, saveSmall: save(small), saveLarge: save(large), grows, threshold, ranking, saveLargest, saveLargestRecurring };
+  lines.push(`### ${profile}`, '',
+    `- Single-run save (\`updateRun\` + \`flush\`): median ${fmt(save(small).median)} ms (p95 ${fmt(save(small).p95)}) at ${small} runs, ${fmt(save(large).median)} ms (p95 ${fmt(save(large).p95)}) at ${large} runs. ` +
+    (grows ? `**It grows beyond noise**: the ${large}-run median is above the ${small}-run p95.` : `**It does not grow beyond noise**: the ${large}-run median is within the ${small}-run p95.`),
+    `- For reference, the post-migration criterion x_N <= x_${small} + max(0.25 x_${small}, 1 ms) allows ${fmt(threshold)} ms; today's ${large}-run median ${save(large).median <= threshold ? 'meets' : 'misses'} it.`,
+    `- Largest synchronous block at ${large} runs: ${ranking.slice(0, 4).map((entry) => `${entry.metric} ${fmt(entry.median)} ms`).join(', ')}. ` +
+    (saveLargest ? '**A save is the largest component.**' : `**A save is not the largest component**; ${ranking[0]!.metric} is.`) +
+    (ranking[0]!.metric === 'open' ? ` Excluding open (once per boot), the largest is ${recurring[0]!.metric}${saveLargestRecurring ? ', a save' : ''}.` : ''),
+    `- Verdict: ${grows && saveLargest ? 'the evidence gate passes' : grows && saveLargestRecurring ? 'save grows beyond noise and is the largest recurring block, but open is larger' : 'the evidence gate does not pass'} for ${profile}.`, '');
+}
+
+function reportIncomplete(outcome: RunOutcome, lines: string[]): void {
   if (outcome.failures.length > 0 || outcome.missing.length > 0 || outcome.stopped) {
     lines.push('## Incomplete run', '', 'Cells aggregate the children that finished.', '');
     if (outcome.stopped) lines.push(`- ${outcome.stopped}`);
@@ -622,8 +644,6 @@ function report(aggregated: ReturnType<typeof aggregate>, options: ParentOptions
     if (outcome.missing.length > 0) lines.push(`- Not run: ${outcome.missing.join(', ')}`);
     lines.push('');
   }
-  lines.push('## Run order', '', order.join(', '), '');
-  return { markdown: lines.join('\n'), gate };
 }
 
 /** Bytes free to this user on the file systems the children write to. */
