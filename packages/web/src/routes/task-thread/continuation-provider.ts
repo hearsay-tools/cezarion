@@ -5,6 +5,36 @@ import { usableRunners } from '@/lib/provider-status'
 import { resolveRunner } from '@/routes/new-task-form'
 import { isStoppedBeforeStarting } from './run-actions'
 
+/** Every question the reason chain asks, in the priority order it asks them. */
+interface ContinuationReasonInput {
+  needsConfig: boolean
+  configPending: boolean
+  configError: boolean
+  providersPending: boolean
+  providersError: boolean
+  canContinue: boolean
+  untouched: boolean
+  missing: string[]
+}
+
+/** Why this surface cannot continue yet: the task-settings checks first, then the provider
+ *  checks, then the connect prompt. */
+function continuationReason(input: ContinuationReasonInput): string | undefined {
+  return input.needsConfig && input.configPending
+    ? 'Checking task settings…'
+    : input.needsConfig && input.configError
+      ? 'Task settings could not be loaded.'
+      : input.providersPending
+        ? 'Checking agent providers…'
+        : input.providersError
+          ? 'Provider authentication could not be verified.'
+          : input.canContinue
+            ? undefined
+            : input.untouched
+              ? `Connect the required workflow providers (${input.missing.join(', ')}) to continue.`
+              : 'Connect an agent provider to continue.'
+}
+
 /** One provider decision for every UI path that reopens an existing agent session. */
 export function useContinuationProvider(run: ApiRun, pickedRunner: Runner | null = null) {
   const providers = useProviderStatus()
@@ -18,19 +48,16 @@ export function useContinuationProvider(run: ApiRun, pickedRunner: Runner | null
   const required = untouched ? providersRequiredByWorkflow(run.workflowDef!, runner) : [runner]
   const missing = required.filter(provider => !runners.includes(provider))
   const canContinue = providers.isSuccess && (!needsConfig || config.isSuccess) && missing.length === 0
-  const reason = needsConfig && config.isPending
-    ? 'Checking task settings…'
-    : needsConfig && config.isError
-      ? 'Task settings could not be loaded.'
-      : providers.isPending
-        ? 'Checking agent providers…'
-        : providers.isError
-          ? 'Provider authentication could not be verified.'
-          : canContinue
-            ? undefined
-            : untouched
-              ? `Connect the required workflow providers (${missing.join(', ')}) to continue.`
-              : 'Connect an agent provider to continue.'
+  const reason = continuationReason({
+    needsConfig,
+    configPending: config.isPending,
+    configError: config.isError,
+    providersPending: providers.isPending,
+    providersError: providers.isError,
+    canContinue,
+    untouched,
+    missing,
+  })
 
   return {
     runners,
