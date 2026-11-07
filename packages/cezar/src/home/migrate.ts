@@ -14,6 +14,7 @@ import { registryFiles } from './entry-authorization.ts';
 import { privateDirectory, protectPrivatePath, replacePrivate, syncDirectory } from './private-files.ts';
 import { readCockpitLeases } from './leases.ts';
 import { getHomeRecovery } from './recovery.ts';
+import { LEGACY_RECOVERY_COMMAND } from './migration-cli.ts';
 import { withHomeLock } from './write-lock.ts';
 import { digest, readBytes, VersionLog } from './version-log.ts';
 import { loadWorkspaceConfigSync, mergeWriteWorkspaceConfigSync } from '../workspace/config.ts';
@@ -154,7 +155,7 @@ function migrateLocked(legacy: Home, target: Home, options: MigrationOptions): M
   // Step 5's refusal runs before the first target write: a refused run leaves no pending home.
   // The claim makes this a report-only recovery read with the normal journal interpretation.
   const recovery = getHomeRecovery(legacy);
-  if (recovery.files.length) throw new Error(`Resolve home recovery before migration: ${recovery.files.map(file => `${file.file} (${file.reason})`).join(', ')}`);
+  if (recovery.files.length) throw new Error(`Resolve home recovery before migration: ${recovery.files.map(file => `${file.file} (${file.reason})`).join(', ')}. Run ${LEGACY_RECOVERY_COMMAND}.`);
   const disposable = marker?.state === 'pending' || existsSync(join(target.config, 'install.json.failed'));
   if (!disposable && registryFiles(target).some(path => existsSync(path))) throw new Error(`Migration target already contains registry data: ${target.config}`);
   if (disposable) discardPendingCopies(target);

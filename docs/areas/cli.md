@@ -35,3 +35,9 @@ actions only when the switch is enabled; both refuse while it is disabled.
 Remote-settings grants remain host-CLI-only, even for a local cockpit. Their
 legacy banner rows show these commands. Existing `backup list` and `backup
 restore` behavior is unchanged.
+
+Before migration, `hsq migrate --resolve-legacy <file> restore|accept` resolves
+an outside-write or reset incident on the legacy home. It uses the pinned restore
+or acceptance writer directly, without preparing or migrating the split home.
+Help lists both actions. The command is registered only with `REBRAND_SWITCH`
+enabled. See `BACKWARD_COMPATIBILITY.md` for output and exit codes.
