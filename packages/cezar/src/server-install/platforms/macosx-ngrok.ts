@@ -408,7 +408,7 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       ];
     },
     async redeploy(ctx: InstallContext) {
-      // #32: an npx-launched agent re-execs its cached build on kickstart, so a
+      // hearsay-tools/cezarion#32: an npx-launched agent re-execs its cached build on kickstart, so a
       // deploy that doesn't invalidate the npx cache never actually updates.
       // Clear the cezarion cache first (read the live ProgramArguments to know the
       // launch form); a checkout / global agent is left alone.
