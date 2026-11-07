@@ -56,6 +56,22 @@ it('the enabled dispatcher resolves the legacy home, not HSQ_HOME or the target 
   expect(targetFactory).not.toHaveBeenCalled();
 });
 
+it.each(['restore', 'accept'])('resolves a backup-derived reset with %s after a report-only migration refusal', async action => {
+  const { legacy, target, env } = migrationFixture();
+  rawJson(`${legacy.workspaceConfig}.bak`, { projects: [{ id: 'kept', root: '/kept' }] });
+  const pinned = readFileSync(`${legacy.workspaceConfig}.bak`);
+  const current = readFileSync(legacy.workspaceConfig);
+  expect(() => prepareOperatorHome(target, 'serve', env, { enabled: true, legacy })).toThrow('config.json (reset)');
+  expect(existsSync(join(legacy.config, '.versions/config.json/RESET'))).toBe(false);
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  expect(await runMigrationCommand(['--resolve-legacy', 'config.json', action], env, target, legacy)).toBe(0);
+  expect(readFileSync(legacy.workspaceConfig)).toEqual(action === 'restore' ? pinned : current);
+  expect(getHomeRecovery(legacy, false)).toEqual({ files: [] });
+  expect(await runMigrationCommand([], env, target, legacy)).toBe(0);
+  expect(readInstallMarker(target.config)?.state).toBe('committed');
+  expect(getHomeRecovery(target, false)).toEqual({ files: [] });
+});
+
 it.each(['agent-accounts.json', 'remote-settings/4321.json', 'server-instances/named.install.lock'])
 ('restores the pinned legacy %s through HomeStore and keeps a backup of the outside bytes', async file => {
   const { legacy, target, env } = migrationFixture();

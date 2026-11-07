@@ -4,6 +4,8 @@ import type { Home } from './home.ts';
 import { resolveHome } from './resolve.ts';
 import { planLegacyMigration } from './migration-plan.ts';
 import { acceptHomeRecovery } from './recovery.ts';
+import { HomeStore } from './store.ts';
+import { homeFileLocation } from './file-location.ts';
 import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
 
 export const LEGACY_RECOVERY_COMMAND = 'hsq migrate --resolve-legacy <file> restore|accept';
@@ -36,6 +38,8 @@ export async function runMigrationCommand(argv: string[], env: NodeJS.ProcessEnv
     const action = recoveryAction(file, positionals, values['dry-run']);
     legacy ??= resolveHome({ purpose: 'cli', env, layout: 'legacy' });
     if (file !== undefined && action) {
+      // Migration inspections are report-only. Persist backup-derived resets before resolving them.
+      new HomeStore(legacy).recovery(homeFileLocation(legacy, file).path);
       if (action === 'restore') restorePinnedRecovery(file, legacy);
       else acceptHomeRecovery(legacy, file, undefined, false);
       console.log(JSON.stringify({ file, action }, null, 2));
