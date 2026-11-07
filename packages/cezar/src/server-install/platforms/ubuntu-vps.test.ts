@@ -1030,3 +1030,26 @@ describe('ubuntu-vps review fixes (PR #423)', () => {
     }
   });
 });
+
+describe('ubuntu-vps preflight', () => {
+  function preflightCtx(answers: Record<string, { code?: number; stdout?: string }>, warn = vi.fn()): InstallContext {
+    const runner: Runner = {
+      capture: async (program) => ({ code: answers[program]?.code ?? 0, stdout: answers[program]?.stdout ?? '', stderr: '' }),
+      interactive: async () => 0,
+    };
+    return ctxWith({ runner, ui: { ...createAutoUi(), warn } as Ui });
+  }
+
+  it('refuses a host that is not Linux, has no apt, or runs as root', async () => {
+    await expect(ubuntuVps.preflight(preflightCtx({ uname: { stdout: 'Darwin' } }))).rejects.toThrow(/requires Linux/);
+    await expect(ubuntuVps.preflight(preflightCtx({ uname: { stdout: 'Linux' }, 'apt-get': { code: 127 } }))).rejects.toThrow(/requires apt/);
+    await expect(ubuntuVps.preflight(preflightCtx({ uname: { stdout: 'Linux' }, id: { stdout: '0\n' } }))).rejects.toThrow(/not root/);
+  });
+
+  it('warns when another proxy already serves port 80', async () => {
+    const warn = vi.fn();
+    const ss = { stdout: 'LISTEN 0 4096 *:80 *:* users:(("docker-proxy",pid=12,fd=4))\n' };
+    await expect(ubuntuVps.preflight(preflightCtx({ uname: { stdout: 'Linux' }, id: { stdout: '1000\n' }, ss }, warn))).resolves.toBeUndefined();
+    expect(warn.mock.calls[0]?.[0]).toContain('"docker-proxy"');
+  });
+});

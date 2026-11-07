@@ -249,6 +249,31 @@ break other vhosts).
 
 ---
 
+## Moving to the new names (staged)
+
+The staged rebrand keeps every name above until the release switch is enabled.
+New installs then use `hearsay-squawk[-<slug>].service`, the nginx site
+`hearsay-squawk[-<slug>]` and `/etc/hearsay-squawk/htpasswd[-<slug>]`.
+Uninstall and deploy act on the names an install recorded, so an install made
+before the switch keeps working.
+
+`cez server-migrate [--dry-run]` exists only with the switch on. It moves every
+install recorded in one home as one group: it stops them all, stages the new
+home, copies each unit and starts it on the same port. For an install that owns
+its nginx site, it copies the site file with only its name and
+`auth_basic_user_file` changed (TLS listeners, certificates, redirects and your
+edits stay), and copies the htpasswd (the old file stays). The health check goes
+through the public site, over HTTPS when the site has TLS, with a temporary
+probe login in the new htpasswd. An `--external-proxy` install moves only its
+unit, and its check stays at the bind address. The group commits only after
+every instance passes. Any failure stops the group, restores the old units and
+sites and renames the new home's `install.json` to `install.json.failed`, so the
+next run starts again from the untouched legacy home. After success, old unit
+files stay as `*.migrated`. `--dry-run` lists every unit, site, file and
+`Environment=` line it would change; it shows only `CEZ_HOME`'s value.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause & fix |
