@@ -29,8 +29,8 @@ import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 import { contentText, isRecord, number, ompRpcError as rpcError, string } from './pi-rpc-wire.ts';
 import { accountUsage, ompFlushProviderError, ompMessageUsage, ompProviderErrorMessage } from './omp-provider-events.ts';
 
-// Provider-failure surfacing and usage accounting moved verbatim to `omp-provider-events.ts`
-// when the hearsay-tools/cezarion#2836 split crossed the 1,000-line limit; the names stay importable from here.
+// Provider-failure surfacing and usage accounting live in omp-provider-events.ts; these
+// names stay importable from here.
 export { ompFlushProviderError, ompMessageUsage, ompProviderErrorMessage } from './omp-provider-events.ts';
 
 /** One stream of text/reasoning blocks: the parent turn's, or one sub-agent's. */

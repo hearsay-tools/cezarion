@@ -1,9 +1,7 @@
 /**
  * OMP provider-failure surfacing and message usage accounting.
  *
- * Moved verbatim (code and comments) from omp-ui-mapper.ts when splitting the mapper
- * functions for hearsay-tools/cezarion#2836 crossed that file's 1,000-line limit.
- * Types import back from the mapper; nothing here imports mapper functions, so there
+ * Types import from the mapper; nothing here imports mapper functions, so there
  * is no runtime cycle.
  */
 import type { TokenUsage, UiEvent } from './ui-events.js';
