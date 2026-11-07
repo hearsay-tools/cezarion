@@ -1,3 +1,4 @@
+import { staleProductEnvReads } from './product-env-read.ts';
 import { staleHomeReaders } from './home-boundary.ts';
 import { externalTestHomeProblems } from './test-home-repository.ts';
 import { guardianCssProblems } from './design-guardian-css.ts';
@@ -217,7 +218,7 @@ export function waitProblems(): string[] {
 }
 
 export function repositoryProblems(): string[] {
-  return [...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems(), ...externalTestHomeProblems()];
+  return [...staleEntries(), ...staleProductEnvReads(), ...fileLengthProblems(), ...guardianCssProblems(), ...externalTestHomeProblems()];
 }
 
 async function lintProblems(withOxlint: boolean): Promise<string[]> {

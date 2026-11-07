@@ -121,7 +121,7 @@ function fakeDeps(file = 'packages/contract/src/sample.ts') {
   const deps = {
     git: (args, cwd) => { calls.push(['git', ...args]); return args[0] === 'rev-parse' ? (args[1] === '--show-toplevel' ? '/live/repo\n' : 'abcdef\n') : 'packages/cezar/src/sample.test.ts\n'; },
     scratch: () => '/cache/scratch', mkdir: dir => calls.push(['mkdir', dir]),
-    env: { PATH: '/bin', CEZ_COCKPIT_URL: 'http://127.0.0.1:4321', CEZ_PROJECT_ID: 'cezar', cez_task_id: 'live', CEZ_HOME: '/home/me/.cezar' },
+    env: { PATH: '/bin', CEZ_COCKPIT_URL: 'http://127.0.0.1:4321', CEZ_PROJECT_ID: 'cezar', cez_task_id: 'live', HSQ_TOOL_TOKEN: 'private', hsq_task_id: 'live', HSQ_HOME: '/host/new-home', CEZ_HOME: '/home/me/.cezar' },
     command: async (bin, args, cwd, signal, env) => { calls.push([bin, ...args]); calls.push(['command-env', cwd, env]); },
     stryker: async (...args) => { calls.push(['stryker', args[0], args[3]]); return { outcome: 'exited', code: 0 }; },
     readReport: () => report(file), reset: cwd => calls.push(['reset', cwd]), removeReport: () => calls.push(['remove-report']),
@@ -221,12 +221,12 @@ test('the scratch checkout is a standalone shallow fetch of HEAD, never a linked
   ]);
 });
 
-test('install, build and Stryker run without CEZ_* variables and with an empty CEZ_HOME', async () => {
+test('install, build and Stryker run without either product prefix and with sandbox home locators', async () => {
   const { deps, calls } = fakeDeps('packages/cezar/src/sample.ts');
   let strykerEnv;
   deps.stryker = async (project, files, ms, options) => { strykerEnv = options.env; return { outcome: 'exited', code: 0 }; };
   await m.runMeasurement(m.parseArgs(['packages/cezar/src/sample.ts']), deps);
-  const isolated = { PATH: '/bin', CEZ_HOME: '/cache/scratch/cez-home' };
+  const isolated = { PATH: '/bin', CEZ_HOME: '/cache/scratch/cez-home', HSQ_HOME: '/cache/scratch/cez-home' };
   assert.ok(calls.some(c => c[0] === 'mkdir' && c[1] === '/cache/scratch/cez-home'));
   const envs = calls.filter(c => c[0] === 'command-env');
   assert.equal(envs.length, 2);

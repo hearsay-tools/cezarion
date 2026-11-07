@@ -26,7 +26,25 @@ function envSites(source: string): Map<string, number> {
   for (const match of source.matchAll(/(['"`])((?:CEZ|HSQ)_[A-Z0-9_]*[A-Z0-9])\1/g)) {
     if (code[match.index] === match[1]) add(match[2]!, match.index);
   }
-  for (const match of code.matchAll(/\.\s*((?:CEZ|HSQ)_[A-Z0-9_]+)/g)) add(match[1]!, match.index);
+  for (const match of code.matchAll(/\b((?:CEZ|HSQ)_[A-Z0-9_]+)\b/g)) add(match[1]!, match.index);
+  // A literal suffix documents both accepted names, including imported helper aliases.
+  for (const helper of productEnvHelpers(source)) {
+    const escaped = helper.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(?<![\\w$])${escaped}\\s*(?:\\?\\.)?\\s*\\(\\s*(['"])([A-Z][A-Z0-9_]*)\\1`, 'g');
+    for (const match of source.matchAll(pattern)) {
+      if (code.slice(match.index, match.index + helper.length) !== helper) continue;
+      for (const prefix of ['HSQ_', 'CEZ_']) add(`${prefix}${match[2]}`, match.index);
+    }
+  }
+  return names;
+}
+
+/** Normal named-import aliases retain the same env contract as productEnv. */
+export function productEnvHelpers(source: string): Set<string> {
+  const names = new Set(['productEnv']);
+  for (const imported of blankOnce(source).matchAll(/\bimport\s*\{([^}]+)\}/g)) {
+    for (const alias of imported[1]!.matchAll(/\bproductEnv\s+as\s+([\w$]+)/g)) names.add(alias[1]!);
+  }
   return names;
 }
 

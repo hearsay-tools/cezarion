@@ -58,6 +58,7 @@ function fixtureCases(cases: [string, string][]): [string, string][] {
 const findingsFor = (file: string): string[] => fixtureFindings.filter(problem => problem.startsWith(`${file}:`));
 
 const VIOLATIONS: Record<string, [string, string]> = {
+  'product-env-read': ['packages/cezar/src/env-reader.ts', 'const flag = process.env.CEZ_DRY_RUN;\n'],
   'test-home-write': ['packages/web/src/ambient-home.test.ts', "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}');\n"],
   'home-boundary': ['packages/cezar/src/ambient-home.ts', 'cezarHomeDir();\n'],
   'unit-wait-discipline': ['packages/web/src/wait-violation.test.tsx', 'await sleep(5);\n'],
@@ -71,11 +72,12 @@ const VIOLATIONS: Record<string, [string, string]> = {
   'raw-query-setter': ['packages/web/src/c.tsx', "import { useSearchParams } from 'react-router';\nconst [p, setP] = useSearchParams();\n"],
   'run-fact-reader': ['packages/web/src/lib/d.ts', "const held = attention.label === 'usage limit';\n"],
   'run-history-reader': ['packages/cezar/src/raw-history.ts', 'const text = readFileSync(historyPaths(dir, id).plain);\n'],
-  'undocumented-env-name': ['packages/cezar/scripts/e.mjs', 'const flag = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n'],
+  'undocumented-env-name': ['packages/cezar/scripts/e.mjs', "process.env.CEZ_NOT_DOCUMENTED_ANYWHERE = '1';\n"],
 };
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/cezar/src/env-approved.ts': "productEnv('DRY_RUN'); delete process.env.CEZ_DRY_RUN;",
   'packages/web/src/sandbox-home.test.ts': "writeFileSync(join(Home.sandbox(dir).root, 'config.json'), '{}');\n",
   'packages/cezar/src/paths.ts': 'homedir();',
   'packages/cezar/src/index.ts': 'resolveHome({ purpose: "cli" });',
@@ -103,7 +105,7 @@ const APPROVED: Record<string, string> = {
   'packages/cezar/src/fixed-history-name.ts': 'readFileSync("prefix".concat("run.ndjson"));\n',
   'packages/cezar/src/runs/history-stream.ts': 'const paths = historyPaths(dir, id);\n',
   // undocumented-env-name: a documented name, a mock control, and a test.
-  'packages/cezar/src/j.ts': "const a = process.env.CEZ_DRY_RUN; const b = env.CEZ_MOCK_ANYTHING;\n",
+  'packages/cezar/src/j.ts': "process.env.CEZ_DRY_RUN = '1'; env.CEZ_MOCK_ANYTHING = '1';\n",
   'packages/cezar/src/k.test.ts': 'const c = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n',
 };
 

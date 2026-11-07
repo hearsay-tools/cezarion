@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { productEnv } from './core/product-env.ts';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
 import { parseArgs } from 'node:util';
@@ -26,7 +27,7 @@ import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
-import { warnLegacyHome } from './home/deprecation.ts';
+import { warnLegacyEnv } from './home/deprecation.ts';
 import { REBRAND_SWITCH } from './home/switch.ts';
 import { resolveHome } from './home/resolve.ts';
 import { operatorHomeEntry, prepareOperatorHome } from './home/entry.ts';
@@ -113,7 +114,7 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 (team skills come from "skillsRepos" in .ai/cezar/config.json, which the Skills page edits; none by default);
 workflows in .ai/cezar/workflows/.`;
 
-warnLegacyHome(process.env);
+warnLegacyEnv(process.env);
 
 async function main(): Promise<void> {
   let resolvedHome: Home | undefined;
@@ -191,7 +192,7 @@ async function main(): Promise<void> {
       // to that explicit identity. Mutations are left to their own guards.
       const projectArgs = positionals.slice(1);
       const isList = projectArgs.length === 0 || projectArgs[0] === 'list';
-      const bootProjectId = process.env.CEZ_SINGLE_PROJECT === '1' && isList
+      const bootProjectId = productEnv('SINGLE_PROJECT') === '1' && isList
         ? await initWorkspace(repoRoot, home())
         : undefined;
       process.exitCode = await runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId, home: home() });
@@ -754,7 +755,7 @@ function buildRunOptions(
 ): ServerRunOptions {
   return {
     home,
-    dryRun: process.env.CEZ_DRY_RUN === '1',
+    dryRun: productEnv('DRY_RUN') === '1',
     assumeYes: flags.yes,
     reconfigure: new Set((flags.reconfigure ?? '').split(',').map((s) => s.trim()).filter(Boolean)),
     reinstall: Boolean(flags.reinstall),

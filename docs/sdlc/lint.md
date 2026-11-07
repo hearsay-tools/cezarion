@@ -266,3 +266,27 @@ benchmark snapshots keep their original measurements.
 wait in `scripts/mock-lifecycle.mjs` (hearsay-tools/cezarion#1529). Other `mock-*.mjs`
 scripts cannot define the old lifecycle helpers or contain the `watchdog.pid` literal.
 Synthetic cases pin the scanner; tests never read native mock source.
+
+### Product environment reads
+
+`cez/product-env-read` requires shipped source and runner scripts to use
+`productEnv('SUFFIX', env?)` from `core/product-env.ts`. The helper selects `HSQ_`
+first by presence (an empty string wins), then `CEZ_`. Its optional third boolean
+keeps the child-env boundary's case-insensitive lookup. Home resolution uses
+`legacyHomeEnv(env)` for the migration source and `preferredHomeEnv(env)` for the
+split-layout override; it keeps its existing empty/default-home rules.
+
+The AST scanner covers dot and optional reads, literal brackets and static
+expressions, env arguments, simple env aliases, destructuring declarations and
+assignments, and computed indexing on env objects. Unresolved computed sites are
+recorded as `computed` with name `*`; conversion must inspect their possible
+suffixes. Tests, testkits, fixtures, plain assignments and deletes are exempt.
+Compound assignments and updates remain reads. Helper calls require literal
+suffixes; `cez/undocumented-env-name` derives both names from them.
+
+`product-env-read.baseline.json` records the initial inventory by file, access
+form and name for hearsay-tools/cezarion#2970. Remaining source reads and runner
+scripts belong to hearsay-tools/cezarion#2971. CI rejects baseline growth; lint
+rejects stale counts. Convert reads and shrink or remove their entries. Never
+add an allowance. `legacyEnvNames(env)` collects old names independently of
+reads so boot can also report shadowed, empty and retired settings without values.

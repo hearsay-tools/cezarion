@@ -5,6 +5,7 @@
  */
 
 import type { AgentBackend } from './agent-runner.ts';
+import { productEnv } from './product-env.ts';
 import { SECRET_NAME_RE } from './secret-redaction.ts';
 
 /**
@@ -342,29 +343,32 @@ function curateEnv(
   // is exactly the temp-directory bug #785 fixes, so the override has to be
   // total. `extra` is cezar's own, never a host secret, and always wins.
   const overridden = upperSet([
-    ...Object.keys(extra),
+    ...Object.keys(extra).flatMap(name => {
+      const key = name.toUpperCase();
+      return /^(CEZ|HSQ)_/.test(key) ? [`CEZ_${key.slice(4)}`, `HSQ_${key.slice(4)}`] : [key];
+    }),
     ...HOME_LOCATING_ENV,
     // Session authority may only come from controller-generated spec.env, never
     // inherited from a parent agent — even through passthrough or full-env mode.
-    'CEZ_TOOL_TOKEN',
-    'CEZ_TOOL_SOCKET',
-    'CEZ_DELEGATION_TOKEN',
-    'CEZ_DELEGATION_URL',
+    'CEZ_TOOL_TOKEN', 'HSQ_TOOL_TOKEN',
+    'CEZ_TOOL_SOCKET', 'HSQ_TOOL_SOCKET',
+    'CEZ_DELEGATION_TOKEN', 'HSQ_DELEGATION_TOKEN',
+    'CEZ_DELEGATION_URL', 'HSQ_DELEGATION_URL',
     // The cockpit address (#774) names THIS run's cockpit and project. A nested headless
     // `cez run` sets none, and must not inherit its parent's: that would let it change
     // automations in a project it does not belong to.
-    'CEZ_COCKPIT_URL',
-    'CEZ_PROJECT_ID',
+    'CEZ_COCKPIT_URL', 'HSQ_COCKPIT_URL',
+    'CEZ_PROJECT_ID', 'HSQ_PROJECT_ID',
     // hearsay-tools/cezarion#784: the address of THIS session's preview browser. An inherited one
     // would point a nested agent at its parent's browser.
-    'CEZ_PREVIEW_CDP_URL',
+    'CEZ_PREVIEW_CDP_URL', 'HSQ_PREVIEW_CDP_URL',
   ]);
 
   // Escape hatch: restore legacy full-inheritance (opt-in, off by default).
   // Parsed with the same `isTruthy` the Bedrock/Vertex toggles use (#456
   // review) — an exact `=== '1'` made `CEZ_AGENT_ENV_FULL=true` silently do
   // nothing, which is a confusing way to fail open-vs-closed.
-  if (isTruthy(readVar(source, 'CEZ_AGENT_ENV_FULL'))) {
+  if (isTruthy(productEnv('AGENT_ENV_FULL', source, true))) {
     const full: NodeJS.ProcessEnv = {};
     for (const [name, value] of Object.entries(source)) {
       if (!overridden.has(name.toUpperCase())) full[name] = value;
@@ -374,7 +378,7 @@ function curateEnv(
 
   const { backendPrefixes } = grants;
   const passthrough = upperSet(
-    (readVar(source, 'CEZ_ENV_PASSTHROUGH') ?? '')
+    (productEnv('ENV_PASSTHROUGH', source, true) ?? '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
@@ -408,7 +412,7 @@ function curateEnv(
     const key = name.toUpperCase();
     // cezar's own namespace (CEZ_DRY_RUN plumbing, mock hooks, run wiring).
     // A secret-shaped one (`CEZ_PRIVATE_TOKEN`) reaches a host command only through passthrough.
-    if (key.startsWith('CEZ_') && (grants.secretCez || !looksSecret(key))) return true;
+    if ((key.startsWith('CEZ_') || key.startsWith('HSQ_')) && (grants.secretCez || !looksSecret(key))) return true;
     // Backend auth + gh handoff + the cloud creds an active Bedrock/Vertex
     // toggle needs: forwarded even though they are secrets — the backend cannot
     // authenticate without them. They are still redacted before anything

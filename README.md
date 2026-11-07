@@ -1168,6 +1168,7 @@ Useful environment variables:
 
 | Var | Effect |
 |---|---|
+| `HSQ_DRY_RUN`, `HSQ_SINGLE_PROJECT`, `HSQ_AUTONOMOUS_DEFAULT`, `HSQ_WORKTREE_DEFAULT`, `HSQ_AGENT_ENV_FULL`, `HSQ_ENV_PASSTHROUGH` | Additive aliases for the matching `CEZ_*` settings at server entry and child-env boundaries. A set `HSQ_*` value wins, including an empty string. Other reads retain `CEZ_*` until their conversion. Both home locators and inherited controller authority are removed from child environments, even in full-env mode. |
 | `CEZ_DELEGATION` | Retired (hearsay-tools/cezarion#2784); has no effect. Workers and task messaging are per-task settings, both on by default. See [Owned workers](#owned-workers). |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
 | `CEZ_UPDATE_CHANNEL` | Managed desktop channel: stable (default), nightly, or development. The version dialog's saved choice takes precedence. |

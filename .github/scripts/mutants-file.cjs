@@ -241,7 +241,7 @@ function standaloneCheckout(git, source, head, cwd) {
 
 /** No task context, cockpit address or project registry reaches the measured code. */
 function isolatedEnv(env, home) {
-  return { ...Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('CEZ_'))), CEZ_HOME: home };
+  return { ...Object.fromEntries(Object.entries(env).filter(([key]) => !/^(CEZ|HSQ)_/i.test(key))), CEZ_HOME: home, HSQ_HOME: home };
 }
 
 /** One committed snapshot, always removed after the active command has stopped. */
