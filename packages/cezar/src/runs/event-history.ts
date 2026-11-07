@@ -479,16 +479,17 @@ export async function readRunHistoryPage(
   return withHistorySource(dataDir, id, (source) => pageFromSource(source, decoded, onRead));
 }
 
-async function pageFromSource(
+type HistoryForwardScan = Awaited<ReturnType<typeof forwardEventsUntil>>;
+type HistoryReverseScan = Awaited<ReturnType<typeof reverseEventsUntil>>;
+
+async function scanHistoryPage(
   source: HistorySource,
   decoded: z.infer<typeof pageCursorSchema> | undefined,
-  onRead?: (instrumentation: HistoryReadInstrumentation) => void,
-): Promise<RunHistoryPage> {
-  const currentSize = source.size;
-  if (decoded && decoded.fileSize > currentSize) {
-    throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
-  }
-  const highWaterRead = await readFileTail(source);
+): Promise<{
+  scannedEvents: RunHistoryEvent[];
+  forward: HistoryForwardScan | undefined;
+  reverse: HistoryReverseScan | undefined;
+}> {
   const forward = decoded?.direction === 'newer'
     ? await forwardEventsUntil(source, decoded.boundarySeq, RUN_HISTORY_PAGE_ITEMS)
     : undefined;
@@ -499,38 +500,48 @@ async function pageFromSource(
         RUN_HISTORY_PAGE_ITEMS,
       )
     : undefined;
-  const scannedEvents = forward?.events ?? reverse?.events ?? [];
-  const canonical = canonicalSessionItems(scannedEvents);
-  const selected = forward
-    ? canonical.slice(0, RUN_HISTORY_PAGE_ITEMS)
-    : canonical.slice(-RUN_HISTORY_PAGE_ITEMS);
-  const hasOlder = forward
+  return { scannedEvents: forward?.events ?? reverse?.events ?? [], forward, reverse };
+}
+
+function historyPageHasOlder(
+  forward: HistoryForwardScan | undefined,
+  decoded: z.infer<typeof pageCursorSchema> | undefined,
+  canonical: CanonicalItem[],
+  selected: CanonicalItem[],
+  reverse: HistoryReverseScan | undefined,
+): boolean {
+  return forward
     ? decoded!.boundarySeq > 0
     : canonical.length > selected.length || !(reverse?.reachedStart ?? true);
-  const hasNewer = forward
+}
+
+function historyPageHasNewer(
+  forward: HistoryForwardScan | undefined,
+  decoded: z.infer<typeof pageCursorSchema> | undefined,
+  canonical: CanonicalItem[],
+  selected: CanonicalItem[],
+): boolean {
+  return forward
     ? canonical.length > selected.length || !forward.reachedEnd
     : decoded !== undefined && selected.length > 0;
-  const events = forward
-    ? forwardPageEventSlice(scannedEvents, selected)
-    : pageEventSlice(scannedEvents, selected);
-  const asOfSeq = highWaterRead.fileHighWater;
-  const oldest = selected[0];
-  const newest = selected.at(-1);
-  onRead?.({
-    fileSize: highWaterRead.fileSize,
-    bytesRead: (reverse?.bytesRead ?? forward?.bytesRead ?? 0) + highWaterRead.bytesRead,
-    retainedEvents: scannedEvents.length,
-  });
+}
+
+function historyPageCursors(
+  hasOlder: boolean,
+  hasNewer: boolean,
+  oldest: CanonicalItem | undefined,
+  newest: CanonicalItem | undefined,
+  fileSize: number,
+  asOfSeq: number,
+): Pick<RunHistoryPage, 'olderCursor' | 'newerCursor' | 'liveCursor'> {
   return {
-    events,
-    itemCount: selected.length,
     ...(hasOlder && oldest
       ? {
           olderCursor: encodeCursor({
             v: 1,
             kind: 'page',
             direction: 'older',
-            fileSize: highWaterRead.fileSize,
+            fileSize,
             boundarySeq: oldest.firstSeq,
           }),
         }
@@ -541,12 +552,45 @@ async function pageFromSource(
             v: 1,
             kind: 'page',
             direction: 'newer',
-            fileSize: highWaterRead.fileSize,
+            fileSize,
             boundarySeq: newest.lastSeq,
           }),
         }
       : {}),
-    liveCursor: encodeCursor({ v: 1, kind: 'live', offset: highWaterRead.fileSize, boundarySeq: asOfSeq }),
+    liveCursor: encodeCursor({ v: 1, kind: 'live', offset: fileSize, boundarySeq: asOfSeq }),
+  };
+}
+
+async function pageFromSource(
+  source: HistorySource,
+  decoded: z.infer<typeof pageCursorSchema> | undefined,
+  onRead?: (instrumentation: HistoryReadInstrumentation) => void,
+): Promise<RunHistoryPage> {
+  const currentSize = source.size;
+  if (decoded && decoded.fileSize > currentSize) {
+    throw new HistoryCursorError(409, 'history cursor is no longer valid — reload the newest page');
+  }
+  const highWaterRead = await readFileTail(source);
+  const { scannedEvents, forward, reverse } = await scanHistoryPage(source, decoded);
+  const canonical = canonicalSessionItems(scannedEvents);
+  const selected = forward
+    ? canonical.slice(0, RUN_HISTORY_PAGE_ITEMS)
+    : canonical.slice(-RUN_HISTORY_PAGE_ITEMS);
+  const hasOlder = historyPageHasOlder(forward, decoded, canonical, selected, reverse);
+  const hasNewer = historyPageHasNewer(forward, decoded, canonical, selected);
+  const events = forward
+    ? forwardPageEventSlice(scannedEvents, selected)
+    : pageEventSlice(scannedEvents, selected);
+  const asOfSeq = highWaterRead.fileHighWater;
+  onRead?.({
+    fileSize: highWaterRead.fileSize,
+    bytesRead: (reverse?.bytesRead ?? forward?.bytesRead ?? 0) + highWaterRead.bytesRead,
+    retainedEvents: scannedEvents.length,
+  });
+  return {
+    events,
+    itemCount: selected.length,
+    ...historyPageCursors(hasOlder, hasNewer, selected[0], selected.at(-1), highWaterRead.fileSize, asOfSeq),
     asOfSeq,
     hasOlder,
   };
