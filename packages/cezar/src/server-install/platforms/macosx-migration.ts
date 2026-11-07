@@ -40,7 +40,7 @@ function isRecorded(ctx: InstallContext, stepId: string, from: StepArtifact): bo
     a.kind === 'owned' && a.type === from.type && a.name === from.name && a.path === from.path) ?? false;
 }
 
-async function bootout(ctx: InstallContext, name: string): Promise<void> {
+export async function unloadLaunchd(ctx: InstallContext, name: string): Promise<void> {
   const target = `gui/${process.getuid?.() ?? 0}/${name}`;
   const result = await ctx.runner.capture('launchctl', ['bootout', target]);
   // launchctl returns nonzero for an already-unloaded job; prove it is absent.
@@ -73,12 +73,12 @@ async function movePlist(ctx: InstallContext, move: Move, xml: string): Promise<
   // Exclusive creation refuses another install's plist, even if it appeared after preflight.
   writeFileSync(to.path!, nextXml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
   try {
-    await bootout(ctx, from.name!);
+    await unloadLaunchd(ctx, from.name!);
     await bootstrap(ctx, to);
     rmSync(from.path!);
   } catch (error) {
     // An unsuccessful move leaves the original ledger valid.
-    await bootout(ctx, to.name!);
+    await unloadLaunchd(ctx, to.name!);
     rmSync(to.path!);
     await bootstrap(ctx, from);
     throw error;
@@ -113,28 +113,43 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
   return report;
 }
 
-async function restorePlist(ctx: InstallContext, move: Move): Promise<boolean> {
+function inspectRollback(move: Move): { xml: string; restoreFile: boolean; complete: boolean } {
   const { from, to, backup } = move;
   if (from.kind !== 'owned' || to.kind !== 'owned' || from.type !== 'launchd' ||
       !from.name?.startsWith('ai.cezar.') || to.name !== from.name.replace('ai.cezar.', 'tools.hearsay.squawk.') ||
       backup?.path !== `${from.path}.migrated`) throw new Error('Invalid launchd rollback entry');
   const xml = readPlist(backup.path);
   const nextXml = relabel(xml, from.name, to.name);
-  if (existsSync(from.path!)) {
-    if (!existsSync(to.path!) && readPlist(from.path!) === xml) return false;
-    throw new Error(`Original path is occupied: ${from.path}`);
+  const restoreFile = !existsSync(from.path!);
+  if (!restoreFile) {
+    if (readPlist(from.path!) !== xml) throw new Error(`Original path is occupied: ${from.path}`);
+    if (!existsSync(to.path!)) return { xml, restoreFile, complete: true };
   }
   if (readPlist(to.path!) !== nextXml) throw new Error(`Destination plist changed: ${to.path}`);
+  return { xml, restoreFile, complete: false };
+}
+
+async function isLoaded(ctx: InstallContext, artifact: StepArtifact): Promise<boolean> {
+  const target = `gui/${process.getuid?.() ?? 0}/${artifact.name!}`;
+  return (await ctx.runner.capture('launchctl', ['print', target])).code === 0;
+}
+
+async function restorePlist(ctx: InstallContext, move: Move): Promise<boolean> {
+  const { from, to } = move;
+  const { xml, restoreFile, complete } = inspectRollback(move);
+  if (complete) return false;
   if (ctx.dryRun) return true;
-  writeFileSync(from.path!, xml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
+  const oldLoaded = await isLoaded(ctx, from);
+  if (restoreFile) writeFileSync(from.path!, xml, { encoding: 'utf8', mode: 0o600, flag: 'wx', flush: true });
   try {
-    await bootout(ctx, to.name);
-    await bootstrap(ctx, from);
+    await unloadLaunchd(ctx, to.name!);
+    // A prior attempt can have restored and loaded the old job already.
+    if (!oldLoaded) await bootstrap(ctx, from);
     rmSync(to.path!);
   } catch (error) {
-    await bootout(ctx, from.name);
-    rmSync(from.path!);
-    await bootstrap(ctx, to);
+    if (!oldLoaded) await unloadLaunchd(ctx, from.name!);
+    if (restoreFile) rmSync(from.path!);
+    if (!(await isLoaded(ctx, to))) await bootstrap(ctx, to);
     throw error;
   }
   return true;

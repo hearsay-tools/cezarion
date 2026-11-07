@@ -36,7 +36,7 @@ describe('macOS launchd migration', () => {
           const name = args[1]?.split('/').pop() ?? '';
           if (args[0] === 'bootout') { loaded.delete(name); return { code: 0, stdout: '', stderr: '' }; }
           if (args[0] === 'print') return { code: loaded.has(name) ? 0 : 113, stdout: '', stderr: '' };
-          return { code: 0, stdout: program === 'curl' ? 'public_url' : '', stderr: '' };
+          return { code: 0, stdout: program === 'curl' ? 'public_url' : program === 'bash' ? '/usr/local/bin/cezarion' : '', stderr: '' };
         },
         interactive: async (program, args) => {
           commands.push([program, ...args]);
@@ -136,6 +136,38 @@ describe('macOS launchd migration', () => {
     expect(commands).toEqual([]);
   });
 
+  it.each([false, true])('resumes interrupted rollback with both exact plists present (old loaded: %s)', async (oldLoaded) => {
+    const old = plant('cockpit');
+    const report = await strategy.migrate!(ctx);
+    const move = report.moved[0]!;
+    const xml = readFileSync(move.backup!.path!, 'utf8');
+    writeFileSync(old.path!, xml, { mode: 0o600 });
+    if (oldLoaded) loaded.add(old.name!);
+    commands.length = 0;
+    const rollback = await strategy.rollbackMigration!(ctx, report);
+    expect(rollback.errors).toEqual([]);
+    expect(rollback.moved).toHaveLength(1);
+    expect(readFileSync(old.path!, 'utf8')).toBe(xml);
+    expect(existsSync(move.to.path!)).toBe(false);
+    expect(loaded).toEqual(new Set([old.name!]));
+    expect(commands.filter((c) => c[1] === 'bootstrap')).toHaveLength(oldLoaded ? 0 : 1);
+    commands.length = 0;
+    expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
+    expect(commands).toEqual([]);
+  });
+
+  it('refuses an occupied old rollback path whose bytes differ from the backup', async () => {
+    const old = plant('ngrok');
+    const report = await strategy.migrate!(ctx);
+    writeFileSync(old.path!, 'foreign old plist');
+    commands.length = 0;
+    const rollback = await strategy.rollbackMigration!(ctx, report);
+    expect(rollback.errors[0]!.message).toContain('Original path is occupied');
+    expect(readFileSync(old.path!, 'utf8')).toBe('foreign old plist');
+    expect(existsSync(report.moved[0]!.to.path!)).toBe(true);
+    expect(commands).toEqual([]);
+  });
+
   it('refuses rollback over a changed destination plist without touching its job', async () => {
     plant('ngrok');
     const report = await strategy.migrate!(ctx);
@@ -223,18 +255,20 @@ describe('macOS launchd migration', () => {
     expect(loaded.size).toBe(0);
   });
 
-  it('prefers the selected static agent and removes both static plists on undo with no ledger', async () => {
-    const old = plant('ngrok', false);
-    const path = join(dir, 'tools.hearsay.squawk.ngrok.plist');
-    writeFileSync(path, launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
-    loaded.add('tools.hearsay.squawk.ngrok');
-    const step = strategy.steps(ctx).find((s) => s.id === 'ngrok')!;
+  it.each(['cockpit', 'ngrok'] as const)('undo selects only the new %s plist and leaves the legacy plist with no ledger', async (agent) => {
+    const old = plant(agent, false);
+    const legacyXml = readFileSync(old.path!, 'utf8');
+    const path = join(dir, `tools.hearsay.squawk.${agent}.plist`);
+    writeFileSync(path, agent === 'cockpit' ? cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true) : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
+    loaded.add(`tools.hearsay.squawk.${agent}`);
+    const step = strategy.steps(ctx).find((s) => s.id === (agent === 'cockpit' ? 'autostart' : 'ngrok'))!;
     await step.check(ctx);
     expect(commands.at(-1)).toEqual(['test', '-f', path]);
     await step.undo(ctx, null);
-    expect(existsSync(old.path!)).toBe(false);
+    expect(readFileSync(old.path!, 'utf8')).toBe(legacyXml);
     expect(existsSync(path)).toBe(false);
-    expect(loaded.size).toBe(0);
+    expect(loaded).toEqual(new Set([old.name!]));
+    expect(commands.filter((c) => c[1] === 'bootout').map((c) => c[2])).toEqual([`gui/${process.getuid?.() ?? 0}/tools.hearsay.squawk.${agent}`]);
   });
 
   it.each(['cockpit', 'ngrok'] as const)('undo keeps a foreign legacy %s plist when the new agent is recorded', async (agent) => {
@@ -258,6 +292,56 @@ describe('macOS launchd migration', () => {
     expect(readFileSync(foreign.path!, 'utf8')).toBe(original);
     expect(loaded).toEqual(new Set([foreign.name!]));
     expect(commands.filter((c) => c[1] === 'bootout').map((c) => c[2])).toEqual([`gui/${process.getuid?.() ?? 0}/${name}`]);
+  });
+
+  it.each(['cockpit', 'ngrok'] as const)('reconfigure replaces the recorded old %s agent after the new job loads', async (agent) => {
+    const old = plant(agent);
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async (opts) => opts.message.includes('domain') ? '' : 'ops' };
+    const capture = ctx.runner.capture;
+    ctx.runner.capture = async (program, args) => program === 'bash'
+      ? { code: 0, stdout: '/usr/local/bin/cezarion', stderr: '' } : capture(program, args);
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    ctx.reconfigure = new Set([stepId]);
+    const created = await strategy.steps(ctx).find((s) => s.id === stepId)!.run(ctx);
+    const next = created!.artifacts.find((a) => a.type === 'launchd')!;
+    expect(next.name).toBe(`tools.hearsay.squawk.${agent}`);
+    expect(existsSync(next.path!)).toBe(true);
+    expect(existsSync(old.path!)).toBe(false);
+    expect(loaded).toEqual(new Set([next.name!]));
+    const newProof = commands.findIndex((c) => c[1] === 'print' && c[2]?.endsWith(`/${next.name}`));
+    const oldBootout = commands.findIndex((c) => c[1] === 'bootout' && c[2]?.endsWith(`/${old.name}`));
+    expect(newProof).toBeGreaterThan(-1);
+    expect(oldBootout).toBeGreaterThan(newProof);
+  });
+
+  it.each(['cockpit', 'ngrok'] as const)('a failed reconfigure leaves only the previous %s job and its ledger', async (agent) => {
+    const old = plant(agent);
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async (opts) => opts.message.includes('domain') ? '' : 'ops' };
+    const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
+    const before = structuredClone(ctx.state);
+    failBootstrap = `tools.hearsay.squawk.${agent}`;
+    await expect(strategy.steps(ctx).find((s) => s.id === stepId)!.run(ctx)).rejects.toThrow('could not load');
+    expect(existsSync(old.path!)).toBe(true);
+    expect(existsSync(join(dir, `${failBootstrap}.plist`))).toBe(false);
+    expect(loaded).toEqual(new Set([old.name!]));
+    expect(ctx.state).toEqual(before);
+  });
+
+  it('refuses reconfigure when the previous job cannot unload and removes the new job', async () => {
+    const old = plant('ngrok');
+    ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
+    const capture = ctx.runner.capture;
+    ctx.runner.capture = async (program, args) => {
+      if (args[0] === 'bootout' && args[1]?.endsWith('/ai.cezar.ngrok')) {
+        commands.push([program, ...args]);
+        return { code: 1, stdout: '', stderr: 'refused' };
+      }
+      return capture(program, args);
+    };
+    await expect(strategy.steps(ctx).find((s) => s.id === 'ngrok')!.run(ctx)).rejects.toThrow('Could not unload');
+    expect(existsSync(old.path!)).toBe(true);
+    expect(existsSync(join(dir, 'tools.hearsay.squawk.ngrok.plist'))).toBe(false);
+    expect(loaded).toEqual(new Set([old.name!]));
   });
 
   it('creates fresh switch-on plists with only the new labels', async () => {
