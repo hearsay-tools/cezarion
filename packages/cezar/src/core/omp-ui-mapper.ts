@@ -17,7 +17,6 @@
  */
 import type {
   FileDiff,
-  PlanEntry,
   StopReason,
   TokenUsage,
   UiEvent,
@@ -27,6 +26,7 @@ import type {
 } from './ui-events.js';
 import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 import { contentText, isRecord, number, ompRpcError as rpcError, string } from './pi-rpc-wire.ts';
+import { childScope, lifecycleStatus, ompToolPlan, singleFormSubagent, startSubagentEntry, withSubagent } from './omp-subagent-rows.ts';
 
 /** One stream of text/reasoning blocks: the parent turn's, or one sub-agent's. */
 interface OmpTextLane {
@@ -373,7 +373,7 @@ function withChildLane(state: OmpUiMapperState, rowId: string, lane: OmpTextLane
 }
 
 /** Item scope: the parent turn (`<turnId>_…`) or one sub-agent (`<rowId>/…`, nested under it). */
-interface ItemScope {
+export interface ItemScope {
   readonly textPrefix: string;
   readonly toolPrefix: string;
   readonly parentItemId?: string;
@@ -445,10 +445,6 @@ function closeLaneText(lane: OmpTextLane, scope: ItemScope): { events: UiEvent[]
 
 function parentScope(state: OmpUiMapperState): ItemScope {
   return { textPrefix: `${state.turnId ?? 'turn_0'}_`, toolPrefix: '' };
-}
-
-function childScope(rowId: string): ItemScope {
-  return { textPrefix: `${rowId}/`, toolPrefix: `${rowId}/`, parentItemId: rowId };
 }
 
 function withParent<T extends UiMessageItem | UiReasoningItem | UiToolItem>(item: T, scope: ItemScope): T {
@@ -704,100 +700,9 @@ function argsDiffs(key: string, input: unknown): FileDiff[] | undefined {
   return [{ path, oldText: oldText ?? null, ...(newText !== undefined ? { newText } : {}) }];
 }
 
-const TODO_STATUS: Readonly<Record<string, PlanEntry['status']>> = {
-  pending: 'pending',
-  in_progress: 'in_progress',
-  completed: 'completed',
-  abandoned: 'cancelled',
-  // A blocked task is still to do; the plan vocabulary has no "blocked".
-  blocked: 'pending',
-};
-
-/**
- * The whole plan from a state-changing `todo` result: `details.phases[].tasks[]` holds the full
- * list after the op (`src/tools/todo.ts` `committedTodoPhases`, v18.4.11). `view` is a read.
- */
-function ompToolPlan(name: string, result: Record<string, unknown>): PlanEntry[] | undefined {
-  if (name !== 'todo' || !isRecord(result.details)) return undefined;
-  const { op, phases } = result.details;
-  if (op === 'view' || !Array.isArray(phases)) return undefined;
-  const entries: PlanEntry[] = [];
-  for (const phase of phases) {
-    if (!isRecord(phase) || !Array.isArray(phase.tasks)) continue;
-    for (const task of phase.tasks) {
-      if (!isRecord(task)) continue;
-      const content = string(task.content);
-      const status = TODO_STATUS[string(task.status) ?? ''];
-      if (content && status) entries.push({ content, status });
-    }
-  }
-  return entries;
-}
-
 /* ------------------------------------------------------------------ */
 /* Sub-agents                                                           */
 /* ------------------------------------------------------------------ */
-
-function lifecycleStatus(status: string | undefined): UiToolItem['status'] {
-  if (status === 'completed') return 'completed';
-  if (status === 'failed' || status === 'aborted') return 'failed';
-  return 'running';
-}
-
-/** The batch entry this sub-agent runs: by `name` (OMP derives the id from it), else by index. */
-function batchTask(parent: UiToolItem | undefined, id: string, index: number | undefined): Record<string, unknown> | undefined {
-  const tasks = isRecord(parent?.input) && Array.isArray(parent.input.tasks) ? parent.input.tasks : [];
-  const byName = tasks.find((task) => isRecord(task) && string(task.name) === id);
-  if (isRecord(byName)) return byName;
-  const byIndex = index !== undefined ? tasks[index] : undefined;
-  return isRecord(byIndex) ? byIndex : undefined;
-}
-
-function startedBatchRow(
-  payload: Record<string, unknown>,
-  id: string,
-  rowId: string,
-  parent: UiToolItem | undefined,
-  state: OmpUiMapperState,
-  events: UiEvent[],
-): OmpUiMapperState {
-  const agent = string(payload.agent);
-  const task = batchTask(parent, id, number(payload.index));
-  const taskText = task ? string(task.task) : undefined;
-  const label = string(payload.description) ?? taskText ?? agent ?? id;
-  const item: UiToolItem = {
-    kind: 'tool',
-    id: rowId,
-    name: 'task',
-    toolKind: 'task',
-    title: toolDisplay('task', { description: label }).title,
-    status: 'running',
-    input: { ...(agent ? { agent } : {}), ...(taskText ? { task: taskText } : {}) },
-  };
-  const tools = new Map(state.tools);
-  tools.set(rowId, item);
-  events.push({ type: 'item.started', item });
-  return { ...state, tools };
-}
-
-function startSubagentEntry(
-  payload: Record<string, unknown>,
-  id: string,
-  parentToolCallId: string,
-  status: UiToolItem['status'],
-  state: OmpUiMapperState,
-  events: UiEvent[],
-): { entry: OmpSubagentEntry; state: OmpUiMapperState } {
-  const parent = parentToolCallId ? state.tools.get(parentToolCallId) : undefined;
-  // A single-form call IS the sub-agent's row; a batch call (or an unknown parent) gets one
-  // synthetic `task` row per sub-agent so the drawer counts agents, not calls.
-  const single = parent !== undefined && !state.batchCalls.has(parentToolCallId);
-  const rowId = single ? parentToolCallId : `${parentToolCallId || 'omp-subagent'}#${id}`;
-  const entry: OmpSubagentEntry = { rowId, parentToolCallId, status, ended: false };
-  let next = withSubagent(state, id, entry);
-  if (!single) next = startedBatchRow(payload, id, rowId, parent, next, events);
-  return { entry, state: next };
-}
 
 function replaySubagentBuffer(id: string, rowId: string, state: OmpUiMapperState, events: UiEvent[]): OmpUiMapperState {
   // Replay what arrived before this frame named the parent, ahead of any terminal close.
@@ -875,20 +780,6 @@ function mapSubagentLifecycle(payload: Record<string, unknown>, state: OmpUiMapp
   }
 
   return syncSubagentRow(entry, status, state, events);
-}
-
-/** The sub-agent whose single-form `task` call is row `rowId`, with its id. */
-function singleFormSubagent(state: OmpUiMapperState, rowId: string): [string, OmpSubagentEntry] | undefined {
-  for (const [id, entry] of state.subagents) {
-    if (entry.rowId === rowId && entry.parentToolCallId === rowId) return [id, entry];
-  }
-  return undefined;
-}
-
-function withSubagent(state: OmpUiMapperState, id: string, entry: OmpSubagentEntry): OmpUiMapperState {
-  const subagents = new Map(state.subagents);
-  subagents.set(id, entry);
-  return { ...state, subagents };
 }
 
 function mapSubagentEvent(payload: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
