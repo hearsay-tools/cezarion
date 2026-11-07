@@ -282,12 +282,10 @@ function eventCreationClaimFragments(event: Record<string, unknown>): string[] {
       if (typeof value === 'string') fragments.push(value);
     }
   }
+  pushAssistantMessageFragment(event, fragments);
   const item = event.item;
   if (item && typeof item === 'object') {
     const it = item as Record<string, unknown>;
-    if (it.kind === 'message' && it.role === 'assistant' && typeof it.text === 'string') {
-      fragments.push(it.text);
-    }
     if (it.kind === 'tool' && typeof it.title === 'string') fragments.push(it.title);
   }
   return fragments;
@@ -302,6 +300,13 @@ function eventAgentTextFragments(event: Record<string, unknown>): string[] {
     const value = event[key];
     if (typeof value === 'string') fragments.push(value);
   }
+  pushAssistantMessageFragment(event, fragments);
+  return fragments;
+}
+
+/** The assistant's own message text in a v2 `item.*` payload, if any — the one
+ * fragment shape both the creation-claim and agent-text readers accept. */
+function pushAssistantMessageFragment(event: Record<string, unknown>, fragments: string[]): void {
   const item = event.item;
   if (item && typeof item === 'object') {
     const it = item as Record<string, unknown>;
@@ -309,7 +314,6 @@ function eventAgentTextFragments(event: Record<string, unknown>): string[] {
       fragments.push(it.text);
     }
   }
-  return fragments;
 }
 
 /**
@@ -386,12 +390,11 @@ function claimCreatedPullRequests(
  * and the phrasing itself is only believed from a source that can speak
  * FOR this run (`eventCreationClaimFragments`), never from quoted output.
  *
- * Extracted from `RunStore.appendEvent` so the append-and-publish body and
- * reference discovery are two named steps. Call it only after the event is
- * persisted, indexed and published: discovery reads the event text and may
- * still update and touch the run. `accumulatePullRequests` is the store's
- * staging callback (`stagePullRequests` with the store's repo handle);
- * `touch` is the store's dirty/save/fan-out signal.
+ * Runs after the event is appended, indexed and emitted: discovery reads the
+ * event text and may still update and touch the run.
+ * `accumulatePullRequests` is the store's staging callback
+ * (`stagePullRequests` with the store's repo handle); `touch` is the
+ * store's dirty/save/fan-out signal.
  */
 export function scanEventReferences(
   run: RunRecord,
