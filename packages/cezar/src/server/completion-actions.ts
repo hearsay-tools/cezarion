@@ -82,28 +82,29 @@ export class CompletionActionCoordinator {
       return store.canCompleteAction(item.id, token) && latest?.branch === run.branch;
     };
     try {
-      await this.runClaimedCompletion(project, store, run, token, key, current);
+      return await this.runClaimedCompletion(project, store, run, token, key, current);
     } catch {
       if (current()) {
         store.completeAction(run.id, token, 'blocked', 'PR auto-merge is unavailable. Check GitHub, retry later, or turn it off.');
         this.backoff(key);
       }
+      return true;
     } finally { store.unpin(run.id, 'maintenance'); }
-    return true;
   }
 
   private async runClaimedCompletion(
     project: ArchiveProject, store: RunStore, run: RunRecord, token: string, key: string, current: () => boolean,
-  ): Promise<void> {
-    if (!current()) return;
+  ): Promise<boolean> {
+    if (!current()) return false;
     store.pin(run.id, 'maintenance');
-    if (!store.claimCompletionAction(run.id, token)) return;
+    if (!store.claimCompletionAction(run.id, token)) return false;
     await store.prepareArchiveOnMerge(run.id);
-    if (!current()) return;
+    if (!current()) return false;
     const result = await this.process(project, run, current);
-    if (result === undefined || !current()) return;
+    if (result === undefined || !current()) return false;
     store.completeAction(run.id, token, result ? 'blocked' : 'complete', result);
     if (result) this.backoff(key); else this.retries.delete(key);
+    return true;
   }
 
   private backoff(key: string): void {
