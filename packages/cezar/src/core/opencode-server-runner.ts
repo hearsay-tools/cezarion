@@ -330,90 +330,85 @@ class OpencodeSession implements AgentSession {
       await this.bootstrap();
     })();
 
-    this.result = (async (): Promise<AgentRunResult> => {
-      try {
-        await this.ready;
-        // Live for the whole session; the SSE loop runs until end()/interrupt.
-        await this.serve.exited;
-      } catch (err) {
-        if (!this.timedOut && !this.openingPromptFailed) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.exitFailure = `opencode: ${message}`;
-        }
-      } finally {
-        if (deadline) clearTimeout(deadline);
-        if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
-        this.sse.abort();
-        this.serverOpen = false;
-        this.clearLostWakeTimer();
-        this.agentRequest?.abort();
-        this.expirePermissions('session ended');
-        this.terminate();
-      }
+    this.result = this.finishSession(deadline, limitMs);
+  }
 
-      const serve = this.serve;
-      await serve.exited;
-      await serve.outputDrained;
-      if (serve.spawnFailed) {
-        this.emit({ type: 'error', message: serve.spawnFailed.message });
-        throw serve.spawnFailed;
+  /** Wait out the child, then map its exit onto the v1 result. */
+  private async finishSession(deadline: NodeJS.Timeout | undefined, limitMs: number): Promise<AgentRunResult> {
+    try {
+      await this.ready;
+      // Live for the whole session; the SSE loop runs until end()/interrupt.
+      await this.serve.exited;
+    } catch (err) {
+      if (!this.timedOut && !this.openingPromptFailed) {
+        this.exitFailure = `opencode: ${err instanceof Error ? err.message : String(err)}`;
       }
-
-      // SSE closure can precede the process exit event. Choose one authoritative
-      // error after settlement, before the synthetic turn-end, retaining the code.
-      const code = serve.child.exitCode;
-      const signal = serve.child.signalCode;
-      const crashed = (signal !== null && !serve.signalled)
-        || (code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code)));
-      if (!this.timedOut && (crashed || this.exitFailure)) {
-        const stderr = serve.stderrChunks.join('');
-        const detail = summarizeRunnerStderr(stderr);
-        if (this.retrySpawnError) {
-          if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
-          this.emit({
-            type: 'error',
-            message: `opencode serve exited before listening (${describeEarlyExit(serve)}) and its retry could not start: ${this.retrySpawnError.message}`,
-          });
-        } else if (this.failedStart) {
-          // #872: the retry failed too — one error naming both attempts.
-          const attempts = [this.failedStart, serve];
-          const notes = attempts.map((attempt, i) => {
-            const text = attempt.stderrChunks.join('');
-            return text.trim() ? `opencode serve stderr (attempt ${i + 1}):\n${text}` : '';
-          }).filter(Boolean);
-          if (notes.length) this.emit({ type: 'note', message: notes.join('\n') });
-          const described = attempts.map((attempt, i) => `attempt ${i + 1}: ${describeEarlyExit(attempt)}`);
-          this.emit({ type: 'error', message: `opencode serve exited before listening on both attempts — ${described.join('; ')}` });
-        } else {
-          if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
-          const message = crashed
-            ? `opencode serve exited with ${describeExit(serve)}${detail ? ` — ${detail}` : ''}`
-            : this.exitFailure!;
-          this.emit({ type: 'error', message });
-        }
-      }
-
-      // Timeout/interrupt can cut the SSE feed before its `session.idle` —
-      // close the turn (idempotent) so consumers still see the v1 boundary,
-      // and recover prose buffered mid-part.
-      this.finishTurn();
-      this.textCoalescer.flush();
-      // Chunks are whole blocks now (one per finished part), so newline-join
-      // like the other runners, not the old delta concatenation.
-      const text = this.textChunks.join('\n').trim();
-      const base: AgentRunResult = {
-        text,
-        toolCalls: this.toolCalls,
-        tokensUsed: this.tokensUsed,
-        sessionId: this.sessionId ?? spec.sessionId,
-      };
-      if (this.timedOut) {
-        const mins = Math.round((limitMs / 60_000) * 10) / 10;
-        this.emit({ type: 'error', message: `opencode timed out after ${mins}m and was killed` });
-      }
-      this.emit({ type: 'done' });
-      return base;
-    })();
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
+      this.sse.abort();
+      this.serverOpen = false;
+      this.clearLostWakeTimer();
+      this.agentRequest?.abort();
+      this.expirePermissions('session ended');
+      this.terminate();
+    }
+    const serve = this.serve;
+    await serve.exited;
+    await serve.outputDrained;
+    if (serve.spawnFailed) {
+      this.emit({ type: 'error', message: serve.spawnFailed.message });
+      throw serve.spawnFailed;
+    }
+    this.reportServeFailure(serve);
+    return this.resultFromCleanExit(limitMs);
+  }
+  private reportServeFailure(serve: ServeProcess): void {
+    // SSE closure can precede the process exit event. Choose one authoritative
+    // error after settlement, before the synthetic turn-end, retaining the code.
+    const code = serve.child.exitCode;
+    const signal = serve.child.signalCode;
+    const crashed = (signal !== null && !serve.signalled)
+      || (code !== null && code !== 0 && !(serve.signalled && isSignalTerminationExit(code)));
+    if (this.timedOut || (!crashed && !this.exitFailure)) return;
+    const stderr = serve.stderrChunks.join('');
+    const detail = summarizeRunnerStderr(stderr);
+    if (this.retrySpawnError) {
+      if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+      this.emit({ type: 'error', message: `opencode serve exited before listening (${describeEarlyExit(serve)}) and its retry could not start: ${this.retrySpawnError.message}` });
+    } else if (this.failedStart) {
+      // #872: the retry failed too — one error naming both attempts.
+      const attempts = [this.failedStart, serve];
+      const notes = attempts.map((attempt, i) => {
+        const text = attempt.stderrChunks.join('');
+        return text.trim() ? `opencode serve stderr (attempt ${i + 1}):\n${text}` : '';
+      }).filter(Boolean);
+      if (notes.length) this.emit({ type: 'note', message: notes.join('\n') });
+      const described = attempts.map((attempt, i) => `attempt ${i + 1}: ${describeEarlyExit(attempt)}`);
+      this.emit({ type: 'error', message: `opencode serve exited before listening on both attempts — ${described.join('; ')}` });
+    } else {
+      if (stderr.trim()) this.emit({ type: 'note', message: `opencode serve stderr:\n${stderr}` });
+      this.emit({ type: 'error', message: crashed ? `opencode serve exited with ${describeExit(serve)}${detail ? ` — ${detail}` : ''}` : this.exitFailure! });
+    }
+  }
+  private resultFromCleanExit(limitMs: number): AgentRunResult {
+    // Timeout/interrupt can cut the SSE feed before its `session.idle` —
+    // close the turn (idempotent) so consumers still see the v1 boundary,
+    // and recover prose buffered mid-part.
+    this.finishTurn();
+    this.textCoalescer.flush();
+    // Chunks are whole blocks now (one per finished part), so newline-join
+    // like the other runners, not the old delta concatenation.
+    const base: AgentRunResult = {
+      text: this.textChunks.join('\n').trim(), toolCalls: this.toolCalls,
+      tokensUsed: this.tokensUsed, sessionId: this.sessionId ?? this.spec.sessionId,
+    };
+    if (this.timedOut) {
+      const mins = Math.round((limitMs / 60_000) * 10) / 10;
+      this.emit({ type: 'error', message: `opencode timed out after ${mins}m and was killed` });
+    }
+    this.emit({ type: 'done' });
+    return base;
   }
 
   get open(): boolean {
