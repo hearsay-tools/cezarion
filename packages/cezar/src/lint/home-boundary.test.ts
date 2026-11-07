@@ -31,6 +31,24 @@ describe('explicit Home boundaries', () => {
     ["homes['resolveHome']()", 'resolveHome'],
     ['homedir()', 'homedir'],
     ['os.homedir()', 'homedir'],
+    ['(0, os.homedir)()', 'homedir'],
+    ['const h = (0, os.homedir); h()', 'homedir'],
+    ['os.homedir.call(null)', 'homedir'],
+    ['os.homedir.apply(null, [])', 'homedir'],
+    ['const h = os.homedir.call; h(null)', 'homedir'],
+    ['os.homedir?.()', 'homedir'],
+    ['os?.homedir()', 'homedir'],
+    ['os?.homedir?.()', 'homedir'],
+    ['const h = os?.homedir; h?.()', 'homedir'],
+    ['os.homedir.bind(null)()', 'homedir'],
+    ['const h = os.homedir.bind(null); h()', 'homedir'],
+    ['os?.homedir.bind?.(null)?.()', 'homedir'],
+    ['Reflect.apply(os.homedir, null, [])', 'homedir'],
+    ['Reflect["apply"]((0, os["homedir"]), null, [])', 'homedir'],
+    ['Reflect.apply?.(os?.homedir, null, [])', 'homedir'],
+    ['const h = os.homedir; Reflect.apply(h, null, [])', 'homedir'],
+    ['(os.homedir as (() => string))()', 'homedir'],
+    ['os.homedir!()', 'homedir'],
     ["os['homedir']()", 'homedir'],
     ["import { homedir as userHome } from 'node:os'; userHome()", 'homedir'],
     ["const { homedir: userHome } = os; userHome()", 'homedir'],
@@ -57,6 +75,19 @@ describe('explicit Home boundaries', () => {
       expect(scanHomeBoundary(file, 'resolveHome()', [])).toEqual([]);
     }
     expect(scanHomeBoundary('packages/cezar/src/home/resolve.ts', 'homedir()', [])).toEqual([]);
+  });
+
+  it('does not count reference creation or calls of unrelated functions as home reads', () => {
+    expect(homeSites('const h = os.homedir.bind(null); other.call(null); other.apply(null, []); Reflect.apply(other, null, []);')).toEqual([]);
+    expect(homeSites('(os.homedir, other)();')).toEqual([]);
+  });
+
+  it('counts indirect reads in reader exemptions and stale entries', () => {
+    const source = '(0, os.homedir)(); os.homedir.bind(null)(); Reflect.apply(os.homedir, null, []);';
+    expect(homeSites(source)).toHaveLength(3);
+    expect(scanHomeBoundary(product, source, [{ ...reader, calls: 2 }])).toEqual([expect.objectContaining({ kind: 'homedir' })]);
+    expect(staleHomeReaders(fixture([{ ...reader, calls: 3 }], { [product]: source }))).toEqual([]);
+    expect(staleHomeReaders(fixture([{ ...reader, calls: 4 }], { [product]: source }))).toEqual([expect.stringContaining('stale or invalid entry')]);
   });
 
   it('allows only the listed number of OS-user reads', () => {

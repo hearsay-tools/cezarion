@@ -41,6 +41,29 @@ function unwrapped(node: Node): Node {
   return node;
 }
 
+function homedirRef(node: Node | null | undefined, aliases: Set<string>): boolean {
+  if (!node) return false;
+  const target = unwrapped(node);
+  if (target.type === 'SequenceExpression') return homedirRef(target.expressions.at(-1), aliases);
+  if (target.type === 'Identifier') return aliases.has(target.name);
+  if (target.type === 'CallExpression' || target.type === 'OptionalCallExpression') {
+    const callee = unwrapped(target.callee);
+    return (callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression')
+      && property(callee) === 'bind' && homedirRef(callee.object, aliases);
+  }
+  if (target.type !== 'MemberExpression' && target.type !== 'OptionalMemberExpression') return false;
+  const member = property(target);
+  return member === 'homedir' || ((member === 'call' || member === 'apply') && homedirRef(target.object, aliases));
+}
+
+function callsHomedir(node: Node, aliases: Set<string>): boolean {
+  if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return false;
+  const callee = unwrapped(node.callee);
+  if ((callee.type === 'MemberExpression' || callee.type === 'OptionalMemberExpression')
+    && property(callee) === 'apply' && name(callee.object) === 'Reflect') return homedirRef(node.arguments[0], aliases);
+  return homedirRef(callee, aliases);
+}
+
 function homeEnv(node: Node): boolean {
   const target = unwrapped(node);
   if (target.type !== 'MemberExpression' || property(target) !== 'CEZ_HOME') return false;
@@ -66,7 +89,7 @@ export function homeSites(source: string, file = 'file.ts'): HomeSite[] {
         if (field.type === 'ObjectProperty' && name(field.key) === 'homedir' && field.value.type === 'Identifier') aliases.add(field.value.name);
       }
     }
-    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && property(node.init) === 'homedir') aliases.add(node.id.name);
+    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && homedirRef(node.init, aliases)) aliases.add(node.id.name);
   });
   const sites: HomeSite[] = [];
   visit(ast, node => {
@@ -76,7 +99,7 @@ export function homeSites(source: string, file = 'file.ts'): HomeSite[] {
       const member = property(node);
       if (member === 'cezarHomeDir' || member === 'resolveHome') sites.push({ kind: member, offset: node.start ?? 0 });
     }
-    if (node.type === 'CallExpression' && (property(node.callee) === 'homedir' || (node.callee.type === 'Identifier' && aliases.has(node.callee.name)))) sites.push({ kind: 'homedir', offset: node.start ?? 0 });
+    if (callsHomedir(node, aliases)) sites.push({ kind: 'homedir', offset: node.start ?? 0 });
     if (selectsHome(node)) sites.push({ kind: 'test-selection', offset: node.start ?? 0 });
   });
   return sites.sort((a, b) => a.offset - b.offset);

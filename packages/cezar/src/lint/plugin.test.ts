@@ -141,6 +141,32 @@ describe('the cez rules under oxlint', () => {
   it.each([
     ['packages/cezar/src/ambient.ts', 'resolveHome({ purpose: "cli" });'],
     ['packages/cezar/src/ambient.ts', 'homedir();'],
+    ...[
+      'os.homedir()',
+      'os["homedir"]()',
+      'import { homedir as h } from "node:os"; h()',
+      'const { homedir: h } = os; h()',
+      '(0, os.homedir)()',
+      'const h = (0, os.homedir); h()',
+      'os.homedir.call(null)',
+      'os.homedir.apply(null, [])',
+      'const h = os.homedir.call; h(null)',
+      'os.homedir?.()',
+      'os?.homedir()',
+      'os?.homedir?.()',
+      'const h = os?.homedir; h?.()',
+      'os.homedir.bind(null)()',
+      'const h = os.homedir.bind(null); h()',
+      'os?.homedir.bind?.(null)?.()',
+      'Reflect.apply(os.homedir, null, [])',
+      'Reflect["apply"]((0, os["homedir"]), null, [])',
+      'Reflect.apply?.(os?.homedir, null, [])',
+      'const h = os.homedir; Reflect.apply(h, null, [])',
+      '(os.homedir as (() => string))()',
+      'os.homedir!()',
+    ].map(source => {
+      return ['packages/cezar/src/ambient.ts', source];
+    }),
     ['packages/cezar/src/ambient.test.ts', 'process.env.CEZ_HOME = dir;'],
   ])('oxlint refuses ambient home access in %s: %s', async (file, source) => {
     expect(await oxlintProblems(seeded({ [file]: source }), ['packages'])).toEqual([expect.stringContaining('cez(home-boundary)')]);
