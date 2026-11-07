@@ -276,7 +276,10 @@ Import uses the exact legacy bytes retained under the migration hash in the owni
 VersionLog as its base. It applies top-level legacy key changes and per-ID changes
 in `config.json` projects and `agent-accounts.json` accounts; other arrays change as
 one value. Live-only changes survive. Legacy wins where both changed the same key
-or entry, as the row explains. A missing base refuses Import. Unlike ordinary writes,
+or entry, as the row explains. Missing, unreadable, corrupt or non-object JSON bases
+make the row Ignore-only; Import rechecks the base at action time. A recorded absent
+file remains a valid empty base for later creations. Unchanged retained versions reuse
+the hash and JSON check across polls. Unlike ordinary writes,
 Import requires its HomeStore backup to succeed before replacement. A deleted legacy
 file offers Ignore only. Import and Ignore retain the exact observed legacy bytes
 as the next base, then update the migration hash (null for deletion). Incident times

@@ -30,7 +30,8 @@ function fixture(fresh = false) {
 }
 
 function row(home: Home, file = 'config.json') {
-  return getHomeRecovery(home, true).files.find(row => row.file === file && row.reason === 'legacy-change')!;
+  const legacy = getHomeRecovery(home, true).files.filter(row => row.reason === 'legacy-change');
+  return legacy.find(row => row.file === file)!;
 }
 
 it('detects legacy changes only for a committed migrated home and leaves the disabled path dark', () => {
@@ -91,9 +92,68 @@ it('refuses Import when the base is missing, but still permits Ignore', () => {
   rmSync(join(home.config, '.versions/config.json', hash));
   writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
   const flag = row(home);
+  expect(flag.canImport).toBe(false);
   expect(() => importHomeRecovery(home, 'config.json', flag.detectedAt, true)).toThrow(/merge base is missing/);
   acceptHomeRecovery(home, 'config.json', flag.detectedAt, true);
   expect(row(home)).toBeUndefined();
+});
+
+it.each(['unreadable', 'corrupt', 'invalid JSON', 'null', 'array', 'primitive'])('offers only Ignore when the retained base is %s', state => {
+  const { legacy, home, store } = fixture();
+  const record = readMigrationRecord(home)!;
+  const entry = record.files.find(file => file.path === 'config.json')!;
+  if (state === 'unreadable') {
+    const path = join(home.config, '.versions/config.json', entry.hash!);
+    rmSync(path);
+    mkdirSync(path); // A directory is unreadable as version bytes, even when tests run as root.
+  } else {
+    const bytes = Buffer.from(state === 'invalid JSON' ? '{' : state === 'null' ? 'null' : state === 'array' ? '[]' : state === 'primitive' ? '1' : '{}');
+    if (state !== 'corrupt') {
+      entry.hash = digest(bytes);
+      store.transaction(() => writeMigrationRecord(home, record), [home.workspaceConfig, home.workspaceUiState]);
+    }
+    writeFileSync(join(home.config, '.versions/config.json', entry.hash!), bytes); // Deliberately damaged retained base.
+  }
+  const live = readFileSync(home.workspaceConfig);
+  writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
+  const flag = row(home);
+  expect(flag.canImport).toBe(false);
+  expect(getHomeRecovery(home).files).toEqual([]); // The shipped switch remains off.
+  expect(() => importHomeRecovery(home, 'config.json', flag.detectedAt, true)).toThrow();
+  expect(readFileSync(home.workspaceConfig)).toEqual(live);
+  acceptHomeRecovery(home, 'config.json', flag.detectedAt, true);
+  expect(row(home)).toBeUndefined();
+  expect(readFileSync(home.workspaceConfig)).toEqual(live);
+});
+
+it('reuses the base check on repeated polls and refreshes it when the retained copy changes', () => {
+  const { legacy, home } = fixture();
+  const hash = readMigrationRecord(home)!.files.find(file => file.path === 'config.json')!.hash!;
+  const path = join(home.config, '.versions/config.json', hash);
+  const bytes = readFileSync(path);
+  writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
+  const read = vi.spyOn(fs, 'readFileSync');
+  expect(row(home).canImport).toBe(true);
+  expect(row(home).canImport).toBe(true);
+  expect(read.mock.calls.filter(([file]) => file === path)).toHaveLength(1);
+  rmSync(path);
+  expect(row(home).canImport).toBe(false);
+  writeFileSync(path, bytes);
+  expect(row(home).canImport).toBe(true);
+  writeFileSync(path, Buffer.alloc(bytes.length, '!')); // Same-size corruption invalidates the successful check.
+  expect(row(home).canImport).toBe(false);
+  expect(row(home).canImport).toBe(false);
+  expect(read.mock.calls.filter(([file]) => file === path)).toHaveLength(3);
+});
+
+it('rechecks the base at action time after offering Import', () => {
+  const { legacy, home } = fixture();
+  writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
+  const flag = row(home);
+  expect(flag.canImport).toBe(true);
+  const hash = readMigrationRecord(home)!.files.find(file => file.path === 'config.json')!.hash!;
+  rmSync(join(home.config, '.versions/config.json', hash));
+  expect(() => importHomeRecovery(home, 'config.json', flag.detectedAt, true)).toThrow(/merge base is missing/);
 });
 
 it('offers Ignore only for a deletion and does not delete the live registry', () => {

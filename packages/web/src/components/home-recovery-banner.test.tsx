@@ -155,9 +155,13 @@ it.each([true, false])('gives host CLI actions for legacy grants with canImport=
   expect(screen.queryByText('cez backup restore remote-settings/4321.json')).toBeNull()
 })
 
-it('allows Ignore while disabling Import for a deleted legacy file', () => {
+it('offers only Ignore when a legacy file cannot be imported', () => {
   state([{ ...file('config.json', 'legacy-change'), reason: 'legacy-change', canImport: false }])
   render(<HomeRecoveryBanner />)
-  expect(screen.getByRole('button', { name: 'Import changes from the old home' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Import changes from the old home' })).toBeNull()
+  expect(screen.getAllByRole('button')).toHaveLength(1)
   expect(screen.getByRole('button', { name: 'Ignore' }).hasAttribute('disabled')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Ignore' }))
+  expect(actions.accept.mutate).toHaveBeenCalledWith({ file: 'config.json', detectedAt: '2026-11-07T09:00:00.000Z' })
+  expect(actions.import.mutate).not.toHaveBeenCalled()
 })
