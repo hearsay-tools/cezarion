@@ -80,6 +80,189 @@ const STATUS_ICON: Record<ReferenceStatus, ComponentType<React.SVGProps<SVGSVGEl
   'not-planned': CircleSlashIcon,
 }
 
+type ChipKind = 'PR' | 'Issue'
+type ChipTooltip = { headline: string; detail: string; also?: string }
+
+function chipDataSlot(kind: ChipKind): 'pr-chip' | 'issue-chip' {
+  return kind === 'PR' ? 'pr-chip' : 'issue-chip'
+}
+
+function chipConflictingProps(conflicting: boolean): { 'data-conflicting': 'true' } | Record<string, never> {
+  return conflicting ? { 'data-conflicting': 'true' } : {}
+}
+
+function isLocalReferenceStatus(
+  kind: ChipKind,
+  number: number | undefined,
+  url: string | undefined,
+  repoBase: string | undefined,
+): boolean {
+  return !url || (repoBase !== undefined && isOwnRepoReference({ kind, number: number ?? 0, url }, repoBase))
+}
+
+function chipIsConflicting(
+  kind: ChipKind,
+  explicitConflicting: boolean | undefined,
+  entryConflicting: boolean | undefined,
+): boolean {
+  return kind === 'PR' && (explicitConflicting ?? entryConflicting) === true
+}
+
+function chipClassName({
+  plain,
+  inert,
+  conflicting,
+  className,
+  tone,
+}: {
+  plain: boolean
+  inert: boolean
+  conflicting: boolean
+  className: string | undefined
+  tone: ReferenceStatusTone
+}): string {
+  if (plain) {
+    return cn(
+      'inline-flex items-center gap-1 rounded-[2px] text-inherit',
+      conflicting && 'text-conflict font-medium',
+      !inert && 'group/reference focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground',
+      className,
+    )
+  }
+  return cn(
+    'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[12px] font-normal',
+    TONE_CLASS[tone],
+    className,
+  )
+}
+
+function chipLabel(kind: ChipKind, number: number | undefined, plain: boolean, compact: boolean): string {
+  if (plain && !compact) {
+    return number ? `${kind === 'PR' ? 'PR ' : ''}#${number}` : kind
+  }
+  return number ? `${!compact && kind === 'Issue' ? 'Issue ' : ''}#${number}` : kind
+}
+
+function chipKindWord(kind: ChipKind): 'pull request' | 'issue' {
+  return kind === 'PR' ? 'pull request' : 'issue'
+}
+
+function chipAriaLabel(
+  kindWord: string,
+  number: number | undefined,
+  taskTitle: string,
+  presentation: ReferenceStatusPresentation | undefined,
+): string {
+  return `Open the ${kindWord}${number ? ` #${number}` : ''} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
+}
+
+function chipGlyphClass(
+  plain: boolean,
+  presentation: ReferenceStatusPresentation | undefined,
+): string | undefined {
+  return plain && presentation ? PLAIN_GLYPH_CLASS[presentation.tone] : undefined
+}
+
+function chipIsUnlinked(to: string | undefined, url: string | undefined): boolean {
+  return !to && (!url || !isHttpUrl(url))
+}
+
+function ReferenceChipBody({
+  conflicting,
+  presentation,
+  status,
+  plain,
+  compact,
+  inert,
+  kind,
+  label,
+  glyphClass,
+}: {
+  conflicting: boolean
+  presentation: ReferenceStatusPresentation | undefined
+  status: ReferenceStatus | undefined
+  plain: boolean
+  compact: boolean
+  inert: boolean
+  kind: ChipKind
+  label: string
+  glyphClass: string | undefined
+}) {
+  return (
+    <>
+      {/* Unknown statuses paint nothing; a conflict overrides even the pending dot. */}
+      {conflicting ? (
+        <TriangleAlertIcon className={cn('size-2.5 shrink-0', glyphClass)} aria-hidden="true" />
+      ) : (
+        <StatusGlyph status={presentation ? status : undefined} className={plain ? cn('size-2.5', glyphClass) : undefined} />
+      )}
+      {plain && compact ? kind === 'PR'
+        ? <GitPullRequestIcon data-slot="reference-kind" className="size-2.5 shrink-0" aria-hidden="true" />
+        : <CircleDotIcon data-slot="reference-kind" className="size-2.5 shrink-0" aria-hidden="true" /> : null}
+      {plain ? (
+        <span className={inert ? undefined : 'underline-offset-2 group-hover/reference:underline group-focus-visible/reference:underline'}>{label}</span>
+      ) : label}
+    </>
+  )
+}
+
+function InertReferenceChip({
+  kind,
+  status,
+  conflicting,
+  chipClass,
+  body,
+}: {
+  kind: ChipKind
+  status: ReferenceStatus | undefined
+  conflicting: boolean
+  chipClass: string
+  body: ReactNode
+}) {
+  return (
+    <span
+      data-slot={chipDataSlot(kind)}
+      data-status={status}
+      data-inert="true"
+      {...chipConflictingProps(conflicting)}
+      className={chipClass}
+    >
+      {body}
+    </span>
+  )
+}
+
+function ReferenceChipPanel({
+  kind,
+  number,
+  tooltip,
+  url,
+}: {
+  kind: ChipKind
+  number: number | undefined
+  tooltip: ChipTooltip
+  url: string | undefined
+}) {
+  return (
+    <>
+      <span className="block font-medium">
+        {kind === 'PR' ? 'Pull request' : 'Issue'}
+        {number ? ` #${number}` : ''} · {tooltip.headline}
+      </span>
+      <span className="block">{tooltip.detail}</span>
+      {/* The status the conflict painted over. It is still true — a conflicting PR can also be
+          green and approved — and burying it would trade one hidden fact for another. */}
+      {tooltip.also ? <span className="block opacity-70">{tooltip.also}</span> : null}
+      {/* The URL the native `title` used to carry. Worth keeping: a reference can name a
+          DIFFERENT repository than the project on screen (#526), and the host is the only
+          thing that says so. */}
+      {url && isHttpUrl(url) ? (
+        <span className="block opacity-70">{url.replace(/^https?:\/\//, '')}</span>
+      ) : null}
+    </>
+  )
+}
+
 /**
  * A task's out-of-app tracker link.
  *
@@ -157,7 +340,7 @@ export function ReferenceChip({
   // has always painted.
   const scope = useReferenceScope()
   const repoBase = explicitRepoBase ?? scope.repoBase
-  const localStatus = !url || (repoBase !== undefined && isOwnRepoReference({ kind, number: number ?? 0, url }, repoBase))
+  const localStatus = isLocalReferenceStatus(kind, number, url, repoBase)
   const entry = useReferenceStatus(kind, localStatus ? number : undefined, projectId)
   const status = explicitStatus ?? entry.status
   // A status this bundle has never heard of resolves to `undefined` here and is then treated
@@ -171,114 +354,78 @@ export function ReferenceChip({
   // exact reading this fixes — and it is only ever a PR: an issue has no base branch. `true`
   // alone paints; `undefined` (never asked, unreachable, a server from before the field) means
   // nothing is known, and nothing known must never colour a chip.
-  const conflicting = kind === 'PR' && (explicitConflicting ?? entry.conflicting) === true
+  const conflicting = chipIsConflicting(kind, explicitConflicting, entry.conflicting)
   const presentation = conflicting ? REFERENCE_CONFLICT : statusPresentation
-  const chipClass = plain
-    ? cn(
-        'inline-flex items-center gap-1 rounded-[2px] text-inherit',
-        conflicting && 'text-conflict font-medium',
-        !inert && 'group/reference focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-link-foreground',
-        className,
-      )
-    : cn(
-        'inline-flex h-[22px] items-center gap-1 rounded-md border px-1.5 font-mono text-[12px] font-normal',
-        TONE_CLASS[presentation?.tone ?? 'accent'],
-        className,
-      )
+  const tone = presentation?.tone ?? 'accent'
+  const chipClass = chipClassName({ plain, inert, conflicting, className, tone })
   // The overridden status rides along into the tooltip whenever the conflict took the chip.
   const tooltip = statusTooltip(entry, presentation, conflicting ? statusPresentation : undefined)
-  const label = plain && !compact
-    ? number ? `${kind === 'PR' ? 'PR ' : ''}#${number}` : kind
-    : number ? `${!compact && kind === 'Issue' ? 'Issue ' : ''}#${number}` : kind
-  const kindWord = kind === 'PR' ? 'pull request' : 'issue'
+  const label = chipLabel(kind, number, plain, compact)
+  const kindWord = chipKindWord(kind)
   // The accessible name carries the status too — a screen reader gets what the color says.
-  const ariaLabel = `Open the ${kindWord}${number ? ` #${number}` : ''} for ${taskTitle}${presentation ? ` — ${presentation.label}` : ''}`
-
-  const glyphClass = plain && presentation ? PLAIN_GLYPH_CLASS[presentation.tone] : undefined
+  const ariaLabel = chipAriaLabel(kindWord, number, taskTitle, presentation)
+  const glyphClass = chipGlyphClass(plain, presentation)
   const body = (
-    <>
-      {/* Unknown statuses paint nothing; a conflict overrides even the pending dot. */}
-      {conflicting ? (
-        <TriangleAlertIcon className={cn('size-2.5 shrink-0', glyphClass)} aria-hidden="true" />
-      ) : (
-        <StatusGlyph status={presentation ? status : undefined} className={plain ? cn('size-2.5', glyphClass) : undefined} />
-      )}
-      {plain && compact ? kind === 'PR'
-        ? <GitPullRequestIcon data-slot="reference-kind" className="size-2.5 shrink-0" aria-hidden="true" />
-        : <CircleDotIcon data-slot="reference-kind" className="size-2.5 shrink-0" aria-hidden="true" /> : null}
-      {plain ? (
-        <span className={inert ? undefined : 'underline-offset-2 group-hover/reference:underline group-focus-visible/reference:underline'}>{label}</span>
-      ) : label}
-    </>
+    <ReferenceChipBody
+      conflicting={conflicting}
+      presentation={presentation}
+      status={status}
+      plain={plain}
+      compact={compact}
+      inert={inert}
+      kind={kind}
+      label={label}
+      glyphClass={glyphClass}
+    />
   )
 
   if (inert) {
     return (
-      <span
-        data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
-        data-status={status}
-        data-inert="true"
-        {...(conflicting ? { 'data-conflicting': 'true' } : {})}
-        className={chipClass}
-      >
-        {body}
-      </span>
+      <InertReferenceChip
+        kind={kind}
+        status={status}
+        conflicting={conflicting}
+        chipClass={chipClass}
+        body={body}
+      />
     )
   }
 
   // href protocol guard (#431): a transcript-scraped non-http URL degrades to inert text.
-  const chip =
-    !to && (!url || !isHttpUrl(url)) ? (
-      <span
-        data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
-        // The STATUS stays here even when the conflict has taken the paint: it is still what the
-        // forge answered, and a test or a stylesheet keying off it must not lose it because a
-        // second axis turned true. What the conflict adds is its own attribute.
-        data-status={status}
-        {...(conflicting ? { 'data-conflicting': 'true' } : {})}
-        aria-label={presentation ? `${kindWord} ${label} — ${presentation.label}` : undefined}
-        className={chipClass}
-      >
-        {body}
-      </span>
-    ) : (
-      <ChipAnchor
-        to={to}
-        url={url}
-        data-slot={kind === 'PR' ? 'pr-chip' : 'issue-chip'}
-        data-status={status}
-        {...(conflicting ? { 'data-conflicting': 'true' } : {})}
-        // The native `title` is the URL only while there is no richer panel to show. Once the
-        // hover card below owns the hover it carries the URL itself, and two tooltips on one
-        // element is a browser popup fighting a designed one.
-        title={tooltip ? undefined : url}
-        aria-label={ariaLabel}
-        className={plain ? chipClass : cn(chipClass, TONE_HOVER[presentation?.tone ?? 'accent'])}
-      >
-        {body}
-      </ChipAnchor>
-    )
+  // The chip itself must be a DOM node (`span` or `ChipAnchor`): `ReferenceChipCard` mounts it
+  // with `asChild`, and a wrapper component would swallow the anchor ref.
+  const chip = chipIsUnlinked(to, url) ? (
+    <span
+      data-slot={chipDataSlot(kind)}
+      // The STATUS stays here even when the conflict has taken the paint: it is still what the
+      // forge answered, and a test or a stylesheet keying off it must not lose it because a
+      // second axis turned true. What the conflict adds is its own attribute.
+      data-status={status}
+      {...chipConflictingProps(conflicting)}
+      aria-label={presentation ? `${kindWord} ${label} — ${presentation.label}` : undefined}
+      className={chipClass}
+    >
+      {body}
+    </span>
+  ) : (
+    <ChipAnchor
+      to={to}
+      url={url}
+      data-slot={chipDataSlot(kind)}
+      data-status={status}
+      {...chipConflictingProps(conflicting)}
+      // The native `title` is the URL only while there is no richer panel to show. Once the
+      // hover card below owns the hover it carries the URL itself, and two tooltips on one
+      // element is a browser popup fighting a designed one.
+      title={tooltip ? undefined : url}
+      aria-label={ariaLabel}
+      className={plain ? chipClass : cn(chipClass, TONE_HOVER[tone])}
+    >
+      {body}
+    </ChipAnchor>
+  )
 
   if (!tooltip) return chip
-
-  const panel = (
-    <>
-      <span className="block font-medium">
-        {kind === 'PR' ? 'Pull request' : 'Issue'}
-        {number ? ` #${number}` : ''} · {tooltip.headline}
-      </span>
-      <span className="block">{tooltip.detail}</span>
-      {/* The status the conflict painted over. It is still true — a conflicting PR can also be
-          green and approved — and burying it would trade one hidden fact for another. */}
-      {tooltip.also ? <span className="block opacity-70">{tooltip.also}</span> : null}
-      {/* The URL the native `title` used to carry. Worth keeping: a reference can name a
-          DIFFERENT repository than the project on screen (#526), and the host is the only
-          thing that says so. */}
-      {url && isHttpUrl(url) ? (
-        <span className="block opacity-70">{url.replace(/^https?:\/\//, '')}</span>
-      ) : null}
-    </>
-  )
 
   // ONE panel, for every chip on every surface. It was a tooltip until a conflict needed a button
   // in it, and then briefly both — which is how the same `#5196` came to behave differently
@@ -291,7 +438,7 @@ export function ReferenceChip({
       action={conflicting ? conflictAction : undefined}
       state={entry.state}
     >
-      {panel}
+      <ReferenceChipPanel kind={kind} number={number} tooltip={tooltip} url={url} />
     </ReferenceChipCard>
   )
 }
