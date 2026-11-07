@@ -519,6 +519,108 @@ export type ProjectRailProps = {
 
 const homeOf = (projectId: string): ProjectSwitchTarget => ({ href: String(scopeTo(projectId, '/')), verify: false })
 
+/** The rail's app mark and name: a labelled block with the version when expanded, the bare mark
+ *  with a tooltip when not. Reads the theme for the mark's variant, so it re-renders on a change. */
+function RailIdentity({ expanded, resolvedTheme, version }: { expanded: boolean; resolvedTheme: string; version: string | null }) {
+  const appLabel = version ? `Cezarion v${version}` : 'Cezarion'
+  return expanded ? (
+    <div data-slot="rail-identity" className="flex shrink-0 flex-col gap-0.5">
+      <div className="flex h-[34px] items-center gap-[10px] px-0.5">
+        <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" data-slot="rail-app-mark" className="size-[34px] shrink-0 rounded-[8px]" />
+        <span className={cn('flex min-w-0 items-baseline gap-[10px] whitespace-nowrap', TEXT_IN)} aria-label={appLabel}>
+          <span className="text-[15px] leading-none font-bold text-foreground">Cezarion</span>
+          {version ? <span data-slot="rail-version" title={`v${version}`} className="min-w-0 truncate text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
+        </span>
+      </div>
+      <div aria-hidden="true" className="h-px w-full bg-border" />
+      <div className={cn('px-1 pt-2.5 pb-1 text-[11px] font-medium text-soft-foreground', TEXT_IN)}>Projects</div>
+    </div>
+  ) : (
+    <div className="flex shrink-0 flex-col items-center gap-0.5">
+      <img
+        src={`/cezarion-mark-${resolvedTheme}.svg`}
+        alt={appLabel}
+        title={appLabel}
+        data-slot="rail-app-mark"
+        className="size-[34px] rounded-[9px]"
+      />
+      <div aria-hidden="true" className="mt-0.5 mb-1.5 h-px w-6 bg-border" />
+    </div>
+  )
+}
+
+/** The Add project trigger: a full-width labelled row when expanded, a compact icon square when
+ *  not. Absent in a single-project workspace, whose server refuses new projects. */
+function RailAddProject({ expanded, singleProject }: { expanded: boolean; singleProject: boolean }) {
+  if (singleProject) return null
+  return expanded ? (
+    <AddProjectMenu
+      origin="rail"
+      icon={PlusIcon}
+      iconClassName="size-[15px] text-soft-foreground"
+      iconFrameClassName="flex size-9 shrink-0 items-center justify-center rounded-[9px] border border-border"
+      label="Add project"
+      side="right"
+      triggerClassName={cn('h-[44px] w-full shrink-0 justify-start gap-[10px] rounded-[8px] px-[6px] text-[13px] font-normal text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-safe:[&>span:last-child]:rail-text-in')}
+    />
+  ) : (
+    <AddProjectMenu
+      origin="rail"
+      icon={PlusIcon}
+      iconClassName="size-[15px]"
+      side="right"
+      triggerClassName="shrink-0 rounded-[9px] border border-border text-soft-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    />
+  )
+}
+
+/** The pinned bottom group: the expand toggle, All projects (multi-project only), global
+ *  settings and the theme toggle. */
+function RailBottom({ roomToExpand, expanded, toggle, railId, singleProject, allProjectsActive, settingsActive }: {
+  roomToExpand: boolean
+  expanded: boolean
+  toggle: () => void
+  railId: string
+  singleProject: boolean
+  allProjectsActive: boolean
+  settingsActive: boolean
+}) {
+  return (
+    <div data-slot="rail-bottom" className={cn('flex shrink-0 flex-col gap-0.5 pt-2', expanded ? 'items-stretch' : 'items-center')}>
+      {roomToExpand ? (
+        // Hidden, not disabled, while the window cannot fit the expanded rail: a toggle that
+        // does nothing would be a lie. The stored choice waits for the window to widen.
+        <button
+          type="button"
+          data-slot="rail-expand-toggle"
+          aria-expanded={expanded}
+          aria-controls={railId}
+          aria-label={expanded ? 'Collapse projects' : 'Expand projects'}
+          title={expanded ? undefined : 'Expand projects'}
+          onClick={toggle}
+          className={cn('group', bottomItemClass(expanded))}
+        >
+          {expanded ? <PanelLeftCloseIcon className="size-4 shrink-0" aria-hidden="true" /> : <PanelLeftOpenIcon className="size-4 shrink-0" aria-hidden="true" />}
+          {expanded ? <span className={BOTTOM_LABEL}>Collapse</span> : null}
+        </button>
+      ) : null}
+      {!singleProject ? (
+        <RailLink to="/tasks" label="All projects" slot="rail-all-projects" active={allProjectsActive} expanded={expanded}>
+          <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
+        </RailLink>
+      ) : null}
+      <RailLink to="/settings/global/appearance" label="Global settings" slot="rail-global-settings" active={settingsActive} expanded={expanded}>
+        <Settings2Icon className="size-4 shrink-0" aria-hidden="true" />
+      </RailLink>
+      <ThemeToggle
+        showLabel={expanded}
+        labelClassName={BOTTOM_LABEL}
+        className={cn('group', bottomItemClass(expanded), '[&_svg]:size-4')}
+      />
+    </div>
+  )
+}
+
 export function ProjectRail({ projects, signals, version, singleProject, projectTarget = homeOf, onSwitchProject, onSelectProject, canReorder = false, onReorder }: ProjectRailProps) {
   const { pathname } = useLocation()
   const { resolvedTheme } = useTheme()
@@ -537,7 +639,6 @@ export function ProjectRail({ projects, signals, version, singleProject, project
   const currentProjectId = pathnameProjectId(pathname)
   const allProjectsActive = pathname === '/tasks'
   const settingsActive = pathname === '/settings/global' || pathname.startsWith('/settings/global/')
-  const appLabel = version ? `Cezarion v${version}` : 'Cezarion'
   const railId = React.useId()
   const sorting = useRailSorting(projects, onReorder)
   const sortable = canReorder && onReorder !== undefined && projects.length > 1
@@ -556,30 +657,7 @@ export function ProjectRail({ projects, signals, version, singleProject, project
         expanded ? 'items-stretch px-2.5' : 'items-center',
       )}
     >
-      {expanded ? (
-        <div data-slot="rail-identity" className="flex shrink-0 flex-col gap-0.5">
-          <div className="flex h-[34px] items-center gap-[10px] px-0.5">
-            <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" data-slot="rail-app-mark" className="size-[34px] shrink-0 rounded-[8px]" />
-            <span className={cn('flex min-w-0 items-baseline gap-[10px] whitespace-nowrap', TEXT_IN)} aria-label={appLabel}>
-              <span className="text-[15px] leading-none font-bold text-foreground">Cezarion</span>
-              {version ? <span data-slot="rail-version" title={`v${version}`} className="min-w-0 truncate text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
-            </span>
-          </div>
-          <div aria-hidden="true" className="h-px w-full bg-border" />
-          <div className={cn('px-1 pt-2.5 pb-1 text-[11px] font-medium text-soft-foreground', TEXT_IN)}>Projects</div>
-        </div>
-      ) : (
-        <div className="flex shrink-0 flex-col items-center gap-0.5">
-          <img
-            src={`/cezarion-mark-${resolvedTheme}.svg`}
-            alt={appLabel}
-            title={appLabel}
-            data-slot="rail-app-mark"
-            className="size-[34px] rounded-[9px]"
-          />
-          <div aria-hidden="true" className="mt-0.5 mb-1.5 h-px w-6 bg-border" />
-        </div>
-      )}
+      <RailIdentity expanded={expanded} resolvedTheme={resolvedTheme} version={version} />
 
       {/* The only part that scrolls, so the app mark and the bottom group stay pinned. */}
       <div
@@ -618,61 +696,10 @@ export function ProjectRail({ projects, signals, version, singleProject, project
             ))}
           </SortableContext>
         </DndContext>
-        {!singleProject ? (
-          expanded ? (
-            <AddProjectMenu
-              origin="rail"
-              icon={PlusIcon}
-              iconClassName="size-[15px] text-soft-foreground"
-              iconFrameClassName="flex size-9 shrink-0 items-center justify-center rounded-[9px] border border-border"
-              label="Add project"
-              side="right"
-              triggerClassName={cn('h-[44px] w-full shrink-0 justify-start gap-[10px] rounded-[8px] px-[6px] text-[13px] font-normal text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-safe:[&>span:last-child]:rail-text-in')}
-            />
-          ) : (
-            <AddProjectMenu
-              origin="rail"
-              icon={PlusIcon}
-              iconClassName="size-[15px]"
-              side="right"
-              triggerClassName="shrink-0 rounded-[9px] border border-border text-soft-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            />
-          )
-        ) : null}
+        <RailAddProject expanded={expanded} singleProject={singleProject} />
       </div>
 
-      <div data-slot="rail-bottom" className={cn('flex shrink-0 flex-col gap-0.5 pt-2', expanded ? 'items-stretch' : 'items-center')}>
-        {roomToExpand ? (
-          // Hidden, not disabled, while the window cannot fit the expanded rail: a toggle that
-          // does nothing would be a lie. The stored choice waits for the window to widen.
-          <button
-            type="button"
-            data-slot="rail-expand-toggle"
-            aria-expanded={expanded}
-            aria-controls={railId}
-            aria-label={expanded ? 'Collapse projects' : 'Expand projects'}
-            title={expanded ? undefined : 'Expand projects'}
-            onClick={toggle}
-            className={cn('group', bottomItemClass(expanded))}
-          >
-            {expanded ? <PanelLeftCloseIcon className="size-4 shrink-0" aria-hidden="true" /> : <PanelLeftOpenIcon className="size-4 shrink-0" aria-hidden="true" />}
-            {expanded ? <span className={BOTTOM_LABEL}>Collapse</span> : null}
-          </button>
-        ) : null}
-        {!singleProject ? (
-          <RailLink to="/tasks" label="All projects" slot="rail-all-projects" active={allProjectsActive} expanded={expanded}>
-            <LayersIcon className="size-4 shrink-0" aria-hidden="true" />
-          </RailLink>
-        ) : null}
-        <RailLink to="/settings/global/appearance" label="Global settings" slot="rail-global-settings" active={settingsActive} expanded={expanded}>
-          <Settings2Icon className="size-4 shrink-0" aria-hidden="true" />
-        </RailLink>
-        <ThemeToggle
-          showLabel={expanded}
-          labelClassName={BOTTOM_LABEL}
-          className={cn('group', bottomItemClass(expanded), '[&_svg]:size-4')}
-        />
-      </div>
+      <RailBottom roomToExpand={roomToExpand} expanded={expanded} toggle={toggle} railId={railId} singleProject={singleProject} allProjectsActive={allProjectsActive} settingsActive={settingsActive} />
     </nav>
   )
 }
