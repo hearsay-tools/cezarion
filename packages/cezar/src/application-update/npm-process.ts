@@ -16,53 +16,78 @@ function verifiedCli(candidate: string): string | undefined {
 
 export interface NpmInvocation { command: string; args: string[] }
 
+function invokeNpmCli(node: string, cli: string): NpmInvocation {
+  return { command: node, args: [cli] };
+}
+
+function requireVerifiedCli(command: string, node: string): NpmInvocation {
+  const cli = verifiedCli(command);
+  if (!cli) throw new Error('npm CLI could not be verified');
+  return invokeNpmCli(node, cli);
+}
+
+function explicitNpmCommand(command: string): NpmInvocation | undefined {
+  // Explicit executables are used by embedders and isolated lifecycle fixtures.
+  // A Windows command script is never sent to spawn/execFile as an executable.
+  if (['npm', 'npm.cmd'].includes(basename(command).toLowerCase())) return undefined;
+  if (/\.(cmd|bat)$/i.test(command)) throw new Error('npm command script is unsupported');
+  return { command, args: [] };
+}
+
+function nodeToolchainCli(node: string, platform: NodeJS.Platform, command: string): string | undefined {
+  if (isAbsolute(command)) return undefined;
+  const nodeDir = dirname(realpathSync(node));
+  return verifiedCli(platform === 'win32'
+    ? join(nodeDir, 'node_modules/npm/bin/npm-cli.js')
+    : join(nodeDir, '../lib/node_modules/npm/bin/npm-cli.js'));
+}
+
+function npmShimCandidates(command: string, platform: NodeJS.Platform, searchPath: string): string[] {
+  return isAbsolute(command) ? [command] : searchPath.split(platform === 'win32' ? ';' : delimiter)
+    .map(part => part.replace(/^"(.*)"$/, '$1')).filter(isAbsolute)
+    .map(part => join(part, platform === 'win32' ? 'npm.cmd' : 'npm'));
+}
+
+function verifiedWindowsShimCli(shim: string, platform: NodeJS.Platform): string | undefined {
+  if (platform !== 'win32' && !/\.cmd$/i.test(shim)) return undefined;
+  const cli = verifiedCli(join(dirname(shim), 'node_modules/npm/bin/npm-cli.js'));
+  if (!cli) return undefined;
+  try {
+    const content = readFileSync(shim, 'utf8');
+    // npm ships its installer shim; npm install -g npm emits cmd-shim's
+    // equivalent. Only their fixed adjacent CLI target is recognized.
+    const vendor = readFileSync(join(dirname(cli), 'npm.cmd'), 'utf8');
+    if (content === vendor) return cli;
+  } catch { /* Fall through to the generated shim's fixed target. */ }
+  try {
+    const content = readFileSync(shim, 'utf8');
+    if (content.includes('SET dp0=%~dp0') && content.includes('"%dp0%\\node_modules\\npm\\bin\\npm-cli.js"')) return cli;
+  } catch { /* Keep looking; never execute an unrecognized wrapper. */ }
+  return undefined;
+}
+
+function resolveNpmFromPath(command: string, node: string, platform: NodeJS.Platform, searchPath: string): NpmInvocation {
+  for (const shim of npmShimCandidates(command, platform, searchPath)) {
+    const linked = verifiedCli(shim);
+    if (linked) return invokeNpmCli(node, linked);
+    const cli = verifiedWindowsShimCli(shim, platform);
+    if (cli) return invokeNpmCli(node, cli);
+  }
+  throw new Error('npm CLI could not be verified');
+}
+
 export function resolveNpmInvocation(command = 'npm', options: {
   nodeExecutable?: string; platform?: NodeJS.Platform; searchPath?: string;
 } = {}): NpmInvocation {
   const node = options.nodeExecutable ?? process.execPath;
   const platform = options.platform ?? process.platform;
-  const invoke = (cli: string): NpmInvocation => ({ command: node, args: [cli] });
-  if (basename(command) === 'npm-cli.js') {
-    const cli = verifiedCli(command);
-    if (!cli) throw new Error('npm CLI could not be verified');
-    return invoke(cli);
-  }
-  // Explicit executables are used by embedders and isolated lifecycle fixtures.
-  // A Windows command script is never sent to spawn/execFile as an executable.
-  if (!['npm', 'npm.cmd'].includes(basename(command).toLowerCase())) {
-    if (/\.(cmd|bat)$/i.test(command)) throw new Error('npm command script is unsupported');
-    return { command, args: [] };
-  }
-  if (!isAbsolute(command)) {
-    const nodeDir = dirname(realpathSync(node));
-    const cli = verifiedCli(platform === 'win32'
-      ? join(nodeDir, 'node_modules/npm/bin/npm-cli.js')
-      : join(nodeDir, '../lib/node_modules/npm/bin/npm-cli.js'));
-    if (cli) return invoke(cli);
-  }
+  if (basename(command) === 'npm-cli.js') return requireVerifiedCli(command, node);
+  const explicit = explicitNpmCommand(command);
+  if (explicit) return explicit;
+  const toolchain = nodeToolchainCli(node, platform, command);
+  if (toolchain) return invokeNpmCli(node, toolchain);
   const searchPath = options.searchPath ?? process.env[Object.keys(process.env).find(key => key.toLowerCase() === 'path') ?? 'PATH'] ?? '';
-  const candidates = isAbsolute(command) ? [command] : searchPath.split(platform === 'win32' ? ';' : delimiter)
-    .map(part => part.replace(/^"(.*)"$/, '$1')).filter(isAbsolute)
-    .map(part => join(part, platform === 'win32' ? 'npm.cmd' : 'npm'));
-  for (const shim of candidates) {
-    const linked = verifiedCli(shim);
-    if (linked) return invoke(linked);
-    if (platform !== 'win32' && !/\.cmd$/i.test(shim)) continue;
-    const cli = verifiedCli(join(dirname(shim), 'node_modules/npm/bin/npm-cli.js'));
-    if (!cli) continue;
-    try {
-      const content = readFileSync(shim, 'utf8');
-      // npm ships its installer shim; npm install -g npm emits cmd-shim's
-      // equivalent. Only their fixed adjacent CLI target is recognized.
-      const vendor = readFileSync(join(dirname(cli), 'npm.cmd'), 'utf8');
-      if (content === vendor) return invoke(cli);
-    } catch { /* Fall through to the generated shim's fixed target. */ }
-    try {
-      const content = readFileSync(shim, 'utf8');
-      if (content.includes('SET dp0=%~dp0') && content.includes('"%dp0%\\node_modules\\npm\\bin\\npm-cli.js"')) return invoke(cli);
-    } catch { /* Keep looking; never execute an unrecognized wrapper. */ }
-  }
-  throw new Error('npm CLI could not be verified');
+  return resolveNpmFromPath(command, node, platform, searchPath);
 }
 
 /** Discovery and both mutating phases use the exact same shell-free invocation. */
