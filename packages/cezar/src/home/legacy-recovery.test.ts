@@ -193,3 +193,24 @@ it('refuses a new legacy-internal account with no relocation and leaves Ignore a
   acceptHomeRecovery(home, 'agent-accounts.json', flag.detectedAt, true);
   expect(row(home, 'agent-accounts.json')).toBeUndefined();
 });
+
+it('preserves top-level removal of the accounts key during import', () => {
+  const legacy = Home.sandbox(storeRoot());
+  const home = Home.sandbox(storeRoot(), { layout: 'split' });
+  Home.seed(legacy, legacy.agentAccounts, { accounts: [{ id: 'external', provider: 'claude', configDir: '/external' }], kept: true });
+  migrateLegacyHome(legacy, home);
+  writeFileSync(legacy.agentAccounts, JSON.stringify({ kept: true }));
+  importHomeRecovery(home, 'agent-accounts.json', row(home, 'agent-accounts.json').detectedAt, true);
+  expect(JSON.parse(readFileSync(home.agentAccounts, 'utf8'))).toEqual({ kept: true });
+});
+
+it('keeps an untouched live account array as found when only another legacy key changed', () => {
+  const legacy = Home.sandbox(storeRoot());
+  const home = Home.sandbox(storeRoot(), { layout: 'split' });
+  Home.seed(legacy, legacy.agentAccounts, { accounts: [], setting: 'base' });
+  migrateLegacyHome(legacy, home);
+  new HomeStore(home).writeJson(home.agentAccounts, { accounts: [null], setting: 'base' });
+  writeFileSync(legacy.agentAccounts, JSON.stringify({ accounts: [], setting: 'legacy' }));
+  importHomeRecovery(home, 'agent-accounts.json', row(home, 'agent-accounts.json').detectedAt, true);
+  expect(JSON.parse(readFileSync(home.agentAccounts, 'utf8'))).toEqual({ accounts: [null], setting: 'legacy' });
+});

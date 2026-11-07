@@ -14,6 +14,7 @@ function accountRows(value: Record<string, unknown>): Record<string, unknown>[] 
 /** Only entries changed in the old home are imported. Keep step-7 credential isolation. */
 export function preserveAccountRelocations(home: Home, record: MigrationRecord, base: Record<string, unknown>,
   legacy: Record<string, unknown>, merged: Record<string, unknown>): void {
+  if (!Array.isArray(merged.accounts) || isDeepStrictEqual(base.accounts, legacy.accounts)) return;
   const previous = new Map(accountRows(base).map(account => [account.id, account]));
   const imported = new Map(accountRows(legacy).filter(account => !isDeepStrictEqual(previous.get(account.id), account))
     .map(account => [account.id, account]));
