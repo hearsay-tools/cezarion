@@ -12,8 +12,8 @@ Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. 
 
 ## Task environments and the cockpit home
 
-`CEZ_HOME` stays in the cockpit. No child receives it, including with
-`CEZ_AGENT_ENV_FULL=1` or `CEZ_ENV_PASSTHROUGH=CEZ_HOME`. Task commands
+`CEZ_HOME` and `HSQ_HOME` stay in the cockpit. No child receives either, including with
+`CEZ_AGENT_ENV_FULL=1` or `CEZ_ENV_PASSTHROUGH=CEZ_HOME,HSQ_HOME`. Task commands
 (`artifact`, `message`, `worker`, `task`, `automation`, `webhook`, `discover`)
 do not read the cockpit home. Artifact links use the supplied `CEZ_PROJECT_ID`;
 without it they keep the unprefixed task link.

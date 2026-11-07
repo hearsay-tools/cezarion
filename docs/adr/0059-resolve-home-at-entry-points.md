@@ -26,15 +26,18 @@ separate from resolved directories: the default POSIX launcher evaluates
 Home carries only path data and the original override. Shell rendering stays in the
 launcher; its historical POSIX quote spelling is preserved byte for byte.
 
-`HOME_LOCATING_ENV` remains the only list of home-locating variables. The resolver
-reads only those names from its supplied environment. `homedir()` continues to
-supply the legacy platform home independently of that object. Empty `CEZ_HOME`
-falls back; nonempty values, including relative paths and whitespace, remain literal.
-The write guard `assertCezarHomeWriteIsSandboxed(path, env?)` is unchanged.
+`HOME_LOCATING_ENV` lists only cockpit home locators (`CEZ_HOME`, `HSQ_HOME`).
+Both are stripped case-insensitively from every child environment, even with
+full-env or explicit passthrough. Platform layout values use the separate
+`HOME_LAYOUT_ENV` list in `home/kind-roots.ts`; agents retain those values.
+`homedir()` supplies the platform home independently of the supplied environment.
+Legacy resolution still reads only `HOME_LOCATING_ENV`. Empty `CEZ_HOME` falls
+back; nonempty legacy values, including relative paths and whitespace, stay literal.
 
-`home/switch.ts` declares `REBRAND_SWITCH = false`. This slice adds no alternative
-layout and no visible behavior change. Turning the constant on does not select an
-unfinished XDG layout. P2a will add that layout behind this release gate.
+`home/switch.ts` declares `REBRAND_SWITCH = false`. P2a-1 adds split paths behind
+that gate. `resolveHome({ purpose, env?, layout?, platform? })` supports explicit
+layout and platform selection for tests without mocking the gate. Resolution stays
+pure. Windows resolution uses `path.win32`, including when tested on another OS.
 
 ## Transition
 
@@ -46,13 +49,32 @@ The process scripts listed in `docs/sdlc/lint.md` resolve once at their existing
 environment boundary. The source lint rule allows resolution only in `home/`,
 `index.ts` and `subcommands.ts`; OS-user readers have a shrink-only reasoned list.
 
-Tests select `Home.sandbox(dir)`. Its paths, including caches, remain under that
-root. It exclusively creates a config-root `install.json` marker containing
-`installId`, `kind: "test"` and `createdAt`, preserving an existing marker. This
-slice does not read or enforce markers. Shared Vitest setup bridges that selection
-to process entry tests; child processes still receive CEZ_HOME in their environment.
-HomeStore, marker enforcement and leases belong to P1b. One shared setup across
-all runners belongs to P1d. The desktop Rust home remains separate.
+P2a-1 (hearsay-tools/cezarion#2931) gives `Home` five kind roots: `config`,
+`state`, `data`, `cache`, `runtime`. `root` aliases `config`; install markers and
+cockpit leases stay there. Named config paths use config; UI state, server state
+and install locks, backups and application updates use state; versions and bin
+use data; skills and dry caches use cache. Runtime has no named file yet.
+Legacy kinds equal root except cache, which stays `~/.cache/cez`; legacy dry
+paths deliberately stay at root. New root metadata is non-enumerable so the P1
+literal path table keeps the same enumerable shape.
+
+Split defaults follow the platform table in the spec. Relative Linux XDG values
+are ignored. macOS uses `/tmp/hearsay-squawk` when TMPDIR is absent. Nonempty
+`HSQ_HOME` selects one-root subdirectories, then nonempty custom `CEZ_HOME` does;
+`CEZ_HOME` equal to the literal legacy default counts as unset. CLI boot warns
+once about a set `CEZ_HOME` when split layout is enabled. Split managed launchers
+use the resolved data root; legacy launcher text stays byte for byte.
+
+Tests select `Home.sandbox(dir, { layout? })`, defaulting to the release gate.
+Legacy sandboxes retain their old shape. Split sandboxes use `config/`, `state/`,
+`data/`, `cache/`, `run/`, with a test marker under config. The script-only setup
+scrubs both prefixes and pins both locators, APPDATA and LOCALAPPDATA as well as
+XDG values. The passwd-home write guard rejects native split default roots too.
+Windows private writers replace the DACL with one current-user full-control
+rule under the split gate; Unix private modes stay unchanged.
+
+HomeStore routing across kind roots belongs to P2a-2. P2a-1 only defines paths;
+passing an explicit split Home to current HomeStore is not yet supported.
 
 Backups still derive their write directory from the file being replaced. An
 explicit backup-list root still selects that root's `backups/` directory. Home

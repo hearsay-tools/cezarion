@@ -10,7 +10,7 @@ import type { Home } from '../home/home.ts';
 
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
@@ -22,7 +22,8 @@ const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "
 export function posixLauncher(env: NodeJS.ProcessEnv, home: Home): string {
   // `CEZ_HOME` is honoured at run time too, so a launcher written under the default home keeps
   // working when the user later sets it — the launcher recomputes, it does not bake the path in.
-  const homeExpr = home.rootOverride ? shellQuote(home.rootOverride) : '"${CEZ_HOME:-$HOME/.cezar}"';
+  const homeExpr = home.layout === 'split' ? shellQuote(home.data)
+    : home.rootOverride ? shellQuote(home.rootOverride) : '"${CEZ_HOME:-$HOME/.cezar}"';
   return `#!/bin/sh
 ${PATH_MARKER} — do not edit; \`cez install\` regenerates this file.
 CEZ_MANAGED_HOME=${homeExpr}
@@ -57,7 +58,7 @@ exec node "$ENTRY" "$@"
 }
 
 export function windowsLauncher(env: NodeJS.ProcessEnv, home: Home): string {
-  const entry = join(home.root, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+  const entry = (home.layout === 'split' ? win32.join : join)(home.data, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
   return `@echo off\r\nrem ${PATH_MARKER}\r\nnode "${entry}" %*\r\n`;
 }
 

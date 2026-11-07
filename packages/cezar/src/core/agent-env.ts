@@ -298,7 +298,7 @@ export interface BuildChildEnvOptions {
 }
 
 /** Home locators belong to the cockpit, never to a child process. */
-export const HOME_LOCATING_ENV: readonly string[] = ['CEZ_HOME'];
+export const HOME_LOCATING_ENV: readonly string[] = ['CEZ_HOME', 'HSQ_HOME'];
 
 /** Preserve every other name, including host command credentials and escape hatches. */
 export function withoutHomeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

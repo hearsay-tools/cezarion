@@ -490,19 +490,20 @@ describe('cockpit home isolation (hearsay-tools/cezarion#2779)', () => {
   for (const full of ['0', '1']) {
     const source = {
       CEZ_HOME: '/live/home', cez_home: '/live/lower', Cez_Home: '/live/mixed',
+      HSQ_HOME: '/live/split', hsq_home: '/live/split-lower', Hsq_Home: '/live/split-mixed',
       CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_HOME,CUSTOM_VALUE',
       CUSTOM_VALUE: 'preserved', PATH: '/bin', CEZ_TASK_ID: 'task',
     };
     for (const backend of RUNNER_IDS) {
       it(`${backend} removes every home spelling in full-env=${full}, including per-run env`, () => {
-        const env = buildChildEnv({ backend, source, extraEnv: { CEZ_HOME: '/extra/home', CEZ_PROJECT_ID: 'project' } });
-        expect(Object.keys(env).filter(name => name.toUpperCase() === 'CEZ_HOME')).toEqual([]);
+        const env = buildChildEnv({ backend, source, extraEnv: { CEZ_HOME: '/extra/home', HSQ_HOME: '/extra/split', CEZ_PROJECT_ID: 'project' } });
+        expect(Object.keys(env).filter(name => ['CEZ_HOME', 'HSQ_HOME'].includes(name.toUpperCase()))).toEqual([]);
         expect(env).toMatchObject({ PATH: '/bin', CUSTOM_VALUE: 'preserved', CEZ_PROJECT_ID: 'project' });
         expect(source.CEZ_HOME).toBe('/live/home');
       });
     }
     it(`preview commands remove home in full-env=${full}`, () => {
-      expect(buildCommandEnv({ source, extraEnv: { CEZ_HOME: '/extra/home' } })).toEqual({
+      expect(buildCommandEnv({ source, extraEnv: { CEZ_HOME: '/extra/home', HSQ_HOME: '/extra/split' } })).toEqual({
         CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_HOME,CUSTOM_VALUE',
         CUSTOM_VALUE: 'preserved', PATH: '/bin', CEZ_TASK_ID: 'task',
       });
@@ -513,5 +514,17 @@ describe('cockpit home isolation (hearsay-tools/cezarion#2779)', () => {
         CUSTOM_VALUE: 'preserved', PATH: '/bin', CEZ_TASK_ID: 'task', SECRET: 'keep', EMPTY: '', UNSET: undefined,
       });
     });
+  }
+});
+
+// Layout values belong to the operator's toolchain and must survive cockpit-home isolation.
+it.each(RUNNER_IDS)('%s preserves all layout env values while stripping explicit home passthrough', backend => {
+  const layoutEnv = { XDG_CONFIG_HOME: '/config', XDG_STATE_HOME: '/state', XDG_DATA_HOME: '/data',
+    XDG_CACHE_HOME: '/cache', XDG_RUNTIME_DIR: '/run', TMPDIR: '/tmp/operator', APPDATA: 'D:\\Roaming', LOCALAPPDATA: 'D:\\Local' };
+  const source = { ...layoutEnv, CEZ_HOME: '/live', HSQ_HOME: '/split', CEZ_ENV_PASSTHROUGH: 'HSQ_HOME,CEZ_HOME' };
+  for (const env of [buildChildEnv({ backend, source }), buildCommandEnv({ source })]) {
+    expect(env).toMatchObject(layoutEnv);
+    expect(env.CEZ_HOME).toBeUndefined();
+    expect(env.HSQ_HOME).toBeUndefined();
   }
 });

@@ -309,3 +309,23 @@ describe('home write guard with HOME pinned to a sandbox', () => {
     expect(() => assertCezarHomeWriteIsSandboxed(realHome, { VITEST: 'true' })).not.toThrow();
   });
 });
+
+// Literal native-platform defaults; no writes or directory creation even if the guard regresses.
+it('refuses every split default kind root and descendant from the account home', () => {
+  const account = join(tmpdir(), 'cez-split-guard-account');
+  vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: account });
+  const roots = process.platform === 'win32'
+    ? [join(account, 'AppData', 'Roaming', 'Hearsay Squawk'), ...['state', 'data', 'cache', 'run'].map(kind => join(account, 'AppData', 'Local', 'Hearsay Squawk', kind))]
+    : process.platform === 'darwin'
+      ? [...['config', 'state', 'data'].map(kind => join(account, 'Library', 'Application Support', 'Hearsay Squawk', kind)),
+        join(account, 'Library', 'Caches', 'Hearsay Squawk'), join(process.env.TMPDIR || '/tmp', 'hearsay-squawk')]
+      : [join(account, '.config', 'hearsay-squawk'), join(account, '.local', 'state', 'hearsay-squawk'),
+        join(account, '.local', 'share', 'hearsay-squawk'), join(account, '.cache', 'hearsay-squawk'),
+        join(account, '.local', 'state', 'hearsay-squawk', 'run')];
+  for (const root of roots) {
+    expect(() => assertCezarHomeWriteIsSandboxed(root, {})).toThrow('refusing to write');
+    expect(() => assertCezarHomeWriteIsSandboxed(join(root, 'nested', 'file.json'), {})).toThrow('refusing to write');
+    if (!root.endsWith(sep + 'run')) expect(() => assertCezarHomeWriteIsSandboxed(root + '-sandbox', {})).not.toThrow();
+  }
+  for (const mutation of mutations) expect(mutation).not.toHaveBeenCalled();
+});
