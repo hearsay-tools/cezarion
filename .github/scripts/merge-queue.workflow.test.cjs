@@ -6,11 +6,11 @@ const path = require('node:path');
 const yaml = require('yaml');
 const workflow = () => yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
 
-async function runAdmissionStep(admission, github, group) {
+async function runAdmissionStep(admission, github, group, { write = async () => {}, onFailure = () => {} } = {}) {
   const step = workflow().jobs['queue-admission'].steps.find(s => s.with?.script);
   const errors = [], failures = [], summary = [];
-  const core = { error: message => errors.push(message), setFailed: message => failures.push(message),
-    summary: { addHeading() { return this; }, addRaw(text) { summary.push(text); return this; }, async write() {} } };
+  const core = { error: message => errors.push(message), setFailed: message => { failures.push(message); onFailure(message); },
+    summary: { addHeading() { return this; }, addRaw(text) { summary.push(text); return this; }, write } };
   const requireStub = name => name.endsWith('/failure-diagnostics.cjs') ? require('./failure-diagnostics.cjs') : admission;
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   await new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script)(
@@ -44,6 +44,15 @@ test('a trusted base from before diagnostics still logs its refusal safely', asy
   assert.match(errors.join('\n'), /Native CI changed/);
   assert.match(summary.join('\n'), /Native CI changed/);
   assert.doesNotMatch([...errors, ...summary].join('\n'), /private-value/);
+});
+
+test('a failed summary write retains the admission recovery message', async () => {
+  const admission = { mergeQueueAdmission: async () => { throw new Error('Native CI changed'); } };
+  let failure;
+  await assert.rejects(runAdmissionStep(admission, {}, {}, {
+    write: async () => { throw new Error('Summary unavailable'); }, onFailure: message => { failure = message; },
+  }), /Summary unavailable/);
+  assert.match(failure, /Inspect the queue and retry; do not bypass/);
 });
 
 test('combined queue revisions request the required gate before reaching main', () => {

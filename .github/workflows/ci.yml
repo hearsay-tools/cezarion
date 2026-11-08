@@ -1093,8 +1093,8 @@ jobs:
               // A speculative group's trusted base can predate this diagnostic helper.
               const diagnostic = admissionFailure ? admissionFailure(error, diagnostics) : sanitize(`${error.name}: ${error.message}`);
               core.error(diagnostic);
-              await core.summary.addHeading('Queue admission refused').addRaw(diagnostic.split('\n').map(line => `    ${line}`).join('\n') + '\n').write();
               core.setFailed('Queue admission could not verify current native PR CI/review, membership and rules. Inspect the queue and retry; do not bypass.');
+              await core.summary.addHeading('Queue admission refused').addRaw(diagnostic.split('\n').map(line => `    ${line}`).join('\n') + '\n').write();
             }
 
   # Distinct inactive names prevent a skipped job supplying a protected check.
