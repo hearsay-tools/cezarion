@@ -54,6 +54,21 @@ pub trait Platform {
     fn remove_old_app(&mut self) -> io::Result<bool>;
 }
 
+struct Lease(fs::File);
+impl Lease {
+    fn acquire(file: fs::File) -> io::Result<Self> {
+        file.try_lock().map_err(|e| io::Error::other(format!("another bridge is running: {e}")))?;
+        Ok(Self(file))
+    }
+}
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // A concurrent fork can retain the open file description until exec. Closing
+        // only our descriptor would leave its flock held across an immediate retry.
+        if let Err(reason) = self.0.unlock() { eprintln!("Could not release bridge lease: {reason}"); }
+    }
+}
+
 pub fn execute(plan: &Plan, platform: &mut impl Platform) -> io::Result<Outcome> {
     if !platform.supported() { return Ok(Outcome::Manual); }
     private_dir(&plan.journal)?;
@@ -62,8 +77,7 @@ pub fn execute(plan: &Plan, platform: &mut impl Platform) -> io::Result<Outcome>
     let mut options = fs::OpenOptions::new(); options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
-    let lease = options.open(lock_path)?;
-    lease.try_lock().map_err(|e| io::Error::other(format!("another bridge is running: {e}")))?;
+    let _lease = Lease::acquire(options.open(lock_path)?)?;
     let receipt = plan.journal.join("plan");
     if receipt.exists() {
         if fs::read(&receipt)? != plan.binding { return Err(io::Error::other("bridge app or payload changed; old app retained")); }
@@ -431,19 +445,31 @@ mod tests {
         fn start_and_acknowledge(&mut self) -> io::Result<()> { self.step("start") }
         fn remove_old_app(&mut self) -> io::Result<bool> { self.step("remove")?; Ok(true) }
     }
+    fn accept_when_ready(listener: &std::net::TcpListener) -> std::net::TcpStream {
+        use std::time::{Duration, Instant};
+        // bound: accept is the connection-ready signal; guard a lost connection.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => return stream,
+                Err(reason) if reason.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => std::thread::yield_now(),
+                Err(reason) => panic!("test connection did not become ready: {reason}"),
+            }
+        }
+    }
     fn closed_peer_then_valid_message(terminator: Option<&[u8]>, message: &[u8]) {
         use std::{net::{TcpListener, TcpStream, Shutdown}, time::{Duration, Instant}};
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         let peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut closed, _) = listener.accept().unwrap();
+        let mut closed = accept_when_ready(&listener);
         // The peer closes after accept, before either mode/timeout preparation or read.
         drop(peer);
         // bound: exercise the real socket close; only guards a hung test.
         let deadline = Instant::now() + Duration::from_secs(3);
         assert!(read_accepted_message(&mut closed, terminator, 4096, deadline).is_err());
         let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut accepted, _) = listener.accept().unwrap();
+        let mut accepted = accept_when_ready(&listener);
         peer.write_all(message).unwrap();
         if terminator.is_none() { peer.shutdown(Shutdown::Write).unwrap(); }
         // bound: a bad first connection must leave the listener able to receive this one.
@@ -464,7 +490,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut receiver, _) = listener.accept().unwrap();
+        let mut receiver = accept_when_ready(&listener);
         // Force BSD/Windows accept semantics on every platform.
         receiver.set_nonblocking(true).unwrap();
         prepare_accepted_stream(&receiver).unwrap();
@@ -712,6 +738,23 @@ mod tests {
         lease.try_lock().unwrap();
         let mut platform = Fake::new(); assert!(execute(&f.plan, &mut platform).is_err());
         assert!(platform.calls.is_empty());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn lease_drop_unlocks_even_when_a_fork_retains_its_file_description() {
+        let f = Fixture::new(); private_dir(&f.plan.journal).unwrap();
+        let lock = f.plan.journal.join("run.lock");
+        let lease = Lease::acquire(fs::OpenOptions::new().read(true).write(true).create_new(true).open(&lock).unwrap()).unwrap();
+        // dup and fork share the same open file description and flock ownership.
+        let inherited = lease.0.try_clone().unwrap();
+        let contender = fs::OpenOptions::new().read(true).write(true).open(lock).unwrap();
+        assert!(contender.try_lock().is_err());
+        drop(lease);
+        // Reacquire while the inherited description is still open; dropping just the
+        // parent descriptor would leave the original lock held and fail this assertion.
+        contender.try_lock().unwrap();
+        contender.unlock().unwrap();
+        drop(inherited);
     }
     #[test]
     fn profile_tree_is_private_and_refuses_symlink_escape() {
