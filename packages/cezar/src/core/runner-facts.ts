@@ -9,9 +9,9 @@ import { RUNNER_IDS, type InputDelivery, type RunnerId, type SystemPromptOnResum
  * id. A test that must not load the runner classes reads the same row here.
  */
 export interface RunnerFacts {
-  /** How the runner admits input while a turn runs (`InputDelivery`, #505). */
+  /** How the runner admits input while a turn runs (`InputDelivery`, hearsay-tools/cezarion#505). */
   readonly inputDelivery: InputDelivery;
-  /** How the runner carries `spec.systemPrompt` onto a resumed session (#790). */
+  /** How the runner carries `spec.systemPrompt` onto a resumed session (hearsay-tools/cezarion#790). */
   readonly systemPromptOnResume: SystemPromptOnResume;
   /**
    * The harness's own question tool. `answerable`: the wire reports the question and Cezar routes
