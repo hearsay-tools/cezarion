@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { attached, rememberReadiness, rememberRoute, rememberViewport } from './browser-page'
 export { lastAttachedBrowser } from './browser-page'
 import { visualSampleExpression } from './visual-ready'
+import { clearField } from './clear-field'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
 import { readTestEnvDescriptor } from '../../../.ai/scripts/test-env-inputs.mjs'
 import { defaultWaitTimeoutMs, pause, sameSample, summarize } from './wait-support'
@@ -819,20 +820,10 @@ export class AgentBrowser {
     }
   }
 
-  /** operation: interact (`fill`) — set a field's value the way typing would (real input
-   *  events, so controlled React inputs — the ⌘K palette's filter — see the change).
-   *  Waits for the field first; see `awaitTarget`. */
+  /** operation: interact (`fill`) — await the field, then replace its controlled value. */
   fill(selector: string, value: string): void {
     this.awaitTarget('fill', selector)
-    // The provider clears through React's value tracker, hiding the input event from React.
-    // Clear through the native setter first so a render between clear and insert restores ''.
-    this.evaluate(`(() => {
-      const field = document.querySelector(${JSON.stringify(selector)})
-      const prototype = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
-      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, '')
-      field.dispatchEvent(new Event('input', { bubbles: true }))
-    })()`)
-    this.waitForValue(`document.querySelector(${JSON.stringify(selector)})?.value`, value => value === '')
+    clearField(this, selector)
     this.run(['fill', selector, value])
   }
 
