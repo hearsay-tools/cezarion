@@ -954,7 +954,30 @@ export const harnessParityFile = (backend: RunnerId, part: HarnessParityPart): s
 type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'beforeAll' | 'afterAll'> & {
   toolGrants: typeof describeToolGrantParity;
   allGroups?: boolean;
+  /** A dry collection: it counts the cells of each group, for `groupCellCounts`. */
+  probe?: boolean;
 };
+
+/** How many cells each group's suite registers for one runner, by suite name. A shared group can
+ *  hold none for a runner outside the derived set, and Vitest 4 fails an empty suite. */
+function groupCellCounts(runner: RunnerId): Map<string, number> {
+  const counts = new Map<string, number>();
+  let cells = 0;
+  describeHarnessParity({ runner, part: 'session' }, {
+    describe: ((name: string, ...args: unknown[]) => {
+      const before = cells;
+      (args.at(-1) as () => void)();
+      counts.set(name, (counts.get(name) ?? 0) + cells - before);
+    }) as typeof describe,
+    it: (() => { cells++; }) as unknown as typeof it,
+    beforeAll: (() => undefined) as typeof beforeAll,
+    afterAll: (() => undefined) as typeof afterAll,
+    toolGrants: () => { cells += TOOL_GRANT_CASES.length; },
+    allGroups: true,
+    probe: true,
+  });
+  return counts;
+}
 
 export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessParityPart } | 'once',
   registration: HarnessRegistration = { describe, it, beforeAll, afterAll, toolGrants: describeToolGrantParity }): void {
@@ -1031,12 +1054,14 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
 
   const runners: RunnerId[] = scope === 'once' ? [] : [scope.runner];
   const registeredGroups: string[] = [];
+  const cellCounts = scope === 'once' || registration.probe ? undefined : groupCellCounts(scope.runner);
   const describeRunners = (group: string, name: string, body: () => void, once = false): void => {
     registeredGroups.push(group);
     if (scope === 'once') {
       if (once) describe(name, body);
       return;
     }
+    if (cellCounts?.get(name) === 0) return;
     const grouped = inGroup(group, body) as () => void;
     // Iterate rather than use includes: duplicate routes register twice and fail the guard.
     if (registration.allGroups) { describe(name, grouped); return; }
