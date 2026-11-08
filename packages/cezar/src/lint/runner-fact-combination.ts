@@ -122,7 +122,7 @@ export function factCombinations(source: string): FactCombination[] {
 }
 
 /**
- * Functions allowed to combine facts, as `<file>#<function>` → the parity row that runs the
+ * Functions allowed to combine facts, as `<file>#<function>` → `<family> <row>`, the parity row that runs the
  * combination on every runner. Empty today: no shared function combines two facts.
  */
 export const COMBINATION_ROWS: Readonly<Record<string, string>> = {};
