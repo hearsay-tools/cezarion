@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { Hono } from 'hono';
 import {
@@ -23,7 +24,7 @@ import { getTeamSourceStatuses, refreshTeamSources, reloadTeamSkills, sourceKey 
 
 /** Settings are admin-only on this cockpit: the source controls are read-only. */
 export const SKILL_SOURCES_HOSTED_ERROR =
-  'Team skill sources are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.';
+  `Team skill sources are read-only on this remote cockpit. To allow remote edits, run \`cez remote-settings enable\` on the machine running ${productName('cezar')}.`;
 
 export interface SkillSourcesProject {
   home: Home;

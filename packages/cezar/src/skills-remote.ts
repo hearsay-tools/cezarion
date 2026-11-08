@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import type { Home } from './home/home.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -753,7 +754,7 @@ function setSourceStatus(repoRoot: string, src: SkillsRepoRef, status: TeamSourc
 function settledStatus(src: SkillsRepoRef, skills: Skill[], problem: ListProblem, home: Home): TeamSourceStatus {
   const skillCount = skills.length;
   if (safeRemoteFor(src.repo) === null) {
-    return { state: 'error', cause: 'refused-format', detail: `"${src.repo}" is not a source format cezar accepts.`, skillCount };
+    return { state: 'error', cause: 'refused-format', detail: `"${src.repo}" is not a source format ${productName('cezar')} accepts.`, skillCount };
   }
   const failure = fetchFailures.get(bareDirFor(src.repo, home));
   if (failure !== undefined) return { state: 'error', cause: 'fetch-failed', detail: failure, skillCount };
