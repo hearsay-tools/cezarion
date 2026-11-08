@@ -104,7 +104,10 @@ export function captureState() { return { root, phase, checkpoints: checkpoints.
   ownedOperations: [...(work?.pending.values() ?? [])],
   sessions: [...(work?.liveSessions ?? [])].map(session => ({ pid: session.pid, open: session.open })),
   runs: store?.listRunIds().flatMap(id => store!.getRun(id) ?? []).map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
-    active: manager.isActive(run.id), stopping: run.stopping, execution: store.readWorkerExecution(run.id),
+    active: manager.isActive(run.id), toolGenerationPresent: toolGenerations.has(run.id),
+    hasSessionId: run.steps.some(step => !!step.sessionId),
+    steps: run.steps.map(step => ({ id: step.id, sessionId: step.sessionId ?? null })),
+    stopping: run.stopping, execution: store.readWorkerExecution(run.id),
     inputs: run.agentInputs?.map(input => ({ id: input.id, deliveredAt: input.deliveredAt })),
     events: formatTimeline(run.id, store.readEvents(run.id).slice(-6)), })),
 }; }
@@ -242,7 +245,7 @@ async function startParent(task: string, runner: RunnerId, permissions: WorkerOp
   store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions, receipts: [] } }]);
   await until(() => {
     return manager.isActive(run.id) && toolGenerations.has(run.id) && store.getRun(run.id)?.steps.some(step => !!step.sessionId) === true;
-  });
+  }, () => JSON.stringify(captureState()));
   checkpoint('parent-session-open'); return run;
 }
 /** The root took input that is not its workers' own messages. An idle worker tells its parent why it
