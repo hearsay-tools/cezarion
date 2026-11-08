@@ -4,7 +4,7 @@ Paths `<config>`, `<state>`, `<data>` and `<cache>` refer to the
 [resolved home roots](../migration.md#home-directories).
 
 
-A remote cockpit (`HSQ_REMOTE=1` (`CEZ_REMOTE` fallback)) shows **Settings → Agent config** and **Settings → Worktrees →
+A remote cockpit (`HSQ_REMOTE=1` or `CEZ_REMOTE=1`) shows **Settings → Agent config** and **Settings → Worktrees →
 Prepare new worktrees** read-only. Both persist commands that run on the host: agent hooks and MCP
 servers start outside the agent's tool permissions, and setup commands run before every task. The
 host operator can let the people the deployment admits edit them from the browser
@@ -48,10 +48,11 @@ application updates. The cockpit shows a warning above both editors while it has
 
 ## When it applies
 
-A grant applies only to a cockpit that runs with `HSQ_REMOTE=1` (`CEZ_REMOTE` fallback), binds loopback (the `127.0.0.1`
+A grant applies only to a cockpit that runs with `HSQ_REMOTE=1` or `CEZ_REMOTE=1`, binds loopback (the `127.0.0.1`
 default) and listens on the granted port. A cockpit bound to any other address keeps settings
 read-only, because a direct connection to its port would skip the deployment's authentication. A
-local cockpit edits settings without a grant.
+local cockpit edits settings without a grant. The two remote flags use OR:
+`HSQ_REMOTE=0` cannot disable `CEZ_REMOTE=1`, so that cockpit still needs a grant.
 
 Squawk never infers the permission from the network: a private address, a LAN client or an
 installed Tailscale grants nothing. The deployment in front of the cockpit decides who gets in.

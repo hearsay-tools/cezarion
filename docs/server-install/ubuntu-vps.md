@@ -8,7 +8,8 @@ Host the Squawk cockpit on a bare Ubuntu/Debian server, reachable over the
 internet, behind a login and (optionally) HTTPS.
 
 **How it's wired:** Squawk itself stays **loopback-bound** (`127.0.0.1:4321`,
-`HSQ_REMOTE=1` (`CEZ_REMOTE` fallback)). **nginx** is the only public surface — it terminates TLS,
+`HSQ_REMOTE=1` or `CEZ_REMOTE=1`). Either flag enables remote mode, even if the
+other is `0`. **nginx** is the only public surface — it terminates TLS,
 challenges every request with HTTP Basic-Auth, and proxies to Squawk. A systemd
 service keeps Squawk running and restarts it on boot.
 
@@ -53,6 +54,7 @@ Or from a git checkout on the box:
 ```bash
 git clone https://github.com/hearsay-tools/cezarion.git
 cd cezarion
+npm install --global pnpm@12.11.2
 pnpm install --frozen-lockfile
 npm run build
 node packages/cezar/dist/index.js server-install --platform ubuntu-vps

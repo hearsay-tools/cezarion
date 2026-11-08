@@ -1,9 +1,11 @@
 # Run history recovery
 
-Squawk imports `runs.json` once into `runs.db` and keeps the original bytes in
-`runs.json.pre-sqlite.bak`. It does not dual-write: an older Squawk sees the
-history at import, and newer Squawk ignores later writes to `runs.json`. Stop
-all older Squawk processes for the project before upgrading.
+Squawk imports legacy `runs.json` once into `runs.db` and keeps the original
+bytes in `runs.json.pre-sqlite.bak`. It does not dual-write. Pre-SQLite Cezarion
+releases (builds before [the SQLite migration](https://github.com/hearsay-tools/cezarion/commit/87f50c3065abb85d894fe457570c1777254cbbf7))
+read `runs.json` and see only the history at import. Squawk ignores their later
+writes to that file. Stop all older Cezarion and Squawk processes for the project
+before upgrading.
 
 If an import warning reports skipped or unreadable records, repair `runs.json`
 using the saved backup. Stop every Squawk process, move `runs.db`, `runs.db-wal`
@@ -21,15 +23,15 @@ Every step needs every Squawk process of the project stopped: `serve`, a headles
 2. **Restore a backup.** Move the current `runs.db`, `runs.db-wal` and `runs.db-shm` aside, copy the backed-up set into `.ai/cezar/`, start Squawk. Never mix a `runs.db` with another copy's `-wal`.
 3. **Rebuild from `runs.json.pre-sqlite.bak`**. This returns the project to the history it had at the import and drops every run made since from the list. Their `runs/<id>.*` files stay on disk, and no run lists them.
    1. Move `runs.db`, `runs.db-wal` and `runs.db-shm` aside. If you want the newer runs back later, keep the set and use step 4 on it.
-   2. Move `.ai/cezar/runs.json` aside, then copy `.ai/cezar/runs.json.pre-sqlite.bak` to `.ai/cezar/runs.json`. Moving only the database makes the next start import whatever `runs.json` holds, which may be a file an older Squawk changed.
+   2. Move `.ai/cezar/runs.json` aside, then copy `.ai/cezar/runs.json.pre-sqlite.bak` to `.ai/cezar/runs.json`. Moving only the database makes the next start import whatever `runs.json` holds, which may be a file a pre-SQLite Cezarion release changed.
    3. Start Squawk. It imports the file once and writes a fresh `runs.db`.
-4. **Export `runs.db` as `runs.json`** (read the new history, or hand it to an older Squawk). With Node 24.21.0 or newer:
+4. **Export `runs.db` as `runs.json`** (read the new history, or hand it to a pre-SQLite Cezarion release). With Node 24.21.0 or newer:
 
    ```bash
    node --input-type=module -e "import { DatabaseSync } from 'node:sqlite'; import { writeFileSync } from 'node:fs'; const db = new DatabaseSync('.ai/cezar/runs.db', { readOnly: true }); const rows = db.prepare('SELECT data FROM runs ORDER BY created_at, id').all(); writeFileSync('runs.export.json', '[' + rows.map((row) => row.data).join(',') + ']'); console.log(rows.length + ' runs')"
    ```
 
-   `runs.export.json` is the same array of `RunRecord` that `runs.json` always was. To downgrade with the new history, move the current `runs.json` aside and put the export in its place as `.ai/cezar/runs.json`, then start the older Squawk. Leave `runs.db` where it is: the older Squawk does not read it.
+   `runs.export.json` is the same array of `RunRecord` that `runs.json` always was. To downgrade to a pre-SQLite Cezarion release with the new history, move the current `runs.json` aside and put the export in its place as `.ai/cezar/runs.json`, then start that release. Leave `runs.db` where it is: pre-SQLite releases do not read it. SQLite-backed Cezarion and Squawk releases still read `runs.db`; replacing `runs.json` does not downgrade their database.
 5. **Re-upgrade after a downgrade, keeping both histories.** Export as in step 4, then merge by run id. This example keeps the `runs.db` copy when both files hold the same id, so choose the order for your case:
 
    ```bash
@@ -48,8 +50,8 @@ Every step needs every Squawk process of the project stopped: `serve`, a headles
 | `busy` | Another Squawk process held the write lock beyond about 3.5 s at boot, or longer than one attempt on a lazy open | Wait for the other process to finish or stop it, then restart. |
 | `permission` | The data directory, `runs.db` or the backup cannot be read or written | Give your user read and write access to `.ai/cezar/`, then restart. |
 | `disk-full` | No space for `runs.db` or the backup | Free disk space, then restart. |
-| `unsupported-schema` | `runs.db` was written by a newer Squawk | Upgrade Squawk. An older Squawk must not write that file; step 4 exports it for a downgrade. |
-| `legacy-writer` | A live older Squawk serves the project, or `runs.json` changed during the import | Stop every older Squawk process of the project, then restart. Nothing was imported, so the next start imports from the beginning. |
+| `unsupported-schema` | `runs.db` was written by a newer Cezarion or Squawk build | Run a build that supports that schema. An older SQLite-backed build must not write it; export in step 4 does not change its schema. To use an older SQLite-backed build, restore a compatible database backup (step 2), or keep the newer build. Step 4 applies only to pre-SQLite Cezarion downgrades. |
+| `legacy-writer` | A live pre-SQLite Cezarion process serves the project, or `runs.json` changed during the import | Stop every pre-SQLite Cezarion process of the project, then restart. Nothing was imported, so the next start imports from the beginning. |
 | `other` | Anything else, with SQLite's detail | Restart Squawk to try again. |
 
 A boot project that failed to open skips worktree pruning, scratch cleanup and run recovery for that start, so nothing is mistaken for an orphan; restart Squawk after the fix. When automations are enabled, a project whose run store cannot open launches no automation: a due occurrence waits without counting towards the three-failure auto-pause, and fires once the store opens, within the usual one-day catch-up window. With `HSQ_AUTOMATIONS=0` (`CEZ_AUTOMATIONS` fallback), the scheduler does not start. A headless `hsq run` that cannot open exits 1.

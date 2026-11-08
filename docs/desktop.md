@@ -73,7 +73,7 @@ ssh -N -L 54321:127.0.0.1:4321 user@server
 
 Then connect to `http://127.0.0.1:54321`. Other unencrypted remote addresses are
 rejected. The tunnel carries SSH's authentication and encryption; the server
-should use its remote-mode protections (`HSQ_REMOTE=1` (`CEZ_REMOTE` fallback)).
+should use its remote-mode protections (`HSQ_REMOTE=1` or `CEZ_REMOTE=1`).
 
 **Remember this connection and sign-in** is checked by default. Saved cockpits
 appear in the launcher's sidebar with their address and trusted sign-in origin
@@ -130,14 +130,18 @@ For an isolated macOS smoke test of a development build with the release switch
 off, launch its old-identity executable directly so it receives the test environment:
 
 ```sh
-HSQ_HOME="$(mktemp -d)" HSQ_DRY_RUN=1 \
+CEZ_HOME="$(mktemp -d)" HSQ_DRY_RUN=1 \
 HSQ_DESKTOP_ENTRY="$PWD/packages/cezar/dist/index.js" \
 HSQ_DESKTOP_CWD="$PWD" HSQ_DESKTOP_NO_UPDATE=1 \
 "$PWD/packages/desktop/src-tauri/target/debug/bundle/macos/Cezarion.app/Contents/MacOS/cezar-desktop"
 ```
 
-These native development settings use `HSQ_HOME` (`CEZ_HOME` fallback),
-`HSQ_DRY_RUN` (`CEZ_DRY_RUN` fallback), `HSQ_DESKTOP_ENTRY` (`CEZ_DESKTOP_ENTRY` fallback),
+With the release switch off, the native home resolver reads only `CEZ_HOME`,
+else `~/.cezar`; it ignores `HSQ_HOME`. The command pins `CEZ_HOME` to isolate
+the registry and desktop state. With the switch on, `HSQ_HOME` selects the split
+roots; see [custom homes](migration.md#custom-homes-and-containers) for `CEZ_HOME` rules.
+The other native development settings use `HSQ_DRY_RUN` (`CEZ_DRY_RUN` fallback),
+`HSQ_DESKTOP_ENTRY` (`CEZ_DESKTOP_ENTRY` fallback),
 `HSQ_DESKTOP_CWD` (`CEZ_DESKTOP_CWD` fallback) and
 `HSQ_DESKTOP_NO_UPDATE` (`CEZ_DESKTOP_NO_UPDATE` fallback).
 

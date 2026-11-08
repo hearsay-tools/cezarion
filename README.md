@@ -775,49 +775,49 @@ no one-click comparison page, automatic winner selection or automatic loser clea
 
 Every task has two settings, both on by default:
 
-- **Allow Squawk workers**: the task's agent may start Squawk workers and resume them. Each worker is a separate paid agent session. The worker limits below cap resources, not spending.
-- **Allow task messaging**: the task's agent may list, message and wait on other tasks in this project with `hsq message`.
+- **Allow cezar workers**: the task's agent may start Cezar workers and resume them. Each worker is a separate paid agent session. The worker limits below cap resources, not spending.
+- **Allow task messaging**: the task's agent may list, message and wait on other tasks in this project with `cez message`.
 
-Set them in the new-task form, in the task's header menu at any time, with `hsq task start` or `hsq run` and `--no-workers` / `--no-messaging`, or in an automation's `task.allowWorkers` / `task.allowMessaging`. A task created before these settings existed counts as on for both. The cockpit and headless `hsq run` start one private loopback listener; each eligible session receives the absolute bundled Node/CLI invocation and its own environment credentials. No `hsq` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the listener cannot start, ordinary tasks keep working without delegation tools.
+Set them in the new-task form, in the task's header menu at any time, with `cez task start` or `cez run` and `--no-workers` / `--no-messaging`, or in an automation's `task.allowWorkers` / `task.allowMessaging`. A task created before these settings existed counts as on for both. The cockpit and headless `cez run` start one private loopback listener; each eligible session receives the absolute bundled Node/CLI invocation and its own environment credentials. No `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the listener cannot start, ordinary tasks keep working without delegation tools.
 
-Turning **Allow Squawk workers** off refuses new `spawn` and `--resume` at once, including through a session's existing credential and for a spawn still waiting to be accepted. The task keeps messaging, waiting on, inspecting, collecting, stopping and destroying the workers it already has, and work already accepted finishes. Turning **Allow task messaging** off refuses peer discovery, new peer waits and new peer messages in both directions; a reply to a request accepted earlier still lands, and messages between a task and its own workers are never blocked. A root task with both off, no worker receipt and no open peer request gets no credential; worker sessions, and roots with a worker receipt (also a deleted worker's, so its retained result stays collectable) or an open peer request, keep theirs. Native subagents inside one session are not Squawk workers, and these settings do not change them. These settings are cooperative supervision, not process isolation.
+Turning **Allow cezar workers** off refuses new `spawn` and `--resume` at once, including through a session's existing credential and for a spawn still waiting to be accepted. The task keeps messaging, waiting on, inspecting, collecting, stopping and destroying the workers it already has, and work already accepted finishes. Turning **Allow task messaging** off refuses peer discovery, new peer waits and new peer messages in both directions; a reply to a request accepted earlier still lands, and messages between a task and its own workers are never blocked. A root task with both off, no worker receipt and no open peer request gets no credential; worker sessions, and roots with a worker receipt (also a deleted worker's, so its retained result stays collectable) or an open peer request, keep theirs. Native subagents inside one session are not Cezar workers, and these settings do not change them. These settings are cooperative supervision, not process isolation.
 
-`CEZ_DELEGATION` is retired and has no effect. A caller that set `CEZ_DELEGATION=1` needs no change. A caller that relied on it being unset turns the settings off per task, for example `hsq run --no-workers --no-messaging "<task>"`.
+`CEZ_DELEGATION` is retired and has no effect. A caller that set `CEZ_DELEGATION=1` needs no change. A caller that relied on it being unset turns the settings off per task, for example `cez run --no-workers --no-messaging "<task>"`.
 
 The provisioned command has these forms (the session instructions supply the absolute invocation):
 
 ```sh
-hsq worker spawn --baseline parent-head --request-id <UUID> 'Implement the assigned change'
-hsq worker spawn --baseline parent-head --request-id <UUID> --runner codex --effort high --context-file ./selected-context.txt 'Review the parser'
-hsq worker spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'
-hsq worker list                         # All own workers, revisions and cleanup resources (fetches pages automatically)
-hsq worker inspect <worker-id>
-hsq worker steer <worker-id> 'Consider this additional constraint'
-hsq worker diff <worker-id>
-hsq worker collect <worker-id>
-hsq worker wait <worker-id> --mode one --timeout-seconds 600
-hsq worker wait <first-id> <second-id> --mode any --timeout-seconds 600
-hsq worker wait <first-id> <second-id> --mode all --timeout-seconds 600
-hsq worker cancel-wait <wait-id>
-hsq message request <recipient-run-id> 'Please check this decision' --id <message-UUID>
-hsq worker resume <worker-id> 'Correct the returned result' --id <new-message-UUID>
-hsq message progress <recipient-run-id> 'Parser tests pass' --id <message-UUID>
-hsq message follow-up <recipient-run-id> 'Include empty input' --id <message-UUID> --request-id <request-UUID>
-hsq message reply <recipient-run-id> 'Checked; empty input is covered' --id <message-UUID> --request-id <request-UUID>
-hsq message conversation <recipient-run-id>
-hsq message wait --request <request-UUID> --request <another-request-UUID> --mode all
-hsq message wait --peer <task-id> --timeout-seconds 1800   # Wake on that peer task's next message, or when it settles
-hsq message inbox
-hsq message tasks --all
-hsq message cancel-wait <wait-id>
-hsq message cancel-request <request-UUID>
-hsq worker stop <worker-id>
-hsq worker destroy <worker-id>
+cez worker spawn --baseline parent-head --request-id <UUID> 'Implement the assigned change'
+cez worker spawn --baseline parent-head --request-id <UUID> --runner codex --effort high --context-file ./selected-context.txt 'Review the parser'
+cez worker spawn --baseline parent-head --request-id <UUID> --workflow review 'Review the parser change'
+cez worker list                         # All own workers, revisions and cleanup resources (fetches pages automatically)
+cez worker inspect <worker-id>
+cez worker steer <worker-id> 'Consider this additional constraint'
+cez worker diff <worker-id>
+cez worker collect <worker-id>
+cez worker wait <worker-id> --mode one --timeout-seconds 600
+cez worker wait <first-id> <second-id> --mode any --timeout-seconds 600
+cez worker wait <first-id> <second-id> --mode all --timeout-seconds 600
+cez worker cancel-wait <wait-id>
+cez message request <recipient-run-id> 'Please check this decision' --id <message-UUID>
+cez worker resume <worker-id> 'Correct the returned result' --id <new-message-UUID>
+cez message progress <recipient-run-id> 'Parser tests pass' --id <message-UUID>
+cez message follow-up <recipient-run-id> 'Include empty input' --id <message-UUID> --request-id <request-UUID>
+cez message reply <recipient-run-id> 'Checked; empty input is covered' --id <message-UUID> --request-id <request-UUID>
+cez message conversation <recipient-run-id>
+cez message wait --request <request-UUID> --request <another-request-UUID> --mode all
+cez message wait --peer <task-id> --timeout-seconds 1800   # Wake on that peer task's next message, or when it settles
+cez message inbox
+cez message tasks --all
+cez message cancel-wait <wait-id>
+cez message cancel-request <request-UUID>
+cez worker stop <worker-id>
+cez worker destroy <worker-id>
 ```
 
-Use `hsq message --help` for messaging commands. Use `hsq worker --help` to list worker operations and flags, or `hsq worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, runner, model, effort and workflow when retrying a lost response. `--runner` and its alias `--backend` count as the same field, so a retry may switch spelling. A parent holds at most 32 outstanding workers: accepted, live, or not yet verifiably destroyed. A verified destroy (`hsq worker destroy`, or **Clean up** on a finished worker in the cockpit's Workers list) frees a slot; incomplete cleanup keeps its slot until a retry completes. A parent can create at most 1,024 workers in total; past that, start a new task. These limits bound disk resources and runaway spawning, not spending: a worker can be resumed with Continue, and destroying it does not undo charges already made. Cost stays bounded by `maxParallel` and by stopping the parent. There are at most 32 undelivered steering messages per worker.
+Use `cez message --help` for messaging commands. Use `cez worker --help` to list worker operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, runner, model, effort and workflow when retrying a lost response. `--runner` and its alias `--backend` count as the same field, so a retry may switch spelling. A parent holds at most 32 outstanding workers: accepted, live, or not yet verifiably destroyed. A verified destroy (`cez worker destroy`, or **Clean up** on a finished worker in the cockpit's Workers list) frees a slot; incomplete cleanup keeps its slot until a retry completes. A parent can create at most 1,024 workers in total; past that, start a new task. These limits bound disk resources and runaway spawning, not spending: a worker can be resumed with Continue, and destroying it does not undo charges already made. Cost stays bounded by `maxParallel` and by stopping the parent. There are at most 32 undelivered steering messages per worker.
 
-An incomplete destroy reports the remaining resources and a reason. Squawk retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `hsq worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Squawk leaves ambiguous or replaced resources in place for operator review.
+An incomplete destroy reports the remaining resources and a reason. Cezarion retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `cez worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Cezarion leaves ambiguous or replaced resources in place for operator review.
 
 `--workflow <name>` runs a catalog workflow inside the worker: the built-in `quick-task` or any `.ai/cezar/workflows/*.yaml` by name, with its agent and check steps, `skill:` bodies and `onFail` loops, so a repo's `review.yaml` becomes a dedicated reviewer. Omitted `--workflow` runs `quick-task` exactly as before. `--runner`, `--model` and `--effort` fill only the steps that leave those fields unset; a step's own `allowedTools`/`bashAllowlist` narrow the parent's grants and never widen them. An unknown name is refused. Agent steps may mix runners: at spawn every agent step is resolved and pinned separately, so an implement-with-codex, review-with-claude chain runs each step under its own runner, account, model, effort and grants. A step's optional `agentProfile` names the account it runs under (an id the registry does not know is refused); same-runner steps otherwise inherit the parent's account and other runners resolve their project/default one. Run-level columns show the first agent step.
 
@@ -825,7 +825,7 @@ Explicit default-account model pins are checked against a fresh, nonempty host c
 
 Omitted `--runner` inherits the parent's active runner. Same-runner workers inherit omitted model/account/effort; `--runner <claude|codex|opencode|pi|cursor|omp>` selecting another runner resolves that runner's project/default account and model without forwarding another provider's settings. `--backend` is a permanent alias of `--runner`; giving both with different values is refused as `invalid_input`. Worker `inspect` and `collect` still report the selected runner in a field named `backend`. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-runner and mixed-runner spawn; omitted `--effort` still inherits the parent pin on same-runner spawn and drops it on mixed-runner spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
 
-Wait registers immediately. End the parent turn to release scheduler capacity; Squawk resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
+Wait registers immediately. End the parent turn to release scheduler capacity; Cezarion resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
 
 Parents and owned workers can converse in both directions; a worker may address only its parent. `send --kind request` opens a reply obligation whose ID is the message ID; `send --kind progress` (or `progress`) does not. Follow-ups clarify an existing request; only an explicit correlated `reply` settles it as replied. Retry a message with the same ID and exact payload, including deadline duration; changed payloads are rejected. Acceptance, provider delivery, reply, and task completion are separate facts, visible in the task transcript and `conversation` JSON.
 
@@ -833,7 +833,7 @@ Messages allow 100,000 characters each, with at most 32 undelivered inputs per r
 
 Messages reach a live recipient as soon as they are accepted, including mid-turn: Claude, Codex, Pi, OMP and OpenCode steer them into the running turn, and the model reads them at its next step. Cursor delivers at the turn boundary, because a second prompt would cancel its running turn. Pending conversations go together, in order, up to 32 messages and 100,000 formatted characters per batch; a single valid message is never split. Every message keeps its ID, sender, delivery receipt and request outcome; receipts show queued, delivered and read (when the agent's harness can tell) separately. A pending human question holds messages until it is answered, then they follow right behind the answer. The thread's Details distinguish creation, delivery confirmation and event-recording times.
 
-Sending a message to a review or terminal participant reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `hsq worker resume` to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; resuming after a rejected message requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
+Sending a message to a review or terminal participant reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `cez worker resume` to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; resuming after a rejected message requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
 
 Collect returns the worker's execution revision, status/outcome, `settled` and `partial` flags, and typed availability for assistant summary, HEAD, bounded diff and artifact descriptors. Missing evidence is explicit; running output is partial. An available `diff.path` points to a **JSON result file** containing `{ result, diffSnapshot }`; its `diffSnapshot` field holds the patch. Read and review that field before applying any changes. The latest collected result is stored under the parent and survives restart. Collection acknowledges observation, not Git integration or successful work. Review desired worker commits and deliberately integrate them into the parent before destroying their worktrees/branches; there is no automatic merge.
 
@@ -841,41 +841,41 @@ Parent completion requires collection of every worker's latest settled execution
 
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
-Provisioned root tasks and workers may use native subagents, and each mechanism has its own purpose. Use native subagents for work that needs no separate worktree: research, code reading and focused analysis, for example a subagent that reads the parser and summarizes its error handling. Native subagents need no worker creation, worktree, collection or destruction. Use Squawk workers for work that needs its own worktree, its own commits or a tracked lifecycle. Workers may use native subagents too, but cannot spawn Squawk workers. An agent may message its own subagents with its runner's tools; it reaches another Squawk task only through `hsq message`. Where a runner's native tool for reaching another session is separate from subagent messaging, a per-run adapter control turns it off: Codex's cross-thread message board, and an OpenCode plugin that refuses a `task` call whose `task_id` names a session outside the caller's own session tree. Claude sessions refuse messages from other sessions on every launch. Known limitations: a Claude session Squawk starts can still list and message Claude sessions that Squawk did not start, and sessions on other machines; an OpenCode session that an older Squawk created under delegation keeps its `task` deny on Continue and restart recovery, because OpenCode cannot remove a session permission rule (new OpenCode sessions allow subagents). See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. When the listener is unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its session credentials authorize only what that session may do: a root manages its own workers and messages peer roots in the same project, subject to the task's settings and relationship checks; a worker addresses only its parent. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot spawn Squawk workers or message peers through Squawk. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
+Provisioned root tasks and workers may use native subagents, and each mechanism has its own purpose. Use native subagents for work that needs no separate worktree: research, code reading and focused analysis, for example a subagent that reads the parser and summarizes its error handling. Native subagents need no worker creation, worktree, collection or destruction. Use Cezarion workers for work that needs its own worktree, its own commits or a tracked lifecycle. Workers may use native subagents too, but cannot spawn Cezarion workers. An agent may message its own subagents with its runner's tools; it reaches another Cezarion task only through `cez message`. Where a runner's native tool for reaching another session is separate from subagent messaging, a per-run adapter control turns it off: Codex's cross-thread message board, and an OpenCode plugin that refuses a `task` call whose `task_id` names a session outside the caller's own session tree. Claude sessions refuse messages from other sessions on every launch. Known limitations: a Claude session Cezarion starts can still list and message Claude sessions that Cezarion did not start, and sessions on other machines; an OpenCode session that an older Cezarion created under delegation keeps its `task` deny on Continue and restart recovery, because OpenCode cannot remove a session permission rule (new OpenCode sessions allow subagents). See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. When the listener is unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its session credentials authorize only what that session may do: a root manages its own workers and messages peer roots in the same project, subject to the task's settings and relationship checks; a worker addresses only its parent. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot spawn Cezarion workers or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
-## From the terminal: `hsq task` and `hsq message`
+## From the terminal: `cez task` and `cez message`
 
-`hsq task` starts, watches and steers tasks **in the running cockpit** from a shell — for you, or
+`cez task` starts, watches and steers tasks **in the running cockpit** from a shell — for you, or
 for a bot driving one. Every command prints one JSON object and exits with a code the caller can
 branch on, so nothing has to parse prose. It never starts a server: it finds the cockpit whose
 project registry holds this checkout (ports 4321–4370; a task worktree resolves to its parent
-project), or you point it at one with `--url` / `HSQ_URL` (`CEZ_URL` fallback).
+project), or you point it at one with `--url` / `CEZ_URL`.
 
 ```text
-hsq task [--url <origin> | --repo <dir>] <operation> …
+cez task [--url <origin> | --repo <dir>] <operation> …
 ```
 
 The shared `--url`, `--repo` and `--help`/`-h` flags also work before the operation;
 `--url` and `--repo` accept both `--flag value` and `--flag=value`. A shared flag repeated
 before the operation or on both sides is a usage error. Operation flags stay after the
-operation. `hsq task --help <operation>` shows that operation's help without discovery.
-An explicit `--url` wins over `HSQ_URL` (`CEZ_URL` fallback); `--repo` selects the checkout to discover.
+operation. `cez task --help <operation>` shows that operation's help without discovery.
+An explicit `--url` wins over `CEZ_URL`; `--repo` selects the checkout to discover.
 
-`hsq task send` is human input. It can answer a pending human question. It refuses
-inside a task (`HSQ_TASK_ID` (`CEZ_TASK_ID` fallback) is set). Agents use `hsq message` for task messages,
+`cez task send` is human input. It can answer a pending human question. It refuses
+inside a task (`CEZ_TASK_ID` is set). Agents use `cez message` for task messages,
 including peer and parent/worker conversations; see [Owned workers](#owned-workers).
 
 ```bash
-id=$(hsq task start --task-file - <<'EOF' | jq -r .id
-Fix the `hsq task` docs. Keep $(example) and "quotes" literal.
+id=$(cez task start --task-file - <<'EOF' | jq -r .id
+Fix the `cez task` docs. Keep $(example) and "quotes" literal.
 EOF
 )
-hsq task wait "$id" --timeout-seconds 900                     # 0 done/review/needs you · 1 failed · 3 timeout
-hsq task list                                                # currentStepId (running), pullRequestUrl (done/review), capped error (failed)
-hsq task status "$id"                                       # slim JSON: status, attention, question, branch, handoffUrl…
-hsq task send "$id" 'Use the retry helper instead'            # delivered live, queued before start
-hsq task send "$id" --resume 'Continue with the next step'    # resumed: reopen a settled session
-hsq task log "$id" --follow --timeout-seconds 300             # JSON lines until it needs you or ends
+cez task wait "$id" --timeout-seconds 900                     # 0 done/review/needs you · 1 failed · 3 timeout
+cez task list                                                # currentStepId (running), pullRequestUrl (done/review), capped error (failed)
+cez task status "$id"                                       # slim JSON: status, attention, question, branch, handoffUrl…
+cez task send "$id" 'Use the retry helper instead'            # delivered live, queued before start
+cez task send "$id" --resume 'Continue with the next step'    # resumed: reopen a settled session
+cez task log "$id" --follow --timeout-seconds 300             # JSON lines until it needs you or ends
 ```
 
 `list --status` accepts comma-separated values: `queued`, `running`, `waiting`, `review`,
@@ -888,18 +888,18 @@ a closed session returns `delivery: not-delivered` and the `next` command. For m
 shell-sensitive messages use `send <id> --text-file <path|->` (`-` reads stdin); the quoting
 rules below apply to messages too.
 
-Use `--task-file PATH` to read a saved task (for example, `hsq task start --task-file task.md`),
+Use `--task-file PATH` to read a saved task (for example, `cez task start --task-file task.md`),
 or `--task-file -` to read stdin as above. The quoted heredoc delimiter (`<<'EOF'`) keeps
 backticks and `$()` literal in the task text.
 
 POSIX shells, including Bash, expand backticks and `$()` in double-quoted arguments before
-hsq receives the text. **Do not put raw backticks in double-quoted task arguments.** This can
+cez receives the text. **Do not put raw backticks in double-quoted task arguments.** This can
 execute parts of your prompt as shell commands and leave holes in the stored task, including
 when starting tasks through SSH and `bash -lc`. Prefer a task file or stdin with a quoted
 heredoc delimiter. A single-quoted positional argument still works for short tasks:
-`hsq task start 'Fix the typo'`.
+`cez task start 'Fix the typo'`.
 
-`hsq task start --task-file task.md --skill <name>` names one skill as the task's agent step;
+`cez task start --task-file task.md --skill <name>` names one skill as the task's agent step;
 `--skill` and `--workflow` are mutually exclusive. The CLI checks `GET /skills` first and
 includes a `warning` in its JSON result if the skill is missing or the catalog cannot be
 checked; it still starts the run. Like a cockpit skill start, if the skill is missing at
@@ -908,13 +908,13 @@ the cockpit composer's recent picks or skill-usage ranking.
 Without either flag, `start` still runs `quick-task`.
 
 `--runner <claude|codex|opencode|pi|cursor|omp>` picks the runner, as in a workflow step and
-`hsq discover --runner`; `--model` and `--effort` pin the rest. `--backend` is a permanent
+`cez discover --runner`; `--model` and `--effort` pin the rest. `--backend` is a permanent
 alias of `--runner` with no warning. Giving both with different values exits 64.
 
 `--archive-when-done` archives the task after **Done**. `--auto-merge-pr` merges its
 PR after **Done** only when current-head CI and GitHub rules pass. It can mark a
 draft PR ready. Both controls are off by default. They also appear as switches in
-the task composer and task details. With both on, Squawk merges before it archives;
+the task composer and task details. With both on, Cezarion merges before it archives;
 without a PR, it archives on Done. Pending or blocked completion actions show their
 reason in task details. Use `status <id> --full` to read the saved `archiveWhenDone`,
 `autoMergePr` and `completionAction` fields. Existing task choices can be changed
@@ -932,7 +932,7 @@ Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, a
 Exit codes:
 `0` ok (`wait`/`start --wait`/`log --follow`: the task ended `done`/`review` or stopped for attention), `1` task
 failed/cancelled or a message was not delivered, `2` no cockpit or the cockpit refused (its `error`
-is passed through), `3` timed out, `64` usage error. `hsq task --help` lists every flag.
+is passed through), `3` timed out, `64` usage error. `cez task --help` lists every flag.
 
 **When a task needs you.** `status`, `list`, `wait` and the final `log --follow` line carry `attention` and `attentionLabel`,
 derived by the same function the cockpit's Needs You uses, so the CLI and the cockpit cannot
@@ -955,12 +955,12 @@ disagree. Read those rather than the raw status:
 `--autonomous` runs, or a bot that wants an outcome:
 
 ```bash
-hsq task wait "$id"                                        # stops when the task needs you, or ends
-hsq task wait "$id" --until settled                        # done/review/failed/cancelled only
-hsq task start --task-file task.md --wait                  # returns as soon as the agent parks
-hsq task start --task-file task.md --wait --autonomous --until settled   # runs to completion
-hsq task log "$id" --follow                                # streams until the task needs you, or ends
-hsq task log "$id" --follow --until settled                # streams until done/review/failed/cancelled
+cez task wait "$id"                                        # stops when the task needs you, or ends
+cez task wait "$id" --until settled                        # done/review/failed/cancelled only
+cez task start --task-file task.md --wait                  # returns as soon as the agent parks
+cez task start --task-file task.md --wait --autonomous --until settled   # runs to completion
+cez task log "$id" --follow                                # streams until the task needs you, or ends
+cez task log "$id" --follow --until settled                # streams until done/review/failed/cancelled
 ```
 
 *Migrating from `--until settled`.* Before 0.16, `wait` and `start --wait` defaulted to
@@ -970,7 +970,7 @@ parked within seconds. The default is now `attention`. A bot that polls for term
 run in the `wait` output (and the `start --wait` object) now carries `attention` +
 `attentionLabel`, and the output's top level says which `until` was in force, so a caller can tell
 "parked for follow-up" (`status: waiting`, `attention: waiting`) from "finished" (`status: done`,
-`attention: none`) without knowing Squawk's status vocabulary.
+`attention: none`) without knowing Cezarion's status vocabulary.
 
 *`log --follow` (#931).* `log --follow` used to stop on a terminal status only, so tailing an
 interactive task streamed until `--timeout-seconds` and exited 3 after the agent had parked. It
@@ -987,20 +987,20 @@ each such webhook when it enters a state that webhook selects: **Needs you**, **
 **Waiting** (a timer) and **Any other wait** when you tick them. A question that puts the task in
 Needs you is `task.question`; every other entry is `task.status`, and the body's `state` names the
 state. `task.subscribed` (when it opts in, at start or on hand-off) and **Send test** always go out.
-Each body carries the same slim projection `hsq task status` prints, under `task`. `hsq task start`
+Each body carries the same slim projection `cez task status` prints, under `task`. `cez task start`
 opts in whenever the project has a webhook (`--no-notify` to skip it); the cockpit's New task form
 has a **Notify webhook** toggle; and a running task's **Hand off** button (or
-`hsq task notify <id> --message '…'`) turns it on later with a note for the bot. `notify` (and
+`cez task notify <id> --message '…'`) turns it on later with a note for the bot. `notify` (and
 `send --notify`) on a worker's id is a usage error that names the parent to notify instead;
 `notify --off` still works on one. The note goes to
 the webhook only, never to the agent. Delivery is best-effort: 10 s timeout, 3 attempts, and a
-failure shows in the thread without touching the task. The token is stored in `<config>` and never
-sent back to a browser. Under `HSQ_DRY_RUN=1` (`CEZ_DRY_RUN` fallback) nothing is sent; the payload is logged in the thread.
+failure shows in the thread without touching the task. The token is stored in `~/.cezar` and never
+sent back to a browser. Under `CEZ_DRY_RUN=1` nothing is sent; the payload is logged in the thread.
 
 A project can hold several webhooks, each with its own states, and each body names the webhook it
 went to under `webhook`. One failing webhook never delays or stops another.
 
-### Reports from agents: `hsq webhook`
+### Reports from agents: `cez webhook`
 
 Turn on **Let agents send reports** for a webhook, and agents in that project can send it a report
 on demand: a friction report to a triage bot instead of a new GitHub issue, for example. Agents see
@@ -1009,32 +1009,32 @@ instructions ("Send friction you hit with tools here instead of filing a GitHub 
 without that switch cannot be reached this way.
 
 ```sh
-hsq webhook list                                         # the webhooks open to agents
-hsq webhook send 'Friction reports' --message-file report.md --title 'Squeal skipped an edit'
-hsq webhook send <name|id> --message 'Short report' [--data '{"severity":"low"}']
+cez webhook list                                         # the webhooks open to agents
+cez webhook send 'Friction reports' --message-file report.md --title 'Squeal skipped an edit'
+cez webhook send <name|id> --message 'Short report' [--data '{"severity":"low"}']
 ```
 
 The body is `event: "agent.report"` with `webhook`, `title`, the Markdown `message`, your `data`,
 and the reporting task's `runId`, thread `url` and `task` projection. The command prints the
 outcome as JSON and exits 0 delivered, 1 not delivered, 2 refused or no cockpit, 64 usage.
 
-### Automations from a task: `hsq automation`
+### Automations from a task: `cez automation`
 
-`hsq automation` creates and manages automations (on by default; `HSQ_AUTOMATIONS=0` (`CEZ_AUTOMATIONS` fallback) disables them) on the cockpit that
+`cez automation` creates and manages automations (on by default; `CEZ_AUTOMATIONS=0` disables them) on the cockpit that
 runs the task, so an agent asked to "do X every morning" or "whenever a PR opens" sets up an
-automation instead of a cron job. Like `hsq task`, it prints one JSON object per invocation and
+automation instead of a cron job. Like `cez task`, it prints one JSON object per invocation and
 exits 0 ok, 1 check failed, 2 refused or no cockpit, 3 check timed out, 64 usage.
 
 ```sh
-hsq automation schema                                    # the definition reference (needs no cockpit)
-hsq automation add --name 'Weekday triage' --cron '0 7 * * 1-5' --prompt 'Triage new issues'
-hsq automation add --name 'Review PRs' --on pull_request.opened --every 5m --label bug --prompt-file p.md
-hsq automation add --name 'Agent triage' --on issue.labeled --changed-label needs-agent --prompt 'Triage #{{github.number}}'
-hsq automation create --file def.json [--enable]         # full JSON form; stdin when no flag is given
-hsq automation update <id> --json '{"task":{"prompt":"…"}}'
-hsq automation add --name 'Check the rollout' --at 2026-10-29T09:00 --tz Europe/Warsaw --prompt 'Check the rollout'
-hsq automation add --name 'Follow up' --in 7d --latest-start 6h --prompt 'Follow up on the migration'
-hsq automation check <id> [--execute] · run <id> · list [--archived include|only] · show <id> · enable <id> · pause <id> · cancel <id> · delete <id>
+cez automation schema                                    # the definition reference (needs no cockpit)
+cez automation add --name 'Weekday triage' --cron '0 7 * * 1-5' --prompt 'Triage new issues'
+cez automation add --name 'Review PRs' --on pull_request.opened --every 5m --label bug --prompt-file p.md
+cez automation add --name 'Agent triage' --on issue.labeled --changed-label needs-agent --prompt 'Triage #{{github.number}}'
+cez automation create --file def.json [--enable]         # full JSON form; stdin when no flag is given
+cez automation update <id> --json '{"task":{"prompt":"…"}}'
+cez automation add --name 'Check the rollout' --at 2026-10-29T09:00 --tz Europe/Warsaw --prompt 'Check the rollout'
+cez automation add --name 'Follow up' --in 7d --latest-start 6h --prompt 'Follow up on the migration'
+cez automation check <id> [--execute] · run <id> · list [--archived include|only] · show <id> · enable <id> · pause <id> · cancel <id> · delete <id>
 ```
 
 `add` and `create` send the same body and create the automation **paused** unless `--enable` is
@@ -1045,7 +1045,7 @@ and echoes the revision it read, so a concurrent edit in the cockpit is refused 
 overwritten. Mutating commands print the automation's cockpit page as `url`.
 
 `add` accepts `--archive-when-done` and `--auto-merge-pr` with the same behavior as
-`hsq task start`. The JSON keys are `task.archiveWhenDone` and `task.autoMergePr`.
+`cez task start`. The JSON keys are `task.archiveWhenDone` and `task.autoMergePr`.
 Both are optional booleans and default to off. The automation editor has the same
 switches. Editing these choices affects future tasks only; it does not change tasks
 the automation already launched. Enabling an automation or making its tasks autonomous
@@ -1068,17 +1068,17 @@ receipts prevent those repeated observations from launching duplicate tasks.
 A **one-time schedule** (**Once** in the editor, `--at` or `--in` on `add`, `"schedule":
 {"type": "once", "at": "2026-10-29T09:00", "timeZone": "Europe/Warsaw"}` in JSON) starts one
 ordinary task at a wall-clock time in an explicit IANA zone. It is created paused like every
-automation; **Enable** arms it. When it is due, Squawk starts the task and moves the schedule to
+automation; **Enable** arms it. When it is due, Cezarion starts the task and moves the schedule to
 **Archived** with a link to that task; **Run now** does the same at once, so it never runs twice.
 **Cancel** archives it without a task. An archived schedule cannot change, and the list hides it
-until you pick the **Archived** filter. Squawk must be running at the due time. If it was not,
+until you pick the **Archived** filter. Cezarion must be running at the due time. If it was not,
 the schedule starts on the next boot only within its **Latest start** (no limit by default; 10
 minutes to 30 days); after that it is marked **Missed** and stays until you edit, cancel or run it.
 A launch that fails marks it **Failed**, and nothing retries on its own; **Retry** or **Run now**
 relaunches the same receipt, so one schedule starts at most one task. Agents can create and manage
 one-time schedules with the `cezar_schedule_task` and `cezar_scheduled_tasks` tools, which exist
-by default unless `HSQ_AUTOMATIONS=0` (`CEZ_AUTOMATIONS` fallback) and also create schedules paused unless the user asked for them to run.
-These tools take and answer the due time in UTC, like every other time in a Squawk tool; the
+by default unless `CEZ_AUTOMATIONS=0` and also create schedules paused unless the user asked for them to run.
+These tools take and answer the due time in UTC, like every other time in a Cezar tool; the
 schedule keeps a wall time in the cockpit's time zone, so the cockpit shows it in local time.
 
 Automation list counters use two windows. **Launched** counts every stored task with that
@@ -1087,8 +1087,8 @@ archived tasks. Restarting or compacting automation logs and receipts does not c
 deleting a task removes it from the count. **Matches**, **Duplicates** and **Errors** describe
 only that automation's latest 100 activity-log rows. Recent activity remains a separate log view.
 
-The address comes from `HSQ_COCKPIT_URL` (`CEZ_COCKPIT_URL` fallback) and `HSQ_PROJECT_ID` (`CEZ_PROJECT_ID` fallback), which the cockpit puts in a task's
-environment. Without them, only an explicit `--url`, `--repo` or `HSQ_URL` (`CEZ_URL` fallback) looks for a cockpit;
+The address comes from `CEZ_COCKPIT_URL` and `CEZ_PROJECT_ID`, which the cockpit puts in a task's
+environment. Without them, only an explicit `--url`, `--repo` or `CEZ_URL` looks for a cockpit;
 otherwise the command exits 2 and never starts a server. With automations off, the cockpit's `409`
 is relayed verbatim (exit 2).
 
@@ -1122,7 +1122,7 @@ back, its failing output is appended to the retried agent's prompt so the next
 attempt can see what broke.
 
 Agent steps have no wall-clock limit by default, including steps before a check or
-another agent. This applies to cockpit tasks, owned workers and `hsq run`, on every
+another agent. This applies to cockpit tasks, owned workers and `cez run`, on every
 runner. Non-final agent steps still close after their turn and advance the chain.
 An authored agent step may opt into `timeoutMs`: an integer from `0` to `2147483647`
 milliseconds, with `0` disabling the cap. A positive limit measures the entire
@@ -1149,14 +1149,14 @@ skills: [reproduce, root-cause, implement, self-review]
 
 ## How it runs agents
 
-Squawk shells out to your locally installed, logged-in agent CLI —
+Cezarion shells out to your locally installed, logged-in agent CLI —
 **your subscription, no API key**. With the default Claude Code backend that
 means headless `stream-json` mode, tool access via `--allowedTools`, with
 unapproved tools denied without prompting (`--permission-mode dontAsk`) inside
 the task's worktree — but note the zero-config default list (`Read`, `Edit`,
 `Write`, `Grep`, `Glob`, `Bash`) grants unrestricted `Bash` unless a step sets
 `bashAllowlist`, so treat a run as having full shell access in its worktree,
-not a sandboxed allowlist. Set `HSQ_APPROVAL_GATE=1` (`CEZ_APPROVAL_GATE` fallback) to opt into Claude's
+not a sandboxed allowlist. Set `CEZ_APPROVAL_GATE=1` to opt into Claude's
 interactive approval UI. Codex, OpenCode and Cursor are driven through their
 own native protocols and don't honor `allowedTools` at all; OpenCode's own
 permission config decides what it asks. pi and OMP map `allowedTools` onto
@@ -1166,7 +1166,7 @@ locks down. Nothing runs on a server you don't own.
 
 Live Preview lets Chromium use host graphics when available. Chromium selects the
 backend and falls back to software when hardware is unavailable or blocked. This
-needs no Squawk setting or VirGL-specific setup. On Linux, GPU access may also
+needs no Cezarion setting or VirGL-specific setup. On Linux, GPU access may also
 need a working display in the cockpit process environment. JPEG streaming is
 unchanged; GPU rendering does not guarantee hardware frame encoding.
 
@@ -1174,7 +1174,7 @@ Useful environment variables:
 
 | Var | Effect |
 |---|---|
-| `HSQ_*` settings (`CEZ_*` fallback) | Ordinary settings prefer a defined HSQ value, including empty. Home, hosted-mode REMOTE and native shell controls use the separate rules below. Both home locators and inherited controller authority are removed from child environments, even in full-env mode. |
+| `HSQ_*` aliases below | Ordinary settings prefer a defined HSQ value, including empty. Home, hosted-mode REMOTE and native shell controls use the separate rules below. Both home locators and inherited controller authority are removed from child environments, even in full-env mode. |
 | `CEZ_DELEGATION` | Retired (hearsay-tools/cezarion#2784); has no effect. Workers and task messaging are per-task settings, both on by default. See [Owned workers](#owned-workers). |
 | `HSQ_DELEGATION_URL`, `CEZ_DELEGATION_URL`, `HSQ_DELEGATION_TOKEN`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
 | `HSQ_REMOTE`, `CEZ_REMOTE` | Hosted mode: exact `1` under either name disables local handoff and local settings administration. Empty or `0` cannot cancel the other name's hosted-mode pin. Server installers pin both names. |
@@ -1196,39 +1196,39 @@ Useful environment variables:
 | `HSQ_DESKTOP_NODE` / `CEZ_DESKTOP_NODE` | Native-shell Node executable. The HSQ name wins when present. Empty selects `node` on PATH. |
 | `HSQ_DESKTOP_NO_UPDATE=1` / `CEZ_DESKTOP_NO_UPDATE=1` | Disable signed native-shell updates. The HSQ name wins when present. Debug builds already disable updates. |
 | `HSQ_DESKTOP_DEBUG_IPC` / `CEZ_DESKTOP_DEBUG_IPC` | Debug builds only: exercise native title-bar IPC after loading the cockpit. The HSQ name wins when present. |
-| `HSQ_URL`, `CEZ_URL` | Cockpit origin for `hsq task` and operator `hsq discover` (e.g. a hosted `HSQ_REMOTE`, `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
-| `HSQ_COCKPIT_URL`, `CEZ_COCKPIT_URL`, `HSQ_PROJECT_ID`, `CEZ_PROJECT_ID` | Set by the cockpit in every agent's environment once it listens: the bound origin and the run's project. `hsq automation` calls that address; a headless `hsq run` sets neither. Do not configure them. |
+| `HSQ_URL`, `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `HSQ_REMOTE`, `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
+| `HSQ_COCKPIT_URL`, `CEZ_COCKPIT_URL`, `HSQ_PROJECT_ID`, `CEZ_PROJECT_ID` | Set by the cockpit in every agent's environment once it listens: the bound origin and the run's project. `cez automation` calls that address; a headless `cez run` sets neither. Do not configure them. |
 | `HSQ_DRY_RUN=1`, `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
-| `HSQ_AGENT_MODELS_LOCKED=1`, `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Squawk skips its credential probes and provider-disable preferences. Existing Squawk presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `<config>/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
+| `HSQ_AGENT_MODELS_LOCKED=1`, `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezarion skips its credential probes and provider-disable preferences. Existing Cezarion presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `HSQ_APPROVAL_GATE=1`, `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `HSQ_CLAUDE_PERMISSION_MODE`, `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
 | `HSQ_CLAUDE_PERMISSION_MODE`, `CEZ_CLAUDE_PERMISSION_MODE` | Claude agent-run permission flag: `dontAsk` (default), `acceptEdits`, or `bypass`. `bypass` passes `--dangerously-skip-permissions` and omits `--permission-mode`. Unset or unknown keeps today's `dontAsk` / `HSQ_APPROVAL_GATE`, `CEZ_APPROVAL_GATE` path. Provider verification commands are never given this flag. |
 | `HSQ_CLAUDE_SETTING_SOURCES`, `CEZ_CLAUDE_SETTING_SOURCES` | When set, Claude agent runs also pass `--setting-sources <value>` (e.g. `user,project,local`). Unset or empty omits the flag. Provider verification is never given this flag. |
 | `HSQ_ARCHIVE_ON_MERGE=1`, `CEZ_ARCHIVE_ON_MERGE=1` | Archive settled task families after all associated pull requests merge. Off by default; only `1` enables this environment default. Saved project settings override global Tasks settings, which override the environment. Runs in the background while the cockpit is open, including unopened projects, without starting agents. Unarchive preserves restored tasks until a later merge. |
-| `HSQ_AUTOMATIONS=0`, `CEZ_AUTOMATIONS=0` | Disable **automations** (GitHub polls and schedules). On by default; only the exact value `0` disables them. Unset, empty, `1` and other values keep them on. The Automations view and agent schedule tools are available by default. New automations start paused; each enabled automation launches an ordinary task per match or occurrence while Squawk is open. Schedules need no GitHub remote. With `0`, nothing polls or fires, automation endpoints answer `409`, and the nav item and schedule tools are hidden. Read at boot: restart after changing it. Existing enabled definitions resume after an upgrade unless you set `HSQ_AUTOMATIONS=0`, `CEZ_AUTOMATIONS=0` before restart. Definitions, receipts and high-watermarks are retained; unset the flag and restart to resume without migration. |
+| `HSQ_AUTOMATIONS=0`, `CEZ_AUTOMATIONS=0` | Disable **automations** (GitHub polls and schedules). On by default; only the exact value `0` disables them. Unset, empty, `1` and other values keep them on. The Automations view and agent schedule tools are available by default. New automations start paused; each enabled automation launches an ordinary task per match or occurrence while Cezarion is open. Schedules need no GitHub remote. With `0`, nothing polls or fires, automation endpoints answer `409`, and the nav item and schedule tools are hidden. Read at boot: restart after changing it. Existing enabled definitions resume after an upgrade unless you set `HSQ_AUTOMATIONS=0`, `CEZ_AUTOMATIONS=0` before restart. Definitions, receipts and high-watermarks are retained; unset the flag and restart to resume without migration. |
 | `HSQ_VOICE=1`, `CEZ_VOICE=1` | Turn on **voice mode** (experimental): the ⌘K palette understands a sentence such as “open the next finished task” or “answer yes”, and the server asks Jev (TypeSafe) to turn it into one action that the cockpit shows and runs. Needs `TYPESAFE_API_KEY` (read by the server only; `HSQ_DRY_RUN=1`, `CEZ_DRY_RUN=1` uses a fake engine instead). Off by default, and only the exact value `1` enables it — without it the voice endpoints answer `409` and the palette is unchanged. Read at boot, so restart after changing it. |
-| `HSQ_PREVIEW=1`, `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. Squawk first runs a registered command after you press Run and open. Agents can then use `cezar_preview_stop({ port, restart?: boolean })` to stop or restart their own Squawk-started server with that unchanged approval; changed command, cwd or path needs Run and open again. Adopted servers cannot be stopped by this tool. Each agent session also gets `HSQ_PREVIEW_CDP_URL`, `CEZ_PREVIEW_CDP_URL`, a cockpit address through which it drives the same browser (`agent-browser --cdp "$CEZ_PREVIEW_CDP_URL" --pin-tab …`) while you watch; Chromium itself opens no debug port. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
+| `HSQ_PREVIEW=1`, `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. Cezarion first runs a registered command after you press Run and open. Agents can then use `cezar_preview_stop({ port, restart?: boolean })` to stop or restart their own Cezarion-started server with that unchanged approval; changed command, cwd or path needs Run and open again. Adopted servers cannot be stopped by this tool. Each agent session also gets `HSQ_PREVIEW_CDP_URL`, `CEZ_PREVIEW_CDP_URL`, a cockpit address through which it drives the same browser (`agent-browser --cdp "$CEZ_PREVIEW_CDP_URL" --pin-tab …`) while you watch; Chromium itself opens no debug port. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
 | `HSQ_PREVIEW_NO_SANDBOX=1`, `CEZ_PREVIEW_NO_SANDBOX=1` | Launch the preview's Chromium with `--no-sandbox`. Off by default and never added automatically, not even for root or in a container; use it only where Chromium's sandbox cannot start, and only for pages you trust. Only the exact value `1` applies. Read at boot. |
-| `HSQ_AUTOSAVE=1`, `CEZ_AUTOSAVE=1` | Re-enable the periodic (90 s) autosave commit in task worktrees. Off by default (open-mercato/cezar#471) — turn-end and pre-PR flushes always run, so branches still end complete. Every autosave names its trigger in the commit subject (`Squawk autosave (periodic)` vs `(turn end)` / `(run finalize)` / `(pre-PR)`), so the flushes you keep are distinguishable from the timer you disabled. The turn-end / run-finalize flushes and the timer commit only while HEAD is the task's own `cez/<id8>` branch; on a branch the agent checked out they leave the work uncommitted, and the closing flush says so in the handoff's Squawk records block, not its Progress log (hearsay-tools/cezarion#1004, hearsay-tools/cezarion#1809). A turn-end / run-finalize commit is reported there too, with its `git reset --soft` fold-back command, and the timer's commits share one line per run of consecutive periodic commits (count, first and latest sha), with no cockpit note. The pre-PR flush is unchanged. |
+| `HSQ_AUTOSAVE=1`, `CEZ_AUTOSAVE=1` | Re-enable the periodic (90 s) autosave commit in task worktrees. Off by default (open-mercato/cezar#471) — turn-end and pre-PR flushes always run, so branches still end complete. Every autosave names its trigger in the commit subject (`cezar autosave (periodic)` vs `(turn end)` / `(run finalize)` / `(pre-PR)`), so the flushes you keep are distinguishable from the timer you disabled. The turn-end / run-finalize flushes and the timer commit only while HEAD is the task's own `cez/<id8>` branch; on a branch the agent checked out they leave the work uncommitted, and the closing flush says so in the handoff's cezar records block, not its Progress log (hearsay-tools/cezarion#1004, hearsay-tools/cezarion#1809). A turn-end / run-finalize commit is reported there too, with its `git reset --soft` fold-back command, and the timer's commits share one line per run of consecutive periodic commits (count, first and latest sha), with no cockpit note. The pre-PR flush is unchanged. |
 | `HSQ_CLAUDE_BIN=/path/to/claude`, `CEZ_CLAUDE_BIN=/path/to/claude` | Override the Claude executable for model discovery and execution. A set `HSQ_CLAUDE_BIN` wins over `CEZ_CLAUDE_BIN`; an explicit binary argument wins over both. |
 | `HSQ_CODEX_BIN=/path/to/codex`, `CEZ_CODEX_BIN=/path/to/codex` | Override which `codex` binary is used. |
 | `HSQ_OPENCODE_BIN=/path/to/opencode`, `CEZ_OPENCODE_BIN=/path/to/opencode` | Override which `opencode` binary is used. |
 | `HSQ_PI_BIN=/path/to/pi`, `CEZ_PI_BIN=/path/to/pi` | Override which `pi` binary is used. |
 | `HSQ_OMP_BIN=/path/to/omp`, `CEZ_OMP_BIN=/path/to/omp` | Override which `omp` (Oh My Pi) binary is used. |
 | `HSQ_CURSOR_BIN=/path/to/agent`, `CEZ_CURSOR_BIN=/path/to/agent` | Override the Cursor CLI (`agent`) executable. |
-| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OMP_PROFILE` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder (for omp, the profile) Squawk discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OMP_PROFILE` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder (for omp, the profile) Cezarion discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `HSQ_BROWSE_ROOT=~/`, `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `HSQ_PROJECTS_DIR=~/cezar/projects`, `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub** and **New project**. Saved workspace settings override it, and missing directories are created recursively. |
 | `HSQ_PROJECT_WARMUP=0`, `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `HSQ_AUTONOMOUS_DEFAULT=0`, `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
 | `HSQ_WORKTREE_DEFAULT=1`, `CEZ_WORKTREE_DEFAULT=1` | Seed the New Task Worktree default (`0` or `1`). Without a seed, eligible runs default on; a saved global Resources setting overrides it. |
-| `HSQ_DISABLE_REPO_LOCK=1`, `CEZ_DISABLE_REPO_LOCK=1` | **Dangerous escape hatch:** allow any run executing in the repository root — an explicit `worktree=false` run, non-Git degradation, or a continuation whose worktree cannot be restored — to proceed without Squawk’s repository-root lease. Agents can overwrite each other’s files or Git state; isolated worktree runs are unaffected. Off by default; only the exact value `1` enables it. |
+| `HSQ_DISABLE_REPO_LOCK=1`, `CEZ_DISABLE_REPO_LOCK=1` | **Dangerous escape hatch:** allow any run executing in the repository root — an explicit `worktree=false` run, non-Git degradation, or a continuation whose worktree cannot be restored — to proceed without Cezarion’s repository-root lease. Agents can overwrite each other’s files or Git state; isolated worktree runs are unaffected. Off by default; only the exact value `1` enables it. |
 | `HSQ_SINGLE_PROJECT=1`, `CEZ_SINGLE_PROJECT=1` | Opt into a launch-project-only cockpit: only the exact value `1` enables it. Project add, edit, checkout, folder browsing, and removal are refused and only the launch project is shown. Off by default; stored registry rows are retained, so unsetting it and restarting restores the full multi-project workspace without migration or data loss. |
 | `HSQ_HIDE_TOKEN_USAGE=1`, `CEZ_HIDE_TOKEN_USAGE=1` | Hide raw input/output token counts throughout the browser cockpit while leaving backend-reported cost visible. Only the exact value `1` enables it; telemetry and API payloads are unchanged, and a restart is required after changing it. |
 | `HSQ_HIDE_COST=1`, `CEZ_HIDE_COST=1` | Hide backend-reported monetary cost throughout the browser cockpit while leaving raw input/output token counts visible. Only the exact value `1` enables it; telemetry and API payloads are unchanged, and a restart is required after changing it. |
 | `HSQ_HIDE_TOKEN_METRICS=1`, `CEZ_HIDE_TOKEN_METRICS=1` | Legacy master switch that hides both token usage and cost. It takes precedence over the two independent flags; only the exact value `1` enables it, payloads are unchanged, and a restart is required. |
 | `GITHUB_TOKEN` | Fallback for GitHub reads/PRs when `gh` isn't authenticated. |
-| `HSQ_HOME=/path/to/home` (`CEZ_HOME` fallback) | Selects `config/`, `state/`, `data/`, `cache/`, and `run/` below this directory. With neither set, uses the [platform roots](docs/migration.md#home-directories). A non-default `CEZ_HOME` keeps its permanent one-root fallback; an explicit legacy-default `CEZ_HOME` uses the platform roots. Both home locators are removed from child environments. |
-| `HSQ_ENV_PASSTHROUGH=A,B`, `CEZ_ENV_PASSTHROUGH=A,B` | Forward these extra host env vars to spawned agents. `CEZ_HOME` and `HSQ_HOME` are always removed, including in full-env mode. By default agents get a least-privilege env (safe shell/toolchain vars + the backend's own auth + `GITHUB_TOKEN` + `HSQ_*` and matching `CEZ_*` aliases), not your full environment — use this to add a var an agent needs. A dev server live preview starts gets the same env without the backend's auth and `GITHUB_TOKEN`, plus these names. |
+| `HSQ_HOME=/path/to/home` | Reserved for the split home layout behind the disabled release switch. Once enabled, selects `config/`, `state/`, `data/`, `cache/`, and `run/` below this directory and takes precedence over `CEZ_HOME`. Both home locators are always removed from child environments. |
+| `HSQ_ENV_PASSTHROUGH=A,B`, `CEZ_ENV_PASSTHROUGH=A,B` | Forward these extra host env vars to spawned agents. `CEZ_HOME` and `HSQ_HOME` are always removed, including in full-env mode. By default agents get a least-privilege env (safe shell/toolchain vars + the backend's own auth + `GITHUB_TOKEN` + `CEZ_*`), not your full environment — use this to add a var an agent needs. A dev server live preview starts gets the same env without the backend's auth and `GITHUB_TOKEN`, plus these names. |
 | `HSQ_AGENT_ENV_FULL=1`, `CEZ_AGENT_ENV_FULL=1` | Escape hatch: give spawned agents, and dev servers live preview starts, the full host environment except `CEZ_HOME` and `HSQ_HOME` (pre-hardening behavior). Off by default; only set it if you understand that this hands every host secret to the agent process. |
 | `HSQ_AGENT_TMPDIR=0`, `CEZ_AGENT_TMPDIR=0` | Stop giving each task its own temp directory and hand agents the host `TMPDIR` again (pre-open-mercato/cezar#785 behavior). On by default: every run gets `TMPDIR`/`TEMP`/`TMP` pointing at `.ai/cezar/t/<task-id8>` (`.ai/cezar/tmp/<task-id>` before hearsay-tools/cezarion#1022), created and write-probed before the agent spawns, kept across session close, Continue, and restart while the task is live, and reaped at terminal completion or history deletion (hearsay-tools/cezarion#515) — and kept short enough for unix-socket paths: a checkout so deep that `.ai/cezar/t/<task-id8>` would leave no room under the kernel's socket-path limit for Chromium's singleton socket resolves it to a `cez-agent-…` directory under the system temp dir instead (hearsay-tools/cezarion#387), with its location recorded so host temp-environment changes cannot move live scratch. So concurrent tasks stop sharing one directory and a task refuses to start rather than run against a temp directory that silently swallows its shell output (see Troubleshooting below). Only an exact `0` disables it, and it disables the whole thing — the pre-spawn check included, so this stays an escape hatch you can actually take. |
 | `HSQ_REDACT_SECRETS=0`, `CEZ_REDACT_SECRETS=0` | Disable scrubbing of credential values/token shapes from the on-disk state (the NDJSON transcript and the free-text fields of the run records in `runs.db`). On by default; leave it on. Controller-generated delegation tokens are always scrubbed. Best-effort defense-in-depth, not a guarantee: it catches known token shapes and the values of your own secret-named env vars, so a credential in neither category can still get through. |
@@ -1258,11 +1258,11 @@ df -i "${TMPDIR:-/tmp}"                # a tmpfs can exhaust inodes long before 
 Under quota the file is *created* and the write then fails, so the backend reads
 back a zero-byte capture file and hands the agent an empty result.
 
-**Fix.** Since open-mercato/cezar#785 Squawk gives each task its own `TMPDIR` under
+**Fix.** Since open-mercato/cezar#785 Cezarion gives each task its own `TMPDIR` under
 `.ai/cezar/t/<task-id8>` and write-probes it before spawning, so a broken temp
 directory fails the task with `agent temp directory is not writable: …` on the
 task thread instead of corrupting its work. If you see that error, free space on
-the disk holding the repo. `HSQ_AGENT_TMPDIR=0` (`CEZ_AGENT_TMPDIR` fallback) turns the whole mechanism off —
+the disk holding the repo. `CEZ_AGENT_TMPDIR=0` turns the whole mechanism off —
 per-task directory and pre-spawn check alike — and hands agents the host
 `TMPDIR` again, which is the way out if the check itself is wrong on your
 platform.
@@ -1588,7 +1588,7 @@ starts in a ready tree:
 ```
 
 Or edit it in **Settings → Worktrees → Prepare new worktrees**, one command per line. These are
-commands the host runs, so a hosted cockpit (`HSQ_REMOTE=1` (`CEZ_REMOTE` fallback)) shows it read-only until the host
+commands the host runs, so a hosted cockpit (`HSQ_REMOTE=1` or `CEZ_REMOTE=1`) shows it read-only until the host
 operator runs `hsq remote-settings enable` ([Remote settings administration](docs/server-install/remote-settings.md)).
 
 - **When it runs.** In every new task worktree and every worker worktree, and again when Continue
@@ -1632,7 +1632,7 @@ files continue to resolve from the agent's home.
 Each file keeps its native format and vendor-documented precedence. Tracked
 files reach task worktrees after commit; Claude's gitignored personal layer is
 seeded into each run's worktree. Config files can define hooks and MCP commands that run
-on the host, so a hosted cockpit (`HSQ_REMOTE=1` (`CEZ_REMOTE` fallback)) is read-only and never serves home-file
+on the host, so a hosted cockpit (`HSQ_REMOTE=1` or `CEZ_REMOTE=1`) is read-only and never serves home-file
 contents until the host operator runs `hsq remote-settings enable`
 ([Remote settings administration](docs/server-install/remote-settings.md)).
 
