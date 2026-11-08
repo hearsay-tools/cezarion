@@ -40,9 +40,9 @@ export function cursorPrintUnsupportedMessage(reason: string): string {
 export class CursorRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
-  readonly systemPromptOnResume = RUNNER_FACTS.cursor.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.cursor;
-  readonly inputDelivery: InputDelivery = RUNNER_FACTS.cursor.inputDelivery;
+  readonly systemPromptOnResume = this.facts.systemPromptOnResume;
+  readonly inputDelivery: InputDelivery = this.facts.inputDelivery;
   private lastSession?: AgentSession;
 
   constructor(private readonly options: CursorRunnerOptions = {}) {}
