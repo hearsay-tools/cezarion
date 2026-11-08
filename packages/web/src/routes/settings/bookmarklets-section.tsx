@@ -1,3 +1,4 @@
+import { productName, productNpmAlias } from '@/lib/product-name'
 import { TriangleAlertIcon } from '@/components/design-icons'
 
 import { useEffect, useRef, useState } from 'react'
@@ -103,12 +104,12 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
       <h2 className="text-xl font-semibold">Run from GitHub</h2>
       <p className="text-[13px] leading-relaxed text-muted-foreground">
         Drag a launcher to your browser&apos;s bookmarks bar. Then open a GitHub PR or issue and
-        click that bookmark. Cezar must be running: <span className="font-mono">npx cezarion</span>.
+        click that bookmark. {productName('Cezar')} must be running: <span className="font-mono">npx {productNpmAlias()}</span>.
       </p>
 
       <div className="settings-bookmarklet-project rounded-lg bg-background p-3.5">
         <p className="text-[13px]">Project{repoName ? ` · ${repoName}` : ''}</p>
-        <p className="mt-2 text-xs text-muted-foreground">Launchers target this cockpit and this project. Keep Cezarion running.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Launchers target this cockpit and this project. Keep {productName('Cezarion')} running.</p>
       </div>
 
       <label className="flex min-h-11 items-center gap-2.5 text-[13px] font-medium">
@@ -130,7 +131,7 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
       <div data-slot="bm-generic" className="rounded-lg border border-border bg-muted/30 p-3.5">
         {/* Generic launcher: no skill, auto forced off — it only prefills the form. */}
         <BookmarkletRow
-          label={repoName ? `cezar (${repoName}): this PR/issue` : 'cezar: this PR/issue'}
+          label={repoName ? `${productName('cezar')} (${repoName}): this PR/issue` : `${productName('cezar')}: this PR/issue`}
           url={key === null ? null : bookmarkletUrl('', false, key, origin, projectId)}
           generic
           hint="Prefills the form only—never auto-starts, even when auto-submit is on."

@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode, type Wait } from '@open-mercato/cezar-contract/waits';
 import { MESSAGING_OFF } from '../delegation/policy.ts';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
@@ -182,7 +183,7 @@ const EXAMPLE_CALL = '{ "command": "npm run dev -- --port 5173 --strictPort", "p
 export function previewRefusal(code: Extract<PreviewResultCode, 'preview_disabled' | 'headless' | 'unavailable'>): PreviewServeResult {
   switch (code) {
     case 'preview_disabled': return { ok: false, code, message: 'Live preview is not enabled in this cockpit.', hint: 'Do not retry. Tell the user the server command and port so they can open it themselves.' };
-    case 'headless': return { ok: false, code, message: 'No cockpit is attached to this run (`cez run`).', hint: 'Do not retry. Report the command and port in your final message.' };
+    case 'headless': return { ok: false, code, message: `No cockpit is attached to this run (\`${productIdentity().command} run\`).`, hint: 'Do not retry. Report the command and port in your final message.' };
     case 'unavailable': return { ok: false, code, message: 'Cezar\'s tool server did not answer.', hint: 'Retry once. If it fails again, continue without preview and report the command and port in your message.' };
   }
 }

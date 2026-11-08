@@ -1,3 +1,4 @@
+import { productIdentityPlugin } from './product-identity.ts'
 import { preferredBuildEnv, e2eBuildEnabled } from './src/lib/build-env.ts'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -44,7 +45,7 @@ export default defineConfig({
   root: appDir,
   base: '/',
   // Tailwind v4 is CSS-first: the whole theme lives in src/styles/index.css, there is no tailwind.config.js.
-  plugins: [react(), tailwindcss(), e2eBuildMarker()],
+  plugins: [react(), tailwindcss(), e2eBuildMarker(), productIdentityPlugin()],
   // `@/…` → packages/web/src — the alias shadcn/ui components import `cn` through. Mirrored in
   // tsconfig.json `paths`.
   //

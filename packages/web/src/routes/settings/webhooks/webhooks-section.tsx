@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 
@@ -22,7 +23,7 @@ export function ProjectWebhooksField({ project }: { project: ProjectListEntry })
   return (
     <SettingsField
       title="Webhooks"
-      hint="A webhook gets a POST from cezar. Tasks can send their status to it, and agents can send it reports."
+      hint={`A webhook gets a POST from ${productName('cezar')}. Tasks can send their status to it, and agents can send it reports.`}
     >
       <div data-slot="project-webhooks" className="flex flex-col gap-3">
         {webhooks.length === 0 && !adding ? (

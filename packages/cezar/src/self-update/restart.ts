@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { shellProductEnv, productEnvEntries } from '../core/product-env.ts';
 /**
  * How a cockpit comes back after an update. Two modes:
@@ -81,7 +82,7 @@ export function restartProcess(opts: RestartOptions): void {
       env: restartEnv(opts.env, opts.rebrand),
     });
     child.on('error', (error) => {
-      console.error(`cezar: restart failed — ${error.message}`);
+      console.error(`${productName('cezar')}: restart failed — ${error.message}`);
       process.exit(1);
     });
     child.unref();

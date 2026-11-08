@@ -1,3 +1,5 @@
+import { productIdentity } from '../home/identity.ts';
+import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { prepareHomeLifecycle } from '../home/entry.ts';
 import { reportsRoutes } from './reports-api.ts';
@@ -69,7 +71,6 @@ import { createAutomationService, onceCreateAnswer } from '../automations/servic
 import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
-
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
@@ -83,7 +84,6 @@ import {
 } from '../automations/types.ts';
 import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
-
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
@@ -495,7 +495,7 @@ export function projectRouteManifest(app: Hono): ProjectRouteInfo[] {
 const AUTOMATIONS_OFF = 'Automations are disabled — unset CEZ_AUTOMATIONS or set it to 1 and restart to enable them';
 
 /** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
-const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
+const UNREADABLE_RUN_ERROR = `this run could not be read by this ${productName('cezar')}: its record in runs.db does not fit this version (a newer ${productName('cezar')} may have written it). It is left in the database untouched.`;
 
 // These response shapes belong to the contract; keep the server's existing type exports.
 export type { ProjectsResponse, RegisterProjectResponse, RemoveProjectResponse, UpdateProjectResponse } from '@open-mercato/cezar-contract';
@@ -980,7 +980,7 @@ export function createApp(deps: ServerDeps) {
       // page instead of the app — the legacy fallback UI was deleted in R7.
       if (!hintLogged) {
         hintLogged = true;
-        console.log('cezar: web/dist is missing — run `npm run build:web` to build the cockpit');
+        console.log(`${productName('cezar')}: web/dist is missing — run \`npm run build:web\` to build the cockpit`);
       }
       return new Response(BUILD_HINT_HTML, {
         headers: { 'content-type': HTML_TYPE },
@@ -1471,7 +1471,7 @@ export function createApp(deps: ServerDeps) {
         return c.json({ error: row.hint ?? 'Authentication could not be verified. Try again.', command }, 409);
       }
       if (!capabilities().localHandoff) {
-        return c.json({ error: 'Run this command on the machine hosting cezar.', command }, 409);
+        return c.json({ error: `Run this command on the machine hosting ${productName('cezar')}.`, command }, 409);
       }
       let opened = false;
       try {
@@ -2059,7 +2059,7 @@ export function createApp(deps: ServerDeps) {
       if (id === bootId) {
         return c.json(
           {
-            error: `cezar is serving ${entry.name} right now — it re-registers itself at every start, so it cannot be removed from here`,
+            error: `${productName('cezar')} is serving ${entry.name} right now — it re-registers itself at every start, so it cannot be removed from here`,
           },
           409,
         );
@@ -2476,7 +2476,7 @@ export function createApp(deps: ServerDeps) {
       return {
         status: 400,
         body: {
-          error: `not a project folder: ${spelled} is your home directory or a cezar task worktree`,
+          error: `not a project folder: ${spelled} is your home directory or a ${productName('cezar')} task worktree`,
         },
       };
     }
@@ -4678,7 +4678,7 @@ export function createApp(deps: ServerDeps) {
     });
 
   /** #917: setup commands run on the host before every task, so only a local cockpit edits them. */
-  const WORKTREE_SETUP_HOSTED_ERROR = 'Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.';
+  const WORKTREE_SETUP_HOSTED_ERROR = `Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run \`${productIdentity().command} remote-settings enable\` on the machine running ${productName('cezar')}.`;
 
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
@@ -4758,7 +4758,7 @@ export function createApp(deps: ServerDeps) {
       const def = findConfigFile(id);
       if (!def) return c.json({ error: 'unknown config file' }, 404);
       if (def.tracked === 'outside-repo' && !capabilities().settingsAdmin) {
-        const error = 'this file lives in your home directory and is not served on a remote cockpit — run `cez remote-settings enable` on the host to allow it';
+        const error = `this file lives in your home directory and is not served on a remote cockpit — run \`${productIdentity().command} remote-settings enable\` on the host to allow it`;
         return c.json({ error }, 409);
       }
       const read = await readConfigFile(id, c.get('project').root);
@@ -4774,7 +4774,7 @@ export function createApp(deps: ServerDeps) {
         return c.json(
           {
             error:
-              'editing agent config is disabled on this remote cockpit — run `cez remote-settings enable` on the host to allow it',
+              `editing agent config is disabled on this remote cockpit — run \`${productIdentity().command} remote-settings enable\` on the host to allow it`,
           },
           409,
         );
@@ -4825,7 +4825,7 @@ export function createApp(deps: ServerDeps) {
       const { webhook: ref } = c.req.valid('param');
       const entry = await registryEntry(project.id, project.root, deps.home).catch(() => undefined);
       const webhook = agentWebhook(entry, ref);
-      if (!entry || !webhook) return c.json({ error: `no webhook named "${ref}" is open to agents in this project — run \`cez webhook list\`` }, 404);
+      if (!entry || !webhook) return c.json({ error: `no webhook named "${ref}" is open to agents in this project — run \`${productIdentity().command} webhook list\`` }, 404);
       const outcome = await sendAgentReport({
         projectId: entry.id,
         webhook,

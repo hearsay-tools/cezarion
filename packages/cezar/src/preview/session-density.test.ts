@@ -370,6 +370,34 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ maxWidth: 1600, maxHeight: 1200 });
   });
 
+  it.each([1, 2, undefined])('attach uses the supplied ratio %s and preserves the legacy default', async dpr => {
+    const { cdp, sent } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    const first = fakeViewer();
+    session.attach(first);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    session.detach(first);
+    session.attach(fakeViewer(), dpr);
+    await flush();
+    const ratio = dpr ?? 2;
+    expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ maxWidth: 800 * ratio, maxHeight: 600 * ratio });
+    session.close();
+  });
+
+  it.each([1, 2, undefined])('refreshing the current viewer ratio %s only restarts on change', async dpr => {
+    const { cdp, sent } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    session.attach(fakeViewer());
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    const before = sent('Page.startScreencast').length;
+    await session.refreshPixelRatio(dpr);
+    expect(sent('Page.startScreencast')).toHaveLength(before + (dpr === 1 ? 1 : 0));
+    const ratio = dpr ?? 2;
+    expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ maxWidth: 800 * ratio, maxHeight: 600 * ratio });
+    session.close();
+  });
+
   it('counts a full-size frame at scale 2 as settled and a CSS-size frame as stale', async () => {
     vi.useFakeTimers();
     const { cdp, sent, emit } = browser();

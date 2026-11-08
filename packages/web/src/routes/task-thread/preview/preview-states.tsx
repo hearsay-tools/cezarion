@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import {
   CircleCheckIcon,
   CircleIcon,
@@ -187,8 +188,8 @@ function ChromiumMissing({ state, actions }: StageProps<'chromium-missing'>) {
     <Shell state={state.stage} icon={<DownloadIcon />} title="This host has no browser yet">
       <Body>
         {state.canDownload
-          ? 'Preview runs Chromium on the machine cezar runs on. cezar can download it into ~/.cache/cez/ (about 150 MB). Nothing else on the host changes.'
-          : 'Preview runs Chromium on the machine cezar runs on. cezar has no download for this platform, so install it with the system package manager.'}
+          ? `Preview runs Chromium on the machine ${productName('cezar')} runs on. ${productName('cezar')} can download it into ~/.cache/cez/ (about 150 MB). Nothing else on the host changes.`
+          : `Preview runs Chromium on the machine ${productName('cezar')} runs on. ${productName('cezar')} has no download for this platform, so install it with the system package manager.`}
       </Body>
       {state.canDownload ? (
         <Actions>
@@ -262,7 +263,7 @@ function DownloadFailed({ state, actions }: StageProps<'download-failed'>) {
 function SandboxFailed({ state, actions }: StageProps<'sandbox-failed'>) {
   return (
     <Shell state={state.stage} icon={<ShieldAlertIcon className="text-danger" />} title="Chromium couldn't start its sandbox">
-      <Body>The host blocks the sandbox Chromium needs. This usually means cezar runs as root, or inside a container without user namespaces.</Body>
+      <Body>The host blocks the sandbox Chromium needs. This usually means {productName('cezar')} runs as root, or inside a container without user namespaces.</Body>
       <LogTail text={state.stderrTail} source="chromium" onCopy={actions.copy} />
       <Actions>
         <Button variant="contrast" onClick={actions.retryBrowser}>
@@ -331,7 +332,7 @@ function NeedsApproval({ state, actions }: StageProps<'needs-approval'>) {
     >
       <Body>
         {wasRunning
-          ? `${server.label} was running when the agent registered it, likely inside the agent's own session, which has ended. cezar can start it with the registered command.`
+          ? `${server.label} was running when the agent registered it, likely inside the agent's own session, which has ended. ${productName('cezar')} can start it with the registered command.`
           : 'The agent registered this server. Nothing runs until you approve it here.'}
       </Body>
       <ApprovalBlock server={server} status={wasRunning ? 'was running when registered · silent now' : 'registered · not started'} />
@@ -367,7 +368,7 @@ function ServerStarting({ state, actions }: StageProps<'server-starting'>) {
   const nextIn = Math.max(0, Math.ceil(PROBE_SECONDS - (now - reportedAt) / 1000))
   return (
     <Shell state={state.stage} icon={<PlayIcon />} title={`Starting ${server.label}`}>
-      <Body>{`cezar ran ${serverScript(server.command)} in the worktree. The page opens as soon as :${server.port} answers.`}</Body>
+      <Body>{`${productName('cezar')} ran ${serverScript(server.command)} in the worktree. The page opens as soon as :${server.port} answers.`}</Body>
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-3 text-sm">
         <span className="flex items-center gap-2.5 font-semibold text-foreground">
           <LoaderCircleIcon className="size-4 animate-spin text-success motion-reduce:animate-none" aria-hidden="true" />
@@ -426,7 +427,7 @@ function ServerStopped({ state, actions }: StageProps<'server-stopped'>) {
     <Shell state={state.stage} icon={<MoonIcon />} title={idle ? 'Stopped after 15 min idle' : `${server.label} stopped`}>
       <Body>
         {idle
-          ? `Nobody had this pane open for 15 min, so cezar stopped ${server.label} :${server.port} and the browser to free memory. Start again reopens ${displayUrl(state.lastUrl)}.`
+          ? `Nobody had this pane open for 15 min, so ${productName('cezar')} stopped ${server.label} :${server.port} and the browser to free memory. Start again reopens ${displayUrl(state.lastUrl)}.`
           : `You stopped ${server.label} :${server.port}. Start again reopens ${displayUrl(state.lastUrl)}.`}
       </Body>
       <Actions>
@@ -506,7 +507,7 @@ function ProxyBlocked({ actions }: { actions: PreviewStateActions }) {
         <PlugIcon />
       </div>
       <h2 className="text-xl leading-tight font-semibold text-foreground">Preview doesn't work behind this proxy yet</h2>
-      <Body>The proxy in front of cezar didn't let the preview's WebSocket through. This is a known gap behind Basic Auth. Everything else in cezar keeps working.</Body>
+      <Body>The proxy in front of {productName('cezar')} didn't let the preview's WebSocket through. This is a known gap behind Basic Auth. Everything else in {productName('cezar')} keeps working.</Body>
       <Actions>
         <Button variant="outline" onClick={actions.close}>Close preview</Button>
         <a className="inline-flex min-h-11 items-center text-sm font-medium text-accent-text underline-offset-2 hover:underline" href={PREVIEW_DOCS_URL} target="_blank" rel="noopener noreferrer">

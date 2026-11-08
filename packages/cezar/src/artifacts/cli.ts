@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { publishArtifact } from './store.ts';
@@ -15,7 +16,7 @@ export async function runArtifactCommand(argv: string[], env: NodeJS.ProcessEnv)
   if (argv.includes('--help') || argv.includes('-h')) { console.log(HELP); return 0; }
   try {
     const artifactsDir = productEnv('ARTIFACTS_DIR', env), taskId = productEnv('TASK_ID', env);
-    if (!artifactsDir || !taskId) throw new Error('Artifact task context is missing. Run this command inside an active Cezar task with CEZ_ARTIFACTS_DIR and CEZ_TASK_ID.');
+    if (!artifactsDir || !taskId) throw new Error(`Artifact task context is missing. Run this command inside an active ${productName('Cezar')} task with CEZ_ARTIFACTS_DIR and CEZ_TASK_ID.`);
     if (argv.length !== 2 || argv[0] !== 'publish') throw new Error(HELP);
     const metadata = await publishArtifact(artifactsDir, taskId, argv[1]!);
     const prefix = productEnv('PROJECT_ID', env) ? `/p/${productEnv('PROJECT_ID', env)}` : '';

@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { scheduleLabel } from '@open-mercato/cezar-api-client/contract/automation-schedule'
@@ -73,7 +74,7 @@ export function AutomationsList({ data, error, refresh, archived = false, onArch
   return (
     <PageFrame
       title="Automations"
-      subtitle="Schedules and GitHub checks run while Cezarion is open."
+      subtitle={`Schedules and GitHub checks run while ${productName('Cezarion')} is open.`}
       action={<Button asChild><Link to="/automations/new">New automation</Link></Button>}
     >
       {error && !data ? (

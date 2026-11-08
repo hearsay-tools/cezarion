@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, fstatSync, fsyncSync, linkSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -140,7 +141,7 @@ export class LegacyWriterError extends Error {
 export function assertNoLegacyCockpit(dataDir: string): void {
   const owner = anotherCockpitOwner(dataDir);
   if (owner) {
-    throw new LegacyWriterError('cockpit', `An older cezar (pid ${owner.pid}${owner.url ? ` at ${owner.url}` : ''}) still serves this project and writes ${LEGACY_INDEX_FILE}. Stop it, then restart cezar: ${LEGACY_INDEX_FILE} is imported once, while nothing else writes it.`);
+    throw new LegacyWriterError('cockpit', `An older ${productName('cezar')} (pid ${owner.pid}${owner.url ? ` at ${owner.url}` : ''}) still serves this project and writes ${LEGACY_INDEX_FILE}. Stop it, then restart ${productName('cezar')}: ${LEGACY_INDEX_FILE} is imported once, while nothing else writes it.`);
   }
 }
 
@@ -157,6 +158,6 @@ export function assertNoLegacyWriter(dataDir: string, snapshot: LegacyIndexSnaps
   const same = now === undefined ? read === undefined
     : read !== undefined && now.dev === read.dev && now.ino === read.ino && now.size === read.size && now.mtimeMs === read.mtimeMs;
   if (!same) {
-    throw new LegacyWriterError('changed', `${LEGACY_INDEX_FILE} changed while cezar was importing it: an older cezar process still writes it. Stop every older cezar process for this project, then restart cezar.`);
+    throw new LegacyWriterError('changed', `${LEGACY_INDEX_FILE} changed while ${productName('cezar')} was importing it: an older ${productName('cezar')} process still writes it. Stop every older ${productName('cezar')} process for this project, then restart ${productName('cezar')}.`);
   }
 }

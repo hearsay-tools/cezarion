@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { WorkerDestroy, WorkerDestroyResult } from '@open-mercato/cezar-contract/delegation';
@@ -200,7 +201,7 @@ export class WorkerCleanup {
       // #469: name what blocks a crashed generation; other causes keep the generic message.
       const taken = project.manager.takeWorkerTerminationBlocker(workerId);
       const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
-        : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
+        : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live ${productName('cezar')} (pid ${taken.blocker.pid})`
         : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
       if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
       const result: WorkerDestroyResult = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'

@@ -185,8 +185,14 @@ const timer = setInterval(() => {
     expectBoundedShutdown(await save());
     const pid = requirePid(join(bin, 'pid'));
     // Linux init may retain an exited grandchild as a zombie; it cannot write.
-    if (existsSync(`/proc/${pid}/stat`)) {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    let stat: string | undefined;
+    try {
+      stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ESRCH') throw error;
+    }
+    if (stat !== undefined) {
       expect(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[0]).toBe('Z');
     } else expect(() => process.kill(pid, 0)).toThrow();
     expect(readFileSync(join(repo, 'work.txt'), 'utf8')).toBe('keep this work\n');

@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { commandText } from './home/command.ts';
 import { productEnv } from './core/product-env.ts';
 import type { Home } from './home/home.ts';
@@ -30,7 +31,7 @@ One JSON object per invocation; exit 0 ok, 2 refused, 64 usage.
   status                 show the grants and what each running cockpit on this machine does with them
   disable [--port <n>]   withdraw the grant for that port, or every grant without --port
 
-Takes effect on the next request; no restart. Run it on the machine that runs Cezarion, as the
+Takes effect on the next request; no restart. Run it on the machine that runs ${productName('Cezarion')}, as the
 cockpit's user. It applies only to a cockpit bound to loopback behind owner-only Tailscale access or
 an authenticated HTTPS proxy.`);
 

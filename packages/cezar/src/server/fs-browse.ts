@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import type { Dirent } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -56,7 +57,7 @@ const MAX_ENTRIES = 1000;
 const PRIVACY_PROTECTED_HOME_DIRS = new Set(['Desktop', 'Documents', 'Downloads', 'Library', 'Movies', 'Music', 'Pictures']);
 
 /** The 403 a macOS privacy denial answers with; the picker offers System Settings beside it. */
-export const MACOS_PRIVACY_BLOCKED = 'macOS privacy settings do not allow cezar to read this folder.';
+export const MACOS_PRIVACY_BLOCKED = `macOS privacy settings do not allow ${productName('cezar')} to read this folder.`;
 
 /**
  * Expand the configured browse root. The workspace owns this independently

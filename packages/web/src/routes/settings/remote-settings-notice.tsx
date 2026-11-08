@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 import { queryKeys, useHealth } from '@/api/queries'
@@ -25,7 +26,7 @@ export function useSettingsAdminRefresh(): () => Promise<void> {
 }
 
 /** The host command that grants remote settings administration (hearsay-tools/cezarion#2428). */
-export const REMOTE_SETTINGS_ENABLE_COMMAND = 'cez remote-settings enable'
+export const REMOTE_SETTINGS_ENABLE_COMMAND = `${productCommand()} remote-settings enable`
 
 /**
  * The warning above a settings editor whose content runs on the host, shown only when the host
@@ -43,7 +44,7 @@ export function RemoteSettingsNotice({ risk }: { risk: string }) {
     >
       Remote settings administration is on. {risk}, and anyone who can open this cockpit can change them. The
       host operator turns this off with{' '}
-      <code>cez remote-settings disable</code>.
+      <code>{productCommand()} remote-settings disable</code>.
     </p>
   )
 }

@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react'
 import type { ComponentType, ReactNode, SVGProps } from 'react'
 
@@ -35,7 +36,7 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: ComponentType<SV
 /** Keep the option list even while it contains one entry: the field below appears automatically
  * when a future second accent is added, and the provider stays wired in the meantime. */
 const ACCENT_OPTIONS: Array<{ value: Accent; label: string; swatch: string }> = [
-  { value: 'cezarion', label: 'Cezarion', swatch: 'var(--accent-strong)' },
+  { value: 'cezarion', label: productName('Cezarion'), swatch: 'var(--accent-strong)' },
 ]
 
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [
@@ -186,7 +187,7 @@ export function AppearanceSection() {
       <div className="settings-appearance-preview settings-readout">
         <span className="text-[12px] text-soft-foreground">PREVIEW</span>
         <p className="mt-3 text-base">Review finalization retries</p>
-        <p className="mt-3 text-xs text-muted-foreground">Needs you · cezar · Task {'#'}227</p>
+        <p className="mt-3 text-xs text-muted-foreground">Needs you · {productName('cezar')} · Task {'#'}227</p>
         <span className="mt-3 inline-flex rounded-md border border-accent-strong/30 bg-accent-strong/10 px-4 py-3 text-xs text-accent-text">Open task</span>
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground">Changes apply immediately. Theme is browser-local; density and reading width are saved with your workspace.</p>
