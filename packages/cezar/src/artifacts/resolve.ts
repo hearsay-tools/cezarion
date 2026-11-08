@@ -58,7 +58,7 @@ async function publishedArtifact(ctx: Context, target: string): Promise<Loaded> 
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   const entry = matches[0] ? await readArtifact(directory, ctx.runId, matches[0].id) : null;
   if (entry) return { preview: artifactPreview(entry.metadata, entry.bytes), ...(rasterMime(entry.metadata.name) ? { imageBytes: entry.bytes } : {}) };
-  return { preview: { type: 'unpublished', path: ctx.path, reason: 'This file is outside the project. Ask the agent to publish it with cez artifact publish <path> and share the returned link.' } };
+  return { preview: { type: 'unpublished', path: ctx.path, reason: 'This file is outside the project. Ask the agent to publish it with hsq artifact publish <path> and share the returned link.' } };
 }
 
 /** Reads at most one byte past `cap`, so an oversized file is detected without reading it whole. */

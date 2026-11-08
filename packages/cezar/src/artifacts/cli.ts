@@ -15,7 +15,7 @@ export async function runArtifactCommand(argv: string[], env: NodeJS.ProcessEnv)
   if (argv.includes('--help') || argv.includes('-h')) { console.log(HELP); return 0; }
   try {
     const artifactsDir = productEnv('ARTIFACTS_DIR', env), taskId = productEnv('TASK_ID', env);
-    if (!artifactsDir || !taskId) throw new Error('Artifact task context is missing. Run this command inside an active Cezar task with CEZ_ARTIFACTS_DIR and CEZ_TASK_ID.');
+    if (!artifactsDir || !taskId) throw new Error('Artifact task context is missing. Run this command inside an active Cezar task with HSQ_ARTIFACTS_DIR (CEZ_ARTIFACTS_DIR fallback) and HSQ_TASK_ID (CEZ_TASK_ID fallback).');
     if (argv.length !== 2 || argv[0] !== 'publish') throw new Error(HELP);
     const metadata = await publishArtifact(artifactsDir, taskId, argv[1]!);
     const prefix = productEnv('PROJECT_ID', env) ? `/p/${productEnv('PROJECT_ID', env)}` : '';

@@ -348,10 +348,10 @@ quality evidence; do not describe it as a bundled-check pass.
 For the bundled fallback, make the report available from the PR's validation section. An ignored path such
 as `.ai/qa/<issue>/code-quality.md` is not a report link a reviewer can open.
 
-- In a Cezar task, publish the generated report with the session-provided
+- In a Squawk task, publish the generated report with the session-provided
   task-artifact command: `… artifact publish <report.md>` (or
-  `cez artifact publish <report.md>` when `cez` is on PATH). It uses the task's
-  `CEZ_ARTIFACTS_DIR` and `CEZ_TASK_ID`. The returned JSON's `link` is a
+  `hsq artifact publish <report.md>` when `hsq` is on PATH). It uses the task's
+  `HSQ_ARTIFACTS_DIR` (`CEZ_ARTIFACTS_DIR` fallback) and `HSQ_TASK_ID` (`CEZ_TASK_ID` fallback). The returned JSON's `link` is a
   root-relative cockpit path. In a GitHub PR, prefix that exact path with the
   verified cockpit origin that reviewers can access; for example, an origin
   `https://cockpit.example` and returned `/p/…/files?artifact=…` form

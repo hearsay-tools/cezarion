@@ -56,4 +56,4 @@ export const QUEUE_WATCHDOG_MS = 60_000;
 export const REPO_REDISCOVERY_MS = 30_000;
 
 export const RESTART_CONTINUATION_PROMPT =
-  'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
+  'The cezar process restarted while you were working on this task. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';

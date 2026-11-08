@@ -1,4 +1,8 @@
-# Cezarion Desktop
+# Squawk Desktop
+
+Paths `<config>`, `<state>`, `<data>` and `<cache>` refer to the
+[resolved home roots](migration.md#home-directories).
+
 
 The desktop app uses Tauri 2 and the existing React cockpit. The Rust shell owns
 local process supervision, a bundled connection screen and isolated remote windows.
@@ -20,8 +24,8 @@ workflow. They require Apple Developer ID signing and notarization, Windows
 Authenticode signing, and the separate Tauri updater key. Missing credentials
 fail the release; they never silently publish an unsigned installer.
 
-DMG: drag Cezarion into Applications. Windows: run setup (WebView2 is handled by
-Tauri's installer). DEB: `sudo apt install ./cezarion-linux-x86_64.deb`.
+DMG: drag Squawk into Applications. Windows: run setup (WebView2 is handled by
+Tauri's installer). DEB: `sudo apt install ./squawk-linux-x86_64.deb`.
 AppImage: make executable and run. The release also includes an Arch package,
 built and dependency-checked in an Arch container. Checksums accompany release
 assets. Stable links are under the fork's `desktop-latest` GitHub release; the
@@ -33,7 +37,7 @@ signed release succeeds.
 Click **Start local cockpit**. Node.js 24.21.0+ and npm must be installed; the shell
 finds tools through your login shell on macOS/Linux. When Node is absent, it
 shows a download link and retry. Remote mode remains available from the app menu.
-The first local start installs `@wjarka/cezarion` under `~/.cezar/versions`.
+The first local start installs `@hearsay-tools/squawk` under `<data>/versions`.
 The cockpit and server come from that installation, not from the shell bundle.
 
 **Versions & updates** supports stable, nightly and development channels,
@@ -42,8 +46,8 @@ Restart interrupts active tasks; the dialog warns first. The app menu also
 provides version switching and recovery updates for older cockpit versions.
 The normal browser cockpit's existing npm updater remains available unchanged.
 
-CLI equivalents: `cez install`, `cez update --channel nightly`, `cez versions`,
-`cez use <id>`, `cez link /path/to/checkout --use`, and `cez unlink <id>`.
+CLI equivalents: `hsq install`, `hsq update --channel nightly`, `hsq versions`,
+`hsq use <id>`, `hsq link /path/to/checkout --use`, and `hsq unlink <id>`.
 A development checkout must be built; the picker can build an unbuilt/stale
 checkout before switching. The development channel never auto-selects a release.
 
@@ -52,7 +56,7 @@ checkout before switching. The development channel never auto-selects a release.
 Enter the address on the launch screen, or choose **Connect to a server…**
 (Cmd/Ctrl+Shift+K). No Node, local cockpit, npm install or agent is started by
 connecting. Use an HTTPS server with a valid certificate and authentication
-provided by its reverse proxy. Cezarion itself has no built-in server auth.
+provided by its reverse proxy. Squawk itself has no built-in server auth.
 Do not expose an unauthenticated cockpit on the internet.
 
 Sign in on the remote site’s login page. For a separate identity provider such as
@@ -69,7 +73,7 @@ ssh -N -L 54321:127.0.0.1:4321 user@server
 
 Then connect to `http://127.0.0.1:54321`. Other unencrypted remote addresses are
 rejected. The tunnel carries SSH's authentication and encryption; the server
-should use its remote-mode protections (`CEZ_REMOTE=1`).
+should use its remote-mode protections (`HSQ_REMOTE=1` (`CEZ_REMOTE` fallback)).
 
 **Remember this connection and sign-in** is checked by default. Saved cockpits
 appear in the launcher's sidebar with their address and trusted sign-in origin
@@ -87,9 +91,8 @@ other devices. Persistent isolated profiles require macOS 14 or later; macOS
 12–13 still remember addresses, explicitly show this limitation and use temporary
 sessions. Windows and Linux use separate webview data directories.
 
-Bookmarks live in `CEZ_HOME/desktop/connections.json` (by default
-`~/.cezar/desktop/connections.json`), with owner-only permissions on Unix. Windows
-and Linux browser profiles live beside it in `desktop/profiles/<uuid>`; macOS
+Bookmarks live in `<state>/desktop/connections.json`, with owner-only permissions on Unix. Windows
+and Linux browser profiles live in `<data>/desktop/profiles/<uuid>`; macOS
 profiles are managed by WebKit under the app's data store. Use Forget to clear a
 profile, rather than deleting just the bookmark file.
 
@@ -123,15 +126,20 @@ Rust and the platform's Tauri build prerequisites are required to compile. They
 are not required to run an installed app. The desktop package intentionally sits
 outside the pnpm workspaces so normal CLI builds do not require Rust.
 
-For an isolated local smoke test on macOS, launch the built executable directly
-so it receives the test environment:
+For an isolated macOS smoke test of a development build with the release switch
+off, launch its old-identity executable directly so it receives the test environment:
 
 ```sh
-CEZ_HOME="$(mktemp -d)" CEZ_DRY_RUN=1 \
-CEZ_DESKTOP_ENTRY="$PWD/packages/cezar/dist/index.js" \
-CEZ_DESKTOP_CWD="$PWD" CEZ_DESKTOP_NO_UPDATE=1 \
+HSQ_HOME="$(mktemp -d)" HSQ_DRY_RUN=1 \
+HSQ_DESKTOP_ENTRY="$PWD/packages/cezar/dist/index.js" \
+HSQ_DESKTOP_CWD="$PWD" HSQ_DESKTOP_NO_UPDATE=1 \
 "$PWD/packages/desktop/src-tauri/target/debug/bundle/macos/Cezarion.app/Contents/MacOS/cezar-desktop"
 ```
+
+These native development settings use `HSQ_HOME` (`CEZ_HOME` fallback),
+`HSQ_DRY_RUN` (`CEZ_DRY_RUN` fallback), `HSQ_DESKTOP_ENTRY` (`CEZ_DESKTOP_ENTRY` fallback),
+`HSQ_DESKTOP_CWD` (`CEZ_DESKTOP_CWD` fallback) and
+`HSQ_DESKTOP_NO_UPDATE` (`CEZ_DESKTOP_NO_UPDATE` fallback).
 
 Click Local cockpit, check the project list and task view, then open
 Versions & updates. Create a dry-run task if desired. Quit the app (Cmd+Q on macOS; closing its window keeps it running) and confirm
@@ -144,7 +152,7 @@ Use the ordinary app launch without these variables for your real projects.
 
 ## App icon
 
-The native app and installer icons use the same Cezarion mark as the cockpit
+The native app and installer icons use the same Squawk mark as the cockpit
 sidebar: `packages/web/public/cezarion-mark-dark.svg`. Regenerate all macOS,
 Windows and Linux sizes with `npm run icon --prefix packages/desktop`, then
 rebuild the app. The generator uses the installed Tauri CLI and also refreshes
@@ -174,10 +182,11 @@ when you quit the app, after the cockpit has stopped; the next launch runs the n
 shell. It never installs or restarts under a running cockpit (on Windows the
 installer would end the process), and it does not relaunch itself after the install.
 
-## Staged desktop identity and bridge validation
+## Desktop identity and bridge validation
 
-The release switch remains off. Normal builds keep the current app ID, names,
-feed and artifact names. Native environment readers accept `HSQ_*` first and
+The release identity is Squawk, `tools.hearsay.squawk`. It has separate feeds
+and artifacts from the old Cezarion app. See the [migration guide](migration.md#desktop-and-mobile).
+Development builds with the release switch off keep the old identity. Native environment readers accept `HSQ_*` first and
 `CEZ_*` as fallback now. Presence wins, including empty values. The shell pins
 both aliases for every generated sidecar control, even in an old-ID build.
 

@@ -8,7 +8,7 @@
 
 ## Rules
 
-Every backend implements `AgentRunner`/`AgentSession` and must pass both parity matrices: `ui-parity.test.ts` (mappers) and `harness-parity.test.ts` (runners, including each runner's `specSupport`). Runner prose never counts runners. `CEZ_DRY_RUN=1` must keep working. The zero-config default includes unrestricted `Bash`, and each runner's `specSupport.toolGrant` says whether its wire honors the list (open-mercato/cezar#430).
+Every backend implements `AgentRunner`/`AgentSession` and must pass both parity matrices: `ui-parity.test.ts` (mappers) and `harness-parity.test.ts` (runners, including each runner's `specSupport`). Runner prose never counts runners. `HSQ_DRY_RUN=1` (`CEZ_DRY_RUN` fallback) must keep working. The zero-config default includes unrestricted `Bash`, and each runner's `specSupport.toolGrant` says whether its wire honors the list (open-mercato/cezar#430).
 
 ## Runner regressions ship with shared coverage
 
@@ -69,7 +69,7 @@ and head and explain every difference.
 recorder import runs. Records name stdout, stderr, SSE or the HTTP response
 (status and body). Normalization replaces process-local identities, timestamps,
 temporary paths, pids and allocated ports. It keeps frame and write order.
-The evidence endpoint uses the real cezar tool definitions with stable
+The evidence endpoint uses the real Squawk tool definitions with stable
 unavailable receipts; it creates no waits and makes no GitHub requests. Parity
 tests continue to verify tool effects through the real workflow controller.
 

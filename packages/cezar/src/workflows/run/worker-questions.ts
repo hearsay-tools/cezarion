@@ -134,7 +134,7 @@ export class WorkerQuestions {
     const spent = this.host.countAutomaticWakes(workerId) + 1;
     if (this.isWorkerFallbackAsk(workerId, askSeq) || spent > this.maxAutoContinues) { this.closeQuestion(workerId, askSeq, 'undeliverable', reason); return; }
     const parentId = run.delegation?.role === 'worker' ? run.delegation.parentRunId : workerId;
-    const notice = `Not delivered to your parent task ${parentId}: ${reason}. Decide without its answer, or message your parent later with cez message request.`;
+    const notice = `Not delivered to your parent task ${parentId}: ${reason}. Decide without its answer, or message your parent later with hsq message request.`;
     const questions = askRequestOf(ask)?.questions;
     // One `Header: answer` line per question, as a native answer seam parses a parent's reply.
     const text = questions?.length ? questions.map(question => `${question.header}: ${notice}`).join('\n') : notice;
