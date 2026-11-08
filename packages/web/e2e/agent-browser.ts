@@ -824,6 +824,15 @@ export class AgentBrowser {
    *  Waits for the field first; see `awaitTarget`. */
   fill(selector: string, value: string): void {
     this.awaitTarget('fill', selector)
+    // The provider clears through React's value tracker, hiding the input event from React.
+    // Clear through the native setter first so a render between clear and insert restores ''.
+    this.evaluate(`(() => {
+      const field = document.querySelector(${JSON.stringify(selector)})
+      const prototype = field instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, '')
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })()`)
+    this.waitForValue(`document.querySelector(${JSON.stringify(selector)})?.value`, value => value === '')
     this.run(['fill', selector, value])
   }
 

@@ -232,9 +232,9 @@ describe('AgentBrowser auto-wait (#405)', () => {
   })
 
   it('fill waits for the selector before filling', () => {
-    const { browser, commands } = open()
+    const { browser, commands } = open({ evalResult: '' })
     browser.fill('#automation-name', 'nightly')
-    expect(commands()).toEqual([
+    expect(commands().filter(([action]) => action !== 'eval')).toEqual([
       ['wait', '#automation-name'],
       ['fill', '#automation-name', 'nightly'],
     ])
