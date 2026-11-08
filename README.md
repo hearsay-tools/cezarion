@@ -1648,9 +1648,11 @@ as in [Quick start](#quick-start)).
 
 **2. Clone & install**
 
-The npm global prefix must be writable by your user. Use Node installed with
-nvm, or set a user-owned prefix (`npm config set prefix ~/.npm-global`) and
-add `~/.npm-global/bin` to your `PATH` before these commands.
+The npm global prefix must be writable by your user. On Unix, use Node installed
+with nvm, or set a user-owned prefix (`npm config set prefix ~/.npm-global`) and
+add `~/.npm-global/bin` to your `PATH`. On Windows, use a user-owned npm prefix
+and add the prefix itself (reported by `npm prefix -g`) to `PATH`; npm puts
+Windows executables directly there. Set `PATH` before these commands.
 
 ```bash
 git clone https://github.com/hearsay-tools/cezarion.git
@@ -1709,7 +1711,8 @@ npm run uninstall-as-command    # removes hsq and the compatibility commands (ei
 
 - **`hsq: command not found`** after install → your npm global bin dir isn't on
   PATH. The script prints the exact dir; add it to your shell profile
-  (`export PATH="$(npm prefix -g)/bin:$PATH"`).
+  (Unix: `export PATH="$(npm prefix -g)/bin:$PATH"`; Windows: add the directory
+  reported by `npm prefix -g` itself to `PATH`, without a `bin` suffix).
 - **`EACCES` / permission denied** → your global prefix is root-owned. Point npm
   at a user-writable one and retry — **never** sudo:
   `npm config set prefix ~/.npm-global`.
