@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -151,6 +151,33 @@ describe('CreateProjectDialog', () => {
     expect(posted).toEqual([])
   })
 
+  it('labels the name and links its validation hint only while the name is invalid', async () => {
+    serve()
+    renderDialog()
+    await githubReady()
+    const input = screen.getByRole('textbox', { name: 'Name' })
+    expect(input).toBe(nameInput())
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(input.hasAttribute('aria-describedby')).toBe(false)
+    expect(slot('create-project-name-hint')).toBeNull()
+    expect(slot('create-project-path')?.textContent).toBe('~/cezar/projects/…')
+    expect(submit().disabled).toBe(true)
+
+    fireEvent.change(input, { target: { value: 'bad/name' } })
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    const hint = slot('create-project-name-hint')!
+    expect(hint.id).not.toBe('')
+    expect(input.getAttribute('aria-describedby')).toBe(hint.id)
+    expect(document.getElementById(hint.id)).toBe(hint)
+
+    fireEvent.change(input, { target: { value: 'fresh' } })
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(input.hasAttribute('aria-describedby')).toBe(false)
+    expect(slot('create-project-name-hint')).toBeNull()
+    expect(slot('create-project-path')?.getAttribute('title')).toBe('~/cezar/projects/fresh')
+    expect(submit().disabled).toBe(false)
+  })
+
   it('shows why GitHub is unavailable, disables the switch, and still creates locally', async () => {
     serve({ owners: async () => json({ available: false, reason: 'gh CLI not found — install it' }) })
     renderDialog()
@@ -234,9 +261,13 @@ describe('CreateProjectDialog', () => {
     serve({ create: () => new Promise<Response>((resolve) => (finish = resolve)) })
     renderDialog()
     fireEvent.change(nameInput(), { target: { value: 'fresh' } })
-    fireEvent.keyDown(nameInput(), { key: 'Enter' })
-    fireEvent.keyDown(nameInput(), { key: 'Enter' })
-    fireEvent.click(submit())
+    // Flush the key handler and mutation microtasks, with no elapsed-time window.
+    await act(async () => { fireEvent.keyDown(nameInput(), { key: 'ArrowLeft' }) })
+    expect(posted).toEqual([])
+    act(() => {
+      fireEvent.keyDown(nameInput(), { key: 'Enter' })
+      fireEvent.keyDown(nameInput(), { key: 'Enter' })
+    })
     await waitFor(() => expect(posted).toHaveLength(1))
     await waitFor(() => expect(submit().disabled).toBe(true))
     finish(json({ project: PROJECT }))
