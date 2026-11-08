@@ -40,7 +40,8 @@ export interface ContractObservation {
   readonly timeline: readonly ContractEntry[];
   /** The timeline position of each mark. */
   readonly at: ReadonlyMap<string, number>;
-  /** Session state read at a named moment: `heldAtSend`, `heldAtTurnEnd`, `ackedWhileStopped`. */
+  /** Session state read at a named moment: `heldAtSend`, `heldAtTurnEnd` (the first turn end),
+   *  `ackedWhileStopped`. */
   readonly read: Readonly<Record<string, boolean | undefined>>;
   /** The timeline length when `holdsHumanInput()` first read false after the watched send. */
   readonly released?: number;
@@ -109,14 +110,12 @@ class Recorder {
   session: AgentSession | undefined;
   private watching = false;
   private poll: ReturnType<typeof setInterval> | undefined;
-  private readonly turnEndReads: string[] = [];
+  /** `holdsHumanInput()` at each v1 `turn-end`, read as run.ts reads it there. */
+  readonly holdsAtTurnEnd: boolean[] = [];
 
   readonly onEvent = (entry: { readonly v1: AgentEvent } | { readonly v2: UiEvent }): void => {
     this.timeline.push(entry);
-    if (isTurnEnd(entry)) {
-      const name = this.turnEndReads.shift();
-      if (name && this.session) this.read[name] = this.session.holdsHumanInput();
-    }
+    if (isTurnEnd(entry) && this.session) this.holdsAtTurnEnd.push(this.session.holdsHumanInput());
     this.sample();
   };
 
@@ -124,11 +123,6 @@ class Recorder {
     this.timeline.push({ mark: label });
     this.at.set(label, this.timeline.length - 1);
     return this.timeline.length - 1;
-  }
-
-  /** Read `holdsHumanInput()` at the next v1 `turn-end`, as run.ts does at a turn end. */
-  readHoldAtNextTurnEnd(name: string): void {
-    this.turnEndReads.push(name);
   }
 
   /** Send a human message, read the hold right after it, and watch for its release. */
@@ -153,32 +147,54 @@ class Recorder {
   }
 }
 
+/** The test's hands on the native mock. No real-time window decides a row's outcome. */
+interface MockControl {
+  /** Create `CEZ_MOCK_RELEASE_FILE`: a `hold-gated` turn moves on to its content. */
+  readonly release: () => void;
+  /** Create `CEZ_MOCK_STEER_GATE`: a steering window (steer-tool hold, steer-late or hold tail) closes. */
+  readonly openGate: () => void;
+  /** Wait until the mock recorded `marker` on its wire (argv, requests or stdin). */
+  readonly onWire: (marker: string) => Promise<void>;
+}
+
 interface DriveContract {
   readonly scenario: ScenarioName;
   readonly variant: string;
   readonly env?: Record<string, string>;
   readonly spec?: DriveSeamOptions['spec'];
   readonly sessionOptions?: DriveSeamOptions['sessionOptions'];
-  readonly whileOpen: (session: AgentSession, recorder: Recorder, release: () => void) => Promise<void>;
+  /** Gate the scenario's steering windows on `MockControl.openGate`. */
+  readonly steerGate?: boolean;
+  readonly whileOpen: (session: AgentSession, recorder: Recorder, mock: MockControl) => Promise<void>;
 }
 
-/** Drive one runner's native mock with a release gate (`CEZ_MOCK_RELEASE_FILE`) and a recorder. */
+/** Drive one runner's native mock with test-controlled gates, a wire recording and a recorder. */
 async function driveContract(backend: RunnerId, drive: DriveContract): Promise<ContractObservation> {
   const dir = mkdtempSync(join(tmpdir(), `cez-contract-${backend}-`));
   const releaseFile = join(dir, 'release');
+  const gateFile = join(dir, 'steer-gate');
+  const wireFiles = [join(dir, 'args.ndjson'), join(dir, 'stdin.ndjson')];
+  const wire = () => wireFiles.map(file => existsSync(file) ? readFileSync(file, 'utf8') : '').join('\n');
   const recorder = new Recorder();
   try {
     const obs = await driveSeam(backend, drive.scenario, {
       spec: {
         ...drive.spec,
-        env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_MOCK_RELEASE_FILE: releaseFile, ...drive.env },
+        env: {
+          CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: wireFiles[0]!, CEZ_MOCK_STDIN_FILE: wireFiles[1]!,
+          CEZ_MOCK_RELEASE_FILE: releaseFile, ...(drive.steerGate ? { CEZ_MOCK_STEER_GATE: gateFile } : {}), ...drive.env,
+        },
       },
       sessionOptions: { ...drive.sessionOptions },
       onEvent: recorder.onEvent,
       whileOpen: async (session) => {
         recorder.session = session;
         try {
-          await drive.whileOpen(session, recorder, () => writeFileSync(releaseFile, ''));
+          await drive.whileOpen(session, recorder, {
+            release: () => writeFileSync(releaseFile, ''),
+            openGate: () => writeFileSync(gateFile, ''),
+            onWire: marker => waitFor(() => wire().includes(marker)),
+          });
         } finally {
           recorder.stop();
         }
@@ -186,7 +202,8 @@ async function driveContract(backend: RunnerId, drive: DriveContract): Promise<C
     });
     const runner = runnersUnderTest()(backend);
     return {
-      backend, delivery: inputDeliveryOf(runner), obs, timeline: recorder.timeline, at: recorder.at, read: recorder.read,
+      backend, delivery: inputDeliveryOf(runner), obs, timeline: recorder.timeline, at: recorder.at,
+      read: { heldAtTurnEnd: recorder.holdsAtTurnEnd[0], ...recorder.read },
       variant: drive.variant, systemPromptOnResume: runner.systemPromptOnResume,
       ...(recorder.released === undefined ? {} : { released: recorder.released }),
     };
@@ -194,6 +211,14 @@ async function driveContract(backend: RunnerId, drive: DriveContract): Promise<C
     recorder.stop();
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Wait until a mid-turn human message is on the mock's wire, when the runner writes it there while
+ * the turn runs. An `always-held` runner keeps it until the turn ends, so nothing reaches the wire.
+ */
+async function deliveredMidTurn(backend: RunnerId, mock: MockControl): Promise<void> {
+  if (inputDeliveryOf(runnersUnderTest()(backend)).humanInputAtTurnEnd !== 'always-held') await mock.onWire(FOLLOW_UP);
 }
 
 const v1Of = (recorder: Recorder): AgentEvent[] => recorder.timeline.flatMap(entry => 'v1' in entry ? [entry.v1] : []);
@@ -234,15 +259,20 @@ export function describeTimeline(timeline: readonly ContractEntry[]): string {
 
 const ACK_IDS = ['contract-S36-running', 'contract-S36-stopped'] as const;
 
+/** The runner reported agent input `id` unread: at a turn end, or on its own. */
+const reportedUnread = (timeline: readonly ContractEntry[], id: string) => timeline.some(entry => 'v1' in entry &&
+  ((entry.v1.type === 'turn-end' && !!entry.v1.unconsumedInputIds?.includes(id)) || (entry.v1.type === 'input-unconsumed' && entry.v1.inputIds.includes(id))));
+
 async function observeAcknowledgement(backend: RunnerId): Promise<ContractObservation> {
   const consumed: string[] = [];
   let recorder: Recorder | undefined;
   return driveContract(backend, {
     scenario: 'hold-gated', variant: 'acknowledgement',
     sessionOptions: { onAgentInputConsumed: ids => { for (const id of ids) { consumed.push(id); recorder?.mark(`consumed:${id}`); } } },
-    whileOpen: async (session, rec, release) => {
+    whileOpen: async (session, rec, mock) => {
       recorder = rec;
-      const steer = inputDeliveryOf(runnersUnderTest()(backend)).mode === 'steer';
+      const delivery = inputDeliveryOf(runnersUnderTest()(backend));
+      const steer = delivery.mode === 'steer';
       const send = (id: string) => session.sendAgentMessage([{ type: 'text', text: `mock:agent-echo ${id}` }], [id]);
       const acknowledged = (id: string, ack: Promise<void>) => ack.then(() => { rec.mark(`ack:${id}`); });
       await waitFor(() => turnStarted(rec));
@@ -262,18 +292,24 @@ async function observeAcknowledgement(backend: RunnerId): Promise<ContractObserv
           second = send(ACK_IDS[1]);
           rec.mark(`sent:${ACK_IDS[1]}`);
           expect(second).not.toBe(false);
-          void acknowledged(ACK_IDS[1], second as Promise<void>);
-          // bound: proves a response-acknowledged input stays unacknowledged while its process
-          // is stopped; a real child process has no fake clock, so this observes 300 ms of real time.
-          await new Promise(resolve => setTimeout(resolve, 300));
+          const ack = acknowledged(ACK_IDS[1], second as Promise<void>);
+          if (delivery.acknowledgement === 'write') {
+            // bound: a write acknowledges with the process stopped; the assertion reports one that waits.
+            await Promise.race([ack, new Promise(resolve => setTimeout(resolve, 10_000))]);
+          } else {
+            // bound: proves a response-acknowledged input stays unacknowledged while its process is
+            // stopped. A stopped process cannot answer at any load, so the observed time decides only
+            // how long the row looks, never whether a correct runner passes.
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
           rec.read.ackedWhileStopped = rec.at.has(`ack:${ACK_IDS[1]}`);
         } finally {
           process.kill(pid!, 'SIGCONT');
         }
         await second;
-        release();
+        mock.release();
       } else {
-        release();
+        mock.release();
         await waitFor(() => turnEnds(rec) >= 1);
         const ack = send(ACK_IDS[0]);
         rec.mark(`sent:${ACK_IDS[0]}`);
@@ -281,14 +317,13 @@ async function observeAcknowledgement(backend: RunnerId): Promise<ContractObserv
         await acknowledged(ACK_IDS[0], ack as Promise<void>);
       }
       const sent = ACK_IDS.filter(id => rec.at.has(`sent:${id}`));
-      const reported = (id: string) => consumed.includes(id) || v1Of(rec).some(event =>
-        (event.type === 'turn-end' && event.unconsumedInputIds?.includes(id)) || (event.type === 'input-unconsumed' && event.inputIds.includes(id)));
-      if (inputDeliveryOf(runnersUnderTest()(backend)).consumption === 'unobservable') {
+      const reported = (id: string) => consumed.includes(id) || reportedUnread(rec.timeline, id);
+      if (delivery.consumption === 'unobservable') {
         // Nothing reports the read: the input's own turn ending is the last signal.
         await waitFor(() => turnEnds(rec) >= 2);
         return;
       }
-      // bound: an observable runner reports each input read or unread; the assertion names a missing report.
+      // bound: an observable runner reports each input read or unread; a missing report fails the row.
       await waitFor(() => sent.every(reported) && turnEnds(rec) >= 1, 10_000).catch(() => undefined);
     },
   });
@@ -307,8 +342,10 @@ function assertAcknowledgement({ delivery, timeline, at, read }: ContractObserva
     else expect(between.filter(isModelWork), `${id} acknowledged before model work${trace}`).toEqual([]);
     const consumedAt = at.get(`consumed:${id}`);
     if (delivery.consumption === 'unobservable') expect(consumedAt, `${id} consumption is unobservable${trace}`).toBeUndefined();
+    // An observable runner reports every input it accepted: read, or unread.
+    else if (consumedAt === undefined) expect(reportedUnread(timeline, id), `${id} reported read or unread${trace}`).toBe(true);
     // Consumption is the model's read: it follows the acknowledgement and a native frame after it.
-    else if (consumedAt !== undefined) {
+    else {
       expect(consumedAt, `${id} consumed after its acknowledgement${trace}`).toBeGreaterThan(ackAt!);
       expect(timeline.slice(ackAt! + 1, consumedAt).some(entry => !('mark' in entry)), `${id} consumed on a native frame${trace}`).toBe(true);
     }
@@ -363,21 +400,25 @@ const HELD_VARIANTS = {
 async function observeHeld(backend: RunnerId, variant: keyof typeof HELD_VARIANTS): Promise<ContractObservation> {
   return driveContract(backend, {
     scenario: 'hold-gated', variant,
-    whileOpen: async (session, rec, release) => {
+    whileOpen: async (session, rec, mock) => {
       if (variant === 'startup') {
         rec.sendHuman(session, HELD_VARIANTS[variant]);
-        release();
+        mock.release();
         await waitFor(() => carrierSettled(rec));
         return;
       }
       await waitFor(() => turnStarted(rec));
       if (variant === 'idle') {
-        release();
+        mock.release();
         await waitFor(() => turnEnds(rec) >= 1);
         rec.sendHuman(session, HELD_VARIANTS[variant]);
       } else {
         rec.sendHuman(session, HELD_VARIANTS[variant]);
-        release();
+        // H5's ordering needs the steer admitted while the turn is open, so the turn waits for it.
+        // A plain follow-up may reach the mock before or after the turn ends: the hold starts at
+        // sendMessage either way, so the arrival order cannot change this row's outcome.
+        if (variant === 'late-ack') await deliveredMidTurn(backend, mock);
+        mock.release();
       }
       await waitFor(() => carrierSettled(rec));
     },
@@ -404,11 +445,11 @@ async function observeFinish(backend: RunnerId): Promise<ContractObservation> {
     scenario: 'hold-gated', variant: 'auto-end',
     // The session is asked to close after its first turn, as a finished step is.
     sessionOptions: { autoEndAfterFirstTurn: true },
-    whileOpen: async (session, rec, release) => {
+    whileOpen: async (session, rec, mock) => {
       await waitFor(() => turnStarted(rec));
-      rec.readHoldAtNextTurnEnd('heldAtTurnEnd');
+      // Before or after the turn ends, the follow-up was sent while it ran, so it is held at that end.
       rec.sendHuman(session, `${FOLLOW_UP} ${DEFERRED_TURN_START}`);
-      release();
+      mock.release();
       // bound: the session closes on its own; the assertion reports a follow-up it dropped.
       await session.result.catch(() => undefined);
     },
@@ -433,12 +474,14 @@ function assertFinish({ timeline, at, read }: ContractObservation): void {
 
 async function observeTiming(backend: RunnerId, timing: 'early' | 'late'): Promise<ContractObservation> {
   return driveContract(backend, {
-    scenario: timing === 'early' ? 'steer-tool' : 'steer-late', variant: timing,
-    whileOpen: async (session, rec) => {
+    scenario: timing === 'early' ? 'steer-tool' : 'steer-late', variant: timing, steerGate: true,
+    whileOpen: async (session, rec, mock) => {
       // Early: while the turn's tool runs, before its last model call. Late: after its final text.
+      // Either window stays open until the mock has the message, so no timer decides which it is.
       await waitFor(() => v1Of(rec).some(event => event.type === (timing === 'early' ? 'tool-call' : 'text')));
-      rec.readHoldAtNextTurnEnd('heldAtTurnEnd');
       rec.sendHuman(session, `${FOLLOW_UP} mock:agent-echo`);
+      await deliveredMidTurn(backend, mock);
+      mock.openGate();
       await waitFor(() => carrierSettled(rec) && turnEnds(rec) >= 1);
     },
   });
