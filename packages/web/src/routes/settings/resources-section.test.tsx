@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -59,11 +59,13 @@ function serve(resources: Partial<WorkspaceConfigResponse['resources']> = {}) {
       if (url === '/api/v1/workspace/config' && method === 'GET') return json(state)
       if (url === '/api/v1/workspace/config' && method === 'PUT') {
         Object.assign(state.resources, (body?.resources ?? {}) as object)
+        Object.assign(state.composerDefaults!, (body?.composerDefaults ?? {}) as object)
         return json(state)
       }
       return new Promise<never>(() => {})
     }),
   )
+  return state
 }
 
 /** Seeds the step-3.2 route gates so the shell renders immediately. The global settings area is
@@ -109,6 +111,28 @@ afterEach(() => {
 })
 
 describe('Global settings → Resources', () => {
+  it('shows loading while the workspace config is pending', () => {
+    serve()
+    vi.mocked(fetch).mockReturnValueOnce(new Promise<Response>(() => {}))
+    renderResources()
+
+    expect(screen.getByText('Loading resource settings…')).toBeTruthy()
+    expect(parallelSelect()).toBeNull()
+  })
+
+  it('shows the server error when the workspace config cannot load', async () => {
+    serve()
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Config is unreadable' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    }))
+    renderResources()
+
+    expect(await screen.findByRole('heading', { name: 'Resource settings did not load' })).toBeTruthy()
+    expect(screen.getByText('Config is unreadable')).toBeTruthy()
+    expect(parallelSelect()).toBeNull()
+  })
+
   it('renders the workspace values, read from /api/v1/workspace/config', async () => {
     serve({ maxParallel: 5, memoryLimitMb: 4096 })
     renderResources()
@@ -149,6 +173,41 @@ describe('Global settings → Resources', () => {
     fireEvent.change(monitoringSelect()!, { target: { value: '3' } })
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.body).toEqual({ resources: { maxMonitoringSessions: 3 } })
+  })
+
+  it('offers every parallel and monitoring capacity, including zero extra sessions', async () => {
+    serve({ maxMonitoringSessions: 0 })
+    renderResources()
+    await waitFor(() => expect(monitoringSelect()).not.toBeNull())
+
+    expect(Array.from(parallelSelect()!.options, (option) => option.value))
+      .toEqual(Array.from({ length: 16 }, (_, i) => String(i + 1)))
+    expect(Array.from(monitoringSelect()!.options, (option) => option.value))
+      .toEqual(Array.from({ length: 17 }, (_, i) => String(i)))
+    expect(monitoringSelect()!.value).toBe('0')
+    expect(screen.getByText(/Capacity: 2 active \+ 0 monitoring/)).toBeTruthy()
+  })
+
+  it('uses compatible defaults when older servers omit optional resource and composer keys', async () => {
+    const state = serve()
+    // Older wire responses predate these fields; the current response type requires them.
+    Reflect.deleteProperty(state.resources, 'maxMonitoringSessions')
+    Reflect.deleteProperty(state.resources, 'monitoringWakeIntervalMinutes')
+    Reflect.deleteProperty(state.resources, 'autoResumeOnUsageLimit')
+    Reflect.deleteProperty(state, 'composerDefaults')
+    renderResources()
+
+    const autonomous = await screen.findByLabelText('Autonomous by default')
+    const worktree = screen.getByLabelText('Use a worktree by default')
+    expect((autonomous as HTMLSelectElement).value).toBe('inherit')
+    expect((worktree as HTMLSelectElement).value).toBe('inherit')
+    expect(screen.getByText(/Source-dependent — skills on, workflows off/)).toBeTruthy()
+    expect(within(worktree.closest('label')!).getByText('Inherited: On')).toBeTruthy()
+    expect(monitoringSelect()!.value).toBe('2')
+    expect(screen.getByText(/Capacity: 2 active \+ 2 monitoring/)).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'Auto-resume after a usage limit' }).getAttribute('aria-checked')).toBe('true')
+    expect(wakeMode()!.getAttribute('aria-checked')).toBe('false')
+    expect(saveWake()!.disabled).toBe(true)
   })
 
   it('keeps wake-ups parked by default and saves an explicit interval', async () => {
@@ -233,6 +292,61 @@ describe('Global settings → Resources', () => {
     fireEvent.click(select)
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.body).toEqual({ resources: { autoResumeOnUsageLimit: false } })
+    expect(await screen.findByText('Tasks stopped by a usage limit will stay failed')).toBeTruthy()
+    await waitFor(() => expect(select.getAttribute('aria-checked')).toBe('false'))
+  })
+
+  it('saves the auto-resume opt-in from an explicit off value', async () => {
+    serve({ autoResumeOnUsageLimit: false })
+    renderResources()
+    const toggle = await screen.findByRole('switch', { name: 'Auto-resume after a usage limit' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+
+    expect(await screen.findByText('Tasks stopped by a usage limit will resume themselves')).toBeTruthy()
+    expect(puts().at(-1)?.body).toEqual({ resources: { autoResumeOnUsageLimit: true } })
+    await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('true'))
+  })
+
+  it('disables resource controls during a save and applies the returned config', async () => {
+    const state = serve({ monitoringWakeIntervalMinutes: 10, memoryLimitMb: 1024 })
+    renderResources()
+    await waitFor(() => expect(wakeInterval()).not.toBeNull())
+    fireEvent.change(wakeInterval()!, { target: { value: '20' } })
+    fireEvent.change(memoryInput()!, { target: { value: '2048' } })
+    let resolveSave!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolveSave = resolve })
+    vi.mocked(fetch).mockReturnValueOnce(pending)
+    fireEvent.change(parallelSelect()!, { target: { value: '6' } })
+
+    const controls = document.querySelector('[data-slot="resources-section"]')!
+      .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button')
+    await waitFor(() => expect(Array.from(controls).every((control) => control.disabled)).toBe(true))
+    await act(async () => resolveSave(new Response(JSON.stringify({
+      ...state,
+      resources: { ...state.resources, maxParallel: 6 },
+    }), { headers: { 'content-type': 'application/json' } })))
+
+    await waitFor(() => expect(parallelSelect()!.disabled).toBe(false))
+    expect(parallelSelect()!.value).toBe('6')
+    expect(saveWake()!.disabled).toBe(false)
+    expect(saveMemory()!.disabled).toBe(false)
+  })
+
+  it('shows a failed save as a danger toast and keeps the saved config', async () => {
+    serve({ maxParallel: 2 })
+    renderResources()
+    await waitFor(() => expect(parallelSelect()).not.toBeNull())
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Cannot save resource settings' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    }))
+    fireEvent.change(parallelSelect()!, { target: { value: '6' } })
+
+    const message = await screen.findByText('Cannot save resource settings')
+    expect(message.closest('[role="status"]')?.getAttribute('data-tone')).toBe('danger')
+    await waitFor(() => expect(parallelSelect()!.disabled).toBe(false))
+    expect(parallelSelect()!.value).toBe('2')
   })
 
   it('saves a memory limit, and an empty field clears it back to "no limit"', async () => {
@@ -309,5 +423,38 @@ describe('Global settings → Resources', () => {
     await waitFor(() => expect(puts().at(-1)?.body).toEqual({
       composerDefaults: { worktree: true },
     }))
+  })
+
+  it.each([true, false])('renders explicit task defaults and inherited %s captions', async (value) => {
+    const state = serve()
+    state.composerDefaults = {
+      autonomous: value,
+      worktree: value,
+      inheritedAutonomous: value,
+      inheritedWorktree: value,
+    }
+    renderResources()
+
+    const autonomous = await screen.findByLabelText('Autonomous by default')
+    const worktree = screen.getByLabelText('Use a worktree by default')
+    expect((autonomous as HTMLSelectElement).value).toBe(value ? 'on' : 'off')
+    expect((worktree as HTMLSelectElement).value).toBe(value ? 'on' : 'off')
+    expect(within(autonomous.closest('label')!).getByText(`Inherited: ${value ? 'On' : 'Off'}`)).toBeTruthy()
+    expect(within(worktree.closest('label')!).getByText(`Inherited: ${value ? 'On' : 'Off'}`)).toBeTruthy()
+  })
+
+  it.each(['Autonomous by default', 'Use a worktree by default'])('saves on, off and inherit for %s', async (label) => {
+    serve()
+    renderResources()
+    const select = await screen.findByLabelText<HTMLSelectElement>(label)
+    const key = label === 'Autonomous by default' ? 'autonomous' : 'worktree'
+
+    for (const [option, value] of [['on', true], ['off', false], ['inherit', null]] as const) {
+      fireEvent.change(select, { target: { value: option } })
+      await waitFor(() => expect(puts().at(-1)?.body).toEqual({ composerDefaults: { [key]: value } }))
+      await waitFor(() => expect(select.disabled).toBe(false))
+      expect(select.value).toBe(option)
+    }
+    expect(puts()).toHaveLength(3)
   })
 })
