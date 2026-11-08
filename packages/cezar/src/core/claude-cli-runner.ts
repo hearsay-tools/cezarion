@@ -25,6 +25,7 @@ import type {
   InputDelivery,
   ToolGrant,
 } from './agent-runner.ts';
+import { RUNNER_FACTS } from './runner-facts.ts';
 
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
@@ -99,8 +100,9 @@ export class ClaudeCliRunner implements AgentRunner {
   readonly backend = 'claude' as const;
   readonly specSupport = CLAUDE_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'resent' as const;
+  readonly facts = RUNNER_FACTS.claude;
   readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable',
+    mode: 'steer', consumption: 'observable', acknowledgement: 'write', humanInputAtTurnEnd: 'held-when-late',
     via: 'stream-json stdin line with uuid; --replay-user-messages echo at consumption',
   };
 

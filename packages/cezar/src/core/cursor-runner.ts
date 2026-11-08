@@ -5,6 +5,7 @@ import type {
   AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentSession, ContentBlock,
   InputDelivery, SessionOptions,
 } from './agent-runner.ts';
+import { RUNNER_FACTS } from './runner-facts.ts';
 import { CursorPrintRunner, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import type { CursorPrintCapabilityResult } from './cursor-print-capabilities.ts';
@@ -40,8 +41,9 @@ export class CursorRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'in-thread' as const;
+  readonly facts = RUNNER_FACTS.cursor;
   readonly inputDelivery: InputDelivery = {
-    mode: 'boundary', consumption: 'unobservable', via: 'selected Cursor session turn boundary',
+    mode: 'boundary', consumption: 'unobservable', acknowledgement: 'model-work', humanInputAtTurnEnd: 'always-held', via: 'selected Cursor session turn boundary',
   };
   private lastSession?: AgentSession;
 

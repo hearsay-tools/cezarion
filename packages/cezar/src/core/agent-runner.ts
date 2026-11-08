@@ -5,6 +5,7 @@
 
 import type { UiEvent } from './ui-events.ts';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
+import type { RunnerFacts } from './runner-facts.ts';
 
 /**
  * Canonical user-selectable runner tuple in display order. Derive runtime enumerations and
@@ -342,16 +343,44 @@ export interface AgentSession {
   readonly open: boolean;
 }
 
-/** How a runner admits non-human input while a turn runs (#505). */
-export interface InputDelivery {
-  /** `steer`: accepted mid-turn, consumed inside the running turn. `boundary`: refused while busy. */
-  readonly mode: 'steer' | 'boundary';
+/**
+ * How a runner admits input while a turn runs (#505). The fields shared by both modes; a
+ * runner declares one of the `InputDelivery` variants.
+ */
+interface InputDeliveryFacts {
   /** Whether the wire tells us when the model actually received the input. */
   readonly consumption: 'observable' | 'unobservable';
+  /**
+   * What resolves `sendAgentMessage`'s Promise (hearsay-tools/cezarion#2991). `write`: the local
+   * pipe write, so the provider can neither delay nor reject it (Claude's stdin). `response`: a
+   * native response to the submission, apart from the turn's frames (an RPC result, an HTTP
+   * acknowledgement, a prompt response id). `model-work`: the first model-work frame of the
+   * turn the input opens, so no turn can end before its input is acknowledged (Cursor print).
+   */
+  readonly acknowledgement: 'write' | 'response' | 'model-work';
   /** The native mechanism, for AGENT_PROTOCOL.md and the parity matrix. */
   readonly via: string;
 }
-export const BOUNDARY_INPUT_DELIVERY: InputDelivery = { mode: 'boundary', consumption: 'unobservable', via: 'next idle turn' };
+/**
+ * `steer`: non-human input is accepted mid-turn and consumed inside the running turn.
+ * `boundary`: it is refused while busy.
+ *
+ * `humanInputAtTurnEnd` says whether a human `sendMessage` written while a turn runs can still
+ * be held, unread, when that turn ends (hearsay-tools/cezarion#2991); turn-end code then keeps
+ * the session for the turn it opens. `never-held`: the harness always reads it inside the
+ * running turn. `held-when-late`: it reads it in the running turn, unless it arrives after the
+ * turn's last model call; then the harness holds it and it opens the next turn.
+ * `always-held`: the harness queues it until the running turn ends, and it opens the next turn.
+ * A boundary runner has no mid-turn input channel, so the type fixes it to `always-held`. A
+ * message written after the harness already ended the turn natively is not mid-turn input.
+ */
+export type InputDelivery = InputDeliveryFacts & (
+  | { readonly mode: 'steer'; readonly humanInputAtTurnEnd: 'never-held' | 'held-when-late' | 'always-held' }
+  | { readonly mode: 'boundary'; readonly humanInputAtTurnEnd: 'always-held' }
+);
+export const BOUNDARY_INPUT_DELIVERY: InputDelivery = {
+  mode: 'boundary', consumption: 'unobservable', acknowledgement: 'response', humanInputAtTurnEnd: 'always-held', via: 'next idle turn',
+};
 /** Absent means the pre-#505 behavior every runner had. */
 export function inputDeliveryOf(runner: Pick<AgentRunner, 'inputDelivery'>): InputDelivery {
   return runner.inputDelivery ?? BOUNDARY_INPUT_DELIVERY;
@@ -394,6 +423,9 @@ export interface AgentRunner {
   readonly systemPromptOnResume: SystemPromptOnResume;
   /** How non-human input is admitted while a turn runs; absent means `boundary` (#505). */
   readonly inputDelivery?: InputDelivery;
+  /** This runner's row of `RUNNER_FACTS` (hearsay-tools/cezarion#2991). Every built-in runner
+   *  declares it; optional only on wrappers and test fakes. Shared code reads the table by id. */
+  readonly facts?: RunnerFacts;
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult>;
   startSession(
     spec: AgentRunSpec,
