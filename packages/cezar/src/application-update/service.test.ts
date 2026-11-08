@@ -2,14 +2,14 @@ import { chmodSync, cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, r
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApplicationUpdateConflictError, ApplicationUpdateService, validateInstalledPackage } from './service.ts';
+import { ApplicationUpdateConflictError, ApplicationUpdateService, validateInstalledPackage, type ApplicationUpdateOptions } from './service.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture(targetVersion: string | null = '2.0.0') {
+afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+function fixture(targetVersion: string | null = '2.0.0', overrides: Partial<ApplicationUpdateOptions> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cez-update-service-')); roots.push(root);
   const prefix = join(root, 'prefix'); const cache = join(root, 'cache'); const home = join(root, 'home');
   const original = join(prefix, 'lib/node_modules/@wjarka/cezarion');
@@ -27,9 +27,128 @@ function fixture(targetVersion: string | null = '2.0.0') {
     writeFileSync(join(next, 'package.json'), JSON.stringify(pkg));
   });
   const armRestart = vi.fn(async (): Promise<void> => undefined);
-  const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original, 'dist/index.js'), npmPrefix: prefix, npmCache: cache, home, targetVersion: () => targetVersion ?? undefined, runNpm, armRestart });
-  return { service, runNpm, armRestart, original, root, home };
+  const options = { packageRoot: original, launchEntry: join(original, 'dist/index.js'), npmPrefix: prefix, npmCache: cache, home, targetVersion: () => targetVersion ?? undefined, runNpm, armRestart, ...overrides };
+  const service = new ApplicationUpdateService(options);
+  const statePath = () => join(home, 'application-updates', readdirSync(join(home, 'application-updates'))[0]!, 'state.json');
+  return { service, runNpm, armRestart, original, root, home, options, statePath };
 }
+
+function changeManifest(path: string, changes: Record<string, unknown>): void {
+  const manifestPath = join(path, 'package.json');
+  writeFileSync(manifestPath, JSON.stringify({ ...JSON.parse(readFileSync(manifestPath, 'utf8')), ...changes }));
+}
+
+describe('installed package validation', () => {
+  it.each([
+    { name: 'other-package' }, { version: '9.9.9' }, { bin: undefined }, { bin: { cez: 'other.js' } },
+    { dependencies: undefined }, { dependencies: 'invalid' }, { engines: { node: '^24' } },
+  ])('rejects an invalid manifest field %j', (changes) => {
+    const { original } = fixture();
+    changeManifest(original, changes);
+    expect(() => validateInstalledPackage(original, '1.0.0')).toThrow();
+  });
+
+  it.each(['dist/index.js', 'web/dist/index.html'])('requires the installed asset %s', (asset) => {
+    const { original } = fixture();
+    rmSync(join(original, asset));
+    expect(() => validateInstalledPackage(original, '1.0.0')).toThrow('assets incomplete');
+  });
+
+  it('accepts referenced assets and dependencies at package and installation levels', () => {
+    const { original, root } = fixture();
+    changeManifest(original, { dependencies: { local: '1', hoisted: '1' }, engines: undefined });
+    mkdirSync(join(original, 'node_modules/local'), { recursive: true });
+    mkdirSync(join(root, 'prefix/node_modules/hoisted'), { recursive: true });
+    mkdirSync(join(original, 'web/dist/assets'), { recursive: true });
+    writeFileSync(join(original, 'web/dist/assets/app.js'), 'app');
+    writeFileSync(join(original, 'web/dist/assets/app.css'), 'styles');
+    writeFileSync(join(original, 'web/dist/index.html'), '<script src="/assets/app.js"></script><link href=\'/assets/app.css\'>');
+    expect(() => validateInstalledPackage(original, '1.0.0', join(root, 'prefix'))).not.toThrow();
+  });
+
+  it('does not use dependencies from outside the installation', () => {
+    const { original, root } = fixture();
+    changeManifest(original, { dependencies: { external: '1' } });
+    mkdirSync(join(root, 'node_modules/external'), { recursive: true });
+    expect(() => validateInstalledPackage(original, '1.0.0', join(root, 'prefix'))).toThrow('runtime dependencies incomplete');
+  });
+
+  it('rejects parent traversal even when the referenced file exists', () => {
+    const { original } = fixture();
+    writeFileSync(join(original, 'web/dist/escape.js'), 'outside assets');
+    writeFileSync(join(original, 'web/dist/index.html'), '<script src="/assets/../escape.js"></script>');
+    expect(() => validateInstalledPackage(original, '1.0.0')).toThrow('web assets incomplete');
+  });
+});
+
+describe('persisted application update state', () => {
+  it.each([
+    { state: { status: 'idle', supported: false } },
+    { state: { status: 'idle', supported: true, message: 'untrusted message' } },
+    { state: { status: 'idle', supported: true, targetVersion: '2.0.0; command' } },
+    { stage: '/other/stage' }, { recovery: '/other/recovery' },
+    { recoveryPackage: '/other/recovery-package' }, { binLinks: '/other/bin-links.json' },
+  ])('rejects each unsafe persisted field independently: %j', async (changes) => {
+    const f = fixture();
+    await f.service.apply();
+    const record = JSON.parse(readFileSync(f.statePath(), 'utf8'));
+    writeFileSync(f.statePath(), JSON.stringify({ ...record, ...changes }));
+    expect(new ApplicationUpdateService(f.options).snapshot()).toEqual({
+      status: 'error', supported: true, message: 'Update state needs retry.',
+    });
+    await expect(f.service.restart()).rejects.toBeInstanceOf(ApplicationUpdateConflictError);
+    expect(f.armRestart).not.toHaveBeenCalled();
+  });
+
+  it.each(['stage', 'recovery', 'targetVersion', 'stage directory', 'recovery directory'])
+  ('invalidates a prepared update with missing %s', async (missing) => {
+    const f = fixture();
+    await f.service.apply();
+    const record = JSON.parse(readFileSync(f.statePath(), 'utf8'));
+    if (missing === 'targetVersion') delete record.state.targetVersion;
+    else if (missing === 'stage directory') rmSync(record.stage, { recursive: true });
+    else if (missing === 'recovery directory') rmSync(record.recovery, { recursive: true });
+    else delete record[missing];
+    writeFileSync(f.statePath(), JSON.stringify(record));
+    expect(f.service.snapshot()).toEqual({ status: 'error', supported: true, message: 'Prepared update is missing. Retry Update.' });
+    await expect(f.service.restart()).rejects.toBeInstanceOf(ApplicationUpdateConflictError);
+    expect(f.armRestart).not.toHaveBeenCalled();
+  });
+
+  it.each(['preparing', 'restarting'] as const)('expires %s after its deadline and keeps it valid at the boundary', async (status) => {
+    const f = fixture();
+    await f.service.apply();
+    await f.service.restart();
+    const record = JSON.parse(readFileSync(f.statePath(), 'utf8'));
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    record.state.status = status;
+    record.startedAt = now - (status === 'preparing' ? 180_000 : 360_000);
+    writeFileSync(f.statePath(), JSON.stringify(record));
+    expect(f.service.snapshot().status).toBe(status);
+    record.startedAt--;
+    writeFileSync(f.statePath(), JSON.stringify(record));
+    expect(f.service.snapshot().message).toBe('Update state needs retry.');
+  });
+
+  it.each([undefined, 2147483647])('reports an interrupted preparation with owner PID %s', async (ownerPid) => {
+    const f = fixture();
+    await f.service.apply();
+    const record = JSON.parse(readFileSync(f.statePath(), 'utf8'));
+    record.state.status = 'preparing'; record.ownerPid = ownerPid; record.startedAt = Date.now();
+    writeFileSync(f.statePath(), JSON.stringify(record));
+    expect(f.service.snapshot()).toEqual({ status: 'error', supported: true, message: 'Update was interrupted. Retry Update.' });
+  });
+
+  it('rejects a recent Restarting state without a claim', async () => {
+    const f = fixture();
+    await f.service.apply();
+    const record = JSON.parse(readFileSync(f.statePath(), 'utf8'));
+    record.state.status = 'restarting'; record.ownerPid = process.pid; record.startedAt = Date.now();
+    writeFileSync(f.statePath(), JSON.stringify(record));
+    expect(f.service.snapshot().message).toBe('Update state needs retry.');
+  });
+});
 
 describe('application update preparation', () => {
   it('stages the advertised release and keeps the original unchanged until Restart', async () => {
