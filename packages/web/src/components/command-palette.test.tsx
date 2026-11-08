@@ -9,7 +9,7 @@ import {
 import { summaryOf } from '@/test/run-summary-fixture'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,6 +23,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import {
   CommandPalette,
+  openCommandPalette,
   mergeTasks,
   referenceKeywords,
   orderProjects,
@@ -205,6 +206,14 @@ function openWith(init: { metaKey?: boolean; ctrlKey?: boolean }) {
 }
 
 describe('opening and closing', () => {
+  it('opens programmatically and keeps an already open palette open', () => {
+    renderPalette()
+    act(() => openCommandPalette())
+    expect(dialog()).not.toBeNull()
+    act(() => openCommandPalette())
+    expect(dialog()).not.toBeNull()
+  })
+
   it.each([
     { name: '⌘K', init: { metaKey: true } },
     { name: 'Ctrl+K', init: { ctrlKey: true } },
@@ -259,6 +268,25 @@ describe('opening and closing', () => {
 })
 
 describe('Views group', () => {
+  it('opens All tasks outside the active project and closes the palette', async () => {
+    renderPalette({
+      projects: [project({ id: 'cezar' }), project({ id: 'shop' })],
+      entry: '/p/cezar/',
+    })
+    openWith({ metaKey: true })
+    fireEvent.click(await screen.findByRole('option', { name: 'All tasks' }))
+    expect(location()).toBe('/tasks')
+    await waitFor(() => expect(dialog()).toBeNull())
+  })
+
+  it('keeps a project view in the active project and closes the palette', async () => {
+    renderPalette({ projects: [project({ id: 'cezar' })], entry: '/p/cezar/' })
+    openWith({ metaKey: true })
+    fireEvent.click(await screen.findByRole('option', { name: 'Workflows' }))
+    expect(location()).toBe('/p/cezar/workflows')
+    await waitFor(() => expect(dialog()).toBeNull())
+  })
+
   it('leads with New task and its C hint, then the 9 nav destinations', async () => {
     renderPalette({ automations: true })
     openWith({ metaKey: true })
@@ -693,6 +721,25 @@ describe('Recently finished group', () => {
 })
 
 describe('ranking', () => {
+  it('ignores surrounding and repeated whitespace in a query', () => {
+    const value = 'task shop auth'
+    expect(paletteScore(value, '  shop   auth  ')).toBe(paletteScore(value, 'shop auth'))
+  })
+
+  it('prefers a boundary over an equally early match inside a word', () => {
+    expect(paletteScore('!auth', 'auth')).toBeGreaterThan(paletteScore('xauth', 'auth'))
+  })
+
+  it('lets a later word boundary beat an early match inside a word', () => {
+    expect(paletteScore('task auth', 'auth')).toBeGreaterThan(paletteScore('xauth', 'auth'))
+  })
+
+  it('keeps a multi-token match within the full-match score', () => {
+    const score = paletteScore('shop auth', 'shop auth')
+    expect(score).toBeGreaterThan(0)
+    expect(score).toBeLessThanOrEqual(paletteScore('shop auth', ''))
+  })
+
   it('scores a real substring hit above a uuid accident — the task-number case', () => {
     // The exact task, and a bystander whose run id merely contains 7…6…7 in order.
     const wanted = paletteScore('task 767: fix the flaky test 9c1d-4f2a', '767')
@@ -973,6 +1020,20 @@ describe('Actions group', () => {
 })
 
 describe('Skills group', () => {
+  it('finds a skill by description when its name does not match', async () => {
+    renderPalette({ skills: [
+      skill({ name: 'release', source: 'global', description: 'Publish packages' }),
+      skill({ name: 'review', source: 'agents', description: 'Inspect changes' }),
+    ] })
+    openWith({ metaKey: true })
+    await screen.findByRole('option', { name: /release.*Publish packages/ })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Publish' } })
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /release.*Publish packages/ })).toBeTruthy()
+      expect(screen.queryByRole('option', { name: /review.*Inspect changes/ })).toBeNull()
+    })
+  })
+
   const MIXED: Skill[] = [
     skill({ name: 'global-deploy', source: 'global', description: 'Deploy from anywhere' }),
     skill({ name: 'project-review', source: 'agents', description: 'Review the diff' }),
@@ -1208,6 +1269,44 @@ it('preserves pending human attention in live and indexed palette rows', async (
  * away, in that project or any other.
  */
 describe('server search past the window', () => {
+  it('orders other projects by recency across the index and search results', () => {
+    const merged = mergeTasks([], null, [
+      indexed({ id: 'old', projectId: 'shop', title: 'Old', createdAt: '2025-01-01T00:00:00Z' }),
+      indexed({ id: 'new', projectId: 'docs', title: 'New', createdAt: '2026-01-01T00:00:00Z' }),
+    ], [
+      indexed({ id: 'middle', projectId: 'shop', title: 'Middle', createdAt: '2025-06-01T00:00:00Z' }),
+    ])
+    expect(merged.map((task) => task.id)).toEqual(['new', 'middle', 'old'])
+  })
+
+  it.each(['pullRequestUrl', 'referencedPullRequestUrl', 'referencedIssueUrl'] as const)(
+    'extracts a multi-digit reference from %s with an optional trailing slash', (field) => {
+      const task = run({ id: 'r', title: 'Reference', [field]: 'https://github.com/org/repo/pull/123' })
+      expect(referenceKeywords(task)).toEqual(['123', '#123'])
+      expect(referenceKeywords({ ...task, [field]: `${task[field]}/` })).toEqual(['123', '#123'])
+    },
+  )
+
+  it('uses only a numeric URL suffix, not a number in an earlier path segment', () => {
+    expect(referenceKeywords(run({ id: 'r', title: 'Reference',
+      pullRequestUrl: 'https://github.com/org/repo/pull/123/files',
+      referencedIssueUrl: 'https://github.com/org/repo/123/issues/456/',
+    }))).toEqual(['456', '#456'])
+  })
+
+  it('includes marker references and removes duplicates from all reference sources', () => {
+    expect(referenceKeywords(run({ id: 'r', title: 'Reference', prNumber: 123,
+      markerRefs: { pr: 789, issue: 987 }, issueNumber: 456,
+      pullRequestUrl: 'https://github.com/org/repo/pull/123',
+    }))).toEqual(['123', '#123', '456', '#456', '789', '#789', '987', '#987'])
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'ignores an invalid numeric reference (%s)', (prNumber) => {
+      expect(referenceKeywords(run({ id: 'r', title: 'Reference', prNumber }))).toEqual([])
+    },
+  )
+
   it('merges searched rows once each, the live row winning', () => {
     const live = run({ id: 'mine', title: 'Mine' })
     const merged = mergeTasks([live], 'cezar', [indexed({ id: 'shop-1', projectId: 'shop', title: 'Indexed' })], [
