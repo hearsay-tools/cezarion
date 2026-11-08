@@ -34,3 +34,23 @@ test('mock publication exposes complete values during creation and replacement',
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('failed publication removes its temporary file and preserves the error', () => {
+  const dir = fs.mkdtempSync(join(tmpdir(), 'cezar-mock-publish-failure-'));
+  const target = join(dir, 'result.json');
+  const rename = fs.renameSync;
+  const failure = new Error('forced rename failure');
+  fs.renameSync = () => { throw failure; };
+  syncBuiltinESMExports();
+  try {
+    fs.writeFileSync(target, 'previous');
+    assert.throws(() => publishFile(target, 'replacement'), error => error === failure);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'previous');
+    assert.deepEqual(fs.readdirSync(dir), ['result.json']);
+  } finally {
+    fs.renameSync = rename;
+    syncBuiltinESMExports();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
