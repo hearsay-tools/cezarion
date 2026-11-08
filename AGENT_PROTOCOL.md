@@ -2196,8 +2196,9 @@ lives decides where its row runs (hearsay-tools/cezarion#2991):
 
 `core/parity-classes.testkit.ts` classes every parity family as `every-runner`,
 `shared` or `no-session`. A shared family names the rows that still run on every
-runner; a row any runner is exempt from, and a cell whose title has no row id, run
-on every runner too. A `no-session` family runs once, on the set's first runner.
+runner; a row any runner is exempt from, and a cell whose title has no row id and
+whose kit passes no row key to `parityRunners`, run on every runner too. A kit that
+passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the set's first runner.
 R1 and U1 are smoke rows on every runner. The guards: `core/parity-classes.test.ts`
 fails when the set misses a declared value, or a parity file belongs to no
 family; `cez/runner-fact-combination` fails when one function in

@@ -35,7 +35,8 @@ A family whose cells branch on a runner's own code, or read a narrow fact (nativ
 ask, native subagents, the native timer tool, cumulative cost), is
 `every-runner`. A shared row also runs on every runner when its family lists it
 in `everyRunner`, when any runner is exempt from it, or when its cell title
-carries no row id. A `no-session` family runs once, on the first runner of the
+carries no row id and its kit passes no row key to `parityRunners`. A kit that
+passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the first runner of the
 set. R1 and U1 stay on every runner as smoke rows. When unsure, choose
 `every-runner` and say why in the table.
 

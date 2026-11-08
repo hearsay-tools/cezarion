@@ -10,7 +10,9 @@ import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
  * - `shared`: the cells test Cezar's logic above the seam, which sees a runner only through its
  *   turn-path facts. The derived `SHARED_RUNNERS` show every value of those facts once. A row of
  *   a shared family still runs on every runner when the family lists it in `everyRunner`, when
- *   `PARITY_EXEMPTIONS` exempts any runner from it, or when its cell title carries no row id.
+ *   `PARITY_EXEMPTIONS` exempts any runner from it, or when its cell title carries no row id
+ *   and its kit passes no row key to `parityRunners`. A kit that passes a key (for example a
+ *   mode name) runs that cell as a shared row.
  * - `no-session`: the cells start no runner session. Once, on `NO_SESSION_RUNNER`.
  *
  * `parity-classes.test.ts` checks that the derived set covers every declared value, and that every
