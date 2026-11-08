@@ -8,9 +8,9 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
   it.each([
     ['a row fact and the resume prompt', "function f(runner, id) { return runner.systemPromptOnResume === 'resent' && RUNNER_FACTS[id].nativeAsk === 'none'; }", 'f', ['nativeAsk', 'systemPromptOnResume']],
     ['two delivery fields', "const g = (state, runner) => state.inputState.inputDelivery?.consumption === 'observable' && inputDeliveryOf(runner).mode === 'steer';", 'g', ['consumption', 'mode']],
-    ['a fact in a nested callback', "class A { settle(runner) { if (runner.facts.costReport === 'cumulative') return list.filter(x => x.inputDelivery.acknowledgement === 'write'); } }", 'settle', ['acknowledgement', 'costReport']],
+    ['a fact in a nested callback', "class A { settle(runner) { if (runner.facts.costReport === 'cumulative') return list.filter(x => x.inputDelivery.acknowledgement === 'write'); } }", 'A>settle', ['acknowledgement', 'costReport']],
     ['destructured facts', "function h(id) { const { nativeAsk, nativeTimerTool } = RUNNER_FACTS[id]; return nativeAsk && nativeTimerTool; }", 'h', ['nativeAsk', 'nativeTimerTool']],
-    ['a private method', "class B { #pick(id, runner) { return RUNNER_FACTS[id]?.nativeSubagents ?? inputDeliveryOf(runner).humanInputAtTurnEnd; } }", '#pick', ['humanInputAtTurnEnd', 'nativeSubagents']],
+    ['a private method', "class B { #pick(id, runner) { return RUNNER_FACTS[id]?.nativeSubagents ?? inputDeliveryOf(runner).humanInputAtTurnEnd; } }", 'B>#pick', ['humanInputAtTurnEnd', 'nativeSubagents']],
   ])('names a function that reads %s', (_case, source, name, facts) => {
     expect(factCombinations(source)).toEqual([{ name, line: 1, facts }]);
   });
@@ -62,7 +62,6 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
   it.each([
     ['one fact read twice through aliases', 'function f(a, b) { const d = a.inputDelivery; const e = b.inputDelivery; return d.mode === e.mode; }'],
     ['one fact on two runners', 'function f(a, b) { const x = RUNNER_FACTS[a]; const y = RUNNER_FACTS[b]; return x.costReport === y.costReport; }'],
-    ['a name that a parameter shadows', 'const d = runner.inputDelivery;\nfunction f(d) { return d.mode && d.consumption; }'],
     ['same-named fields of another object', 'function f(options) { const { mode, consumption, nativeAsk } = options; return mode && consumption && nativeAsk; }'],
   ])('passes %s', (_case, source) => {
     expect(factCombinations(source)).toEqual([]);
@@ -85,12 +84,28 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
 
   // The over-approximation: a fact source anywhere plus two fact keys from any object.
   it.each([
-    ['a local reassigned to another value', 'function f(runner, options) { let d = runner.inputDelivery; d = options; return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['a module-level source with a shadowing parameter', 'const d = runner.inputDelivery;\nfunction f(d) { return d.mode && d.consumption; }', ['consumption', 'mode'], 2],
+    ['a local reassigned to another value', 'function f(runner, options) { let d = runner.inputDelivery; d = options; return d.mode && d.consumption; }', ['consumption', 'mode'], 1],
     ['an unrelated object with a same-named key', "function f(runner, options) { const resent = runner.systemPromptOnResume === 'resent'; return resent && options.mode === 'fast'; }",
-      ['mode', 'systemPromptOnResume']],
-    ['a source in one callback and keys in another', 'function f(ids, list) { ids.map(id => RUNNER_FACTS[id]); return list.filter(x => x.mode).map(x => x.costReport); }', ['costReport', 'mode']],
-  ])('flags %s, by design', (_case, source, facts) => {
-    expect(factCombinations(source)).toEqual([{ name: 'f', line: 1, facts }]);
+      ['mode', 'systemPromptOnResume'], 1],
+    ['a source in one callback and keys in another', 'function f(ids, list) { ids.map(id => RUNNER_FACTS[id]); return list.filter(x => x.mode).map(x => x.costReport); }', ['costReport', 'mode'], 1],
+  ] as const)('flags %s, by design', (_case, source, facts, line) => {
+    expect(factCombinations(source)).toEqual([{ name: 'f', line, facts }]);
+  });
+
+  // Review round 3: renamed and module-level sources, and static computed keys.
+  it.each([
+    ['a renamed type import', "import type { InputDelivery as InputDeliveryPolicy } from '../../core/agent-runner.ts';\nfunction f(d: InputDeliveryPolicy) { return d.mode && d.consumption; }",
+      ['consumption', 'mode']],
+    ['a renamed value import', "import { RUNNER_FACTS as table } from '../../core/runner-facts.ts';\nfunction f(id) { const row = table[id]; return row.nativeAsk && row.costReport; }",
+      ['costReport', 'nativeAsk']],
+    ['a renamed inputDeliveryOf import', "import { inputDeliveryOf as deliveryOf } from '../../core/agent-runner.ts';\nfunction f(runner) { const d = deliveryOf(runner); return d.mode && d.acknowledgement; }",
+      ['acknowledgement', 'mode']],
+    ['a local alias of the type', 'type Policy = Readonly<InputDelivery>;\nfunction f(d: Policy) { return d.mode && d.humanInputAtTurnEnd; }', ['humanInputAtTurnEnd', 'mode']],
+    ['a module-level captured value', 'const d = RUNNER_FACTS.codex.inputDelivery;\nfunction f() { return d.mode && d.acknowledgement; }', ['acknowledgement', 'mode']],
+    ['template and string computed keys', "function f(runner) {\n  const d = runner.inputDelivery; return d[`mode`] && d['consumption'];\n}", ['consumption', 'mode']],
+  ] as const)('names a function that reads two facts through %s', (_case, source, facts) => {
+    expect(factCombinations(source)).toEqual([{ name: 'f', line: source.split('\n').findIndex(line => line.includes('function f')) + 1, facts }]);
   });
 
   it('lets a reported function pass only through an exception, which names its reason', () => {
@@ -113,9 +128,24 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
       .toEqual([{ name: 'f', line: 1, facts: ['nativeAsk', 'nativeVoice'] }]);
   });
 
-  it('reports only the innermost function that combines facts', () => {
+  it('reports every qualifying function, the outer one with its nested reads', () => {
     const source = "function outer(id, runner) {\n  const inner = () => RUNNER_FACTS[id].nativeAsk && runner.systemPromptOnResume;\n  return inner;\n}";
-    expect(factCombinations(source)).toEqual([{ name: 'inner', line: 2, facts: ['nativeAsk', 'systemPromptOnResume'] }]);
+    expect(factCombinations(source)).toEqual([
+      { name: 'outer', line: 1, facts: ['nativeAsk', 'systemPromptOnResume'] },
+      { name: 'outer>inner', line: 2, facts: ['nativeAsk', 'systemPromptOnResume'] },
+    ]);
+  });
+
+  it('clears only the function an exception names, so an inner exception leaves the outer combination', () => {
+    const file = 'packages/cezar/src/workflows/run/x.ts';
+    const source = "function outer(id, runner) {\n  const inner = () => RUNNER_FACTS[id].nativeAsk && RUNNER_FACTS[id].costReport;\n  return inner() && runner.inputDelivery.mode === 'steer';\n}";
+    expect(combinationFindings(file, source, { [`${file}#outer>inner`]: { reason: 'a probe' } }))
+      .toEqual([{ line: 1, message: expect.stringMatching(/^outer touches a runner fact source and reads costReport and mode and nativeAsk\./) }]);
+  });
+
+  it('names functions apart by their enclosing class and function, and numbers repeats', () => {
+    const source = "class A { run(r) { return r.inputDelivery.mode && r.inputDelivery.consumption; } }\nclass B { run(r) { return r.inputDelivery.mode && r.inputDelivery.consumption; } }\nlist.map(r => r.inputDelivery.mode && r.inputDelivery.consumption);\nlist.map(r => r.inputDelivery.mode && r.inputDelivery.consumption);";
+    expect(factCombinations(source).map(found => found.name)).toEqual(['A>run', 'B>run', '(anonymous function)', '(anonymous function)#2']);
   });
 
   it('applies to workflow sources and not to their tests', () => {

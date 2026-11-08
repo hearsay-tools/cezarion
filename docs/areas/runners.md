@@ -48,7 +48,9 @@ Three guards hold the rule:
    included, that touches any fact source (`.inputDelivery`, `.facts`,
    `.systemPromptOnResume`, `RUNNER_FACTS`, `inputDeliveryOf`, or the
    `InputDelivery` or `RunnerFacts` type) and reads two or more different fact
-   keys from any object. The keys come from the declared types. A real
+   keys from any object. Renamed imports and a source touched at module level
+   count; its Limits list in `docs/sdlc/lint.md` names what it cannot see. The
+   keys come from the declared types. A real
    combination needs a parity row that runs on every runner. Each reported
    function goes in the rule's `COMBINATION_ROWS` with a reason; a real
    combination also names its row as `<family> <row>`, and a false positive
