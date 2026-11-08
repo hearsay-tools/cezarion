@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import {
@@ -38,7 +39,7 @@ export interface AutomationIo {
   timeoutMs?: number;
 }
 
-const USAGE = `cez automation — create and manage automations (GitHub polls and schedules) on the cockpit running this task.
+const USAGE = commandText(`cez automation — create and manage automations (GitHub polls and schedules) on the cockpit running this task.
 One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockpit, 3 check timed out, 64 usage.
 
   schema                                   print the definition shape, bounds and prompt placeholders
@@ -70,7 +71,7 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
   list [--archived include|only] | show <id> | enable <id> | pause <id> | delete <id>
 
 Address: CEZ_COCKPIT_URL + CEZ_PROJECT_ID (set inside a task). --url <origin>, --repo <dir> or CEZ_URL look
-for a cockpit instead.`;
+for a cockpit instead.`);
 
 const NO_COCKPIT = 'no cockpit address — this command works inside a task run by a cockpit with automations on; stop and report that automations are unavailable';
 const CHECK_POLL_MS = 500;

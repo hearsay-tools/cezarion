@@ -1,0 +1,37 @@
+// Frozen from hearsay-tools/cezarion v0.17.0, packages/cezar/src/application-update/service.ts.
+// Identical in v0.16.0, v0.15.1, v0.15.0 and v0.14.9. Keep shipped validation unchanged.
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+const PACKAGE = '@wjarka/cezarion';
+
+export function validateInstalledPackage(path: string, expectedVersion: string, installRoot: string = path): void {
+  const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as {
+    name?: unknown; version?: unknown; engines?: { node?: string }; dependencies?: Record<string, string>; bin?: Record<string, string>;
+  };
+  if (manifest.name !== PACKAGE || manifest.version !== expectedVersion) throw new Error('staged package version mismatch');
+  if (!manifest.bin || !Object.values(manifest.bin).some((entry) => entry === 'dist/index.js')) throw new Error('staged CLI entry missing');
+  if (!existsSync(join(path, 'dist/index.js')) || !existsSync(join(path, 'web/dist/index.html'))) throw new Error('staged package assets incomplete');
+  const html = readFileSync(join(path, 'web/dist/index.html'), 'utf8');
+  for (const [, asset] of html.matchAll(/(?:src|href)=["']\/assets\/([A-Za-z0-9._/-]+)["']/g)) {
+    if (!asset || asset.includes('..') || !existsSync(join(path, 'web/dist/assets', asset))) {
+      throw new Error('staged web assets incomplete');
+    }
+  }
+  if (!manifest.dependencies || typeof manifest.dependencies !== 'object') throw new Error('staged dependencies missing');
+  if (manifest.engines?.node && !/^>=?\s*\d+/.test(manifest.engines.node)) throw new Error('unsupported engine declaration');
+  // npm's engine-strict flag verifies engine compatibility and installs the declared runtime tree.
+  for (const name of Object.keys(manifest.dependencies)) {
+    let cursor = path;
+    let present = false;
+    while (cursor.startsWith(installRoot)) {
+      if (existsSync(join(cursor, 'node_modules', name))) { present = true; break; }
+      if (cursor === installRoot) break;
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      cursor = parent;
+    }
+    if (!present) {
+      throw new Error('staged runtime dependencies incomplete');
+    }
+  }
+}

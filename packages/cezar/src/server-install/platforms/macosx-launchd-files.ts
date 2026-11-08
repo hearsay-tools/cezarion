@@ -1,3 +1,6 @@
+import { BINARY_NAMES } from '../../home/identity.ts';
+import { ownedNpxPackage } from '../npx-cache.ts';
+import { shellQuote } from '../../core/shell-env.ts';
 import { lstatSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,11 +21,11 @@ function isOurLauncher(xml: string): boolean {
   const serve = args.indexOf('serve');
   if (serve < 1) return false;
   const command = args.slice(0, serve);
-  if (basename(command[0]!) === 'npx') return command.length === 3 && command[1] === '--yes' && command[2] === 'cezarion';
+  if (basename(command[0]!) === 'npx') return command.length === 3 && command[1] === '--yes' && ownedNpxPackage(command.map(shellQuote).join(' ')) !== undefined;
   if (command.length !== 2 || !/^node(?:\.exe)?$/.test(basename(command[0]!))) return false;
   const entry = command[1]!;
   const ownEntry = resolve(fileURLToPath(new URL('../../../dist/index.js', import.meta.url)));
-  return entry === ownEntry || ['cezarion', 'cez'].includes(basename(entry));
+  return entry === ownEntry || BINARY_NAMES.some(name => basename(entry) === name || entry === resolve(ownEntry, '..', `${name}.js`));
 }
 
 function sameAgent(a: StepArtifact | undefined, b: StepArtifact): boolean {

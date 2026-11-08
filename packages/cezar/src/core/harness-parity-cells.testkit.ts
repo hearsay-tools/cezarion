@@ -22,9 +22,9 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  *
  * Two tiers. The seam tier drives each real runner class against that backend's
  * own offline mock. The run tier drives a real `RunManager`, because
- * `ask.requested` comes from the RUNNER for codex, opencode and cursor and from
- * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
- * above the seam.
+ * `workflows/run/` emits `ask.requested` for every runner's `cezar_ask` card,
+ * while codex and opencode also emit it from the runner for a native ask —
+ * groups 1, 3 and 6 are only uniform above the seam.
  *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
  * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`
@@ -612,11 +612,10 @@ const CONTROL_CRITERIA = [
   { id: 'R27', scenario: 'hold' },
   // hearsay-tools/cezarion#1225: cancel/destroy releases the same-turn wait slot.
   { id: 'R80', scenario: 'hold' },
-  // workflows/ci-wait-conflict-{fresh,continued,recovered,cancellation}-parity.test.ts: real gh metadata, atomic input, native wake.
+  // workflows/ci-wait-conflict-{fresh,continued,recovered}-parity.test.ts: real gh metadata, atomic input, native wake.
   { id: 'R81', scenario: 'baseline' },
   { id: 'R82', scenario: 'baseline' },
   { id: 'R83', scenario: 'baseline' },
-  { id: 'R84', scenario: 'baseline' },
   // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-{fresh,recovered}-parity.test.ts keeps
   // partial green pending during a rerun, including recovery without a session.
   { id: 'R85', scenario: 'baseline' },
@@ -627,9 +626,6 @@ const CONTROL_CRITERIA = [
   { id: 'R97', scenario: 'baseline' },
   { id: 'R98', scenario: 'baseline' },
   { id: 'R99', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1540: completion-options-parity.test.ts, fresh and Continue.
-  { id: 'R100', scenario: 'baseline' },
-  { id: 'R101', scenario: 'cezar-done' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
@@ -3269,7 +3265,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
     }
   });
 
-  // cezar's own tools are covered where they run: Codex rows of ci-wait-{fresh,continued,recovered}-parity park only
+  // cezar's own tools are covered where they run: the Codex U1 row of workflows/waits-parity parks only
   // when the mock's MCP tool gate lets cezar_wait through unasked.
   describeRunners('mcp', 'MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
     for (const backend of runners) {

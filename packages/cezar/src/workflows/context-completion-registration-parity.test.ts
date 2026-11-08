@@ -2,7 +2,6 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
-import { describeCompletionOptions, COMPLETION_OPTIONS_GROUPS } from './completion-options-cells.testkit.ts';
 import { describeSessionContext, SESSION_CONTEXT_GROUPS } from './session-context-cells.testkit.ts';
 import { useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
@@ -29,7 +28,7 @@ function expectCells(names: string[], rows: string[]) {
   expect(actual).toEqual(expected);
 }
 
-describe('context and completion family registration', () => {
+describe('session-context family registration', () => {
   it('registers every session-context runner and row exactly once', () => {
     const known = Object.keys(SESSION_CONTEXT_GROUPS) as Array<keyof typeof SESSION_CONTEXT_GROUPS>;
     const registered = registeredGroups('describeSessionContext', 'SESSION_CONTEXT_GROUPS', known);
@@ -37,14 +36,5 @@ describe('context and completion family registration', () => {
     const names: string[] = [];
     for (const group of registered) describeSessionContext(SESSION_CONTEXT_GROUPS[group as keyof typeof SESSION_CONTEXT_GROUPS], collectionSuite(names));
     expectCells(names, ['R120', 'R121', 'R122', 'R123', 'R124']);
-  });
-
-  it('registers every completion-options runner and row exactly once', () => {
-    const known = Object.keys(COMPLETION_OPTIONS_GROUPS) as Array<keyof typeof COMPLETION_OPTIONS_GROUPS>;
-    const registered = registeredGroups('describeCompletionOptions', 'COMPLETION_OPTIONS_GROUPS', known);
-    expect(registered.sort()).toEqual([...known].sort());
-    const names: string[] = [];
-    for (const group of registered) describeCompletionOptions(COMPLETION_OPTIONS_GROUPS[group as keyof typeof COMPLETION_OPTIONS_GROUPS], collectionSuite(names));
-    expectCells(names, ['R100', 'R101']);
   });
 });

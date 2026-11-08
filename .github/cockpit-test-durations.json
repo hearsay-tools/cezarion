@@ -4,7 +4,18 @@
     "headSha": "2a28cfe91c62ae162afc65f2d2fc7a668a20031f",
     "source": "https://github.com/hearsay-tools/cezarion/actions/runs/40179359274",
     "aggregation": "reported per-file suite duration from one successful four-shard run (attempt 1, jobs 121127024603, 121127024593, 121127024555, 121127024568); milliseconds",
-    "root": "packages/web/e2e"
+    "root": "packages/web/e2e",
+    "taskThreadSplit": {
+      "source": "hearsay-tools/cezarion#2983: three local runs of task-thread.e2e.ts at 2cb9561da and three of its replacement specs, on one host with one e2e build, 2026-11-08",
+      "aggregation": "each weight is the replaced CI weight (138615 ms for task-thread.e2e.ts) times that spec's median local duration divided by the old file's median local duration (244135 ms); local durations are Vitest JSON per-file endTime minus startTime; milliseconds",
+      "localMediansMs": {
+        "task-thread.e2e.ts": 244135,
+        "task-thread-layout.e2e.ts": 133186,
+        "task-thread-session.e2e.ts": 51286,
+        "task-thread-transcript.e2e.ts": 38289
+      },
+      "browser": "agent-browser 0.40.0; Node 24.22.1"
+    }
   },
   "durationsMs": {
     "agent-browser-tabs.e2e.ts": 3188,
@@ -82,7 +93,9 @@
     "task-handoff.e2e.ts": 9528,
     "task-pr-collection.e2e.ts": 25180,
     "task-status-groups.e2e.ts": 8984,
-    "task-thread.e2e.ts": 138615,
+    "task-thread-layout.e2e.ts": 75620,
+    "task-thread-session.e2e.ts": 29119,
+    "task-thread-transcript.e2e.ts": 21740,
     "task-views-layout.e2e.ts": 45493,
     "thread-scroll.e2e.ts": 61871,
     "tools-menu.e2e.ts": 2107,

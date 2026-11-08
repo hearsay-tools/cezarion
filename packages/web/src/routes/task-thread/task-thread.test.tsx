@@ -653,6 +653,18 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="follow-up-engine"]')).not.toBeNull()
   })
 
+  it('closed but resumable → the action row holds exactly Archive, then Continue (#281)', async () => {
+    const steps = [
+      { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's-1' },
+    ]
+    renderView(<ThreadView run={run('done', { steps })} thread={reduceThread(EVENTS)} />)
+    const actions = () => document.querySelector('[data-slot="composer-actions"]')
+    // Continue replaces Send only once the provider query makes the run continuable.
+    await waitFor(() => expect(actions()?.querySelector('[aria-label="Continue"]')).not.toBeNull())
+    const labels = [...actions()!.querySelectorAll('button')].map((button) => button.getAttribute('aria-label'))
+    expect(labels).toEqual(['Archive task', 'Continue'])
+  })
+
   /** #472 — stacked messages render as their own bubbles, after the task. */
   it('renders one bubble per stacked message, in order, with their images', () => {
     renderView(
@@ -1112,6 +1124,23 @@ describe('ThreadView', () => {
     const summary = document.querySelector('[data-slot="run-activity-status"]')?.textContent
     expect(summary).not.toContain('All complete')
     // Not "In progress" either: the run is over, so the header names an outcome (#402 feedback).
+    expect(summary).toContain('Incomplete')
+  })
+
+  it('a done run whose plan was never ticked off reads Incomplete', () => {
+    const steps = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }]
+    const withPlan: RunEvent[] = [
+      ...EVENTS,
+      line(8, 'plan.updated', {
+        entries: [
+          { content: 'Read the docs', status: 'completed' },
+          { content: 'Reply', status: PLAN_STATUS.pending },
+        ],
+      }),
+    ]
+    renderView(<ThreadView run={run('done', { id: 'dock-unticked-plan', steps } as Partial<ApiRun>)} thread={reduceThread(withPlan)} />)
+    const summary = document.querySelector('[data-slot="run-activity-status"]')?.textContent
+    expect(summary).not.toContain('All complete')
     expect(summary).toContain('Incomplete')
   })
 

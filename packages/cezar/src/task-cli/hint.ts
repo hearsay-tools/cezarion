@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import type { Cockpit } from './http.ts';
 
@@ -26,7 +27,7 @@ export function startCockpitHint(repoDir: string, io: CockpitHintIo = {}): () =>
   void Promise.resolve()
     .then(() => discover({ repoDir, signal: controller.signal }))
     .then((found) => {
-      if (!controller.signal.aborted) write(`a cockpit is running at ${found.origin}; use "cez task start" to run this task there instead`);
+      if (!controller.signal.aborted) write(commandText(`a cockpit is running at ${found.origin}; use "cez task start" to run this task there instead`));
     }, () => { /* no cockpit, or abandoned: silent */ });
   return () => controller.abort();
 }

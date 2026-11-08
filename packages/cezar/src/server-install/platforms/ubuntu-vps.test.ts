@@ -613,6 +613,7 @@ describe('ubuntu-vps redeploy npx-cache refresh (#696)', () => {
     try {
       mkdirSync(join(cache, '_npx', 'aaaa', 'node_modules', 'cezarion'), { recursive: true });
       writeFileSync(join(cache, '_npx', 'aaaa', 'node_modules', 'cezarion', 'x'), '');
+      writeFileSync(join(cache, '_npx', 'aaaa', 'package.json'), JSON.stringify({ dependencies: { cezarion: '^0.17.0' } }));
       mkdirSync(join(cache, '_npx', 'bbbb', 'node_modules', 'prettier'), { recursive: true });
 
       refreshNpxCacheForRedeploy(ctxWith({}), '/n/npx --yes cezarion serve --port 4321');

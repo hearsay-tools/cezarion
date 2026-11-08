@@ -1,3 +1,4 @@
+import { BINARY_NAMES, productIdentity } from './home/identity.ts';
 /** The pure half of `scripts/install-as-command.mjs` (spec 013).
  *
  *  `npm run install-as-command` builds this checkout and puts a global
@@ -17,7 +18,8 @@ export const PACKAGE_NAME = '@wjarka/cezarion';
 /** Every bin the main package installs. `cezarion` matches the unscoped npm
  *  alias, so a single link / global-install exposes the same name as
  *  `npx cezarion`; `cez` is the short form. */
-export const BIN_NAMES = ['cezarion', 'cez'] as const;
+export const BIN_NAMES = BINARY_NAMES;
+export const COMMAND_NAME = productIdentity().command;
 
 export type InstallMode = 'link' | 'global' | 'uninstall';
 

@@ -2,14 +2,13 @@
 // follow core/__fixtures__; every turn waits on a file so tests choose ordering,
 // never provider latency. Production runners, transport and process proof stay real.
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { publishFile } from '../../../scripts/mock-publish.mjs';
 
 export function publishJson(path, value) {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value));
-  renameSync(tmp, path);
+  publishFile(path, JSON.stringify(value));
 }
 
 // Cezar's no-wait nudge (hearsay-tools/cezarion#1234). The wire answers it at once in plain text,

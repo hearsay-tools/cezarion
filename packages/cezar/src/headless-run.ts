@@ -1,3 +1,4 @@
+import { commandText } from './home/command.ts';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
 import { ProviderAuthService, providerAuthChecksDisabled } from './core/provider-auth.ts';
@@ -122,9 +123,9 @@ export async function runHeadless(
     });
     const record = store.getRun(run.id);
     if (final === 'review') {
-      deps.console.log(`\n  changes ready for review on branch ${record?.branch ?? '?'} — inspect them in the cockpit: npx cezarion`);
+      deps.console.log(commandText(`\n  changes ready for review on branch ${record?.branch ?? '?'} — inspect them in the cockpit: npx cezarion`));
     }
-    deps.console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`);
+    deps.console.log(commandText(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezarion`));
     deps.process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
   } finally {
     deps.process.off('SIGINT', onSigint); deps.process.off('SIGTERM', onSigterm); deps.process.off('SIGHUP', onSighup);

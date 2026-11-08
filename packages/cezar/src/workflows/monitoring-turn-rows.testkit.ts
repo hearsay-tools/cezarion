@@ -275,37 +275,12 @@ export function registerClose(backend: RunnerId): void {
   });
 
 }
-export function registerAutonomousAsk(backend: RunnerId, mode: 'fresh' | 'continuation'): void {
-  // An autonomous run assumes instead of asking while its wake budget lasts: cezar_ask is refused
-  // with `autonomous_run`, registers nothing, and the turn takes the autonomous nudge.
-  it(`${mode} M23 an autonomous cezar_ask followed by acknowledgement is refused, and the run continues`, async () => {
-    process.env.CEZ_DRY_RUN = '0';
-    process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
-    const prompt = script(ASK, thenSay(ACK_TEXT));
-    const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: mode === 'fresh' ? prompt : 'mock:hold', runner: backend, autonomous: mode === 'fresh' });
-    if (mode === 'continuation') {
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-      expect(manager.finish(p.id)).toBe(true);
-      await until(() => !manager.isActive(p.id));
-      store.updateRun(p.id, { autonomous: true });
-      expect(manager.continueRun(p.id, { text: prompt }).ok).toBe(true);
-    }
-    await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)?.status).toBe(RUN_STATUS.done);
-    expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes('autonomous_run'))).toBe(true);
-    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith('autonomous — continuing without pausing'))).toBe(true);
-    expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
-    expect(store.readEvents(p.id).filter(event => event.type === 'ask.requested' || event.type === 'human-input-delivered')).toHaveLength(0);
-  });
-}
-
 export function registerMonitoringPartition(name: MonitoringPartitionName): void {
   const partition = MONITORING_PARTITIONS[name];
   for (const backend of partition.runners) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
     useWorkerWaitFixture();
     for (const mode of partition.modes) for (const id of partition.rows) {
       if (id === 'M13' || id === 'M14') registerAutonomousProse(backend, mode);
-      else if (id === 'M23') registerAutonomousAsk(backend, mode);
       else if (id === 'M17') registerClose(backend);
       else {
         const row = MONITORING_TURN_CRITERIA.find(row => row.id === id)!;

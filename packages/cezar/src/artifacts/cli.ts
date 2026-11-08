@@ -1,7 +1,8 @@
+import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { publishArtifact } from './store.ts';
 
-const HELP = `Usage: cez artifact publish <path>
+const HELP = commandText(`Usage: cez artifact publish <path>
 Publish an immutable local file snapshot from an active task. Returns JSON
 with metadata, a task-relative preview link, and escaped Markdown.
 
@@ -9,7 +10,7 @@ Limits: 10 MiB per file; 64 publications and 64 MiB per task. No old
 snapshots are evicted. Requires CEZ_ARTIFACTS_DIR and CEZ_TASK_ID supplied
 by the task runner. Never publish credentials or unrelated private files.
 
--h, --help   Show this help without task context.`;
+-h, --help   Show this help without task context.`);
 export async function runArtifactCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
   if (argv.includes('--help') || argv.includes('-h')) { console.log(HELP); return 0; }
   try {

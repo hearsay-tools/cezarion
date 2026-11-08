@@ -1,6 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { Suspense, lazy } from 'react'
+import { BrowserRouter, Link, MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { expect, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import type { AgentProfilesResponse, ConfigResponse, HealthResponse, ProviderStatusResponse, RepoResponse, Skill, WorkspaceConfigResponse, WorkflowsResponse } from '@open-mercato/cezar-api-client'
@@ -8,6 +9,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { answerFixture, answerFromRoutes, jsonResponse, type FetchRoute } from '@/test/fetch-routes'
 import { readDraft, writeDraft } from './new-task-draft'
 import { NewTaskRoute } from './new-task'
+import { TaskPreviewLayout } from './task-thread/preview/task-preview-layout'
 
 export const HEALTH: HealthResponse = {
   version: '0.1.3',
@@ -289,19 +291,30 @@ export function LocationProbe() {
   return <output data-testid="location">{location.pathname + location.search}</output>
 }
 
-export function renderNewTask(entry = '/new') {
+export function renderNewTask(entry = '/new', suspendThread: false | 'outer' | 'inner' = false) {
+  // Keep /new mounted while its outgoing transition suspends, as a cold thread chunk does.
+  const PendingThread = lazy(() => new Promise<{ default: () => null }>(() => {}))
   const client = createQueryClient()
+  const Router = suspendThread ? BrowserRouter : MemoryRouter
+  if (suspendThread) window.history.replaceState(null, '', entry)
   const rendered = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[entry]}>
-        <Routes>
-          <Route path="/new" element={<NewTaskRoute />} />
-          <Route path="/p/:projectId/new" element={<NewTaskRoute />} />
-          <Route path="*" element={<div data-testid="elsewhere" />} />
-        </Routes>
+      <Router initialEntries={[entry]}>
+        <Link to="/new">New task</Link>
+        <Suspense fallback={null}>
+          <Routes>
+            {suspendThread === 'outer' ? <Route path="/tasks/:id" element={<PendingThread />} /> : null}
+            {suspendThread === 'inner' ? <Route path="/tasks/:id" element={<TaskPreviewLayout />}>
+              <Route index element={<Suspense fallback={<div data-route="task-thread" />}><PendingThread /></Suspense>} />
+            </Route> : null}
+            <Route path="/new" element={<NewTaskRoute />} />
+            <Route path="/p/:projectId/new" element={<NewTaskRoute />} />
+            <Route path="*" element={<div data-testid="elsewhere" />} />
+          </Routes>
+        </Suspense>
         <LocationProbe />
         <Toaster />
-      </MemoryRouter>
+      </Router>
     </QueryClientProvider>,
   )
   return { ...rendered, client }

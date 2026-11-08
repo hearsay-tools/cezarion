@@ -276,6 +276,7 @@ describe('plan mode against a live dry-run server', () => {
 
     browser.click('[data-slot="plan-start"]')
     browser.waitForFunction(`location.pathname.startsWith('${scoped('/tasks/')}')`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') !== null && document.querySelector('[data-route="new"]') === null`)
 
     const runId = (browser.evaluate(`location.pathname.split('/').pop()`) as string) ?? ''
     expect(runId).not.toBe('')
@@ -289,7 +290,7 @@ describe('plan mode against a live dry-run server', () => {
       expect.objectContaining({ id: 'implement', name: 'Implement', prompt: '{{task}}' }),
     ])
     // The thread really rendered (the dry-run session parks at waiting).
-    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"] [data-slot="composer"] textarea') !== null`)
   }, 90_000)
 
   it('back on /new: plan mode stuck (draft store) and the spent draft text is gone', () => {
@@ -298,6 +299,7 @@ describe('plan mode against a live dry-run server', () => {
     browser.waitForFunction(`document.querySelectorAll('[data-slot="plan-step"]').length === 2`)
     browser.click('[data-slot="plan-start"]')
     browser.waitForFunction(`location.pathname.startsWith('${scoped('/tasks/')}')`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') !== null && document.querySelector('[data-route="new"]') === null`)
     browser.click(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)
     browser.waitForFunction(`document.querySelector('[data-slot="mode-plan"]') !== null`)
     expect(
