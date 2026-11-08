@@ -10,7 +10,7 @@ import { createQueryClient } from '@/api/query-client'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
-import type { GithubItem, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
+import type { GithubItem, GithubPrMergeState, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
 
@@ -54,7 +54,7 @@ const CONFLICTING_STATE: typeof MERGE_STATE = {
   mergeState: { ...MERGE_STATE.mergeState, mergeable: 'conflicting', eligibility: 'blocked', canMerge: false },
 }
 
-let mergeState: typeof MERGE_STATE = MERGE_STATE
+let mergeState: GithubPrMergeStateResponse = MERGE_STATE
 
 beforeEach(() => {
   mergeState = MERGE_STATE
@@ -145,6 +145,148 @@ describe('GithubItemDetail outside the GitHub view', () => {
   })
 })
 
+describe('merge requirements in the detail', () => {
+  it.each([
+    ['merged', { state: 'merged', eligibility: 'terminal', canMerge: false }, 'Merged'],
+    ['closed', { state: 'closed', eligibility: 'terminal', canMerge: false }, 'Closed'],
+    ['draft', { isDraft: true, canMerge: false }, 'Draft'],
+    ['conflicting', { mergeable: 'conflicting', canMerge: false }, 'Conflicts must be resolved'],
+    ['blocked', { eligibility: 'blocked', canMerge: false }, 'Merge blocked'],
+  ] satisfies [string, Partial<GithubPrMergeState>, string][])(
+    'shows the %s heading', async (_name, patch: Partial<GithubPrMergeState>, title) => {
+      mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, ...patch } }
+      renderDetail(PR_42)
+      await screen.findByRole('heading', { name: title })
+      const method = screen.queryByRole('combobox', { name: 'Merge method' })
+      expect(Boolean(method)).toBe(patch.state === undefined)
+    },
+  )
+
+  it.each([
+    ['mergeable', 'none', 'passing', null],
+    ['conflicting', 'present', 'failing', 'true'],
+    ['unknown', 'unknown', 'unknown', null],
+  ] as const)('shows %s conflict status', async (mergeable, label, icon, attribute) => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, mergeable } }
+    renderDetail(PR_42)
+    const row = (await screen.findByText(`Conflicts: ${label}`)).closest('li')!
+    expect(row.querySelector(`[data-slot="gh-merge-status-${icon}"]`)).not.toBeNull()
+    expect(document.querySelector('[data-slot="gh-merge-box"]')?.getAttribute('data-conflicting')).toBe(attribute)
+  })
+
+  it('shows unknown reviews, requirement warning and blockers without claiming readiness', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: {
+      ...MERGE_STATE.mergeState, reviewDecision: 'unknown', eligibility: 'unknown', canMerge: false,
+      blockers: [{ code: 'reviews', message: 'Review requirements could not be read.' }],
+    } }
+    renderDetail(PR_42)
+    await screen.findByRole('heading', { name: 'Merge blocked · Requirements unknown' })
+    expect(screen.getByText('Reviews: unknown').closest('li')?.querySelector('[data-slot="gh-merge-status-unknown"]')).not.toBeNull()
+    expect(screen.getByText(/Passing checks do not establish merge readiness/)).toBeTruthy()
+    expect(screen.getByText('Review requirements could not be read.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('shows an empty check list and the abbreviated branch head', async () => {
+    renderDetail(PR_42, vi.fn())
+    await screen.findByText('No checks configured')
+    expect(screen.getByText('feat/share (0123456) → main')).toBeTruthy()
+    expect(screen.queryByText(/Passing checks do not establish merge readiness/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Run agent on this PR' })).toBeNull()
+  })
+
+  it('keeps requiredness and safe details links on their own check rows', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, checks: [
+      { name: 'unit', state: 'passing', required: true, url: 'https://checks.example/unit' },
+      { name: 'optional', state: 'failing', required: false, url: 'javascript:void(0)' },
+      { name: 'queued', state: 'pending', required: null },
+      { name: 'unreported', state: 'unknown', required: false, url: '' },
+    ] } }
+    renderDetail(PR_42)
+    const unit = (await screen.findByText('unit · passing · required')).closest('li')!
+    const link = within(unit).getByRole('link', { name: 'details' })
+    expect(link.getAttribute('href')).toBe('https://checks.example/unit')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    for (const [label, status] of [
+      ['optional · failing', 'failing'], ['queued · pending · requiredness unknown', 'pending'],
+      ['unreported · unknown', 'unknown'],
+    ]) {
+      const row = screen.getByText(label!).closest('li')!
+      expect(row.querySelector(`[data-slot="gh-merge-status-${status}"]`)).not.toBeNull()
+      expect(within(row).queryByRole('link')).toBeNull()
+    }
+  })
+
+  it('shows the unavailable reason instead of merge controls', async () => {
+    mergeState = { available: false, reason: 'GitHub is not installed.' }
+    renderDetail(PR_42)
+    await screen.findByText('Merge status unavailable')
+    expect(screen.getByText('GitHub is not installed.')).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: 'Merge method' })).toBeNull()
+  })
+})
+
+describe('merge method selection', () => {
+  it.each([
+    [null, 'Rebase and merge'], ['merge', 'Create a merge commit'],
+  ] as const)('uses default %s or the first allowed method', async (defaultMethod, label) => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, methods: ['rebase', 'merge'], defaultMethod } }
+    renderDetail(PR_42)
+    await screen.findByRole('button', { name: label })
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Rebase and merge', 'Create a merge commit'])
+  })
+
+  it('uses the selected method, cancels confirmation and drops a method removed on refresh', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, methods: ['squash', 'rebase'] } }
+    renderDetail(PR_42)
+    const select = await screen.findByRole('combobox', { name: 'Merge method' })
+    fireEvent.change(select, { target: { value: 'rebase' } })
+    expect((select as HTMLSelectElement).value).toBe('rebase')
+    fireEvent.click(screen.getByRole('button', { name: 'Rebase and merge' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: /Rebase and merge pull request/ })).toBeTruthy()
+    expect(within(dialog).queryByText(/bypass unmet repository requirements/)).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).toBeNull()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    mergeState = MERGE_STATE
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByRole('button', { name: 'Squash and merge' })
+    expect((select as HTMLSelectElement).value).toBe('squash')
+  })
+
+  it('offers no merge action when no method is allowed', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, methods: [], defaultMethod: null } }
+    renderDetail(PR_42)
+    await screen.findByRole('heading', { name: 'Ready to merge' })
+    expect(screen.queryByRole('combobox', { name: 'Merge method' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Squash and merge' })).toBeNull()
+  })
+
+  it('keeps the loading state until requirements arrive', async () => {
+    let answer!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { answer = resolve })
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) => String(input).includes('/merge-state')
+      ? pending
+      : Promise.resolve(new Response(JSON.stringify({ available: true, comments: [] }))))
+    renderDetail(PR_42)
+    expect(document.querySelector('[data-slot="gh-merge-loading"]')).not.toBeNull()
+    expect(screen.queryByText('Merge status unavailable')).toBeNull()
+    answer(new Response(JSON.stringify(MERGE_STATE)))
+    await screen.findByRole('heading', { name: 'Ready to merge' })
+    expect(document.querySelector('[data-slot="gh-merge-loading"]')).toBeNull()
+  })
+
+  it('shows the fallback reason when the requirements request fails', async () => {
+    vi.stubGlobal('fetch', () => Promise.reject(new Error('Offline')))
+    renderDetail(PR_42)
+    await screen.findByText('GitHub could not load merge requirements.')
+    expect(screen.getByText('Merge status unavailable')).toBeTruthy()
+  })
+})
+
 describe('merging from the detail (#692)', () => {
   /** The merge flow's fetch: merge-state, the merge POST, and a ref-status answer that turns
    *  `merged` once the POST has landed — what the server's `forgetRefStatus` makes true. */
@@ -172,6 +314,35 @@ describe('merging from the detail (#692)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Squash and merge' }))
     fireEvent.click(within(document.querySelector('[data-slot="gh-merge-confirm"]') as HTMLElement).getByRole('button', { name: 'Squash and merge' }))
   }
+
+  it('closes confirmation after a successful merge', async () => {
+    stubMergeFlow()
+    renderDetail(PR_42)
+    await merge()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('locks confirmation during the request and keeps a failed merge available to retry', async () => {
+    let answer!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { answer = resolve })
+    let stateReads = 0
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input)
+      if (url.endsWith('/merge') && init.method === 'POST') return pending
+      if (url.includes('/merge-state')) stateReads++
+      return Promise.resolve(new Response(JSON.stringify(url.includes('/merge-state') ? MERGE_STATE : { available: true, comments: [] })))
+    })
+    renderDetail(PR_42)
+    await merge()
+    const dialog = await screen.findByRole('dialog')
+    expect((await within(dialog).findByRole('button', { name: 'Merging…' })).hasAttribute('disabled')).toBe(true)
+    expect(within(dialog).getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(true)
+    answer(new Response(JSON.stringify({ error: 'Head changed; refresh before merging.' }), { status: 409 }))
+    await within(dialog).findByText('Head changed; refresh before merging.')
+    expect(within(dialog).getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(false)
+    expect(within(dialog).getByRole('button', { name: 'Cancel' }).hasAttribute('disabled')).toBe(false)
+    await waitFor(() => expect(stateReads).toBe(2))
+  })
 
   it('invalidates the item query, so a task tab rereads the merged PR', async () => {
     stubMergeFlow()
