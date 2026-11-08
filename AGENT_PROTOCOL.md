@@ -97,8 +97,9 @@ interface RunnerFacts {                  // core/runner-facts.ts, one row per ru
 
 - **Declared facts, not runner ids** (hearsay-tools/cezarion#2991). Shared code outside
   `packages/cezar/src/core/` reads what a runner declares; it never compares runner ids to
-  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in three places: `systemPromptOnResume`,
-  `inputDelivery`, and its row of `RUNNER_FACTS` (`core/runner-facts.ts`). The table is keyed
+  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in its row of `RUNNER_FACTS`
+  (`core/runner-facts.ts`), which holds its `inputDelivery` and `systemPromptOnResume`
+  too; the class reads both from the row. The table is keyed
   by runner id because shared code often holds only a `RunnerId` before it builds the runner.
   Each runner class exposes its row as `facts`, and `core/runner-facts.test.ts` checks every
   runner `createRunner` builds against the table. Parity exemptions that follow a fact select
@@ -2163,7 +2164,10 @@ latch keeps #48 closed; completion comes only from the `cezar_done` call, never 
 never replaced by the no-wait nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
-> or carry a declared exemption naming the wire limitation that prevents it.
+> or carry a declared exemption naming the wire limitation that prevents it. A row
+> that tests runner code runs on every backend. A row that tests Cezar's shared
+> logic above the seam runs on the derived runner set, which shows every declared
+> value of each turn-path fact (hearsay-tools/cezarion#2991).
 
 §6 pins what a mapper emits. This pins the rest of the contract in
 `agent-runner.ts`: session lifecycle, provider-failure surfacing, `sendMessage`,
@@ -2172,11 +2176,34 @@ hearsay-tools/cezarion#6, hearsay-tools/cezarion#46, hearsay-tools/cezarion#48, 
 shared contract covered, so the same class of bug shipped again on the next one.
 
 **Regression coverage belongs in the fixing PR.** A fix to runner lifecycle,
-input delivery, attention, asks or completion MUST add or extend a shared
-`RUNNER_IDS` case in this matrix, or an equivalent exhaustive adapter loop such
-as `workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
+input delivery, attention, asks or completion MUST add or extend a parity row in
+this matrix, or in an equivalent adapter loop such as
+`workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
 separate parity issue is not a prerequisite. Keep a focused backend test when it
-helps explain the wire, but it is not the shared regression proof.
+helps explain the wire, but it is not the shared regression proof. Where the fix
+lives decides where its row runs (hearsay-tools/cezarion#2991):
+
+- A fix inside a runner class extends the seam contract suite
+  (`core/seam-contract.testkit.ts`) or that runner's own rows. They run on every
+  runner.
+- A fix above the seam extends a shared row. It runs on the derived runner set:
+  the smallest set of runners that shows every declared value of
+  `inputDelivery.mode`, `.consumption`, `.acknowledgement`,
+  `.humanInputAtTurnEnd` and `systemPromptOnResume` (`SHARED_RUNNERS` in
+  `core/parity-classes.testkit.ts`, ties broken by `RUNNER_IDS` order).
+- A new runner declares its facts in `RUNNER_FACTS`. When it adds a value that no
+  member of the set has, the set takes it in.
+
+`core/parity-classes.testkit.ts` classes every parity family as `every-runner`,
+`shared` or `no-session`. A shared family names the rows that still run on every
+runner; a row any runner is exempt from, and a cell whose title has no row id, run
+on every runner too. A `no-session` family runs once, on the set's first runner.
+R1 and U1 are smoke rows on every runner. The guards: `core/parity-classes.test.ts`
+fails when the set misses a declared value, or a parity file belongs to no
+family; `cez/runner-fact-combination` fails when one function in
+`packages/cezar/src/workflows/` reads two different declared facts, because one
+runner per value cannot show a combination. Such a function needs a combination
+row on every runner.
 
 Drive each real runner through its own native mock frames. Register each new
 criterion in the total-coverage guard, and use a named, executable exemption only
@@ -2187,12 +2214,12 @@ that another runner constructs or attributes that event correctly.
 
 **Two tiers.** The seam tier drives each real runner class against that
 backend's own offline mock and asserts over the v1 and v2 streams plus the
-settled result. The run tier drives a real `RunManager` run in a temp git repo.
-The second tier is not redundant: `ask.requested` is emitted by the RUNNER for
-codex, opencode and cursor (`codex-app-server-runner.ts`, `opencode-server-runner.ts`, `cursor-acp-runner.ts`)
-and by `workflows/run.ts` for claude and pi, and whether a provider failure
-fails the run or parks it is decided in the orchestrator either way. Provider
-failures, asks and park declarations are only uniform above the seam.
+settled result. It runs on every runner. The run tier drives a real `RunManager`
+run in a temp git repo. Whether a provider failure fails the run or parks it,
+and how a wait, an ask or a park settles, is decided in the orchestrator. A run
+tier row whose outcome depends on runner code (a provider error, a native ask on
+codex and opencode, a native wire recording) runs on every runner; the rest run
+on the derived runner set (`core/parity-classes.testkit.ts`).
 
 **Shared scenario names, per-backend spellings.** Every mock is already driven by
 `mock:<scenario>` markers found in the prompt text. The matrix names a scenario
@@ -2792,8 +2819,10 @@ To be first-class:
    `inputDelivery` (§1) from a live probe of mid-turn input, including its
    `acknowledgement` and `humanInputAtTurnEnd`, and pass the §7 I1/I2
    rows or declare their exemption. Add the runner's row to `RUNNER_FACTS`
-   (`core/runner-facts.ts`, §1) and expose it as `facts`; the table's type fails to
-   compile until the row exists. Shared code reads these facts, so a new runner never
+   (`core/runner-facts.ts`, §1), with its `inputDelivery` and
+   `systemPromptOnResume`, and expose it as `facts`; the class reads both from its
+   row, and the table's type fails to compile until the row exists. A new value of
+   a turn-path fact brings the runner into the derived parity set (§7). Shared code reads these facts, so a new runner never
    needs a runner-id branch outside `packages/cezar/src/core/`.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in

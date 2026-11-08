@@ -21,13 +21,21 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  * those groups, named in its comment.
  *
  * Two tiers. The seam tier drives each real runner class against that backend's
- * own offline mock. The run tier drives a real `RunManager`, because
- * `ask.requested` comes from the RUNNER for codex, opencode and cursor and from
- * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
- * above the seam.
+ * own offline mock, on every runner. The run tier drives a real `RunManager`,
+ * because provider failures, asks and parks settle in the orchestrator (groups
+ * 1, 3 and 6).
  *
  * Rows S36–S42 are the seam contract (hearsay-tools/cezarion#2991): each runner proves on its own
  * wire that it behaves as its declared facts say. They live in `seam-contract.testkit.ts`.
+ *
+ * Coverage rule (hearsay-tools/cezarion#2991): a fix inside a runner class extends the seam
+ * contract or that runner's own rows, which run on every runner. A fix above the seam extends a
+ * shared row, which runs on the derived runner set `SHARED_RUNNERS`: the smallest set that shows
+ * every declared value of each turn-path fact. A new runner declares its facts and joins the set
+ * when it adds a value. Each `describeRunners` group is one family in
+ * `parity-classes.testkit.ts`, and a cell registers only on the runners its row's class names.
+ * Guards: `parity-classes.test.ts` (the set covers every value; every parity file has a family)
+ * and `cez/runner-fact-combination` (no workflow function reads two facts).
  *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
  * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`
