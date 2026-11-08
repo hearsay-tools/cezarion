@@ -10,7 +10,8 @@ import type { Home } from '../home/home.ts';
  * predates the cockpit's update dialog (this PoC's own situation).
  */
 
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, fchmodSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, win32 } from 'node:path';
 
@@ -87,29 +88,50 @@ export function windowsLauncher(env: NodeJS.ProcessEnv, home: Home, name?: Binar
   return `${header}node "${entry}" %*\r\n`;
 }
 
+/** Match the old writer's final mode: POSIX executable; Windows existing mode or umask. */
+function launcherMode(path: string, platform: NodeJS.Platform): number {
+  if (platform !== 'win32') return 0o755;
+  try { return statSync(path).mode & 0o777; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return 0o666 & ~process.umask();
+  }
+}
+
+/** Never truncate a live command. A locked Windows destination must fail closed. */
+function writeLauncher(path: string, contents: string, platform: NodeJS.Platform): void {
+  const mode = launcherMode(path, platform);
+  const temp = `${path}.${randomUUID()}.tmp`;
+  // Exclusive open establishes ownership before the cleanup scope. It cannot remove a foreign file.
+  const fd = openSync(temp, 'wx', mode);
+  try {
+    try {
+      writeFileSync(fd, contents);
+      fchmodSync(fd, mode);
+    } finally { closeSync(fd); }
+    renameSync(temp, path);
+  } finally { rmSync(temp, { force: true }); }
+}
+
 /** Write each supported binary launcher. Returns the bin directory. */
-export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand): string {
+export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand, platform: NodeJS.Platform = process.platform): string {
   const dir = binDir(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
   assertCezarHomeWriteIsSandboxed(versionsDir(env, home), env);
   mkdirSync(dir, { recursive: true });
   mkdirSync(versionsDir(env, home), { recursive: true });
   for (const name of BINARY_NAMES) {
-    if (process.platform === 'win32') {
-      writeFileSync(join(dir, `${name}.cmd`), windowsLauncher(env, home, name, rebrand));
-    } else {
-      const path = join(dir, name);
-      writeFileSync(path, posixLauncher(env, home, name, rebrand));
-      chmodSync(path, 0o755);
-    }
+    const path = join(dir, name + (platform === 'win32' ? '.cmd' : ''));
+    const contents = platform === 'win32' ? windowsLauncher(env, home, name, rebrand) : posixLauncher(env, home, name, rebrand);
+    writeLauncher(path, contents, platform);
   }
   return dir;
 }
 
 /** Refresh fixed legacy launch paths before selecting a renamed managed tree.
  * With the switch off, preserve activation order and leave launcher writes to the caller. */
-export function activateManaged(id: string, env: NodeJS.ProcessEnv, home: Home, rebrand = productIdentity().rebrand): void {
-  if (rebrand) writeLaunchers(env, home, rebrand);
+export function activateManaged(id: string, env: NodeJS.ProcessEnv, home: Home, rebrand = productIdentity().rebrand, platform: NodeJS.Platform = process.platform): void {
+  if (rebrand) writeLaunchers(env, home, rebrand, platform);
   activate(id, env, home, rebrand);
 }
 
