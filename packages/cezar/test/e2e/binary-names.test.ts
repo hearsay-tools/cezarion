@@ -114,14 +114,19 @@ test('packed, alias, linked and managed binaries retain their name and keep noti
       // Only the installed test copy changes. The repository's release switch stays false.
       await writeFile(join(scoped, 'dist/home/switch.js'), `export const REBRAND_SWITCH = ${rebrand};\n`);
       for (const name of BINARY_NAMES) {
-        assert.equal(scopedManifest.bin[name], name === 'hsq' ? 'dist/hsq.js' : 'dist/index.js');
-        assert.equal(aliasManifest.bin[name], `${name}.js`);
         const managed = join(root, `${name}${binExtension}`);
         if (process.platform !== 'win32') {
           const used = await run(managed, ['use', 'installed']);
           assert.ok(used.stdout.includes('now using installed'));
           assert.equal(used.stderr, rebrand && name !== 'hsq' ? `[${name}] '${name}' is deprecated; use 'hsq' instead.\n` : '');
         }
+      }
+      // Keep shared version-link writes serial, then check the three independent names in parallel.
+      const checks: Promise<void>[] = [];
+      for (const name of BINARY_NAMES) {
+        assert.equal(scopedManifest.bin[name], name === 'hsq' ? 'dist/hsq.js' : 'dist/index.js');
+        assert.equal(aliasManifest.bin[name], `${name}.js`);
+        const managed = join(root, `${name}${binExtension}`);
         const linked = process.platform === 'win32' ? join(prefix, `${name}.cmd`) : join(prefix, 'bin', name);
         const installed = join(consumer, 'node_modules/.bin', name + binExtension);
         const entries: Entry[] = [
@@ -132,7 +137,11 @@ test('packed, alias, linked and managed binaries retain their name and keep noti
           [linked, [], process.platform === 'win32', npmIdentities[name]],
           [join(root, `target-${name}${binExtension}`), [], process.platform === 'win32', targetIdentities[name]],
         ];
-        await verifyBinary(run, entries, name, rebrand);
+        checks.push(verifyBinary(run, entries, name, rebrand));
+      }
+      // Drain every child before changing the switch or removing its installation, even on failure.
+      for (const result of await Promise.allSettled(checks)) {
+        if (result.status === 'rejected') throw result.reason;
       }
     }
   } finally {
