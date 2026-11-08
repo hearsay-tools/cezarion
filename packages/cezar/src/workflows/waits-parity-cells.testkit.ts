@@ -416,9 +416,9 @@ const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.
 function silenceRefusals() {
   const clock = observationClock(delay => delay === NO_WAIT_NUDGE_REPLY_MS && /\bat TurnNudges\./.test(new Error().stack ?? ''));
   process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:ack-only';
-  return async (runner: RunnerId, refusal: string) => {
+  return async (runner: RunnerId, refusal: string, { after = 0 }: { after?: number } = {}) => {
     // bound: until's 15 s guards a missing mock record or a reply timer that never arms.
-    await until(() => prompted(runner, refusal).length > 0 && clock.pending > 0);
+    await until(() => prompted(runner, refusal).length > after && clock.pending > 0);
     // A native ACK may rearm the same reply bound after the mock recorded the prompt.
     const timer = nativeTimeout(() => { if (clock.pending) clock.fire(clock.captured - 1); }, 300);
     onTestFinished(() => clearNativeTimeout(timer));
@@ -3106,7 +3106,7 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
           else retryAtOnce();
           expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
           if (variant === 'silent') {
-            await silence!(runner, refusal);
+            await silence!(runner, refusal, { after: before });
             await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
             if (runner === 'opencode') expect(refusals()[0]!.deliveredAt).toBeUndefined();
             expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
@@ -3114,7 +3114,7 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
             releaseAck();
             if (runner === 'opencode') {
               await until(() => refusals().some(input => !!input.deliveredAt));
-              await silence!(runner, refusal);
+              await silence!(runner, refusal, { after: before });
             }
             // The reply bound can beat the native ACK. Its human gate alone does not prove
             // delivery committed; the late ACK resumes wake bookkeeping and re-arms that bound.
