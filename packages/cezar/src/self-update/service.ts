@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 /**
@@ -209,7 +210,7 @@ export class SelfUpdateService {
    */
   async forwardOnlyRefusal(target: string): Promise<string | null> {
     const running = this.deps.version;
-    const suffix = 'apply it on the host itself (`cez use <id>`)';
+    const suffix = `apply it on the host itself (\`${productIdentity().command} use <id>\`)`;
     if (!isNewer(target, running)) {
       return `a hosted cockpit can only update forward — ${target} is not newer than the running ${running}; ${suffix}`;
     }
@@ -234,7 +235,7 @@ export class SelfUpdateService {
     const installed = findInstalled(target, this.env, this.home);
     if (!doc?.versions.some(entry => entry.version === target) ||
         (installed && (installed.source !== 'registry' || installed.id !== target || installed.version !== target))) {
-      return 'Hosted updates require a published registry version; switch local builds on the host with `cez use <id>`.';
+      return `Hosted updates require a published registry version; switch local builds on the host with \`${productIdentity().command} use <id>\`.`;
     }
     return null;
   }

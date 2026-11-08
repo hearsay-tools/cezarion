@@ -27,6 +27,14 @@ describe.each([false, true])('server display names (switch %s)', rebrand => {
     const { createUbuntuVps } = await import('../server-install/platforms/ubuntu-vps.ts');
     const step = createUbuntuVps({ rebrand }).steps({ state: {} } as InstallContext).find(step => step.id === 'autostart');
     expect(step?.title).toBe(`Run ${name} as a service (systemd — starts now + on boot)`);
+    const command = productIdentity(rebrand).command;
+    const { previewRefusal } = await import('../ci-wait/errors.ts');
+    expect(previewRefusal('headless').message).toBe(`No cockpit is attached to this run (\`${command} run\`).`);
+    const { SKILL_SOURCES_HOSTED_ERROR } = await import('../server/skill-sources.ts');
+    expect(SKILL_SOURCES_HOSTED_ERROR).toContain(`run \`${command} remote-settings enable\``);
+    const { listAgentConfig } = await import('../agent-config/service.ts');
+    const listing = await listAgentConfig('/unused', {}, false);
+    expect(listing.files.find(file => file.readOnlyReason)?.readOnlyReason).toContain(`run \`${command} remote-settings enable\``);
     const { RunStore } = await import('../runs/store.ts');
     const { createApp } = await import('../server/server.ts');
     const root = mkdtempSync(join(tmpdir(), 'display-server-'));

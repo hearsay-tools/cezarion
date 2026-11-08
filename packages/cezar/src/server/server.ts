@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { prepareHomeLifecycle } from '../home/entry.ts';
@@ -83,7 +84,6 @@ import {
 } from '../automations/types.ts';
 import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
-
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
@@ -4678,7 +4678,7 @@ export function createApp(deps: ServerDeps) {
     });
 
   /** #917: setup commands run on the host before every task, so only a local cockpit edits them. */
-  const WORKTREE_SETUP_HOSTED_ERROR = `Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run \`cez remote-settings enable\` on the machine running ${productName('cezar')}.`;
+  const WORKTREE_SETUP_HOSTED_ERROR = `Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run \`${productIdentity().command} remote-settings enable\` on the machine running ${productName('cezar')}.`;
 
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
@@ -4758,7 +4758,7 @@ export function createApp(deps: ServerDeps) {
       const def = findConfigFile(id);
       if (!def) return c.json({ error: 'unknown config file' }, 404);
       if (def.tracked === 'outside-repo' && !capabilities().settingsAdmin) {
-        const error = 'this file lives in your home directory and is not served on a remote cockpit — run `cez remote-settings enable` on the host to allow it';
+        const error = `this file lives in your home directory and is not served on a remote cockpit — run \`${productIdentity().command} remote-settings enable\` on the host to allow it`;
         return c.json({ error }, 409);
       }
       const read = await readConfigFile(id, c.get('project').root);
@@ -4774,7 +4774,7 @@ export function createApp(deps: ServerDeps) {
         return c.json(
           {
             error:
-              'editing agent config is disabled on this remote cockpit — run `cez remote-settings enable` on the host to allow it',
+              `editing agent config is disabled on this remote cockpit — run \`${productIdentity().command} remote-settings enable\` on the host to allow it`,
           },
           409,
         );
@@ -4825,7 +4825,7 @@ export function createApp(deps: ServerDeps) {
       const { webhook: ref } = c.req.valid('param');
       const entry = await registryEntry(project.id, project.root, deps.home).catch(() => undefined);
       const webhook = agentWebhook(entry, ref);
-      if (!entry || !webhook) return c.json({ error: `no webhook named "${ref}" is open to agents in this project — run \`cez webhook list\`` }, 404);
+      if (!entry || !webhook) return c.json({ error: `no webhook named "${ref}" is open to agents in this project — run \`${productIdentity().command} webhook list\`` }, 404);
       const outcome = await sendAgentReport({
         projectId: entry.id,
         webhook,
