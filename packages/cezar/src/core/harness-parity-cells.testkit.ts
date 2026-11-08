@@ -26,6 +26,9 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
  * above the seam.
  *
+ * Rows S36–S42 are the seam contract (hearsay-tools/cezarion#2991): each runner proves on its own
+ * wire that it behaves as its declared facts say. They live in `seam-contract.testkit.ts`.
+ *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
  * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`
  * runs one part of a runner's cells (hearsay-tools/cezarion#1288).
@@ -79,6 +82,7 @@ import { supportsProfiles } from './agent-profiles.ts';
 import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { promptFor, driveSeam, lastIndexWhere, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
+import { SEAM_CONTRACT_ROWS } from './seam-contract.testkit.ts';
 import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
@@ -919,12 +923,13 @@ const RETIREMENTS = [
   { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
 ] as const;
 
-export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup' | 'owned-workflows';
+export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup' | 'owned-workflows' | 'contract';
 
 // Adjacent semantic families; every group below belongs to exactly one part.
 export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly string[]>> = {
   startup: ['startup'],
   provider: ['provider'],
+  contract: ['contract'],
   session: ['seam', 'session', 'input', 'governed', 'native-message', 'spec', 'tools', 'cdp', 'tool-grants'],
   run: ['run', 'diagnostics', 'child', 'hooks', 'answer', 'monitoring', 'prs'],
   'owned-workflows': ['owned-workflows'],
@@ -1018,6 +1023,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }
     }
   };
+  // hearsay-tools/cezarion#2991: the seam contract every runner keeps, read from its declared facts.
+  describeRunners('contract', 'harness parity — seam contract (hearsay-tools/cezarion#2991)', () => {
+    for (const backend of runners) for (const row of SEAM_CONTRACT_ROWS) parityRow(backend, row, () => row.observe(backend));
+  });
   describeRunners('startup', 'harness parity — missing executable', () => seamRows(SEAM_CRITERIA.filter(row => row.id === 'S20')));
   describeRunners('seam', 'harness parity — seam tier', () => seamRows(SEAM_CRITERIA.filter(row => row.id !== 'S20')));
   // hearsay-tools/cezarion#1810: the Tool-list kinds case table, one cell per case and runner.
@@ -2140,6 +2149,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         ...NO_PROGRESS_CRITERIA.map(c => c.id),
         ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
         ...SEAM_CRITERIA.map((c) => c.id),
+        ...SEAM_CONTRACT_ROWS.map((c) => c.id),
         ...INPUT_CRITERIA.map((c) => c.id),
         FOLLOW_ON_CRITERION.id,
         ...CONTROL_CRITERIA.map((c) => c.id),
@@ -2152,7 +2162,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         ...ANSWER_DELIVERY_CRITERIA, ...SKILL_RESUME_CRITERIA, ...SKILL_PROVISION_CRITERIA,
         ...WORKTREE_SETUP_CRITERIA, ...AUTONOMOUS_CRITERIA, ...WORKER_PROGRESS_WAIT_CRITERIA,
         ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
-        ...SEAM_CRITERIA, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
+        ...SEAM_CRITERIA, ...SEAM_CONTRACT_ROWS, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
       ];
       const scenarioOf = (id: string): ScenarioName => {
         const row = rows.find(c => c.id === id);
