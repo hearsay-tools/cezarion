@@ -90,3 +90,29 @@ it('draws a 2x frame into a 2x backing store and keeps the CSS size and the inpu
     delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight
   }
 })
+
+it('keeps the newest frame when an older decode finishes last', async () => {
+  const ref = createRef<PreviewStageHandle>()
+  const draw = vi.fn()
+  const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: draw } as never)
+  const finishes: Array<(bitmap: unknown) => void> = []
+  vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise(resolve => finishes.push(resolve))))
+  const older = { width: 2000, height: 1400, close: vi.fn() }
+  const newest = { width: 1000, height: 700, close: vi.fn() }
+  try {
+    render(<PreviewStage ref={ref} viewport="fit" />)
+    const first = ref.current!.draw(new Blob(['older']))
+    const second = ref.current!.draw(new Blob(['newest']))
+    finishes[1]!(newest)
+    await second
+    finishes[0]!(older)
+    await first
+    const canvas = document.querySelector('canvas')!
+    expect([canvas.width, canvas.height]).toEqual([1000, 700])
+    expect(draw.mock.calls).toEqual([[newest, 0, 0]])
+    expect(older.close).toHaveBeenCalledOnce()
+    expect(newest.close).toHaveBeenCalledOnce()
+  } finally {
+    context.mockRestore(); vi.unstubAllGlobals()
+  }
+})
