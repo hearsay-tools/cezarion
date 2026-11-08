@@ -11,7 +11,7 @@ import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { resetToasts, Toaster } from '@/components/ui/toaster'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
-import type { GithubItem, GithubPrChangesData, GithubPrMergeState, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
+import type { GithubCommentsData, GithubItem, GithubPrChangesData, GithubPrMergeState, GithubPrMergeStateResponse, GithubTimelineEvent } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
 
@@ -72,11 +72,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderDetail(item: GithubItem, onRunAgent?: () => void) {
+function renderDetail(item: GithubItem, onRunAgent?: () => void, props: Partial<Parameters<typeof GithubItemDetail>[0]> = {}) {
   render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={['/p/p1/tasks/r1/pr/42']}>
-        <GithubItemDetail item={item} colors={{}} backLink={null} subNav={null} onRunAgent={onRunAgent} />
+        <GithubItemDetail item={item} colors={{}} backLink={null} subNav={null} onRunAgent={onRunAgent} {...props} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -144,6 +144,93 @@ describe('GithubItemDetail outside the GitHub view', () => {
     renderDetail(PR_42, onRunAgent)
     fireEvent.click(await screen.findByRole('button', { name: 'Run agent on this PR' }))
     expect(onRunAgent).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('detail metadata and discussion fallbacks', () => {
+  const stubThread = (thread: GithubCommentsData) => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => new Response(JSON.stringify(
+      String(input).includes('/merge-state') ? MERGE_STATE : thread,
+    )))
+  }
+
+  it('uses an empty hydrated body and zero diff counts instead of stale list values', async () => {
+    stubThread({ available: true, comments: [], detail: { body: '', additions: 0, deletions: 0 } })
+    renderDetail({ ...PR_42, additions: 50, deletions: 20 })
+    await screen.findByText('(no description)')
+    expect(screen.queryByText(PR_42.body!)).toBeNull()
+    expect(document.querySelector('[data-slot="gh-diffstat"]')).toBeNull()
+  })
+
+  it.each([
+    ['pr', 6, undefined, '+6 −0'], ['pr', undefined, 4, '+0 −4'], ['issue', 6, 4, null],
+  ] as const)('renders %s diff counts %s/%s with zero for the absent side', (kind, additions, deletions, expected) => {
+    renderDetail({ ...PR_42, kind, ...(additions === undefined ? {} : { additions }), ...(deletions === undefined ? {} : { deletions }) })
+    expect(document.querySelector('[data-slot="gh-diffstat"]')?.textContent ?? null).toBe(expected)
+  })
+
+  it.each([[0, null], [2, '2 comments'], [undefined, '5 comments']] as const)(
+    'uses resolved comment count %s over the list count', (comments, label) => {
+      renderDetail({ ...PR_42, comments: 5 }, undefined, { comments })
+      expect(document.querySelector('[data-slot="gh-comment-count"]')?.getAttribute('aria-label') ?? null).toBe(label)
+    },
+  )
+
+  it('replaces a broken avatar with its first letter and uses a question mark for an empty login', async () => {
+    const comment = { id: 1, author: 'grace', avatarUrl: 'https://avatars.example/grace', body: '',
+      kind: 'comment' as const, createdAt: PR_42.createdAt, url: `${PR_42.url}#comment-1` }
+    stubThread({ available: true, comments: [comment, { ...comment, id: 2, author: '', avatarUrl: '' }] })
+    renderDetail(PR_42)
+    await screen.findByText('Activity · 2 comments')
+    const entries = document.querySelectorAll('[data-slot="gh-thread-entry"]')
+    const image = entries[0]!.querySelector('img')!
+    expect(image.getAttribute('src')).toBe(comment.avatarUrl)
+    fireEvent.error(image)
+    expect(entries[0]!.querySelector('img')).toBeNull()
+    expect(entries[0]!.querySelector('[data-slot="gh-avatar-fallback"]')?.textContent).toBe('g')
+    expect(entries[1]!.querySelector('[data-slot="gh-avatar-fallback"]')?.textContent).toBe('?')
+    expect(screen.getAllByText('(no body)')).toHaveLength(2)
+  })
+
+  it.each(['approved', 'commented', 'dismissed'] as const)('renders the %s review state beside its body', async (reviewState) => {
+    stubThread({ available: true, comments: [{ id: 1, author: 'grace', body: 'Reviewed the change.',
+      kind: 'review', reviewState, createdAt: PR_42.createdAt, url: `${PR_42.url}#review-1` }] })
+    renderDetail(PR_42)
+    const chip = await screen.findByText(reviewState)
+    expect(chip.getAttribute('data-review-state')).toBe(reviewState)
+    expect(screen.getByText('Reviewed the change.')).toBeTruthy()
+  })
+
+  it.each([
+    ['assigned', 'assigned someone'], ['unassigned', 'unassigned someone'],
+    ['renamed', 'renamed this to —'], ['cross-referenced', 'referenced this in another thread'],
+    ['unlabeled', 'removed the'], ['reopened', 'reopened this'],
+  ] satisfies [GithubTimelineEvent['kind'], string][])(
+    'renders a %s event when optional details are absent', async (kind, phrase) => {
+      stubThread({ available: true, comments: [], events: [{ id: kind, kind, actor: 'grace', createdAt: PR_42.createdAt }] })
+      renderDetail(PR_42)
+      await screen.findByText('Activity · 0 comments')
+      const row = document.querySelector('[data-slot="gh-event-row"]') as HTMLElement
+      expect(row.textContent).toContain(phrase)
+      expect(within(row).queryByRole('link')).toBeNull()
+      expect(row.querySelector('[data-slot="gh-event-label"]')).toBeNull()
+    },
+  )
+
+  it('collapses an expanded two-commit group without losing the summary', async () => {
+    stubThread({ available: true, comments: [], events: [1, 2].map((n) => ({
+      id: `commit-${n}`, kind: 'committed', actor: 'grace', createdAt: PR_42.createdAt,
+      message: `Change ${n}`, sha: `${n}`.repeat(40),
+    })) })
+    renderDetail(PR_42)
+    const summary = await screen.findByRole('button', { name: /added 2 commits/ })
+    fireEvent.click(summary)
+    expect(screen.getByText('Change 1')).toBeTruthy()
+    expect(screen.getByText('Change 2')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /added 2 commits/ }))
+    expect(screen.getByRole('button', { name: /added 2 commits/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('Change 1')).toBeNull()
+    expect(screen.queryByText('Change 2')).toBeNull()
   })
 })
 
@@ -467,7 +554,7 @@ describe('merging from the detail (#692)', () => {
 })
 
 describe('PR changed files', () => {
-  const changesFor = (path: string, headSha: string) => ({
+  const changesFor = (path: string, headSha: string): Extract<GithubPrChangesData, { available: true }> => ({
     available: true, number: 42, headSha, additions: 1, deletions: 0, truncated: false,
     files: [{ path, status: 'added', additions: 1, deletions: 0, patch: `@@ -0,0 +1 @@\n+${path}` }],
   })
@@ -496,7 +583,9 @@ describe('PR changed files', () => {
       changesFor('docs/guide.md', A_HEAD).files[0]!,
     ],
   })
-  const selectedFile = () => (screen.getByRole('combobox', { name: 'Select changed file' }) as HTMLSelectElement).value
+  const selectedFile = () => {
+    return (screen.getByRole('combobox', { name: 'Select changed file' }) as HTMLSelectElement).value
+  }
   const shownPath = () => document.querySelector('[data-slot="diff-file"]')?.getAttribute('data-path')
 
   it('selects files with both navigation buttons, the list and the phone selector', async () => {
