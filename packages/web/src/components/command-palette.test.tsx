@@ -9,7 +9,7 @@ import {
 import { summaryOf } from '@/test/run-summary-fixture'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -206,11 +206,11 @@ function openWith(init: { metaKey?: boolean; ctrlKey?: boolean }) {
 }
 
 describe('opening and closing', () => {
-  it('opens programmatically and keeps an already open palette open', async () => {
+  it('opens programmatically and keeps an already open palette open', () => {
     renderPalette()
-    openCommandPalette()
-    expect(await screen.findByRole('dialog')).toBeTruthy()
-    openCommandPalette()
+    act(() => openCommandPalette())
+    expect(dialog()).not.toBeNull()
+    act(() => openCommandPalette())
     expect(dialog()).not.toBeNull()
   })
 
@@ -1296,9 +1296,9 @@ describe('server search past the window', () => {
 
   it('includes marker references and removes duplicates from all reference sources', () => {
     expect(referenceKeywords(run({ id: 'r', title: 'Reference', prNumber: 123,
-      markerRefs: { pr: 123, issue: 456 }, issueNumber: 456,
+      markerRefs: { pr: 789, issue: 987 }, issueNumber: 456,
       pullRequestUrl: 'https://github.com/org/repo/pull/123',
-    }))).toEqual(['123', '#123', '456', '#456'])
+    }))).toEqual(['123', '#123', '456', '#456', '789', '#789', '987', '#987'])
   })
 
   it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
