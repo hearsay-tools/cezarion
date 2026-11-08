@@ -89,6 +89,25 @@ impl Native {
         }
         Ok(())
     }
+    fn install_nsis(&self) -> io::Result<()> {
+        #[cfg(windows)] {
+            bridge_state::install_verified(&self.journal, &self.destination,
+                || command_ok(&mut bridge_state::nsis_command(&self.payload, &self.destination)?),
+                || {
+                    self.verify_identity()?;
+                    // Tauri CLI 2.11.5 installer.nsi writes the actual $INSTDIR here.
+                    // Read HKCU only: this bridge supports per-user NSIS installations.
+                    let key = format!("Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", identity::NEXT_DISPLAY_NAME).replace('\'', "''");
+                    let script = format!("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); Get-ItemPropertyValue -LiteralPath '{key}' -Name InstallLocation -ErrorAction Stop | ConvertTo-Json -Compress");
+                    let result = bounded_output(Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &script]), Duration::from_secs(15))?;
+                    if !result.status.success() { return Err(error("Could not verify the NSIS installation location")); }
+                    let location: String = serde_json::from_slice(&result.stdout)?;
+                    bridge_state::verify_install_location(&self.destination, Path::new(location.trim_matches('"')))
+                })
+        }
+        #[cfg(not(windows))]
+        unreachable!()
+    }
 }
 impl Platform for Native {
     fn supported(&self) -> bool { self.supported }
@@ -105,6 +124,7 @@ impl Platform for Native {
         }
     }
     fn install(&mut self) -> io::Result<()> {
+        if cfg!(windows) { return self.install_nsis(); }
         if self.destination.exists() { return self.verify_identity(); }
         let staging = self.destination.with_extension("bridge-stage");
         let reserved = self.journal.join("installation-staging");
@@ -122,9 +142,6 @@ impl Platform for Native {
             let app = staging.join(format!("{}.app", identity::NEXT_DISPLAY_NAME));
             command_ok(Command::new("/usr/bin/codesign").args(["--verify", "--deep", "--strict"]).arg(&app))?;
             fs::rename(app, &self.destination)?; fs::remove_dir(&staging)?;
-        } else if cfg!(windows) {
-            // /D must be last. NSIS receives one argument, never a shell-expanded command.
-            command_ok(Command::new(&self.payload).arg("/S").arg(format!("/D={}", self.destination.display())))?;
         } else {
             let temporary = staging;
             let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
@@ -168,6 +185,15 @@ impl Platform for Native {
         if cfg!(target_os = "macos") { fs::remove_dir_all(&self.source)?; } else { fs::remove_file(&self.source)?; }
         Ok(true)
     }
+}
+
+/// System-package bridge builds must never reach the updater's privileged DEB installer.
+pub fn shell_updates_allowed() -> bool {
+    if !identity::BRIDGE || !cfg!(target_os = "linux") { return true; }
+    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    let appdir = std::env::var_os("APPDIR").map(PathBuf::from);
+    let supported = std::env::current_exe().is_ok_and(|exe| bridge_state::appimage_install(&exe, appimage.as_deref(), appdir.as_deref()));
+    bridge_state::shell_updates_allowed(identity::BRIDGE, super::platform_name(), supported)
 }
 
 fn validate_acknowledgement(bytes: &[u8], token: &str) -> io::Result<()> {
@@ -227,6 +253,8 @@ fn schedule_windows_removal(_: &Path, _: &Path) -> io::Result<()> { unreachable!
 fn transfer_plan(journal: PathBuf, binding: Vec<u8>) -> io::Result<Plan> {
     let old = product::home(&super::home_dir(), super::platform_name(), false, |key| std::env::var_os(key));
     let next = product::home(&super::home_dir(), super::platform_name(), true, |key| std::env::var_os(key));
+    // Only profile membership can change during a retry. App/payload/home roots stay bound.
+    let binding = serde_json::to_vec(&serde_json::json!({ "app": binding, "legacy": old.legacy, "config": next.config, "state": next.state, "data": next.data }))?;
     let mut transfers = vec![
         Transfer { source: old.state.join("desktop-window.json"), target: next.state.join("desktop-window.json") },
         Transfer { source: old.state.join("desktop/connections.json"), target: next.state.join("desktop/connections.json") },

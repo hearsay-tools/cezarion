@@ -8,7 +8,7 @@ test('both desktop identities reach the release overlay and Rust without a secon
   for (const rebrand of ['off', 'on']) {
     const metadata = desktopMetadata({ rebrand });
     const overlay = releaseConfig('linux', {}, true, metadata);
-    const built = desktopMetadata({ tauriConfig: overlay });
+    const built = desktopMetadata({ rebrand, tauriConfig: overlay });
     assert.equal(built.rebrand, metadata.rebrand);
     assert.equal(built.desktopAppId, metadata.desktopAppId);
     assert.match(rustMetadata(built), new RegExp(`pub const REBRAND: bool = ${metadata.rebrand};`));
@@ -42,7 +42,11 @@ test('bridge builds retain the old ID and carry a new-ID payload without a new f
   assert.equal(compiled.desktopAppId, 'tools.hearsay.cezarion');
   assert.ok(rustMetadata(compiled).includes('pub const BRIDGE: bool = true;'));
   assert.throws(() => desktopMetadata({ bridge: true, rebrand: 'on' }), /old app/);
-  assert.throws(() => releaseConfig('linux', {}, false, metadata), /release switch/);
+  const signing = { TAURI_SIGNING_PRIVATE_KEY: 'test', TAURI_SIGNING_PUBLIC_KEY: Buffer.from('untrusted comment: test\npublic-key').toString('base64') };
+  for (const releaseRebrand of [false, true]) {
+    if (releaseRebrand) assert.equal(releaseConfig('linux', signing, false, metadata, releaseRebrand).bundle.createUpdaterArtifacts, true);
+    else assert.throws(() => releaseConfig('linux', signing, false, metadata, releaseRebrand), /release switch/);
+  }
 });
 test('release naming keeps old artifacts unchanged and isolates the new feed', () => {
   for (const rebrand of ['off', 'on']) {

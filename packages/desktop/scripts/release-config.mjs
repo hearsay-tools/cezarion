@@ -3,12 +3,12 @@ import { writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { desktopMetadata } from './build-metadata.mjs';
-export function releaseConfig(platform, env, dryRun, metadata = desktopMetadata()) {
+export function releaseConfig(platform, env, dryRun, metadata = desktopMetadata(), releaseRebrand = desktopMetadata().rebrand) {
   const requireValue = name => { if (!env[name]?.trim()) throw new Error(`Public desktop release requires ${name}`); return env[name]; };
   const bundle = { targets: platform === 'darwin' ? ['app', 'dmg'] : platform === 'win32' ? ['nsis'] : ['appimage', 'deb'], createUpdaterArtifacts: !dryRun };
   const config = { bundle };
   if (metadata.bridge) {
-    if (!dryRun && !desktopMetadata().rebrand) throw new Error('Public bridge builds require the release switch');
+    if (!dryRun && !releaseRebrand) throw new Error('Public bridge builds require the release switch');
     bundle.resources = { '../bridge-payload/': 'bridge/' };
   }
   if (metadata.rebrand) {

@@ -767,7 +767,7 @@ pub fn run() {
 /// running cockpit. `install_shell_update` installs at quit, and the next launch runs it.
 async fn check_shell_update(app: AppHandle, shell: Arc<Shell>) {
     use tauri_plugin_updater::UpdaterExt;
-    if product::env("DESKTOP_NO_UPDATE").as_deref() == Some("1") || cfg!(debug_assertions) {
+    if !bridge::shell_updates_allowed() || product::env("DESKTOP_NO_UPDATE").as_deref() == Some("1") || cfg!(debug_assertions) {
         return;
     }
     let Ok(updater) = app.updater() else { return };
@@ -780,6 +780,7 @@ async fn check_shell_update(app: AppHandle, shell: Arc<Shell>) {
 /// the installer runs and this process exits; it does not relaunch the app.
 fn install_shell_update(shell: &Shell) {
     let pending = shell.shell_update.lock().unwrap().take();
+    if !bridge::shell_updates_allowed() { return; }
     if let Some((update, bytes)) = pending {
         let _ = update.restart_after_install(false).install(bytes);
     }

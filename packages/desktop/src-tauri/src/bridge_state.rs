@@ -1,6 +1,7 @@
 //! Filesystem-only bridge transaction. Sources are never moved or removed.
 use std::{fs, io::{self, Write}, path::{Path, PathBuf}};
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Transfer { pub source: PathBuf, pub target: PathBuf }
 pub struct Plan { pub journal: PathBuf, pub transfers: Vec<Transfer>, pub binding: Vec<u8> }
 #[derive(Debug, PartialEq)]
@@ -25,31 +26,157 @@ pub fn execute(plan: &Plan, platform: &mut impl Platform) -> io::Result<Outcome>
     { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
     let lease = options.open(lock_path)?;
     lease.try_lock().map_err(|e| io::Error::other(format!("another bridge is running: {e}")))?;
-    let mut binding = plan.binding.clone();
-    for transfer in &plan.transfers {
-        for path in [&transfer.source, &transfer.target] {
-            let absolute = std::path::absolute(path)?;
-            let bytes = absolute.as_os_str().as_encoded_bytes();
-            binding.extend_from_slice(&(bytes.len() as u64).to_le_bytes()); binding.extend_from_slice(bytes);
-        }
-    }
     let receipt = plan.journal.join("plan");
     if receipt.exists() {
-        if fs::read(&receipt)? != binding { return Err(io::Error::other("bridge inputs changed; old app retained")); }
-    } else { private_bytes(&receipt, &binding)?; }
+        if fs::read(&receipt)? != plan.binding { return Err(io::Error::other("bridge app or payload changed; old app retained")); }
+    } else { private_bytes(&receipt, &plan.binding)?; }
     if plan.journal.join("removed").is_file() { return Ok(Outcome::Complete); }
-    if !plan.journal.join("acknowledged").is_file() {
-        platform.quiescent(&plan.transfers)?;
+    let acknowledged = plan.journal.join("acknowledged").is_file();
+    let transfers = registered_transfers(plan, acknowledged)?;
+    if !acknowledged {
+        platform.quiescent(&transfers)?;
+        // An installer may fail before any target transfer. Keep a private source snapshot
+        // now, so forgetting a connection in the fallback app cannot discard its only copy.
+        for (index, transfer) in transfers.iter().enumerate() {
+            snapshot_source(&transfer.source, &plan.journal.join(format!("source-{index}")))?;
+        }
         platform.install()?;
-        platform.quiescent(&plan.transfers)?;
-        for (index, transfer) in plan.transfers.iter().enumerate() {
-            transfer_one(transfer, &plan.journal.join(format!("copy-{index}")))?;
+        platform.quiescent(&transfers)?;
+        for (index, transfer) in transfers.iter().enumerate() {
+            let source = plan.journal.join(format!("source-{index}"));
+            snapshot_source(&transfer.source, &source)?;
+            transfer_one(&Transfer { source, target: transfer.target.clone() }, &plan.journal.join(format!("copy-{index}")))?;
         }
         platform.start_and_acknowledge()?;
         marker(&plan.journal.join("acknowledged"))?;
     }
     if platform.remove_old_app()? { marker(&plan.journal.join("removed"))?; }
     Ok(Outcome::Complete)
+}
+
+/// Transfer records keep their original index, even when the current connection list changes.
+/// The stable receipt above binds the apps/payload; only pre-ACK profile membership can grow.
+fn registered_transfers(plan: &Plan, acknowledged: bool) -> io::Result<Vec<Transfer>> {
+    let directory = plan.journal.join("transfers");
+    private_dir(&directory)?;
+    let mut records = Vec::new();
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        if entry.file_name() == "next" { continue; }
+        let index = entry.file_name().to_string_lossy().parse::<usize>().map_err(|_| io::Error::other("invalid bridge transfer record"))?;
+        records.push((index, entry.path()));
+    }
+    records.sort_by_key(|(index, _)| *index);
+    let mut transfers = Vec::new();
+    for (index, path) in records {
+        if index != transfers.len() { return Err(io::Error::other("missing bridge transfer record")); }
+        transfers.push(decode_transfer(&fs::read(path)?)?);
+    }
+    for transfer in &plan.transfers {
+        let transfer = Transfer { source: std::path::absolute(&transfer.source)?, target: std::path::absolute(&transfer.target)? };
+        if transfer.source == transfer.target { return Err(io::Error::other("bridge source equals target")); }
+        if transfers.contains(&transfer) { continue; }
+        if acknowledged || transfers.iter().any(|old| old.source == transfer.source || old.target == transfer.target) {
+            return Err(io::Error::other("bridge transfer changed after acknowledgement or conflicts with a saved path"));
+        }
+        let mut bytes = Vec::new();
+        for path in [&transfer.source, &transfer.target] {
+            let encoded = encode_path(path);
+            bytes.extend_from_slice(&(encoded.len() as u64).to_le_bytes()); bytes.extend(encoded);
+        }
+        let next = directory.join("next"); remove_staging(&next)?;
+        private_bytes(&next, &bytes)?;
+        fs::rename(next, directory.join(transfers.len().to_string()))?;
+        transfers.push(transfer);
+    }
+    Ok(transfers)
+}
+#[cfg(unix)]
+fn encode_path(path: &Path) -> Vec<u8> { use std::os::unix::ffi::OsStrExt; path.as_os_str().as_bytes().to_vec() }
+#[cfg(windows)]
+fn encode_path(path: &Path) -> Vec<u8> { use std::os::windows::ffi::OsStrExt; path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect() }
+#[cfg(unix)]
+fn decode_path(bytes: &[u8]) -> io::Result<PathBuf> { use std::os::unix::ffi::OsStringExt; Ok(std::ffi::OsString::from_vec(bytes.to_vec()).into()) }
+#[cfg(windows)]
+fn decode_path(bytes: &[u8]) -> io::Result<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    if bytes.len() % 2 != 0 { return Err(io::Error::other("invalid Windows bridge path")); }
+    Ok(std::ffi::OsString::from_wide(&bytes.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect::<Vec<_>>()).into())
+}
+fn decode_transfer(mut bytes: &[u8]) -> io::Result<Transfer> {
+    fn read_path(bytes: &mut &[u8]) -> io::Result<PathBuf> {
+        let invalid = || io::Error::other("invalid bridge transfer record");
+        let size = bytes.get(..8).ok_or_else(invalid)?;
+        let length = usize::try_from(u64::from_le_bytes(size.try_into().unwrap())).map_err(|_| invalid())?;
+        *bytes = &bytes[8..];
+        let path = decode_path(bytes.get(..length).ok_or_else(invalid)?)?;
+        *bytes = &bytes[length..];
+        if !path.is_absolute() { return Err(invalid()); }
+        Ok(path)
+    }
+    let source = read_path(&mut bytes)?; let target = read_path(&mut bytes)?;
+    if !bytes.is_empty() { return Err(io::Error::other("trailing bridge transfer bytes")); }
+    Ok(Transfer { source, target })
+}
+fn snapshot_source(source: &Path, snapshot: &Path) -> io::Result<()> {
+    let previous = snapshot.with_extension("previous");
+    if !snapshot.exists() && previous.exists() { fs::rename(&previous, snapshot)?; }
+    match fs::symlink_metadata(source) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+        Ok(_) => (),
+    }
+    if snapshot.exists() && same_tree(source, snapshot)? { return Ok(()); }
+    let next = snapshot.with_extension("next"); remove_staging(&next)?;
+    copy_tree(source, &next)?;
+    if !same_tree(source, &next)? { return Err(io::Error::other("bridge source changed during snapshot")); }
+    remove_staging(&previous)?;
+    if snapshot.exists() { fs::rename(snapshot, &previous)?; }
+    fs::rename(next, snapshot)?;
+    remove_staging(&previous)
+}
+
+/// An incomplete bridge-owned NSIS directory is repaired, never mistaken for an install.
+pub fn install_verified(journal: &Path, destination: &Path, install: impl FnOnce() -> io::Result<()>, verify: impl Fn() -> io::Result<()>) -> io::Result<()> {
+    let completed = journal.join("installation-complete");
+    let started = journal.join("installation-started");
+    if completed.is_file() { return verify(); }
+    if !started.is_file() {
+        // An independently installed app is accepted only after verification. Never repair
+        // an unknown directory or overwrite someone else's installation.
+        if fs::symlink_metadata(destination).is_ok() { verify()?; return marker(&completed); }
+        marker(&started)?;
+    }
+    install()?;
+    verify()?;
+    marker(&completed)
+}
+
+/// NSIS scans the raw command line for a trailing unquoted /D= value, including spaces.
+pub fn nsis_destination_arg(destination: &Path) -> io::Result<std::ffi::OsString> {
+    if destination.as_os_str().to_string_lossy().contains(['"', '\r', '\n']) { return Err(io::Error::other("invalid NSIS destination")); }
+    let mut argument = std::ffi::OsString::from("/D="); argument.push(destination); Ok(argument)
+}
+#[cfg(windows)]
+fn append_nsis_destination(command: &mut std::process::Command, destination: &Path) -> io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    command.raw_arg(nsis_destination_arg(destination)?);
+    Ok(())
+}
+#[cfg(windows)]
+pub fn nsis_command(payload: &Path, destination: &Path) -> io::Result<std::process::Command> {
+    let mut command = std::process::Command::new(payload);
+    command.arg("/S");
+    append_nsis_destination(&mut command, destination)?;
+    Ok(command)
+}
+pub fn verify_install_location(expected: &Path, reported: &Path) -> io::Result<()> {
+    if fs::canonicalize(expected)? != fs::canonicalize(reported)? { return Err(io::Error::other("NSIS installed at a different location; old app retained")); }
+    Ok(())
+}
+
+pub fn shell_updates_allowed(bridge: bool, platform: &str, appimage: bool) -> bool {
+    !bridge || platform != "linux" || appimage
 }
 
 /// A system-package binary cannot opt into removal merely by inheriting APPIMAGE.
@@ -249,6 +376,103 @@ mod tests {
         fn install(&mut self) -> io::Result<()> { self.step("install") }
         fn start_and_acknowledge(&mut self) -> io::Result<()> { self.step("start") }
         fn remove_old_app(&mut self) -> io::Result<bool> { self.step("remove")?; Ok(true) }
+    }
+    #[test]
+    fn partial_nsis_install_is_repaired_until_verification_commits() {
+        for fail_installer in [false, true] {
+            let f = Fixture::new(); private_dir(&f.plan.journal).unwrap();
+            let destination = f.root.join("User Name/Programs/Squawk");
+            let executable = destination.join("app.exe");
+            let verify = || {
+                if fs::read(&executable)? == b"verified" { Ok(()) } else { Err(io::Error::other("incomplete identity")) }
+            };
+            assert!(install_verified(&f.plan.journal, &destination, || {
+                private_dir(&destination)?; fs::write(&executable, "partial")?;
+                if fail_installer { Err(io::Error::other("NSIS failed")) } else { Ok(()) }
+            }, &verify).is_err());
+            assert!(!f.plan.journal.join("installation-complete").exists());
+            install_verified(&f.plan.journal, &destination, || { fs::write(&executable, "verified") }, &verify).unwrap();
+            assert!(f.plan.journal.join("installation-complete").is_file());
+            install_verified(&f.plan.journal, &destination, || panic!("verified install must not rerun"), &verify).unwrap();
+            assert!(f.plan.transfers[0].source.is_file());
+        }
+    }
+    #[test]
+    fn incomplete_independent_install_is_never_claimed_for_repair() {
+        let f = Fixture::new(); private_dir(&f.plan.journal).unwrap();
+        let destination = f.root.join("independent"); private_dir(&destination).unwrap();
+        assert!(install_verified(&f.plan.journal, &destination, || panic!("not bridge owned"), || Err(io::Error::other("independent"))).is_err());
+        assert!(!f.plan.journal.join("installation-started").exists());
+    }
+    #[test]
+    fn nsis_destination_is_unquoted_and_registry_location_must_match() {
+        let destination = Path::new(r"C:\Users\User Name\AppData\Local\Programs\Squawk");
+        assert_eq!(nsis_destination_arg(destination).unwrap(), std::ffi::OsStr::new(r"/D=C:\Users\User Name\AppData\Local\Programs\Squawk"));
+        assert!(nsis_destination_arg(Path::new("bad\"path")).is_err());
+        let f = Fixture::new();
+        let requested = f.root.join("User Name/Programs/Squawk"); let fallback = f.root.join("User Name/Squawk");
+        private_dir(&requested).unwrap(); private_dir(&fallback).unwrap();
+        verify_install_location(&requested, &requested).unwrap();
+        assert!(verify_install_location(&requested, &fallback).is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_process_receives_the_raw_nsis_destination_with_spaces() {
+        let destination = Path::new(r"C:\Users\User Name\AppData\Local\Programs\Squawk");
+        let mut command = std::process::Command::new("powershell.exe");
+        // The comment makes PowerShell ignore the NSIS tail while reporting the actual
+        // process command line. Use the same raw-argument helper as the installer builder.
+        command.args(["-NoProfile", "-NonInteractive", "-Command", "[Environment]::CommandLine #"]);
+        append_nsis_destination(&mut command, destination).unwrap();
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let raw = String::from_utf8_lossy(&output.stdout);
+        assert!(raw.trim_end().ends_with(&format!(" {}", nsis_destination_arg(destination).unwrap().to_string_lossy())), "{raw}");
+    }
+    #[test]
+    fn changed_connection_lists_replan_and_preserve_every_profile_before_ack() {
+        for step in ["install", "start"] {
+            let mut f = Fixture::new(); let mut platform = Fake::new(); platform.fail = step;
+            f.plan.transfers.truncate(2);
+            let forgotten = Transfer { source: f.root.join("old/profile"), target: f.root.join("new/profile") };
+            f.plan.transfers.push(forgotten.clone());
+            assert!(execute(&f.plan, &mut platform).is_err());
+            // Forget deletes its source store in the old app. The durable union still owns
+            // the earlier snapshot, even when the installer failed before target copying.
+            fs::remove_dir_all(&forgotten.source).unwrap(); f.plan.transfers.pop();
+            let added = Transfer { source: f.root.join("old/added-profile"), target: f.root.join("new/added-profile") };
+            private_dir(&added.source).unwrap(); fs::write(added.source.join("cookie"), "new authenticated session").unwrap();
+            // Insert first to prove old copy indices and their ownership records stay stable.
+            f.plan.transfers.insert(0, added.clone());
+            fs::write(&f.plan.transfers[2].source, "current connection list after add/forget").unwrap();
+            platform.fail = ""; execute(&f.plan, &mut platform).unwrap();
+            assert!(forgotten.target.join("Cookies/cookies").is_file());
+            assert!(forgotten.target.join("LocalStorage/data").is_file());
+            assert!(same_tree(&added.source, &added.target).unwrap());
+            assert_eq!(fs::read_to_string(&f.plan.transfers[2].target).unwrap(), "current connection list after add/forget");
+            assert!(!forgotten.source.exists());
+            execute(&f.plan, &mut platform).unwrap();
+        }
+    }
+    #[test]
+    fn acknowledged_profile_set_cannot_be_extended_before_old_app_removal() {
+        let mut f = Fixture::new(); let mut platform = Fake::new(); platform.fail = "remove";
+        assert!(execute(&f.plan, &mut platform).is_err());
+        f.plan.transfers.push(Transfer { source: f.root.join("old/late"), target: f.root.join("new/late") });
+        platform.calls.clear(); platform.fail = "";
+        assert!(execute(&f.plan, &mut platform).is_err()); assert!(platform.calls.is_empty());
+    }
+    #[test]
+    fn manual_linux_bridge_blocks_update_check_and_install() {
+        for format in ["deb", "arch"] {
+            assert!(!shell_updates_allowed(true, "linux", false), "{format} must not invoke install_deb");
+        }
+        assert!(shell_updates_allowed(true, "linux", true));
+        for platform in ["linux", "macos", "windows"] {
+            assert!(shell_updates_allowed(false, platform, false));
+        }
+        assert!(shell_updates_allowed(true, "macos", false));
+        assert!(shell_updates_allowed(true, "windows", false));
     }
     #[test]
     fn transfers_state_before_ack_then_removes_and_never_overwrites_new_state() {

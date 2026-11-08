@@ -208,6 +208,12 @@ trusted sign-in origins stay unchanged. A loopback acknowledgement from the
 new app after native setup permits removal of the old app. A journal binds
 acknowledgements to the source, target and embedded payload. Failed attempts
 keep the old app usable. Retries preserve independent destination changes.
+Before acknowledgement, retries retain every profile seen in any attempt and
+add newly saved connections. Private source snapshots also preserve a profile
+that the user later forgets in the old app. Transfer indices stay stable.
+Windows retries repair a partial bridge install until identity and the actual
+per-user registry install location both verify. NSIS receives its destination
+as the final raw, unquoted argument so paths with spaces work.
 Windows removal waits for the old process to exit before running its NSIS
 uninstaller. A failed uninstaller leaves the old installation in place.
 
@@ -215,6 +221,8 @@ Linux DEB and Arch installations take the manual path: install the new package,
 then remove the old package with the same package manager. The bridge shows a
 one-time dismissible notice, keeps all normal app controls, and starts no
 installation, profile transfer or removal. It never requests privilege.
+These bridge builds also disable shell update checks and update installation
+at quit, so a later DEB update cannot request privilege through the updater.
 The pinned Tauri updater supports DEBs; the pinned tauri-action emits an
 installer-specific `linux-x86_64-deb` manifest key when a DEB signature exists,
 with AppImage as the primary `linux-x86_64` target. Arch packages are repackaged

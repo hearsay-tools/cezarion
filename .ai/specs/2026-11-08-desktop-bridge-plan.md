@@ -22,6 +22,9 @@ the bridge must refuse that route, irrespective of manifest selection.
 | Switch-on build | Squawk ID, display name, separate feed and artifact names |
 | Bridge receives unsupported install | No installation, transfer or removal; dismissible notice; old app works |
 | Installer fails | Source app and source state untouched; retry possible |
+| NSIS leaves an incomplete directory | Retry repairs the bridge-owned install; completion requires verified identity and registry location |
+| Windows destination contains spaces | Pass trailing raw unquoted /D=; verify actual registry install location |
+| Connection added/forgotten before acknowledgement | Replan the union with stable indices; retain earlier private profile snapshots |
 | Source profile still in use | Refuse transfer; source remains usable |
 | Destination conflicts | Refuse overwrite; source and destination remain usable |
 | Transfer fails midway | Retain verified bridge copies for retry; source untouched; independent destination edits protected |
@@ -29,6 +32,7 @@ the bridge must refuse that route, irrespective of manifest selection.
 | New app acknowledges | Record acknowledgement before old-app removal |
 | Removal fails | Keep acknowledgement; retry removal without copying new state again |
 | Completed bridge repeats | No copy, duplicate connection or profile overwrite |
+| DEB/Arch bridge continues as old app | No shell update check or install at quit; no privileged DEB updater route |
 | macOS 14+ | Copy full WebKit UUID store, preserving cookies and site storage |
 | macOS 12/13 | No persistent remote profile exists; preserve saved connections |
 | Linux/Windows | Copy complete closed profile directory for each connection UUID |
