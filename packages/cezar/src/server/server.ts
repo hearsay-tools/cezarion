@@ -1048,17 +1048,23 @@ export function createApp(deps: ServerDeps) {
   let backendChecksPending: Promise<void> | undefined;
   const readBackendChecks = () => {
     if (!backendChecksPending && Date.now() - backendChecksAt >= 5_000) {
-      backendChecksPending = detectEnvironment().then(async (checks) => {
+      backendChecksPending = detectEnvironment().then((checks) => {
         const changed = JSON.stringify(checks) !== JSON.stringify(backendChecks);
         backendChecks = checks;
-        if (!changed) return;
-        // A cold snapshot may still be assembling with the previous checks. Let
-        // it finish, then replace it and notify remote SSE readers as well as WS.
-        await healthInFlight?.catch(() => {});
-        await refreshHealth();
+        return changed;
       })
-        .catch(() => {})
-        .finally(() => { backendChecksAt = Date.now(); backendChecksPending = undefined; });
+        .catch(() => false)
+        .finally(() => { backendChecksAt = Date.now(); backendChecksPending = undefined; })
+        .then((changed) => {
+          if (!changed) return;
+          // Availability is settled before repository/workspace I/O starts.
+          // A cold snapshot may still hold the previous checks: let it finish,
+          // then replace it and notify both transports. Catch this separate job.
+          void (async () => {
+            await healthInFlight?.catch(() => {});
+            await refreshHealth();
+          })().catch(() => {});
+        });
     }
     return backendChecks;
   };
