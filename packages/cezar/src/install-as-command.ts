@@ -13,7 +13,8 @@ import path from 'node:path';
 
 /** Scoped package name — both install flavors register globally under it, so
  *  uninstall is a single `npm rm --global` of this name regardless of flavor. */
-export const PACKAGE_NAME = '@wjarka/cezarion';
+// Local builds retain the source workspace name in both switch states (D17).
+export const PACKAGE_NAME = productIdentity(false).npmPackage;
 
 /** Every bin the main package installs. `cezarion` matches the unscoped npm
  *  alias, so a single link / global-install exposes the same name as

@@ -1,5 +1,5 @@
 import { productName } from '../home/display.ts';
-import { BINARY_NAMES } from '../home/identity.ts';
+import { BINARY_NAMES, productIdentity } from '../home/identity.ts';
 import { commandText } from '../home/command.ts';
 /**
  * `cez install | update | versions | use | link | unlink` — the terminal side of the managed
@@ -183,7 +183,7 @@ async function versionsCommand(home: Home): Promise<number> {
       console.log(`    ${checkout.branch.padEnd(34)} ${checkout.built ? 'built    ' : 'not built'} ${checkout.worktree}`);
     }
   }
-  const registry = await new RegistryCache('@wjarka/cezarion').get();
+  const registry = await new RegistryCache(productIdentity().npmPackage).get();
   if (registry) {
     console.log(`\n  registry: stable ${registry.distTags[distTagFor('stable')] ?? '—'} · nightly ${registry.distTags[distTagFor('nightly')] ?? '—'}`);
   }

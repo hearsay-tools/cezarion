@@ -47,3 +47,29 @@ failure changes the source name. Switch off returns the original manifest set.
 Compatibility artifacts are unit C. Their approved layout is a release-only
 temporary pack tree, outside the workspaces, with exact new-package pins and old
 bins targeting `dist/index.js`. The new dispatcher owns the sole stderr notice.
+
+
+## Installed update paths (unit B)
+
+Decision D25 preserves the outer npm package and launch path for global and npx
+updates and rollbacks. An old alias or scoped install keeps reinstalling that
+name. The compatibility releases in unit C forward old names to the new runtime;
+B does not migrate identities or recovery records. This preserves service launch
+paths and pending update records.
+
+| Case | Switch off | Switch on |
+| --- | --- | --- |
+| Legacy global and npx layouts | Current discovery and outer package | Same |
+| New global and npx layouts | Unsupported, no npm mutation | Discover matching direct, nested and hoisted layouts |
+| New managed registry install | Legacy scoped package | Active scoped package |
+| Managed version reads | Legacy scoped package only | Active scoped package first, legacy fallback |
+| Local source pack or linked checkout | Source workspace identity | Same |
+| Published new local pack | Rejected | Accepted with its manifest identity |
+| Registry discovery | Current package argument | Active scoped package |
+| Pending legacy update record | Existing schema and directory | Same, no rewrite |
+| Restart and failed-promotion rollback | Original outer name and launch path | Same for both identities |
+| Generated managed launcher | Frozen legacy bytes | Active package with legacy fallback; refresh before activation |
+| Server npx cache ownership | All four exact launch names (P3b) | Same |
+
+Tests stub registry reads and npm, or use local npm executables. No test accesses
+the registry. Desktop, web and mobile code stays outside this unit.

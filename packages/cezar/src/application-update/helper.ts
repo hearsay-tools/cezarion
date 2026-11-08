@@ -1,3 +1,4 @@
+import { npmPackageIdentity, type NpmLaunchPackage } from '../home/identity.js';
 import type { spawn } from 'node:child_process';
 import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,7 +15,7 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 export interface HelperPlan {
   installation: {
     kind: 'global' | 'npx'; prefix: string; cache: string; installRoot: string;
-    packageRoot: string; outerRoot: string; launchEntry: string; outerPackage: '@wjarka/cezarion' | 'cezarion'; request: string;
+    packageRoot: string; outerRoot: string; launchEntry: string; outerPackage: NpmLaunchPackage; request: string;
   };
   targetVersion: string;
   oldVersion: string;
@@ -134,17 +135,18 @@ export async function runRestartWorkflow(io: RestartIO): Promise<void> {
 }
 
 function scopedPath(plan: HelperPlan): string {
-  if (plan.installation.outerPackage === '@wjarka/cezarion') return plan.installation.packageRoot;
-  const nested = join(plan.installation.outerRoot, 'node_modules/@wjarka/cezarion');
+  const identity = npmPackageIdentity(plan.installation.outerPackage)!;
+  if (plan.installation.outerPackage === identity.npmPackage) return plan.installation.packageRoot;
+  const nested = join(plan.installation.outerRoot, 'node_modules', identity.npmPackage);
   if (existsSync(nested)) return nested;
   const modules = plan.installation.kind === 'npx' ? join(plan.installation.installRoot, 'node_modules')
     : dirname(plan.installation.outerRoot);
-  return join(modules, '@wjarka/cezarion');
+  return join(modules, identity.npmPackage);
 }
 
 function validateOriginal(plan: HelperPlan, expected: string): void {
   const pkg = JSON.parse(readFileSync(join(scopedPath(plan), 'package.json'), 'utf8')) as { name?: string; version?: string; bin?: Record<string, string> };
-  if (pkg.name !== '@wjarka/cezarion' || pkg.version !== expected || !existsSync(join(scopedPath(plan), 'dist/index.js')) || !existsSync(join(scopedPath(plan), 'web/dist/index.html'))) {
+  if (pkg.name !== npmPackageIdentity(plan.installation.outerPackage)!.npmPackage || pkg.version !== expected || !existsSync(join(scopedPath(plan), 'dist/index.js')) || !existsSync(join(scopedPath(plan), 'web/dist/index.html'))) {
     throw new Error('promoted installation did not validate');
   }
   if (!existsSync(plan.installation.launchEntry)) throw new Error('original launch entry missing');
@@ -261,8 +263,9 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
   const copy = async (from: string, to: string) => cp(from, to, { recursive: true, dereference: false,
     filter: async () => { await assertOwned(); return true; } });
   await assertOwned();
-  const hoisted = installation.kind === 'global' && installation.outerPackage === 'cezarion'
-    && installation.packageRoot === join(dirname(installation.outerRoot), '@wjarka/cezarion');
+  const identity = npmPackageIdentity(installation.outerPackage)!;
+  const hoisted = installation.kind === 'global' && installation.outerPackage === identity.npmAlias
+    && installation.packageRoot === join(dirname(installation.outerRoot), identity.npmPackage);
   if (hoisted || plan.recoveryPackage !== undefined) {
     // No destination list from disk: only the discovery-owned scoped sibling
     // and one fixed private backup are allowed. Validate before removing roots.
@@ -270,7 +273,7 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
       throw new Error('invalid hoisted package recovery');
     }
     const pkg = JSON.parse(await readFile(join(plan.recoveryPackage, 'package.json'), 'utf8')) as { name?: string; version?: string };
-    if (pkg.name !== '@wjarka/cezarion' || pkg.version !== plan.oldVersion
+    if (pkg.name !== identity.npmPackage || pkg.version !== plan.oldVersion
       || !existsSync(join(plan.recoveryPackage, 'dist/index.js')) || !existsSync(join(plan.recoveryPackage, 'web/dist/index.html'))) {
       throw new Error('invalid hoisted package recovery');
     }

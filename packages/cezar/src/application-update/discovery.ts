@@ -1,9 +1,10 @@
+import { npmPackageIdentity, productIdentity, type NpmLaunchPackage } from '../home/identity.ts';
 import { realpathSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 export type Installation =
   | { kind: 'unsupported'; reason: string }
-  | { kind: 'global' | 'npx'; prefix: string; cache: string; installRoot: string; packageRoot: string; outerRoot: string; launchEntry: string; outerPackage: '@wjarka/cezarion' | 'cezarion'; request: string };
+  | { kind: 'global' | 'npx'; prefix: string; cache: string; installRoot: string; packageRoot: string; outerRoot: string; launchEntry: string; outerPackage: NpmLaunchPackage; request: string };
 
 export interface DiscoveryInput {
   prefix: string;
@@ -22,6 +23,7 @@ type InstallLayout = {
   launchEntry: string;
   installRoot: string;
   modules: string;
+  identity: ReturnType<typeof productIdentity>;
 };
 
 function inside(path: string, root: string): boolean {
@@ -37,7 +39,7 @@ function unsupported(reason: string): UnsupportedInstall {
   return { kind: 'unsupported', reason };
 }
 
-function discoverInstallLayout(input: DiscoveryInput): UnsupportedInstall | InstallLayout {
+function discoverInstallLayout(input: DiscoveryInput, rebrand: boolean): UnsupportedInstall | InstallLayout {
   let prefix: string;
   try { prefix = realpathSync(input.prefix); } catch { prefix = resolve(input.prefix); }
   // A fresh global npm install need not have created its cache yet.
@@ -46,12 +48,13 @@ function discoverInstallLayout(input: DiscoveryInput): UnsupportedInstall | Inst
   const packageRoot = realpathSync(input.packageRoot);
   const launchEntry = realpathSync(input.launchEntry);
   const manifest = json(join(packageRoot, 'package.json'));
-  if (manifest.name !== '@wjarka/cezarion' || typeof manifest.version !== 'string') {
+  const identity = typeof manifest.name === 'string' ? npmPackageIdentity(manifest.name) : undefined;
+  if (!identity || identity.npmPackage !== manifest.name || (identity.rebrand && !rebrand) || typeof manifest.version !== 'string') {
     return unsupported('running package is not @wjarka/cezarion');
   }
   if (inside(packageRoot, join(prefix, 'lib/node_modules')) || inside(packageRoot, join(prefix, 'node_modules'))) {
     return {
-      kind: 'global', prefix, cache, packageRoot, launchEntry, installRoot: prefix,
+      kind: 'global', prefix, cache, packageRoot, launchEntry, installRoot: prefix, identity,
       modules: inside(packageRoot, join(prefix, 'lib/node_modules')) ? join(prefix, 'lib/node_modules') : join(prefix, 'node_modules'),
     };
   }
@@ -60,54 +63,54 @@ function discoverInstallLayout(input: DiscoveryInput): UnsupportedInstall | Inst
     return unsupported('not an npm global or npx cache installation');
   }
   const installRoot = join(cache, '_npx', parts[1]!);
-  return { kind: 'npx', prefix, cache, packageRoot, launchEntry, installRoot, modules: join(installRoot, 'node_modules') };
+  return { kind: 'npx', prefix, cache, packageRoot, launchEntry, installRoot, identity, modules: join(installRoot, 'node_modules') };
 }
 
-function discoverNpxRequest(installRoot: string): string | UnsupportedInstall {
+function discoverNpxRequest(installRoot: string, identity: ReturnType<typeof productIdentity>): string | UnsupportedInstall {
   const root = json(join(installRoot, 'package.json'));
   const requests = (root._npx as { packages?: unknown } | undefined)?.packages;
   if (!Array.isArray(requests) || requests.length !== 1 ||
-    !['cezarion', '@wjarka/cezarion'].includes(requests[0] as string)) {
+    ![identity.npmAlias, identity.npmPackage].includes(requests[0] as never)) {
     return unsupported('pinned or mixed npx request');
   }
   return requests[0] as string;
 }
 
 function discoverOuterPackage(layout: InstallLayout, launchPath: string): Installation {
-  const { prefix, cache, packageRoot, launchEntry, kind, installRoot, modules } = layout;
-  const direct = join(modules, '@wjarka/cezarion');
-  const alias = join(modules, 'cezarion');
-  if (packageRoot !== direct && packageRoot !== join(alias, 'node_modules/@wjarka/cezarion')) {
+  const { prefix, cache, packageRoot, launchEntry, kind, installRoot, modules, identity } = layout;
+  const direct = join(modules, identity.npmPackage);
+  const alias = join(modules, identity.npmAlias);
+  if (packageRoot !== direct && packageRoot !== join(alias, 'node_modules', identity.npmPackage)) {
     return unsupported('linked or mixed package layout');
   }
-  let outerPackage: '@wjarka/cezarion' | 'cezarion' = inside(launchEntry, alias) ? 'cezarion' : '@wjarka/cezarion';
+  let outerPackage: NpmLaunchPackage = inside(launchEntry, alias) ? identity.npmAlias : identity.npmPackage;
   let request: string = outerPackage;
   if (kind === 'npx') {
-    const npxRequest = discoverNpxRequest(installRoot);
+    const npxRequest = discoverNpxRequest(installRoot, identity);
     if (typeof npxRequest !== 'string') return npxRequest;
     request = npxRequest;
     // npm may link .bin/cezarion to the scoped dependency even when the _npx
     // request and root dependency are the alias. Metadata owns this choice.
     outerPackage = request as typeof outerPackage;
   }
-  if (outerPackage === '@wjarka/cezarion' && packageRoot !== direct) return unsupported('mixed launch layout');
-  const outerPath = outerPackage === 'cezarion' ? alias : direct;
+  if (outerPackage === identity.npmPackage && packageRoot !== direct) return unsupported('mixed launch layout');
+  const outerPath = outerPackage === identity.npmAlias ? alias : direct;
   if (!inside(launchEntry, outerPath) && !(kind === 'npx' && inside(launchEntry, packageRoot))) {
     return unsupported('launch entry does not belong to installation');
   }
-  if (outerPackage === 'cezarion') {
+  if (outerPackage === identity.npmAlias) {
     const outer = json(join(alias, 'package.json'));
     const deps = outer.dependencies as Record<string, unknown> | undefined;
-    if (outer.name !== 'cezarion' || typeof deps?.['@wjarka/cezarion'] !== 'string') return unsupported('alias is not linked to scoped package');
+    if (outer.name !== identity.npmAlias || typeof deps?.[identity.npmPackage] !== 'string') return unsupported('alias is not linked to scoped package');
   }
   return { kind, prefix, cache, installRoot, packageRoot, outerRoot: outerPath,
     launchEntry: resolve(launchPath), outerPackage, request };
 }
 
 /** Match only npm-owned, canonical layouts. A matched but unsafe layout is explicit. */
-export function discoverInstallation(input: DiscoveryInput): Installation {
+export function discoverInstallation(input: DiscoveryInput, rebrand = productIdentity().rebrand): Installation {
   try {
-    const layout = discoverInstallLayout(input);
+    const layout = discoverInstallLayout(input, rebrand);
     if (layout.kind === 'unsupported') return layout;
     return discoverOuterPackage(layout, input.launchEntry);
   } catch {

@@ -1,3 +1,4 @@
+import { npmPackageIdentity, productIdentity } from '../home/identity.ts';
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { access, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -13,7 +14,7 @@ import { runOwnedNpm } from './npm-process.ts';
 import { snapshotGlobalBins, windowsGlobalLayout } from './bin-recovery.ts';
 import { globalBinDir } from '../install-as-command.ts';
 
-const PACKAGE = '@wjarka/cezarion';
+const PACKAGE = productIdentity(false).npmPackage;
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const SAFE_MESSAGES = new Set([
   'Update this installation manually.', 'Update was interrupted. Retry Update.',
@@ -36,6 +37,7 @@ export interface ApplicationUpdateServiceLike {
 }
 
 export interface ApplicationUpdateOptions {
+  rebrand?: boolean | undefined;
   packageRoot: string;
   launchEntry: string;
   npmPrefix: string;
@@ -78,9 +80,9 @@ function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-function packageVersion(path: string): string {
+function packageVersion(path: string, rebrand = productIdentity().rebrand): string {
   const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as { name?: unknown; version?: unknown };
-  if (manifest.name !== PACKAGE || typeof manifest.version !== 'string') throw new Error('package identity mismatch');
+  if (!acceptedPackage(manifest.name, rebrand) || typeof manifest.version !== 'string') throw new Error('package identity mismatch');
   return manifest.version;
 }
 
@@ -114,12 +116,16 @@ function validateRuntimeDependencies(path: string, installRoot: string, dependen
   }
 }
 
+function acceptedPackage(name: unknown, rebrand: boolean): boolean {
+  return name === PACKAGE || (rebrand && name === productIdentity(true).npmPackage);
+}
+
 /** Validate the npm result, not merely its exit code. */
-export function validateInstalledPackage(path: string, expectedVersion: string, installRoot: string = path): void {
+export function validateInstalledPackage(path: string, expectedVersion: string, installRoot: string = path, expectedPackage: string = PACKAGE): void {
   const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as {
     name?: unknown; version?: unknown; engines?: { node?: string }; dependencies?: Record<string, string>; bin?: Record<string, string>;
   };
-  if (manifest.name !== PACKAGE || manifest.version !== expectedVersion) throw new Error('staged package version mismatch');
+  if (manifest.name !== expectedPackage || manifest.version !== expectedVersion) throw new Error('staged package version mismatch');
   if (!manifest.bin || !Object.values(manifest.bin).some((entry) => entry === 'dist/index.js')) throw new Error('staged CLI entry missing');
   if (!existsSync(join(path, 'dist/index.js')) || !existsSync(join(path, 'web/dist/index.html'))) throw new Error('staged package assets incomplete');
   validateStagedWebAssets(path);
@@ -129,8 +135,17 @@ export function validateInstalledPackage(path: string, expectedVersion: string, 
 }
 
 function stageScopedPath(stage: string, outer: string): string {
-  const nested = join(stage, 'node_modules/cezarion/node_modules/@wjarka/cezarion');
-  return outer === 'cezarion' && existsSync(nested) ? nested : join(stage, 'node_modules/@wjarka/cezarion');
+  const identity = npmPackageIdentity(outer)!;
+  const nested = join(stage, 'node_modules', identity.npmAlias, 'node_modules', identity.npmPackage);
+  return outer === identity.npmAlias && existsSync(nested) ? nested : join(stage, 'node_modules', identity.npmPackage);
+}
+
+function scopedPackage(installation: Exclude<Installation, { kind: 'unsupported' }>): string {
+  return npmPackageIdentity(installation.outerPackage)!.npmPackage;
+}
+
+function isAlias(installation: Installation): boolean {
+  return installation.kind !== 'unsupported' && installation.outerPackage === npmPackageIdentity(installation.outerPackage)!.npmAlias;
 }
 
 export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
@@ -146,13 +161,13 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
   private lockLost = false;
 
   constructor(private readonly options: ApplicationUpdateOptions) {
-    this.installation = discoverInstallation({ prefix: options.npmPrefix, cache: options.npmCache, packageRoot: options.packageRoot, launchEntry: options.launchEntry });
+    this.installation = discoverInstallation({ prefix: options.npmPrefix, cache: options.npmCache, packageRoot: options.packageRoot, launchEntry: options.launchEntry }, options.rebrand);
     const identity = this.installation.kind === 'unsupported' ? resolve(options.packageRoot)
       : `${this.installation.kind}\0${this.installation.installRoot}\0${this.installation.outerPackage}`;
     this.dir = join(options.home, 'application-updates', createHash('sha256').update(identity).digest('hex'));
     this.recordPath = join(this.dir, 'state.json');
-    this.recoveryPackage = this.installation.kind === 'global' && this.installation.outerPackage === 'cezarion'
-      && this.installation.packageRoot === join(dirname(this.installation.outerRoot), PACKAGE)
+    this.recoveryPackage = this.installation.kind === 'global' && isAlias(this.installation)
+      && this.installation.packageRoot === join(dirname(this.installation.outerRoot), scopedPackage(this.installation))
       ? join(this.dir, 'recovery-package') : undefined;
     this.record = { state: this.installation.kind === 'unsupported' && !options.dryRun
       ? { status: 'idle', supported: false, message: 'Update this installation manually.' }
@@ -208,12 +223,12 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
       // original snapshot metadata after npm changes the dependency layout.
       if (loaded.recoveryPackage !== this.recoveryPackage) throw new Error('hoisted recovery mismatch');
       if (this.recoveryPackage && this.installation.kind === 'global') {
-        validateInstalledPackage(this.recoveryPackage, packageVersion(this.installation.packageRoot));
+        validateInstalledPackage(this.recoveryPackage, packageVersion(this.installation.packageRoot, this.options.rebrand), this.recoveryPackage, scopedPackage(this.installation));
       }
       const stagedScoped = stageScopedPath(stage, this.installation.kind === 'unsupported' ? PACKAGE : this.installation.outerPackage);
-      validateInstalledPackage(stagedScoped, loaded.state.targetVersion, stage);
-      if (this.installation.kind !== 'unsupported' && this.installation.outerPackage === 'cezarion') {
-        const alias = JSON.parse(readFileSync(join(stage, 'node_modules/cezarion/package.json'), 'utf8')) as { version?: string };
+      validateInstalledPackage(stagedScoped, loaded.state.targetVersion, stage, this.installation.kind === 'unsupported' ? PACKAGE : scopedPackage(this.installation));
+      if (this.installation.kind !== 'unsupported' && isAlias(this.installation)) {
+        const alias = JSON.parse(readFileSync(join(stage, 'node_modules', this.installation.outerPackage, 'package.json'), 'utf8')) as { version?: string };
         if (alias.version !== loaded.state.targetVersion) throw new Error('alias version mismatch');
       }
     } catch {
@@ -274,7 +289,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
 
   private async prepareDryRun(): Promise<ApplicationUpdateState> {
     const target = this.options.targetVersion();
-    const old = packageVersion(this.options.packageRoot);
+    const old = packageVersion(this.options.packageRoot, this.options.rebrand);
     if (!target || !VERSION_RE.test(target) || !isNewerVersion(target, old)) throw new ApplicationUpdateConflictError('No newer release is available.');
     await this.persist({ status: 'preparing', supported: true, targetVersion: target });
     await this.persist({ status: 'ready', supported: true, targetVersion: target });
@@ -311,9 +326,9 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     await (this.options.runNpm ?? ((argv, abortSignal) => this.runNpm(argv, installation.cache, abortSignal)))(args, signal);
     await assertOwned();
     const stagedScoped = stageScopedPath(stage, installation.outerPackage);
-    validateInstalledPackage(stagedScoped, target, stage);
-    if (installation.outerPackage === 'cezarion') {
-      const alias = JSON.parse(await readFile(join(stage, 'node_modules/cezarion/package.json'), 'utf8')) as { version?: string };
+    validateInstalledPackage(stagedScoped, target, stage, scopedPackage(installation));
+    if (isAlias(installation)) {
+      const alias = JSON.parse(await readFile(join(stage, 'node_modules', installation.outerPackage, 'package.json'), 'utf8')) as { version?: string };
       if (alias.version !== target) throw new Error('alias release has not been published yet');
     }
   }
@@ -332,7 +347,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
       await assertOwned();
       await cp(installation.packageRoot, this.recoveryPackage, { recursive: true, dereference: false,
         filter: async () => { await assertOwned(); return true; } });
-      validateInstalledPackage(this.recoveryPackage, oldVersion);
+      validateInstalledPackage(this.recoveryPackage, oldVersion, this.recoveryPackage, scopedPackage(installation));
     }
     if (installation.kind === 'global') {
       const outer = JSON.parse(await readFile(join(installation.outerRoot, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
@@ -419,7 +434,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     const installation = this.installation;
     if (installation.kind === 'unsupported') throw new ApplicationUpdateConflictError('Update this installation manually.');
     const target = this.options.targetVersion();
-    const oldVersion = packageVersion(installation.packageRoot);
+    const oldVersion = packageVersion(installation.packageRoot, this.options.rebrand);
     if (!target || !VERSION_RE.test(target) || !isNewerVersion(target, oldVersion)) throw new ApplicationUpdateConflictError('No newer release is available.');
     this.refreshRecord();
     if (this.record.state.targetVersion === target && ['ready', 'restarting'].includes(this.record.state.status)) return this.record.state;
@@ -466,7 +481,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
         const target = this.record.state.targetVersion!;
         const claimId = randomUUID();
         const plan: RestartPlan = { installation,
-          targetVersion: target, oldVersion: packageVersion(installation.packageRoot), stage: this.record.stage,
+          targetVersion: target, oldVersion: packageVersion(installation.packageRoot, this.options.rebrand), stage: this.record.stage,
           recovery: this.record.recovery, recoveryPackage: this.record.recoveryPackage,
           binLinks: this.record.binLinks, recordPath: this.recordPath, claimId };
         await this.persist({ status: 'restarting', supported: true, targetVersion: target }, { ownerPid: process.pid, claimId, startedAt: Date.now() });

@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import type { Home } from '../home/home.ts';
 /**
  * Installing one version into the managed layout. npm does the heavy lifting — download,
@@ -38,6 +39,7 @@ export interface InstallOptions {
   onLog?: (line: string) => void;
   env?: NodeJS.ProcessEnv;
   home: Home;
+  rebrand?: boolean | undefined;
   /** The npm runner; tests substitute one that touches no network. */
   runNpm?: typeof runNpm;
 }
@@ -52,12 +54,13 @@ export interface InstallResult {
 export async function installFromRegistry(version: string, opts: InstallOptions): Promise<InstallResult> {
   const env = opts.env ?? process.env;
   const id = installId(version, 'registry');
-  if (existsSync(versionEntry(id, env, opts.home))) {
+  if (existsSync(versionEntry(id, env, opts.home, opts.rebrand))) {
     opts.onLog?.(`${id} is already installed`);
-    return { id, version, entry: versionEntry(id, env, opts.home) };
+    return { id, version, entry: versionEntry(id, env, opts.home, opts.rebrand) };
   }
-  await installSpec(id, `${PACKAGE_NAME}@${version}`, { version, source: 'registry' }, opts);
-  return { id, version, entry: versionEntry(id, env, opts.home) };
+  const name = productIdentity(opts.rebrand).npmPackage;
+  await installSpec(id, `${name}@${version}`, { version, source: 'registry' }, opts, name);
+  return { id, version, entry: versionEntry(id, env, opts.home, opts.rebrand) };
 }
 
 /** Pack the package at `packageRoot` (must be built) and install the tarball as `<version>+local`. */
@@ -66,7 +69,7 @@ export async function installFromLocal(packageRoot: string, opts: InstallOptions
   // The package.json is read back off disk, so it goes through a schema like every other
   // persisted file cezar parses — a malformed one is "not a built package", never a crash.
   const pkg = packageJsonSchema.safeParse(readJson(join(packageRoot, 'package.json')));
-  if (!pkg.success || pkg.data.name !== PACKAGE_NAME) throw new Error(`${packageRoot} is not a built ${PACKAGE_NAME} package`);
+  if (!pkg.success || !(pkg.data.name === PACKAGE_NAME || (productIdentity(opts.rebrand).rebrand && pkg.data.name === productIdentity(true).npmPackage))) throw new Error(`${packageRoot} is not a built ${PACKAGE_NAME} package`);
   const version = pkg.data.version;
   const id = installId(version, 'local');
   const packDir = join(tmpdir(), `cezar-pack-${process.pid}-${Date.now()}`);
@@ -78,11 +81,11 @@ export async function installFromLocal(packageRoot: string, opts: InstallOptions
     if (!tarball) throw new Error('npm pack produced no tarball');
     // installSpec replaces the previous local build only after staging has a valid entry.
     // Keep the active build usable if npm fails or produces an incomplete replacement.
-    await installSpec(id, join(packDir, tarball), { version, source: 'local' }, opts);
+    await installSpec(id, join(packDir, tarball), { version, source: 'local' }, opts, pkg.data.name);
   } finally {
     rmSync(packDir, { recursive: true, force: true });
   }
-  return { id, version, entry: versionEntry(id, env, opts.home) };
+  return { id, version, entry: versionEntry(id, env, opts.home, opts.rebrand) };
 }
 
 async function installSpec(
@@ -90,6 +93,7 @@ async function installSpec(
   spec: string,
   manifest: { version: string; source: 'registry' | 'local' },
   opts: InstallOptions,
+  packageName: string,
 ): Promise<void> {
   const env = opts.env ?? process.env;
   // Both callers validate before they get here, but the staging path is built from `id` and
@@ -106,7 +110,7 @@ async function installSpec(
       staging,
       opts.onLog,
     );
-    const entry = join(staging, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+    const entry = join(staging, 'node_modules', ...packageName.split('/'), 'dist', 'index.js');
     if (!existsSync(entry)) throw new Error('install finished but the entry file is missing');
     // A stale complete install of the same id (registry re-install after a manual delete of
     // the manifest, say) is replaced wholesale.

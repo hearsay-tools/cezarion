@@ -35,3 +35,11 @@ export const NPM_LAUNCH_PACKAGES = [
   productIdentity(false).npmPackage, productIdentity(false).npmAlias,
   productIdentity(true).npmPackage, productIdentity(true).npmAlias,
 ] as const;
+
+export type NpmLaunchPackage = typeof NPM_LAUNCH_PACKAGES[number];
+
+/** The scoped runtime belonging to an installed scoped package or command alias. */
+export function npmPackageIdentity(name: string): ProductIdentity | undefined {
+  return [productIdentity(false), productIdentity(true)]
+    .find(identity => name === identity.npmPackage || name === identity.npmAlias);
+}
