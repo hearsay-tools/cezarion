@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
+import { runsOn } from './parity-classes.testkit.ts';
 import { FINAL_MESSAGE_CRITERIA } from './harness-parity.testkit.ts';
 import { describeWorkflowFinalMessage, WORKFLOW_FINAL_MESSAGE_GROUPS } from './workflow-final-message-cells.testkit.ts';
 
@@ -26,6 +27,7 @@ describe('workflow final-message family registration', () => {
     }
     expect(new Set(names).size).toBe(names.length);
     for (const runner of RUNNER_IDS) for (const row of FINAL_MESSAGE_CRITERIA) {
+      if (!runsOn('workflow-final-message', row.id, runner)) { expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toEqual([]); continue; }
       const expectedModes = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'].includes(row.id) ? 2 : 1;
       expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toHaveLength(expectedModes);
     }

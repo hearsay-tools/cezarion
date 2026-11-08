@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { expect, it, describe } from 'vitest';
 import { deriveAttention, WEBHOOK_TRIGGERS } from '@open-mercato/cezar-contract/attention';
 import type { ApiRun, TimerWaitEntry } from '@open-mercato/cezar-contract';
-import { type RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { runsOn } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { attentionFields, projectStatus } from '../task-cli/projections.ts';
 import { endsWait } from '../task-cli/watch.ts';
@@ -301,9 +302,9 @@ export function registerAutonomousAsk(backend: RunnerId, mode: 'fresh' | 'contin
 
 export function registerMonitoringPartition(name: MonitoringPartitionName): void {
   const partition = MONITORING_PARTITIONS[name];
-  for (const backend of partition.runners) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
+  for (const backend of RUNNER_IDS.filter(runner => partition.rows.some(row => runsOn('monitoring-turn', row, runner)))) describe(`${backend} monitoring turn`, { timeout: 30_000 }, () => {
     useWorkerWaitFixture();
-    for (const mode of partition.modes) for (const id of partition.rows) {
+    for (const mode of partition.modes) for (const id of partition.rows.filter(row => runsOn('monitoring-turn', row, backend))) {
       if (id === 'M13' || id === 'M14') registerAutonomousProse(backend, mode);
       else if (id === 'M23') registerAutonomousAsk(backend, mode);
       else if (id === 'M17') registerClose(backend);

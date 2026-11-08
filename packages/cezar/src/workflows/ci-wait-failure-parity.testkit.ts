@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CiWaitResult, Wait } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { supportsProfiles } from '../core/agent-profiles.ts';
 import { acceptedWorkerIdentitySchema, workerWorkflowHash } from '../delegation/execution-identity.ts';
@@ -72,14 +73,15 @@ type CiFailureRow =
   | { family: 'final'; runner: RunnerId; mode: 'fresh' | 'continued' }
   | { family: 'nonfinal'; runner: RunnerId; outcome: 'passed' | 'failed' | 'restarted' | 'source-retry' }
   | { family: 'restart'; runner: RunnerId; boundary: 'CI acknowledgement' | 'queued tail' };
+// R75 runs on every runner (core/parity-classes.testkit.ts); the pair split keeps each file under the per-file cap.
 const otherRunners = RUNNER_IDS.filter(runner => runner !== 'cursor' && runner !== 'opencode');
 const modelAndServerRunners = RUNNER_IDS.filter(runner => runner === 'cursor' || runner === 'opencode');
 export const CI_FAILURE_GROUPS = {
-  'final-recovery': RUNNER_IDS.flatMap(runner => { return (['fresh', 'continued'] as const).map(mode => ({ family: 'final', runner, mode } as const)); }),
-  'nonfinal-passed': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'passed' } as const)),
-  'nonfinal-failed': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'failed' } as const)),
-  'nonfinal-restarted': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'restarted' } as const)),
-  'nonfinal-source-retry': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'source-retry' } as const)),
+  'final-recovery': (['fresh', 'continued'] as const).flatMap(mode => parityRunners('ci-wait-failure', mode === 'fresh' ? 'R72' : 'R73').map(runner => ({ family: 'final', runner, mode } as const))),
+  'nonfinal-passed': parityRunners('ci-wait-failure', 'R74').map(runner => ({ family: 'nonfinal', runner, outcome: 'passed' } as const)),
+  'nonfinal-failed': parityRunners('ci-wait-failure', 'R74').map(runner => ({ family: 'nonfinal', runner, outcome: 'failed' } as const)),
+  'nonfinal-restarted': parityRunners('ci-wait-failure', 'R74').map(runner => ({ family: 'nonfinal', runner, outcome: 'restarted' } as const)),
+  'nonfinal-source-retry': parityRunners('ci-wait-failure', 'R76').map(runner => ({ family: 'nonfinal', runner, outcome: 'source-retry' } as const)),
   'restart-acknowledgement-cursor-opencode': modelAndServerRunners.map(runner => ({ family: 'restart', runner, boundary: 'CI acknowledgement' } as const)),
   'restart-acknowledgement-claude-codex-pi-omp': otherRunners.map(runner => ({ family: 'restart', runner, boundary: 'CI acknowledgement' } as const)),
   'restart-queued-tail-cursor-opencode': modelAndServerRunners.map(runner => ({ family: 'restart', runner, boundary: 'queued tail' } as const)),

@@ -17,6 +17,7 @@ import { RUNNER_IDS, type AgentSession, type RunnerFactory, type RunnerId } from
 import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit.ts';
 import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
+import { familyCells } from '../core/parity-classes.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
@@ -629,8 +630,17 @@ function splitPart(runner: RunnerId, part: WaitParityPart): boolean {
   return Object.values(WAIT_PARITY_FAMILIES).some(scope => scope.runner === runner && scope.part === part);
 }
 
+/** Whether a runner runs any cell of a part, after the wait family's class (hearsay-tools/cezarion#2991)
+ *  drops the shared rows outside the derived runner set. A part with none has no file. */
+export function partRuns(runner: RunnerId, part: WaitParityPart): boolean {
+  let any = false;
+  WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, (() => { any = true; }) as unknown as typeof registerTest));
+  return any;
+}
+
 function expectPartLeaf(runner: RunnerId, part: WaitParityPart): void {
   if (splitPart(runner, part)) return; // Full-title family coverage is checked separately below.
+  if (!partRuns(runner, part)) return;
   const file = WAIT_PARITY_FILES[part](runner);
   const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
   expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
@@ -678,10 +688,10 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
         expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => {
           return (Object.keys(WAIT_PARITY_FILES) as WaitParityPart[])
-            .filter(part => !splitPart(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
+            .filter(part => !splitPart(runner, part) && partRuns(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
         }).sort());
-        for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
-          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
+        for (const runner of RUNNER_IDS) for (const [part, file] of Object.entries(WAIT_PARITY_FILES) as Array<[WaitParityPart, (runner: RunnerId) => string]>) {
+          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(partRuns(runner, part) || splitPart(runner, part));
         }
       });
 
@@ -710,8 +720,10 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       singleRunnerCells();
     }
 
+    // Each row runs on the runners its class names (core/parity-classes.testkit.ts).
+    const register = scope === 'once' ? registerTest : familyCells('waits', scope.runner, registerTest);
     for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) WAIT_PARITY_CELLS[part](runnersFor(part),
-      scope !== 'once' && scope.family ? familyTest(scope as WaitParityFamily, registerTest) : registerTest);
+      scope !== 'once' && scope.family ? familyTest(scope as WaitParityFamily, register) : register);
   });
 }
 

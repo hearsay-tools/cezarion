@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RUNNER_IDS } from './agent-runner.ts';
+import { parityRunners } from './parity-classes.testkit.ts';
 import { WORKTREE_SETUP_CRITERIA } from './harness-parity.testkit.ts';
 import { driveRun } from './workflow-parity.testkit.ts';
 
@@ -19,7 +19,7 @@ const readOrEmpty = (path: string) => { try { return readFileSync(path, 'utf8');
 describe('harness parity — worktree setup note (#917)', () => {
   expect(WORKTREE_SETUP_CRITERIA.map((row) => row.id)).toEqual(['R58']);
 
-  for (const backend of RUNNER_IDS) {
+  for (const backend of parityRunners('worktree-setup', 'R58')) {
     it(`${backend} R58 delivers the worktree setup note in the opening message`, async () => {
       const wire = mkdtempSync(join(tmpdir(), `cez-r58-${backend}-`));
       dirs.push(wire);

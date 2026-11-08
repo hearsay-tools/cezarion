@@ -83,6 +83,7 @@ import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef 
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { promptFor, driveSeam, lastIndexWhere, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
 import { SEAM_CONTRACT_ROWS } from './seam-contract.testkit.ts';
+import { parityRowId, runsOn, type ParityFamilyName } from './parity-classes.testkit.ts';
 import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
@@ -949,7 +950,26 @@ type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'be
 
 export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessParityPart } | 'once',
   registration: HarnessRegistration = { describe, it, beforeAll, afterAll, toolGrants: describeToolGrantParity }): void {
-  const { describe, it, beforeAll, afterAll } = registration;
+  const { beforeAll, afterAll } = registration;
+  // Each group is one parity family (core/parity-classes.testkit.ts, hearsay-tools/cezarion#2991):
+  // a cell registers only when its row runs on this file's runner. The group is carried into each
+  // suite factory, which Vitest may call after describeRunners returns.
+  let currentGroup: string | undefined;
+  const inGroup = <A extends unknown[]>(group: string | undefined, factory: (...args: A) => unknown) => (...args: A) => {
+    const previous = currentGroup;
+    currentGroup = group;
+    try { return factory(...args); } finally { currentGroup = previous; }
+  };
+  const describe = new Proxy(registration.describe, {
+    apply: (target, self, args: unknown[]) => Reflect.apply(target, self, args.map(arg => typeof arg === 'function' ? inGroup(currentGroup, arg as () => unknown) : arg)),
+  });
+  const it = new Proxy(registration.it, {
+    apply: (target, self, args: unknown[]) => {
+      if (scope !== 'once' && currentGroup !== undefined && typeof args[0] === 'string'
+        && !runsOn(`harness:${currentGroup}` as ParityFamilyName, parityRowId(args[0]), scope.runner)) return undefined;
+      return Reflect.apply(target, self, args);
+    },
+  });
   /**
    * Register one cell. An exempt cell still produces a named test that fails the
    * day the backend gains the thing — see `ExemptionKind` for the two ways that
@@ -1009,10 +1029,11 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       if (once) describe(name, body);
       return;
     }
+    const grouped = inGroup(group, body) as () => void;
     // Iterate rather than use includes: duplicate routes register twice and fail the guard.
-    if (registration.allGroups) { describe(name, body); return; }
+    if (registration.allGroups) { describe(name, grouped); return; }
     for (const selected of HARNESS_PARITY_GROUPS[scope.part]) {
-      if (selected === group) describe(name, body);
+      if (selected === group) describe(name, grouped);
     }
   };
 

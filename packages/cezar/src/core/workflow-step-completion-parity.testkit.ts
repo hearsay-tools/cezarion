@@ -21,53 +21,35 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
   "markers": [
     "claude C1",
     "claude C2",
-    "codex C1",
-    "codex C2",
     "cursor C1",
     "cursor C2",
     "omp C1",
-    "omp C2",
-    "opencode C1",
-    "opencode C2",
-    "pi C1",
-    "pi C2"
+    "omp C2"
   ],
   "clean-close": [
     "claude C3",
-    "codex C3",
     "cursor C3",
-    "omp C3",
-    "opencode C3",
-    "pi C3"
+    "omp C3"
   ],
   "idle-close": [
     "claude C4",
-    "codex C4",
     "cursor C4",
-    "omp C4",
-    "opencode C4",
-    "pi C4"
+    "omp C4"
   ],
   "recovery": [
     "claude C5",
-    "codex C5",
     "cursor C5",
-    "omp C5",
-    "opencode C5",
-    "pi C5"
+    "omp C5"
   ],
   "autonomous": [
     "claude C6",
-    "codex C6",
     "cursor C6",
-    "omp C6",
-    "opencode C6",
-    "pi C6"
+    "omp C6"
   ]
 };
 
 export function describeWorkflowStepCompletionParity(part: ParityPart, collect?: ParityCollector): void {
-  const { describe, it } = partitionParity(part, PARTS, collect);
+  const { describe, it } = partitionParity(part, PARTS, collect, 'workflow-step-completion');
 describe('explicit step completion parity — hearsay-tools/cezarion#1620', () => {
   for (const backend of RUNNER_IDS) for (const row of STEP_COMPLETION_CRITERIA) {
     it(`${backend} ${row.id} ${row.name}`, async () => {

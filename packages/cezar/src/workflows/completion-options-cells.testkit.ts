@@ -2,6 +2,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit'
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { runsOn } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, store, root, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
@@ -18,7 +19,7 @@ export function describeCompletionOptions(rows: readonly string[], suite = { des
   suite.describe('task completion controls on native harnesses', { timeout: 40_000 }, () => {
     suite.useWorkerWaitFixture();
     for (const runner of RUNNER_IDS) {
-      if (rows.includes('R100')) suite.it(`${runner} R100 archives only Done, restores on Continue, and archives the next Done`, async () => {
+      if (rows.includes('R100') && runsOn('completion-options', 'R100', runner)) suite.it(`${runner} R100 archives only Done, restores on Continue, and archives the next Done`, async () => {
         process.env.CEZ_DRY_RUN = '0';
         process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline!, archiveWhenDone: true });
@@ -35,7 +36,7 @@ export function describeCompletionOptions(rows: readonly string[], suite = { des
         await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
         expect(store.getRun(run.id)?.archived).toBe(true);
       });
-      if (rows.includes('R101')) suite.it(`${runner} R101 records merge intent before archiving, while defaults stay off`, async () => {
+      if (rows.includes('R101') && runsOn('completion-options', 'R101', runner)) suite.it(`${runner} R101 records merge intent before archiving, while defaults stay off`, async () => {
         process.env.CEZ_DRY_RUN = '0';
         process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
         for (const enabled of [false, true]) {

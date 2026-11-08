@@ -1,6 +1,6 @@
 import { captureSessions } from './runner-session-capture.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import type { CiWaitResult } from '@open-mercato/cezar-contract';
 import { CiToolController } from '../ci-wait/controller.ts';
@@ -16,7 +16,8 @@ const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id
 
 // The production controller, bundled tool, runner, store and scheduler remain real.
 // Only the external CI completion time is controlled; metadata uses the dry-run gh process.
-export const GROUPS = { fresh: RUNNER_IDS, continued: RUNNER_IDS, recovered: RUNNER_IDS };
+// The cells carry no row id; each mode is one shared row (hearsay-tools/cezarion#2991).
+export const GROUPS = { fresh: parityRunners('ci-wait-registration', 'fresh'), continued: parityRunners('ci-wait-registration', 'continued'), recovered: parityRunners('ci-wait-registration', 'recovered') };
 export function registerGroup(mode: keyof typeof GROUPS) {
 
 

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { setTimeout as realDelay } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
+import { runsOn } from './parity-classes.testkit.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
@@ -85,7 +86,7 @@ export function describeWorkflowFinalMessage(group: keyof typeof WORKFLOW_FINAL_
   const { describe, it } = registration;
 describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
   for (const backend of RUNNER_IDS) {
-    for (const row of FINAL_MESSAGE_CRITERIA.filter(row => { return (WORKFLOW_FINAL_MESSAGE_GROUPS[group] as readonly string[]).includes(row.id); })) {
+    for (const row of FINAL_MESSAGE_CRITERIA.filter(row => { return (WORKFLOW_FINAL_MESSAGE_GROUPS[group] as readonly string[]).includes(row.id) && runsOn('workflow-final-message', row.id, backend); })) {
       if (row.id === 'F7') {
         const exemption = exemptionFor('F7', backend);
         if (exemption) {

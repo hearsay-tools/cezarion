@@ -1,16 +1,11 @@
-import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { runsOn } from '../core/parity-classes.testkit.ts';
 
-export interface MonitoringPartition { runners: readonly RunnerId[]; modes: readonly ('fresh' | 'continuation')[]; rows: readonly string[] }
+/** A file's monitoring cells: its modes and rows, on each runner its rows' class names
+ *  (`core/parity-classes.testkit.ts`, hearsay-tools/cezarion#2991). */
+export interface MonitoringPartition { modes: readonly ('fresh' | 'continuation')[]; rows: readonly string[] }
 export const MONITORING_PARTITIONS = {
   "timer-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -19,14 +14,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "prose-question-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -35,14 +22,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "worker-review-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -52,14 +31,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "ask-precedence-question-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -68,14 +39,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "ask-precedence-done-refusal-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -84,14 +47,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "autonomous-prose-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -100,14 +55,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "autonomous-ask-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -116,14 +63,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "timer-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -132,14 +71,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "prose-question-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -148,14 +79,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "worker-review-request-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -164,14 +87,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "worker-review-done-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -180,14 +95,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "ask-precedence-question-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -196,14 +103,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "ask-precedence-done-refusal-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -212,14 +111,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "autonomous-prose-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -228,14 +119,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "autonomous-ask-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -243,11 +126,7 @@ export const MONITORING_PARTITIONS = {
       "M23"
     ]
   },
-  "ask-idle-closure-claude-codex": {
-    "runners": [
-      "claude",
-      "codex"
-    ],
+  "ask-idle-closure": {
     "modes": [
       "fresh",
       "continuation"
@@ -256,63 +135,7 @@ export const MONITORING_PARTITIONS = {
       "M7"
     ]
   },
-  "ask-ack-claude-codex": {
-    "runners": [
-      "claude",
-      "codex"
-    ],
-    "modes": [
-      "fresh",
-      "continuation"
-    ],
-    "rows": [
-      "M18"
-    ]
-  },
-  "ask-idle-closure-opencode-pi": {
-    "runners": [
-      "opencode",
-      "pi"
-    ],
-    "modes": [
-      "fresh",
-      "continuation"
-    ],
-    "rows": [
-      "M7"
-    ]
-  },
-  "ask-ack-opencode-pi": {
-    "runners": [
-      "opencode",
-      "pi"
-    ],
-    "modes": [
-      "fresh",
-      "continuation"
-    ],
-    "rows": [
-      "M18"
-    ]
-  },
-  "ask-idle-closure-cursor-omp": {
-    "runners": [
-      "cursor",
-      "omp"
-    ],
-    "modes": [
-      "fresh",
-      "continuation"
-    ],
-    "rows": [
-      "M7"
-    ]
-  },
-  "ask-ack-cursor-omp": {
-    "runners": [
-      "cursor",
-      "omp"
-    ],
+  "ask-ack": {
     "modes": [
       "fresh",
       "continuation"
@@ -322,14 +145,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "done-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -338,14 +153,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "done-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "continuation"
     ],
@@ -354,14 +161,6 @@ export const MONITORING_PARTITIONS = {
     ]
   },
   "close": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
     "modes": [
       "fresh"
     ],
@@ -373,9 +172,10 @@ export const MONITORING_PARTITIONS = {
 export type MonitoringPartitionName = keyof typeof MONITORING_PARTITIONS;
 export const monitoringTurnFiles = Object.keys(MONITORING_PARTITIONS).map(name => `monitoring-turn-${name}.test.ts`);
 export function monitoringCells(partitions: readonly MonitoringPartition[]): string[] {
-  return partitions.flatMap(partition => partition.runners.flatMap(runner => partition.modes.flatMap(mode => partition.rows.map(row => `${runner}/${mode}/${row}`))));
+  return partitions.flatMap(partition => RUNNER_IDS.flatMap(runner => partition.modes.flatMap(mode => partition.rows
+    .filter(row => runsOn('monitoring-turn', row, runner)).map(row => `${runner}/${mode}/${row}`))));
 }
 export const expectedMonitoringCells = RUNNER_IDS.flatMap(runner => [
   ...['fresh', 'continuation'].flatMap(mode => ['M1', 'M2', 'M3', 'M4', 'M5', 'M7', 'M18', 'M19', 'M21', 'M23'].map(row => `${runner}/${mode}/${row}`)),
   `${runner}/fresh/M13`, `${runner}/continuation/M14`, `${runner}/fresh/M17`,
-]);
+].filter(cell => runsOn('monitoring-turn', cell.split('/')[2], runner)));
