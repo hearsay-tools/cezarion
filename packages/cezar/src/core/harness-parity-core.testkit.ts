@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentRunSpec, AgentEvent, AgentRunResult, AgentSession, RunnerId, SessionOptions } from './agent-runner.ts';
 import { runnersUnderTest } from './runners-under-test.testkit.ts';
+import { runnersWhere, type RunnerFacts } from './runner-facts.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 import type { UiEvent } from './ui-events.ts';
 
@@ -807,22 +808,13 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'F11', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no native turn-start frame that reaches v2 after the nudge is sent; turn.started is synthetic inside sendAgentMessage and fires at nudge send, before the bound.',
   })),
-  {
-    criterion: 'A9', backend: 'claude', kind: 'capability-absent',
-    reason: 'Claude stream-json asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
-  },
-  {
-    criterion: 'A9', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor print auto-skips native AskQuestion before a human can answer. The executable native-question rejection and the A3/A4 cezar_ask cells cover the available paths.',
-  },
-  {
-    criterion: 'A9', backend: 'pi', kind: 'capability-absent',
-    reason: 'Pi RPC asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
-  },
-  {
-    criterion: 'A9', backend: 'omp', kind: 'capability-absent',
-    reason: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. Asks go through cezar_ask (A3/A4 cover the cezar_ask policy).',
-  },
+  // A9: a native mid-turn ask.requested exists only where the declared native ask is answerable.
+  ...exemptWhere('A9', 'capability-absent', facts => facts.nativeAsk !== 'answerable', backend => reasonFor('A9', backend, {
+    claude: 'Claude stream-json asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
+    cursor: 'Cursor print auto-skips native AskQuestion before a human can answer. The executable native-question rejection and the A3/A4 cezar_ask cells cover the available paths.',
+    pi: 'Pi RPC asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
+    omp: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. Asks go through cezar_ask (A3/A4 cover the cezar_ask policy).',
+  })),
   {
     criterion: 'R15', backend: 'pi', kind: 'scenario-unconstructible',
     reason: 'Pi RPC has no child session or nested child transcript (rpc-lifecycle.ndjson); like S9/R12, post-park child items cannot be constructed on that wire.',
@@ -878,30 +870,23 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
       'parentItemId and no child transcript), so there is no child terminal signal that could ' +
       'end the parent turn.',
   },
-  // S11 (hearsay-tools/cezarion#2397): these wires have no native ask; the `ask` scenario calls
-  // cezar_ask, whose human wait the workflow holds input behind (R6), not the runner.
-  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
-    criterion: 'S11', backend, kind: 'capability-absent' as const,
-    reason: 'this wire has no native ask; cezar_ask is the workflow\'s human wait, so the runner admits non-human input and the run tier holds it (R6)',
-  })),
+  // S11 (hearsay-tools/cezarion#2397): these wires have no answerable native ask; the `ask`
+  // scenario calls cezar_ask, whose human wait the workflow holds input behind (R6), not the runner.
+  ...exemptWhere('S11', 'capability-absent', facts => facts.nativeAsk !== 'answerable', () =>
+    'this wire has no native ask; cezar_ask is the workflow\'s human wait, so the runner admits non-human input and the run tier holds it (R6)'),
   // R4: a malformed question is a native ask's failure. cezar_ask validates its arguments and
-  // answers the agent with invalid_request, so no malformed question reaches the run.
-  ...(['claude', 'pi', 'omp'] as const).map(backend => ({
-    criterion: 'R4', backend, kind: 'scenario-unconstructible' as const,
-    reason: 'this wire has no native ask; a malformed cezar_ask is refused to the agent as invalid_request before any card exists',
-  })),
-  // hearsay-tools/cezarion#1233 U7: cezar_wait stays live on every wire; only the
-  // ScheduleWakeup alias is Claude's.
-  ...(['codex', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
-    criterion: 'U7', backend, kind: 'capability-absent' as const,
-    reason: 'native scheduler tool exists only on the Claude wire',
-  })),
+  // answers the agent with invalid_request, so no malformed question reaches the run. Cursor's
+  // auto-skipped native question still runs the row on its wire.
+  ...exemptWhere('R4', 'scenario-unconstructible', facts => facts.nativeAsk === 'none', () =>
+    'this wire has no native ask; a malformed cezar_ask is refused to the agent as invalid_request before any card exists'),
+  // hearsay-tools/cezarion#1233 U7: cezar_wait stays live on every wire; only a declared native
+  // timer tool (Claude's ScheduleWakeup) is an alias.
+  ...exemptWhere('U7', 'capability-absent', facts => facts.nativeTimerTool === null, () =>
+    'native scheduler tool exists only on the Claude wire'),
   // U7h (hearsay-tools/cezarion#1234): the ask scenario on these wires calls cezar_ask, so its
   // human wait opens through cezar_ask rather than a native ask; the cell asserts that instead.
-  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
-    criterion: 'U7h', backend, kind: 'capability-absent' as const,
-    reason: 'this wire has no native ask; its ask scenario calls cezar_ask',
-  })),
+  ...exemptWhere('U7h', 'capability-absent', facts => facts.nativeAsk !== 'answerable', () =>
+    'this wire has no native ask; its ask scenario calls cezar_ask'),
   // U12/U13: an agent-input acknowledgement the provider can delay or reject.
   {
     criterion: 'U12', backend: 'claude', kind: 'capability-absent',
@@ -957,6 +942,22 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'D3', backend, kind: 'capability-absent' as const, reason,
   })),
 ];
+
+/**
+ * One exemption for each runner whose declared facts match (hearsay-tools/cezarion#2991), so a row
+ * and the shared code that reads the same fact cannot disagree on which runners it covers.
+ */
+function exemptWhere(criterion: string, kind: ExemptionKind, matches: (facts: RunnerFacts) => boolean,
+  reason: (backend: RunnerId) => string): ParityExemption[] {
+  return runnersWhere(matches).map(backend => ({ criterion, backend, kind, reason: reason(backend) }));
+}
+
+/** A runner-specific reason; a runner the facts select without one fails the table at load. */
+function reasonFor(criterion: string, backend: RunnerId, reasons: Partial<Record<RunnerId, string>>): string {
+  const reason = reasons[backend];
+  if (reason === undefined) throw new Error(`${criterion} exempts ${backend} by its declared facts, but gives no reason`);
+  return reason;
+}
 
 export function exemptionFor(criterion: string, backend: RunnerId): ParityExemption | undefined {
   return PARITY_EXEMPTIONS.find((e) => e.criterion === criterion && e.backend === backend);
