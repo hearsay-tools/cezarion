@@ -88,7 +88,7 @@ function staticKey(key: Node, computed: boolean): string | undefined {
 }
 
 /** What one node contributes: whether it touches a fact source, and the fact key it reads. */
-function inspect(node: Node, parent: Node | undefined, keys: Set<string>): { source: boolean; key?: string } {
+function inspect(node: Node, parent: Node | undefined, keys: Set<string>): { source: boolean; key?: string | undefined } {
   if (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') {
     const key = staticKey(node.property, node.computed);
     return { source: key !== undefined && SOURCE_KEYS.has(key), key: key !== undefined && keys.has(key) ? key : undefined };
