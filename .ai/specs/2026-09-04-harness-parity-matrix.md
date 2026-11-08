@@ -167,6 +167,27 @@ Driven by `driveSeam()`: the real runner class, a real child process, the real m
 | S9 | `subagent` | the parent turn ends exactly once, after the child's content — a child terminal signal never ends the parent | 4 |
 | S10 | `baseline` | `session.pid` is a number while the session is open | 7 |
 
+#### The seam contract (hearsay-tools/cezarion#2991)
+
+Rows S36–S42 run from `core/seam-contract.testkit.ts`, in each runner's own
+`harness-<runner>-contract-parity.test.ts`. They hold every runner to what it declares
+(`inputDelivery`, `systemPromptOnResume`), so a shared row above the seam can run on fewer
+runners. Each row reads the declared fact, never a runner id. A fix to runner lifecycle, input
+delivery, holds or resume inside a runner class extends these rows.
+
+| Row | Scenario | Asserts |
+|---|---|---|
+| S36 | `hold-gated` | agent input is acknowledged at the declared point: `write` while the native process is stopped, `response` only once it answers, `model-work` only after the turn it opens has started; consumption is reported after the acknowledgement and on a later native frame, never for an `unobservable` runner. S12 holds the steer and boundary admission |
+| S37 | `hold` | a follow-up turn whose native start is late emits `turn.started` before its content, its `turn.completed` and its `turn-end` |
+| S38 | `hold-gated` ×4 | `holdsHumanInput()` reads true as soon as `sendMessage` returns, and releases after the `turn.started` of the turn that carries the follow-up and by its end; mid-turn, late-acknowledged (H5's ordering), at an idle boundary and during startup, each with a late native turn start |
+| S39 | `hold-gated` | with `autoEndAfterFirstTurn`, a follow-up the turn did not read is held at that turn's `turn-end`, and runs in a turn of its own before the session closes |
+| S40 | `steer-tool` | a human message sent before the turn's last model call is read in that turn, or held for the next, as `humanInputAtTurnEnd` declares |
+| S41 | `steer-late` | the same for a message sent after the last model call |
+| S42 | `baseline` ×2 | on a fresh and a resumed session, `spec.systemPrompt` travels outside the conversation when the runner declares `resent`, and is prepended to the opening turn when it declares `in-thread` |
+
+A boundary runner has no read point inside a running turn, so S40 and S41 exempt it
+(`scenario-unconstructible`); `runner-facts.test.ts` ties those exemptions to the declared mode.
+
 S8 is group 5 and group 6 in one row on purpose. hearsay-tools/cezarion#2's real damage was not split text as such — it was
 that a cezar marker assembled across deltas stopped matching its anchored regex (`CEZ:ASK` there,
 `CEZ:MONITORING` here; the two are the same integrity property, and `CEZ:MONITORING` is the one R5
