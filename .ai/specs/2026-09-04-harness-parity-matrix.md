@@ -204,7 +204,9 @@ the derived runner set, `SHARED_RUNNERS` in `core/parity-classes.testkit.ts`: th
 that shows every declared value of each turn-path fact (`inputDelivery.mode`, `.consumption`,
 `.acknowledgement`, `.humanInputAtTurnEnd`, `systemPromptOnResume`), ties broken by
 `RUNNER_IDS` order. A row that depends on runner code stays on every runner: R1 (the smoke row),
-R2 (a provider error), R3 (a native ask on codex and opencode) and every row with an exemption.
+R2 (a provider error), R3 (a native ask on codex and opencode), every row with an exemption, and every
+row whose scenario runs runner code (`provider-error`, a native ask, native subagents), which
+`core/parity-classes.test.ts` checks.
 The classification table in that file names each family's class and these rows; its guards are
 listed in `AGENT_PROTOCOL.md` §7.
 

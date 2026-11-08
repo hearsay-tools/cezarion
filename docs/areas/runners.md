@@ -56,7 +56,9 @@ Three guards hold the rule:
    `core/parity-classes.test.ts` fails an entry with no reason, or with a row
    that is not registered in that family or does not run on every runner.
 3. `core/parity-classes.test.ts` fails when a parity test file belongs to no
-   classified family, or a family has no file.
+   classified family, or a family has no file. It also fails when a registered
+   row whose scenario runs runner code (`provider-error`, a native ask scenario,
+   native subagents) does not run on every runner.
 
 A per-runner parity file loads only its own adapter. It picks its runner with
 `useRunners(onlyRunner(...))`. The testkits it reaches import a kit's `-core` file, never
