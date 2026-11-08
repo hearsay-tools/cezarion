@@ -1,4 +1,4 @@
-import { productName } from '@/lib/product-name'
+import { productCommand, productName } from '@/lib/product-name'
 import type { HomeRecoveryFile } from '@open-mercato/cezar-api-client/contract/home-recovery'
 import { useAcceptHomeRecovery, useHomeRecovery, useImportHomeRecovery, useRestoreHomeRecovery } from '@/api/home-recovery'
 import { Button } from '@/components/ui/button'
@@ -43,8 +43,8 @@ function HomeRecoveryRow({ file, editable }: { file: HomeRecoveryFile; editable:
         ? (file.canImport ? 'Only the host operator can import or ignore this file.' : 'Only the host operator can ignore this file.')
         : 'Only the host operator can restore or accept this file.'}
         {file.file.startsWith('remote-settings/') && (legacy
-          ? <> {file.canImport && <><code>cez backup import {file.file}</code> or </>}<code>cez backup ignore {file.file}</code></>
-          : <> <code>cez backup restore {file.file}</code></>)}
+          ? <> {file.canImport && <><code>{productCommand()} backup import {file.file}</code> or </>}<code>{productCommand()} backup ignore {file.file}</code></>
+          : <> <code>{productCommand()} backup restore {file.file}</code></>)}
       </p>}
       {editable && error && <p role="alert" className="basis-full text-danger">{error.message}</p>}
     </div>

@@ -2,11 +2,13 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ rebrand: false, displayName: '' }))
+const state = vi.hoisted(() => ({ rebrand: false, displayName: '', command: '', npmAlias: '', npmPackage: '' }))
 vi.mock('./product-name', async importOriginal => {
   const actual = await importOriginal<typeof import('./product-name')>()
-  return { productName: (legacy: 'cezar' | 'Cezar' | 'Cezarion') => actual.productName(legacy, state) }
+  return { ...actual, productCommand: () => actual.productCommand(state), productName: (legacy: 'cezar' | 'Cezar' | 'Cezarion') => actual.productName(legacy, state) }
 })
+
+vi.mock('@/api/queries', () => ({ useHealth: () => ({ data: { capabilities: { remoteSettingsAdmin: true } } }) }))
 
 import { readProductIdentity } from '../../product-identity'
 import { DesktopControls } from '@/components/desktop-controls'
@@ -24,6 +26,13 @@ describe.each([false, true])('cockpit product display (switch %s)', rebrand => {
     expect(desktop).toContain(`${rebrand ? state.displayName : 'Cezarion'} · Local`)
     expect(access).toContain(`Allow ${rebrand ? state.displayName : 'cezar'} workers`)
     expect(access).toContain(`start ${rebrand ? state.displayName : 'Cezar'} workers`)
+  })
+
+  it('renders both shared remote-settings hints from the command identity', async () => {
+    Object.assign(state, readProductIdentity(rebrand))
+    const { RemoteSettingsNotice, REMOTE_SETTINGS_ENABLE_COMMAND } = await import('@/routes/settings/remote-settings-notice')
+    expect(renderToStaticMarkup(<code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>)).toBe(`<code>${state.command} remote-settings enable</code>`)
+    expect(renderToStaticMarkup(<RemoteSettingsNotice risk="Commands run here" />)).toContain(`<code>${state.command} remote-settings disable</code>`)
   })
 
   it('changes only the product suffix in document titles', () => {

@@ -1,4 +1,4 @@
-import { productName } from '@/lib/product-name'
+import { productCommand, productName } from '@/lib/product-name'
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { RefreshCwIcon, TriangleAlertIcon, XIcon } from '@/components/design-icons'
@@ -134,7 +134,7 @@ export function TeamSourcesPanel() {
       {data && !data.editable ? (
         <Notice slot="skill-sources-read-only">
           Sources are read-only on this remote cockpit. To edit them here, run{' '}
-          <span className="font-mono">cez remote-settings enable</span> on the machine running {productName('cezar')}.
+          <span className="font-mono">{productCommand()} remote-settings enable</span> on the machine running {productName('cezar')}.
         </Notice>
       ) : null}
 

@@ -1,11 +1,12 @@
 import { cronOf } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 import type { CreateAutomationInput } from '@open-mercato/cezar-api-client'
 
+import { productCommand } from './product-name'
 import { toCreateBody, type AutomationDraft } from '@/routes/automations/editor-draft'
 
 /**
  * The editor's "Copy as CLI" line (#774, port of upstream #985): `cez automation add …` when every
- * key of the body Save would send has a flag, `cez automation create --json '…'` otherwise. Both
+ * key of the body Save would send has a flag, `${productCommand()} automation create --json '…'` otherwise. Both
  * are built from `toCreateBody`, so the line cannot disagree with Save.
  *
  * Every value is POSIX single-quoted: a prompt is free text, and `!`, `$(…)`, backticks and
@@ -66,7 +67,7 @@ function flag(name: string, value: string): string {
 }
 
 function flagsOf(body: CreateAutomationInput): string {
-  const parts = ['cez automation add', flag('name', body.name)]
+  const parts = [`${productCommand()} automation add`, flag('name', body.name)]
   if (body.schedule?.type === 'once') {
     parts.push(flag('at', body.schedule.at!), flag('tz', body.schedule.timeZone!))
     if (body.schedule.latestStartMinutes !== undefined) parts.push(flag('latest-start', durationFlag(body.schedule.latestStartMinutes)))
@@ -112,7 +113,7 @@ export interface CliAddress {
  */
 export function cliOf(draft: AutomationDraft, address?: CliAddress): string {
   const body = toCreateBody(draft)
-  const command = bodyFlagExpressible(body) ? flagsOf(body) : `cez automation create --json ${shellQuote(JSON.stringify(body))}`
+  const command = bodyFlagExpressible(body) ? flagsOf(body) : `${productCommand()} automation create --json ${shellQuote(JSON.stringify(body))}`
   return address
     ? `CEZ_COCKPIT_URL=${shellQuote(address.origin)} CEZ_PROJECT_ID=${shellQuote(address.projectId)} HSQ_COCKPIT_URL=${shellQuote(address.origin)} HSQ_PROJECT_ID=${shellQuote(address.projectId)} ${command}`
     : command
