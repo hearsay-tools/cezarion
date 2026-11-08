@@ -10,7 +10,7 @@ import { createQueryClient } from '@/api/query-client'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
-import type { GithubItem, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
+import type { GithubItem, GithubPrMergeState, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
 
@@ -54,7 +54,7 @@ const CONFLICTING_STATE: typeof MERGE_STATE = {
   mergeState: { ...MERGE_STATE.mergeState, mergeable: 'conflicting', eligibility: 'blocked', canMerge: false },
 }
 
-let mergeState: typeof MERGE_STATE = MERGE_STATE
+let mergeState: GithubPrMergeStateResponse = MERGE_STATE
 
 beforeEach(() => {
   mergeState = MERGE_STATE
@@ -142,6 +142,88 @@ describe('GithubItemDetail outside the GitHub view', () => {
     renderDetail(PR_42, onRunAgent)
     fireEvent.click(await screen.findByRole('button', { name: 'Run agent on this PR' }))
     expect(onRunAgent).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('merge requirements in the detail', () => {
+  it.each([
+    ['merged', { state: 'merged', eligibility: 'terminal', canMerge: false }, 'Merged'],
+    ['closed', { state: 'closed', eligibility: 'terminal', canMerge: false }, 'Closed'],
+    ['draft', { isDraft: true, canMerge: false }, 'Draft'],
+    ['conflicting', { mergeable: 'conflicting', canMerge: false }, 'Conflicts must be resolved'],
+    ['blocked', { eligibility: 'blocked', canMerge: false }, 'Merge blocked'],
+  ] satisfies [string, Partial<GithubPrMergeState>, string][])(
+    'shows the %s heading', async (_name, patch, title) => {
+      mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, ...patch } }
+      renderDetail(PR_42)
+      await screen.findByRole('heading', { name: title })
+      const method = screen.queryByRole('combobox', { name: 'Merge method' })
+      expect(Boolean(method)).toBe(patch.state === undefined)
+    },
+  )
+
+  it.each([
+    ['mergeable', 'none', 'passing', null],
+    ['conflicting', 'present', 'failing', 'true'],
+    ['unknown', 'unknown', 'unknown', null],
+  ] as const)('shows %s conflict status', async (mergeable, label, icon, attribute) => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, mergeable } }
+    renderDetail(PR_42)
+    const row = (await screen.findByText(`Conflicts: ${label}`)).closest('li')!
+    expect(row.querySelector(`[data-slot="gh-merge-status-${icon}"]`)).not.toBeNull()
+    expect(document.querySelector('[data-slot="gh-merge-box"]')?.getAttribute('data-conflicting')).toBe(attribute)
+  })
+
+  it('shows unknown reviews, requirement warning and blockers without claiming readiness', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: {
+      ...MERGE_STATE.mergeState, reviewDecision: 'unknown', eligibility: 'unknown', canMerge: false,
+      blockers: [{ code: 'reviews', message: 'Review requirements could not be read.' }],
+    } }
+    renderDetail(PR_42)
+    await screen.findByRole('heading', { name: 'Merge blocked · Requirements unknown' })
+    expect(screen.getByText('Reviews: unknown').closest('li')?.querySelector('[data-slot="gh-merge-status-unknown"]')).not.toBeNull()
+    expect(screen.getByText(/Passing checks do not establish merge readiness/)).toBeTruthy()
+    expect(screen.getByText('Review requirements could not be read.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Squash and merge' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('shows an empty check list and the abbreviated branch head', async () => {
+    renderDetail(PR_42, vi.fn())
+    await screen.findByText('No checks configured')
+    expect(screen.getByText('feat/share (0123456) → main')).toBeTruthy()
+    expect(screen.queryByText(/Passing checks do not establish merge readiness/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Run agent on this PR' })).toBeNull()
+  })
+
+  it('keeps requiredness and safe details links on their own check rows', async () => {
+    mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, checks: [
+      { name: 'unit', state: 'passing', required: true, url: 'https://checks.example/unit' },
+      { name: 'optional', state: 'failing', required: false, url: 'javascript:alert(1)' },
+      { name: 'queued', state: 'pending', required: null },
+      { name: 'unreported', state: 'unknown', required: false, url: '' },
+    ] } }
+    renderDetail(PR_42)
+    const unit = (await screen.findByText('unit · passing · required')).closest('li')!
+    const link = within(unit).getByRole('link', { name: 'details' })
+    expect(link.getAttribute('href')).toBe('https://checks.example/unit')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    for (const [label, status] of [
+      ['optional · failing', 'failing'], ['queued · pending · requiredness unknown', 'pending'],
+      ['unreported · unknown', 'unknown'],
+    ]) {
+      const row = screen.getByText(label!).closest('li')!
+      expect(row.querySelector(`[data-slot="gh-merge-status-${status}"]`)).not.toBeNull()
+      expect(within(row).queryByRole('link')).toBeNull()
+    }
+  })
+
+  it('shows the unavailable reason instead of merge controls', async () => {
+    mergeState = { available: false, reason: 'GitHub is not installed.' }
+    renderDetail(PR_42)
+    await screen.findByText('Merge status unavailable')
+    expect(screen.getByText('GitHub is not installed.')).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: 'Merge method' })).toBeNull()
   })
 })
 
