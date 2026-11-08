@@ -69,7 +69,7 @@ it('owns immutable flight IDs, bundled IDs and delivery policy without freezing 
   expect(bundled).toEqual(['one', 'external']);
   group.clearBundledInputs();
   expect(group.bundledInputIds).toBeUndefined();
-  const policy = { mode: 'steer' as const, consumption: 'observable' as const, via: 'test' };
+  const policy = { mode: 'steer' as const, consumption: 'observable' as const, acknowledgement: 'response' as const, humanInputAtTurnEnd: 'never-held' as const, via: 'test' };
   group.declareDelivery(policy);
   expect(group.inputDelivery).toEqual(policy);
   expect(Object.isFrozen(policy)).toBe(false);

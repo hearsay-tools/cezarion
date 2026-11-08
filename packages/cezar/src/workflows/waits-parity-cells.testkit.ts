@@ -26,7 +26,7 @@ import { fireCapturedTimer, timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import { handoffPath } from '../handoff.ts';
-import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
+import { nativeTimerDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
@@ -1043,11 +1043,11 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
       if (exemptionFor('U7', runner)) {
         // capability-absent: the same tool name on this wire is not a scheduler.
         expect(exemptionFor('U7', runner)?.reason).toBe('native scheduler tool exists only on the Claude wire');
-        expect(claudeScheduleWakeupDelay(scheduler, runner)).toBeUndefined();
+        expect(nativeTimerDelay(scheduler, runner)).toBeUndefined();
         expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait']);
         return;
       }
-      expect(claudeScheduleWakeupDelay(scheduler, runner)).toBe(120);
+      expect(nativeTimerDelay(scheduler, runner)).toBe(120);
       const turns = turnEnds(run.id);
       expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:schedule-wakeup:120' }])).toBe(true);
       await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'schedule-wakeup')));

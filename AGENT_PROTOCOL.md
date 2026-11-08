@@ -77,13 +77,60 @@ interface AgentRunner {
   interrupt(): Promise<void>;
   readonly systemPromptOnResume: 'resent' | 'in-thread'; // required (hearsay-tools/cezarion#790)
   readonly inputDelivery?: InputDelivery; // absent = boundary (hearsay-tools/cezarion#505)
+  readonly facts?: RunnerFacts;           // this runner's RUNNER_FACTS row (hearsay-tools/cezarion#2991)
 }
-interface InputDelivery {
-  readonly mode: 'steer' | 'boundary';                 // mid-turn admission, or refused while busy
-  readonly consumption: 'observable' | 'unobservable'; // does the wire show the model read it?
-  readonly via: string;                                // the native mechanism
+type InputDelivery = {
+  readonly consumption: 'observable' | 'unobservable';        // does the wire show the model read it?
+  readonly acknowledgement: 'write' | 'response' | 'model-work'; // what resolves sendAgentMessage
+  readonly via: string;                                        // the native mechanism
+} & (
+  | { readonly mode: 'steer'; readonly humanInputAtTurnEnd: 'never-held' | 'held-when-late' | 'always-held' } // admitted mid-turn
+  | { readonly mode: 'boundary'; readonly humanInputAtTurnEnd: 'always-held' }  // refused while busy
+);
+interface RunnerFacts {                  // core/runner-facts.ts, one row per runner id
+  readonly nativeAsk: 'answerable' | 'auto-skipped' | 'none';
+  readonly nativeSubagents: 'reported' | 'unreported' | 'turn-held';
+  readonly nativeTimerTool: string | null;
+  readonly costReport: 'cumulative' | 'per-turn';
 }
 ```
+
+- **Declared facts, not runner ids** (hearsay-tools/cezarion#2991). Shared code outside
+  `packages/cezar/src/core/` reads what a runner declares; it never compares runner ids to
+  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in three places: `systemPromptOnResume`,
+  `inputDelivery`, and its row of `RUNNER_FACTS` (`core/runner-facts.ts`). The table is keyed
+  by runner id because shared code often holds only a `RunnerId` before it builds the runner.
+  Each runner class exposes its row as `facts`, and `core/runner-facts.test.ts` checks every
+  runner `createRunner` builds against the table. Parity exemptions that follow a fact select
+  their runners from the same table (`runnersWhere`), so a row and the code cannot disagree.
+  - `inputDelivery.acknowledgement`: `write` when the local pipe write resolves
+    `sendAgentMessage` (Claude stdin), so the provider can neither delay nor reject it;
+    `response` when a native response does (the Codex RPC result, the OpenCode HTTP
+    acknowledgement, the Pi and OMP prompt response id); `model-work` when the first
+    model-work frame of the turn the input opens does (Cursor print), so no turn ends before
+    its input is acknowledged.
+  - `inputDelivery.humanInputAtTurnEnd`: whether a human `sendMessage` written while a turn
+    runs can still be held, unread, when that turn ends; turn-end code then keeps the session
+    for the turn it opens. `never-held`: always read inside the running turn (OMP, whose turn
+    ends only at `session_settled`, and that needs an empty steer queue). `held-when-late`: read
+    in the running turn unless it arrives after the turn's last model call, then held into the
+    next turn (Claude runs such a stdin line as its next queued turn; Codex starts a turn for a
+    steer the turn did not echo or refused at its end; Pi reads a late steer as its next
+    prompt). `always-held`: queued until the running turn ends, then it opens the next turn
+    (OpenCode posts a human prompt only after the busy turn goes idle; Cursor print). A
+    boundary runner has no mid-turn input channel, so the type fixes it to `always-held`. A
+    message written after the harness already ended the turn natively is not mid-turn input.
+  - `nativeAsk`: `answerable` when the wire reports the harness's own question and Cezar
+    routes the answer back (Codex, OpenCode); `auto-skipped` when the harness answers it
+    itself before a human can (Cursor print); `none` when the agent asks only through
+    `cezar_ask`.
+  - `nativeSubagents`: `reported` when the wire reports a backgrounded child's start and end,
+    so Cezar waits on it; `unreported` when it sends no child signal; `turn-held` when the
+    parent turn stays open until every child returns.
+  - `nativeTimerTool`: the native tool that schedules the session's own wake-up (Claude's
+    `ScheduleWakeup`), the equivalent of a `cezar_wait` timer; null when none.
+  - `costReport`: `cumulative` when each cost report is the session total (Claude
+    `total_cost_usd`), which usage accounting turns into deltas; `per-turn` otherwise.
 
 - `run()` is a one-shot convenience; `startSession()` is the real contract.
 - `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
@@ -2708,8 +2755,12 @@ To be first-class:
    skill-prefix dedupe policy — in-thread runners still re-prepend the whole
    `spec.systemPrompt` (extra prompt + handoff) on every resumed opening turn. Required
    — a new runner fails to compile until it decides. Declare
-   `inputDelivery` (§1) from a live probe of mid-turn input, and pass the §7 I1/I2
-   rows or declare their exemption.
+   `inputDelivery` (§1) from a live probe of mid-turn input, including its
+   `acknowledgement` and `humanInputAtTurnEnd`, and pass the §7 I1/I2
+   rows or declare their exemption. Add the runner's row to `RUNNER_FACTS`
+   (`core/runner-facts.ts`, §1) and expose it as `facts`; the table's type fails to
+   compile until the row exists. Shared code reads these facts, so a new runner never
+   needs a runner-id branch outside `packages/cezar/src/core/`.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in
    `ui-events.ts` **and its mirror** `packages/api-client/src/protocol/ui-events.ts` (the

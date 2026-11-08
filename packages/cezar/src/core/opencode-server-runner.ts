@@ -9,19 +9,18 @@ import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
-import type {
-  AgentEvent,
-  AgentRunResult,
-  AgentRunSpec,
-  AgentRunner,
-  AgentToolCallRecord,
-  ContentBlock,
-  AgentRunSpecSupport,
-  InputDelivery,
+import {
+  type AgentEvent,
+  type AgentRunResult,
+  type AgentRunSpec,
+  type AgentRunner,
+  type AgentToolCallRecord,
+  type ContentBlock,
+  type AgentRunSpecSupport,
+  type InputDelivery, type AgentSession, type SessionOptions, isSignalTerminationExit, prependSystemPrompt, trackChildExit,
 } from './agent-runner.ts';
+import { RUNNER_FACTS } from './runner-facts.ts';
 import { InputSubmissions } from './input-submissions.ts';
-import type { AgentSession, SessionOptions } from './agent-runner.ts';
-import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { opencodeToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
@@ -166,8 +165,9 @@ export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'in-thread' as const;
+  readonly facts = RUNNER_FACTS.opencode;
   readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable',
+    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'always-held',
     via: 'prompt_async while busy; assistant message.updated parentID at consumption',
   };
 

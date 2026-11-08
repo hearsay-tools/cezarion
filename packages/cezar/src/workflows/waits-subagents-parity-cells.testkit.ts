@@ -7,6 +7,7 @@ import type { SubagentWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/ceza
 import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
+import { runnersWhere } from '../core/runner-facts.ts';
 import { reportsNativeSubagents } from './run/subagent-waits.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
 import { stateOf } from './run-states.ts';
@@ -40,10 +41,11 @@ const SCENARIO: Partial<Record<RunnerId, string>> = { claude: 'mock:subagent-bac
 const NO_SIGNAL = (runner: string) => `${runner}'s native wire reports no start or end of a background child to Cezar, so its sessions keep the monitoring timer (owner decision 3 of hearsay-tools/cezarion#2431).`;
 const NEVER_SETTLES = (runner: string) => `${runner}'s parent turn never ends while its subagents run: the wire holds the turn open until every child returns, so no turn end parks on running children.`;
 
-/** Rows a runner's wire cannot carry. A runner with no scenario is exempt from every row. */
+/** Rows a runner's wire cannot carry. A runner with no scenario is exempt from every row; which
+ *  runners those are comes from their declared `nativeSubagents` (hearsay-tools/cezarion#2991). */
 export const SUBAGENT_EXEMPTIONS: ReadonlyArray<{ criterion: SubagentCriterion; runner: RunnerId; reason: string }> = [
-  ...(['pi', 'cursor'] as const).flatMap(runner => SUBAGENT_CRITERIA.map(({ id }) => ({ criterion: id, runner, reason: NO_SIGNAL(runner) }))),
-  ...(['omp', 'opencode'] as const).flatMap(runner => SUBAGENT_CRITERIA.map(({ id }) => ({ criterion: id, runner, reason: NEVER_SETTLES(runner) }))),
+  ...runnersWhere(facts => facts.nativeSubagents === 'unreported').flatMap(runner => SUBAGENT_CRITERIA.map(({ id }) => ({ criterion: id, runner, reason: NO_SIGNAL(runner) }))),
+  ...runnersWhere(facts => facts.nativeSubagents === 'turn-held').flatMap(runner => SUBAGENT_CRITERIA.map(({ id }) => ({ criterion: id, runner, reason: NEVER_SETTLES(runner) }))),
   { criterion: 'U31', runner: 'codex', reason: 'Codex app-server never starts a parent turn by itself when a spawned child ends (live codex-cli 0.164.0 wire, watched for 2.5 minutes): the child\'s end reaches the parent only as a subAgentActivity item on the already-completed turn, so Cezar\'s grace wake is the only resume.' },
   ...(['U33', 'U34'] as const).map(criterion => ({ criterion, runner: 'codex' as const,
     reason: 'Codex app-server reports a child\'s end as subAgentActivity kind completed only; no failed, interrupted or cancelled child frame was observed on the live wire, so a child that fails is seen at the 30-minute deadline (U36).' })),

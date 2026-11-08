@@ -119,17 +119,15 @@ function continuationEffort(
 }
 
 /** The Continue's runner, and whether it resumes into a thread that already holds the skill
- *  playbook. A resumed Cursor session keeps the transport it was opened with: an untagged one
- *  predates print, so it is ACP, which the Cursor runner refuses (hearsay-tools/cezarion#1267). */
+ *  playbook. A resumed session keeps the transport its owning step recorded. The Cursor runner
+ *  refuses a resume not recorded on print, untagged ones included (hearsay-tools/cezarion#1267). */
 function continuationRunner(
   backend: RunnerId,
   sessionId: string | undefined,
   owningStep: RunRecord['steps'][number] | undefined,
   factory: RunnerFactory,
 ): { runner: AgentRunner; skipSkillOnResume: boolean } {
-  const sessionTransport = sessionId !== undefined && backend === 'cursor'
-    ? owningStep?.sessionTransport ?? 'cursor-acp'
-    : undefined;
+  const sessionTransport = sessionId !== undefined ? owningStep?.sessionTransport : undefined;
   const runner = factory(backend, sessionTransport ? { sessionTransport } : {});
   return { runner, skipSkillOnResume: sessionId !== undefined && runner.systemPromptOnResume === 'in-thread' };
 }
@@ -657,6 +655,7 @@ function ciWorkflowResumeStepIndex(run: RunRecord): number {
  */
 function resumableSessionId(store: Pick<RunStore, 'getRun' | 'readEvents'>, runId: string, sessionStep: StepState | undefined): string | undefined {
   if (!sessionStep?.sessionId) return undefined;
+  // A later slice of hearsay-tools/cezarion#2991 replaces this runner-id check with a declared fact.
   if ((sessionStep.backend ?? store.getRun(runId)?.runner) === 'cursor') {
     const run = store.getRun(runId);
     const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;

@@ -123,12 +123,13 @@ describe('Continue after a Cursor bootstrap crash', () => {
     await settled(id);
   });
 
-  it('hands an untagged confirmed session id to the runner as ACP, which refuses it (hearsay-tools/cezarion#1267)', async () => {
+  // The real runner refuses this untagged resume: cursor-acp-continue.test.ts (hearsay-tools/cezarion#1267).
+  it('hands an untagged confirmed session id to the runner with no transport', async () => {
     const id = failedCursorRun(CURSOR_SESSION_ID, true);
     const spec = await continueSpec(id);
     expect(spec.resume).toBe(true);
     expect(spec.sessionId).toBe(CURSOR_SESSION_ID);
-    expect(captured.options[0]).toEqual({ sessionTransport: 'cursor-acp' });
+    expect(captured.options[0]).toEqual({});
     await settled(id);
   });
 
@@ -140,6 +141,9 @@ describe('Continue after a Cursor bootstrap crash', () => {
     expect(spec.resume).toBe(true);
     expect(spec.sessionId).toBe(CURSOR_SESSION_ID);
     expect(captured.options[0]).toEqual({ sessionTransport: 'cursor-print' });
+    // The Continue step records the owning step's transport, so a crash before its own session
+    // event still resumes through print.
+    expect(store.getRun(id)?.steps.at(-1)).toMatchObject({ name: 'Continue', sessionTransport: 'cursor-print' });
     await settled(id);
   });
 
