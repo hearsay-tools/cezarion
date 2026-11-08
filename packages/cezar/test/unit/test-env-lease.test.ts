@@ -45,12 +45,11 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     let mutator: number | undefined;
     try {
       const deadline = Date.now() + 10_000;
-      while (!existsSync(join(root, 'mutator.pid'))) {
+      while ((mutator = readPid(join(root, 'mutator.pid'))) === undefined) {
         assert.equal(supervisor.exitCode, null, `supervisor exited before mutator started: ${stderr}`);
         assert.ok(Date.now() < deadline, `mutator must start: ${stderr}`);
         await delay(20);
       }
-      mutator = requirePid(join(root, 'mutator.pid'));
       supervisor.kill(signal);
       if (signal === 'SIGKILL') process.kill(requirePid(join(root, 'shell.pid')), 'SIGKILL');
       await closed;

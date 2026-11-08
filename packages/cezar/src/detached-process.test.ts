@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { readPid, requirePid } from './pid-file.testkit.ts';
+
 import {
   groupExists, groupRunning, leaderRunning, processStartToken, startAndForget, startOwnedGroup, stopGroup, watchGroup,
   type GroupLeader,
@@ -63,8 +65,8 @@ function alive(pid: number): boolean {
 /** The pid a fixture script wrote to `name`, once it is there. */
 async function pidFrom(name: string): Promise<number> {
   const file = join(dir, name);
-  await until(() => existsSync(file) && readFileSync(file, 'utf8').endsWith('\n'), `${name} to be written`);
-  return Number(readFileSync(file, 'utf8').trim());
+  await until(() => readPid(file) !== undefined, `${name} to be written`);
+  return requirePid(file);
 }
 
 /** A Node script as `-e` code: `out` names a file in the test directory. */
@@ -102,10 +104,11 @@ describe.runIf(posix)('startOwnedGroup', () => {
     const readStart = (pid: number): undefined => {
       leaderPid = pid;
       const file = join(dir, 'member.pid');
-      // bound: hang guard only; the leader writes the file as its first statement.
+      // bound: hang guard only; the member records its pid once its signal handler is installed.
       const deadline = performance.now() + 20_000;
       const sleeper = new Int32Array(new SharedArrayBuffer(4));
-      while (!existsSync(file) && performance.now() < deadline) Atomics.wait(sleeper, 0, 0, 20);
+      // File creation can precede the write; wait for the pid before the group is killed.
+      while (readPid(file) === undefined && performance.now() < deadline) Atomics.wait(sleeper, 0, 0, 20);
       return undefined;
     };
     await expect(startOwnedGroup(process.execPath, script(STUBBORN_MEMBER + IDLE), { stdio: 'ignore', readStart, requireStart: true }))
