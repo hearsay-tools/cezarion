@@ -6,6 +6,55 @@ const path = require('node:path');
 const yaml = require('yaml');
 const workflow = () => yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
 
+async function runAdmissionStep(admission, github, group, { write = async () => {}, onFailure = () => {} } = {}) {
+  const step = workflow().jobs['queue-admission'].steps.find(s => s.with?.script);
+  const errors = [], failures = [], summary = [];
+  const core = { error: message => errors.push(message), setFailed: message => { failures.push(message); onFailure(message); },
+    summary: { addHeading() { return this; }, addRaw(text) { summary.push(text); return this; }, write } };
+  const requireStub = name => name.endsWith('/failure-diagnostics.cjs') ? require('./failure-diagnostics.cjs') : admission;
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  await new AsyncFunction('require', 'github', 'context', 'core', 'process', step.with.script)(
+    requireStub, github, { repo: { owner: 'o', repo: 'r' }, payload: { merge_group: group } }, core, { env: {} });
+  return { errors, failures, summary };
+}
+test('queue admission logs the refusal in the step and summary and still fails closed', async () => {
+  const { fixture, SHA, BASE, HEAD } = require('./merge-queue.testkit.cjs');
+  const h = fixture();
+  h.s.entry.headCommit.oid = HEAD;
+  h.s.entry.pullRequest.number = 8;
+  const github = { request: async (route, args) => ({ ...await h.github.request(route, args), status: 200 }) };
+  const { errors, failures, summary } = await runAdmissionStep(require('./merge-queue-admission.cjs'), github, h.s.group);
+  assert.equal(failures.length, 1);
+  assert.match(errors.join('\n'), /Error: Queue entry does not match group/);
+  assert.match(summary.join('\n'), /Error: Queue entry does not match group/);
+  const evidence = JSON.parse(errors[0].split('Evidence: ')[1]);
+  assert.deepEqual(evidence.group, { head: SHA, base: BASE });
+  assert.deepEqual(evidence.expectedPullNumbers, [7]);
+  assert.deepEqual(evidence.observedEntries.map(e => e.pullNumber), [8]);
+  assert.equal(evidence.observedEntries[0].head, HEAD);
+  assert.equal(evidence.check, 'queue membership');
+  assert.deepEqual(evidence.api, { route: 'POST /graphql', status: 200 });
+  assert.ok(summary.join('\n').includes(JSON.stringify(evidence)));
+});
+
+test('a trusted base from before diagnostics still logs its refusal safely', async () => {
+  const admission = { mergeQueueAdmission: async () => { throw new Error('Native CI changed\nAuthorization: Bearer private-value'); } };
+  const { errors, failures, summary } = await runAdmissionStep(admission, {}, {});
+  assert.equal(failures.length, 1);
+  assert.match(errors.join('\n'), /Native CI changed/);
+  assert.match(summary.join('\n'), /Native CI changed/);
+  assert.doesNotMatch([...errors, ...summary].join('\n'), /private-value/);
+});
+
+test('a failed summary write retains the admission recovery message', async () => {
+  const admission = { mergeQueueAdmission: async () => { throw new Error('Native CI changed'); } };
+  let failure;
+  await assert.rejects(runAdmissionStep(admission, {}, {}, {
+    write: async () => { throw new Error('Summary unavailable'); }, onFailure: message => { failure = message; },
+  }), /Summary unavailable/);
+  assert.match(failure, /Inspect the queue and retry; do not bypass/);
+});
+
 test('combined queue revisions request the required gate before reaching main', () => {
   assert.deepEqual(workflow().on.merge_group, { types: ['checks_requested'], branches: ['main'] });
 });
