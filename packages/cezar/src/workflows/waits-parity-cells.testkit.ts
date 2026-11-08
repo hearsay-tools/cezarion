@@ -18,7 +18,7 @@ import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit
 import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { ToolsUnavailableError } from '../ci-wait/controller.ts';
+import { CiToolController, ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, toolGenerationOf, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait-core.testkit.ts';
@@ -757,6 +757,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
     it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
       const external = github();
       nativeWire(runner);
+      const provision = vi.spyOn(CiToolController.prototype, 'provision');
       const initial = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 });
       const changed = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 60 });
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${initial} ${initial} ${changed}`, runner });
@@ -766,10 +767,27 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       expect(store.getRun(run.id)?.waitRegistrations).toMatchObject([{ wait: { id: ci.id }, deduplicated: false }, { wait: { id: ci.id }, deduplicated: true }]);
       expect(agentWaits(run.id)).toHaveLength(1);
       expect(manager.isActive(run.id)).toBe(true);
+      // The wait outlives its session: a Continue's registration for the same PR returns it.
+      sessionOf(run.id).end();
+      await until(() => !manager.isActive(run.id));
+      const boundaries = turnEnds(run.id);
+      expect(manager.continueRun(run.id, { text: initial }).ok).toBe(true);
+      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')) && turnEnds(run.id) > boundaries);
+      expect(store.getRun(run.id)?.waitRegistrations?.at(-1)).toMatchObject({ wait: { id: ci.id }, deduplicated: true });
+      expect(agentWaits(run.id)).toMatchObject([{ id: ci.id }]);
+      // A recovery keeps it, and its result wakes the run with one observation.
+      await restart();
+      expect(manager.isActive(run.id)).toBe(false);
+      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+      expect(agentWaits(run.id)).toMatchObject([{ id: ci.id, phase: WAIT_PHASE.open }]);
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered');
       expect(inputsFor(run.id, ci.id).map(input => input.text)).toEqual([expect.stringContaining(`CI wait observation ${ci.id} for ${pr}`)]);
       await until(() => store.getRun(run.id)?.status === 'waiting');
+      // Each session, fresh, continued and woken after recovery, gets its own tool descriptor.
+      const descriptors = provision.mock.results.filter(result => result.type === 'return').map(result => result.value.descriptor.name);
+      expect(descriptors.length).toBeGreaterThanOrEqual(3);
+      expect(new Set(descriptors).size).toBe(descriptors.length);
 
       expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u1' }) }])).toBe(true);
       await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));

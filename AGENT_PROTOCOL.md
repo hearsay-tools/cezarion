@@ -1457,6 +1457,8 @@ normalized-event injection. U0, in `core/ci-tools-wait-cancel.test.ts` and `core
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
 `workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from semantic part files in `WAIT_PARITY_FILES`. Cursor mixed rows and Cursor/OpenCode U27 turn-end entry rows use the smaller files in `WAIT_PARITY_FAMILIES`; the original entries files retain the refusal rows. The criteria and exactly-once full-row guards run in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each settled outcome's word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
+A Continue's registration for the same PR returns the open CI wait, a restart recovery keeps
+it, and each session gets its own tool descriptor name.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
 delivered. U3 delivers a human message during a CI wait, keeps the wait open and
