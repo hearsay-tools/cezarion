@@ -7,9 +7,14 @@ export function releaseConfig(platform, env, dryRun, metadata = desktopMetadata(
   const requireValue = name => { if (!env[name]?.trim()) throw new Error(`Public desktop release requires ${name}`); return env[name]; };
   const bundle = { targets: platform === 'darwin' ? ['app', 'dmg'] : platform === 'win32' ? ['nsis'] : ['appimage', 'deb'], createUpdaterArtifacts: !dryRun };
   const config = { bundle };
+  if (metadata.bridge) {
+    if (!dryRun && !desktopMetadata().rebrand) throw new Error('Public bridge builds require the release switch');
+    bundle.resources = { '../bridge-payload/': 'bridge/' };
+  }
   if (metadata.rebrand) {
     config.identifier = metadata.desktopAppId;
     config.productName = metadata.displayName;
+    config.mainBinaryName = metadata.desktopExecutable;
     config.plugins = { updater: { endpoints: [`https://github.com/hearsay-tools/cezarion/releases/download/${metadata.feed}/${metadata.feed}.json`] } };
   }
   if (!dryRun) {
@@ -29,6 +34,9 @@ export function releaseConfig(platform, env, dryRun, metadata = desktopMetadata(
   return config;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { values } = parseArgs({ options: { rebrand: { type: 'string' } } });
-  writeFileSync('release-config.json', JSON.stringify(releaseConfig(process.platform, process.env, process.env.DESKTOP_DRY_RUN === 'true', desktopMetadata({ rebrand: values.rebrand }))));
+  const { values } = parseArgs({ options: { rebrand: { type: 'string' }, bridge: { type: 'boolean' } } });
+  const metadata = desktopMetadata({ rebrand: values.rebrand, bridge: values.bridge });
+  const config = releaseConfig(process.platform, process.env, process.env.DESKTOP_DRY_RUN === 'true', metadata);
+  if (values.rebrand !== undefined || values.bridge) Object.assign(config, { identifier: metadata.desktopAppId, productName: metadata.displayName });
+  writeFileSync('release-config.json', JSON.stringify(config));
 }

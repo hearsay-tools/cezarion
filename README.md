@@ -1185,9 +1185,11 @@ Useful environment variables:
 | `HSQ_DESKTOP`, `CEZ_DESKTOP`, `HSQ_SUPERVISED`, `CEZ_SUPERVISED`, `HSQ_SUPERVISOR_PID`, `CEZ_SUPERVISOR_PID`, `HSQ_SUPERVISOR_STDIN`, `CEZ_SUPERVISOR_STDIN` | Internal desktop and supervisor lifecycle values. The shell's CEZ value wins when present, including empty values; HSQ is used only when CEZ is absent. Do not configure them. |
 | `HSQ_DISCLAIM_EXEC`, `CEZ_DISCLAIM_EXEC` | Desktop executable used to remove inherited macOS execution attribution. A defined CEZ value wins over HSQ. Discovered automatically. |
 | `HSQ_UPDATE_CHANNEL`, `CEZ_UPDATE_CHANNEL` | Managed desktop channel: stable (default), nightly, or development. The version dialog's saved choice takes precedence. |
-| `CEZ_DESKTOP_ENTRY` / `CEZ_DESKTOP_CWD` / `CEZ_DESKTOP_NODE` | Desktop development overrides for the built entry, boot directory and Node executable; otherwise discovered automatically. |
-| `CEZ_DESKTOP_NO_UPDATE` | Exact `1` disables native shell updates; debug builds already disable them. |
-| `CEZ_DESKTOP_DEBUG_IPC` | Debug-only native title-bar probe. |
+| `HSQ_DESKTOP_ENTRY` / `CEZ_DESKTOP_ENTRY` | Native-shell development entry file. The HSQ name wins when present, including an empty value. |
+| `HSQ_DESKTOP_CWD` / `CEZ_DESKTOP_CWD` | Native-shell starting project directory. The HSQ name wins when present. |
+| `HSQ_DESKTOP_NODE` / `CEZ_DESKTOP_NODE` | Native-shell Node executable. The HSQ name wins when present. Empty selects `node` on PATH. |
+| `HSQ_DESKTOP_NO_UPDATE=1` / `CEZ_DESKTOP_NO_UPDATE=1` | Disable signed native-shell updates. The HSQ name wins when present. Debug builds already disable updates. |
+| `HSQ_DESKTOP_DEBUG_IPC` / `CEZ_DESKTOP_DEBUG_IPC` | Debug builds only: exercise native title-bar IPC after loading the cockpit. The HSQ name wins when present. |
 | `HSQ_URL`, `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `HSQ_REMOTE`, `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
 | `HSQ_COCKPIT_URL`, `CEZ_COCKPIT_URL`, `HSQ_PROJECT_ID`, `CEZ_PROJECT_ID` | Set by the cockpit in every agent's environment once it listens: the bound origin and the run's project. `cez automation` calls that address; a headless `cez run` sets neither. Do not configure them. |
 | `HSQ_DRY_RUN=1`, `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |

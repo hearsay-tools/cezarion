@@ -34,6 +34,10 @@ mod remote;
 mod disclaim;
 mod sidecar;
 mod product;
+mod bridge_state;
+mod bridge;
+#[cfg(feature = "bridge-fixture")]
+mod bridge_fixture;
 mod identity { include!(concat!(env!("OUT_DIR"), "/product_identity.rs")); }
 use identity::PACKAGE;
 pub use disclaim::disclaim_exec_if_asked;
@@ -278,7 +282,7 @@ fn build_menu(app: &AppHandle, shell: &Shell) -> tauri::Result<()> {
     refresh_versions_menu(app, shell);
     let app_menu = Submenu::with_items(
         app,
-        "Cezarion",
+        identity::DISPLAY_NAME,
         true,
         &[
             &PredefinedMenuItem::about(app, None, None)?,
@@ -334,7 +338,7 @@ struct InstalledVersion {
 /// Every complete install under `~/.cezar/versions` (a manifest AND an entry file), newest
 /// install first — the same rule as cezar's own `listInstalled`.
 fn installed_versions() -> Vec<InstalledVersion> {
-    let dir = desktop_home().data.join("versions");
+    let Ok(dir) = selected_versions_root() else { return Vec::new(); };
     let active = active_id(&dir);
     let mut rows: Vec<(String, InstalledVersion)> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -398,7 +402,7 @@ fn refresh_versions_menu(app: &AppHandle, shell: &Shell) {
 
 /// Point `current` at an installed id (atomic rename over the old link) and relaunch.
 fn switch_version(app: &AppHandle, shell: &Arc<Shell>, id: &str) -> bool {
-    let dir = desktop_home().data.join("versions");
+    let Ok(dir) = selected_versions_root() else { return false; };
     if !entry_under(&dir.join(id)).is_file() {
         return false;
     }
@@ -579,6 +583,14 @@ fn offer_update(window: &WebviewWindow, version: &str) {
 }
 
 pub fn run() {
+    #[cfg(feature = "bridge-fixture")]
+    if bridge_fixture::run_if_asked() { return; }
+    if std::env::args_os().any(|arg| arg == "--desktop-identity") {
+        let context = tauri::generate_context!();
+        assert_eq!(context.config().identifier, identity::APP_ID, "native identity metadata mismatch");
+        println!("{}", serde_json::json!({ "identifier": context.config().identifier, "productName": context.config().product_name }));
+        return;
+    }
     let shell = Arc::new(Shell {
         child: Mutex::new(None),
         port: AtomicU16::new(0),
@@ -615,7 +627,13 @@ pub fn run() {
         .setup(move |app| {
             app.manage(shell_for_state.clone());
             let handle = app.handle().clone();
+            let bridge_result = bridge::attempt(&handle);
+            if matches!(bridge_result, Some(Ok(bridge_state::Outcome::Complete))) {
+                app.handle().exit(0);
+                return Ok(());
+            }
             build_main_window(&handle, &shell_for_setup)?;
+            bridge::show_notice(&handle, bridge_result);
             build_menu(&handle, &shell_for_setup)?;
             // Start local only after the user chooses it; remote use needs no Node or install.
             // Geometry writer: coalesces the burst of move/resize events into one file write.
@@ -716,6 +734,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build the cezar desktop shell")
         .run(move |app, event| match event {
+            RunEvent::Ready => {
+                if app.get_webview_window("main").is_some() {
+                    if let Err(reason) = bridge::acknowledge() { eprintln!("bridge acknowledgement failed: {reason}"); app.exit(1); }
+                }
+            }
             #[cfg(target_os = "macos")]
             RunEvent::Reopen { .. } => {
                 if let Some(window) = app.get_webview_window("main") {
@@ -803,6 +826,10 @@ fn supervisor_continues(shell: &Shell, relaunch: bool) -> bool {
 
 /// The entry to run, installing cezar first on a machine that has none.
 fn entry_or_install(app: &AppHandle, shell: &Arc<Shell>) -> Option<PathBuf> {
+    if let Err(reason) = selected_versions_root() {
+        if let Some(window) = app.get_webview_window("main") { fail(&window, "Home migration is in progress", reason, ""); }
+        return None;
+    }
     if let Some(entry) = resolve_entry() {
         return Some(entry);
     }
@@ -1076,7 +1103,10 @@ fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
         shell.updating.store(false, Ordering::SeqCst);
         return false;
     };
-    let versions = desktop_home().data.join("versions");
+    let versions = match selected_versions_root() {
+        Ok(versions) => versions,
+        Err(reason) => { fail(&window, "Home migration is in progress", reason, ""); shell.updating.store(false, Ordering::SeqCst); return false; }
+    };
     splash_reset(&window, title, &format!("{PACKAGE}@{tag} → {}", versions.display()));
 
     let mut lines: Vec<String> = Vec::new();
@@ -1129,7 +1159,7 @@ fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
 /// for `development`: a worktree or PR build picked by hand follows no tag, so nothing is ever
 /// offered or installed over it.
 fn release_tag() -> Option<&'static str> {
-    let config = desktop_home().config.join("config.json");
+    let config = desktop_config_path();
     let channel = std::fs::read_to_string(config)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -1545,6 +1575,21 @@ fn desktop_home() -> product::Home {
     product::home(&home_dir(), platform_name(), identity::REBRAND, |key| std::env::var_os(key))
 }
 
+fn desktop_config_path() -> PathBuf {
+    let home = desktop_home();
+    if identity::REBRAND && selected_versions_root().ok().as_ref() == Some(&home.legacy.join("versions")) {
+        home.legacy.join("config.json")
+    } else { home.config.join("config.json") }
+}
+
+fn selected_versions_root() -> Result<PathBuf, &'static str> {
+    let home = desktop_home();
+    let state = std::fs::read(home.config.join("install.json")).ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|marker| marker.get("state").and_then(|value| value.as_str()).map(str::to_owned));
+    product::versions_root(&home, identity::REBRAND, state.as_deref() == Some("committed"), state.as_deref() == Some("pending"))
+}
+
 /// `CEZ_DESKTOP_ENTRY` (a checkout's `packages/cezar/dist/index.js` while developing), else the
 /// managed layout's `current` entry.
 fn resolve_entry() -> Option<PathBuf> {
@@ -1553,7 +1598,7 @@ fn resolve_entry() -> Option<PathBuf> {
             return Some(explicit);
         }
     }
-    managed_entry(&desktop_home().data.join("versions"))
+    managed_entry(&selected_versions_root().ok()?)
 }
 
 /// The boot folder: `CEZ_DESKTOP_CWD`, else the most recently opened registered project, else
@@ -1565,7 +1610,7 @@ fn pick_cwd() -> PathBuf {
             return explicit;
         }
     }
-    let config = desktop_home().config.join("config.json");
+    let config = desktop_config_path();
     let fallback = home_dir();
     let Ok(raw) = std::fs::read_to_string(config) else { return fallback };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else { return fallback };

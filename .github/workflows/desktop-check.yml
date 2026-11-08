@@ -16,6 +16,9 @@ on:
     paths:
       - 'packages/desktop/**'
       - 'packages/cezar/src/self-update/**'
+      - 'packages/cezar/src/home/identity.ts'
+      - 'packages/cezar/src/home/switch.ts'
+      - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
       - '.github/workflows/desktop-release.yml'
   push:
@@ -25,6 +28,9 @@ on:
     paths:
       - 'packages/desktop/**'
       - 'packages/cezar/src/self-update/**'
+      - 'packages/cezar/src/home/identity.ts'
+      - 'packages/cezar/src/home/switch.ts'
+      - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
   workflow_dispatch:
 
@@ -37,10 +43,12 @@ concurrency:
 
 jobs:
   check:
-    name: Desktop shell on ${{ matrix.name }}
+    name: Desktop shell on ${{ matrix.name }} (${{ matrix.rebrand }})
     strategy:
       fail-fast: false
       matrix:
+        rebrand: ['off', 'on']
+        os: [macos-latest, ubuntu-22.04, windows-latest]
         include:
           - name: macOS
             os: macos-latest
@@ -52,7 +60,7 @@ jobs:
           - name: Windows
             os: windows-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,6 +96,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
+      - name: Select the native identity
+        working-directory: packages/desktop
+        shell: bash
+        env:
+          DESKTOP_DRY_RUN: 'true'
+        run: |
+          node scripts/release-config.mjs --rebrand ${{ matrix.rebrand }}
+          echo "TAURI_CONFIG=$(cat release-config.json)" >> "$GITHUB_ENV"
+
       - name: cargo check
         working-directory: packages/desktop/src-tauri
         run: cargo check --locked --all-targets
@@ -115,14 +132,65 @@ jobs:
           DESKTOP_DRY_RUN: 'true'
         run: |
           npm ci --no-audit --no-fund
-          node --test scripts/release-config.test.mjs
-          node scripts/release-config.mjs
+          node --test scripts/release-config.test.mjs scripts/build-metadata.test.mjs
+          node scripts/release-config.mjs --rebrand ${{ matrix.rebrand }}
           npm run build -- --config release-config.json
+
+      - name: Verify the compiled app identity
+        working-directory: packages/desktop
+        run: node scripts/assert-build-identity.mjs ${{ matrix.rebrand }}
+
+      - name: Native authenticated profile transfer (macOS)
+        if: runner.os == 'macOS' && matrix.rebrand == 'on'
+        working-directory: packages/desktop
+        # The fixture owns its two overlays and target tree.
+        env:
+          TAURI_CONFIG: '{}'
+        run: node scripts/macos-bridge-smoke.mjs
 
       - name: Upload test installers (not public signed releases)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: desktop-test-${{ matrix.name }}
+          name: desktop-test-${{ matrix.name }}-${{ matrix.rebrand }}
+          path: |
+            packages/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            packages/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+            packages/desktop/src-tauri/target/release/bundle/deb/*.deb
+            packages/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build old-ID bridge review installers
+        if: matrix.rebrand == 'on'
+        working-directory: packages/desktop
+        shell: bash
+        env:
+          DESKTOP_DRY_RUN: 'true'
+          TAURI_CONFIG: '{}'
+        run: |
+          bundle=src-tauri/target/release/bundle
+          case "$RUNNER_OS" in
+            macOS) platform=darwin; pattern="$bundle/macos/*.app" ;;
+            Windows) platform=win32; pattern="$bundle/nsis/*-setup.exe" ;;
+            Linux) platform=linux; pattern="$bundle/appimage/*.AppImage" ;;
+          esac
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(compgen -G "$pattern" | sort)
+          if [ ${#files[@]} -ne 1 ]; then echo "::error::expected one new-ID payload"; exit 1; fi
+          if [ "$platform" = "darwin" ]; then
+            tar -czf bridge-new-app.tar.gz -C "$(dirname "${files[0]}")" "$(basename "${files[0]}")"
+            files=(bridge-new-app.tar.gz)
+          fi
+          node scripts/prepare-bridge.mjs --platform "$platform" --payload "${files[0]}"
+          rm -rf "$bundle"
+          node scripts/release-config.mjs --bridge
+          npm run build -- --config release-config.json
+
+      - name: Upload old-ID bridge review installers
+        if: matrix.rebrand == 'on'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: desktop-bridge-${{ matrix.name }}
           path: |
             packages/desktop/src-tauri/target/release/bundle/dmg/*.dmg
             packages/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe

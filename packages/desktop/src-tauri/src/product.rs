@@ -63,6 +63,21 @@ pub fn home(user: &Path, platform: &str, rebrand: bool, get: impl Fn(&str) -> Op
     Home { config, state, data, legacy }
 }
 
+/// D13: boot/repair from the source tree until the P2 copy commits. Never run from a
+/// target installation that migration may replace underneath the running process.
+pub fn versions_root(home: &Home, rebrand: bool, committed: bool, pending: bool) -> Result<PathBuf, &'static str> {
+    let target = home.data.join("versions");
+    if !rebrand { return Ok(target); }
+    if home.config.join(".migrating").exists() || home.legacy.join(".migrating").exists() {
+        return Err("Home migration is in progress. Retry after it finishes.");
+    }
+    if committed { return Ok(target); }
+    let legacy = home.legacy.join("versions");
+    if legacy.exists() { return Ok(legacy); }
+    if pending { return Err("Home migration is pending; a fresh target installation cannot start yet."); }
+    Ok(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +122,47 @@ mod tests {
         let both = home(user, "linux", true, |k| match k { "HSQ_HOME" => Some("/new".into()), "CEZ_HOME" => Some("/old".into()), _ => None });
         assert_eq!(both.config, Path::new("/new/config"));
         assert_eq!(both.legacy, Path::new("/old"));
+    }
+    #[test]
+    fn managed_root_order_keeps_the_running_legacy_tree_outside_the_copy_target() {
+        let root = std::env::temp_dir().join(format!("desktop-order-{}", std::process::id()));
+        let home = Home { config: root.join("new/config"), state: root.join("new/state"), data: root.join("new/data"), legacy: root.join("old") };
+        std::fs::create_dir_all(&home.config).unwrap();
+        let old = home.legacy.join("versions"); let new = home.data.join("versions");
+        // Fresh: no legacy versions directory. An initial new install is safe from P2 copy.
+        assert_eq!(versions_root(&home, true, false, false).unwrap(), new);
+        let write_entry = |versions: &Path, contents: &str| {
+            let entry = versions.join("current/node_modules/@old/package/dist/index.js");
+            std::fs::create_dir_all(entry.parent().unwrap()).unwrap(); std::fs::write(entry, contents).unwrap();
+        };
+        write_entry(&new, "target entry");
+        assert_eq!(versions_root(&home, true, false, false).unwrap(), new);
+        // Empty and interrupted legacy directories select source-side repair. Even an
+        // existing target entry cannot win before the migration commits.
+        for name in ["", ".staging/incomplete"] {
+            std::fs::create_dir_all(old.join(name)).unwrap();
+            let chosen = versions_root(&home, true, false, false).unwrap();
+            assert_eq!(chosen, old);
+            assert!(!package_entry(&chosen.join("current"), "@old/package", "@old/package", "@new/package").is_file());
+            assert_eq!(versions_root(&home, true, false, true).unwrap(), old);
+        }
+        write_entry(&old, "running legacy entry");
+        let chosen = versions_root(&home, true, false, false).unwrap();
+        assert_eq!(std::fs::read_to_string(package_entry(&chosen.join("current"), "@old/package", "@old/package", "@new/package")).unwrap(), "running legacy entry");
+        // Only a committed migration selects the new managed tree while legacy still exists.
+        let chosen = versions_root(&home, true, true, false).unwrap();
+        assert_eq!(chosen, new);
+        assert_eq!(std::fs::read_to_string(package_entry(&chosen.join("current"), "@old/package", "@old/package", "@new/package")).unwrap(), "target entry");
+        std::fs::remove_dir_all(&old).unwrap();
+        assert!(versions_root(&home, true, false, true).is_err());
+        for claim in [home.config.join(".migrating"), home.legacy.join(".migrating")] {
+            std::fs::create_dir_all(claim.parent().unwrap()).unwrap(); std::fs::write(&claim, "claimed").unwrap();
+            assert!(versions_root(&home, true, false, false).is_err());
+            // Ordinary switch-off behavior stays at its own data root.
+            assert_eq!(versions_root(&home, false, false, true).unwrap(), new);
+            std::fs::remove_file(claim).unwrap();
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn both_package_names_remain_openable() {
