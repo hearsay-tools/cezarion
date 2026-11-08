@@ -28,15 +28,22 @@ export interface RunnerFacts {
   /** `cumulative`: each cost report is the session total so far, Continue steps included.
    *  `per-turn`: each report is new cost since the previous report. */
   readonly costReport: 'cumulative' | 'per-turn';
+  /**
+   * Who names the session. `launch`: the runner opens its session under the id Cezar saves on the
+   * step before launch, so that id resumes at once. `native`: the runner mints its own id and
+   * reports it in a `session` event; until then the step holds only Cezar's launch id, which the
+   * runner never knew. The `sessionId` row of each runner's `specSupport` names the wire.
+   */
+  readonly sessionIdSource: 'launch' | 'native';
 }
 
 export const RUNNER_FACTS = {
-  claude: { nativeAsk: 'none', nativeSubagents: 'reported', nativeTimerTool: 'ScheduleWakeup', costReport: 'cumulative' },
-  codex: { nativeAsk: 'answerable', nativeSubagents: 'reported', nativeTimerTool: null, costReport: 'per-turn' },
-  opencode: { nativeAsk: 'answerable', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn' },
-  pi: { nativeAsk: 'none', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn' },
-  cursor: { nativeAsk: 'auto-skipped', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn' },
-  omp: { nativeAsk: 'none', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn' },
+  claude: { nativeAsk: 'none', nativeSubagents: 'reported', nativeTimerTool: 'ScheduleWakeup', costReport: 'cumulative', sessionIdSource: 'launch' },
+  codex: { nativeAsk: 'answerable', nativeSubagents: 'reported', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native' },
+  opencode: { nativeAsk: 'answerable', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native' },
+  pi: { nativeAsk: 'none', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'launch' },
+  cursor: { nativeAsk: 'auto-skipped', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native' },
+  omp: { nativeAsk: 'none', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native' },
 } as const satisfies Readonly<Record<RunnerId, RunnerFacts>>;
 
 /** The runners whose declared facts match, in `RUNNER_IDS` order. */

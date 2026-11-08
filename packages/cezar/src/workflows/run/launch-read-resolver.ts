@@ -9,10 +9,11 @@ import { buildChildEnv } from '../../core/agent-env.ts';
 import type { AgentRunner, ContentBlock, RunnerFactory, RunnerId } from '../../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../../core/agent-model-policy.ts';
 import { ModelIdentityError, formatModelIdentity, normalizeModelForBackend } from '../../core/model-identity.ts';
+import { RUNNER_FACTS } from '../../core/runner-facts.ts';
 import { parseDelegationEffort } from '../../delegation/effort.ts';
 import { boundWorkerAccountEnv, captureWorkerAccount, continuationDefStep, ownedWorkflow, workerIdentity, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
-import type { QueuedMessage, RunRecord, RunStore, StepState } from '../../runs/store.ts';
+import type { QueuedMessage, RunEvent, RunRecord, RunStore, StepState } from '../../runs/store.ts';
 import { makeRunTitle } from '../../runs/run-title.ts';
 import { discoverSkills, filterDisabledTeamSkills, filterDisabledTeamSources, readDisabledTeamSkills, type Skill } from '../../skills.ts';
 import { getTeamSkillsCached } from '../../skills-remote.ts';
@@ -224,7 +225,7 @@ const skillSourceReads = {
 export const atTaskHead = { executionPayload, queuedPayload, resumedPayload, acceptedWorkflowFields, recordedRunner, defaultRunner, runnerless, heldFor, accountFor, workerStep, executionInput, executionWorkflow, requeueJob, baseBranch, worktreeSetup: continuationWorktreeSetup, jobInput, jobWorkflow, resumedJob, storedWorkflow, interruptedIndex, interruptedDefinition, heldAccount, worktree: inputWorktree, workflowName, images: acceptedImages, task: acceptedTask, skillHint: acceptedSkillHint, ownedJob, verifyIdentity: verifyWorkerIdentity, autonomous: inputAutonomous, reviveWorkflow, queuedResumeSession, recoveryInput: queuedRecoveryInput, registry: discoverRunSkills, acceptedRunFields, acceptInput, modelIdentity: taskModelIdentity, config: readLaunchConfig, runner: taskRunner, systemPrompt: taskSystemPrompt, hydrateQueuedInput, attachments: readPersistedAttachments };
 export const atStepOpen = { afterStepPayload, sessionPayload, sessionWaitPayload, retryIndex, workflowLength, workflowStep, workflowSlice, workflowChainNote, runner: stepRunner, prompt: stepPrompt, skill: stepSkill, toolGrant: continuationToolGrant, enabledSkills: skillSourceReads.enabledSkills, disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, contextVariables, model: stepModel, effort: stepEffort, openingInputs, agentEnvForStep, workerStep };
 export const atLiveInput = { disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, queuedMessages: queuedMessageSource, taskAttachmentUrls, enabledSkills: skillSourceReads.enabledSkills };
-export const atContinue = { resumedStep, storedWorkflow, workflowStep, workflowLength, agentEnvForStep, workerStep, registry: discoverRunSkills, enabledSkills: skillSourceReads.enabledSkills, disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, isPrintTransport: printSessionTransport, skill: continuedSkill, checkpoint: continuedCheckpoint, prompt: continuedPrompt, rejoinLine: rejoinContinuationLine, verifyIdentity: verifyWorkerIdentity, waitingBeforeFinalWorkflowStep, waitingWorkflowStepIndex, continuationNextStep, ciWorkflowResumeStepIndex, resumableSessionId, isSyntheticContinuation, owningStep: continuationOwningStep, definitionStep: continuationDefStep, toolGrant: continuationToolGrant, extraSystemPrompt: continuedSystemPrompt, recordedProfile: continuedProfileId, definitionId: continuationStepId, model: continuationModel, effort: continuationEffort, runner: continuationRunner, hydrateQueuedContinuation, config: readLaunchConfig, worktreeSetup: continuationWorktreeSetup, opening: continuationOpening, openingImages: continuationImages };
+export const atContinue = { resumedStep, storedWorkflow, workflowStep, workflowLength, agentEnvForStep, workerStep, registry: discoverRunSkills, enabledSkills: skillSourceReads.enabledSkills, disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, isPrintTransport: printSessionTransport, skill: continuedSkill, checkpoint: continuedCheckpoint, prompt: continuedPrompt, rejoinLine: rejoinContinuationLine, verifyIdentity: verifyWorkerIdentity, waitingBeforeFinalWorkflowStep, waitingWorkflowStepIndex, continuationNextStep, ciWorkflowResumeStepIndex, resumableSessionId, continuedSessionId, isSyntheticContinuation, owningStep: continuationOwningStep, definitionStep: continuationDefStep, toolGrant: continuationToolGrant, extraSystemPrompt: continuedSystemPrompt, recordedProfile: continuedProfileId, definitionId: continuationStepId, model: continuationModel, effort: continuationEffort, runner: continuationRunner, hydrateQueuedContinuation, config: readLaunchConfig, worktreeSetup: continuationWorktreeSetup, opening: continuationOpening, openingImages: continuationImages };
 
 function hydrateQueuedInput(context: RunModuleContext, readAttachments: AttachmentReader, runId: string, input: StartRunInput): StartRunInput {
     const run = context.store.getRun(runId);
@@ -650,30 +651,45 @@ function ciWorkflowResumeStepIndex(run: RunRecord): number {
 }
 
 /**
- * Session ids Cursor will accept on `session/load`. A launch UUID written
- * before `session.started` is only for the step rail (hearsay-tools/cezarion#583).
+ * The saved session id a Continue can resume, or undefined when it opens a fresh session. A
+ * `launch` runner opened its session under the saved id. A `native` runner replaces Cezar's launch
+ * UUID only with its `session` event (hearsay-tools/cezarion#583, hearsay-tools/cezarion#2991), so
+ * its saved id resumes when a recorded `session` event names it, or when the event history does
+ * not show the launch of the step that first holds the id. Older or salvaged run data can keep a
+ * step without its history; that id keeps its conversation, and a runner that never knew it
+ * refuses the resume. A shown launch with no matching `session` event ended before the runner
+ * reported its id. A `cursor-print` id always needs its print `session` event.
  */
 function resumableSessionId(store: Pick<RunStore, 'getRun' | 'readEvents'>, runId: string, sessionStep: StepState | undefined): string | undefined {
-  if (!sessionStep?.sessionId) return undefined;
-  // A later slice of hearsay-tools/cezarion#2991 replaces this runner-id check with a declared fact.
-  if ((sessionStep.backend ?? store.getRun(runId)?.runner) === 'cursor') {
-    const run = store.getRun(runId);
-    const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
-    // A Continue records the existing ID before the resumed process emits its
-    // own session event. After a crash, its original owning step still holds
-    // the print-session proof; later steps cannot establish that proof.
-    const printEvidenceSteps = new Set(run?.steps.slice(0, sessionStepIndex + 1)
-      .filter((step) => step.sessionId === sessionStep.sessionId && step.sessionTransport === 'cursor-print')
-      .map((step) => step.id));
-    const confirmed = store.readEvents(runId).some(
-      (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId &&
-        (sessionStep.sessionTransport !== 'cursor-print' ||
-          (event.stepId !== undefined && printEvidenceSteps.has(event.stepId) &&
-            event.sessionTransport === 'cursor-print')),
-    );
-    if (!confirmed) return undefined;
-  }
-  return sessionStep.sessionId;
+  const sessionId = sessionStep?.sessionId;
+  if (!sessionId) return undefined;
+  const run = store.getRun(runId);
+  if (RUNNER_FACTS[sessionStep.backend ?? run?.runner ?? 'claude'].sessionIdSource === 'launch') return sessionId;
+  const events = store.readEvents(runId);
+  if (sessionStep.sessionTransport === 'cursor-print') return printSessionConfirmed(run, events, sessionStep) ? sessionId : undefined;
+  if (events.some(event => event.type === 'session' && event.sessionId === sessionId)) return sessionId;
+  const owner = run?.steps.find(step => step.sessionId === sessionId) ?? sessionStep;
+  return events.some(event => event.type === 'step-start' && event.stepId === owner.id) ? undefined : sessionId;
+}
+
+/** A Continue records the existing id before the resumed process emits its own session event.
+ *  After a crash, its original owning step still holds the print-session proof; later steps
+ *  cannot establish that proof. */
+function printSessionConfirmed(run: RunRecord | undefined, events: RunEvent[], sessionStep: StepState): boolean {
+  const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
+  const printEvidenceSteps = new Set(run?.steps.slice(0, sessionStepIndex + 1)
+    .filter((step) => step.sessionId === sessionStep.sessionId && step.sessionTransport === 'cursor-print')
+    .map((step) => step.id));
+  return events.some((event) => event.type === 'session' && event.sessionId === sessionStep.sessionId &&
+    event.stepId !== undefined && printEvidenceSteps.has(event.stepId) && event.sessionTransport === 'cursor-print');
+}
+
+/** The recorded session a Continue continues: the one it resumes, else the run's latest recorded
+ *  session from before this Continue's own step. Its owning step names the skill, grants, model,
+ *  effort and worker identity the Continue runs with, also when the Continue opens a fresh session
+ *  (hearsay-tools/cezarion#2991). Undefined when no earlier step recorded a session. */
+function continuedSessionId(record: RunRecord | undefined, continuationStepId: string, resumeSessionId: string | undefined): string | undefined {
+  return resumeSessionId ?? [...record?.steps ?? []].reverse().find(step => step.id !== continuationStepId && step.sessionId)?.sessionId;
 }
 
 function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {

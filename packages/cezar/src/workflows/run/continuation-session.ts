@@ -266,19 +266,21 @@ export class ContinuationSession {
     // continuation must run under the account that created it — not whatever the project has
     // been switched to since. The owning step is the one carrying this session id.
     const owningStep = atContinue.owningStep(record, sessionId);
-    // An owned worker's turn runs under the identity pinned for the step it extends (#452).
-    const toolsStep = atContinue.definitionStep(this.context.store, record, sessionId);
+    // Which step this Continue continues does not depend on whether it resumes that step's
+    // session: a fresh session after a backend switch or an unreported native id continues the
+    // same step (hearsay-tools/cezarion#2991). An owned worker's turn runs under the identity
+    // pinned for that step (#452).
+    const toolsStep = atContinue.definitionStep(this.context.store, record, atContinue.continuedSessionId(record, stepId, sessionId));
     const stepIdentity = this.host.workerStep(runId, atContinue.definitionId(toolsStep));
-    // The owning step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
+    // The continued step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
     // from the persisted `workflowDef` exactly as the first spawn did (`runAgentStep`).
     // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
     // (MCP servers, subagents) on Continue, restart recovery and the usage-limit auto-resume
     // — and dropping `bashAllowlist` WIDENED Bash from an allowlist to unrestricted
     // (`AgentRunSpec.toolGrant`, #430). Record steps share ids with `workflowDef.steps`;
-    // a synthetic `continue-N` owner and a fresh-session continuation (backend switch — no
-    // owning session) both extend the run's tail, so they resolve from the definition's last
-    // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
-    // keeps today's defaults.
+    // a synthetic `continue-N` that owns its session extends the run's tail, so it resolves
+    // from the definition's last agent step. A legacy record without `workflowDef` (#367), or
+    // a session no step owns, keeps today's defaults.
     const toolGrant = atContinue.toolGrant(stepIdentity, toolsStep, backend);
     const model = await continuationModel(this.context.store, this.context.repoRoot, runId, state, record, toolsStep, stepIdentity, backend, this.context.home);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
