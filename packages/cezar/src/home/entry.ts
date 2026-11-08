@@ -1,3 +1,4 @@
+import { commandText } from './command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,7 +67,7 @@ export function serverInstanceForPort(home: Home, port: number): string {
 export function prepareHomeLifecycle(home: Home, instance?: string, { rebrand = REBRAND_SWITCH } = {}): (server: ServerType) => void {
   const preparedHome = prepareOperatorHome(home, 'serve', process.env, { enabled: rebrand });
   if (preparedHome !== home) {
-    throw new Error(`[hsq] refusing to serve home ${home.root}: preparation selected ${preparedHome.root}. Prepare the home before starting the server.`);
+    throw new Error(commandText(`[hsq] refusing to serve home ${home.root}: preparation selected ${preparedHome.root}. Prepare the home before starting the server.`));
   }
   return server => {
     const listening = () => {

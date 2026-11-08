@@ -1,3 +1,4 @@
+import { commandText } from './home/command.ts';
 import { execFileSync } from 'node:child_process';
 import { productEnv } from './core/product-env.ts';
 import { DEFAULT_SERVER_INSTANCE } from './paths.ts';
@@ -182,12 +183,12 @@ async function runAndReportServerCommand(
           ? await deps.runDeploy(strategy, runOpts)
           : await deps.runUninstall(strategy, runOpts);
     if (mode === 'install' && result.status === 'complete') {
-      console.log(`\n  cez server-install (${label}) complete.`);
-      console.log(`  Redeploy a new version any time with: cez server-deploy --platform ${chosen}${domainFlag}\n`);
+      console.log(commandText(`\n  cez server-install (${label}) complete.`));
+      console.log(commandText(`  Redeploy a new version any time with: cez server-deploy --platform ${chosen}${domainFlag}\n`));
     } else if (mode === 'deploy' && result.status === 'complete') {
-      console.log(`\n  cez server-deploy (${label}) complete — the service was reloaded and verified.\n`);
+      console.log(commandText(`\n  cez server-deploy (${label}) complete — the service was reloaded and verified.\n`));
     } else if (mode === 'uninstall' && result.status === 'complete') {
-      console.log(`\n  cez server-uninstall (${label}) complete — the changes it made were reversed.\n`);
+      console.log(commandText(`\n  cez server-uninstall (${label}) complete — the changes it made were reversed.\n`));
     }
     // complete + cancelled (resumable) exit 0; failed exits 1.
     process.exitCode = result.status === 'failed' ? 1 : 0;

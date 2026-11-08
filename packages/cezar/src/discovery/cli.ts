@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
@@ -19,7 +20,7 @@ interface DiscoveryIo {
   stdout(line: string): void;
   discover?: (options: DiscoverOptions) => Promise<Cockpit>;
 }
-const HELP = `cez discover — inspect the host's default-account catalog
+const HELP = commandText(`cez discover — inspect the host's default-account catalog
 
 Usage:
   cez discover runners
@@ -37,7 +38,7 @@ Catalog source/stale/reason describe discovery availability and freshness.
 Inside a parent session, discovery uses its authenticated controller, including
 headless runs. It never falls back to another cockpit on authentication failure.
 Outside a session, it finds an existing cockpit; it never starts one.
-Catalogs describe host default accounts, not every named account or spawn policy.`;
+Catalogs describe host default accounts, not every named account or spawn policy.`);
 
 /** Discovery through the session's own controller. A failure never escapes to another cockpit. */
 async function sessionDiscovery(env: NodeJS.ProcessEnv, request: z.infer<typeof discoveryRequestSchema>, schema: z.ZodType, print: (value: unknown) => void): Promise<number> {
@@ -78,10 +79,10 @@ type ParsedDiscovery =
 function parseDiscoveryRequest(argv: string[]): ParsedDiscovery {
   let parsed: ReturnType<typeof parseDiscoveryArgs>;
   try { parsed = parseDiscoveryArgs(argv); }
-  catch { throw new TaskCliError(64, { code: 'invalid_input', error: 'Use cez discover runners or cez discover models --runner=<runner>. See cez discover --help.' }); }
+  catch { throw new TaskCliError(64, { code: 'invalid_input', error: commandText('Use cez discover runners or cez discover models --runner=<runner>. See cez discover --help.') }); }
   if (parsed.values.help) return { help: true };
   const selected = discoveryRequestSchema.safeParse({ kind: parsed.positionals[0], ...(parsed.values.runner === undefined ? {} : { runner: parsed.values.runner }) });
-  if (parsed.positionals.length !== 1 || !selected.success) throw new TaskCliError(64, { code: 'invalid_input', error: 'Use cez discover runners or cez discover models --runner=<runner>.' });
+  if (parsed.positionals.length !== 1 || !selected.success) throw new TaskCliError(64, { code: 'invalid_input', error: commandText('Use cez discover runners or cez discover models --runner=<runner>.') });
   const request = selected.data;
   return { help: false, values: parsed.values, request, schema: request.kind === 'runners' ? discoveredRunnersSchema : runnerModelCatalogResponseSchema };
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commandText } from './home/command.ts';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,7 +73,7 @@ async function runCommand(
   access: TaskAccess,
 ): Promise<void> {
   if (!task) {
-    console.error('usage: cez run "<task>" [--workflow name] [--model model] [--no-workers] [--no-messaging]');
+    console.error(commandText('usage: cez run "<task>" [--workflow name] [--model model] [--no-workers] [--no-messaging]'));
     process.exitCode = 1;
     return;
   }
@@ -133,7 +134,7 @@ description: House rules the agent should follow in this repo.
     }
   }
   ensureDataGitignore(repoRoot);
-  console.log('\nDone. Start the cockpit with: npx cezarion');
+  console.log(commandText('\nDone. Start the cockpit with: npx cezarion'));
 }
 
 // ---- helpers -----------------------------------------------------------------

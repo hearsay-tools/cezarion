@@ -5,8 +5,9 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "cezarion": "bin.js",
-    "cez": "bin.js"
+    "cezarion": "cezarion.js",
+    "cez": "cez.js",
+    "hsq": "hsq.js"
   },
   "dependencies": {
     "@wjarka/cezarion": "^0.17.0"
