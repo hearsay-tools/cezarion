@@ -17,6 +17,12 @@
  *   `humanInputAtTurnEnd` declares, when it arrives before (S40) or after (S41) the last model call.
  * - S42: `spec.systemPrompt` reaches every process on a system channel when the runner declares
  *   `resent`, and the opening turn of the thread when it declares `in-thread`.
+ * - S43: the session reports every native process it starts while that process runs: the first
+ *   as `pid` when `startSession` returns, each later one through `onPidChange`. The worker process
+ *   ledger records exactly these pids (worker-reboot, worker-restart).
+ * - S44: a provider failure in a turn that a wake opened, or in a turn that runs a while before it
+ *   fails, reaches v1 as an `error` before any turn end and v2 as an error, and the session ends
+ *   once Cezar interrupts it, as `recordSessionFault` does.
  *
  * A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends these
  * rows, which run on every runner (AGENT_PROTOCOL.md §7).
@@ -25,6 +31,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'vitest';
+import { createFailureControl } from '../../scripts/mock-failure-control.mjs';
 import { inputDeliveryOf, type AgentEvent, type AgentSession, type InputDelivery, type RunnerId } from './agent-runner.ts';
 import { driveSeam, PINNED_SESSION_ID, promptFor, seedOpencodeMockSession, waitFor, type DriveSeamOptions, type ScenarioName, type SeamObservation } from './harness-parity-core.testkit.ts';
 import { runnersUnderTest } from './runners-under-test.testkit.ts';
@@ -48,6 +55,8 @@ export interface ContractObservation {
   /** S42: the mock's recorded argv/requests and stdin lines. */
   readonly records?: readonly string[];
   readonly systemPromptOnResume?: 'resent' | 'in-thread';
+  /** S43: the pids the native mock started, and each pid the session reported with whether it ran then. */
+  readonly processes?: { readonly started: readonly number[]; readonly reported: readonly { readonly pid: number; readonly alive: boolean }[]; readonly last?: number };
   readonly variant: string;
 }
 
@@ -535,6 +544,104 @@ function assertSystemPrompt({ backend, records = [], systemPromptOnResume, varia
   }
 }
 
+// ---- S43: every native process reported ---------------------------------------------------------
+
+/** Whether a process with this pid runs now. */
+function running(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+async function observeProcesses(backend: RunnerId): Promise<ContractObservation> {
+  const dir = mkdtempSync(join(tmpdir(), `cez-contract-${backend}-pids-`));
+  const pidFile = join(dir, 'pids');
+  const reported: { pid: number; alive: boolean }[] = [];
+  const report = (pid: number | undefined) => { if (pid !== undefined) reported.push({ pid, alive: running(pid) }); };
+  let last: number | undefined;
+  try {
+    const observed = await driveContract(backend, {
+      scenario: 'hold', variant: 'processes', env: { CEZ_MOCK_PID_FILE: pidFile },
+      sessionOptions: { onPidChange: report },
+      whileOpen: async (session, rec) => {
+        // As Cezar reads it: right after startSession returns (workflows/run/input-receipts.ts).
+        report(session.pid);
+        await waitFor(() => turnEnds(rec) >= 1);
+        // A follow-up turn: a runner that starts a process per turn (Cursor print) starts another.
+        rec.sendHuman(session, `${FOLLOW_UP} mock:agent-echo`);
+        await waitFor(() => carrierSettled(rec) && turnEnds(rec) >= 2);
+        last = session.pid;
+      },
+    });
+    const started = existsSync(pidFile) ? readFileSync(pidFile, 'utf8').split('\n').filter(Boolean).map(Number) : [];
+    return { ...observed, processes: { started, reported, ...(last === undefined ? {} : { last }) } };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function assertProcesses({ processes, timeline }: ContractObservation): void {
+  const trace = `\n${JSON.stringify(processes)}\n${describeTimeline(timeline)}`;
+  const { started = [], reported = [], last } = processes ?? {};
+  expect(started.length, `the native mock started${trace}`).toBeGreaterThan(0);
+  const pids = new Set(reported.map(entry => entry.pid));
+  for (const pid of started) expect(pids.has(pid), `native process ${pid} reported${trace}`).toBe(true);
+  for (const entry of reported) expect(entry.alive, `process ${entry.pid} ran when it was reported${trace}`).toBe(true);
+  // Between turns a runner that starts a process per turn (Cursor print) runs none, so `pid` is unset.
+  if (last !== undefined) expect(last, `pid names the last reported process${trace}`).toBe(reported.at(-1)?.pid);
+}
+
+// ---- S44: provider failure in a wake turn ---------------------------------------------------------
+
+/** The opening prompt of the continuation a timer wake starts (workflows/waits-parity.testkit.ts). */
+const WAKE_OPENING = 'Resume to receive the queued timer result.';
+const FAILURE_VARIANTS = ['wake', 'gated'] as const;
+
+async function observeProviderFailure(backend: RunnerId, variant: typeof FAILURE_VARIANTS[number]): Promise<ContractObservation> {
+  const dir = mkdtempSync(join(tmpdir(), `cez-contract-${backend}-failure-`));
+  const files = [join(dir, 'args.ndjson'), join(dir, 'stdin.ndjson')] as const;
+  // `wake`: every continuation's opening prompt fails, as `persistentWakeFailure` does. `gated`: the
+  // failing turn runs until the test releases it, as `gatedProviderFailure` does.
+  const control = createFailureControl(dir, variant === 'wake' ? { mode: 'persistent', opening: WAKE_OPENING, failure: 'provider' } : { mode: 'gated-once' });
+  try {
+    if (variant === 'wake' && backend === 'opencode') seedOpencodeMockSession(files[0]);
+    return await driveContract(backend, {
+      scenario: variant === 'wake' ? 'baseline' : 'provider-error-controlled', variant,
+      env: { CEZ_MOCK_FAILURE_CONTROL: control.path, CEZ_MOCK_ARGS_FILE: files[0], CEZ_MOCK_STDIN_FILE: files[1] },
+      // A wake resumes the native session with its opening prompt (S14, S42).
+      spec: variant === 'wake' ? { userPrompt: `${WAKE_OPENING} ${FOLLOW_UP}`, resume: true, sessionId: backend === 'codex' ? 'th_mock_1' : PINNED_SESSION_ID } : {},
+      whileOpen: async (session, rec) => {
+        if (variant === 'gated') {
+          await waitFor(control.held);
+          rec.mark('released');
+          control.release();
+        }
+        await waitFor(() => v1Of(rec).some(event => event.type === 'error'));
+        // Cezar interrupts a session on its first error (workflows/run/session-events.ts).
+        rec.mark('interrupt');
+        session.interrupt();
+        // bound: the session must end after the interrupt; one that does not fails the test's timeout.
+        await session.result.catch(() => undefined);
+        rec.mark('ended');
+      },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function assertProviderFailure({ timeline, at }: ContractObservation): void {
+  const trace = `\n${describeTimeline(timeline)}`;
+  const error = indexFrom(timeline, entry => 'v1' in entry && entry.v1.type === 'error');
+  expect(error, `v1 error${trace}`).toBeGreaterThanOrEqual(0);
+  const event = timeline[error] as { v1: Extract<AgentEvent, { type: 'error' }> };
+  expect(event.v1.message.trim(), `the error names its cause${trace}`).not.toBe('');
+  // run.ts ignores every event after the first error: a turn end before it would settle the turn as clean.
+  expect(lastIndexBefore(timeline, isTurnEnd, error), `no turn end before the error${trace}`).toBe(-1);
+  const v2Error = (entry: ContractEntry) => 'v2' in entry && (entry.v2.type === 'session.error' || (entry.v2.type === 'turn.completed' && entry.v2.stopReason === 'error'));
+  expect(timeline.some(v2Error), `v2 reports the failure${trace}`).toBe(true);
+  expect(timeline.some(entry => 'v2' in entry && entry.v2.type === 'turn.completed' && entry.v2.stopReason === 'end_turn'), `no clean v2 turn end${trace}`).toBe(false);
+  expect(at.get('ended'), `the session ended after the interrupt${trace}`).toBeGreaterThan(at.get('interrupt')!);
+}
+
 export const SEAM_CONTRACT_ROWS: readonly SeamContractRow[] = [
   {
     id: 'S36', scenario: 'hold-gated', observe: observeAcknowledgement, assert: assertAcknowledgement,
@@ -563,5 +670,15 @@ export const SEAM_CONTRACT_ROWS: readonly SeamContractRow[] = [
   ...([false, true] as const).map(resume => ({
     id: 'S42', scenario: 'baseline' as const, observe: (backend: RunnerId) => observeSystemPrompt(backend, resume), assert: assertSystemPrompt,
     name: `S42 carries spec.systemPrompt as systemPromptOnResume declares (${resume ? 'resume' : 'fresh'})`,
+  })),
+  {
+    id: 'S43', scenario: 'hold', observe: observeProcesses, assert: assertProcesses,
+    name: 'S43 reports every native process it starts while that process runs',
+  },
+  ...FAILURE_VARIANTS.map(variant => ({
+    // Both variants raise the failure control's provider error; the wake drives a baseline prompt.
+    id: 'S44', scenario: 'provider-error-controlled' as const,
+    observe: (backend: RunnerId) => observeProviderFailure(backend, variant), assert: assertProviderFailure,
+    name: `S44 fails a ${variant === 'wake' ? 'wake continuation' : 'running'} turn on a provider error before any turn end, and ends once interrupted`,
   })),
 ];

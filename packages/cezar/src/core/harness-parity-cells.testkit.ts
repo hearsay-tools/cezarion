@@ -25,7 +25,7 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  * because provider failures, asks and parks settle in the orchestrator (groups
  * 1, 3 and 6).
  *
- * Rows S36–S42 are the seam contract (hearsay-tools/cezarion#2991): each runner proves on its own
+ * Rows S36–S44 are the seam contract (hearsay-tools/cezarion#2991): each runner proves on its own
  * wire that it behaves as its declared facts say. They live in `seam-contract.testkit.ts`.
  *
  * Coverage rule (hearsay-tools/cezarion#2991): a fix inside a runner class extends the seam

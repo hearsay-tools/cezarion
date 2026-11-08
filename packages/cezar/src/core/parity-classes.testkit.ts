@@ -241,6 +241,11 @@ export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioC
   'steer-tool': ['shared', TURN_PATH],
   'steer-late': ['shared', TURN_PATH],
   'provider-error': ['runner-code', OWN_ERROR],
+  // Split from provider-error (hearsay-tools/cezarion#2991): the same native provider error, raised by
+  // the mock's failure control in a running turn (gated) or at a wake's opening (persistent). Seam
+  // contract row S44 drives both on every runner and holds the runner's part (an error before any turn
+  // end, and an end once interrupted), so what a row reads above it is Cezar's.
+  'provider-error-controlled': ['shared', 'S44 holds each runner\'s mapping of the failure control\'s provider error on every runner; Cezar decides the outcome'],
   'provider-unavailable': ['runner-code', OWN_ERROR],
   'post-success-refusal': ['runner-code', 'each runner maps its own model refusal after a successful turn'],
   'skill-warning': ['runner-code', 'each wire reports skill diagnostics its own way'],
