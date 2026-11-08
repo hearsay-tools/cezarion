@@ -20,7 +20,7 @@ const record = recordedRun(recordJson)
  * NDJSON file — `fixtures/subagents-run.ndjson`, the verbatim output of a `mock:subagents`
  * dry run (two parallel `Task` spawns whose children carry `parent_tool_use_id`).
  *
- * Same boot-own-server doctrine as task-thread.e2e.ts: the store reads `runs.json` once at
+ * Same boot-own-server doctrine as task-thread-fixture.ts: the store reads `runs.json` once at
  * startup, so the fixture must exist before boot, and a terminal (`done`) status keeps
  * `recover()` from touching the run. The server replays it over the per-run SSE stream exactly
  * as it would for any finished run, so this covers the full pipe — store → SSE replay →
