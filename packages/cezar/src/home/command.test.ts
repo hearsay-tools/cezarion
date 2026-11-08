@@ -45,3 +45,8 @@ it('rewrites standalone command examples before backticks and at end of text', (
   expect(commandText(text, '/bin/cezarion', true)).toBe('Run `cezarion` or `cezarion`; finish with cezarion');
   expect(commandText(text, '/bin/cez', false)).toBe(text);
 });
+
+it.each([false, true])('preserves path tokens in command examples (rebrand=%s)', rebrand => {
+  const text = String.raw`Run cez inspect /tmp/cez /tmp/hsq C:\tools\cez ./hsq tools-cez`;
+  expect(commandText(text, '/bin/hsq', rebrand)).toBe(text.replace('Run cez', 'Run hsq'));
+});

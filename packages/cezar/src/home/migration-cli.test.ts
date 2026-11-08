@@ -13,6 +13,7 @@ import { cleanStoreRoots } from './store.testkit.ts';
 import { listBackups } from '../workspace/backups.ts';
 import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { REBRAND_SWITCH } from './switch.ts';
+import * as migrationPlan from './migration-plan.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 
@@ -147,4 +148,19 @@ it('keeps migration unregistered and the outside legacy bytes untouched with the
   prepareOperatorHome(legacy, 'serve', env);
   expect(readFileSync(legacy.workspaceConfig)).toEqual(bytes);
   expect(existsSync(target.workspaceConfig)).toBe(false);
+});
+
+it('keeps migration error text literal while formatting the invoked command prefix', async () => {
+  const { legacy, target, env } = migrationFixture();
+  const argv = [...process.argv];
+  const message = 'unsupported file /cez; run `cez` or npx cezarion to inspect /hsq';
+  vi.spyOn(migrationPlan, 'planLegacyMigration').mockImplementation(() => { throw new Error(message); });
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  process.argv[1] = '/bin/hsq';
+  try {
+    expect(await runMigrationCommand(['--dry-run'], env, target, legacy)).toBe(1);
+    expect(error).toHaveBeenCalledExactlyOnceWith(`[hsq] migration failed: ${message}`);
+    expect(output).not.toHaveBeenCalled();
+  } finally { process.argv = argv; }
 });

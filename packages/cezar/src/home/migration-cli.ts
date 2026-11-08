@@ -51,5 +51,5 @@ export async function runMigrationCommand(argv: string[], env: NodeJS.ProcessEnv
     console.log(JSON.stringify(values['dry-run'] ? { dryRun: true, plan: planLegacyMigration(legacy, target) }
       : migrateLegacyHome(legacy, target, { env }), null, 2));
     return 0;
-  } catch (error) { console.error(commandText(`[hsq] migration failed: ${error instanceof Error ? error.message : String(error)}`)); return 1; }
+  } catch (error) { console.error(`${commandText('[hsq] migration failed:')} ${error instanceof Error ? error.message : String(error)}`); return 1; }
 }
