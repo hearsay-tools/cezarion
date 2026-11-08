@@ -439,8 +439,12 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       const cockpit = agentArtifact(ctx, 'autostart', rebrand);
       const ngrok = agentArtifact(ctx, 'ngrok', rebrand);
       const uid = process.getuid ? process.getuid() : 0;
-      if (repairAgentEnv(ctx, cockpit)) {
+      const repaired = repairAgentEnv(ctx, cockpit);
+      if (repaired) {
         await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${cockpit.name}`]);
+      }
+      // A previous deploy can have repaired the file before bootstrap failed.
+      if (repaired || (existsSync(cockpit.path) && (await ctx.runner.capture('launchctl', ['print', `gui/${uid}/${cockpit.name}`])).code !== 0)) {
         await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, 'the cezar cockpit agent');
       }
       ctx.ui.info('Redeploying — restarting the cezar cockpit.');

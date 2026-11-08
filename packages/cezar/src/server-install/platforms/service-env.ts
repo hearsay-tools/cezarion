@@ -3,7 +3,7 @@
 export function systemdRemoteEnv(unit: string): string {
   if (!/^Environment=CEZ_REMOTE=1$/m.test(unit)) return unit;
   return unit.replace(/^Environment=HSQ_REMOTE=.*\n/gm, '')
-    .replace(/^Environment=CEZ_REMOTE=1$/m, 'Environment=CEZ_REMOTE=1\nEnvironment=HSQ_REMOTE=1');
+    .replace(/^Environment=CEZ_REMOTE=1$/gm, 'Environment=CEZ_REMOTE=1\nEnvironment=HSQ_REMOTE=1');
 }
 
 export function launchdRemoteEnv(xml: string): string {

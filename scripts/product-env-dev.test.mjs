@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
@@ -19,7 +20,7 @@ if (script === 'dev:server') require('node:http').createServer((req, res) => {re
 `);
   try {
     // bound: the product has a 15 s health budget; allow 5 s more for child exit.
-    const result = await exec(process.execPath, [new URL('./dev.mjs', import.meta.url).pathname], {
+    const result = await exec(process.execPath, [fileURLToPath(new URL('./dev.mjs', import.meta.url))], {
       timeout: 20_000, env: {...process.env, npm_execpath: cli, HSQ_API_PORT: '1', CEZ_API_PORT: '2', DEV_PORT_LOG: log},
     });
     assert.ok(existsSync(log), result.stdout + result.stderr);
