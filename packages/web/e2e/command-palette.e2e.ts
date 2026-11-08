@@ -58,6 +58,7 @@ describe('command palette', () => {
 
     browser.press('Enter')
     browser.waitForFunction(`location.pathname === '/p/${bootProject}/workflows'`)
+    browser.waitForFunction(`document.querySelector('[data-route="workflows"]') !== null`)
     browser.waitForFunction(`document.querySelector('${ROOT}') === null`)
     expect(browser.url()).toContain('/workflows')
     expect(browser.count(ROOT)).toBe(0)

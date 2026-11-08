@@ -328,6 +328,7 @@ describe('task quick-list', () => {
     // cockpit rewrites them onto the boot project's scoped twin (BACKWARD_COMPATIBILITY.md).
     browser.goto(`${baseUrl}/tasks/fix-done`)
     browser.waitForFunction(`location.pathname === '${scoped('/tasks/fix-done')}'`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') !== null`)
     browser.waitForFunction(`document.querySelector('${ROW}[data-active]') !== null`)
 
     expect(browser.evaluate(`[...document.querySelectorAll('${ROW}[data-active]')].map((r) => r.dataset.runId)`)).toEqual(
@@ -515,6 +516,7 @@ describe('tasks table overview', () => {
   it('opens the task from a row click', () => {
     browser.click(`${TABLE_ROW}[data-run-id="fix-done"] a[href*='/tasks/']`)
     browser.waitForFunction(`location.pathname === '${scoped('/tasks/fix-done')}'`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') !== null`)
     expect(browser.url()).toContain(scoped('/tasks/fix-done'))
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="tasks-summary"], [data-slot="tasks-table"]') !== null`)

@@ -120,7 +120,7 @@ export function NewTaskRoute() {
   const config = useConfig()
   const workspaceConfig = useWorkspaceConfig()
 
-  const { draft, update, submissionPending, mounted } = useNewTaskDraft(draftProjectId, deepLink)
+  const { draft, update, clearStarted, submissionPending, mounted } = useNewTaskDraft(draftProjectId, deepLink)
   const sources = useSourceSelection(draft.source, uiState)
   const { source, sourcesReady, skillList } = sources
   const webhook = useNotifyWebhook(urlProjectId)
@@ -142,9 +142,10 @@ export function NewTaskRoute() {
     notifyOn: webhook.notifyOn,
     uiState,
     mounted,
+    clearStarted,
   })
   const autoStarting = useBookmarkletDeepLink({
-    deepLink, search, engine, config, draftProjectId, mounted, sourcesReady, skillList, update,
+    deepLink, search, engine, config, draftProjectId, mounted, clearStarted, sourcesReady, skillList, update,
   })
   const compactAgentOptions = useCompactAgentOptions(agentOptionsRef, autoStarting)
 
