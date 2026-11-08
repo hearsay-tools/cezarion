@@ -1083,11 +1083,17 @@ jobs:
         with:
           retries: 0
           script: |
-            const { mergeQueueAdmission } = require('./.github/scripts/merge-queue-admission.cjs');
+            const { mergeQueueAdmission, admissionFailure } = require('./.github/scripts/merge-queue-admission.cjs');
+            const { sanitize } = require('./.github/scripts/failure-diagnostics.cjs');
+            const diagnostics = {};
             try {
-              const admission = await mergeQueueAdmission({ github, ...context.repo, group: context.payload.merge_group, releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
+              const admission = await mergeQueueAdmission({ github, ...context.repo, group: context.payload.merge_group, releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN, diagnostics });
               await core.summary.addHeading('Existing PR-head review admission').addRaw(JSON.stringify(admission)).write();
-            } catch {
+            } catch (error) {
+              // A speculative group's trusted base can predate this diagnostic helper.
+              const diagnostic = admissionFailure ? admissionFailure(error, diagnostics) : sanitize(`${error.name}: ${error.message}`);
+              core.error(diagnostic);
+              await core.summary.addHeading('Queue admission refused').addRaw(diagnostic.split('\n').map(line => `    ${line}`).join('\n') + '\n').write();
               core.setFailed('Queue admission could not verify current native PR CI/review, membership and rules. Inspect the queue and retry; do not bypass.');
             }
 

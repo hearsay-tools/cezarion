@@ -2,6 +2,42 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { fixture, secondEntry, SHA, BASE, HEAD, MAIN } = require('./merge-queue.testkit.cjs');
+const { admissionFailure } = require('./merge-queue-admission.cjs');
+test('request failures name the API route, error and HTTP status without credentials', async () => {
+  const h = fixture();
+  const diagnostics = {};
+  const { mergeQueueAdmission } = require('./merge-queue-admission.cjs');
+  const github = { request: async () => {
+    throw Object.assign(new Error('Resource not accessible by integration\nAuthorization: Bearer private-value'), {
+      name: 'HttpError', status: 403, request: { headers: { authorization: 'private-header' } },
+    });
+  } };
+  await assert.rejects(() => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group, diagnostics }), error => {
+    const diagnostic = admissionFailure(error, diagnostics);
+    assert.match(diagnostic, /GET \/repos\/\{owner\}\/\{repo\}\/rules\/branches\/\{branch\}/);
+    assert.match(diagnostic, /HttpError/);
+    assert.match(diagnostic, /403/);
+    assert.match(diagnostic, /Resource not accessible by integration/);
+    assert.doesNotMatch(diagnostic, /private-value|private-header/);
+    assert.deepEqual(diagnostics.api, { route: 'GET /repos/{owner}/{repo}/rules/branches/{branch}', status: 403 });
+    assert.equal(diagnostics.check, 'queue rules');
+    return true;
+  });
+});
+test('GraphQL failures report the API error instead of only incomplete evidence', async () => {
+  const h = fixture();
+  const { mergeQueueAdmission } = require('./merge-queue-admission.cjs');
+  const github = { request: async (route, args) => route === 'POST /graphql'
+    ? { data: { errors: [{ message: 'Resource not accessible by integration' }] } }
+    : h.github.request(route, args) };
+  await assert.rejects(() => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group }),
+    /POST \/graphql.*Resource not accessible by integration/);
+});
+test('admission diagnostics redact signed URLs and prevent workflow command injection', () => {
+  const diagnostic = admissionFailure(new Error('Request failed https://user:private@example.test/path?signature=private\n::error::injected'));
+  assert.match(diagnostic, /example.test\/path/);
+  assert.doesNotMatch(diagnostic, /private|::error::/);
+});
 for (const fork of [false, true]) test(`valid reviewed native head admitted (fork=${fork})`, async () => {
   const h = fixture(fork); assert.equal((await h.run()).pullNumber, 7);
 });

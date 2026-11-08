@@ -1,6 +1,49 @@
 'use strict';
 const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
+const { sanitize } = require('./failure-diagnostics.cjs');
 const { CI_PATH, VERIFY, REVIEW, validSha, positive, reader, readCiRuns, readCiJobs, successfulJobs, newest } = require('./queue-ci-proof.cjs');
+function errorMessage(error) {
+  // Never serialize request objects, headers, response bodies or stacks.
+  const status = Number.isInteger(error?.status) && error.status >= 100 && error.status <= 599 ? ` (HTTP ${error.status})` : '';
+  return sanitize(`${error?.name ?? 'Error'}${status}: ${error?.message ?? 'Unknown admission failure'}`);
+}
+function admissionFailure(error, diagnostics = {}) {
+  // This object contains only static check/route names and projected identities,
+  // never raw API fields. Preserve validated SHAs that sanitize would redact.
+  return `${errorMessage(error)}\nEvidence: ${JSON.stringify(diagnostics)}`;
+}
+const shaOrNull = sha => validSha(sha) ? sha : null;
+const numberOrNull = n => positive(n) ? n : null;
+function queueIdentity(entry) {
+  return { pullNumber: numberOrNull(entry?.pullRequest?.number), position: numberOrNull(entry?.position),
+    head: shaOrNull(entry?.headCommit?.oid), base: shaOrNull(entry?.baseCommit?.oid),
+    pullHead: shaOrNull(entry?.pullRequest?.headRefOid) };
+}
+function startDiagnostics(diagnostics, group) {
+  diagnostics.group = { head: shaOrNull(group?.head_sha), base: shaOrNull(group?.base_sha) };
+  const expected = /^refs\/heads\/gh-readonly-queue\/main\/pr-(\d+)(?:-[a-f0-9]{40})?$/.exec(group?.head_ref);
+  diagnostics.expectedPullNumbers = expected ? [numberOrNull(Number(expected[1]))] : [];
+  diagnostics.observedEntries = null;
+  diagnostics.check = 'merge-group identity';
+}
+function diagnosticGithub(github, diagnostics) {
+  return { request: async (route, args) => {
+    diagnostics.api = { route, status: null };
+    try {
+      const result = await github.request(route, args);
+      diagnostics.api.status = numberOrNull(result.status);
+      if (route === 'POST /graphql' && result.data?.errors) {
+        const errors = Array.isArray(result.data.errors) ? result.data.errors.slice(0, 5).map(e => e?.message).join('; ') : 'Malformed errors';
+        throw new Error(`GraphQL response errors: ${errors}`);
+      }
+      return result;
+    } catch (error) {
+      diagnostics.api.status = numberOrNull(error?.status) ?? diagnostics.api.status;
+      // Routes are static templates from trusted code. Arguments may be private.
+      throw new Error(`${route}: ${errorMessage(error)}`);
+    }
+  } };
+}
 const QUEUE_QUERY = `query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
     mergeQueue(branch: "main") { entries(first: 2) {
@@ -80,34 +123,52 @@ function requireStableRun(run, finalRun, finalLatest, eligible) {
   if (!eligible(finalRun) || finalRun.id !== run.id || finalRun.run_attempt !== run.run_attempt
     || finalLatest?.id !== run.id || finalLatest.run_attempt !== run.run_attempt || !eligible(finalLatest)) throw new Error('Native CI changed');
 }
-async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, allowInProgress = false, releaseAppBotLogin }) {
+async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, allowInProgress = false, releaseAppBotLogin, diagnostics = {} }) {
+  startDiagnostics(diagnostics, group);
   requireGroup(group);
+  github = diagnosticGithub(github, diagnostics);
   const read = reader(github, owner, repo, now() + 120000, now);
   const graphql = boundedGraphql(read);
   const rules = () => read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch: 'main', per_page: 100 });
+  diagnostics.check = 'queue rules';
   requireQueueRules(await rules());
-  const queue = () => graphql(QUEUE_QUERY, { owner, repo });
+  const queue = async () => {
+    const data = await graphql(QUEUE_QUERY, { owner, repo });
+    const nodes = data?.repository?.mergeQueue?.entries?.nodes;
+    diagnostics.observedEntries = Array.isArray(nodes) ? nodes.slice(0, 2).map(queueIdentity) : null;
+    return data;
+  };
+  diagnostics.check = 'queue membership';
   const entry = entryFrom(await queue(), group);
   const pull = () => read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: entry.pullRequest.number });
+  diagnostics.check = 'PR eligibility';
   const pr = await pull(); const fullName = `${owner}/${repo}`;
   if (!validPull(pr, fullName, entry)) throw new Error('PR head is no longer eligible');
+  diagnostics.check = 'native workflow identity';
   const workflow = await read('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}', { workflow_id: 'ci.yml' });
   if (!positive(workflow?.id) || workflow.path !== CI_PATH || workflow.state !== 'active') throw new Error('CI workflow unavailable');
   const runs = () => readCiRuns(read, workflow.id, pr.head.sha, 'pull_request_target');
+  diagnostics.check = 'native CI/review';
   const latest = newest(await runs());
   const run = latest && await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: latest.id });
   const eligible = r => nativeRun(r, fullName, workflow.id, entry, pr) && nativeSuccess(r, allowInProgress);
   if (!eligible(run)) throw new Error('Current native PR CI/review has not passed');
+  diagnostics.check = 'native protected jobs';
   if (!successfulJobs(await readCiJobs(read, run.id), [VERIFY, REVIEW])) throw new Error('Native CI/review gates missing');
+  diagnostics.check = 'CodeRabbit admission';
   const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin, now });
   if (!admission.admitted) throw new Error(`Unresolved or unsuccessful CodeRabbit admission: ${admission.reason}`);
+  diagnostics.check = 'final native CI/review';
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
   const finalLatest = newest(await runs());
   requireStableRun(run, finalRun, finalLatest, eligible);
+  diagnostics.check = 'final queue rules';
   requireQueueRules(await rules());
+  diagnostics.check = 'final queue membership';
   const finalEntry = entryFrom(await queue(), group);
+  diagnostics.check = 'final queue/PR identity';
   if (finalEntry.id !== entry.id || finalEntry.pullRequest.number !== pr.number
     || finalEntry.pullRequest.headRefOid !== pr.head.sha || !validPull(await pull(), fullName, entry)) throw new Error('Queue or PR changed');
   return { pullNumber: pr.number, head: pr.head.sha, runId: run.id, attempt: run.run_attempt };
 }
-module.exports = { mergeQueueAdmission, requireQueueRules, entryFrom, QUEUE_QUERY, nativeSuccess };
+module.exports = { mergeQueueAdmission, requireQueueRules, entryFrom, QUEUE_QUERY, nativeSuccess, admissionFailure };
