@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -243,7 +244,7 @@ export class OmpRunner implements AgentRunner {
   private lastSession: AgentSession | null = null;
 
   constructor(opts: OmpRunnerOptions = {}) {
-    this.bin = opts.bin ?? process.env.CEZ_OMP_BIN ?? (process.env.CEZ_DRY_RUN === '1' ? mockOmpPath() : 'omp');
+    this.bin = opts.bin ?? productEnv('OMP_BIN') ?? (productEnv('DRY_RUN') === '1' ? mockOmpPath() : 'omp');
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
     this.killGraceMs = opts.killGraceMs ?? KILL_GRACE_MS;
   }

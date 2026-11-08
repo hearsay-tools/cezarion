@@ -310,3 +310,12 @@ describe('voice capability', () => {
     expect(resolveCapabilities(env).voice).toBe(expected);
   });
 });
+
+// D8: old CEZ-only units must remain hosted before their env aliases are repaired.
+it.each([undefined, '', '0', '1'])('keeps hosted mode fail-closed for HSQ_REMOTE=%s', preferred => {
+  for (const legacy of [undefined, '0', '1']) {
+    const hosted = preferred === '1' || legacy === '1';
+    expect(resolveCapabilities({HSQ_REMOTE: preferred, CEZ_REMOTE: legacy}, '127.0.0.1'))
+      .toMatchObject({localHandoff: !hosted, settingsAdmin: !hosted});
+  }
+});

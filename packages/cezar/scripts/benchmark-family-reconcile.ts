@@ -1,4 +1,4 @@
-import { benchmarkHome } from './benchmark-home.ts';
+import { benchmarkHome, prepareBenchmarkEnv } from './benchmark-home.ts';
 import { setRunStatus } from '../src/runs/run-store.testkit.ts';
 /**
  * Family reconcile benchmark (hearsay-tools/cezarion#2378): what one reconcile pass over a settled
@@ -33,11 +33,8 @@ import type { ConversationMessage } from '@open-mercato/cezar-contract';
 // This benchmark reads settled runs and starts no runner.
 import { noRunners } from '../src/core/runners-under-test.testkit.ts';
 
-process.env.CEZ_DRY_RUN = '1';
-process.env.CEZ_AUTONAME = '0';
-process.env.CEZ_PROJECT_WARMUP = '0';
-const ownHome = process.env.CEZ_HOME ? undefined : mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
-if (ownHome) process.env.CEZ_HOME = ownHome;
+process.env.HSQ_PROJECT_WARMUP = process.env.CEZ_PROJECT_WARMUP = '0';
+const ownHome = prepareBenchmarkEnv();
 
 const { values } = parseArgs({ options: {
   messages: { type: 'string', default: '50,300,1000' },

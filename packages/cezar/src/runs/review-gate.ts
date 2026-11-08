@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * Optional diff-first review gate (#489, spec `2026-07-18-optional-review-gate`).
  *
@@ -18,5 +19,5 @@ export function reviewGateEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (config.reviewGate !== undefined) return config.reviewGate;
-  return env.CEZ_REVIEW_GATE === '1';
+  return productEnv('REVIEW_GATE', env) === '1';
 }

@@ -323,3 +323,14 @@ test('a non-publishable event exits 0 without touching the manifests', { timeout
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+// Alias selection is checked through the real script after the package build.
+test('preferred snapshot root and channel override legacy settings', async () => {
+  const root = await makeFixture();
+  try {
+    await runScript(root, {HSQ_SNAPSHOT_ROOT: root, CEZ_SNAPSHOT_ROOT: '/missing-legacy',
+      HSQ_RELEASE_CHANNEL: 'nightly', CEZ_RELEASE_CHANNEL: 'unused', GITHUB_EVENT_NAME: 'schedule', GITHUB_REF_NAME: 'main',
+      GITHUB_REPOSITORY: 'open-mercato/cezar', GITHUB_RUN_NUMBER: '12', GITHUB_RUN_ATTEMPT: '1', NIGHTLY_DATE: '20260813'}, ['--dry-run']);
+    assert.equal((await readPkg(root, 'packages', 'cezar')).version, '0.9.9-nightly.20260813.12');
+  } finally { await rm(root, {recursive: true, force: true}); }
+});

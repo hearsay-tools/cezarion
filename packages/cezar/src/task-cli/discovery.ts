@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
@@ -113,8 +114,8 @@ export async function resolveCockpit(
   noCockpit: string,
   options: { removeDiscoveryHint?: boolean } = {},
 ): Promise<Cockpit> {
-  const address = env.CEZ_COCKPIT_URL?.trim();
-  const projectId = env.CEZ_PROJECT_ID?.trim();
+  const address = productEnv('COCKPIT_URL', env)?.trim();
+  const projectId = productEnv('PROJECT_ID', env)?.trim();
   if (address && projectId) {
     let origin: string;
     try { origin = new URL(address).origin; } catch {
@@ -122,7 +123,7 @@ export async function resolveCockpit(
     }
     return { origin, projectId, api: `${origin}/api/v1/p/${encodeURIComponent(projectId)}` };
   }
-  const url = values.url ?? (env.CEZ_URL?.trim() || undefined);
+  const url = values.url ?? (productEnv('URL', env)?.trim() || undefined);
   if (url === undefined && values.repo === undefined) throw new TaskCliError(2, { code: 'no-cockpit', error: noCockpit });
   try {
     return await (discover ?? discoverCockpit)({ url, repoDir: resolve(values.repo ?? process.cwd()) });

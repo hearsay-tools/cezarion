@@ -402,3 +402,12 @@ if (process.argv[2] === 'view') console.log(process.argv.includes('gitHead') ? $
     }
   });
 }
+
+// These alias cases require the built release modules, so they belong in the package gate.
+test('preferred release root overrides the legacy root', async () => {
+  const root = await makeFixture('0.9.9');
+  try {
+    await runScript(root, ['patch', '--dry-run'], {HSQ_RELEASE_ROOT: root, CEZ_RELEASE_ROOT: '/missing-legacy'});
+    assert.equal((await readPkg(root, 'packages', 'cezar')).version, '0.9.10');
+  } finally { await rm(root, {recursive: true, force: true}); }
+});

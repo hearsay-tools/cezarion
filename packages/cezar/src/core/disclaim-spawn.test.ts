@@ -36,3 +36,13 @@ describe('disclaimedCommand', () => {
     expect(disclaimedCommand('./claude', [], { PATH: dir }, darwin)).toEqual(['./claude', []]);
   });
 });
+
+it.each(['', '/does-not-exist', trampoline])('keeps the shell trampoline despite inherited HSQ_DISCLAIM_EXEC=%s', preferred => {
+  expect(disclaimedCommand('claude', [], {PATH: dir}, {platform: 'darwin', hostEnv: {CEZ_DISCLAIM_EXEC: trampoline, HSQ_DISCLAIM_EXEC: preferred}}))
+    .toEqual([trampoline, [DISCLAIM_EXEC_FLAG, claude]]);
+});
+
+it('accepts a preferred-only trampoline without a legacy shell pin', () => {
+  expect(disclaimedCommand('claude', [], {PATH: dir}, {platform: 'darwin', hostEnv: {HSQ_DISCLAIM_EXEC: trampoline}}))
+    .toEqual([trampoline, [DISCLAIM_EXEC_FLAG, claude]]);
+});

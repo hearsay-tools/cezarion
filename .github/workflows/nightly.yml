@@ -204,6 +204,7 @@ jobs:
           # The channel is requested BY NAME, never inferred from the event — that is
           # what keeps any other workflow_dispatch from cutting a nightly by accident.
           CEZ_RELEASE_CHANNEL: nightly
+          HSQ_RELEASE_CHANNEL: nightly
         run: node scripts/release-snapshot.mjs
 
       # `always()` so a failed publish still explains itself. A failed gate skips

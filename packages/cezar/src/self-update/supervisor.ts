@@ -1,3 +1,4 @@
+import { shellProductEnv } from '../core/product-env.ts';
 /** A desktop child follows its supervisor down, without confusing EPERM with death. */
 export function supervisorGone(pid: number, initialPpid: number, ppid: number, probe = process.kill): boolean {
   if (initialPpid > 1 && ppid !== initialPpid) return true;
@@ -12,7 +13,7 @@ export function supervisorGone(pid: number, initialPpid: number, ppid: number, p
  * reaches us. Without the opt-in, an older shell's `/dev/null` stdin must not read as a stop.
  */
 export function watchSupervisor(shutdown: () => void, env = process.env, stdin: NodeJS.ReadableStream = process.stdin): () => void {
-  if (env.CEZ_DESKTOP !== '1') return () => {};
+  if (shellProductEnv('DESKTOP', env) !== '1') return () => {};
   let stopped = false;
   const stop = () => {
     if (stopped) return;
@@ -22,12 +23,12 @@ export function watchSupervisor(shutdown: () => void, env = process.env, stdin: 
   };
   const cancels: Array<() => void> = [];
   const cancel = () => { for (const fn of cancels.splice(0)) fn(); };
-  if (env.CEZ_SUPERVISOR_STDIN === '1') {
+  if (shellProductEnv('SUPERVISOR_STDIN', env) === '1') {
     stdin.once('end', stop).once('close', stop).once('error', stop);
     stdin.resume();
     cancels.push(() => { stdin.off('end', stop).off('close', stop).off('error', stop); });
   }
-  const pid = Number(env.CEZ_SUPERVISOR_PID);
+  const pid = Number(shellProductEnv('SUPERVISOR_PID', env));
   if (Number.isInteger(pid) && pid > 1) {
     const initialPpid = process.ppid;
     const timer = setInterval(() => {

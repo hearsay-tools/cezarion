@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { randomUUID } from 'node:crypto';
 import { open as openFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -738,7 +739,7 @@ async function execute(
 export const AGENT_TASK_SEND_REMEDY = "cez message progress <task-id> '<text>' --id <message-UUID> (needs task messaging on)";
 
 function refuseAgentSend(name: string, env: NodeJS.ProcessEnv): void {
-  if (name === 'send' && env.CEZ_TASK_ID?.trim()) {
+  if (name === 'send' && productEnv('TASK_ID', env)?.trim()) {
     throw new TaskCliError(EXIT.usage, {
       code: 'invalid_input',
       error: 'cez task send is human input. An agent inside a task cannot use it to message another task.',
@@ -771,7 +772,7 @@ export async function runTaskCommand(argv: string[], env: NodeJS.ProcessEnv, io:
           : undefined;
     validateFlags(name, values);
     const cockpit = await (io.discover ?? discoverCockpit)({
-      url: (values.url as string | undefined) ?? (env.CEZ_URL?.trim() || undefined),
+      url: (values.url as string | undefined) ?? (productEnv('URL', env)?.trim() || undefined),
       repoDir: resolve((values.repo as string | undefined) ?? process.cwd()),
     });
     return await execute(name, cockpit, io, values, positionals, text, print);

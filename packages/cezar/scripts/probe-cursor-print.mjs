@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { productEnv } from './product-env.mjs';
 // Opt-in vendor probe. It saves only a small allowlisted summary, never a transcript.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -18,7 +19,7 @@ if (!values.model || !values['output-dir'] || !['native-question', 'delegation',
   process.exit(1);
 }
 
-const bin = process.env.CEZ_CURSOR_BIN || 'agent';
+const bin = productEnv('CURSOR_BIN') || 'agent';
 const scratch = mkdtempSync(join(tmpdir(), 'cez-cursor-print-probe-'));
 const checkout = join(scratch, 'checkout');
 const outputDir = resolve(values['output-dir']);

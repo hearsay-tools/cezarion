@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
 import { readHomeFile } from '../home/store.ts';
@@ -23,7 +24,7 @@ export function agentModelsLocked(
   env: NodeJS.ProcessEnv = process.env,
   home: Home,
 ): boolean {
-  if (env[AGENT_MODELS_LOCKED_ENV] === '1') return true;
+  if (productEnv('AGENT_MODELS_LOCKED', env) === '1') return true;
   const paths = [
     workspaceConfigPath(env, home),
     ...(repoRoot ? [join(repoRoot, '.ai', 'cezar', 'config.json')] : []),

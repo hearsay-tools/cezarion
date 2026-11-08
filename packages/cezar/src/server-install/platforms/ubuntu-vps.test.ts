@@ -714,6 +714,32 @@ describe('ubuntu-vps redeploy restart verification (#430)', () => {
     expect(calls.join('\n')).toContain('journalctl --user -u cezar.service');
   });
 
+  it('repairs only the old unit env and keeps a second redeploy idempotent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'unit-env-drift-'));
+    const path = join(root, 'cezar.service');
+    const old = systemdUnit('/repo', 4321, 'user', '/custom/node /custom/entry.js')
+      .replace('Environment=HSQ_REMOTE=1\n', '') + '# operator annotation\n';
+    writeFileSync(path, old);
+    try {
+      const withUnit = () => {
+        const { ctx } = redeployContext({before, after});
+        ctx.state.steps.autostart!.created!.artifacts[0]!.path = path;
+        const capture = ctx.runner.capture;
+        ctx.runner.capture = async (program, args) => program === 'cat'
+          ? {code: 0, stdout: readFileSync(path, 'utf8'), stderr: ''} : capture(program, args);
+        return ctx;
+      };
+      const first = {ctx: withUnit()};
+      expect(await ubuntuVps.steps(first.ctx).find(step => step.id === 'autostart')!.check(first.ctx)).toBe(false);
+      await ubuntuVps.redeploy!(first.ctx);
+      const repaired = readFileSync(path, 'utf8');
+      expect(repaired).toContain('Environment=HSQ_REMOTE=1');
+      expect(repaired.replace('Environment=HSQ_REMOTE=1\n', '')).toBe(old);
+      await ubuntuVps.redeploy!(withUnit());
+      expect(readFileSync(path, 'utf8')).toBe(repaired);
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
+
   it('includes bounded journal output without hiding the restart failure', async () => {
     const journal = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n');
     const { ctx } = redeployContext({ before, after, restartCode: 1, journal });

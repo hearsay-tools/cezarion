@@ -41,7 +41,7 @@ const npmExecpath = /(?:^|[\\/])npm-cli\.js$/.test(process.env.npm_execpath ?? '
 const npmCli = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const run = (script, extraArgs) => {
   const args = ['run', script, '--', ...extraArgs];
-  const env = { ...process.env, CEZ_API_PORT: String(apiPort) };
+  const env = { ...process.env, CEZ_API_PORT: String(apiPort), HSQ_API_PORT: String(apiPort) };
   return npmExecpath
     ? spawn(process.execPath, [npmExecpath, ...args], { cwd: repoRoot, stdio: 'inherit', env })
     : spawn(npmCli, args, { cwd: repoRoot, stdio: 'inherit', env, shell: process.platform === 'win32' });

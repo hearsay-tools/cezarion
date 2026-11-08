@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
 import { matchesGithubPullRequest, mergedPullRequestObservations } from '../merge-observations.ts';
@@ -162,7 +163,7 @@ export class GithubCiClient {
   private readonly cwd?: string | undefined;
   constructor(options: { command?: CiCommandOptions; env?: NodeJS.ProcessEnv; cwd?: string | undefined } = {}) {
     this.env = options.env ?? process.env;
-    this.command = options.command ?? (this.env.CEZ_DRY_RUN === '1' ? { file: process.execPath, args: ['-e', dryRunCommand] } : { file: 'gh', args: [] });
+    this.command = options.command ?? (productEnv('DRY_RUN', this.env) === '1' ? { file: process.execPath, args: ['-e', dryRunCommand] } : { file: 'gh', args: [] });
     this.cwd = options.cwd;
   }
   /**
@@ -214,7 +215,7 @@ export class GithubCiClient {
     if (!parsed.success) throw new CiGithubError('malformed_data', 'GitHub returned malformed structured data; update gh and retry.');
     const { state, mergedAt, mergeCommit } = parsed.data;
     const [owner, repo] = repository.split('/');
-    if (this.env.CEZ_DRY_RUN !== '1') mergedPullRequestObservations.observe({ owner: owner!, repo: repo!, number: prNumber }, raw);
+    if (productEnv('DRY_RUN', this.env) !== '1') mergedPullRequestObservations.observe({ owner: owner!, repo: repo!, number: prNumber }, raw);
     return { headSha, mergeable, mergeStateStatus, state, ...(mergedAt ? { mergedAt } : {}), ...(mergeCommit ? { mergeCommitSha: mergeCommit.oid.toLowerCase() } : {}) };
   }
   /** Opt-in merge supervision: current pending state and its last lifecycle event, one bounded read. */
@@ -222,7 +223,7 @@ export class GithubCiClient {
     const parsedUrl = ciWaitRequestSchema.safeParse({ pr: pr.prUrl });
     if (!parsedUrl.success) throw new CiGithubError('invalid_request', 'Provide an HTTPS GitHub pull request URL.');
     if (new URL(pr.prUrl).hostname !== 'github.com') throw new CiGithubError('unsupported_host', 'Merge supervision supports github.com.');
-    if (this.env.CEZ_DRY_RUN === '1') return { ...await this.mergeState(pr, signal), mergeRequest: { isInMergeQueue: false, autoMergeEnabled: false } };
+    if (productEnv('DRY_RUN', this.env) === '1') return { ...await this.mergeState(pr, signal), mergeRequest: { isInMergeQueue: false, autoMergeEnabled: false } };
     const response = await this.query(mergeProgressArgs(pr), signal);
     if (response.code !== 0) throw commandError(response);
     const raw = parseJson(response.stdout, mergeProgressResponseSchema).data.repository.pullRequest;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { productEnv } from './product-env.mjs';
 import { loadControls } from './mock-controls.mjs';
 import { waitForRelease } from './mock-lifecycle.mjs';
 import { scenarioFor, play, afterParityPark } from './mock-scenario.mjs';
@@ -403,7 +404,7 @@ function replyWithRequirements(msg) {
 async function handleThread(msg) {
   if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('codex', msg.params); }
   ciWire = msg.params;
-  const expectedSandbox = process.env.CEZ_CODEX_NETWORK === '0' ? 'workspace-write' : 'danger-full-access';
+  const expectedSandbox = productEnv('CODEX_NETWORK') === '0' ? 'workspace-write' : 'danger-full-access';
   rejectedPermissionOverride = managedRequirements !== null && msg.params?.sandbox !== undefined;
   if (rejectedPermissionOverride) permissionWarning();
   if (rejectThreadPermissions(msg, expectedSandbox)) return;

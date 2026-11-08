@@ -26,3 +26,8 @@ The Activity tab shows live work: `/p/:projectId/activity` for one project and `
 - **Hidden tab.** A hidden tab pauses every animation and releases the topic. When the tab is visible again, the view reconciles from a fresh snapshot.
 - **Motion cost.** Animate only `transform` and `opacity`, with one named exception: the marching dashes on open lines, stubs and arcs, and the drifting dots on wait lines, animate `stroke-dashoffset` in CSS, with no JavaScript loop. Both pause on a hidden tab and are static with reduced motion. Measure line geometry on layout change (`ResizeObserver`), never on every frame.
 - **Live region.** Only the summary chips are a polite live region. Cards and the Just now feed are not, so a busy project does not flood a screen reader.
+
+Build-time `VITE_HSQ_E2E` and `VITE_HSQ_API_BASE` take precedence over their
+`VITE_CEZ_*` fallbacks, including defined empty values. The Vite build marker
+uses the same E2E decision as the browser. The dev proxy accepts `HSQ_API_PORT`
+first; the root dev launcher pins both port names to the port it selected.

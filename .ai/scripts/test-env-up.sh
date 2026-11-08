@@ -117,19 +117,19 @@ BUILD_INPUT_PATHS="packages/contract/src packages/contract/package.json packages
 # (CEZ_TASK_ID, CEZ_DELEGATION_*, …), so a local boot differed from CI in ways nobody chose.
 # Every CEZ_* goes rather than a list of known opt-ins: a list is one new flag away from the
 # same leak. A run that wants a flag asks for it with --server-env=CEZ_NAME=value below.
-for name in $(node -e 'for (const key of Object.keys(process.env)) if (/^CEZ_\w+$/i.test(key)) console.log(key)'); do
+for name in $(node -e 'for (const key of Object.keys(process.env)) if (/^(CEZ|HSQ)_\w+$/i.test(key)) console.log(key)'); do
   unset "$name"
 done
 
 # CEZ_DRY_RUN=1 swaps the agent CLIs for the bundled mock, so booting needs no
 # `claude` login and reaches no network — the whole point for CI/e2e.
-export CEZ_DRY_RUN=1
+export CEZ_DRY_RUN=1 HSQ_DRY_RUN=1
 
 # The real CLI writes workspace state at boot (~/.cezar migrations + project
 # registration) — pin CEZ_HOME under .ai/qa so a test boot never touches the
 # developer's real ~/.cezar. Kept stable (not per-boot) so the reuse path
 # attaches to the same workspace the running instance was booted with.
-export CEZ_HOME="$QA_DIR/cez-home"
+export CEZ_HOME="$QA_DIR/cez-home" HSQ_HOME="$QA_DIR/cez-home"
 node "$REPO_ROOT/scripts/test-install-marker.mjs" "$CEZ_HOME"
 
 FORCE=0
@@ -158,7 +158,7 @@ for arg in "$@"; do
       case " $SERVER_ENV " in
         *" $name="*) echo "invalid --server-env: $name is given twice" >&2; exit 2 ;;
       esac
-      export "$assignment"
+      export "$assignment" "HSQ_${assignment#CEZ_}"
       SERVER_ENV="$SERVER_ENV $assignment" ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac

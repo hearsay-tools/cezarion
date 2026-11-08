@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { z } from 'zod';
 import type { VoiceView, voiceSidebarViewSchema } from '@open-mercato/cezar-contract/voice';
 import { FakeVoiceEngine } from './fake-engine.ts';
@@ -111,6 +112,6 @@ export class VoiceEngineError extends Error {
  * route has already ruled out.
  */
 export function selectVoiceEngine(env: NodeJS.ProcessEnv, fetchImpl?: typeof fetch): DecisionEngine {
-  if (env.CEZ_DRY_RUN === '1') return new FakeVoiceEngine();
+  if (productEnv('DRY_RUN', env) === '1') return new FakeVoiceEngine();
   return new JevVoiceEngine({ apiKey: env.TYPESAFE_API_KEY ?? '', ...(fetchImpl ? { fetch: fetchImpl } : {}) });
 }

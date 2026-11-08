@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { publishArtifact } from './store.ts';
 
 const HELP = `Usage: cez artifact publish <path>
@@ -12,10 +13,11 @@ by the task runner. Never publish credentials or unrelated private files.
 export async function runArtifactCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
   if (argv.includes('--help') || argv.includes('-h')) { console.log(HELP); return 0; }
   try {
-    if (!env.CEZ_ARTIFACTS_DIR || !env.CEZ_TASK_ID) throw new Error('Artifact task context is missing. Run this command inside an active Cezar task with CEZ_ARTIFACTS_DIR and CEZ_TASK_ID.');
+    const artifactsDir = productEnv('ARTIFACTS_DIR', env), taskId = productEnv('TASK_ID', env);
+    if (!artifactsDir || !taskId) throw new Error('Artifact task context is missing. Run this command inside an active Cezar task with CEZ_ARTIFACTS_DIR and CEZ_TASK_ID.');
     if (argv.length !== 2 || argv[0] !== 'publish') throw new Error(HELP);
-    const metadata = await publishArtifact(env.CEZ_ARTIFACTS_DIR, env.CEZ_TASK_ID, argv[1]!);
-    const prefix = env.CEZ_PROJECT_ID ? `/p/${env.CEZ_PROJECT_ID}` : '';
+    const metadata = await publishArtifact(artifactsDir, taskId, argv[1]!);
+    const prefix = productEnv('PROJECT_ID', env) ? `/p/${productEnv('PROJECT_ID', env)}` : '';
     const link = `${prefix}/tasks/${metadata.runId}/files?artifact=${metadata.id}`;
     const label = metadata.name.replace(/[\r\n\u0000-\u001f\u007f]/g, ' ').replace(/[\\`*_{}[\]()#+.!|<>~-]/g, '\\$&');
     console.log(JSON.stringify({ ...metadata, link, markdown: `[${label}](${link})` }));

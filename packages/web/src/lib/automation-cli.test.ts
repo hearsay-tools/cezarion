@@ -113,7 +113,7 @@ describe('cliOf', () => {
 describe('Copy as CLI round-trips through a real shell into the cez automation request', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cez-copy-as-cli-'))
   const stub = join(dir, 'argv.mjs')
-  writeFileSync(stub, 'process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), env: { CEZ_COCKPIT_URL: process.env.CEZ_COCKPIT_URL, CEZ_PROJECT_ID: process.env.CEZ_PROJECT_ID } }))\n')
+  writeFileSync(stub, 'process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), env: { CEZ_COCKPIT_URL: process.env.CEZ_COCKPIT_URL, CEZ_PROJECT_ID: process.env.CEZ_PROJECT_ID, HSQ_COCKPIT_URL: process.env.HSQ_COCKPIT_URL, HSQ_PROJECT_ID: process.env.HSQ_PROJECT_ID } }))\n')
   const ADDRESS = { origin: 'http://127.0.0.1:4391', projectId: "it's-a-project" }
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -126,7 +126,7 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
     expect(at).toBeGreaterThan(0)
     const command = `${line.slice(0, at)}${shellQuote(process.execPath)} ${shellQuote(stub)} ${line.slice(at + 'cez automation '.length)}`
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CEZ_')))
-    return JSON.parse(execFileSync('sh', ['-c', command], { encoding: 'utf8', env })) as { argv: string[]; env: NodeJS.ProcessEnv }
+    return JSON.parse(execFileSync('sh', ['-c', command], { encoding: 'utf8', env: { ...env, HSQ_COCKPIT_URL: 'http://wrong', HSQ_PROJECT_ID: 'wrong' } })) as { argv: string[]; env: NodeJS.ProcessEnv }
   }
 
   /** What `cez automation` would POST for that argv and env — its own parser, body builder and transport seam. */
@@ -175,7 +175,7 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
   it.each(drafts)('%s', async (_name, draft, form) => {
     const { argv, env } = shellRun(cliOf(draft, ADDRESS))
     expect(argv[0]).toBe(form)
-    expect(env).toEqual({ CEZ_COCKPIT_URL: ADDRESS.origin, CEZ_PROJECT_ID: ADDRESS.projectId })
+    expect(env).toEqual({ CEZ_COCKPIT_URL: ADDRESS.origin, CEZ_PROJECT_ID: ADDRESS.projectId, HSQ_COCKPIT_URL: ADDRESS.origin, HSQ_PROJECT_ID: ADDRESS.projectId })
     const request = await posted(argv, env)
     expect(request.url).toBe(`${ADDRESS.origin}/api/v1/p/${encodeURIComponent(ADDRESS.projectId)}/automations`)
     expect(paused(request.body)).toEqual(paused(toCreateBody(draft)))

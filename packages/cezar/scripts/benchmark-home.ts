@@ -1,3 +1,7 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { legacyHomeEnv, productEnvEntries } from '../src/core/product-env.ts';
 import { Home } from '../src/home/home.ts';
 import { readInstallMarker } from '../src/home/install-marker.ts';
 
@@ -6,4 +10,22 @@ export function benchmarkHome(home: Home): Home {
   if (readInstallMarker(home.root)?.kind === 'live') throw new Error('Benchmark refuses a live install marker');
   Home.sandbox(home.root);
   return home;
+}
+
+/** Sandbox controls must override both inherited product prefixes. */
+export function setBenchmarkEnv(env: NodeJS.ProcessEnv = process.env): void {
+  Object.assign(env, productEnvEntries('DRY_RUN', '1', true), productEnvEntries('AUTONAME', '0', true));
+}
+
+/** Retain an explicit legacy sandbox or allocate an isolated benchmark home. */
+export function prepareBenchmarkEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  setBenchmarkEnv(env);
+  const existing = legacyHomeEnv(env);
+  if (existing) {
+    Object.assign(env, productEnvEntries('HOME', existing, true));
+    return undefined;
+  }
+  const ownHome = mkdtempSync(join(tmpdir(), 'cez-bench-home-'));
+  Object.assign(env, productEnvEntries('HOME', ownHome, true));
+  return ownHome;
 }

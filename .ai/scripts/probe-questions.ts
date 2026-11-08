@@ -25,7 +25,8 @@ import { createRunner } from '../../packages/cezar/src/core/runner-factory.ts';
 const home = resolveHome({ purpose: 'cli' });
 const [backend, model] = process.argv.slice(2) as [RunnerId, string | undefined];
 if (!backend) { console.error('usage: probe-questions.ts <backend> [model]'); process.exit(2); }
-delete process.env.CEZ_DRY_RUN; process.env.CEZ_AUTONAME = '0';
+delete process.env.CEZ_DRY_RUN; delete process.env.HSQ_DRY_RUN;
+process.env.HSQ_AUTONAME = process.env.CEZ_AUTONAME = '0';
 const repoRoot = mkdtempSync(join(tmpdir(), `probe-questions-${backend}-`));
 const git = (...args: string[]) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim();
 git('init', '-q', '-b', 'main'); git('config', 'user.name', 'probe'); git('config', 'user.email', 'probe@local');

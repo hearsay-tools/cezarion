@@ -1,3 +1,5 @@
+import { e2eBuildEnabled } from './build-env'
+
 /**
  * Build-time gate for the cockpit e2e suite (#415).
  *
@@ -6,7 +8,7 @@
  * `refetchInterval` keep their live cadences.
  */
 export function isCockpitE2e(): boolean {
-  return import.meta.env.VITE_CEZ_E2E === '1' || import.meta.env.VITE_CEZ_E2E === 'true'
+  return e2eBuildEnabled(import.meta.env.VITE_HSQ_E2E, import.meta.env.VITE_CEZ_E2E)
 }
 
 declare global {

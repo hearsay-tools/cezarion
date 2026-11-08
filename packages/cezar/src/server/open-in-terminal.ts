@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -156,7 +157,7 @@ export function createLaunchScript(
  * could drift.
  */
 export function refuseSpawnUnderTest(bin: string, args: readonly string[]): void {
-  if (!process.env.VITEST || process.env.CEZ_ALLOW_TEST_SPAWN === '1') return;
+  if (!process.env.VITEST || productEnv('ALLOW_TEST_SPAWN') === '1') return;
   throw new Error(
     `refusing to spawn a launcher from a test: ${[bin, ...args].join(' ')}\n` +
       'Inject the launcher (ServerDeps.openTerminal / openFile / openApp) instead of calling the real one.',

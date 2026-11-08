@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -747,7 +748,7 @@ export function buildClaudeArgs(
   args.push(...claudePermissionArgs(env));
   // Refuse other Claude sessions' SendMessage on every launch; fails open (AGENT_PROTOCOL.md D3).
   args.push('--settings', JSON.stringify({ crossSessionInbound: 'refuse' }));
-  const settingSources = env.CEZ_CLAUDE_SETTING_SOURCES;
+  const settingSources = productEnv('CLAUDE_SETTING_SOURCES', env);
   if (settingSources) {
     args.push('--setting-sources', settingSources);
   }
@@ -768,7 +769,7 @@ export function buildClaudeArgs(
 
 function claudePermissionArgs(env: NodeJS.ProcessEnv): string[] {
   const args: string[] = [];
-  const permissionMode = env.CEZ_CLAUDE_PERMISSION_MODE;
+  const permissionMode = productEnv('CLAUDE_PERMISSION_MODE', env);
   if (permissionMode === 'bypass') {
     args.push('--dangerously-skip-permissions');
   } else if (permissionMode === 'dontAsk' || permissionMode === 'acceptEdits') {
@@ -776,7 +777,7 @@ function claudePermissionArgs(env: NodeJS.ProcessEnv): string[] {
   } else {
     args.push(
       '--permission-mode',
-      env.CEZ_APPROVAL_GATE === '1' ? 'acceptEdits' : 'dontAsk',
+      productEnv('APPROVAL_GATE', env) === '1' ? 'acceptEdits' : 'dontAsk',
     );
   }
   return args;

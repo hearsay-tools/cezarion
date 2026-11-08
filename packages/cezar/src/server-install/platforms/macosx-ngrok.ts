@@ -1,3 +1,5 @@
+import { launchdRemoteEnv } from './service-env.ts';
+import { productEnvEntries } from '../../core/product-env.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -315,8 +317,7 @@ ${argXml}
     <string>${escapeXml(repoRoot)}</string>
     <key>EnvironmentVariables</key>
     <dict>
-      <key>CEZ_REMOTE</key>
-      <string>1</string>
+${Object.entries(productEnvEntries('REMOTE', '1', true)).reverse().map(([key, value]) => `      <key>${key}</key>\n      <string>${value}</string>`).join('\n')}
       <key>PATH</key>
       <string>${escapeXml(pathDirs.join(':'))}</string>
     </dict>
@@ -329,12 +330,27 @@ ${argXml}
 `;
 }
 
+/** Idempotent env drift repair retains the selected agent's identity and command. */
+function repairAgentEnv(ctx: InstallContext, agent: LaunchAgent): boolean {
+  if (!existsSync(agent.path)) return false;
+  const current = readLaunchdPlist(agent.path);
+  const next = launchdRemoteEnv(current);
+  if (next === current) return false;
+  guardLaunchdWrite(ctx, agent, {selected: agent, expectedXml: current});
+  writeFileSync(agent.path, next, {encoding: 'utf8', mode: 0o600});
+  chmodSync(agent.path, 0o600);
+  return true;
+}
+
 const autostartStep = (rebrand: boolean): InstallStep => ({
   id: 'autostart',
   title: 'Run cezar as a service (launchd — starts now + on boot)',
   async check(ctx) {
     if (ctx.dryRun) return false;
-    return verifyCommand(ctx, 'test', ['-f', agentArtifact(ctx, 'autostart', rebrand).path]);
+    const agent = agentArtifact(ctx, 'autostart', rebrand);
+    if (!await verifyCommand(ctx, 'test', ['-f', agent.path])) return false;
+    const current = readLaunchdPlist(agent.path);
+    return launchdRemoteEnv(current) === current;
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
     const argv = await resolveCezarArgv(ctx);
@@ -423,6 +439,14 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       const cockpit = agentArtifact(ctx, 'autostart', rebrand);
       const ngrok = agentArtifact(ctx, 'ngrok', rebrand);
       const uid = process.getuid ? process.getuid() : 0;
+      const repaired = repairAgentEnv(ctx, cockpit);
+      if (repaired) {
+        await ctx.runner.capture('launchctl', ['bootout', `gui/${uid}/${cockpit.name}`]);
+      }
+      // A previous deploy can have repaired the file before bootstrap failed.
+      if (repaired || (existsSync(cockpit.path) && (await ctx.runner.capture('launchctl', ['print', `gui/${uid}/${cockpit.name}`])).code !== 0)) {
+        await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, 'the cezar cockpit agent');
+      }
       ctx.ui.info('Redeploying — restarting the cezar cockpit.');
       const cezarCode = await ctx.runner.interactive('launchctl', ['kickstart', '-k', `gui/${uid}/${cockpit.name}`]);
       if (cezarCode !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${cockpit.name}\`.`);

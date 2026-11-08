@@ -288,12 +288,35 @@ suffixes. Tests, testkits, fixtures, plain assignments and deletes are exempt.
 Compound assignments and updates remain reads. Helper calls require literal
 suffixes; `cez/undocumented-env-name` derives both names from them.
 
-`product-env-read.baseline.json` records the initial inventory by file, access
-form and name for hearsay-tools/cezarion#2970. Remaining source reads and runner
-scripts belong to hearsay-tools/cezarion#2971. CI rejects baseline growth; lint
-rejects stale counts. Convert reads and shrink or remove their entries. Never
-add an allowance. `legacyEnvNames(env)` collects old names independently of
-reads so boot can also report shadowed, empty and retired settings without values.
+`product-env-read.baseline.json` is empty after hearsay-tools/cezarion#2971.
+The file remains for CI's shrink-only ratchet; no product-setting allowance may grow.
+Permanent non-setting reads live separately in `nonSettingEnvReads` in the lint
+source. Each names its file, computed form, exact expression and reason. They cover
+OS PATH, XDG roots, HOME_LAYOUT_ENV projection, third-party Bedrock/Vertex toggles,
+controller tool-authority transport, generic mock env interpolation/recording and
+benchmark snapshot/restoration. The scanner only exempts anonymous computed sites;
+a literal product-setting name never qualifies. `mockEnvReadExemption` permits
+only `CEZ_MOCK_*` controls in `packages/cezar/scripts/mock-*.mjs`. These names
+belong to fixtures, even though the scripts ship in the package. Mock reads of
+real product settings still use the shared helper. Tests pin each exemption and
+reject named product reads and altered expressions in those same files.
+
+`legacyEnvNames(env)` collects old names independently of reads so boot can also
+report shadowed, empty and retired settings without values. The generated legacy
+launcher shell keeps its explicit permanent `CEZ_HOME` fallback (spec section 4).
+
+Computed-key resolution accepts only string literals, static templates and immutable
+literal aliases. Member access, calls, mutable bindings, cycles and duplicate or
+shadowed binding names remain unknown computed reads. REMOTE uses the explicit
+`remoteEnvEnabled` accessor: either prefix's exact `1` keeps hosted mode enabled,
+including for old CEZ-only service files awaiting their next deploy.
+
+Native shell controls use `shellProductEnv`: DESKTOP, SUPERVISED, SUPERVISOR_PID,
+SUPERVISOR_STDIN and DISCLAIM_EXEC. A defined CEZ value wins, including empty;
+HSQ is a fallback only when CEZ is absent. Old and new native shells always pin
+CEZ, so inherited HSQ aliases cannot disable supervision or the macOS trampoline.
+P5 must revisit this precedence when it removes the CEZ fallback. This is separate
+from ordinary HSQ-first operator settings (coordinator decision D11).
 
 #### Known limits
 

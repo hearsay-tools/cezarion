@@ -1,3 +1,4 @@
+import { productEnv } from '../../core/product-env.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
@@ -229,7 +230,7 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
     launch.delegation?.instructions,
     host.automationsPart(),
     launch.webhooksPart,
-    artifactInstructions(launch.env.CEZ_ARTIFACTS_DIR),
+    artifactInstructions(productEnv('ARTIFACTS_DIR', launch.env)),
     handoffInstructions({ handoffInjected: launch.handoffInjected, nativeSubagents: reportsNativeSubagents(launch.runner) }),
   );
 }

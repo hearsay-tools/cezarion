@@ -1,3 +1,4 @@
+import { productEnvEntries } from './core/product-env.ts';
 import {
   WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS,
   worktreeSetupConfigSchema,
@@ -134,10 +135,11 @@ export function worktreeSetupEnv(opts: {
   projectRoot: string;
   runId: string;
   tmpEnv: Record<string, string>;
+  rebrand?: boolean;
   source?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   return buildCommandEnv({
-    extraEnv: { ...opts.tmpEnv, CEZ_TASK_ID: opts.runId, CEZ_PROJECT_ROOT: opts.projectRoot },
+    extraEnv: { ...opts.tmpEnv, ...productEnvEntries('TASK_ID', opts.runId, opts.rebrand), ...productEnvEntries('PROJECT_ROOT', opts.projectRoot, opts.rebrand) },
     ...(opts.source ? { source: opts.source } : {}),
   });
 }

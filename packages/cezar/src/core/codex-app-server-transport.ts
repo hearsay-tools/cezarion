@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { fileURLToPath } from 'node:url';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { spawnAgent as nodeSpawn } from './disclaim-spawn.ts';
@@ -20,7 +21,7 @@ interface PendingRequest {
 }
 
 export function resolveCodexExecutable(override?: string): string {
-  return override ?? process.env.CEZ_CODEX_BIN ?? (process.env.CEZ_DRY_RUN === '1'
+  return override ?? productEnv('CODEX_BIN') ?? (productEnv('DRY_RUN') === '1'
     ? fileURLToPath(new URL('../../scripts/mock-codex-app-server.mjs', import.meta.url)) : 'codex');
 }
 
