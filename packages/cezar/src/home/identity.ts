@@ -7,6 +7,7 @@ export type ProductIdentity = {
   command: 'cez' | 'hsq';
   npmPackage: '@wjarka/cezarion' | '@hearsay-tools/squawk';
   npmAlias: 'cezarion' | 'hsq';
+  npmAliasDirectory: 'alias-cezarion' | 'alias-hsq';
   envPrefix: 'CEZ_' | 'HSQ_';
   desktopExecutable: 'cezar-desktop' | 'squawk-desktop';
   desktopAppId: 'tools.hearsay.cezarion' | 'tools.hearsay.squawk';
@@ -16,11 +17,11 @@ export type ProductIdentity = {
 export function productIdentity(rebrand: boolean = REBRAND_SWITCH): ProductIdentity {
   return rebrand ? {
     rebrand, displayName: 'Squawk', command: 'hsq', npmPackage: '@hearsay-tools/squawk',
-    npmAlias: 'hsq', envPrefix: 'HSQ_', desktopAppId: 'tools.hearsay.squawk',
+    npmAlias: 'hsq', npmAliasDirectory: 'alias-hsq', envPrefix: 'HSQ_', desktopAppId: 'tools.hearsay.squawk',
     mobileAppId: 'tools.hearsay.squawk.mobile', desktopExecutable: 'squawk-desktop',
   } : {
     rebrand, displayName: 'Cezarion', command: 'cez', npmPackage: '@wjarka/cezarion',
-    npmAlias: 'cezarion', envPrefix: 'CEZ_', desktopAppId: 'tools.hearsay.cezarion',
+    npmAlias: 'cezarion', npmAliasDirectory: 'alias-cezarion', envPrefix: 'CEZ_', desktopAppId: 'tools.hearsay.cezarion',
     mobileAppId: 'tools.hearsay.cezarion.mobile', desktopExecutable: 'cezar-desktop',
   };
 }
@@ -29,7 +30,8 @@ export function productIdentity(rebrand: boolean = REBRAND_SWITCH): ProductIdent
 export const BINARY_NAMES = ['cezarion', 'cez', 'hsq'] as const;
 export type BinaryName = typeof BINARY_NAMES[number];
 
-/** Read-only launch identities; npm package naming belongs to P3c. */
+/** Accepted launch identities during the package deprecation window. */
 export const NPM_LAUNCH_PACKAGES = [
-  '@wjarka/cezarion', 'cezarion', '@hearsay-tools/squawk', 'hsq',
+  productIdentity(false).npmPackage, productIdentity(false).npmAlias,
+  productIdentity(true).npmPackage, productIdentity(true).npmAlias,
 ] as const;

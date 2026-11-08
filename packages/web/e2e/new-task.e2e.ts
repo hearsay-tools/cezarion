@@ -196,11 +196,9 @@ describe('the full-screen /new against a live dry-run server', () => {
     expect(browser.url()).toBe(`${baseUrl}${scoped('/new')}`)
     expect(browser.text('h1')).toBe('What should the agent work on?')
     expect(browser.isVisible('[data-route="new"] [data-slot="composer"]')).toBe(true)
-    expect(
-      browser.evaluate(
-        `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
-      ),
-    ).toBe(true)
+    browser.waitForFunction(
+      `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
+    )
     expect(browser.count('[data-slot="suggested-chip"]')).toBe(0)
   })
 
@@ -352,7 +350,7 @@ describe('the full-screen /new against a live dry-run server', () => {
     expect(uiState.lastTask).toEqual({ source: 'skill', ref: 'spec-writer' })
 
     // The thread really rendered (the run parks at waiting under the dry-run mock).
-    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"] [data-slot="composer"] textarea') !== null`)
   }, 90_000)
 
   it('back on /new the skill is gone with the task it ran; iPhone hero screenshot', () => {
@@ -361,6 +359,7 @@ describe('the full-screen /new against a live dry-run server', () => {
     browser.fill('[data-slot="composer"] textarea', 'Draft a spec for the new-task hero e2e.')
     browser.click('[aria-label="Start task"]')
     browser.waitForFunction(`location.pathname.startsWith('${scoped('/tasks/')}')`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"]') !== null && document.querySelector('[data-route="new"]') === null`)
     browser.click(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)
     // The started skill does NOT follow the user into the next task — the whole point of the
     // empty state. A fresh composer picks nothing and shows the invitation. Waiting on the
@@ -420,7 +419,7 @@ describe('the full-screen /new against a live dry-run server', () => {
       expect.objectContaining({ id: 'lint-fix', name: 'lint-fix', skill: 'lint-fix', prompt: '{{task}}' }),
     )
     // The thread really rendered (the run parks at waiting under the dry-run mock).
-    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"] [data-slot="composer"] textarea') !== null`)
   }, 90_000)
 })
 

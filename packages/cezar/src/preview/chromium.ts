@@ -11,6 +11,7 @@ import type { Readable, Writable } from 'node:stream';
 import { z } from 'zod';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { cdpOverPipe, type CdpConnection } from './cdp.ts';
+import { LAUNCH_HANG_GUARD_MS, watchChromiumLaunch, type chromiumProcessProgress } from './chromium-launch-progress.ts';
 
 /**
  * The preview's Chromium: find one, download Chrome for Testing when there is none, launch it
@@ -365,13 +366,14 @@ export class ChromiumError extends Error {
   }
 }
 
+/** Internal marker: retry policy must not depend on user-facing error text. */
+class ChromiumStallError extends ChromiumError {}
+
 const STDERR_TAIL_BYTES = 4096;
 const SANDBOX_FAILURE = /No usable sandbox|zygote_host_impl|setuid sandbox/;
-/** A cold start (fresh profile, loaded machine) can take well over 10 s; CI runners did (#781). */
-const LAUNCH_TIMEOUT_MS = 30_000;
-/** A launch that misses its deadline is killed and tried once more: on a CI runner Chrome stalled
- *  past 30 s before it printed anything, while every launch on a loaded host took 2 s at most
- *  (hearsay-tools/cezarion#1474). Only a timeout is retried; an exit fails at once. */
+/** No observed launch progress for this long means the browser has stalled. */
+const LAUNCH_SILENCE_MS = 30_000;
+/** Retry one silence stall after reaping the child. A progressing launch is never retried. */
 const LAUNCH_ATTEMPTS = 2;
 /** How long a timed-out launch may take to exit after SIGKILL before the retry starts anyway. */
 const KILLED_EXIT_WAIT_MS = 5_000;
@@ -419,7 +421,7 @@ function disablePasswordManagerLeakDetection(profileDir: string): void {
 
 /**
  * Starts headless Chromium with its DevTools on a pipe and resolves once the browser answers
- * `Browser.getVersion` on it. A launch that misses the deadline is killed and tried once more
+ * `Browser.getVersion` on it. A launch that stalls without progress is killed and tried once more
  * (`LAUNCH_ATTEMPTS`); any other failure kills the process and says why at once. While it runs,
  * `CHROMIUM_PID_FILE` in the profile's parent names it. Leak detection is turned off in the profile
  * Preferences before spawn so Chrome's leaked-password dialog cannot freeze preview input
@@ -429,18 +431,18 @@ export async function launchChromium(
   bin: string,
   profileDir: string,
   env: NodeJS.ProcessEnv,
-  opts: { timeoutMs?: number } = {},
+  opts: { /** Silence window; the overall hang guard is independent. */ timeoutMs?: number; readProgress?: typeof chromiumProcessProgress } = {},
 ): Promise<{ proc: ChildProcess; browser: CdpConnection }> {
   mkdirSync(profileDir, { recursive: true });
   disablePasswordManagerLeakDetection(profileDir);
-  const timeoutMs = opts.timeoutMs ?? LAUNCH_TIMEOUT_MS;
+  const timeoutMs = opts.timeoutMs ?? LAUNCH_SILENCE_MS;
   for (let attempt = 1; ; attempt++) {
     try {
-      return await launchOnce(bin, profileDir, env, timeoutMs);
+      return await launchOnce(bin, profileDir, env, timeoutMs, opts.readProgress);
     } catch (error) {
-      if (!(error instanceof ChromiumError) || error.kind !== 'timeout') throw error;
+      if (!(error instanceof ChromiumStallError) || error.kind !== 'timeout') throw error;
       if (attempt >= LAUNCH_ATTEMPTS) {
-        throw new ChromiumError('timeout', error.stderrTail, `Chromium did not answer on its DevTools pipe within ${timeoutMs / 1000} s, twice (${bin})`);
+        throw new ChromiumError('timeout', error.stderrTail, `Chromium was silent for ${timeoutMs / 1000} s, twice (${bin})`);
       }
     }
   }
@@ -448,7 +450,7 @@ export async function launchChromium(
 
 /** One launch attempt. A timed-out attempt is killed and has exited (or had `KILLED_EXIT_WAIT_MS`
  *  to) before it rejects, so a retry does not share the profile with it. */
-async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ proc: ChildProcess; browser: CdpConnection }> {
+async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEnv, timeoutMs: number, readProgress?: typeof chromiumProcessProgress): Promise<{ proc: ChildProcess; browser: CdpConnection }> {
   // fd 3 carries commands into Chromium, fd 4 carries its replies and events out.
   const proc = spawn(bin, chromiumArgs(profileDir, env), { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   const pid = proc.pid;
@@ -462,7 +464,10 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
       rmSync(record, { force: true });
     });
   }
+  const watch = watchChromiumLaunch(pid, timeoutMs, readProgress);
   let tail = Buffer.alloc(0);
+  const stderrProgress = (chunk: Buffer) => { if (chunk.length) watch.progress(); };
+  proc.stderr?.on('data', stderrProgress);
   proc.stderr?.on('data', (chunk: Buffer) => {
     tail = Buffer.concat([tail, chunk]).subarray(-STDERR_TAIL_BYTES);
   });
@@ -484,16 +489,19 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
     wake();
   });
 
-  const fail = (kind: 'timeout' | 'exited', message: string): ChromiumError => {
+  const fail = (kind: 'timeout' | 'exited', message: string, stalled = false): ChromiumError => {
     browser?.close();
     proc.kill('SIGKILL');
     const stderrTail = tail.toString('utf8');
     if (missing) return new ChromiumError('not-installed', stderrTail, message);
-    return new ChromiumError(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message, kind === 'exited' ? ended : {});
+    const ErrorType = stalled ? ChromiumStallError : ChromiumError;
+    return new ErrorType(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message, kind === 'exited' ? ended : {});
   };
 
   const toBrowser = proc.stdio[3] as Writable | null | undefined;
   const fromBrowser = proc.stdio[4] as Readable | null | undefined;
+  const pipeProgress = (chunk: Buffer) => { if (chunk.length) watch.progress(); };
+  fromBrowser?.on('data', pipeProgress);
   const browser = toBrowser && fromBrowser ? cdpOverPipe(toBrowser, fromBrowser) : undefined;
   // The first answer on the pipe is the ready signal; a closed pipe answers with an error.
   let ready = false;
@@ -503,10 +511,10 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
     pipeClosed = !ready;
     wake();
   });
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<void>(resolve => (timer = setTimeout(resolve, timeoutMs)));
-  await Promise.race([changed, deadline]);
-  clearTimeout(timer);
+  const expired = await Promise.race([changed, watch.expired]);
+  watch.stop();
+  proc.stderr?.off('data', stderrProgress);
+  fromBrowser?.off('data', pipeProgress);
   // A browser that dies closes the pipe before `close` reports its exit code: wait for that
   // report, bounded, so the failure says how Chromium ended.
   if (!exit && pipeClosed) {
@@ -517,7 +525,7 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
   }
   if (exit) throw fail('exited', exit);
   if (ready && browser) return { proc, browser };
-  const error = fail('timeout', `Chromium did not answer on its DevTools pipe within ${timeoutMs / 1000} s (${bin})`);
+  const error = fail('timeout', expired === 'hard' ? `Chromium exceeded the ${LAUNCH_HANG_GUARD_MS / 1000} s hang guard (${bin})` : `Chromium was silent for ${timeoutMs / 1000} s (${bin})`, expired === 'stall');
   let killedTimer: NodeJS.Timeout | undefined;
   await Promise.race([closed, new Promise<void>(resolve => (killedTimer = setTimeout(resolve, KILLED_EXIT_WAIT_MS)))]);
   clearTimeout(killedTimer);

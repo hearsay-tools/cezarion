@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { BINARY_NAMES } from '../home/identity.ts';
 import { commandText } from '../home/command.ts';
 /**
@@ -222,7 +223,7 @@ async function linkCommand(dir: string | undefined, use: boolean, home: Home): P
       console.log(`  ✓ now using ${result.id}`);
       console.log('    the desktop app picks it up on its next start (Cmd+Q, reopen) — a running cockpit keeps its version');
     } else {
-      console.log(commandText(`    switch with: cez use ${result.id}  ·  desktop: Cezar ▸ Versions  ·  cockpit: the version chip`));
+      console.log(commandText(`    switch with: cez use ${result.id}  ·  desktop: ${productName('Cezar')} ▸ Versions  ·  cockpit: the version chip`));
     }
     console.log('    rebuild the checkout (npm run build) and restart to run new code — the link needs no refresh\n');
     return 0;

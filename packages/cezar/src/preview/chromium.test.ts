@@ -617,7 +617,7 @@ setInterval(()=>{},1000);`,
     expect(err).toBeInstanceOf(ChromiumError);
     expect(err.kind).toBe('timeout');
     // The owner's diagnostics name the binary, the deadline it missed, and that it missed it twice.
-    expect(err.message).toBe(`Chromium did not answer on its DevTools pipe within 0.4 s, twice (${bin})`);
+    expect(err.message).toBe(`Chromium was silent for 0.4 s, twice (${bin})`);
     const children = spawned.filter(candidate => candidate.spawnfile === bin);
     expect(children).toHaveLength(2);
     // Reaping the killed child is OS work, the same class as the 1 s vi.waitFor default that

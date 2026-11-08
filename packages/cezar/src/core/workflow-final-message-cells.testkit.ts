@@ -12,7 +12,7 @@ import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
-import { IDLE_TIMEOUT_MS, NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
+import { NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
 
 function replyObservationClock() {
   return observationClock(delay => delay === 300 &&
@@ -42,8 +42,6 @@ const nudgeNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && String(e.message).startsWith(NO_WAIT_NUDGE_NOTE));
 const noReplyNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE);
-const autonomousNotes = (events: readonly Record<string, unknown>[]) =>
-  events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
 const lateDoneContent = (events: readonly Record<string, unknown>[]) =>
   events.some(e => {
     if (e.type === 'text') return String(e.text).includes('Filed #543');
@@ -79,7 +77,7 @@ describe('silent-tail seam — mapper emits reasoning/tool with no later message
 }
 
 
-export const WORKFLOW_FINAL_MESSAGE_GROUPS = {'visible-done': ['F1'], 'silent-nudge': ['F2', 'F3'], 'tool-tail': ['F4'], 'accepted-done': ['F5'], 'autonomous': ['F6'], 'ack-delay': ['F7'], 'reply-bound': ['F8'], 'late-reply': ['F9', 'F11'], 'content-budget': ['F10']} as const;
+export const WORKFLOW_FINAL_MESSAGE_GROUPS = {'ack-delay': ['F7'], 'reply-bound': ['F8'], 'late-reply': ['F9', 'F11'], 'content-budget': ['F10']} as const;
 
 export function describeWorkflowFinalMessage(group: keyof typeof WORKFLOW_FINAL_MESSAGE_GROUPS, registration = { describe, it }) {
   const { describe, it } = registration;
@@ -267,76 +265,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
           }, { semaphore, noWaitNudgeReplyMs: 300, ...(gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {}) });
           } finally { if (gateRoot) rmSync(gateRoot, { recursive: true, force: true }); }
-        }, 30_000);
-        continue;
-      }
-      for (const mode of ['fresh', 'continuation'] as const) {
-        it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
-          const semaphore = new WorkspaceSemaphore({ home: testHome() });
-          await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId }) => {
-            if (mode === 'continuation') {
-              manager.enqueueOwnedRun(runId);
-              await waitFor(() => store.getRun(runId)?.status === 'waiting');
-              manager.finish(runId);
-              await waitFor(() => !manager.isActive(runId));
-            }
-            if (row.id === 'F6') store.updateRun(runId, { autonomous: true });
-            const startSeq = store.readEvents(runId).length;
-            const idleClock = row.id === 'F6' ? observationClock(delay => delay === IDLE_TIMEOUT_MS) : undefined;
-            if (mode === 'continuation') expect(manager.continueRun(runId, { text: promptFor(backend, row.scenario) }).ok).toBe(true);
-            else manager.enqueueOwnedRun(runId);
-            if (row.id === 'F6') {
-              await waitFor(() => autonomousNotes(store.readEvents(runId).slice(startSeq)).length >= 1);
-              expect(store.getRun(runId)?.status).toBe('running');
-              expect(semaphore.busy()).toBe(1);
-              try {
-                await idleClock!.advance(IDLE_TIMEOUT_MS);
-                expect(store.getRun(runId)?.status).toBe('running');
-                expect(semaphore.busy()).toBe(1);
-                expect(store.readEvents(runId).slice(startSeq).some(event => event.type === 'lifecycle' &&
-                  String(event.message).includes('of inactivity'))).toBe(false);
-              } finally { idleClock!.restore(); }
-              expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-              return;
-            }
-            await waitFor(() => store.getRun(runId)?.status === 'waiting' || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? ''));
-            const events = store.readEvents(runId).slice(startSeq);
-            const notes = nudgeNotes(events);
-            const status = store.getRun(runId)?.status;
-            if (row.id === 'F1') {
-              expect(status).toBe('done');
-              expect(notes).toHaveLength(1);
-              expect(autonomousNotes(events)).toHaveLength(0);
-            } else if (row.id === 'F2') {
-              expect(status).toBe('waiting');
-              expect(status).not.toBe('done');
-              expect(notes).toHaveLength(1);
-              expect(autonomousNotes(events)).toHaveLength(0);
-            } else if (row.id === 'F3') {
-              const all = store.readEvents(runId);
-              expect(status).toBe('waiting');
-              expect(status).not.toBe('done');
-              expect(all.some(e => e.type === 'lifecycle' && String(e.message).includes('goal achieved'))).toBe(false);
-              expect(notes).toHaveLength(1);
-              expect(autonomousNotes(events)).toHaveLength(0);
-              expect(all.some(e => {
-                if (e.type !== 'item.completed') return false;
-                const item = e.item as { kind?: string; text?: string; output?: string } | undefined;
-                // Cursor print suppresses reasoning natively. Its tool output
-                // carries the reasoning text without turning it into v1 text.
-                return backend === 'cursor'
-                  ? item?.kind === 'tool' && (item.output ?? '').includes('cezar_done')
-                  : item?.kind === 'reasoning' && (item.text ?? '').includes('cezar_done');
-              })).toBe(true);
-            } else if (row.id === 'F4') {
-              expect(status).toBe('waiting');
-              expect(notes).toHaveLength(1);
-              expect(autonomousNotes(events)).toHaveLength(0);
-            } else {
-              expect(status).toBe('done');
-              expect(notes).toHaveLength(0);
-            }
-          }, { semaphore });
         }, 30_000);
       }
     }

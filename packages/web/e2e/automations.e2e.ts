@@ -135,6 +135,7 @@ describe('scheduled automations on a default-on fixture server', () => {
 
     browser.click('button[type="submit"]')
     browser.waitForFunction(`location.pathname === '${scoped('/automations')}'`)
+    browser.waitForFunction(`document.querySelector('[data-route="automations"]') !== null`)
     // Poll the server for the row the UI just saved: paused, with no run armed yet.
     const created = await pollFor(async () => (await listed()).find((item) => item.name === name),
       () => `automation ${name} never appeared in the list`, { timeoutMs: 15_000, intervalMs: 250 })
@@ -249,6 +250,7 @@ describe('scheduled automations on a default-on fixture server', () => {
     browser.screenshot(`${shotsDir}/automations-once-editor-360.png`, { viewport: true })
     browser.press('Enter')
     browser.waitForFunction(`location.pathname === '${scoped('/automations')}'`)
+    browser.waitForFunction(`document.querySelector('[data-route="automations"]') !== null`)
     interface OnceEntry { id: string; name: string; enabled: boolean; schedule?: { type: string; at?: string; timeZone?: string }; archived?: { outcome: string } }
     const onceListed = async (query = '') =>
       ((await fetch(`${base}/api/v1/automations${query}`).then((response) => response.json())) as { automations: OnceEntry[] }).automations

@@ -7,6 +7,7 @@ import type {
   AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport,
   AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions,
 } from './agent-runner.ts';
+import { RUNNER_FACTS } from './runner-facts.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
 import { cursorPrintToolGrantArgs } from './runner-tool-grants.ts';
 import { buildChildEnv } from './agent-env.ts';
@@ -50,13 +51,17 @@ export interface CursorPrintRunnerOptions {
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
 }
 
+/** Cursor's input delivery: every Cursor session runs on print (hearsay-tools/cezarion#1267). */
+export const CURSOR_PRINT_INPUT_DELIVERY: InputDelivery = {
+  mode: 'boundary', consumption: 'unobservable', acknowledgement: 'model-work', humanInputAtTurnEnd: 'always-held', via: 'next exact-resume print process',
+};
+
 export class CursorPrintRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'in-thread' as const;
-  readonly inputDelivery: InputDelivery = {
-    mode: 'boundary', consumption: 'unobservable', via: 'next exact-resume print process',
-  };
+  readonly facts = RUNNER_FACTS.cursor;
+  readonly inputDelivery = CURSOR_PRINT_INPUT_DELIVERY;
   private lastSession?: AgentSession;
   constructor(private readonly options: CursorPrintRunnerOptions = {}) {}
   async interrupt(): Promise<void> { this.lastSession?.interrupt(); }

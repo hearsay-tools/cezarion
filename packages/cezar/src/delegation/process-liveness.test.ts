@@ -1,3 +1,4 @@
+import { ABSENT_PROCESS_PID } from './process-enumeration.testkit.ts';
 import childProcess, { spawn } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -117,7 +118,7 @@ describe('process liveness (#469)', () => {
       expect(processesWithCwdUnder(dir)).toEqual([]);
       expect(inspectGeneration({ paths: [dir] })).toEqual({ liveness: 'gone', pids: [] });
       for (const controller of [`${oldBoot}:100`, `${boot}:100`]) {
-        const input = { paths: [dir], pathsComplete: true, record: { generation: 'g', controller: { pid: 2147483001, startToken: controller }, processes: [] } };
+        const input = { paths: [dir], pathsComplete: true, record: { generation: 'g', controller: { pid: ABSENT_PROCESS_PID, startToken: controller }, processes: [] } };
         expect(probeGeneration(input)).toBe('gone');
         // A same-boot crash settles as gone: nothing is abandoned any more.
         expect(inspectExecutionGeneration(input)).toEqual({ liveness: 'gone', pids: [] });
@@ -140,7 +141,7 @@ describe('process liveness (#469)', () => {
     vi.resetModules();
     const { inspectExecutionGeneration: executionProbe } = await import('./process-liveness.ts');
     const input = { paths: [dir], ...(shape === 'absent record' ? {} : { record: {
-      generation: 'g', controller: { pid: 2147483001, startToken: token }, processes: [],
+      generation: 'g', controller: { pid: ABSENT_PROCESS_PID, startToken: token }, processes: [],
     } }) };
     try {
       expect(executionProbe(input)).toEqual({ liveness: 'alive', pids: [holder.pid] });
@@ -155,7 +156,7 @@ describe('process liveness (#469)', () => {
     const recorded = await nonDumpableHolder(tmpdir()); procScope.entries = [String(recorded.pid)];
     const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
     const input = (startToken: string | undefined) => ({ paths: [dir], pathsComplete: true, record: {
-      generation: 'g', controller: { pid: 2147483001, startToken: `${boot}:100` },
+      generation: 'g', controller: { pid: ABSENT_PROCESS_PID, startToken: `${boot}:100` },
       processes: [{ pid: recorded.pid, ...(startToken ? { startToken } : {}) }],
     } });
     try {
@@ -182,11 +183,11 @@ describe('process liveness (#469)', () => {
       expect(probeGeneration({ paths: [dir] })).toBe('alive');
       const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
       expect(inspectExecutionGeneration({ paths: [dir], pathsComplete: true,
-        record: { generation: 'g', controller: { pid: 2147483001, startToken: `${boot}:100` }, processes: [] } }))
+        record: { generation: 'g', controller: { pid: ABSENT_PROCESS_PID, startToken: `${boot}:100` }, processes: [] } }))
         .toMatchObject({ liveness: 'alive', pids: [proc.pid] });
       // Reboot proof settles execution only; the resource proof still sees an actual cwd holder.
       expect(probeGeneration({ paths: [dir],
-        record: { generation: 'g', controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [] } })).toBe('alive');
+        record: { generation: 'g', controller: { pid: ABSENT_PROCESS_PID, startToken: `${oldBoot}:100` }, processes: [] } })).toBe('alive');
       // One scan pass over several roots (#469: worktree plus scratch).
       expect(processesWithCwdUnder([`${dir}-sibling`, nested])).toContain(proc.pid);
     } finally { proc.kill('SIGKILL'); await exited; }
@@ -216,7 +217,7 @@ describe('process liveness (#469)', () => {
       // Even with a previous-boot controller, a verified live record blocks independently of cwd.
       for (const inspect of [probeGeneration, (input: Parameters<typeof inspectExecutionGeneration>[0]) => inspectExecutionGeneration(input).liveness]) {
         expect(inspect({ paths: [dir], record: { generation: 'g',
-          controller: { pid: 2147483001, startToken: `${oldBoot}:100` }, processes: [{ pid: proc.pid!, startToken: token }] } })).toBe('alive');
+          controller: { pid: ABSENT_PROCESS_PID, startToken: `${oldBoot}:100` }, processes: [{ pid: proc.pid!, startToken: token }] } })).toBe('alive');
         expect(inspect({ paths: [dir], record: { generation: 'g', controller: { pid: proc.pid!, startToken: token }, processes: [] } })).toBe('alive');
       }
       // This process as controller is never "alive": the in-memory execution map owns it.

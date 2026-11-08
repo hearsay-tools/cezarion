@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { Hono, type Context, type Next } from 'hono';
@@ -14,7 +15,7 @@ import { VoiceEngineError, type DecisionEngine } from './engine.ts';
 import { readPendingHumanAsk } from './pending-ask.ts';
 
 /** The one refusal both routes answer while voice mode is off (capability `voice`). */
-export const VOICE_OFF = 'Voice mode is off: set CEZ_VOICE=1 and TYPESAFE_API_KEY, then restart cezar';
+export const VOICE_OFF = `Voice mode is off: set CEZ_VOICE=1 and TYPESAFE_API_KEY, then restart ${productName('cezar')}`;
 
 export interface VoiceRouteDeps {
   voiceEnabled(): boolean;

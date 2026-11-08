@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { constants } from 'node:fs';
 import { open, realpath, lstat, type FileHandle } from 'node:fs/promises';
@@ -107,7 +108,7 @@ export async function loadFileLink(ctx: Context): Promise<Loaded> {
   const root = allowedRoot(target, ctx.workingDirectory, ctx.projectRoot);
   if (!root) return publishedArtifact(ctx, target);
   if (privatePath(root, target)) {
-    return unavailable('Git internals and private Cezar state are not available through file links.');
+    return unavailable(`Git internals and private ${productName('Cezar')} state are not available through file links.`);
   }
   try {
     return await readLinkedFile(ctx, root, target, working);

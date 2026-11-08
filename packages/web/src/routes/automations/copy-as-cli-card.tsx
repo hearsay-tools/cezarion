@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { productCommand } from '@/lib/product-name'
 import { cliOf } from '@/lib/automation-cli'
 import { useActiveProjectId } from '@/lib/project-router'
 
@@ -46,7 +47,7 @@ export function CopyAsCliCard({ draft }: { draft: AutomationDraft }) {
       <p role="status" className="mbs-2 text-xs break-words text-muted-foreground">
         {state === 'failed'
           ? 'Could not copy — select the line and copy it by hand.'
-          : <>The definition Save would create. <code>cez automation schema</code> prints its shape.</>}
+          : <>The definition Save would create. <code>{productCommand()} automation schema</code> prints its shape.</>}
       </p>
     </section>
   )

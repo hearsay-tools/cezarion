@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { randomUUID } from 'node:crypto';
@@ -89,7 +90,7 @@ export const OPERATIONS: Record<string, Operation> = {
       'archive-when-done': { type: 'boolean', help: '  Archive after Done (default off); with --auto-merge-pr, merge first.' },
       'auto-merge-pr': { type: 'boolean', help: '      Merge the task PR after Done when current-head CI and GitHub rules pass (default off); may mark a draft ready.' },
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
-      'no-workers': { type: 'boolean', help: '       Do not let this task start or resume Cezar workers (default on).' },
+      'no-workers': { type: 'boolean', help: `       Do not let this task start or resume ${productName('Cezar')} workers (default on).` },
       'no-messaging': { type: 'boolean', help: '     Block new peer-task messages; worker messages and replies to earlier requests stay (default on).' },
       wait: { type: 'boolean', help: '               Then wait until the task needs you or ends (see wait).' },
       until: UNTIL_FLAG,
@@ -221,7 +222,7 @@ export function taskHelp(operation?: string): string {
   for (const name of names) for (const [flag, spec] of Object.entries(OPERATIONS[name]!.flags)) flags.set(flag, spec);
   for (const [flag, spec] of Object.entries(COMMON)) flags.set(flag, spec);
   return [
-    'cezar task — start, watch and steer cockpit tasks from the terminal', '', 'Usage:',
+    `${productName('cezar')} task — start, watch and steer cockpit tasks from the terminal`, '', 'Usage:',
     commandText('  cez task [--url <origin> | --repo <dir>] <operation> …'),
     ...names.flatMap((name) => {
       const op = OPERATIONS[name]!;

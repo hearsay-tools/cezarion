@@ -18,7 +18,6 @@ export const MONITORING_ORDER_CRITERIA = [
   { id: 'M13', scenario: 'turn-messages', name: 'fresh ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M14', scenario: 'turn-messages', name: 'Continue ordinary markerless prose questions keep autonomous nudges' },
   { id: 'M17', scenario: 'turn-messages', name: 'fresh a clean session close with an accepted worker wait open parks the run on it' },
-  { id: 'M23', scenario: 'turn-messages', name: 'an autonomous cezar_ask followed by acknowledgement is refused, and the run continues' },
 ] as const;
 
 // Agent-echo follows a real owned-input ACK on each adapter's existing wire.

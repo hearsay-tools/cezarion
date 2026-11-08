@@ -77,13 +77,60 @@ interface AgentRunner {
   interrupt(): Promise<void>;
   readonly systemPromptOnResume: 'resent' | 'in-thread'; // required (hearsay-tools/cezarion#790)
   readonly inputDelivery?: InputDelivery; // absent = boundary (hearsay-tools/cezarion#505)
+  readonly facts?: RunnerFacts;           // this runner's RUNNER_FACTS row (hearsay-tools/cezarion#2991)
 }
-interface InputDelivery {
-  readonly mode: 'steer' | 'boundary';                 // mid-turn admission, or refused while busy
-  readonly consumption: 'observable' | 'unobservable'; // does the wire show the model read it?
-  readonly via: string;                                // the native mechanism
+type InputDelivery = {
+  readonly consumption: 'observable' | 'unobservable';        // does the wire show the model read it?
+  readonly acknowledgement: 'write' | 'response' | 'model-work'; // what resolves sendAgentMessage
+  readonly via: string;                                        // the native mechanism
+} & (
+  | { readonly mode: 'steer'; readonly humanInputAtTurnEnd: 'never-held' | 'held-when-late' | 'always-held' } // admitted mid-turn
+  | { readonly mode: 'boundary'; readonly humanInputAtTurnEnd: 'always-held' }  // refused while busy
+);
+interface RunnerFacts {                  // core/runner-facts.ts, one row per runner id
+  readonly nativeAsk: 'answerable' | 'auto-skipped' | 'none';
+  readonly nativeSubagents: 'reported' | 'unreported' | 'turn-held';
+  readonly nativeTimerTool: string | null;
+  readonly costReport: 'cumulative' | 'per-turn';
 }
 ```
+
+- **Declared facts, not runner ids** (hearsay-tools/cezarion#2991). Shared code outside
+  `packages/cezar/src/core/` reads what a runner declares; it never compares runner ids to
+  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in three places: `systemPromptOnResume`,
+  `inputDelivery`, and its row of `RUNNER_FACTS` (`core/runner-facts.ts`). The table is keyed
+  by runner id because shared code often holds only a `RunnerId` before it builds the runner.
+  Each runner class exposes its row as `facts`, and `core/runner-facts.test.ts` checks every
+  runner `createRunner` builds against the table. Parity exemptions that follow a fact select
+  their runners from the same table (`runnersWhere`), so a row and the code cannot disagree.
+  - `inputDelivery.acknowledgement`: `write` when the local pipe write resolves
+    `sendAgentMessage` (Claude stdin), so the provider can neither delay nor reject it;
+    `response` when a native response does (the Codex RPC result, the OpenCode HTTP
+    acknowledgement, the Pi and OMP prompt response id); `model-work` when the first
+    model-work frame of the turn the input opens does (Cursor print), so no turn ends before
+    its input is acknowledged.
+  - `inputDelivery.humanInputAtTurnEnd`: whether a human `sendMessage` written while a turn
+    runs can still be held, unread, when that turn ends; turn-end code then keeps the session
+    for the turn it opens. `never-held`: always read inside the running turn (OMP, whose turn
+    ends only at `session_settled`, and that needs an empty steer queue). `held-when-late`: read
+    in the running turn unless it arrives after the turn's last model call, then held into the
+    next turn (Claude runs such a stdin line as its next queued turn; Codex starts a turn for a
+    steer the turn did not echo or refused at its end; Pi reads a late steer as its next
+    prompt). `always-held`: queued until the running turn ends, then it opens the next turn
+    (OpenCode posts a human prompt only after the busy turn goes idle; Cursor print). A
+    boundary runner has no mid-turn input channel, so the type fixes it to `always-held`. A
+    message written after the harness already ended the turn natively is not mid-turn input.
+  - `nativeAsk`: `answerable` when the wire reports the harness's own question and Cezar
+    routes the answer back (Codex, OpenCode); `auto-skipped` when the harness answers it
+    itself before a human can (Cursor print); `none` when the agent asks only through
+    `cezar_ask`.
+  - `nativeSubagents`: `reported` when the wire reports a backgrounded child's start and end,
+    so Cezar waits on it; `unreported` when it sends no child signal; `turn-held` when the
+    parent turn stays open until every child returns.
+  - `nativeTimerTool`: the native tool that schedules the session's own wake-up (Claude's
+    `ScheduleWakeup`), the equivalent of a `cezar_wait` timer; null when none.
+  - `costReport`: `cumulative` when each cost report is the session total (Claude
+    `total_cost_usd`), which usage accounting turns into deltas; `per-turn` otherwise.
 
 - `run()` is a one-shot convenience; `startSession()` is the real contract.
 - `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
@@ -1432,7 +1479,7 @@ native permission request carry P1's exemption for each row.
 **P9** (hearsay-tools/cezarion#1294) routes another MCP server's tool approval
 from the native Codex mock through `RunManager` and the cockpit HTTP decision
 route; accept and decline each reach Codex as the exact elicitation reply. The
-mock models Codex's MCP tool gate, so Codex rows of `ci-wait-{fresh,continued,recovered}-parity`,
+mock models Codex's MCP tool gate, so the Codex U1 row of `workflows/waits-parity`,
 `ci-tools` H1 and U0 fail if cezar's own server loses `approve`. Runners whose
 wires carry no MCP tool approval request have named exemptions.
 
@@ -1457,6 +1504,8 @@ normalized-event injection. U0, in `core/ci-tools-wait-cancel.test.ts` and `core
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
 `workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from semantic part files in `WAIT_PARITY_FILES`. Cursor mixed rows and Cursor/OpenCode U27 turn-end entry rows use the smaller files in `WAIT_PARITY_FAMILIES`; the original entries files retain the refusal rows. The criteria and exactly-once full-row guards run in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each settled outcome's word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
+A Continue's registration for the same PR returns the open CI wait, a restart recovery keeps
+it, and each session gets its own tool descriptor name.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
 delivered. U3 delivers a human message during a CI wait, keeps the wait open and
@@ -1573,8 +1622,9 @@ and pins that an agent question still blocks Finish of a root with workers; a ro
 workers finishes and closes it (hearsay-tools/cezarion#2784). U5d pins that the no-wait wait raises no
 question (its `askSeq` is its note, and no gate fact is pending), and that a timer the agent
 registers cancels it into `lastWaits` and parks the run as monitoring. U18 finishes a run parked
-on the agent's `cezar_ask` card, with its session open and with it closed: Finish records
-`human-ask-closed` for that question and no `human-input-delivered`, so no question stays pending.
+on the agent's `cezar_ask` card, with its session open, in a Continue that asked again, and with
+it closed: Finish records `human-ask-closed` for that question and no `human-input-delivered`, so
+no question stays pending. With a live session, fresh or continued, the later step stays pending.
 U17 sends a prose question
 with no wait, which gets the nudge, then the same question beside a `cezar_wait` timer, which
 parks the run on that timer as monitoring with no gate note. U15 nudges an autonomous run with the autonomous
@@ -1891,16 +1941,18 @@ retain their default cap. Longer authored limits override that cap, while defaul
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
 manager, runners, transports and terminal signals remain real.
 
-Intermediate question rows **Q1 and Q3–Q10** (hearsay-tools/cezarion#427) live in
+Intermediate question rows **Q4–Q6 and Q8** (hearsay-tools/cezarion#427) live in
 `core/workflow-ask-cells.testkit.ts` and the shared parity guard. Every
 `RUNNER_IDS` adapter drives the `cezar-ask` scenario, one `cezar_ask` call over its
-native wire. No wire exemption is needed. The rows cover same-session answers and
-trailing checks (Q1), final interactive asks (Q3), idle close and a second question
-on Continue (Q4), disk-round-trip restart recovery (Q5), cancellation (Q6), Finish
-on fresh and continued sessions (Q7), authored timeouts (Q8), an autonomous
-intermediate `cezar_ask` that the tool refuses while the tail runs with no human wait
-(Q9), and clean unanswered session exit (Q10). Unrun checks remain pending on
-stop/failure; an unanswered clean close retains durable waiting and releases capacity.
+native wire. No wire exemption is needed. The rows cover idle close and a second
+question on Continue, whose clean close before its answer keeps the question and the
+tail, and a later answer runs the trailing check (Q4); disk-round-trip
+restart recovery (Q5), cancellation (Q6) and authored timeouts (Q8). Unrun checks
+remain pending on stop/failure. hearsay-tools/cezarion#2991 retired Q1, Q3, Q7, Q9
+and Q10, which repeated wait rows: U7h, U7k and U7d pin the ask, its answer and the
+answering done; U18 pins Finish on a parked question, fresh and after a Continue, with the
+later step left pending; U9h pins a clean close with a question open; Q4 pins that close
+after a Continue; A3/A4 pin the autonomous refusal.
 
 
 Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.testkit.ts`
@@ -2043,18 +2095,17 @@ unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the 
 and runs as a fresh turn after the `cezar_ask` park while the card is pending — the inverted
 H2 assertion does not pin that.
 
-No-wait nudge rows **F1–F11** live in
+No-wait nudge rows **F7–F11** live in
 `core/workflow-final-message-cells.testkit.ts` and the same parity guard. They were written for the
 final-message nudge (hearsay-tools/cezarion#544), which the no-wait nudge absorbed
 (hearsay-tools/cezarion#1234): a silent tail is a turn end with no wait, so it gets the same one
-nudge, reply bound and settled outcome. Every adapter covers a reasoning-or-tool tail with no later
-assistant message, on fresh and Continue paths: one nudge that can complete with a visible
-`cezar_done` (F1), a still-silent nudge that opens Cezar's no-wait human wait (#119, F2),
-reasoning that names `cezar_done` never completing the run (#399, F3), a done-less
-message-then-tool tail getting exactly one nudge (F4), `cezar_done` with zero nudge notes (F5),
-and an autonomous silent tail that stays `running` with a held
-slot and no idle timer at the first `continuing without pausing` note, with zero no-wait nudge
-notes. F7 covers the park-after-ACK site: a silent-tail turn that ends while its agent-input ACK is
+nudge, reply bound and settled outcome. The turn-end decision reads no text and no tail shape
+(`classifyTurnEnd`), so hearsay-tools/cezarion#2991 retired F1–F6, which repeated wait rows on
+fresh and Continue paths: U5 and U27 pin the one nudge and the no-wait human wait, U7d and U6s
+pin that a turn with an accepted `cezar_done` gets no nudge, and U15 and A1/A2 pin the autonomous
+wording; `workflows/run/turn-boundary-timer-order.test.ts` pins that a delivered autonomous nudge
+arms no idle bound. The silent-tail seam row (`describeSilentTail`) still pins each mapper's
+reasoning-or-tool tail. F7 covers the park-after-ACK site: a silent-tail turn that ends while its agent-input ACK is
 still pending produces exactly one `no wait or done — reminding the agent once` note and a
 no-wait nudge outcome after the ACK.
 Only OpenCode's HTTP ACK is independent of the SSE turn; the other adapters have named executable
@@ -2104,10 +2155,10 @@ that another runner constructs or attributes that event correctly.
 **Two tiers.** The seam tier drives each real runner class against that
 backend's own offline mock and asserts over the v1 and v2 streams plus the
 settled result. The run tier drives a real `RunManager` run in a temp git repo.
-The second tier is not redundant: `ask.requested` is emitted by the RUNNER for
-codex, opencode and cursor (`codex-app-server-runner.ts`, `opencode-server-runner.ts`, `cursor-acp-runner.ts`)
-and by `workflows/run.ts` for claude and pi, and whether a provider failure
-fails the run or parks it is decided in the orchestrator either way. Provider
+The second tier is not redundant: `workflows/run/` (`human-waits.ts`, `turn-settler.ts`)
+emits `ask.requested` for every runner's `cezar_ask` card, while codex and opencode also emit it
+from the runner for a native ask (`codex-app-server-runner.ts`, `opencode-server-runner.ts`),
+and whether a provider failure fails the run or parks it is decided in the orchestrator either way. Provider
 failures, asks and park declarations are only uniform above the seam.
 
 **Shared scenario names, per-backend spellings.** Every mock is already driven by
@@ -2329,9 +2380,8 @@ and checks that a later monitoring turn carries no stale attention. M18 keeps a 
 across a routine acknowledgement, idle close and delivered answer. M21 pins that `cezar_done` is
 refused with `human_question_pending` while the turn's question is pending, and the question
 stays. Ordinary done-less autonomous turns keep their nudge policy (M13/M14). M17 pins that a
-clean session close with an accepted worker wait open parks the run on it. M23 pins that an
-autonomous `cezar_ask` is refused with `autonomous_run` on fresh and Continue sessions, registers
-nothing, and the run continues to done. M26/M27 extend owned-input ACK coverage with live workers;
+clean session close with an accepted worker wait open parks the run on it. The autonomous
+`cezar_ask` refusal is pinned once, by A3/A4 (hearsay-tools/cezarion#2991). M26/M27 extend owned-input ACK coverage with live workers;
 the existing executable Claude/Cursor pipe-write exemptions keep their native
 acceptance-before-response proof. The native rows also assert CLI attention-wait and webhook
 projections. Cockpit grouping and notification transitions remain consumers of the same contract
@@ -2705,8 +2755,12 @@ To be first-class:
    skill-prefix dedupe policy — in-thread runners still re-prepend the whole
    `spec.systemPrompt` (extra prompt + handoff) on every resumed opening turn. Required
    — a new runner fails to compile until it decides. Declare
-   `inputDelivery` (§1) from a live probe of mid-turn input, and pass the §7 I1/I2
-   rows or declare their exemption.
+   `inputDelivery` (§1) from a live probe of mid-turn input, including its
+   `acknowledgement` and `humanInputAtTurnEnd`, and pass the §7 I1/I2
+   rows or declare their exemption. Add the runner's row to `RUNNER_FACTS`
+   (`core/runner-facts.ts`, §1) and expose it as `facts`; the table's type fails to
+   compile until the row exists. Shared code reads these facts, so a new runner never
+   needs a runner-id branch outside `packages/cezar/src/core/`.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in
    `ui-events.ts` **and its mirror** `packages/api-client/src/protocol/ui-events.ts` (the
@@ -3060,7 +3114,7 @@ withheld-ACK tests cover completion state and barrier bypass for both diagnostic
 
 ### CI conflict observation parity (hearsay-tools/cezarion#1339)
 
-R81–R84 in `workflows/ci-wait-conflict-{fresh,continued,recovered,cancellation}-parity.test.ts` exercise every
+R81–R83 in `workflows/ci-wait-conflict-{fresh,continued,recovered}-parity.test.ts` exercise every
 `RUNNER_IDS` native mock through `HARNESS_ADAPTERS`, with a real GitHub client
 and supervisor reading explicit `CONFLICTING` metadata from a separate gh wire.
 R81 covers a fresh session, R82 a Continue, and R83 restart recovery without an
@@ -3070,5 +3124,5 @@ one conflict observation over the native prompt channel. R83 also reboots with
 a resolved but undelivered result after the external PR becomes clean: the saved
 observation must survive without reclassification. No timer or repair authority
 is introduced.
-R84 cancels an open wait while native gh checks are blocked, then attempts late
-resolution and proves there is no lifecycle input or native conflict prompt.
+A cancelled wait ignores a late result of any outcome: U4 and
+`workflows/ci-wait-list-registration.test.ts` pin that, so hearsay-tools/cezarion#2991 retired R84.

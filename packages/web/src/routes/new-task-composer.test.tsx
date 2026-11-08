@@ -174,6 +174,28 @@ describe('the hero surface', () => {
     await waitFor(() => expect(document.activeElement).toBe(textarea()))
   })
 
+  it.each([false, true])('restores sidebar focus after providers load unless the user moved it: %s', async (moveFocus) => {
+    const providers = deferredJson<typeof PROVIDERS_CONNECTED>()
+    serve({ providerStatus: providers.fetch })
+    const anchor = document.createElement('a')
+    anchor.href = '/new'
+    document.body.append(anchor)
+    anchor.focus()
+    const view = renderNewTask()
+    try {
+      expect(textarea().disabled).toBe(true)
+      expect(document.activeElement).toBe(anchor)
+      const other = screen.getByRole('checkbox', { name: 'Autonomous' })
+      if (moveFocus) other.focus()
+      await act(async () => { providers.release(PROVIDERS_CONNECTED) })
+      await waitFor(() => expect(textarea().disabled).toBe(false))
+      await waitFor(() => expect(document.activeElement).toBe(moveFocus ? other : textarea()))
+    } finally {
+      view.unmount()
+      anchor.remove()
+    }
+  })
+
   it('does not render suggestion chips — design.pen 1A–1D have none', async () => {
     serve()
     renderNewTask()

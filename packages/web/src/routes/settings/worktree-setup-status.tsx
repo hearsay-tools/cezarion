@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import type { ReactNode } from 'react'
 
 import { REMOTE_SETTINGS_ENABLE_COMMAND } from './remote-settings-notice'
@@ -31,7 +32,7 @@ export function WorktreeSetupStatus({
           ) : (
             <code className="break-all">{configPath}</code>
           )}{' '}
-          on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed. To edit
+          on the machine running {productName('Cezarion')}. Valid file edits apply to new worktrees; no restart is needed. To edit
           here, the host operator runs <code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>.
         </p>
       ) : null}

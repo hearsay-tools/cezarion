@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
@@ -81,7 +82,7 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
       title="Prepare new worktrees"
       hint="Runs in every new task and worker worktree before the agent starts, in order, stopping at the first failure. Leave commands empty to skip setup."
     >
-      <RemoteSettingsNotice risk="These commands run on the machine running Cezarion" />
+      <RemoteSettingsNotice risk={`These commands run on the machine running ${productName('Cezarion')}`} />
       <WorktreeSetupStatus
         savedCommandCount={savedCommands.length}
         settingsAdmin={health.data?.capabilities?.settingsAdmin}

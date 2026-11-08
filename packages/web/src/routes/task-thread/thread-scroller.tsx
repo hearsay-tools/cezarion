@@ -475,7 +475,11 @@ export function useThreadScroll(
     let previousScrollTop = scroller.scrollTop
     let travelDirection: 'up' | 'down' | undefined
     let travel = 0
-    const markGesture = () => { readerGestureAtRef.current = Date.now() }
+    let gestureDirection: 'up' | 'down' | undefined
+    const markGesture = (direction: 'up' | 'down') => {
+      readerGestureAtRef.current = Date.now()
+      gestureDirection = direction
+    }
     const unstick = () => {
       bumpFocus()
       pendingFocusRef.current?.disconnect()
@@ -494,7 +498,8 @@ export function useThreadScroll(
       downIntentAtRef.current = Date.now()
     }
     const onWheel = (event: WheelEvent) => {
-      markGesture()
+      if (event.deltaY === 0) return
+      markGesture(event.deltaY < 0 ? 'up' : 'down')
       if (event.deltaY < 0) {
         unstick()
         const freshGesture = !wheelGestureActiveRef.current
@@ -508,12 +513,15 @@ export function useThreadScroll(
       else markDown()
     }
     const onKey = (event: KeyboardEvent) => {
-      if (['ArrowUp', 'PageUp', 'Home', 'ArrowDown', 'PageDown', 'End'].includes(event.key)) markGesture()
       if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) {
+        markGesture('up')
         unstick()
         if (!event.repeat && isNearHistoryStart(scroller)) loadOlder()
       }
-      else if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) markDown()
+      else if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) {
+        markGesture('down')
+        markDown()
+      }
     }
     const onPointerDown = (event: PointerEvent) => {
       // Transcript clicks/selection (including blank viewport space) are not scrolling
@@ -551,21 +559,26 @@ export function useThreadScroll(
     const onTouchMove = (event: TouchEvent) => {
       const y = event.touches[0]?.clientY
       if (y === undefined) return
-      markGesture()
       // Finger moving down pans the content up (away from the tail), and vice versa.
       if (lastTouchY !== null && y > lastTouchY + 1) {
+        markGesture('up')
         unstick()
         if (!touchHistoryConsumedRef.current && isNearHistoryStart(scroller)) {
           touchHistoryConsumedRef.current = true
           loadOlder()
         }
       }
-      else if (lastTouchY !== null && y < lastTouchY - 1) markDown()
+      else if (lastTouchY !== null && y < lastTouchY - 1) {
+        markGesture('down')
+        markDown()
+      }
       lastTouchY = y
     }
     const readerMoved = (delta: number) => {
       if (delta === 0 || (!pointerScrolling && Date.now() - readerGestureAtRef.current >= READER_GESTURE_MS)) return
       const direction = delta < 0 ? 'up' : 'down'
+      // Virtualizer compensation can move against the gesture while rows measure.
+      if (!pointerScrolling && direction !== gestureDirection) return
       if (direction !== travelDirection) {
         travelDirection = direction
         travel = 0
