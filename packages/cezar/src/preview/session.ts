@@ -219,13 +219,13 @@ export class PreviewSession {
   }
 
   /** Makes `viewer` the one the page streams to and starts the screencast at the current viewport. */
-  attach(viewer: Viewer): void {
+  attach(viewer: Viewer, dpr?: number): void {
     this.viewer = viewer;
     this.announced = false;
     // A new viewer needs its own first frame, so its stream always restarts, whatever the size.
     this.streaming = undefined;
     this.silentStarts = 0;
-    void this.setViewport(this.viewport.w, this.viewport.h, this.viewport.dpr).catch(() => {});
+    void this.setViewport(this.viewport.w, this.viewport.h, dpr ?? this.viewport.dpr).catch(() => {});
   }
 
   detach(viewer: Viewer): void {

@@ -89,6 +89,8 @@ type RunEntry = {
   port?: number | undefined;
   /** The stream mode the viewer chose (hearsay-tools/cezarion#2066). Every session of the run reads it at each start. */
   quality: PreviewQuality;
+  /** Latest viewer ratio, shared by sessions when the pane switches pages. */
+  viewerDpr?: number | undefined;
   lastUrl?: string | undefined;
   adopted: boolean;
   idleTimers: { server?: NodeJS.Timeout | undefined; browser?: NodeJS.Timeout | undefined };
@@ -144,7 +146,7 @@ export class PreviewHost implements PreviewHostLike {
    * A pane asks for a server or a URL. A registered port is probed again now: answering is
    * adopted and streamed, silent asks for approval. Nothing here spawns a command.
    */
-  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined; quality?: PreviewQuality | undefined } = {}): Promise<void> {
+  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined; quality?: PreviewQuality | undefined; dpr?: number | undefined } = {}): Promise<void> {
     const entry = this.entryFor(ctx);
     if (entry.released) return;
     if (options.resume && this.heldByAnotherTab(entry, viewer, options.viewerId)) {
@@ -154,6 +156,7 @@ export class PreviewHost implements PreviewHostLike {
     }
     entry.viewerId = options.viewerId;
     entry.quality = options.quality ?? 'normal';
+    entry.viewerDpr = options.dpr;
     this.claim(entry, viewer);
     // The viewer that was already attached keeps its stream: only a changed mode restarts it.
     void entry.session?.refreshQuality().catch(() => {});
@@ -345,6 +348,7 @@ export class PreviewHost implements PreviewHostLike {
     if (msg.t === 'open') return this.open(ctx, viewer, msg.target, msg);
     const entry = this.entries.get(ctx.runId);
     if (!entry || entry.viewer !== viewer) return;
+    if (msg.t === 'resize') entry.viewerDpr = msg.dpr ?? 1;
     switch (msg.t) {
       case 'run': return this.run(ctx.runId, msg.port);
       case 'stop': await this.stop(ctx.runId, msg.port, 'user'); return;
@@ -559,7 +563,7 @@ export class PreviewHost implements PreviewHostLike {
     this.dropFollowed(entry);
     if (!entry.home) return;
     this.streamFrom(entry, entry.home);
-    if (shown && entry.viewer) entry.home.attach(entry.viewer);
+    if (shown && entry.viewer) entry.home.attach(entry.viewer, entry.viewerDpr);
   }
 
   /** The agent's page closed while the pane looked elsewhere: cezar's own page stands in for it. */
@@ -619,7 +623,7 @@ export class PreviewHost implements PreviewHostLike {
     entry.lastUrl = session.url ?? entry.lastUrl;
     if (!viewer) return;
     if (session.url) viewer.send({ t: 'url', url: session.url });
-    if (changed) session.attach(viewer);
+    if (changed) session.attach(viewer, entry.viewerDpr);
   }
 
   /** A resumed pane whose run another tab took since: that tab keeps it. */
@@ -650,7 +654,7 @@ export class PreviewHost implements PreviewHostLike {
       previous.close(4001, 'replaced');
     }
     entry.viewer = viewer;
-    entry.session?.attach(viewer);
+    entry.session?.attach(viewer, entry.viewerDpr);
   }
 
   /** Tells the pane `port-held` when another task's cezar-owned server holds `server.port`. */
@@ -743,7 +747,7 @@ export class PreviewHost implements PreviewHostLike {
     if (resume && session?.url && viewer && !entry.browserFailure && sameOrigin(session.url, url)) {
       entry.adopted = adopted;
       entry.lastUrl = session.url;
-      session.attach(viewer);
+      session.attach(viewer, entry.viewerDpr);
       return;
     }
     return this.show(entry, url, adopted);
@@ -805,7 +809,7 @@ export class PreviewHost implements PreviewHostLike {
     }
     entry.browser = browser;
     entry.session = entry.home = session;
-    if (entry.viewer) session.attach(entry.viewer);
+    if (entry.viewer) session.attach(entry.viewer, entry.viewerDpr);
     void browser.exited.then(exit => this.browserExited(entry, browser, exit));
     return session;
   }
