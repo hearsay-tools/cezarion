@@ -153,7 +153,7 @@ describe('merge requirements in the detail', () => {
     ['conflicting', { mergeable: 'conflicting', canMerge: false }, 'Conflicts must be resolved'],
     ['blocked', { eligibility: 'blocked', canMerge: false }, 'Merge blocked'],
   ] satisfies [string, Partial<GithubPrMergeState>, string][])(
-    'shows the %s heading', async (_name, patch, title) => {
+    'shows the %s heading', async (_name, patch: Partial<GithubPrMergeState>, title) => {
       mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, ...patch } }
       renderDetail(PR_42)
       await screen.findByRole('heading', { name: title })
@@ -198,7 +198,7 @@ describe('merge requirements in the detail', () => {
   it('keeps requiredness and safe details links on their own check rows', async () => {
     mergeState = { ...MERGE_STATE, mergeState: { ...MERGE_STATE.mergeState, checks: [
       { name: 'unit', state: 'passing', required: true, url: 'https://checks.example/unit' },
-      { name: 'optional', state: 'failing', required: false, url: 'javascript:alert(1)' },
+      { name: 'optional', state: 'failing', required: false, url: 'javascript:void(0)' },
       { name: 'queued', state: 'pending', required: null },
       { name: 'unreported', state: 'unknown', required: false, url: '' },
     ] } }
