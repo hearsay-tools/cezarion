@@ -35,7 +35,6 @@ import {
   type DeepLinkNotice,
 } from './new-task-autostart'
 import {
-  clearStartedDraft,
   draftRevision,
   readDraft,
   resolveComposerRunMode,
@@ -106,7 +105,15 @@ export function useNewTaskDraft(draftProjectId: string | null, deepLink: NewTask
     writeDraft(next, draftProjectId)
     setDraft(next)
   }
-  return { draft, update, submissionPending, mounted }
+  // A suspended thread transition can return to this same mounted form. Clear it too.
+  const clearStarted = (expectedRevision: number) => {
+    if (draftRevision(draftProjectId) !== expectedRevision) return
+    const next = { ...currentDraft.current, text: '', source: null }
+    currentDraft.current = next
+    writeDraft(next, draftProjectId)
+    if (mounted.current) setDraft(next)
+  }
+  return { draft, update, clearStarted, submissionPending, mounted }
 }
 
 /** The skill/workflow picker's catalog and the draft's resolved pick. */
@@ -319,6 +326,7 @@ async function launchBookmarkletRun(input: {
   queryClient: QueryClient
   navigate: Navigate
   mounted: MountedRef
+  clearStarted: (revision: number) => void
 }): Promise<DeepLinkNotice | null> {
   const submittedRevision = draftRevision(input.draftProjectId)
   let launchKey = ''
@@ -331,7 +339,7 @@ async function launchBookmarkletRun(input: {
   if (launchKey === '' || input.deepLink.key !== launchKey) return { kind: 'blocked' }
   try {
     const created = await createRun(bookmarkletRunBody(input.deepLink, input.runner, input.defaultRunner))
-    clearStartedDraft(input.draftProjectId, submittedRevision)
+    input.clearStarted(submittedRevision)
     void input.queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
     if (input.mounted.current) void input.navigate(startedRunPath(created))
     return null
@@ -352,6 +360,7 @@ export function useBookmarkletDeepLink(input: {
   config: ConfigQuery
   draftProjectId: string | null
   mounted: MountedRef
+  clearStarted: (revision: number) => void
   sourcesReady: boolean
   skillList: readonly Skill[]
   update: DraftUpdate
@@ -384,7 +393,7 @@ export function useBookmarkletDeepLink(input: {
       return
     }
     void launchBookmarkletRun({
-      deepLink, runner, defaultRunner, draftProjectId: input.draftProjectId, queryClient, navigate, mounted: input.mounted,
+      deepLink, runner, defaultRunner, draftProjectId: input.draftProjectId, queryClient, navigate, mounted: input.mounted, clearStarted: input.clearStarted,
     }).then((failure) => {
       if (failure === null) return
       setNotice(failure)
@@ -494,6 +503,7 @@ export function useNewTaskSubmit(input: {
   notifyOn: boolean
   uiState: UiStateQuery
   mounted: MountedRef
+  clearStarted: (revision: number) => void
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -504,7 +514,7 @@ export function useNewTaskSubmit(input: {
   const { providers, providersReady, runner } = engine
 
   const started = (created: Parameters<typeof startedRunPath>[0], submittedRevision: number) => {
-    clearStartedDraft(draftProjectId, submittedRevision)
+    input.clearStarted(submittedRevision)
     void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
     if (mounted.current) void navigate(startedRunPath(created))
   }

@@ -1174,3 +1174,21 @@ it('clears the submitted dictation draft after delayed creation succeeds', async
   await waitFor(() => expect(location()).toBe('/tasks/dictated-task'))
   expect(readDraft().text).toBe('')
 })
+
+// A lazy thread can leave the same /new instance mounted through both transitions.
+it.each(['direct', 'plan'] as const)('clears the spent %s draft when returning before the thread loads', async (mode) => {
+  serve({ createRun: { id: 'suspended-task' } })
+  renderNewTask('/new', true)
+  await pillReady()
+  if (mode === 'plan') await planTask('Spent task')
+  else fireEvent.change(textarea(), { target: { value: 'Spent task' } })
+  const original = textarea()
+  if (mode === 'plan') fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
+  else await startTask()
+  await waitFor(() => expect(window.location.pathname).toBe('/tasks/suspended-task'))
+  fireEvent.click(screen.getByRole('link', { name: 'New task' }))
+  await waitFor(() => expect(location()).toBe('/new'))
+  expect(textarea()).toBe(original)
+  expect(textarea().value).toBe('')
+  expect(readDraft().text).toBe('')
+})
