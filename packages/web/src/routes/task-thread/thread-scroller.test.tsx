@@ -1372,14 +1372,14 @@ describe('#795 compatible measurement replay with the real virtua handle', () =>
 // hearsay-tools/cezarion#1601: Session activity folds while the reader scrolls up and restores on
 // the way down. Only the reader's own movement counts, so a pinned replay never folds it.
 describe('useThreadScroll — reader scroll signals (#1601)', () => {
-  function readerScroller() {
+  function readerScroller(scrollHeight = 2_000) {
     const scroller = document.createElement('main')
     scroller.dataset.slot = 'main'
     Object.defineProperties(scroller, {
-      // Arrival pins to the tail at 1600, with room to read up and down away from it.
+      // Arrival pins to the tail, with room to read up and down away from it.
       scrollTop: { value: 0, writable: true },
       clientHeight: { value: 400 },
-      scrollHeight: { value: 2_000 },
+      scrollHeight: { value: scrollHeight },
     })
     const content = document.createElement('div')
     scroller.append(content)
@@ -1399,6 +1399,15 @@ describe('useThreadScroll — reader scroll signals (#1601)', () => {
     fireEvent.wheel(scroller, { deltaY: -120 })
     moveTo(1480)
     expect(events).toEqual([{ direction: 'up', distanceFromBottom: 120 }])
+  })
+
+  it('ignores virtualizer compensation opposite to the latest wheel gesture', () => {
+    const { scroller, events, moveTo } = readerScroller(4_000)
+    fireEvent.wheel(scroller, { deltaY: -120 })
+    moveTo(600)
+    expect(events.map((event) => event.direction)).toEqual(['up'])
+    moveTo(630)
+    expect(events.map((event) => event.direction)).toEqual(['up'])
   })
 
   it('ignores movement without a reader gesture', () => {
