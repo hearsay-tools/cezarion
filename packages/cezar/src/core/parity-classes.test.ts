@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
@@ -9,12 +9,14 @@ import { registrationCollector } from './split-registration.testkit.ts';
 import {
   AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, FOLLOWUP_CRITERIA, MODEL_REFUSAL_CRITERIA, NO_PROGRESS_CRITERIA, SHUTDOWN_CRITERIA,
   SKILL_PROVISION_CRITERIA, SKILL_RESUME_CRITERIA, STEP_COMPLETION_CRITERIA, WORKFLOW_ASK_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA,
-  WORKTREE_SETUP_CRITERIA,
+  WORKTREE_SETUP_CRITERIA, HARNESS_ADAPTERS, type ScenarioName,
 } from './harness-parity-core.testkit.ts';
 import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
+import { MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA, MONITORING_TURN_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import {
   NO_SESSION_RUNNER, PARITY_FAMILIES, PARITY_FILES, SHARED_RUNNERS, deriveRunnerSet, parityRowId, parityRunners, turnPathValues,
   type ParityFamilyName,
+  SCENARIO_CLASSES,
 } from './parity-classes.testkit.ts';
 import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
 import { COMBINATION_ROWS, type CombinationException } from '../lint/runner-fact-combination.ts';
@@ -109,14 +111,29 @@ describe('the parity classification table (hearsay-tools/cezarion#2991)', () => 
   // each runner, and a native ask or native subagents exist only where the facts say. Every
   // registered row a catalog below lists is held to that, so a new shared row of this kind fails here.
   it('runs every registered row whose scenario runs runner code on every runner', () => {
-    // An id two families reuse (R85: resume diagnostics and CI rerun) counts as runner code when any of its rows is.
-    const runnerCode = new Set(parityRowScenarios().filter(row => RUNNER_CODE_SCENARIOS.has(row.scenario)).map(row => row.id));
-    const shared = [...familyRowCatalog()].flatMap(([family, rows]) => [...rows]
-      .filter(row => runnerCode.has(row) && parityRunners(family as ParityFamilyName, row).length !== RUNNER_IDS.length)
-      .map(row => `${family} ${row}`));
+    const shared = [...familyRowScenarios()].flatMap(([family, rows]) => [...rows]
+      .filter(([row, scenarios]) => [...scenarios].some(scenario => SCENARIO_CLASSES[scenario][0] === 'runner-code')
+        && parityRunners(family as ParityFamilyName, row).length !== RUNNER_IDS.length)
+      .map(([row, scenarios]) => `${family} ${row} (${[...scenarios].join(', ')})`));
     expect(shared).toEqual([]);
     expect(familyRowCatalog().get('ci-wait-failure')).toEqual(new Set(['R72', 'R73', 'R74', 'R75', 'R76']));
+    // Complete: every shared family is checked, and every shared row it lists has a known scenario.
+    const checked = familyRowScenarios();
+    expect(Object.entries(PARITY_FAMILIES).filter(([family, entry]) => entry.class === 'shared' && !checked.has(family)).map(([family]) => family)).toEqual([]);
+    expect([...checked].flatMap(([family, rows]) => [...rows]
+      .filter(([row, scenarios]) => scenarios.size === 0 && parityRunners(family as ParityFamilyName, row).length !== RUNNER_IDS.length)
+      .map(([row]) => `${family} ${row}`))).toEqual([]);
     expect(familyRowCatalog().get('resume-diagnostics')).toEqual(new Set(['R85', 'R86', 'R87', 'R88', 'R89', 'R90', 'R91']));
+  });
+
+  it('classes every scenario a native mock declares, and every scenario a row drives', () => {
+    const declared = new Set(Object.values(HARNESS_ADAPTERS).flatMap(adapter => Object.keys(adapter.scenarios)));
+    expect([...declared].filter(name => !Object.hasOwn(SCENARIO_CLASSES, name))).toEqual([]);
+    expect(parityRowScenarios().filter(row => !Object.hasOwn(SCENARIO_CLASSES, row.scenario)).map(row => row.id)).toEqual([]);
+    for (const [name, [kind, why]] of Object.entries(SCENARIO_CLASSES) as Array<[ScenarioName, readonly [string, string]]>) {
+      expect(['runner-code', 'shared'], name).toContain(kind);
+      expect(why.length, name).toBeGreaterThan(10);
+    }
   });
 
   // cez/runner-fact-combination lets a reported function pass only with a reason. A real combination
@@ -136,9 +153,67 @@ describe('the parity classification table (hearsay-tools/cezarion#2991)', () => 
   });
 });
 
-/** Scenarios whose outcome is the runner's own code: its provider error, a native ask (answerable on
- *  codex and opencode only) or native subagents. */
-const RUNNER_CODE_SCENARIOS = new Set(['provider-error', 'ask', 'ask-resume', 'ask-bad', 'ask-reply-late', 'subagent', 'subagent-after-park', 'forked-skill']);
+
+/**
+ * The scenarios each registered row drives, by family. A family with its own criteria table reads
+ * the row's scenario there. The others (harness groups, CI failure, resume diagnostics) read the
+ * matrix inventory, where an id two families reuse (R85: resume diagnostics and CI rerun) carries
+ * every scenario listed for it, so the check fails closed.
+ */
+function familyRowScenarios(): Map<string, Map<string, Set<ScenarioName>>> {
+  const inventory = new Map<string, Set<ScenarioName>>();
+  for (const row of parityRowScenarios()) inventory.set(row.id, (inventory.get(row.id) ?? new Set()).add(row.scenario));
+  const tables = familyTables();
+  const scanned = Object.entries(SCANNED_KITS).map(([family, files]) => [family, new Map([['*', kitScenarios(files)]])] as const);
+  return new Map([...scanned, ...[...familyRowCatalog()].map(([family, rows]) => {
+    const own = tables[family];
+    return [family, new Map([...rows].map(row => {
+      const listed = own?.filter(entry => entry.id === row).map(entry => entry.scenario);
+      return [row, new Set(listed?.length ? listed : inventory.get(row) ?? [])];
+    }))] as const;
+  })]);
+}
+
+/**
+ * Shared families whose rows no criteria table lists, with the kit files that hold their cells.
+ * Their one pseudo-row `*` stands for every row, and carries every scenario name its kit source
+ * spells (`scenarios.baseline`, `'cezar-done'`), so a kit that starts driving runner code fails.
+ * `mock:ci-wait` is the dry-run mock's `cezar_wait` call, counted as `cezar-wait`.
+ */
+const SCANNED_KITS: Record<string, readonly string[]> = {
+  'ci-wait-registration': ['workflows/ci-wait-registration-parity.testkit.ts'],
+  'ci-wait-conflict': ['workflows/ci-wait-conflict-parity.testkit.ts'],
+  'ci-wait-rerun': ['workflows/ci-wait-rerun-parity.testkit.ts'],
+  'ci-wait-retry': ['workflows/ci-wait-retry-parity.test.ts'],
+  'pr-merge-wait': ['workflows/pr-merge-wait-parity.test.ts'],
+  'session-context': ['workflows/session-context-cells.testkit.ts'],
+  'completion-options': ['workflows/completion-options-cells.testkit.ts'],
+};
+
+function kitScenarios(files: readonly string[]): Set<ScenarioName> {
+  const names = Object.keys(SCENARIO_CLASSES) as ScenarioName[];
+  const found = new Set<ScenarioName>();
+  for (const file of files) {
+    const source = readFileSync(join(src, file), 'utf8');
+    for (const name of names) {
+      if (source.includes(`'${name}'`) || source.includes(`"${name}"`) || new RegExp(`\\.${name.replace(/-/g, '\\-')}\\b(?!-)`).test(source)) found.add(name);
+    }
+    if (source.includes('mock:ci-wait')) found.add('cezar-wait');
+  }
+  return found;
+}
+
+/** The criteria tables that list a family's rows with their scenarios. */
+function familyTables(): Record<string, ReadonlyArray<{ id: string; scenario: ScenarioName }>> {
+  return {
+    waits: WAIT_CRITERIA, 'workflow-autonomous': AUTONOMOUS_CRITERIA, 'workflow-ask': WORKFLOW_ASK_CRITERIA,
+    'workflow-final-message': FINAL_MESSAGE_CRITERIA, 'workflow-followup': FOLLOWUP_CRITERIA, 'workflow-no-progress': NO_PROGRESS_CRITERIA,
+    'workflow-step-completion': STEP_COMPLETION_CRITERIA, 'workflow-timeout': WORKFLOW_TIMEOUT_CRITERIA, 'skill-resume': SKILL_RESUME_CRITERIA,
+    'skill-provision': SKILL_PROVISION_CRITERIA, 'worktree-setup': WORKTREE_SETUP_CRITERIA, 'runner-shutdown': SHUTDOWN_CRITERIA,
+    'model-refusal': MODEL_REFUSAL_CRITERIA,
+    'monitoring-turn': [...MONITORING_TURN_CRITERIA, ...MONITORING_ORDER_CRITERIA, ...MONITORING_ACK_CRITERIA],
+  };
+}
 
 /** Row ids each family registers, where this guard can list them. */
 function familyRowCatalog(): Map<string, Set<string>> {
@@ -148,13 +223,7 @@ function familyRowCatalog(): Map<string, Set<string>> {
   const titles: string[] = [];
   for (const rows of Object.values(RESUME_DIAGNOSTICS_GROUPS)) for (const row of rows) resumeDiagnosticsCells[row.family](row.runner, registrationCollector(titles));
   catalog.set('resume-diagnostics', new Set(titles.map(parityRowId).filter((row): row is string => row !== undefined)));
-  for (const [family, rows] of Object.entries({
-    waits: WAIT_CRITERIA, 'workflow-autonomous': AUTONOMOUS_CRITERIA, 'workflow-ask': WORKFLOW_ASK_CRITERIA,
-    'workflow-final-message': FINAL_MESSAGE_CRITERIA, 'workflow-followup': FOLLOWUP_CRITERIA, 'workflow-no-progress': NO_PROGRESS_CRITERIA,
-    'workflow-step-completion': STEP_COMPLETION_CRITERIA, 'workflow-timeout': WORKFLOW_TIMEOUT_CRITERIA, 'skill-resume': SKILL_RESUME_CRITERIA,
-    'skill-provision': SKILL_PROVISION_CRITERIA, 'worktree-setup': WORKTREE_SETUP_CRITERIA, 'runner-shutdown': SHUTDOWN_CRITERIA,
-    'model-refusal': MODEL_REFUSAL_CRITERIA,
-  })) catalog.set(family, ids(rows));
+  for (const [family, rows] of Object.entries(familyTables())) catalog.set(family, ids(rows));
   return catalog;
 }
 

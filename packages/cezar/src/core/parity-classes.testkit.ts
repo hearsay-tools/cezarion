@@ -1,5 +1,5 @@
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
-import { PARITY_EXEMPTIONS } from './harness-parity-core.testkit.ts';
+import { PARITY_EXEMPTIONS, type ScenarioName } from './harness-parity-core.testkit.ts';
 import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
 
 /**
@@ -200,6 +200,89 @@ export const PARITY_FILES: ReadonlyArray<readonly [RegExp, readonly ParityFamily
   [/^core\/ui-parity\.test\.ts$/, ['ui-parity']],
   [/^server\/(?:contract|route|query-repeat)-parity(?:\.[a-z]+)?\.test\.ts$/, ['server-contract']],
 ];
+
+/** Whether a native mock scenario's outcome is the runner's own code or Cezar's. */
+export type ScenarioClass = 'runner-code' | 'shared';
+
+const MAPPER = 'a turn shape every mapper emits alike (ui-parity holds the mappers); Cezar decides the outcome';
+const TURN_PATH = 'it differs only by a turn-path fact, which the shared runner set shows value by value';
+const CEZAR_TOOL = 'the same Cezar tool call on every wire';
+const OWN_ERROR = 'the runner maps its own provider or process failure';
+const PERMISSION = 'a native permission or approval request exists only on some wires and each answers it its own way';
+const NATIVE_ASK = 'a native ask exists only where nativeAsk is answerable (codex, opencode)';
+const SUBAGENTS = 'native subagents exist only where nativeSubagents says';
+const PROCESS = 'the runner class starts, feeds, watches or stops its own process';
+const NATIVE_ACK = 'the timing of the runner\'s own acknowledgement or turn-start frame';
+
+/**
+ * Every scenario the native mocks declare, classed once (hearsay-tools/cezarion#2991). `parity-classes.test.ts`
+ * holds every registered row whose scenario is `runner-code` to every runner. The `Record` fails to
+ * compile when a scenario is added or removed, so a new one must be classed here; a doubtful one is
+ * `runner-code`.
+ */
+export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioClass, string]>> = {
+  baseline: ['shared', MAPPER],
+  'tool-tail': ['shared', MAPPER],
+  'turn-messages': ['shared', MAPPER],
+  'silent-tail': ['shared', MAPPER],
+  'silent-tail-again': ['shared', MAPPER],
+  'cezar-done': ['shared', CEZAR_TOOL],
+  'cezar-ask': ['shared', CEZAR_TOOL],
+  'cezar-wait': ['shared', CEZAR_TOOL],
+  autonomous: ['shared', CEZAR_TOOL],
+  'autonomous-cap': ['shared', CEZAR_TOOL],
+  'autonomous-cezar-ask-cap': ['shared', CEZAR_TOOL],
+  hold: ['shared', 'the mock delays its terminal turn signal; Cezar decides what happens meanwhile'],
+  'hold-gated': ['shared', 'the mock holds its turn until a gate file exists; Cezar decides what happens meanwhile'],
+  'hold-cezar-done': ['shared', CEZAR_TOOL],
+  'hold-cezar-ask': ['shared', CEZAR_TOOL],
+  'steer-tool': ['shared', TURN_PATH],
+  'steer-late': ['shared', TURN_PATH],
+  'provider-error': ['runner-code', OWN_ERROR],
+  'provider-unavailable': ['runner-code', OWN_ERROR],
+  'post-success-refusal': ['runner-code', 'each runner maps its own model refusal after a successful turn'],
+  'skill-warning': ['runner-code', 'each wire reports skill diagnostics its own way'],
+  'auto-resumed': ['runner-code', 'only the OMP wire reports restored history at start'],
+  'multi-pr-refs': ['runner-code', 'each mapper keeps markers inside tool results and reasoning out of the run'],
+  'missing-binary': ['runner-code', PROCESS],
+  'serve-start-exit': ['runner-code', PROCESS],
+  'closed-input': ['runner-code', PROCESS],
+  'input-closed-live': ['runner-code', PROCESS],
+  'crash-stderr': ['runner-code', PROCESS],
+  'crash-stderr-single': ['runner-code', PROCESS],
+  'crash-stderr-pre-ack': ['runner-code', PROCESS],
+  'crash-stderr-held-pipe': ['runner-code', PROCESS],
+  'shutdown-stderr': ['runner-code', PROCESS],
+  'no-progress': ['runner-code', PROCESS],
+  'no-progress-ignore-term': ['runner-code', PROCESS],
+  'no-progress-held-pipe': ['runner-code', PROCESS],
+  'no-progress-ack-only': ['runner-code', PROCESS],
+  'no-progress-leftover': ['runner-code', PROCESS],
+  'busy-progress': ['runner-code', PROCESS],
+  approval: ['runner-code', PERMISSION],
+  'approval-resolved': ['runner-code', PERMISSION],
+  'approval-turn-end': ['runner-code', PERMISSION],
+  'approval-reply-fails': ['runner-code', PERMISSION],
+  'approval-malformed': ['runner-code', PERMISSION],
+  'permission-default': ['runner-code', PERMISSION],
+  'permission-classify': ['runner-code', PERMISSION],
+  'permission-late': ['runner-code', PERMISSION],
+  'mcp-approval': ['runner-code', PERMISSION],
+  ask: ['runner-code', NATIVE_ASK],
+  'ask-resume': ['runner-code', NATIVE_ASK],
+  'ask-bad': ['runner-code', NATIVE_ASK],
+  'ask-reply-late': ['runner-code', NATIVE_ASK],
+  subagent: ['runner-code', SUBAGENTS],
+  'subagent-after-park': ['runner-code', SUBAGENTS],
+  'forked-skill': ['runner-code', SUBAGENTS],
+  'hook-after-park': ['runner-code', 'only some wires report hook lifecycle frames'],
+  'silent-tail-ack-delay': ['runner-code', NATIVE_ACK],
+  'silent-tail-no-reply': ['runner-code', NATIVE_ACK],
+  'silent-tail-late-reply': ['runner-code', NATIVE_ACK],
+  'silent-tail-late-turn-start': ['runner-code', NATIVE_ACK],
+  'silent-tail-slow-done': ['runner-code', NATIVE_ACK],
+  'autonomous-readiness-idle': ['runner-code', 'a portable-answer acknowledgement retained after the turn, which only some wires have'],
+};
 
 /** A row with an exemption on any runner differs by runner, so it runs on every runner. */
 const EXEMPT_ROWS = new Set(PARITY_EXEMPTIONS.map(exemption => exemption.criterion));
