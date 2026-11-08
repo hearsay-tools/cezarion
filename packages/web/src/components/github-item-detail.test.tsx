@@ -577,6 +577,7 @@ describe('PR changed files', () => {
   }
   const threeFiles = () => ({
     ...changesFor('src/Alpha.ts', A_HEAD),
+    additions: 3,
     files: [
       changesFor('src/Alpha.ts', A_HEAD).files[0]!,
       changesFor('src/beta.ts', A_HEAD).files[0]!,
@@ -630,20 +631,21 @@ describe('PR changed files', () => {
   })
 
   it.each([
-    ['binary', 'binary'], ['too-large', 'too-large'], [undefined, 'not-provided'],
-  ] as const)('explains a missing %s patch and keeps the renamed path and statistics', async (reason, label) => {
+    ['binary', 0, 0, false], ['too-large', 7, 3, true], ['not-provided', 7, 3, false],
+  ] as const)('explains a missing %s patch and keeps the renamed path and statistics', async (reason, additions, deletions, truncated) => {
     const data: GithubPrChangesData = {
-      ...changesFor('new.dat', A_HEAD), additions: 7, deletions: 3,
-      files: [{ path: 'new.dat', previousPath: 'old.dat', status: 'renamed', additions: 7, deletions: 3,
-        ...(reason ? { patchUnavailableReason: reason } : {}) }],
+      ...changesFor('new.dat', A_HEAD), additions, deletions, truncated,
+      ...(truncated ? { reason: 'One or more patches exceeded the per-file limit.' } : {}),
+      files: [{ path: 'new.dat', previousPath: 'old.dat', status: 'renamed', additions, deletions,
+        patchUnavailableReason: reason, ...(truncated ? { truncated: true } : {}) }],
     }
     renderChanges(seedChanges(data))
-    expect(await screen.findByText(`Patch unavailable: ${label}.`)).toBeTruthy()
+    expect(await screen.findByText(`Patch unavailable: ${reason}.`)).toBeTruthy()
     await waitFor(() => expect(document.querySelector('[data-slot="diff-file"]')?.textContent).toContain('old.dat'))
     expect(screen.getByText(`head ${A_HEAD.slice(0, 8)}`).getAttribute('title')).toBe(A_HEAD)
     const diff = document.querySelector('[data-slot="diff-file"]') as HTMLElement
-    expect(within(diff).getByText('+7')).toBeTruthy()
-    expect(within(diff).getByText('−3')).toBeTruthy()
+    expect(within(diff).getByText(`+${additions}`)).toBeTruthy()
+    expect(within(diff).getByText(`−${deletions}`)).toBeTruthy()
     expect(Boolean(within(diff).queryByText('Binary file — no text diff.'))).toBe(reason === 'binary')
   })
 
@@ -664,7 +666,8 @@ describe('PR changed files', () => {
 
   it('keeps the selected file on a same-head refresh and resets it when the head changes', async () => {
     const client = seedChanges(threeFiles())
-    let next = threeFiles()
+    let next = { ...threeFiles(), files: threeFiles().files.map((file) => file.path === 'src/beta.ts'
+      ? { ...file, patch: '@@ -0,0 +1 @@\n+Refreshed beta content' } : file) }
     const refreshUrls: string[] = []
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -678,7 +681,7 @@ describe('PR changed files', () => {
     const refresh = within(document.querySelector('[data-slot="gh-pr-changes"]') as HTMLElement).getByRole('button', { name: 'Refresh' })
     fireEvent.click(refresh)
     await waitFor(() => expect(refreshUrls).toHaveLength(1))
-    await waitFor(() => expect(client.getQueryData(queryKeys.githubPrChanges(42))).toEqual(next))
+    await screen.findByText('Refreshed beta content')
     expect(selectedFile()).toBe('src/beta.ts')
     expect(screen.queryByText('The reviewed revision changed.')).toBeNull()
     next = { ...threeFiles(), headSha: B_HEAD }
