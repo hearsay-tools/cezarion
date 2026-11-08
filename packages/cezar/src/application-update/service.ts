@@ -307,12 +307,8 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
   ): Promise<void> {
     await mkdir(stage, { recursive: true });
     const spec = `${installation.outerPackage}@${target}`;
-    if (!this.options.dryRun) {
-      const args = ['install', '--prefix', stage, '--engine-strict', '--no-audit', '--no-fund', '--ignore-scripts', '--prefer-online', '--fetch-retries=1', spec];
-      await (this.options.runNpm ?? ((argv, abortSignal) => this.runNpm(argv, abortSignal)))(args, signal);
-    } else {
-      await cp(installation.installRoot, stage, { recursive: true });
-    }
+    const args = ['install', '--prefix', stage, '--engine-strict', '--no-audit', '--no-fund', '--ignore-scripts', '--prefer-online', '--fetch-retries=1', spec];
+    await (this.options.runNpm ?? ((argv, abortSignal) => this.runNpm(argv, abortSignal)))(args, signal);
     await assertOwned();
     const stagedScoped = stageScopedPath(stage, installation.outerPackage);
     validateInstalledPackage(stagedScoped, target, stage);
