@@ -39,9 +39,26 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (BuildConfig.FINAL_OLD_APP) { showMoveScreen(); return; }
         prefs = getSharedPreferences("connection", MODE_PRIVATE);
         BrowserProfile.deleteUnused(prefs);
         showLauncher();
+    }
+
+    // The final old-ID release never reads connection preferences or starts a WebView.
+    private void showMoveScreen() {
+        setRoot();
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = column(); content.setPadding(dp(24), dp(28), dp(24), dp(24));
+        scroll.addView(content); root.addView(scroll);
+        content.addView(text("Move to " + BuildConfig.MOVE_DISPLAY_NAME, 30));
+        content.addView(text("Install the new app. Connect to your server and sign in again. Your connection and sign-in are not copied.", 16));
+        TextView notice = text("", 14);
+        content.addView(button("Get " + BuildConfig.MOVE_DISPLAY_NAME, () -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(BuildConfig.STORE_URL)).addCategory(Intent.CATEGORY_BROWSABLE)); }
+            catch (android.content.ActivityNotFoundException error) { notice.setText("No app is available to open the store page."); }
+        }));
+        content.addView(notice);
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -85,9 +102,9 @@ public final class MainActivity extends Activity {
         scroll.addView(form); root.addView(scroll);
         ImageView mark = new ImageView(this); mark.setImageResource(tools.hearsay.cezarion.R.drawable.ic_launcher);
         mark.setScaleType(ImageView.ScaleType.FIT_CENTER); form.addView(mark, new LinearLayout.LayoutParams(-1, dp(76)));
-        TextView title = text("Cezarion", 20); title.setTextColor(AMBER); form.addView(title);
+        TextView title = text(BuildConfig.DISPLAY_NAME, 20); title.setTextColor(AMBER); form.addView(title);
         TextView heading = text("Your agents.\nIn your pocket.", 30); heading.setTypeface(null, Typeface.BOLD); heading.setTextColor(Color.WHITE); form.addView(heading);
-        form.addView(text("Connect to your Cezarion server to follow tasks and keep work moving.", 16));
+        form.addView(text("Connect to your " + BuildConfig.DISPLAY_NAME + " server to follow tasks and keep work moving.", 16));
         form.addView(text("Cockpit address", 14));
         endpoint = input("https://cezar.example.com", "Cockpit address"); form.addView(endpoint);
         form.addView(text("Trusted sign-in origin · optional", 14));

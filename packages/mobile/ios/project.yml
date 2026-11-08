@@ -1,6 +1,5 @@
 name: Cezarion
 options:
-  bundleIdPrefix: tools.hearsay.cezarion
   deploymentTarget:
     iOS: "16.0"
 settings:
@@ -10,6 +9,13 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
     TARGETED_DEVICE_FAMILY: "1,2"
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) $(MOBILE_SWIFT_CONDITIONS)
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DEBUG $(MOBILE_SWIFT_CONDITIONS)
+configFiles:
+  Debug: ProductIdentity.xcconfig
+  Release: ProductIdentity.xcconfig
 targets:
   Cezarion:
     type: application
@@ -17,12 +23,15 @@ targets:
     sources: [Cezarion]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: tools.hearsay.cezarion.mobile
+        PRODUCT_BUNDLE_IDENTIFIER: $(MOBILE_APP_ID)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Cezarion/Info.plist
       properties:
-        CFBundleDisplayName: Cezarion
+        CFBundleDisplayName: $(MOBILE_DISPLAY_NAME)
+        MobileMoveDisplayName: $(MOBILE_MOVE_DISPLAY_NAME)
+        MobileFinalOldApp: $(MOBILE_FINAL_OLD_APP)
+        MobileStoreURLBase64: $(MOBILE_STORE_URL_BASE64)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -31,8 +40,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIRequiresFullScreen: false
         ITSAppUsesNonExemptEncryption: false
-        NSCameraUsageDescription: Cezarion uses the camera only when you choose to take a photo or video to attach in the cockpit.
-        NSMicrophoneUsageDescription: Cezarion uses the microphone only when you record a video to attach in the cockpit.
+        NSCameraUsageDescription: $(MOBILE_DISPLAY_NAME) uses the camera only when you choose to take a photo or video to attach in the cockpit.
+        NSMicrophoneUsageDescription: $(MOBILE_DISPLAY_NAME) uses the microphone only when you record a video to attach in the cockpit.
   CezarionTests:
     type: bundle.unit-test
     platform: iOS
@@ -41,6 +50,7 @@ targets:
       - target: Cezarion
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MOBILE_TEST_ID_PREFIX).CezarionTests
         GENERATE_INFOPLIST_FILE: YES
   CezarionUITests:
     type: bundle.ui-testing
@@ -50,6 +60,7 @@ targets:
       - target: Cezarion
     settings:
       base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MOBILE_TEST_ID_PREFIX).CezarionUITests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
   Cezarion:
@@ -59,5 +70,6 @@ schemes:
     test:
       targets: [CezarionTests, CezarionUITests]
       environmentVariables:
+        MOBILE_TEST_DISPLAY_NAME: "$(MOBILE_DISPLAY_NAME)"
         MOBILE_TEST_ENDPOINT: "$(MOBILE_TEST_ENDPOINT)"
         MOBILE_TEST_AUTH_ORIGIN: "$(MOBILE_TEST_AUTH_ORIGIN)"

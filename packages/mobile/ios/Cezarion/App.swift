@@ -1,6 +1,17 @@
 import UIKit
 import WebKit
 
+enum MobileBuild {
+    static let displayName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? ""
+    static let moveDisplayName = Bundle.main.object(forInfoDictionaryKey: "MobileMoveDisplayName") as? String ?? ""
+    static let finalOldApp = Bundle.main.object(forInfoDictionaryKey: "MobileFinalOldApp") as? String == "true"
+    static var storeURL: URL? {
+        guard let encoded = Bundle.main.object(forInfoDictionaryKey: "MobileStoreURLBase64") as? String,
+              let data = Data(base64Encoded: encoded), let text = String(data: data, encoding: .utf8) else { return nil }
+        return URL(string: text)
+    }
+}
+
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
@@ -15,12 +26,62 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: scene)
-        window.rootViewController = UINavigationController(rootViewController: ConnectionController())
+        // The final old-ID release never constructs a connection controller or WebView.
+        let controller: UIViewController = MobileBuild.finalOldApp ? MoveController() : ConnectionController()
+        window.rootViewController = UINavigationController(rootViewController: controller)
         window.tintColor = UIColor(red: 1, green: 0.73, blue: 0.22, alpha: 1)
         window.overrideUserInterfaceStyle = .dark
         window.makeKeyAndVisible()
         self.window = window
     }
+}
+
+final class MoveController: UIViewController {
+    let storeButton = UIButton(type: .system)
+    private let storeURL: URL?
+    private let openStore: (URL) -> Void
+
+    init(storeURL: URL? = MobileBuild.storeURL, openStore: @escaping (URL) -> Void = { UIApplication.shared.open($0) }) {
+        self.storeURL = storeURL
+        self.openStore = openStore
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("Use init(storeURL:openStore:)") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Move to \(MobileBuild.moveDisplayName)"
+        view.backgroundColor = .systemBackground
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scroll)
+        let note = UILabel()
+        note.text = "Install the new app. Connect to your server and sign in again. Your connection and sign-in are not copied."
+        note.numberOfLines = 0
+        note.font = .preferredFont(forTextStyle: .body)
+        note.adjustsFontForContentSizeCategory = true
+        note.accessibilityIdentifier = "moveNote"
+        storeButton.setTitle("Get \(MobileBuild.moveDisplayName)", for: .normal)
+        storeButton.accessibilityIdentifier = "openStore"
+        storeButton.isEnabled = storeURL != nil
+        storeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+        storeButton.addTarget(self, action: #selector(openStorePage), for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [note, storeButton])
+        stack.axis = .vertical
+        stack.spacing = 24
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(stack)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 36),
+            stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
+            stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -24)
+        ])
+    }
+    @objc private func openStorePage() { if let url = storeURL { openStore(url) } }
 }
 
 final class ConnectionController: UIViewController {
@@ -39,7 +100,7 @@ final class ConnectionController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Cezarion"
+        title = MobileBuild.displayName
         view.backgroundColor = UIColor(red: 0.043, green: 0.063, blue: 0.11, alpha: 1)
         let scroll = UIScrollView()
         scroll.keyboardDismissMode = .interactive
@@ -64,7 +125,7 @@ final class ConnectionController: UIViewController {
         mark.heightAnchor.constraint(equalToConstant: 76).isActive = true
         stack.addArrangedSubview(mark)
         stack.addArrangedSubview(label("Your agents. In your pocket.", size: 27, weight: .bold))
-        stack.addArrangedSubview(label("Connect to your Cezarion server to follow tasks and keep work moving.", size: 16))
+        stack.addArrangedSubview(label("Connect to your \(MobileBuild.displayName) server to follow tasks and keep work moving.", size: 16))
         stack.addArrangedSubview(label("Cockpit address", size: 14, weight: .semibold))
         configure(endpoint, placeholder: "https://cezar.example.com", id: "endpoint")
         stack.addArrangedSubview(endpoint)

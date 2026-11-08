@@ -1,6 +1,11 @@
 import XCTest
 
 final class LauncherTests: XCTestCase {
+    override func setUpWithError() throws {
+        #if FINAL_OLD_APP
+        throw XCTSkip("Final old-app builds have no connection flow.")
+        #endif
+    }
     func testRejectsHTTPAndCanForgetConnection() {
         let app = XCUIApplication()
         app.launchArguments = ["--endpoint", "http://example.com", "--auth-origin", ""]
@@ -30,7 +35,9 @@ final class LauncherTests: XCTestCase {
         XCTAssertFalse(app.buttons["Back"].isEnabled)
         app.buttons["Connection settings"].tap()
         XCTAssertTrue(app.buttons["connect"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.navigationBars["Cezarion"].exists)
+        // The selected display name changes only for a rebrand build.
+        let displayName = ProcessInfo.processInfo.environment["MOBILE_TEST_DISPLAY_NAME"]!
+        XCTAssertTrue(app.navigationBars[displayName].exists)
     }
 
     func testOptionalRemoteSignIn() throws {
@@ -114,3 +121,25 @@ final class LauncherTests: XCTestCase {
         XCTAssertTrue(app.buttons["connect"].waitForExistence(timeout: 5))
     }
 }
+
+#if FINAL_OLD_APP
+final class FinalOldAppTests: XCTestCase {
+    func testOnlyMoveScreen() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--endpoint", "https://old.example.com", "--browser-fixture"]
+        app.launch()
+        // bound: native launch must finish before the move screen can be inspected.
+        XCTAssertTrue(app.buttons["openStore"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["openStore"].isEnabled)
+        XCTAssertTrue(app.staticTexts["moveNote"].label.contains("sign in again"))
+        XCTAssertFalse(app.textFields["endpoint"].exists)
+        XCTAssertFalse(app.buttons["connect"].exists)
+        XCTAssertEqual(app.webViews.count, 0)
+        app.buttons["openStore"].tap()
+        // bound: UIKit must open the supplied HTTPS URL in the receiving browser.
+        // The source app can already be suspended by the time XCTest observes it.
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 10))
+    }
+}
+#endif

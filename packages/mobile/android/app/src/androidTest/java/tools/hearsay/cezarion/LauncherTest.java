@@ -25,6 +25,7 @@ import androidx.webkit.Profile;
 import androidx.webkit.ProfileStore;
 import androidx.webkit.WebViewFeature;
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.util.concurrent.CountDownLatch;
@@ -41,6 +42,7 @@ import static org.junit.Assume.assumeTrue;
 
 @RunWith(AndroidJUnit4.class)
 public class LauncherTest {
+    @Before public void ordinaryBuildOnly() { assumeTrue(!BuildConfig.FINAL_OLD_APP); }
     private static final java.util.function.Consumer<android.app.Activity> RESTART = MainActivity.restart;
     @After public void restoreResetSeams() { MainActivity.inProcessResetOverride = null; MainActivity.restart = RESTART; }
 

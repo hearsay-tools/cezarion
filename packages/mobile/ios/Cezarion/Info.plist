@@ -5,7 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Cezarion</string>
+	<string>$(MOBILE_DISPLAY_NAME)</string>
+	<key>MobileMoveDisplayName</key>
+	<string>$(MOBILE_MOVE_DISPLAY_NAME)</string>
+	<key>MobileFinalOldApp</key>
+	<string>$(MOBILE_FINAL_OLD_APP)</string>
+	<key>MobileStoreURLBase64</key>
+	<string>$(MOBILE_STORE_URL_BASE64)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,9 +29,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSCameraUsageDescription</key>
-	<string>Cezarion uses the camera only when you choose to take a photo or video to attach in the cockpit.</string>
+	<string>$(MOBILE_DISPLAY_NAME) uses the camera only when you choose to take a photo or video to attach in the cockpit.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Cezarion uses the microphone only when you record a video to attach in the cockpit.</string>
+	<string>$(MOBILE_DISPLAY_NAME) uses the microphone only when you record a video to attach in the cockpit.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
