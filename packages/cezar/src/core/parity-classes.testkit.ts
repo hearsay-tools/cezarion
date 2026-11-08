@@ -150,7 +150,10 @@ export const PARITY_FAMILIES = {
   'workflow-followup': everyRunner('the follow-up hold (H rows) is each runner class\'s own'),
   'workflow-no-progress': everyRunner('each runner reports its own model progress'),
   'workflow-step-completion': shared('step completion is decided in run.ts'),
-  'workflow-timeout': everyRunner('each runner applies its own step deadline'),
+  'workflow-timeout': shared('which deadline a step passes is decided in run/step-session.ts, and a timed-out step is Cezar\'s; T7 holds each runner to applying the deadline', {
+    T4: 'each runner\'s own default deadline, on its seam',
+    T7: 'the seam row: each runner applies a set spec.timeoutMs in place of its default',
+  }),
   'skill-resume': shared('inbox generation is Cezar\'s', {
     R53: 'the resumed skill prompt on each runner\'s wire', R54: 'the resumed skill prompt on each runner\'s wire',
     R55: 'the resumed skill prompt on each runner\'s wire', R56: 'the resumed skill prompt on each runner\'s wire',

@@ -203,6 +203,7 @@ export const WORKFLOW_TIMEOUT_CRITERIA = [
   { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
   { id: 'T5', scenario: 'hold-cezar-done', name: 'an authored longer limit replaces the runner default' },
   { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
+  { id: 'T7', scenario: 'hold', name: 'a set spec.timeoutMs replaces the runner default deadline' },
 ] as const;
 
 export const NO_PROGRESS_CRITERIA = [
