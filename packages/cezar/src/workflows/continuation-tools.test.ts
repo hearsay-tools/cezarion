@@ -287,9 +287,9 @@ describe('a resumed session keeps its workflow step tools', () => {
     await settled(id);
   });
 
-  it("a fresh-session continuation (backend switch) resolves the definition's LAST agent step", async () => {
-    // A session owned by another backend forces `resume: false` — `runContinuation` gets no
-    // sessionId, so there is no owning step to read; the run's tail is the documented fallback.
+  it('a fresh-session continuation (backend switch) keeps the step that owns the latest recorded session', async () => {
+    // A session owned by another backend forces `resume: false`. The Continue still continues
+    // `implement`, so it runs with that step's tools, not the definition's tail (hearsay-tools/cezarion#2991).
     const id = terminalRun({
       def: CHAIN_DEF,
       steps: [{ id: 'implement', sessionId: 'sess-1', backend: 'codex' }],
@@ -299,7 +299,27 @@ describe('a resumed session keeps its workflow step tools', () => {
     const spec = await specAt(0);
     expect(spec.resume).toBe(false);
     expect(spec.sessionId).toBeUndefined();
-    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TAIL_TOOLS });
+    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TOOLS, bashAllowlist: BASH });
+    await settled(id);
+  });
+
+  it('a Continue that cannot resume an unreported native session keeps the owning step (hearsay-tools/cezarion#2991)', async () => {
+    // Codex mints its own session id. The step holds only the launch UUID: the process ended after
+    // the step started and before Codex reported a session. The Continue opens a fresh session,
+    // and still continues `implement`, not the definition's tail.
+    const id = terminalRun({
+      def: CHAIN_DEF,
+      steps: [{ id: 'implement', sessionId: 'launch-uuid', backend: 'codex' }],
+      status: RUN_STATUS.failed,
+      error: 'boom',
+    });
+    store.appendEvent(id, { type: 'step-start', stepId: 'implement', name: 'Implement', kind: STEP_KIND.agent, iteration: 1 });
+
+    expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    const spec = await specAt(0);
+    expect(spec.resume).toBe(false);
+    expect(spec.sessionId).not.toBe('launch-uuid');
+    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TOOLS, bashAllowlist: BASH });
     await settled(id);
   });
 
