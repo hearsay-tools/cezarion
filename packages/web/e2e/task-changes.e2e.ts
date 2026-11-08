@@ -142,13 +142,15 @@ describe('the Changes tab against a live dry run', () => {
   it('the toolbar comes from the policy: Push, Create PR, Commit, and kebab', () => {
     browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
     browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"]') !== null`)
-    // Push's enablement rides the /api/v1/health answer (repo.remote), and health probes the
-    // real codex/opencode/gh CLIs — slow. Wait for the policy to settle rather than sample.
-    browser.waitForFunction(
-      `document.querySelector('[data-slot="git-toolbar"] [data-action="push"]')?.disabled === false`,
-    )
-    const actions = browser.evaluate(`[...document.querySelectorAll('[data-slot="git-toolbar"] [data-action]')]
-      .map((el) => ({ id: el.dataset.action, disabled: el.disabled === true }))`) as Array<{
+    // Commit reads /changes, Push reads /repo, and Create PR reads /health.
+    // Wait for their inputs, then assert the policy on the same sample.
+    const actions = browser.waitForValue(`(() => {
+      const toolbar = document.querySelector('[data-slot="git-toolbar"]')
+      if (!toolbar?.querySelector('[data-slot="changes-stat"]') || toolbar.dataset.healthReady !== 'true'
+        || toolbar.querySelector('[data-action="push"]')?.disabled !== false) return null
+      return [...toolbar.querySelectorAll('[data-action]')]
+        .map((el) => ({ id: el.dataset.action, disabled: el.disabled === true }))
+    })()`) as Array<{
       id: string
       disabled: boolean
     }>
