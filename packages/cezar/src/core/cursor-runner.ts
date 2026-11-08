@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
 import type {
   AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentSession, ContentBlock,
-  InputDelivery, SessionOptions,
+  SessionOptions,
 } from './agent-runner.ts';
 import { RUNNER_FACTS } from './runner-facts.ts';
-import { CursorPrintRunner, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
+import { CursorPrintRunner, CURSOR_PRINT_INPUT_DELIVERY, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import type { CursorPrintCapabilityResult } from './cursor-print-capabilities.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
@@ -42,9 +42,7 @@ export class CursorRunner implements AgentRunner {
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'in-thread' as const;
   readonly facts = RUNNER_FACTS.cursor;
-  readonly inputDelivery: InputDelivery = {
-    mode: 'boundary', consumption: 'unobservable', acknowledgement: 'model-work', humanInputAtTurnEnd: 'always-held', via: 'selected Cursor session turn boundary',
-  };
+  readonly inputDelivery = CURSOR_PRINT_INPUT_DELIVERY;
   private lastSession?: AgentSession;
 
   constructor(private readonly options: CursorRunnerOptions = {}) {}
