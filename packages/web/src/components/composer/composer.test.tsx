@@ -102,6 +102,82 @@ const paste = (textarea: HTMLTextAreaElement, files: File[]) =>
     },
   })
 
+function stubComposerSpeech() {
+  let recognition!: { onresult: ((event: unknown) => void) | null; onerror: ((event: { error: string }) => void) | null }
+  const start = vi.fn()
+  const stop = vi.fn()
+  vi.stubGlobal('SpeechRecognition', class {
+    onresult = null
+    onerror = null
+    onend = null
+    start() { recognition = this; start() }
+    stop = stop
+    abort() {}
+  })
+  return {
+    start,
+    stop,
+    result: (transcript: string) => act(() => recognition.onresult?.({
+      resultIndex: 0, results: [{ isFinal: true, 0: { transcript } }],
+    })),
+    fail: () => act(() => recognition.onerror?.({ error: 'audio-capture' })),
+  }
+}
+
+describe('dictation in the composer draft', () => {
+  it('inserts speech after the draft and restores focus and the caret without sending', () => {
+    const speech = stubComposerSpeech()
+    const { textarea, onSubmit } = renderComposer()
+    type(textarea, 'Written text')
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    speech.result('spoken words')
+    fireEvent.click(screen.getByRole('button', { name: 'Insert transcription' }))
+    expect(textarea.value).toBe('Written text spoken words')
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.selectionStart).toBe(textarea.value.length)
+    expect(textarea.selectionEnd).toBe(textarea.value.length)
+    expect(screen.queryByRole('button', { name: 'Cancel dictation' })).toBeNull()
+    expect(speech.stop).toHaveBeenCalledOnce()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('sends speech with text and attachments (retain=%s)', async (retainDraftUntilSuccess) => {
+    const speech = stubComposerSpeech()
+    let resolve!: () => void
+    const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    const { textarea } = renderComposer({ onSubmit, retainDraftUntilSuccess })
+    type(textarea, 'Written text')
+    paste(textarea, [textFile('brief.txt', 'text/plain', 'context')])
+    await screen.findByRole('button', { name: 'Remove brief.txt' })
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    speech.result('spoken words')
+    fireEvent.click(screen.getByRole('button', { name: 'Insert transcription and send' }))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('Written text spoken words', [
+      { mediaType: 'text/plain', data: btoa('context') },
+    ])
+    expect(textarea.value).toBe(retainDraftUntilSuccess ? 'Written text spoken words' : '')
+    expect(speech.stop).toHaveBeenCalledOnce()
+    await act(async () => resolve())
+    expect(textarea.value).toBe('')
+    expect(screen.queryByRole('button', { name: 'Remove brief.txt' })).toBeNull()
+  })
+
+  it('lets a user retry a recognition error from the toast', () => {
+    const speech = stubComposerSpeech()
+    const { textarea, onSubmit } = renderComposer()
+    type(textarea, 'Keep this')
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    speech.fail()
+    expect(textarea.value).toBe('Keep this')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(speech.start).toHaveBeenCalledTimes(2)
+    speech.result('retry words')
+    fireEvent.click(screen.getByRole('button', { name: 'Insert transcription' }))
+    expect(textarea.value).toBe('Keep this retry words')
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
 describe('submit shortcuts', () => {
   it('starts as a compact one-row phone input and restores the desktop minimum at md', () => {
     const { textarea } = renderComposer()
@@ -190,6 +266,22 @@ describe('attachment read errors', () => {
 })
 
 describe('failure restores the draft (nothing the user typed is ever lost)', () => {
+  it('restores sent attachments beside files added while the request was pending', async () => {
+    let reject!: (error: Error) => void
+    const { textarea } = renderComposer({
+      onSubmit: () => new Promise<void>((_, fail) => { reject = fail }),
+    })
+    paste(textarea, [textFile('sent.txt', 'text/plain')])
+    await screen.findByRole('button', { name: 'Remove sent.txt' })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(screen.queryByRole('button', { name: 'Remove sent.txt' })).toBeNull()
+    paste(textarea, [textFile('next.txt', 'text/plain')])
+    await screen.findByRole('button', { name: 'Remove next.txt' })
+    await act(async () => reject(new Error('Send failed')))
+    expect(screen.getByRole('button', { name: 'Remove sent.txt' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove next.txt' })).toBeTruthy()
+  })
+
   it('rejection → danger toast with the server words + the text back in the box', async () => {
     const onSubmit = vi.fn(() => Promise.reject(new Error('session closed — the agent is no longer listening')))
     const { textarea } = renderComposer({ onSubmit })
@@ -213,6 +305,27 @@ describe('failure restores the draft (nothing the user typed is ever lost)', () 
 })
 
 describe('attachments — attach, paste, thumbnails, caps (legacy parity)', () => {
+  it('accepts a file drop, prevents browser navigation and sends the file contents', async () => {
+    const { textarea, onSubmit } = renderComposer()
+    const defaultAllowed = fireEvent.drop(textarea, {
+      dataTransfer: { files: [textFile('dropped.pdf', 'application/pdf', '%PDF')] },
+    })
+    expect(defaultAllowed).toBe(false)
+    await screen.findByRole('button', { name: 'Remove dropped.pdf' })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('', [
+      { mediaType: 'application/pdf', data: btoa('%PDF') },
+    ])
+  })
+
+  it('leaves a drop without files to the browser', () => {
+    const { textarea } = renderComposer()
+    type(textarea, 'Keep this')
+    expect(fireEvent.drop(textarea, { dataTransfer: { files: [] } })).toBe(true)
+    expect(textarea.value).toBe('Keep this')
+    expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull()
+  })
+
   it('pasted screenshots become removable thumbnails and ride the submit', async () => {
     const { onSubmit, textarea } = renderComposer()
     paste(textarea, [pngFile('shot.png', [9, 9])])
@@ -314,6 +427,18 @@ describe('attachments — attach, paste, thumbnails, caps (legacy parity)', () =
 })
 
 describe('/ skills autocomplete (#380)', () => {
+  it('accepts a skill with Tab while Shift+Tab leaves the draft unchanged', async () => {
+    const { textarea, onSubmit } = renderComposer()
+    type(textarea, '/om-fix')
+    await screen.findByText('Fix an issue')
+    expect(fireEvent.keyDown(textarea, { key: 'Tab', shiftKey: true })).toBe(true)
+    expect(textarea.value).toBe('/om-fix')
+    expect(fireEvent.keyDown(textarea, { key: 'Tab' })).toBe(false)
+    expect(textarea.value).toBe('/om-fix ')
+    expect(document.querySelector('[data-slot="composer-menu"]')).toBeNull()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it('opens at a word boundary, fetches skills lazily, lists project skills first and bold', async () => {
     const { fetchMock, textarea } = renderComposer()
     // No `/` yet — no skills fetch.
@@ -483,6 +608,19 @@ describe('/ autocomplete usage order and pick bump (#519)', () => {
 })
 
 describe('@ file mentions — the provider seam (R5 upgrades the source, not the composer)', () => {
+  it('sends the raw draft with Enter when no file matches the open menu', async () => {
+    const { textarea, onSubmit } = renderComposer({ getMentionCandidates: () => [] })
+    type(textarea, '@missing')
+    expect(await screen.findByText(/No files seen in this session yet/)).toBeTruthy()
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+    expect(textarea.value).toBe('@missing')
+    expect(onSubmit).not.toHaveBeenCalled()
+    await act(async () => fireEvent.keyDown(textarea, { key: 'Enter' }))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('@missing', [])
+    expect(textarea.value).toBe('')
+    expect(screen.queryByText(/No files seen in this session yet/)).toBeNull()
+  })
+
   it('lists and inserts the provider paths, fuzzy-filtered', async () => {
     const { textarea } = renderComposer({
       getMentionCandidates: () => ['src/server/server.ts', 'README.md'],
@@ -790,6 +928,41 @@ describe('phone composer disclosure', () => {
 
 
 describe('retained submission (#164)', () => {
+  it('inserts a template at the caret without replacing the surrounding draft', () => {
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    const { textarea } = renderComposer({ ref: handle })
+    type(textarea, 'Before After')
+    textarea.setSelectionRange(6, 6)
+    textarea.blur()
+    act(() => handle.current?.insertAtCaret('Template'))
+    expect(textarea.value).toBe('Before\n\nTemplate\n\nAfter')
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.selectionStart).toBe('Before\n\nTemplate'.length)
+    expect(textarea.selectionEnd).toBe(textarea.selectionStart)
+    expect(handle.current?.getDraft()).toBe(textarea.value)
+  })
+
+  it('keeps text and attachments after success when the host disables clearing', async () => {
+    let resolve!: () => void
+    const onPendingChange = vi.fn()
+    const { textarea } = renderComposer({
+      retainDraftUntilSuccess: true,
+      clearOnSuccess: false,
+      onPendingChange,
+      onSubmit: () => new Promise<void>(done => { resolve = done }),
+    })
+    type(textarea, 'Keep after success')
+    paste(textarea, [textFile('kept.txt', 'text/plain')])
+    await screen.findByRole('button', { name: 'Remove kept.txt' })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onPendingChange.mock.calls).toEqual([[true]])
+    await act(async () => resolve())
+    expect(onPendingChange.mock.calls).toEqual([[true], [false]])
+    expect(textarea.value).toBe('Keep after success')
+    expect(screen.getByRole('button', { name: 'Remove kept.txt' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('holds the draft through same-turn keyboard duplicates and clears only on success', async () => {
     let resolve!: () => void
     const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
@@ -998,6 +1171,21 @@ it('retained submission prevents dictation insertion and dictation send while pe
 })
 
 describe('unified execution actions (#201)', () => {
+  it('routes an empty draft to Finish and a written draft to Send', async () => {
+    const onFinish = vi.fn(async () => {})
+    const { textarea, onSubmit } = renderComposer({ onFinish })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(onFinish).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Finish' })))
+    expect(onFinish).toHaveBeenCalledOnce()
+    type(textarea, 'More instructions')
+    expect(screen.queryByRole('button', { name: 'Finish' })).toBeNull()
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('More instructions', [])
+    expect(onFinish).toHaveBeenCalledOnce()
+  })
+
   it('shows Stop on empty active drafts without making Enter a Stop shortcut', async () => {
     const onStop = vi.fn(async () => {})
     const { textarea, onSubmit } = renderComposer({ onStop, stopOnEmpty: true, quickReplies: true })
