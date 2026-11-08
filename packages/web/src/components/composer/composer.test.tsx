@@ -559,6 +559,19 @@ describe('/ autocomplete usage order and pick bump (#519)', () => {
 })
 
 describe('@ file mentions — the provider seam (R5 upgrades the source, not the composer)', () => {
+  it('sends the raw draft with Enter when no file matches the open menu', async () => {
+    const { textarea, onSubmit } = renderComposer({ getMentionCandidates: () => [] })
+    type(textarea, '@missing')
+    expect(await screen.findByText(/No files seen in this session yet/)).toBeTruthy()
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+    expect(textarea.value).toBe('@missing')
+    expect(onSubmit).not.toHaveBeenCalled()
+    await act(async () => fireEvent.keyDown(textarea, { key: 'Enter' }))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('@missing', [])
+    expect(textarea.value).toBe('')
+    expect(screen.queryByText(/No files seen in this session yet/)).toBeNull()
+  })
+
   it('lists and inserts the provider paths, fuzzy-filtered', async () => {
     const { textarea } = renderComposer({
       getMentionCandidates: () => ['src/server/server.ts', 'README.md'],
@@ -866,6 +879,41 @@ describe('phone composer disclosure', () => {
 
 
 describe('retained submission (#164)', () => {
+  it('inserts a template at the caret without replacing the surrounding draft', () => {
+    const handle = React.createRef<import('./composer').ComposerHandle>()
+    const { textarea } = renderComposer({ ref: handle })
+    type(textarea, 'Before After')
+    textarea.setSelectionRange(6, 6)
+    textarea.blur()
+    act(() => handle.current?.insertAtCaret('Template'))
+    expect(textarea.value).toBe('Before\n\nTemplate\n\nAfter')
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.selectionStart).toBe('Before\n\nTemplate'.length)
+    expect(textarea.selectionEnd).toBe(textarea.selectionStart)
+    expect(handle.current?.getDraft()).toBe(textarea.value)
+  })
+
+  it('keeps text and attachments after success when the host disables clearing', async () => {
+    let resolve!: () => void
+    const onPendingChange = vi.fn()
+    const { textarea } = renderComposer({
+      retainDraftUntilSuccess: true,
+      clearOnSuccess: false,
+      onPendingChange,
+      onSubmit: () => new Promise<void>(done => { resolve = done }),
+    })
+    type(textarea, 'Keep after success')
+    paste(textarea, [textFile('kept.txt', 'text/plain')])
+    await screen.findByRole('button', { name: 'Remove kept.txt' })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onPendingChange.mock.calls).toEqual([[true]])
+    await act(async () => resolve())
+    expect(onPendingChange.mock.calls).toEqual([[true], [false]])
+    expect(textarea.value).toBe('Keep after success')
+    expect(screen.getByRole('button', { name: 'Remove kept.txt' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('holds the draft through same-turn keyboard duplicates and clears only on success', async () => {
     let resolve!: () => void
     const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
@@ -1074,6 +1122,21 @@ it('retained submission prevents dictation insertion and dictation send while pe
 })
 
 describe('unified execution actions (#201)', () => {
+  it('routes an empty draft to Finish and a written draft to Send', async () => {
+    const onFinish = vi.fn(async () => {})
+    const { textarea, onSubmit } = renderComposer({ onFinish })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    expect(onFinish).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Finish' })))
+    expect(onFinish).toHaveBeenCalledOnce()
+    type(textarea, 'More instructions')
+    expect(screen.queryByRole('button', { name: 'Finish' })).toBeNull()
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('More instructions', [])
+    expect(onFinish).toHaveBeenCalledOnce()
+  })
+
   it('shows Stop on empty active drafts without making Enter a Stop shortcut', async () => {
     const onStop = vi.fn(async () => {})
     const { textarea, onSubmit } = renderComposer({ onStop, stopOnEmpty: true, quickReplies: true })
