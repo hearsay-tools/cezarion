@@ -380,7 +380,7 @@ type Definition = { id: string; name: string; enabled: boolean; revision: number
 function onceFields(schedule: AutomationSchedule | undefined): { dueAt: string; timeZone: string } | Record<string, never> {
   if (schedule?.type !== 'once') return {};
   const instant = onceInstant(schedule);
-  return instant === null ? {} : { dueAt: new Date(instant).toISOString(), timeZone: schedule.timeZone ?? '' };
+  return instant === null ? {} : { dueAt: new Date(instant).toISOString(), timeZone: schedule.timeZone! };
 }
 
 /** What one command's execution reads and answers through: the parsed call with its shared request helpers. */
