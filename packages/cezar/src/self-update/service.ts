@@ -13,7 +13,7 @@ import type { SelfUpdateDevelopment, SelfUpdateJob, SelfUpdateStatus, UpdateChan
 import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { installFromLocal, installFromRegistry } from './installer.ts';
-import { writeLaunchers } from './launcher.ts';
+import { activateManaged, writeLaunchers } from './launcher.ts';
 import { buildCheckout, discoverCheckouts } from './checkouts.ts';
 import { activate, detectInstallKind, findInstalled, linkCheckout, listInstalled, packageRootOf, type InstalledEntry, type InstallKind } from './layout.ts';
 import { CEZAR_REPO, fetchOpenPulls, OpenPullsCache, type OpenPulls } from './pulls.ts';
@@ -291,10 +291,7 @@ export class SelfUpdateService {
         const linked = !registryOnly && (!installed || installed.source === 'link') ? await this.linkDiscovered(target, log) : null;
         const id = linked ?? installed?.id ?? (await installFromRegistry(target, { onLog: log, env: this.env, home: this.home, rebrand: this.deps.rebrand })).id;
         if (installed && !linked) log(`${id} is already installed`);
-        // A legacy launcher has a fixed legacy package path. Refresh it before selecting
-        // a renamed managed tree so future terminal and service starts can find both names.
-        if (productIdentity(this.deps.rebrand).rebrand) writeLaunchers(this.env, this.home, this.deps.rebrand);
-        activate(id, this.env, this.home, this.deps.rebrand);
+        activateManaged(id, this.env, this.home, this.deps.rebrand);
         log(`activated ${id}`);
         job.status = 'restarting';
         job.finishedAt = new Date().toISOString();
@@ -330,6 +327,9 @@ export class SelfUpdateService {
   /** `cezar install` from a checkout or the npx cache: pack the running package into the managed
    *  layout and activate it. Headless — the CLI prints the log. */
   async installSelf(onLog: (line: string) => void): Promise<{ id: string; entry: string }> {
+    // A local reinstall can replace the tree already selected by current. Refresh
+    // before installing too, so a failed write cannot strand the active local build.
+    if (productIdentity(this.deps.rebrand).rebrand) writeLaunchers(this.env, this.home, this.deps.rebrand);
     const result = await installFromLocal(packageRootOf(this.deps.entry), { onLog, env: this.env, home: this.home, rebrand: this.deps.rebrand });
     activate(result.id, this.env, this.home, this.deps.rebrand);
     return result;

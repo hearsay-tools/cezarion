@@ -16,7 +16,7 @@ import { join, win32 } from 'node:path';
 
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 
-import { binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
+import { activate, binDir, CURRENT_LINK, PACKAGE_NAME, versionsDir } from './layout.ts';
 
 const PATH_MARKER = '# cezar managed install';
 const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
@@ -104,6 +104,13 @@ export function writeLaunchers(env: NodeJS.ProcessEnv = process.env, home: Home,
     }
   }
   return dir;
+}
+
+/** Refresh fixed legacy launch paths before selecting a renamed managed tree.
+ * With the switch off, preserve activation order and leave launcher writes to the caller. */
+export function activateManaged(id: string, env: NodeJS.ProcessEnv, home: Home, rebrand = productIdentity().rebrand): void {
+  if (rebrand) writeLaunchers(env, home, rebrand);
+  activate(id, env, home, rebrand);
 }
 
 /** Whether `dir` is already on the caller's PATH. */

@@ -73,3 +73,13 @@ paths and pending update records.
 
 Tests stub registry reads and npm, or use local npm executables. No test accesses
 the registry. Desktop, web and mobile code stays outside this unit.
+
+
+Managed activation refreshes launchers before selecting a new tree with the
+switch on. Cockpit apply and CLI update, use and link share that guard. Install
+refreshes before packing or installing too: a local reinstall can replace the
+already active version directory. CLI install and update do not write launchers
+again after activation with the switch on. A failed refresh keeps `current`
+unchanged and prevents local replacement. With the switch off, the existing
+activation and launcher-write order stays unchanged; both versions use the
+legacy runtime path, so the existing launcher remains usable.
