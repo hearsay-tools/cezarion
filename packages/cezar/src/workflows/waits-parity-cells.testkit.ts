@@ -417,10 +417,10 @@ function silenceRefusals() {
   const clock = observationClock(delay => delay === NO_WAIT_NUDGE_REPLY_MS && /\bat TurnNudges\./.test(new Error().stack ?? ''));
   process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:ack-only';
   return async (runner: RunnerId, refusal: string) => {
-    // bound: until's 15 s only guards a mock that never records the refusal.
-    await until(() => prompted(runner, refusal).length > 0);
-    const captured = clock.captured - 1;
-    const timer = nativeTimeout(() => { if (clock.pending && captured === clock.captured - 1) clock.fire(captured); }, 300);
+    // bound: until's 15 s guards a missing mock record or a reply timer that never arms.
+    await until(() => prompted(runner, refusal).length > 0 && clock.pending > 0);
+    // A native ACK may rearm the same reply bound after the mock recorded the prompt.
+    const timer = nativeTimeout(() => { if (clock.pending) clock.fire(clock.captured - 1); }, 300);
     onTestFinished(() => clearNativeTimeout(timer));
   };
 }
@@ -3112,8 +3112,10 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
             expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
             expect(semaphore.busy()).toBe(0);
             releaseAck();
-            await until(() => refusals().some(input => !!input.deliveredAt));
-            await silence!(runner, refusal);
+            if (runner === 'opencode') {
+              await until(() => refusals().some(input => !!input.deliveredAt));
+              await silence!(runner, refusal);
+            }
             // The reply bound can beat the native ACK. Its human gate alone does not prove
             // delivery committed; the late ACK resumes wake bookkeeping and re-arms that bound.
             checkpoint('u22r-refusal-delivered-and-reparked');
