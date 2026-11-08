@@ -308,7 +308,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     await mkdir(stage, { recursive: true });
     const spec = `${installation.outerPackage}@${target}`;
     const args = ['install', '--prefix', stage, '--engine-strict', '--no-audit', '--no-fund', '--ignore-scripts', '--prefer-online', '--fetch-retries=1', spec];
-    await (this.options.runNpm ?? ((argv, abortSignal) => this.runNpm(argv, abortSignal)))(args, signal);
+    await (this.options.runNpm ?? ((argv, abortSignal) => this.runNpm(argv, installation.cache, abortSignal)))(args, signal);
     await assertOwned();
     const stagedScoped = stageScopedPath(stage, installation.outerPackage);
     validateInstalledPackage(stagedScoped, target, stage);
@@ -512,8 +512,8 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     this.options.handoff?.();
   }
 
-  private async runNpm(args: string[], signal?: AbortSignal): Promise<void> {
-    const env = { ...process.env, npm_config_cache: this.installation.kind === 'unsupported' ? '' : this.installation.cache };
+  private async runNpm(args: string[], cache: string, signal?: AbortSignal): Promise<void> {
+    const env = { ...process.env, npm_config_cache: cache };
     await runOwnedNpm(this.options.npmBin ?? 'npm', args, env, signal);
   }
 }
