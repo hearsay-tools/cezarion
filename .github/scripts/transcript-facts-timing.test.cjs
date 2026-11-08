@@ -5,19 +5,19 @@ const timing = import('../../packages/cezar/scripts/transcript-facts-timing.mjs'
 
 test('separates CPU, run-queue wait and residual blocked time', async () => {
   const { timingDelta } = await timing;
-  assert.deepEqual(timingDelta({ at: 0, cpuMs: 10, queueWaitMs: 5 }, { at: 100, cpuMs: 12, queueWaitMs: 35 }),
+  assert.deepEqual(timingDelta({ at: 0, cpuMs: 10, queueAfterMs: 5 }, { at: 100, cpuMs: 12, queueBeforeMs: 35 }),
     { elapsedMs: 100, mainThreadCpuMs: 2, queueWaitMs: 30, blockedMs: 68 });
 });
 
 test('does not invent scheduler evidence when procfs is absent', async () => {
   const { timingDelta } = await timing;
-  assert.deepEqual(timingDelta({ at: 0, cpuMs: 10, queueWaitMs: null }, { at: 100, cpuMs: 12, queueWaitMs: null }),
+  assert.deepEqual(timingDelta({ at: 0, cpuMs: 10, queueAfterMs: null }, { at: 100, cpuMs: 12, queueBeforeMs: null }),
     { elapsedMs: 100, mainThreadCpuMs: 2, queueWaitMs: null, blockedMs: null });
 });
 
 test('clamps residual skew from independently sampled clocks', async () => {
   const { timingDelta } = await timing;
-  assert.equal(timingDelta({ at: 0, cpuMs: 0, queueWaitMs: 0 }, { at: 1, cpuMs: 1, queueWaitMs: 1 }).blockedMs, 0);
+  assert.equal(timingDelta({ at: 0, cpuMs: 0, queueAfterMs: 0 }, { at: 1, cpuMs: 1, queueBeforeMs: 1 }).blockedMs, 0);
 });
 
 test('takes a finite current-thread CPU snapshot and optional scheduler snapshot', async () => {
@@ -25,7 +25,7 @@ test('takes a finite current-thread CPU snapshot and optional scheduler snapshot
   const sample = timingSnapshot();
   assert.ok(Number.isFinite(sample.at));
   assert.ok(Number.isFinite(sample.cpuMs));
-  assert.ok(sample.queueWaitMs === null || Number.isFinite(sample.queueWaitMs));
+  assert.ok(sample.queueBeforeMs === null || Number.isFinite(sample.queueBeforeMs));
 });
 
 test('excludes run-queue delay but keeps synchronous blocking and CPU', async () => {
@@ -39,4 +39,24 @@ test('excludes run-queue delay but keeps synchronous blocking and CPU', async ()
   assert.equal(blockingBudget({ elapsedMs: 1, mainThreadCpuMs: 0, queueWaitMs: 2 }).blockingMs, 0);
   assert.deepEqual(blockingBudget({ elapsedMs: 120, mainThreadCpuMs: 2, queueWaitMs: null }),
     { mode: 'cpu-only', blockingMs: 2 });
+});
+
+test('does not credit queue wait before the measured interval (B1)', async () => {
+  const { timingSnapshot, timingDelta, blockingBudget } = await timing;
+  let wall = 0;
+  let queue = 0;
+  let reads = 0;
+  const readQueue = () => {
+    const value = queue;
+    if (reads++ === 0) { wall += 80; queue += 80; }
+    return value;
+  };
+  const sources = { now: () => wall, readQueue, readCpu: () => ({ user: 0, system: 0 }) };
+  const start = timingSnapshot(sources);
+  wall += 60; // Synchronous off-CPU blocking inside the measured interval.
+  const end = timingSnapshot(sources);
+  const sample = timingDelta(start, end);
+  assert.equal(sample.elapsedMs, 60);
+  assert.equal(sample.queueWaitMs, 0);
+  assert.equal(blockingBudget(sample).blockingMs, 60);
 });
