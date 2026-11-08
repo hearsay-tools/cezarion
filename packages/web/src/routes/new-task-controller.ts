@@ -240,10 +240,12 @@ export function useAccountSelection(displayRunner: Runner, draftAgentProfile: st
  */
 export function useProviderReadyFocus(providersReady: boolean) {
   const providersWereReady = useRef(false)
+  const initialFocus = useRef<Element | null | undefined>(undefined)
   useEffect(() => {
+    if (initialFocus.current === undefined) initialFocus.current = document.activeElement
     const becameReady = providersReady && !providersWereReady.current
     providersWereReady.current = providersReady
-    if (becameReady && document.activeElement === document.body) {
+    if (becameReady && (document.activeElement === document.body || document.activeElement === initialFocus.current)) {
       document
         .querySelector<HTMLTextAreaElement>('textarea[aria-label="Describe a task for the agent"]')
         ?.focus()
