@@ -410,20 +410,19 @@ const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.
 /** A harness that acknowledges Cezar's completion refusal on its own native wire and never
  *  answers it (hearsay-tools/cezarion#1301): the mocks' `mock:ack-only` reply accepts the prompt,
  *  reports it read where the wire can, and starts no turn, as an OpenCode heartbeat keeps a session
- *  alive without one. The nudge's reply bound is shortened so its no-reply park comes at once.
- *  Call it before the session starts: a mock reads its environment when it is spawned. */
+ *  alive without one. Call it before the session starts: a mock reads its environment when spawned.
+ *  After each delivery, call the returned function with that refusal. It waits for the native mock
+ *  record before starting the shortened 300 ms reply window, including after a late ACK rearms it. */
 function silenceRefusals() {
-  let index = 0;
-  const clock = observationClock(delay => {
-    const owned = delay === NO_WAIT_NUDGE_REPLY_MS && /\bat TurnNudges\./.test(new Error().stack ?? '');
-    if (owned) {
-      const captured = index++;
-      const timer = nativeTimeout(() => { if (clock.pending && captured === clock.captured - 1) clock.fire(captured); }, 300);
-      onTestFinished(() => clearNativeTimeout(timer));
-    }
-    return owned;
-  });
+  const clock = observationClock(delay => delay === NO_WAIT_NUDGE_REPLY_MS && /\bat TurnNudges\./.test(new Error().stack ?? ''));
   process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:ack-only';
+  return async (runner: RunnerId, refusal: string) => {
+    // bound: until's 15 s only guards a mock that never records the refusal.
+    await until(() => prompted(runner, refusal).length > 0);
+    const captured = clock.captured - 1;
+    const timer = nativeTimeout(() => { if (clock.pending && captured === clock.captured - 1) clock.fire(captured); }, 300);
+    onTestFinished(() => clearNativeTimeout(timer));
+  };
 }
 
 /** A steering parent on `runner`'s native wire and a worker running on the Claude wire, parked,
@@ -2574,7 +2573,7 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
           expect(exemptionFor('U20h', runner)?.kind).toBe('capability-absent');
           return;
         }
-        silenceRefusals();
+        const silence = silenceRefusals();
         const p = await workerParent(runner);
         if (path === 'continuation') {
           // An idle close leaves the run waiting; the human's Continue reopens it as a continuation.
@@ -2583,6 +2582,7 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
         }
         const continued = (prompt: string) => expect(manager.continueRun(p.id, { text: prompt }).ok).toBe(true);
         const w = await blockedDone(p.id, () => blockingWorker(p.id), path === 'continuation' ? continued : undefined);
+        await silence(runner, liveRefusal(w));
         await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
         if (path === 'continuation') expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
         expect(nudgeNotes(p.id)).toHaveLength(1);
@@ -2601,6 +2601,7 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
         expect(nudgeNotes(p.id)).toHaveLength(2);
         await until(() => prompted(runner, liveRefusal(next)).length > 0);
         expect(prompted(runner, liveRefusal(next))).toHaveLength(1);
+        await silence(runner, liveRefusal(next));
         await until(() => noReplyNotes(p.id).length === 2 && gated(p.id));
         expect(workerWaits(p.id)).toEqual([]);
       });
@@ -2904,10 +2905,11 @@ function completionRepliesCells(runners: RunnerId[], it: typeof registerTest = r
         expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
         return;
       }
-      silenceRefusals();
+      const silence = silenceRefusals();
       const { p, w } = await parentWithWorker(runner);
       const refusal = `Workers are still live: ${w.id}.`;
       sessionOf(p.id).end();
+      await silence(runner, refusal);
       await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
       expect(prompted(runner, refusal)).toHaveLength(1);
       expect(store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)))
@@ -3020,8 +3022,8 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
           return;
         }
         retryAtOnce();
-        if (variant === 'silent') silenceRefusals();
-        else process.env.CEZ_MOCK_COMPLETION_REPLY = refusedDoneReply();
+        const silence = variant === 'silent' ? silenceRefusals() : undefined;
+        if (variant === 'closing') process.env.CEZ_MOCK_COMPLETION_REPLY = refusedDoneReply();
         const { p, w } = await parentWithWorker(runner, runner === 'claude' ? 'U22k' : undefined);
         const refusal = `Workers are still live: ${w.id}.`;
         const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
@@ -3049,6 +3051,7 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
           await refusalStep(runner, p.id, 'U22k: Continue delivery checkpoint', () => refusals()[0]?.deliveredAt !== undefined);
         }
         if (variant === 'silent') {
+          await silence!(runner, refusal);
           await refusalStep(runner, p.id, 'U22k: Continue no-reply final park', () => noReplyNotes(p.id).length === 1 && gated(p.id));
           expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
           expect(semaphore.busy()).toBe(0);
@@ -3071,8 +3074,8 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
             expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
             return;
           }
-          if (variant === 'silent') silenceRefusals();
-          else process.env.CEZ_MOCK_COMPLETION_REPLY = refusedDoneReply();
+          let silence = variant === 'silent' ? silenceRefusals() : undefined;
+          if (variant === 'closing') process.env.CEZ_MOCK_COMPLETION_REPLY = refusedDoneReply();
           const { p, w } = await parentWithWorker(runner);
           const refusal = `Workers are still live: ${w.id}.`;
           const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
@@ -3099,15 +3102,18 @@ function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest
           // Recovery reopens the run through the scheduler; its first turn end is a mock round trip away.
           store.on('event', closeOnce);
           onTestFinished(() => { store.off('event', closeOnce); });
-          if (variant === 'silent') silenceRefusals();
+          if (variant === 'silent') silence = silenceRefusals();
           else retryAtOnce();
           expect(refusals()).toEqual([expect.objectContaining({ source: 'lifecycle' })]);
           if (variant === 'silent') {
+            await silence!(runner, refusal);
             await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
             if (runner === 'opencode') expect(refusals()[0]!.deliveredAt).toBeUndefined();
             expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
             expect(semaphore.busy()).toBe(0);
             releaseAck();
+            await until(() => refusals().some(input => !!input.deliveredAt));
+            await silence!(runner, refusal);
             // The reply bound can beat the native ACK. Its human gate alone does not prove
             // delivery committed; the late ACK resumes wake bookkeeping and re-arms that bound.
             checkpoint('u22r-refusal-delivered-and-reparked');
