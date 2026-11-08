@@ -19,6 +19,7 @@ import {
   hasWorkerDeadline,
   LAST_WAITS_LIMIT,
   resolveWaitingOn,
+  runningSubagents,
   TIMER_MAX_SECONDS,
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
@@ -615,11 +616,28 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     expect(result.error?.issues.map((issue) => issue.path[0])).toContain('deadline');
   });
 
+  it.each(['deadline', 'timeoutSeconds'] as const)('reports the missing agent worker field %s independently', (field) => {
+    const result = workerWaitEntrySchema.safeParse({ ...workerBase(targets), [field]: undefined });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: 'custom', path: [field] },
+    ]);
+  });
+
   it('a cezar entry with only one of deadline and timeoutSeconds is refused', () => {
     const cezar = { ...workerBase(targets), source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion };
     expect(workerWaitEntrySchema.safeParse({ ...cezar, timeoutSeconds: undefined }).success).toBe(false);
     expect(workerWaitEntrySchema.safeParse({ ...cezar, deadline: undefined }).success).toBe(false);
     expect(workerWaitEntrySchema.safeParse(cezar).success).toBe(true);
+  });
+
+  it.each(['deadline', 'timeoutSeconds'] as const)('identifies the missing partner %s in a cezar worker entry', (field) => {
+    const cezar = { ...workerBase(targets), source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion };
+    const result = workerWaitEntrySchema.safeParse({ ...cezar, [field]: undefined });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map(({ code, path }) => ({ code, path }))).toEqual([
+      { code: 'custom', path: [field] },
+    ]);
   });
 
   it('a deadline-less worker entry is reported without a deadline, and the CI deadline stands alone', () => {
@@ -1021,6 +1039,12 @@ describe('waiting-on mixed entries', () => {
 // hearsay-tools/cezarion#2431: Cezar's wait on native subagents a turn left running.
 describe('subagent waits', () => {
   const child = (id: string, status: 'running' | 'completed' | 'failed' | 'cancelled' = 'running') => ({ id, status });
+
+  it('counts only running subagents in a wait with mixed child states', () => {
+    const wait = makeSubagentWait({ children: [child('a'), child('b', 'completed'), child('c', 'failed'), child('d', 'cancelled')] });
+    expect(runningSubagents(wait)).toBe(1);
+    expect(runningSubagents({ children: wait.children.slice(1) })).toBe(0);
+  });
 
   it('is Cezar\'s own entry with a required deadline, 1 to 32 children and a reason once settled', () => {
     expect(waitSchema.safeParse(makeSubagentWait()).success).toBe(true);
