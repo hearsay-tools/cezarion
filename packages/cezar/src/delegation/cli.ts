@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { execFileSync } from 'node:child_process';
@@ -131,7 +132,7 @@ function workerHelp(operation?: string): string {
   const names = [...new Set(operations.map(entry => entry.name))];
   const flags = [...new Set(operations.flatMap(entry => [...(entry.required ?? []), ...(entry.optional ?? [])]))];
   return [
-    'cezar worker — manage owned coding workers', '', 'Usage:',
+    `${productName('cezar')} worker — manage owned coding workers`, '', 'Usage:',
     ...names.flatMap(name => {
       const help = WORKER_HELP[name]!;
       return [commandText(`  cez worker ${name} ${help.args}`), `    ${help.description}`];
@@ -140,7 +141,7 @@ function workerHelp(operation?: string): string {
     '  -h, --help                       Show help without a delegation session.', '',
     'Required flags are shown in each synopsis. Other flags are optional.',
     commandText('Use cez worker <operation> --help for operation help.'),
-    'Commands require an active cezar delegation session and return JSON.',
+    `Commands require an active ${productName('cezar')} delegation session and return JSON.`,
     'Explicit help prints text and exits successfully; invalid commands return JSON errors.',
   ].join('\n');
 }
@@ -340,7 +341,7 @@ const MESSAGE_HELP: Record<string, string> = {
 };
 function messageHelp(operation?: string): string {
   const entries = operation === undefined ? Object.entries(MESSAGE_HELP) : [[operation, MESSAGE_HELP[operation]!]];
-  return ['cezar message — task conversations', '', 'Usage:', ...entries.map(([name, args]) => commandText(`  cez message ${name} ${args}`)), '', 'Commands require an active delegation session and return JSON.'].join('\n');
+  return [`${productName('cezar')} message — task conversations`, '', 'Usage:', ...entries.map(([name, args]) => commandText(`  cez message ${name} ${args}`)), '', 'Commands require an active delegation session and return JSON.'].join('\n');
 }
 /** Values after the option terminator are always message text or positionals. */
 function optionArguments(argv: string[]): string[] {

@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -11,7 +12,7 @@ export class PreviewErrorBoundary extends Component<{ children: ReactNode; onClo
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('cezar cockpit: the preview pane crashed', error, info.componentStack)
+    console.error(`${productName('cezar')} cockpit: the preview pane crashed`, error, info.componentStack)
   }
 
   override render(): ReactNode {

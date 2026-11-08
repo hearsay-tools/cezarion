@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createHostDiscovery } from './discovery/catalog.ts';
@@ -113,7 +114,7 @@ export async function serveCommand(
   void deps.checkForUpdate(pkgName, version).then((latest) => {
     if (!latest) return;
     update.latest = latest;
-    deps.console.log(`\n  ⬆ cezar ${latest} is available (running ${version}) — restart with: npx ${pkgName}@latest\n`);
+    deps.console.log(`\n  ⬆ ${productName('cezar')} ${latest} is available (running ${version}) — restart with: npx ${pkgName}@latest\n`);
   });
 
   const port = preferredPort;

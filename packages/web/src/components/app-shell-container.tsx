@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { projectAddress } from '@/api/run-address'
 import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
@@ -128,7 +129,7 @@ function shellBreadcrumb(
   titleRun: RunSummary | undefined,
   pageLabel: string | null,
 ) {
-  return { project: pathname === '/tools' ? 'Workspace' : projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? 'Cezarion', branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }
+  return { project: pathname === '/tools' ? 'Workspace' : projectName, page: titleRun ? `Tasks / ${pageLabel}` : pageLabel ?? productName('Cezarion'), branch: titleRun?.worktreePath ? 'Isolated worktree' : undefined }
 }
 
 function shellProjectRail(

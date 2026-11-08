@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon } from 'lucide-react'
@@ -663,10 +664,10 @@ function TaskAccessItems({ run, patch }: { run: ApiRun; patch: ReturnType<typeof
       <DropdownMenuCheckboxItem data-slot="allow-workers" className="min-h-11" checked={workersAllowed(run)} disabled={patch.isPending}
         aria-describedby={`${workersHelpId} ${sessionHelpId}`}
         onCheckedChange={(allowWorkers) => patch.mutate({ allowWorkers }, { onError })}>
-        Allow cezar workers
+        Allow {productName('cezar')} workers
       </DropdownMenuCheckboxItem>
       <p id={workersHelpId} className="text-xs text-muted-foreground [padding-inline:0.5rem] [padding-block-end:0.5rem]">
-        Agents in this task can start Cezar workers. Each worker is a separate paid agent session. Worker limits cap resources, not spending.
+        Agents in this task can start {productName('Cezar')} workers. Each worker is a separate paid agent session. Worker limits cap resources, not spending.
       </p>
       <DropdownMenuCheckboxItem data-slot="allow-messaging" className="min-h-11" checked={messagingAllowed(run)} disabled={patch.isPending}
         aria-describedby={`${messagingHelpId} ${sessionHelpId}`}

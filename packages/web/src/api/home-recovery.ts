@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { homeRecoveryReaderSchema, type HomeFile, type HomeRecovery, type HomeRecoveryAction } from '@open-mercato/cezar-api-client/contract/home-recovery'
@@ -12,7 +13,7 @@ export const HOME_RECOVERY_QUERY_KEY = ['workspace', 'home-recovery'] as const
 
 function parseRecovery(value: unknown): HomeRecovery {
   const parsed = homeRecoveryReaderSchema.safeParse(value)
-  if (!parsed.success) throw new ApiError(200, 'the cezar server answered /home/recovery with an unexpected body')
+  if (!parsed.success) throw new ApiError(200, `the ${productName('cezar')} server answered /home/recovery with an unexpected body`)
   return parsed.data
 }
 

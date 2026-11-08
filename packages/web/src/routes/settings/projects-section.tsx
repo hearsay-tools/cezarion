@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FoldersIcon, XIcon } from '@/components/design-icons'
 
@@ -387,7 +388,7 @@ function ProjectRow({
           aria-label={`Remove ${project.name} from the workspace — unregisters it, no files are deleted`}
           // The boot project is refused server-side too (it re-registers itself at every start);
           // disabling here means the user gets the explanation before the click, not after.
-          title={isBoot ? 'cezar is serving this project — it re-registers itself at every start' : undefined}
+          title={isBoot ? `${productName('cezar')} is serving this project — it re-registers itself at every start` : undefined}
           disabled={disabled || isBoot}
           onClick={onRemove}
         >

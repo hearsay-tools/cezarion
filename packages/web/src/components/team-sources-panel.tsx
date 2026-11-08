@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { RefreshCwIcon, TriangleAlertIcon, XIcon } from '@/components/design-icons'
@@ -133,7 +134,7 @@ export function TeamSourcesPanel() {
       {data && !data.editable ? (
         <Notice slot="skill-sources-read-only">
           Sources are read-only on this remote cockpit. To edit them here, run{' '}
-          <span className="font-mono">cez remote-settings enable</span> on the machine running cezar.
+          <span className="font-mono">cez remote-settings enable</span> on the machine running {productName('cezar')}.
         </Notice>
       ) : null}
 
@@ -279,7 +280,7 @@ export function statusText(source: TeamSkillSource): string {
     case 'error': {
       const kept = status.skillCount > 0 ? ' Skills from an earlier fetch still show.' : ''
       if (status.cause === 'refused-format') {
-        return `cezar does not accept this repo format. Remove it, then add it as ${SKILLS_REPO_FORMATS}.`
+        return `${productName('cezar')} does not accept this repo format. Remove it, then add it as ${SKILLS_REPO_FORMATS}.`
       }
       if (status.cause === 'ref-not-found') {
         return `${status.detail} Check the ref, or remove the source and add it with another ref.${kept}`
