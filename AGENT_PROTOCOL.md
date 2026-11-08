@@ -131,6 +131,12 @@ interface RunnerFacts {                  // core/runner-facts.ts, one row per ru
     `ScheduleWakeup`), the equivalent of a `cezar_wait` timer; null when none.
   - `costReport`: `cumulative` when each cost report is the session total (Claude
     `total_cost_usd`), which usage accounting turns into deltas; `per-turn` otherwise.
+  - `sessionIdSource`: `launch` when the runner opens its session under the id Cezar saves on
+    the step before launch (Claude and Pi `--session-id`), so that id resumes at once; `native`
+    when the runner mints its own id and reports it in a `session` event (Codex
+    `thread/start`, OpenCode `POST /session`, OMP `get_state`, Cursor print `system/init`).
+    Until that event the step holds only Cezar's launch id. §7 *Continue: session and step*
+    gives the resume rule.
 
 - `run()` is a one-shot convenience; `startSession()` is the real contract.
 - `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
@@ -1853,6 +1859,58 @@ id (OpenCode GETs `/session/{id}` and does not `POST /session`; the other runner
 resume channel). A fresh-session continuation on an `in-thread` runner still receives the
 skill. OpenCode's lost-session 404 fallback is covered alongside R57: one notice, a new
 session id, skill present in the fresh session's system prompt. No runner is exempt.
+
+### Continue: session and step (hearsay-tools/cezarion#2991)
+
+A Continue makes two separate choices. **Which step it continues** names the skill, tool
+grants, model, effort and worker identity of its turn. **Which session it resumes** decides
+whether that turn reopens the step's conversation or opens a fresh one. The first never depends
+on the second: the continued step owns the run's latest recorded session from before the
+Continue (`continuedSessionId` in `workflows/run/launch-read-resolver.ts`), which is also the step
+admission checks the worker identity against and queued revival rebuilds from. A synthetic
+`continue-N` that owns a session of its own extends the definition's last agent step, as before.
+
+Cezar saves a launch UUID on every agent step before the runner starts (`step-session.ts`), so
+the step rail has an id at once. `resumableSessionId` decides whether the saved id resumes:
+
+| Runner class (`sessionIdSource`) | Saved id | Event history | Session the Continue opens |
+| --- | --- | --- | --- |
+| `launch`: claude, pi | any | any | Resumes the saved id. The runner opened its session under it. |
+| `native`: codex, opencode, omp, untagged cursor | named by a `session` event | present | Resumes the saved id. |
+| `native` | not named by a `session` event | present, with the `step-start` of the step that first holds the id | Fresh session. The process ended before the runner reported its id, so the runner never knew the saved one. |
+| `native` | any | absent or unreadable (`readEvents` returns `[]`), or without that step's `step-start` | Resumes the saved id. Nothing shows the runner never reported it, so older or salvaged run data keeps its conversation. A wrong id fails loudly: Codex `thread/resume` and OMP `--resume` fail the step, OpenCode answers 404 and opens one fresh session with the lost-session notice, and Cursor refuses an untagged id with `CURSOR_ACP_RESUME_REFUSED`. |
+| `native`, recorded transport `cursor-print` | named by a print `session` event of a step, up to the session step, that holds the same id and transport | present | Resumes through print. |
+| `native`, recorded transport `cursor-print` | without that event | present or absent | Refused: `Cursor print session identity lacks a matching recorded session event`. Queued revival fails the run with the same error. |
+| any | any | any | A runner or account switch opens a fresh session on the new runner, as before. |
+
+A confirmed id with absent history cannot occur: the `session` event is the confirmation. A
+workflow step appends its `step-start` event (a synchronous NDJSON write) before the record saves
+the launch id, so a crash in that window leaves both in place. A Continue step saves only an id it
+resumes or one its runner reported.
+
+The step each Continue runs as, for every row above:
+
+| Chain | Latest recorded session belongs to | Session | Skill, grants, model, effort and worker identity from |
+| --- | --- | --- | --- |
+| Single step | the step | resumed or fresh | the step |
+| Multi-step | step *k* (for example failed mid-chain) | resumed | step *k* |
+| Multi-step | step *k* | fresh: native id not reported | step *k* (was the chain's last agent step) |
+| Multi-step | step *k* | fresh: runner or account switch | step *k* (was the chain's last agent step) |
+| Mixed-runner worker, codex `implement` then claude `review` | `implement` | fresh Codex session: id not reported | `implement`'s pinned identity: Codex account, model and grants (was `review`'s, which failed with `Accepted worker provider identity cannot change`) |
+| Mixed-runner worker | `review` | resumed | `review`'s pinned identity |
+| Any | a synthetic `continue-N` that owns its own session | resumed or fresh | the chain's last agent step |
+| Any | a failed CI source step (`workflowResumeStepId`) | resumed or fresh | the CI source step |
+| Legacy record without `workflowDef` | any | resumed or fresh | the defaults |
+
+Only a resumed session reads the account (`profileId`) and transport recorded on its owning step;
+a fresh session takes the account the run or the worker's pinned step identity names.
+
+`workflows/native-session-continue.test.ts` drives every `RUNNER_IDS` backend through its native
+`HARNESS_ADAPTERS` wire: a Continue after a crash before the `session` event resumes the launch
+id on `launch` runners and opens a fresh session on `native` ones, as the continued step; a native
+id without event history resumes. `continuation-tools.test.ts`, `cursor-bootstrap-continue.test.ts`
+and `delegation/provision-intent-catalog.test.ts` pin the step for multi-step, Cursor and
+mixed-runner worker chains.
 
 **PR1–PR2** (hearsay-tools/cezarion#922), in `core/harness-parity.test.ts`, drive
 all `RUNNER_IDS` through the native `multi-pr-refs` scenario. PR1 retains five
