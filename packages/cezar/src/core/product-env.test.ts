@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { legacyEnvNames, legacyHomeEnv, preferredHomeEnv, productEnv } from './product-env.ts';
+import { legacyEnvNames, legacyHomeEnv, preferredHomeEnv, productEnv, shellProductEnv } from './product-env.ts';
 import { resolveHome } from '../home/resolve.ts'; // test-home-read: pure resolver tests use injected env objects; no IO.
 
 it.each([
@@ -34,3 +34,14 @@ it('collects legacy names independently of fallback reads', () => {
   expect(legacyEnvNames({ CEZ_X: 'hidden', HSQ_X: 'new', CEZ_UNREAD: '', CEZ_ABSENT: undefined, OTHER: 'value' }))
     .toEqual(['CEZ_UNREAD', 'CEZ_X']);
 });
+
+it.each(['DESKTOP', 'SUPERVISED', 'SUPERVISOR_PID', 'SUPERVISOR_STDIN', 'DISCLAIM_EXEC'] as const)(
+  'keeps native shell ownership of %s (D11)', suffix => {
+    for (const [legacy, preferred, expected] of [
+      [undefined, undefined, undefined], [undefined, '', ''], [undefined, 'preferred', 'preferred'],
+      ['', 'preferred', ''], ['shell', '', 'shell'], ['shell', 'conflict', 'shell'], ['shell', 'shell', 'shell'],
+    ]) {
+      expect(shellProductEnv(suffix, {[`CEZ_${suffix}`]: legacy, [`HSQ_${suffix}`]: preferred})).toBe(expected);
+    }
+  },
+);

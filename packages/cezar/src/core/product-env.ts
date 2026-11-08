@@ -34,3 +34,13 @@ export function productEnvEntries(suffix: string, value: string, rebrand = REBRA
 export function remoteEnvEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.HSQ_REMOTE === '1' || env.CEZ_REMOTE === '1';
 }
+
+/** Native shells always pin the legacy names, including shells released before HSQ aliases.
+ * A defined shell pin (even empty) wins over ambient HSQ values. P5 must revisit this
+ * precedence when removing the CEZ fallback; ordinary product settings stay HSQ-first. */
+export function shellProductEnv(
+  suffix: 'DESKTOP' | 'SUPERVISED' | 'SUPERVISOR_PID' | 'SUPERVISOR_STDIN' | 'DISCLAIM_EXEC',
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  return env[`CEZ_${suffix}`] ?? env[`HSQ_${suffix}`];
+}

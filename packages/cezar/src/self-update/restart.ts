@@ -1,4 +1,4 @@
-import { productEnv, productEnvEntries } from '../core/product-env.ts';
+import { shellProductEnv, productEnvEntries } from '../core/product-env.ts';
 /**
  * How a cockpit comes back after an update. Two modes:
  *
@@ -40,7 +40,7 @@ export interface RestartOptions {
 }
 
 export function isSupervised(env: NodeJS.ProcessEnv = process.env): boolean {
-  return productEnv('SUPERVISED', env) === '1' || productEnv('DESKTOP', env) === '1';
+  return shellProductEnv('SUPERVISED', env) === '1' || shellProductEnv('DESKTOP', env) === '1';
 }
 
 /** Build the child argv: the same command and flags, the port pinned, no second browser tab. */

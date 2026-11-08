@@ -49,10 +49,14 @@ it('reads the preferred native model lock for both auth and model policy', () =>
   expect(providerAuthChecksDisabled(cleared)).toBe(false);
 });
 
-it('supervised restart accepts either preferred supervisor signal and preserves clears', () => {
+it('supervised restart preserves shell pins and accepts preferred-only signals (D11)', () => {
   expect(isSupervised({HSQ_SUPERVISED: '1'})).toBe(true);
   expect(isSupervised({HSQ_DESKTOP: '1'})).toBe(true);
-  expect(isSupervised({HSQ_SUPERVISED: '', CEZ_SUPERVISED: '1', HSQ_DESKTOP: '', CEZ_DESKTOP: '1'})).toBe(false);
+  for (const inherited of ['', '0', '1']) {
+    expect(isSupervised({HSQ_SUPERVISED: inherited, CEZ_SUPERVISED: '1'})).toBe(true);
+    expect(isSupervised({HSQ_DESKTOP: inherited, CEZ_DESKTOP: '1'})).toBe(true);
+  }
+  expect(isSupervised({CEZ_SUPERVISED: '', HSQ_SUPERVISED: '1', CEZ_DESKTOP: '0', HSQ_DESKTOP: '1'})).toBe(false);
 });
 
 it('workspace path defaults use preferred aliases, keep empty fallback and honor saved values', () => {

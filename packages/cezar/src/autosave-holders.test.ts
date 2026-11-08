@@ -101,8 +101,9 @@ describe('autosave cwd-holder proof', () => {
   it.each([false, true])('reads the same Darwin owner marker with rebrand=%s and fails closed when ps hides the environment', async rebrand => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' });
     vi.spyOn(process, 'kill').mockReturnValue(true);
-    const generated = autosaveOwnerEnv('marker', {}, rebrand);
+    const generated = autosaveOwnerEnv('marker', {HSQ_AUTOSAVE_OWNER: 'inherited', CEZ_AUTOSAVE_OWNER: 'old', PATH: '/bin'}, rebrand);
     expect(generated[AUTOSAVE_OWNER_ENV]).toBe('marker');
+    expect(generated.PATH).toBe('/bin');
     expect(generated.HSQ_AUTOSAVE_OWNER).toBe(rebrand ? 'marker' : undefined);
     let scans = 0;
     const environment: Record<number, string> = {

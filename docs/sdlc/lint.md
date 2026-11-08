@@ -311,6 +311,13 @@ shadowed binding names remain unknown computed reads. REMOTE uses the explicit
 `remoteEnvEnabled` accessor: either prefix's exact `1` keeps hosted mode enabled,
 including for old CEZ-only service files awaiting their next deploy.
 
+Native shell controls use `shellProductEnv`: DESKTOP, SUPERVISED, SUPERVISOR_PID,
+SUPERVISOR_STDIN and DISCLAIM_EXEC. A defined CEZ value wins, including empty;
+HSQ is a fallback only when CEZ is absent. Old and new native shells always pin
+CEZ, so inherited HSQ aliases cannot disable supervision or the macOS trampoline.
+P5 must revisit this precedence when it removes the CEZ fallback. This is separate
+from ordinary HSQ-first operator settings (coordinator decision D11).
+
 #### Known limits
 
 - Untyped values passed across files, function return values and values stored in

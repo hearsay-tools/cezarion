@@ -1,4 +1,4 @@
-import { productEnv } from './product-env.ts';
+import { shellProductEnv } from './product-env.ts';
 import { spawn } from 'node:child_process';
 /**
  * macOS privacy prompts name the RESPONSIBLE process, and every process the desktop app starts
@@ -35,7 +35,7 @@ export function disclaimedCommand(
   opts: DisclaimOptions = {},
 ): [string, string[]] {
   const platform = opts.platform ?? process.platform;
-  const trampoline = productEnv('DISCLAIM_EXEC', (opts.hostEnv ?? process.env));
+  const trampoline = shellProductEnv('DISCLAIM_EXEC', (opts.hostEnv ?? process.env));
   if (platform !== 'darwin' || !trampoline || !isExecutable(trampoline)) return [program, [...args]];
   const resolved = resolveProgram(program, childEnv?.PATH ?? process.env.PATH);
   if (!resolved) return [program, [...args]];
