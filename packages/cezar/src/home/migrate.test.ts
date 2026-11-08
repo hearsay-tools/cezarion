@@ -226,6 +226,26 @@ it('step 6: three older-binary writes abort with the filename and process diagno
   expect(existsSync(join(legacy.root, '.migrating'))).toBe(false);
 });
 
+it('D13: copying a running legacy managed installation into an empty target never changes its source', () => {
+  const { legacy, target, env } = migrationFixture();
+  const entry = join(legacy.versions, '1.2.3/node_modules/@wjarka/cezarion/dist/index.js');
+  mkdirSync(join(entry, '..'), { recursive: true });
+  const bytes = Buffer.from('export const runningFromLegacy = true;\n');
+  writeFileSync(entry, bytes); // Fixture managed vendor file, outside the registry writer.
+  rawJson(join(legacy.versions, '1.2.3/.cezar-install.json'), { version: '1.2.3', source: 'registry' });
+  writeFileSync(join(legacy.versions, 'current'), '1.2.3');
+  const before = statSync(entry);
+  expect(existsSync(target.versions)).toBe(false);
+  migrateLegacyHome(legacy, target, { env });
+  const copied = join(target.versions, '1.2.3/node_modules/@wjarka/cezarion/dist/index.js');
+  expect(readFileSync(copied)).toEqual(bytes);
+  expect(readFileSync(entry)).toEqual(bytes);
+  expect(statSync(entry).ino).toBe(before.ino);
+  expect(statSync(entry).mtimeMs).toBe(before.mtimeMs);
+  expect(readFileSync(join(legacy.versions, 'current'), 'utf8')).toBe('1.2.3');
+  expect(readInstallMarker(target.config)?.state).toBe('committed');
+});
+
 it('step 6: recopy removes managed files deleted by an older binary', () => {
   const { legacy, target } = migrationFixture();
   rawJson(join(legacy.versions, 'v1/removed.json'), { stale: true });

@@ -2,7 +2,8 @@
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use url::{Host, Url};
 mod profiles;
-use profiles::{Connection, load, save, persistent_sessions_supported};
+pub(super) use profiles::Connection;
+use profiles::{load, save, persistent_sessions_supported};
 use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_WINDOW: AtomicU64 = AtomicU64::new(1);
 
@@ -64,7 +65,7 @@ pub async fn connect_remote(app: AppHandle, window: WebviewWindow, endpoint: Str
         existing.show().map_err(|e| e.to_string())?;
         return existing.set_focus().map_err(|e| e.to_string());
     }
-    let title = format!("Cezarion — {}", origin.ascii_serialization());
+    let title = format!("{} — {}", super::identity::DISPLAY_NAME, origin.ascii_serialization());
     let endpoint = url.clone();
     let navigation_app = app.clone();
     let builder = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url));
@@ -199,7 +200,7 @@ fn show_connection_form(app: &AppHandle, feedback: Option<ConnectionFeedback>) -
         window.show()?; return window.set_focus();
     }
     let builder = WebviewWindowBuilder::new(app, "connections", WebviewUrl::App("connections.html".into()))
-        .title("Cezarion — Connect to a server").inner_size(960.0, 700.0).min_inner_size(740.0, 600.0)
+        .title(format!("{} — Connect to a server", super::identity::DISPLAY_NAME)).inner_size(960.0, 700.0).min_inner_size(740.0, 600.0)
         .on_navigation(|u| u.scheme() == "tauri" && u.host_str() == Some("localhost") ||
             matches!(u.scheme(), "http" | "https") && u.host_str() == Some("tauri.localhost"));
     let builder = if let Some(script) = script { builder.initialization_script(script) } else { builder };

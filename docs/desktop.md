@@ -173,3 +173,85 @@ The shell downloads and verifies a signed update on launch, but installs it only
 when you quit the app, after the cockpit has stopped; the next launch runs the new
 shell. It never installs or restarts under a running cockpit (on Windows the
 installer would end the process), and it does not relaunch itself after the install.
+
+## Staged desktop identity and bridge validation
+
+The release switch remains off. Normal builds keep the current app ID, names,
+feed and artifact names. Native environment readers accept `HSQ_*` first and
+`CEZ_*` as fallback now. Presence wins, including empty values. The shell pins
+both aliases for every generated sidecar control, even in an old-ID build.
+
+Build metadata comes from `packages/cezar/scripts/product-identity.mjs`.
+`node scripts/release-config.mjs --rebrand on|off` in `packages/desktop` writes
+the matching Tauri overlay. Pass it to `npm run build -- --config
+release-config.json`. Tauri passes that overlay to `build.rs`; Rust receives
+constants from the same identity source. Until home migration commits, the shell
+starts or repairs any existing legacy `versions/` tree in place. It uses the new
+data root after commit, or for a fresh install when no legacy versions directory
+exists. Pending migration markers and claims block fresh target installation. `--desktop-identity` prints the built
+Tauri identifier and product name without starting a webview. The new identity
+has its own executable name, release tags, stable installer names and rolling
+updater feed. A bridge build keeps the old identity and old feed.
+
+The owner can build a bridge in the Desktop release workflow with `bridge`
+selected. Dry run is still the default. The workflow first builds the new app,
+embeds it in the old-ID updater, and signs the outer bundle. Development runs
+publish no release, tag or feed. Public bridge generation refuses while the
+release switch is off. Only the owner publishes the final bridge to the old
+feed.
+
+The bridge supports macOS `.app`, Windows per-user NSIS and Linux AppImage
+installs. It installs the new app beside the old one before transferring state.
+It refuses live browser stores, preserves the complete source, and copies
+geometry, connections and persistent profiles privately. Connection UUIDs and
+trusted sign-in origins stay unchanged. A loopback acknowledgement from the
+new app after native setup permits removal of the old app. A journal binds
+acknowledgements to the source, target and embedded payload. Failed attempts
+keep the old app usable. Retries preserve independent destination changes.
+Before acknowledgement, retries retain every profile seen in any attempt and
+add newly saved connections. Private source snapshots also preserve a profile
+that the user later forgets in the old app. Transfer indices stay stable.
+Windows retries repair a partial bridge install until identity and the actual
+per-user registry install location both verify. NSIS receives its destination
+as the final raw, unquoted argument so paths with spaces work.
+Windows removal waits for the old process to exit before running its NSIS
+uninstaller. A failed uninstaller leaves the old installation in place.
+
+Linux DEB and Arch installations take the manual path: install the new package,
+then remove the old package with the same package manager. The bridge shows a
+one-time dismissible notice, keeps all normal app controls, and starts no
+installation, profile transfer or removal. It never requests privilege.
+These bridge builds also disable shell update checks and update installation
+at quit, so a later DEB update cannot request privilege through the updater.
+The pinned Tauri updater supports DEBs; the pinned tauri-action emits an
+installer-specific `linux-x86_64-deb` manifest key when a DEB signature exists,
+with AppImage as the primary `linux-x86_64` target. Arch packages are repackaged
+from the DEB after manifest generation. They have no Arch-specific manifest key,
+but their binary can retain the DEB bundle marker and select the DEB entry.
+The explicit guard applies regardless of feed selection.
+
+macOS 14+ WebKit stores live outside the app data directory:
+`~/Library/WebKit/<bundle-id>/WebsiteDataStore/<lowercase-connection-uuid>`.
+The bridge copies the entire closed store, including cookies and site storage.
+macOS 12/13 remote windows already use temporary profiles. Notification and
+automation permission prompts return under the new ID. The app has no
+app-managed Keychain or password store.
+
+Desktop check runs both identities on each platform. Its macOS fixture builds
+two test apps, seeds a real persistent HttpOnly cookie and local storage in the
+old-ID WebKit store, closes it, runs the actual transfer plan, and reads both
+in the new-ID app. It also checks geometry, connection UUIDs and trust origins,
+then repeats the transfer and read. This fixture uses the `bridge-fixture`
+Cargo feature and refuses to run outside a disposable CI runner. Normal
+installers omit that feature.
+
+For the owner macOS smoke check: obtain both CI test installers and the old-ID
+bridge test artifact. In a disposable user account, save a remote connection
+with a trusted sign-in origin, sign in, and move/resize the old app. Quit both
+apps, launch the bridge, and confirm the new app opens with the same geometry
+and signed-in connection. Confirm the old app is removed only after the new
+app opens. Repeat the bridge and confirm no duplicate connection or reset.
+Repeat with an unwritable destination and with the new app prevented from
+starting; the old app and signed-in profile must remain usable. Record the
+macOS version, artifact head SHA and results. No macOS smoke result is claimed
+from a Linux workstation.

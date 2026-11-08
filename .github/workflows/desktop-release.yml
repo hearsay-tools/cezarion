@@ -25,8 +25,14 @@ on:
   push:
     tags:
       - 'desktop-v*'
+      - 'squawk-desktop-v*'
   workflow_dispatch:
     inputs:
+      bridge:
+        description: 'Build the final old-ID bridge with an embedded new-ID app (owner rollout only)'
+        required: false
+        default: false
+        type: boolean
       dry_run:
         description: 'Build the installers as run artifacts only: no release, no tag, no download links'
         required: false
@@ -51,22 +57,23 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      stem: ${{ steps.version.outputs.stem }}
+      feed: ${{ steps.version.outputs.feed }}
+      display_name: ${{ steps.version.outputs.display_name }}
+      rebrand: ${{ steps.version.outputs.rebrand }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Resolve and verify the version
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+
+      - name: Resolve and verify the version and product identity
         id: version
-        run: |
-          # tauri.conf.json is the version. A manual run releases what it says; a tag can
-          # disagree with it, so a tag is checked against it.
-          VERSION=$(node -p "require('./$DESKTOP_DIR/src-tauri/tauri.conf.json').version")
-          if [ "${{ github.event_name }}" = "push" ] && [ "${GITHUB_REF_NAME#desktop-v}" != "$VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match tauri.conf.json version $VERSION"
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=desktop-v$VERSION" >> "$GITHUB_OUTPUT"
+        working-directory: packages/desktop
+        run: node scripts/release-metadata.mjs ${{ inputs.bridge && '--bridge' || '' }} --github-output "$GITHUB_OUTPUT"
 
       - name: Create the draft release
         if: ${{ !inputs.dry_run }}
@@ -74,15 +81,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          DISPLAY_NAME: ${{ steps.version.outputs.display_name }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists — assets will be replaced"
           else
-            gh release create "$TAG" --draft --title "Cezarion desktop v$VERSION" --target "$GITHUB_SHA" \
+            gh release create "$TAG" --draft --title "$DISPLAY_NAME desktop v$VERSION" --target "$GITHUB_SHA" \
               --notes "Desktop shell v$VERSION. Installers below; the shell installs and updates cezar itself from the cockpit."
           fi
 
   build:
+    env:
+      STEM: ${{ needs.prepare.outputs.stem }}
+      DISPLAY_NAME: ${{ needs.prepare.outputs.display_name }}
     name: Build ${{ matrix.name }}
     needs: prepare
     strategy:
@@ -93,25 +104,25 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-            stable: cezarion-macos-aarch64.dmg
+            stable: ${{ needs.prepare.outputs.stem }}-macos-aarch64.dmg
             glob: 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg'
           - name: macOS (Intel)
             os: macos-latest
             target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
-            stable: cezarion-macos-x86_64.dmg
+            stable: ${{ needs.prepare.outputs.stem }}-macos-x86_64.dmg
             glob: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg'
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
             args: ''
-            stable: cezarion-windows-x86_64-setup.exe
+            stable: ${{ needs.prepare.outputs.stem }}-windows-x86_64-setup.exe
             glob: 'src-tauri/target/release/bundle/nsis/*-setup.exe'
           - name: Linux
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             args: ''
-            stable: cezarion-linux-x86_64.AppImage
+            stable: ${{ needs.prepare.outputs.stem }}-linux-x86_64.AppImage
             glob: 'src-tauri/target/release/bundle/appimage/*.AppImage'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -174,7 +185,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node scripts/release-config.mjs
+        run: node scripts/release-config.mjs ${{ inputs.bridge && '--rebrand on' || '' }}
 
       - name: Export Apple credentials only for public builds
         if: runner.os == 'macOS' && !inputs.dry_run
@@ -191,6 +202,35 @@ jobs:
             { echo "$name<<CEZAR_EOF_$name"; printenv "$name"; echo "CEZAR_EOF_$name"; } >> "$GITHUB_ENV"
           done
 
+      - name: Build and embed the new-ID app for the old-ID bridge
+        if: ${{ inputs.bridge }}
+        working-directory: ${{ env.DESKTOP_DIR }}
+        shell: bash
+        env:
+          DESKTOP_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ vars.TAURI_SIGNING_PUBLIC_KEY }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ env.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          npm run build -- ${{ matrix.args }} --config release-config.json
+          case "$RUNNER_OS" in
+            macOS) platform=darwin; bundle="src-tauri/target/$TARGET/release/bundle"; pattern="$bundle/macos/*.app" ;;
+            Windows) platform=win32; bundle=src-tauri/target/release/bundle; pattern="$bundle/nsis/*-setup.exe" ;;
+            Linux) platform=linux; bundle=src-tauri/target/release/bundle; pattern="$bundle/appimage/*.AppImage" ;;
+          esac
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(compgen -G "$pattern" | sort)
+          if [ ${#files[@]} -ne 1 ]; then echo "::error::expected one new-ID payload"; exit 1; fi
+          if [ "$platform" = "darwin" ]; then
+            tar -czf bridge-new-app.tar.gz -C "$(dirname "${files[0]}")" "$(basename "${files[0]}")"
+            files=(bridge-new-app.tar.gz)
+          fi
+          node scripts/prepare-bridge.mjs --platform "$platform" --payload "${files[0]}"
+          rm -rf "$bundle"
+          node scripts/release-config.mjs --bridge
+
       - name: Build and upload with tauri-action
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
@@ -203,7 +243,7 @@ jobs:
           projectPath: ${{ env.DESKTOP_DIR }}
           # A dry run names no release, and tauri-action then builds without uploading.
           tagName: ${{ !inputs.dry_run && needs.prepare.outputs.tag || '' }}
-          releaseName: ${{ !inputs.dry_run && format('Cezarion desktop v{0}', needs.prepare.outputs.version) || '' }}
+          releaseName: ${{ !inputs.dry_run && format('{0} desktop v{1}', needs.prepare.outputs.display_name, needs.prepare.outputs.version) || '' }}
           releaseDraft: true
           prerelease: false
           # The manifest every installed shell polls (plugins.updater.endpoints). Renamed below
@@ -285,7 +325,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          STABLE: cezarion-linux-x86_64.deb
+          STABLE: ${{ needs.prepare.outputs.stem }}-linux-x86_64.deb
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           shopt -s nullglob
@@ -303,10 +343,10 @@ jobs:
         if: ${{ inputs.dry_run && runner.os == 'Linux' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cezarion-linux-x86_64.deb
+          name: ${{ needs.prepare.outputs.stem }}-linux-x86_64.deb
           path: |
-            ${{ env.DESKTOP_DIR }}/cezarion-linux-x86_64.deb
-            ${{ env.DESKTOP_DIR }}/cezarion-linux-x86_64.deb.sha256
+            ${{ env.DESKTOP_DIR }}/${{ needs.prepare.outputs.stem }}-linux-x86_64.deb
+            ${{ env.DESKTOP_DIR }}/${{ needs.prepare.outputs.stem }}-linux-x86_64.deb.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -330,7 +370,10 @@ jobs:
     container: archlinux:latest
     timeout-minutes: 20
     env:
-      STABLE: cezarion-linux-x86_64.pkg.tar.zst
+      STABLE: ${{ needs.prepare.outputs.stem }}-linux-x86_64.pkg.tar.zst
+      STEM: ${{ needs.prepare.outputs.stem }}
+      DISPLAY_NAME: ${{ needs.prepare.outputs.display_name }}
+      REBRAND: ${{ needs.prepare.outputs.rebrand }}
     steps:
       - name: Install the packaging tools
         run: pacman -Syu --noconfirm --needed base-devel git github-cli libarchive
@@ -353,17 +396,20 @@ jobs:
           mkdir work
           cp "$DESKTOP_DIR/arch/PKGBUILD" work/PKGBUILD
           sed -i "s/@VERSION@/$VERSION/" work/PKGBUILD
+          if [ "$REBRAND" = "true" ]; then
+            sed -i "s/cezarion-desktop/$STEM-desktop/g; s/Desktop app for cezar/Desktop app for $DISPLAY_NAME/" work/PKGBUILD
+          fi
           cp deb/*.deb work/cezar.deb
           chown -R builder work
           su builder -c 'cd work && makepkg --nodeps --noconfirm'
-          cp work/cezarion-desktop-bin-*.pkg.tar.zst "$STABLE"
+          cp work/"$STEM"-desktop-bin-*.pkg.tar.zst "$STABLE"
           sha256sum "$STABLE" > "$STABLE.sha256"
 
       - name: Install it and check every library resolves
         run: |
           pacman -U --noconfirm "$STABLE"
-          pacman -Ql cezarion-desktop-bin
-          BIN=$(pacman -Qlq cezarion-desktop-bin | grep -E '^/usr/bin/[^/]+$' | head -1)
+          pacman -Ql "$STEM-desktop-bin"
+          BIN=$(pacman -Qlq "$STEM-desktop-bin" | grep -E '^/usr/bin/[^/]+$' | head -1)
           test -x "$BIN"
           if ldd "$BIN" | grep "not found"; then
             echo "::error::$BIN needs libraries Arch does not provide"
@@ -375,10 +421,10 @@ jobs:
         if: ${{ inputs.dry_run }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: cezarion-linux-x86_64.pkg.tar.zst
+          name: ${{ needs.prepare.outputs.stem }}-linux-x86_64.pkg.tar.zst
           path: |
-            cezarion-linux-x86_64.pkg.tar.zst
-            cezarion-linux-x86_64.pkg.tar.zst.sha256
+            ${{ needs.prepare.outputs.stem }}-linux-x86_64.pkg.tar.zst
+            ${{ needs.prepare.outputs.stem }}-linux-x86_64.pkg.tar.zst.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -391,6 +437,10 @@ jobs:
         run: gh release upload "$TAG" "$STABLE" "$STABLE.sha256" --clobber --repo "$REPO"
 
   publish:
+    env:
+      FEED: ${{ needs.prepare.outputs.feed }}
+      STEM: ${{ needs.prepare.outputs.stem }}
+      DISPLAY_NAME: ${{ needs.prepare.outputs.display_name }}
     name: Publish release
     needs: [prepare, build, arch]
     if: ${{ !inputs.dry_run }}
@@ -403,15 +453,15 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          # tauri-action uploads `latest.json`; the shells poll `desktop-latest.json` so the name
+          # tauri-action uploads `latest.json`; the shells poll `$FEED.json` so the name
           # can never collide with a future cezar (CLI) manifest on the same release page.
-          if gh release download "$TAG" --repo "$REPO" --pattern latest.json --output desktop-latest.json 2>/dev/null; then
-            gh release upload "$TAG" desktop-latest.json --clobber --repo "$REPO"
+          if gh release download "$TAG" --repo "$REPO" --pattern latest.json --output "$FEED.json" 2>/dev/null; then
+            gh release upload "$TAG" "$FEED.json" --clobber --repo "$REPO"
             gh release delete-asset "$TAG" latest.json --yes --repo "$REPO" || true
             echo "updater manifest published"
-          elif gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -qx desktop-latest.json; then
+          elif gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -Fxq "$FEED.json"; then
             # A re-run of this job alone: the first attempt already renamed it.
-            echo "updater manifest already published as desktop-latest.json"
+            echo "updater manifest already published as $FEED.json"
           else
             echo "::error::missing signed updater manifest"; exit 1
           fi
@@ -419,8 +469,8 @@ jobs:
 
       # `releases/latest/download/…` follows the repo's "latest" release, and that is cezar's own
       # `v*` release — which carries no installers. The permanent URLs therefore hang off a
-      # ROLLING release, `desktop-latest`, whose assets are replaced on every shell release.
-      - name: Refresh the rolling desktop-latest release
+      # ROLLING release, `$FEED`, whose assets are replaced on every shell release.
+      - name: Refresh the rolling $FEED release
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -431,29 +481,29 @@ jobs:
           # Every installer or none: `--clobber` replaces by name, so a file missing here would
           # leave the PREVIOUS release's asset under the same permanent URL — a download page
           # that silently mixes versions.
-          for f in cezarion-macos-aarch64.dmg cezarion-macos-x86_64.dmg cezarion-windows-x86_64-setup.exe cezarion-linux-x86_64.AppImage cezarion-linux-x86_64.deb cezarion-linux-x86_64.pkg.tar.zst; do
+          for f in ${STEM}-macos-aarch64.dmg ${STEM}-macos-x86_64.dmg ${STEM}-windows-x86_64-setup.exe ${STEM}-linux-x86_64.AppImage ${STEM}-linux-x86_64.deb ${STEM}-linux-x86_64.pkg.tar.zst; do
             if ! gh release download "$TAG" --repo "$REPO" --pattern "$f" --dir rolling; then
-              echo "::error::$f is not on $TAG — desktop-latest left untouched"
+              echo "::error::$f is not on $TAG — $FEED left untouched"
               exit 1
             fi
           done
           # Public releases require both signed installers and the updater manifest.
-          gh release download "$TAG" --repo "$REPO" --pattern desktop-latest.json --dir rolling
+          gh release download "$TAG" --repo "$REPO" --pattern "$FEED.json" --dir rolling
           gh release download "$TAG" --repo "$REPO" --pattern "*.sha256" --dir rolling
           SHA=$(gh api "repos/$REPO/commits/$TAG" --jq .sha)
-          if gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
-            # The `desktop-latest` TAG stays where the first release put it. Moving a tag is a
+          if gh release view "$FEED" --repo "$REPO" >/dev/null 2>&1; then
+            # The `$FEED` TAG stays where the first release put it. Moving a tag is a
             # ref update the workflow's token is refused (HTTP 403), and nothing reads the tag:
             # the download links go by release and asset name, and the notes name the version.
-            gh release edit desktop-latest --repo "$REPO" --title "Cezarion desktop (latest: v$VERSION)" \
+            gh release edit "$FEED" --repo "$REPO" --title "$DISPLAY_NAME desktop (latest: v$VERSION)" \
               --notes "Rolling pointer to the newest desktop release, [$TAG](https://github.com/$REPO/releases/tag/$TAG). Download links on this page never change." \
               --latest=false
           else
-            gh release create desktop-latest --repo "$REPO" --target "$SHA" --title "Cezarion desktop (latest: v$VERSION)" \
+            gh release create "$FEED" --repo "$REPO" --target "$SHA" --title "$DISPLAY_NAME desktop (latest: v$VERSION)" \
               --notes "Rolling pointer to the newest desktop release, [$TAG](https://github.com/$REPO/releases/tag/$TAG). Download links on this page never change." \
               --latest=false
           fi
-          gh release upload desktop-latest rolling/* --clobber --repo "$REPO"
+          gh release upload "$FEED" rolling/* --clobber --repo "$REPO"
 
       - name: Write workflow summary
         env:
@@ -464,14 +514,14 @@ jobs:
           HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
           {
-            echo "## 🖥 Cezarion desktop v${VERSION}"
+            echo "## 🖥 $DISPLAY_NAME desktop v${VERSION}"
             echo ""
             echo "Release: https://github.com/${REPO}/releases/tag/${TAG}"
             echo ""
             echo "| Platform | Stable download |"
             echo "|---|---|"
-            for f in cezarion-macos-aarch64.dmg cezarion-macos-x86_64.dmg cezarion-windows-x86_64-setup.exe cezarion-linux-x86_64.AppImage cezarion-linux-x86_64.deb cezarion-linux-x86_64.pkg.tar.zst; do
-              echo "| \`$f\` | https://github.com/${REPO}/releases/download/desktop-latest/$f |"
+            for f in ${STEM}-macos-aarch64.dmg ${STEM}-macos-x86_64.dmg ${STEM}-windows-x86_64-setup.exe ${STEM}-linux-x86_64.AppImage ${STEM}-linux-x86_64.deb ${STEM}-linux-x86_64.pkg.tar.zst; do
+              echo "| \`$f\` | https://github.com/${REPO}/releases/download/$FEED/$f |"
             done
             echo ""
             [ "$HAS_APPLE" = "true" ] || echo "⚠️ macOS builds are UNSIGNED (no APPLE_* secrets) — Gatekeeper will refuse them. Not fit for a landing page."
