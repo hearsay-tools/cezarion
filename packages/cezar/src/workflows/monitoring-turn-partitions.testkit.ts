@@ -99,22 +99,6 @@ export const MONITORING_PARTITIONS = {
       "M13"
     ]
   },
-  "autonomous-ask-fresh": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
-    "modes": [
-      "fresh"
-    ],
-    "rows": [
-      "M23"
-    ]
-  },
   "timer-continuation": {
     "runners": [
       "claude",
@@ -225,22 +209,6 @@ export const MONITORING_PARTITIONS = {
     ],
     "rows": [
       "M14"
-    ]
-  },
-  "autonomous-ask-continuation": {
-    "runners": [
-      "claude",
-      "codex",
-      "opencode",
-      "pi",
-      "cursor",
-      "omp"
-    ],
-    "modes": [
-      "continuation"
-    ],
-    "rows": [
-      "M23"
     ]
   },
   "ask-idle-closure-claude-codex": {
@@ -376,6 +344,6 @@ export function monitoringCells(partitions: readonly MonitoringPartition[]): str
   return partitions.flatMap(partition => partition.runners.flatMap(runner => partition.modes.flatMap(mode => partition.rows.map(row => `${runner}/${mode}/${row}`))));
 }
 export const expectedMonitoringCells = RUNNER_IDS.flatMap(runner => [
-  ...['fresh', 'continuation'].flatMap(mode => ['M1', 'M2', 'M3', 'M4', 'M5', 'M7', 'M18', 'M19', 'M21', 'M23'].map(row => `${runner}/${mode}/${row}`)),
+  ...['fresh', 'continuation'].flatMap(mode => ['M1', 'M2', 'M3', 'M4', 'M5', 'M7', 'M18', 'M19', 'M21'].map(row => `${runner}/${mode}/${row}`)),
   `${runner}/fresh/M13`, `${runner}/continuation/M14`, `${runner}/fresh/M17`,
 ]);
