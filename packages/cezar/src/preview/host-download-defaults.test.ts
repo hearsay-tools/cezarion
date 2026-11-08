@@ -57,4 +57,28 @@ describe('PreviewHost default downloader', () => {
     expect(launchBrowser).toHaveBeenCalledTimes(2);
     expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'chromium-missing' });
   });
+
+  it('cancels the default download through its signal and returns to the install prompt', async () => {
+    const { host, ctx, viewer, launchBrowser } = setup();
+    let signal: AbortSignal | undefined;
+    vi.mocked(downloadChromium).mockImplementation(options => {
+      signal = options.signal;
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('Download cancelled')), { once: true });
+      });
+    });
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    const pending = host.handle(ctx, viewer, { t: 'download' });
+    expect(signal?.aborted).toBe(false);
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'downloading', received: 0, total: 0 });
+
+    await host.handle(ctx, viewer, { t: 'cancelDownload' });
+    await pending;
+
+    expect(signal?.aborted).toBe(true);
+    expect(launchBrowser).toHaveBeenCalledTimes(1);
+    expect(viewer.messages.at(-1)).toEqual({
+      t: 'state', stage: 'chromium-missing', installCommand: 'sudo snap install chromium', canDownload: true,
+    });
+  });
 });
