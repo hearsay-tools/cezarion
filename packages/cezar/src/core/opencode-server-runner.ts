@@ -164,12 +164,9 @@ export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'in-thread' as const;
+  readonly systemPromptOnResume = RUNNER_FACTS.opencode.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.opencode;
-  readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'always-held',
-    via: 'prompt_async while busy; assistant message.updated parentID at consumption',
-  };
+  readonly inputDelivery: InputDelivery = RUNNER_FACTS.opencode.inputDelivery;
 
   private readonly bin: string;
   private readonly timeoutMs: number;

@@ -3,10 +3,10 @@ import { fileURLToPath } from 'node:url';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
 import type {
   AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentSession, ContentBlock,
-  SessionOptions,
+  InputDelivery, SessionOptions,
 } from './agent-runner.ts';
 import { RUNNER_FACTS } from './runner-facts.ts';
-import { CursorPrintRunner, CURSOR_PRINT_INPUT_DELIVERY, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
+import { CursorPrintRunner, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import type { CursorPrintCapabilityResult } from './cursor-print-capabilities.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
@@ -40,9 +40,9 @@ export function cursorPrintUnsupportedMessage(reason: string): string {
 export class CursorRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'in-thread' as const;
+  readonly systemPromptOnResume = RUNNER_FACTS.cursor.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.cursor;
-  readonly inputDelivery = CURSOR_PRINT_INPUT_DELIVERY;
+  readonly inputDelivery: InputDelivery = RUNNER_FACTS.cursor.inputDelivery;
   private lastSession?: AgentSession;
 
   constructor(private readonly options: CursorRunnerOptions = {}) {}

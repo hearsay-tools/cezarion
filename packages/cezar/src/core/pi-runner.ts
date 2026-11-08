@@ -84,12 +84,9 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class PiRunner implements AgentRunner {
   readonly backend = 'pi' as const;
   readonly specSupport = PI_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'resent' as const;
+  readonly systemPromptOnResume = RUNNER_FACTS.pi.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.pi;
-  readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'held-when-late',
-    via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
-  };
+  readonly inputDelivery: InputDelivery = RUNNER_FACTS.pi.inputDelivery;
   private readonly bin: string;
   private readonly timeoutMs: number;
   private lastSession: AgentSession | null = null;
