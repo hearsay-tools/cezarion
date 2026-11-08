@@ -585,8 +585,8 @@ fn offer_update(window: &WebviewWindow, version: &str) {
 pub fn run() {
     #[cfg(feature = "bridge-fixture")]
     if bridge_fixture::run_if_asked() { return; }
+    let context = tauri::generate_context!();
     if std::env::args_os().any(|arg| arg == "--desktop-identity") {
-        let context = tauri::generate_context!();
         assert_eq!(context.config().identifier, identity::APP_ID, "native identity metadata mismatch");
         println!("{}", serde_json::json!({ "identifier": context.config().identifier, "productName": context.config().product_name }));
         return;
@@ -731,7 +731,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build the cezar desktop shell")
         .run(move |app, event| match event {
             RunEvent::Ready => {

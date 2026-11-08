@@ -163,8 +163,8 @@ impl Platform for Native {
         let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline {
             match listener.accept() {
-                Ok((mut stream, _)) => {
-                    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+                Ok((stream, _)) => {
+                    bridge_state::prepare_accepted_stream(&stream)?;
                     let mut bytes = Vec::new(); stream.take(4096).read_to_end(&mut bytes)?;
                     return validate_acknowledgement(&bytes, &token);
                 },
@@ -244,7 +244,8 @@ fn schedule_windows_removal(source: &Path, journal: &Path) -> io::Result<()> {
     let escaped = uninstall.to_string_lossy().replace('\'', "''");
     let removed = journal.join("removed").to_string_lossy().replace('\'', "''");
     fs::write(&script, format!("Wait-Process -Id {} -ErrorAction SilentlyContinue\n$p = Start-Process -FilePath '{escaped}' -ArgumentList '/S' -Wait -PassThru\nif ($p.ExitCode -eq 0) {{ New-Item -ItemType File -Path '{removed}' -Force | Out-Null }}\n", std::process::id()))?;
-    Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-File"]).arg(script).spawn()?;
+    // This private script is generated above. The policy applies only to this child.
+    bridge_state::powershell_script_command(&script).spawn()?;
     Ok(())
 }
 #[cfg(not(windows))]

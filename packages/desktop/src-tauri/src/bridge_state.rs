@@ -7,6 +7,19 @@ pub struct Plan { pub journal: PathBuf, pub transfers: Vec<Transfer>, pub bindin
 #[derive(Debug, PartialEq)]
 pub enum Outcome { Manual, Complete }
 
+/// BSD and Windows can inherit the listener's nonblocking mode on accepted sockets.
+pub fn prepare_accepted_stream(stream: &std::net::TcpStream) -> io::Result<()> {
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+}
+
+#[cfg(windows)]
+pub fn powershell_script_command(script: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("powershell.exe");
+    command.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]).arg(script);
+    command
+}
+
 pub trait Platform {
     fn supported(&self) -> bool;
     fn quiescent(&self, transfers: &[Transfer]) -> io::Result<()>;
@@ -300,9 +313,18 @@ pub fn same_tree(left: &Path, right: &Path) -> io::Result<bool> {
     Ok(true)
 }
 pub fn copy_tree(source: &Path, target: &Path) -> io::Result<()> {
+    copy_tree_inner(source, target, true)
+}
+fn copy_tree_inner(source: &Path, target: &Path, root: bool) -> io::Result<()> {
     if regular(source)?.is_dir() {
-        private_dir(target)?;
-        for name in entries(source)? { copy_tree(&source.join(&name), &target.join(name))?; }
+        #[cfg(windows)]
+        if !root {
+            // New children inherit the protected root's (OI)(CI) grant.
+            fs::create_dir(target)?;
+        } else { private_dir(target)?; }
+        #[cfg(not(windows))]
+        { let _ = root; private_dir(target)?; }
+        for name in entries(source)? { copy_tree_inner(&source.join(&name), &target.join(name), false)?; }
     } else {
         let mut options = fs::OpenOptions::new(); options.write(true).create_new(true);
         #[cfg(unix)]
@@ -318,16 +340,23 @@ pub fn private_dir(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     { use std::os::unix::fs::PermissionsExt; fs::set_permissions(path, fs::Permissions::from_mode(0o700))?; }
     #[cfg(windows)] {
-        let who = std::process::Command::new("whoami.exe").args(["/user", "/fo", "csv", "/nh"]).output()?;
-        if !who.status.success() { return Err(io::Error::other("could not identify the bridge operator")); }
-        let text = String::from_utf8_lossy(&who.stdout);
-        let sid = text.trim().rsplit(',').next().unwrap_or("").trim_matches('"');
-        if !sid.starts_with("S-1-") { return Err(io::Error::other("invalid bridge operator SID")); }
-        let account = format!("*{sid}");
+        let account = operator_account()?;
         let result = std::process::Command::new("icacls.exe").arg(path).args(["/inheritance:r", "/grant:r", &format!("{account}:(OI)(CI)F")]).output()?;
         if !result.status.success() { return Err(io::Error::other("could not protect private bridge data")); }
     }
     Ok(())
+}
+#[cfg(windows)]
+fn operator_account() -> io::Result<&'static str> {
+    static ACCOUNT: std::sync::OnceLock<Result<String, String>> = std::sync::OnceLock::new();
+    ACCOUNT.get_or_init(|| {
+        let who = std::process::Command::new("whoami.exe").args(["/user", "/fo", "csv", "/nh"]).output().map_err(|e| e.to_string())?;
+        if !who.status.success() { return Err("could not identify the bridge operator".into()); }
+        let text = String::from_utf8_lossy(&who.stdout);
+        let sid = text.trim().rsplit(',').next().unwrap_or("").trim_matches('"');
+        if !sid.starts_with("S-1-") { return Err("invalid bridge operator SID".into()); }
+        Ok(format!("*{sid}"))
+    }).as_ref().map(String::as_str).map_err(|message| io::Error::other(message.clone()))
 }
 fn remove_staging(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
@@ -376,6 +405,65 @@ mod tests {
         fn install(&mut self) -> io::Result<()> { self.step("install") }
         fn start_and_acknowledge(&mut self) -> io::Result<()> { self.step("start") }
         fn remove_old_app(&mut self) -> io::Result<bool> { self.step("remove")?; Ok(true) }
+    }
+    #[test]
+    fn accepted_stream_waits_for_bytes_after_accept() {
+        use std::{io::Read, net::{TcpListener, TcpStream}, sync::mpsc, time::Duration};
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut receiver, _) = listener.accept().unwrap();
+        // Force BSD/Windows accept semantics on every platform.
+        receiver.set_nonblocking(true).unwrap();
+        prepare_accepted_stream(&receiver).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            entered_tx.send(()).unwrap();
+            let mut bytes = [0; 3];
+            result_tx.send(receiver.read_exact(&mut bytes).map(|_| bytes)).unwrap();
+        });
+        // bound: the reader signals immediately; only guards a thread startup failure.
+        entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        // Real sockets are required to test mode inheritance. No bytes exist yet;
+        // a nonblocking regression returns immediately instead of waiting for the sender.
+        assert!(matches!(result_rx.recv_timeout(Duration::from_millis(50)), Err(mpsc::RecvTimeoutError::Timeout)));
+        sender.write_all(b"ack").unwrap();
+        // bound: the socket read timeout is two seconds; this only guards a hung test.
+        assert_eq!(result_rx.recv_timeout(Duration::from_secs(3)).unwrap().unwrap(), *b"ack");
+        reader.join().unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    fn generated_script_runs_under_restricted_process_policy() {
+        let f = Fixture::new();
+        let script = f.root.join("script with spaces.ps1");
+        let receipt = f.root.join("script-ran");
+        fs::write(&script, format!("[IO.File]::WriteAllText('{}', 'executed')", receipt.to_string_lossy().replace('\'', "''"))).unwrap();
+        let restricted = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-File"]).arg(&script)
+            .env("PSExecutionPolicyPreference", "Restricted").output().unwrap();
+        assert!(!restricted.status.success());
+        assert!(!receipt.exists());
+        let output = powershell_script_command(&script).env("PSExecutionPolicyPreference", "Restricted").output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read_to_string(receipt).unwrap(), "executed");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn copied_nested_directories_inherit_private_root_acl() {
+        let f = Fixture::new();
+        let source = f.root.join("profile-source");
+        private_dir(&source.join("nested/deep")).unwrap();
+        fs::write(source.join("nested/deep/Cookies"), "secret").unwrap();
+        let target = f.root.join("profile-copy");
+        copy_tree(&source, &target).unwrap();
+        let script = f.root.join("check-acl.ps1");
+        let nested = target.join("nested/deep").to_string_lossy().replace('\'', "''");
+        let sid = operator_account().unwrap().trim_start_matches('*');
+        fs::write(&script, format!("$acl = Get-Acl -LiteralPath '{nested}'\nif ($acl.AreAccessRulesProtected) {{ exit 1 }}\nforeach ($rule in $acl.Access) {{ if (-not $rule.IsInherited -or $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -ne '{sid}') {{ exit 2 }} }}\n")).unwrap();
+        let output = powershell_script_command(&script).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(fs::read(target.join("nested/deep/Cookies")).unwrap(), b"secret");
     }
     #[test]
     fn partial_nsis_install_is_repaired_until_verification_commits() {

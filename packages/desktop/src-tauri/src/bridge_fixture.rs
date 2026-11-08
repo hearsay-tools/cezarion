@@ -42,7 +42,7 @@ pub fn run_if_asked() -> bool {
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                        super::bridge_state::prepare_accepted_stream(&stream).unwrap();
                         let mut bytes = Vec::new(); let mut buffer = [0; 1024];
                         while bytes.len() < 16384 && !bytes.ends_with(b"\r\n\r\n") {
                             let count = stream.read(&mut buffer).unwrap_or(0); if count == 0 { break; }
