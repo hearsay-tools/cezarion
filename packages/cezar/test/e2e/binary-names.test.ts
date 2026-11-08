@@ -46,8 +46,8 @@ async function verifyBinary(run: BinaryRun, entries: Entry[], name: string, rebr
   }
 }
 
-// bound: npm pack/install/link and fresh CLI processes for both switch states need an outer hang guard.
-test('packed, alias, linked and managed binaries retain their name and keep notices off JSON stdout', { timeout: 120_000 }, async () => {
+// bound: full matrix measured 85.10s in CI and 37.75s locally; 240s allows CI slowdown without reducing coverage.
+test('packed, alias, linked and managed binaries retain their name and keep notices off JSON stdout', { timeout: 240_000 }, async () => {
   const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'binary-names-e2e-'));
   const token = 'p'.repeat(43);
   const server = createServer((request, response) => {
