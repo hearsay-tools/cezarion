@@ -1,9 +1,9 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, store, until, work, worker } from './worker-wait.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WAIT_KIND, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { conversationOf, eventsOf, idleWorker, steer, expectFallbackIntact, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
+import { conversationOf, eventsOf, idleWorker, steeringParent, steer, expectFallbackIntact, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
@@ -47,7 +47,18 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
   // recovery finishes it.
   for (const failing of ['outcome', 'retire'] as const) {
     it(`a failed ${failing} write leaves the fallback question pending, and recovery supersedes it`, async () => {
-      const f = await idleWorker();
+      const p = await steeringParent();
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      expect(work.liveSessions.size).toBe(1);
+      const [parentSession] = work.liveSessions;
+      // Retirement only writes for an unread question. Keep the parent's copy
+      // queued even if its live session gets time to accept input before steering.
+      const refuseInput = failing === 'retire'
+        ? vi.spyOn(parentSession!, 'sendAgentMessage').mockReturnValue(false)
+        : undefined;
+      const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
+      await until(() => eventsOf(w.id, 'worker-question-routed').length === 1 && store.getRun(w.id)?.status === 'waiting');
+      const f = { p, w, askSeq: eventsOf(w.id, 'ask.requested')[0]!.seq, requestId: String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId) };
       const commitInputs = store.commitAgentInputs.bind(store);
       let retirementFailed = false;
       const fail = failing === 'outcome'
@@ -57,9 +68,15 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
           return commitInputs(id, inputs);
         });
       vi.spyOn(console, 'warn').mockImplementation(() => {});
+      if (failing === 'retire') {
+        const question = store.getRun(p.id)?.agentInputs?.find(input => input.id === f.requestId);
+        expect(question).toBeDefined();
+        expect(question?.consumedAt).toBeUndefined();
+      }
       expect(steer(f.w.id, f.p.id, 'mock:agent-echo Also lint').result).toBe('queued');
       await until(() => failing === 'outcome' ? fail.mock.calls.length > 0 : retirementFailed);
       fail.mockRestore();
+      refuseInput?.mockRestore();
       expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
       expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(f.askSeq);
       expect(store.getRun(f.w.id)?.waits).toEqual([expect.objectContaining({ via: WAIT_VIA['no-wait'], askSeq: f.askSeq })]);
