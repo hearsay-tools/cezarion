@@ -35,6 +35,7 @@ import {
   type DeepLinkNotice,
 } from './new-task-autostart'
 import {
+  clearStartedDraft,
   draftRevision,
   readDraft,
   resolveComposerRunMode,
@@ -108,9 +109,9 @@ export function useNewTaskDraft(draftProjectId: string | null, deepLink: NewTask
   // A suspended thread transition can return to this same mounted form. Clear it too.
   const clearStarted = (expectedRevision: number) => {
     if (draftRevision(draftProjectId) !== expectedRevision) return
-    const next = { ...currentDraft.current, text: '', source: null }
+    clearStartedDraft(draftProjectId, expectedRevision)
+    const next = readDraft(draftProjectId)
     currentDraft.current = next
-    writeDraft(next, draftProjectId)
     if (mounted.current) setDraft(next)
   }
   return { draft, update, clearStarted, submissionPending, mounted }
