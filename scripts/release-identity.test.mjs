@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -118,6 +118,36 @@ for (const rebrand of [false, true]) for (const [name, channel] of Object.entrie
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test('renamed stable publication requires the source commit before calling npm', () => {
+  const dir = fixture(true);
+  try {
+    assert.throws(() => run(dir, { script: 'release.mjs', args: ['patch'],
+      env: { NODE_AUTH_TOKEN: 'fixture-token', GIT_DIR: join(dir, 'missing-git') } }),
+      /not a git repository/);
+    assert.equal(existsSync(join(dir, 'calls.ndjson')), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('renamed stable publication carries the verified source commit into its npm manifest', () => {
+  const dir = fixture(true);
+  try {
+    const git = args => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: 'pipe' }).trim();
+    git(['init']);
+    git(['-c', 'user.name=Release test', '-c', 'user.email=release@example.test', 'commit', '--allow-empty', '-m', 'source']);
+    const source = git(['rev-parse', 'HEAD']);
+    // This local npm stub records publication data. It never loads registry code.
+    writeFileSync(join(dir, 'npm-cli.js'), `import { appendFileSync, readFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (args[0] !== 'publish') throw Error('unexpected npm operation');
+appendFileSync(process.env.CALLS, JSON.stringify(JSON.parse(readFileSync('package.json')))+'\\n');
+`);
+    run(dir, { script: 'release.mjs', args: ['patch'], env: { NODE_AUTH_TOKEN: 'fixture-token' } });
+    const published = readFileSync(join(dir, 'calls.ndjson'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(published[0].gitHead, source);
+    assert.equal(published[0].name, '@hearsay-tools/squawk');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 for (const rebrand of [false, true]) {
   test(`trusted PR archives accept only the projected identity with switch ${rebrand}`, () => {

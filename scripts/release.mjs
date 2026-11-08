@@ -72,6 +72,13 @@ if (!dryRun && !token && !oidc) {
 const stamped = stampStableManifests(manifests, version);
 for (const key of order) writeManifest(dirs[key], stamped[key]);
 const publication = publicationManifests(stamped);
+// A renamed stable package packs outside Git. Require its source before any npm
+// publication; otherwise a successful publish could not be verified on retry.
+if (!dryRun && publication.cezar.name !== stamped.cezar.name) {
+  publication.cezar.gitHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: dirs.cezar, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
 const stampedNames = order.map((key) => publication[key].name);
 console.log(
   `release: stamped ${stampedNames.join(' + ')} to ${version} (bump ${bump}, dist-tag latest${dryRun ? ', dry run' : ''})`,
