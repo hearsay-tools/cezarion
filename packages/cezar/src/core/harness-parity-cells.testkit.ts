@@ -614,12 +614,12 @@ const CONTROL_CRITERIA = [
   { id: 'R79', scenario: 'baseline' },
   // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.testkit.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
-  { id: 'R72', scenario: 'provider-error' },
-  { id: 'R73', scenario: 'provider-error' },
+  { id: 'R72', scenario: 'provider-error-controlled' },
+  { id: 'R73', scenario: 'provider-error-controlled' },
   // Nonfinal CI recovery retains failure history and runs the tail/check retries, including restart.
-  { id: 'R74', scenario: 'provider-error' },
-  { id: 'R75', scenario: 'provider-error' },
-  { id: 'R76', scenario: 'provider-error' },
+  { id: 'R74', scenario: 'provider-error-controlled' },
+  { id: 'R75', scenario: 'provider-error-controlled' },
+  { id: 'R76', scenario: 'provider-error-controlled' },
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },

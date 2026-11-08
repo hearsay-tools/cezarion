@@ -1434,7 +1434,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       it(`${runner} U9 provider failure with a ${kind} wait open leaves the run recoverable and the next wake delivers`, async () => {
         const external = github();
         const wire = gatedProviderFailure(root, runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
         await until(wire.held);
         const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
         const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
@@ -1551,7 +1551,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
 
     it(`${runner} U9h provider failure with a human wait open leaves the run recoverable`, async () => {
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       await until(wire.held);
       const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
@@ -2228,7 +2228,7 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
   for (const runner of runners) {
     it(`${runner} U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       await until(wire.held);
       const w = await worker(run.id);
@@ -2587,7 +2587,7 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} R18 Finish followed by a provider error retires its intent before restart`, async () => {
       const peer = await parentOn(runner);
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
       await until(wire.held);
       const request = seedCompletionRequest(run.id, peer.id);
@@ -3641,7 +3641,7 @@ function processCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} U9p provider failure with a process wait open leaves the run recoverable and the next result delivers`, async () => {
       const external = processes();
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       await until(wire.held);
       const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.process, pid: sleeper(), timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);

@@ -82,7 +82,6 @@ interface ParityFamily {
 }
 
 const NATIVE_ASK_SCENARIO = 'its scenario asks through the native ask on codex and opencode (nativeAsk answerable), which no runner of the shared set declares';
-const PROVIDER_FAILURE = 'the wake fails through the runner\'s own provider-error handling';
 const SMOKE = 'per-runner smoke row';
 const PROVIDER_ERROR_START = 'its step fails through the runner\'s own provider-error path';
 
@@ -122,8 +121,7 @@ export const PARITY_FAMILIES = {
     U1: `${SMOKE}: registration through each runner's own tool transport`,
     U7k: NATIVE_ASK_SCENARIO,
     U8l: 'asserts an opencode-only session state',
-    U9: PROVIDER_FAILURE, U9h: PROVIDER_FAILURE, U9w: PROVIDER_FAILURE, U9p: PROVIDER_FAILURE, R18: PROVIDER_FAILURE,
-    U14: PROVIDER_FAILURE, U14m: `${PROVIDER_FAILURE}; a claude-only failure mode`,
+    U14m: 'the wake fails through Claude\'s own unread exit on Claude, and no failing opening turn may read the steered message; S44 holds neither',
     U22k: 'reads the U22s exemption', U22r: 'reads the U22s exemption and holds the acknowledgement on opencode only',
   }),
   'waits-subagents': everyRunner('reads the nativeSubagents fact'),
@@ -132,7 +130,7 @@ export const PARITY_FAMILIES = {
   'ci-wait-conflict': shared('conflict resolution in the wait registry'),
   'ci-wait-rerun': shared('reruns in the CI supervisor'),
   'ci-wait-retry': shared('source retry in the CI supervisor'),
-  'ci-wait-failure': everyRunner('every row fails a CI agent through the runner\'s own provider-error path (gatedProviderFailure); R75 also builds each runner\'s own account and home'),
+  'ci-wait-failure': shared('the failed CI attempt, its history and the resumed workflow are Cezar\'s; S44 holds each runner\'s part of the gated provider error, and R14 (harness:owned-workflows, every runner) each runner\'s own account and home'),
   'pr-merge-wait': shared('PR merge waits in the wait registry'),
   'worker-reboot': shared('reboot settlement reads the worker process ledger; S43 holds each runner to reporting its native processes, and runner-shutdown to stopping them'),
   'worker-restart': shared('restart settlement reads the worker process ledger; S43 holds each runner to reporting its native processes, and runner-shutdown to stopping them'),

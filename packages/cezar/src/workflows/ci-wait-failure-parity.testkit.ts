@@ -84,7 +84,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       // A failure that owes the CI result retries after the wake backoff (hearsay-tools/cezarion#1233);
       // the cell is about the failure history, so the retry need not wait out production cadence.
       const adapter = HARNESS_ADAPTERS[runner];
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: adapter.scenarios[mode === 'fresh' ? 'provider-error' : 'baseline']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: adapter.scenarios[mode === 'fresh' ? 'provider-error-controlled' : 'baseline']! });
       let wait: Wait;
       if (mode === 'fresh') {
         await until(wire.held);
@@ -146,7 +146,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
         ? 'node -e "process.exit(1)"'
         : 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'check-retried\')){fs.writeFileSync(\'check-retried\',\'\');process.exit(1)}"';
       const run = manager.startRun({ name: 'ci-failure-chain', source: 'built-in', steps: [
-        { id: 'first', prompt: adapter.scenarios['provider-error']! },
+        { id: 'first', prompt: adapter.scenarios['provider-error-controlled']! },
         { id: 'later', prompt: adapter.scenarios['cezar-done']! },
         { id: 'check', command, onFail: { retry: outcome === 'source-retry' ? 'first' : 'later', max: 1 } },
       ] }, { runner, task: 'Recover CI and run the remaining workflow', worktree: false });
@@ -206,7 +206,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       const wire = gatedProviderFailure(root, runner);
       const adapter = HARNESS_ADAPTERS[runner];
       const run = await ownedChain(runner, { name: 'owned-ci-chain', source: 'built-in', steps: [
-        { id: 'first', prompt: adapter.scenarios['provider-error']!, runner, agentProfile: 'default' },
+        { id: 'first', prompt: adapter.scenarios['provider-error-controlled']!, runner, agentProfile: 'default' },
         { id: 'later', prompt: adapter.scenarios['cezar-done']!, runner, agentProfile: 'default' },
         { id: 'check', command: 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'check-retried\')){fs.writeFileSync(\'check-retried\',\'\');process.exit(1)}"', onFail: { retry: 'later', max: 1 } },
       ] });
