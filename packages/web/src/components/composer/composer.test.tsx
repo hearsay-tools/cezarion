@@ -266,6 +266,22 @@ describe('attachment read errors', () => {
 })
 
 describe('failure restores the draft (nothing the user typed is ever lost)', () => {
+  it('restores sent attachments beside files added while the request was pending', async () => {
+    let reject!: (error: Error) => void
+    const { textarea } = renderComposer({
+      onSubmit: () => new Promise<void>((_, fail) => { reject = fail }),
+    })
+    paste(textarea, [textFile('sent.txt', 'text/plain')])
+    await screen.findByRole('button', { name: 'Remove sent.txt' })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(screen.queryByRole('button', { name: 'Remove sent.txt' })).toBeNull()
+    paste(textarea, [textFile('next.txt', 'text/plain')])
+    await screen.findByRole('button', { name: 'Remove next.txt' })
+    await act(async () => reject(new Error('Send failed')))
+    expect(screen.getByRole('button', { name: 'Remove sent.txt' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove next.txt' })).toBeTruthy()
+  })
+
   it('rejection → danger toast with the server words + the text back in the box', async () => {
     const onSubmit = vi.fn(() => Promise.reject(new Error('session closed — the agent is no longer listening')))
     const { textarea } = renderComposer({ onSubmit })
@@ -289,6 +305,27 @@ describe('failure restores the draft (nothing the user typed is ever lost)', () 
 })
 
 describe('attachments — attach, paste, thumbnails, caps (legacy parity)', () => {
+  it('accepts a file drop, prevents browser navigation and sends the file contents', async () => {
+    const { textarea, onSubmit } = renderComposer()
+    const defaultAllowed = fireEvent.drop(textarea, {
+      dataTransfer: { files: [textFile('dropped.pdf', 'application/pdf', '%PDF')] },
+    })
+    expect(defaultAllowed).toBe(false)
+    await screen.findByRole('button', { name: 'Remove dropped.pdf' })
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('', [
+      { mediaType: 'application/pdf', data: btoa('%PDF') },
+    ])
+  })
+
+  it('leaves a drop without files to the browser', () => {
+    const { textarea } = renderComposer()
+    type(textarea, 'Keep this')
+    expect(fireEvent.drop(textarea, { dataTransfer: { files: [] } })).toBe(true)
+    expect(textarea.value).toBe('Keep this')
+    expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull()
+  })
+
   it('pasted screenshots become removable thumbnails and ride the submit', async () => {
     const { onSubmit, textarea } = renderComposer()
     paste(textarea, [pngFile('shot.png', [9, 9])])
@@ -390,6 +427,18 @@ describe('attachments — attach, paste, thumbnails, caps (legacy parity)', () =
 })
 
 describe('/ skills autocomplete (#380)', () => {
+  it('accepts a skill with Tab while Shift+Tab leaves the draft unchanged', async () => {
+    const { textarea, onSubmit } = renderComposer()
+    type(textarea, '/om-fix')
+    await screen.findByText('Fix an issue')
+    expect(fireEvent.keyDown(textarea, { key: 'Tab', shiftKey: true })).toBe(true)
+    expect(textarea.value).toBe('/om-fix')
+    expect(fireEvent.keyDown(textarea, { key: 'Tab' })).toBe(false)
+    expect(textarea.value).toBe('/om-fix ')
+    expect(document.querySelector('[data-slot="composer-menu"]')).toBeNull()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it('opens at a word boundary, fetches skills lazily, lists project skills first and bold', async () => {
     const { fetchMock, textarea } = renderComposer()
     // No `/` yet — no skills fetch.
