@@ -730,17 +730,22 @@ describe('workflow failures and submission guards', () => {
   })
 })
 
-/** jsdom has no layout. Supply separate card, canvas-padding and palette rectangles so the
- * real dnd-kit sensors and collision detector can select the same targets as a browser. */
+/** jsdom has no layout. Model 100px cards with the canvas's gap-4 (16px) between them.
+ * The canvas fits those cards; its absolute tail indicator adds no height or padding.
+ * An empty canvas instead fits the padded drop hint. */
 function layOutWorkflow() {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const ids = canvasIds()
     const card = this.closest('li')?.querySelector<HTMLElement>('[data-slot="wb-step"]')
     const palette = this.closest<HTMLElement>('[data-slot="wb-skill"]')
     if (card) {
-      const index = stepIds().indexOf(card.dataset.id)
-      return new DOMRect(0, index * 120, 400, 100)
+      const index = ids.indexOf(card.dataset.id)
+      return new DOMRect(0, index * 116, 400, 100)
     }
-    if (this.matches('[data-slot="wb-steps"]')) return new DOMRect(0, 0, 400, stepIds().length * 120 + 240)
+    if (this.matches('[data-slot="wb-steps"]')) {
+      const height = ids.length === 0 ? 100 : ids.length * 100 + (ids.length - 1) * 16
+      return new DOMRect(0, 0, 400, height)
+    }
     if (palette) return new DOMRect(600, palette.dataset.skill === 'om-fix' ? 0 : 60, 200, 44)
     // DragOverlay measures its fixed wrapper, whose inline dimensions come from the source.
     const overlay = this.parentElement
@@ -839,7 +844,7 @@ describe('workflow drag and drop through real sensors', () => {
     await waitFor(() => expect(stepCards()).toHaveLength(2))
     layOutWorkflow()
     await liftPalette()
-    await pointerMove(110, 170)
+    await pointerMove(110, 166)
     expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
     await dropPointer()
     expect(stepIds()).toEqual(['om-fix', 'om-review-2', 'om-review'])
@@ -847,19 +852,21 @@ describe('workflow drag and drop through real sensors', () => {
     expect(dropLine()).toBeNull()
   })
 
-  it('appends a palette skill on canvas padding', async () => {
-    stubFetch()
+  it('copies a palette skill into an empty canvas', async () => {
+    stubFetch({}, [QUICK])
     renderAt('/workflows')
-    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    await screen.findByText('Drop a skill here — or Import a workflow.yaml')
     layOutWorkflow()
     await liftPalette()
-    await pointerMove(110, 300)
+    await pointerMove(110, 50)
     expect(dropLine()).toBeNull()
     await dropPointer()
-    expect(stepIds()).toEqual(['om-fix', 'om-review', 'om-review-2'])
+    expect(stepIds()).toEqual(['om-review'])
+    expect(screen.queryByText('Drop a skill here — or Import a workflow.yaml')).toBeNull()
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
   })
 
-  it('leaves a step in place when dropped on canvas padding', async () => {
+  it('moves a step to the last card when dropped below the content-sized canvas', async () => {
     stubFetch()
     renderAt('/workflows')
     await waitFor(() => expect(stepCards()).toHaveLength(2))
@@ -868,8 +875,10 @@ describe('workflow drag and drop through real sensors', () => {
     fireEvent.pointerDown(grip, { button: 0, clientX: 10, clientY: 50 })
     await pointerMove(20, 50)
     await pointerMove(10, 300)
+    // closestCenter keeps the last card as the nearest target even below its bottom edge.
+    expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
     await dropPointer()
-    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
     expect(canvas().hasAttribute('data-dragging')).toBe(false)
   })
 
