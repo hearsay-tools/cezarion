@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
@@ -145,7 +146,7 @@ export class DevServer extends EventEmitter {
     this.child = child;
     this.childExited = new Promise<void>(resolveExit => {
       child.once('error', error => {
-        try { appendFileSync(this.logPath, `cezar could not start the command: ${error.message}\n`); } catch { /* log is best effort */ }
+        try { appendFileSync(this.logPath, `${productName('cezar')} could not start the command: ${error.message}\n`); } catch { /* log is best effort */ }
         resolveExit();
         this.finish('exited');
       });

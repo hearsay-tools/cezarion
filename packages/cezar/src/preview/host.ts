@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -12,7 +13,6 @@ import { DevServer, probePort, type DevServerState } from './dev-server.ts';
 import { previewStopResult, type PreviewHostLike } from './registration.ts';
 import { PreviewSession, type Viewer } from './session.ts';
 import { normalizePreviewUrl } from './url.ts';
-
 /**
  * The workspace-wide preview host (#781, spec 2026-10-02-live-preview-v1): one per server process,
  * because ports are host-global. Keyed by run id, it owns every cezar-started dev server and every
@@ -968,7 +968,7 @@ export class PreviewHost implements PreviewHostLike {
     entry.viewer = undefined;
     if (!viewer) return;
     if (notify) viewer.send({ t: 'state', stage: 'worktree-removed' });
-    else viewer.close(1001, 'cezar is shutting down');
+    else viewer.close(1001, `${productName('cezar')} is shutting down`);
   }
 
   private tell(entry: RunEntry, msg: PreviewServerMessage): void {

@@ -1,3 +1,5 @@
+import { productIdentity } from '../home/identity.ts';
+import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 /**
  * The self-update service behind `/api/v1/workspace/self-update` and `cezar update`. Owns the
@@ -208,7 +210,7 @@ export class SelfUpdateService {
    */
   async forwardOnlyRefusal(target: string): Promise<string | null> {
     const running = this.deps.version;
-    const suffix = 'apply it on the host itself (`cez use <id>`)';
+    const suffix = `apply it on the host itself (\`${productIdentity().command} use <id>\`)`;
     if (!isNewer(target, running)) {
       return `a hosted cockpit can only update forward — ${target} is not newer than the running ${running}; ${suffix}`;
     }
@@ -233,30 +235,30 @@ export class SelfUpdateService {
     const installed = findInstalled(target, this.env, this.home);
     if (!doc?.versions.some(entry => entry.version === target) ||
         (installed && (installed.source !== 'registry' || installed.id !== target || installed.version !== target))) {
-      return 'Hosted updates require a published registry version; switch local builds on the host with `cez use <id>`.';
+      return `Hosted updates require a published registry version; switch local builds on the host with \`${productIdentity().command} use <id>\`.`;
     }
     return null;
   }
 
   capability(): { canSelfUpdate: boolean; reason?: string } {
-    if (this.deps.readOnly) return { canSelfUpdate: false, reason: 'This cezar was started without an updater.' };
+    if (this.deps.readOnly) return { canSelfUpdate: false, reason: `This ${productName('cezar')} was started without an updater.` };
     switch (this.installKind) {
       case 'managed':
         return { canSelfUpdate: true };
       case 'npx':
         return {
           canSelfUpdate: false,
-          reason: 'This cezar runs from the npx cache, which npx replaces on its own. Install it permanently to update from here.',
+          reason: `This ${productName('cezar')} runs from the npx cache, which npx replaces on its own. Install it permanently to update from here.`,
         };
       case 'global-npm':
         return {
           canSelfUpdate: false,
-          reason: 'This cezar was installed with npm -g. Update it with npm, or install the managed layout to update from here.',
+          reason: `This ${productName('cezar')} was installed with npm -g. Update it with npm, or install the managed layout to update from here.`,
         };
       case 'checkout':
-        return { canSelfUpdate: false, reason: 'This cezar runs from a git checkout — rebuild it instead of updating.' };
+        return { canSelfUpdate: false, reason: `This ${productName('cezar')} runs from a git checkout — rebuild it instead of updating.` };
       default:
-        return { canSelfUpdate: false, reason: 'cezar could not tell how it was installed.' };
+        return { canSelfUpdate: false, reason: `${productName('cezar')} could not tell how it was installed.` };
     }
   }
 

@@ -1,3 +1,4 @@
+import { productName } from '../../home/display.ts';
 import { shellQuote } from '../../core/shell-env.ts';
 import { productIdentity } from '../../home/identity.ts';
 import { commandText } from '../../home/command.ts';
@@ -181,10 +182,10 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
     // 3) reserved domain (optional → ephemeral URL)
     const domainInput = await ctx.ui.text({
       message: 'Reserved ngrok domain (leave blank for an ephemeral URL that changes on restart)',
-      placeholder: 'cezar.ngrok.app',
+      placeholder: `cezar.ngrok.app`,
       // Bare hostname only — `https://…` here used to yield `--domain https://…`
       // in the plist and a `https://https://…` publicUrl.
-      validate: (v) => (!v.trim() || HOSTNAME_RE.test(v.trim()) ? undefined : 'enter a bare hostname (no scheme), e.g. cezar.ngrok.app'),
+      validate: (v) => (!v.trim() || HOSTNAME_RE.test(v.trim()) ? undefined : `enter a bare hostname (no scheme), e.g. cezar.ngrok.app`),
     });
     if (domainInput === CANCEL) throw new StepCancelled();
     // Guard against `String(undefined)` → `"undefined"` — @clack/prompts can
@@ -293,7 +294,7 @@ export async function resolveCezarArgv(ctx: InstallContext, rebrand = REBRAND_SW
   // No runnable cezar → installing a KeepAlive agent would make launchd
   // respawn-throttle a permanently failing job across reboots. Fail the step.
   throw new StepAborted(
-    `could not locate a runnable cezar (${entry} missing, no global ${cliPackage}) — ` +
+    `could not locate a runnable ${productName('cezar', rebrand)} (${entry} missing, no global ${cliPackage}) — ` +
       `install it (npm i -g ${cliPackage}) or build the checkout, then re-run with --reconfigure autostart`,
   );
 }
@@ -347,7 +348,7 @@ function repairAgentEnv(ctx: InstallContext, agent: LaunchAgent): boolean {
 
 const autostartStep = (rebrand: boolean): InstallStep => ({
   id: 'autostart',
-  title: 'Run cezar as a service (launchd — starts now + on boot)',
+  title: `Run ${productName('cezar', rebrand)} as a service (launchd — starts now + on boot)`,
   async check(ctx) {
     if (ctx.dryRun) return false;
     const agent = agentArtifact(ctx, 'autostart', rebrand);
@@ -363,14 +364,14 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     if (ctx.dryRun) {
       ctx.ui.info(`DRY RUN — would write ${path} and launchctl bootstrap it.`);
     } else {
-      await installAgent(ctx, previous, name, path, cezarLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), 'the cezar cockpit agent');
+      await installAgent(ctx, previous, name, path, cezarLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), `the ${productName('cezar', rebrand)} cockpit agent`);
     }
     return { artifacts: [owned('launchd', { name, path })] };
   },
   async undo(ctx, created) {
     // Recorded identity, with the same null-ledger fallback as ngrok.
     if (ctx.dryRun) {
-      ctx.ui.info('DRY RUN — would launchctl bootout and remove the cezar agent.');
+      ctx.ui.info(`DRY RUN — would launchctl bootout and remove the ${productName('cezar', rebrand)} agent.`);
     } else {
       await removeAgent(ctx, agentArtifact(ctx, 'autostart', rebrand, created));
     }
@@ -436,7 +437,7 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       });
       // Restart both the cezar cockpit and the ngrok tunnel, then re-verify.
       if (ctx.dryRun) {
-        ctx.ui.info('DRY RUN — would restart the cezar and ngrok launchd agents and re-verify.');
+        ctx.ui.info(`DRY RUN — would restart the ${productName('cezar', rebrand)} and ngrok launchd agents and re-verify.`);
         return;
       }
       const cockpit = agentArtifact(ctx, 'autostart', rebrand);
@@ -448,9 +449,9 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       }
       // A previous deploy can have repaired the file before bootstrap failed.
       if (repaired || (existsSync(cockpit.path) && (await ctx.runner.capture('launchctl', ['print', `gui/${uid}/${cockpit.name}`])).code !== 0)) {
-        await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, 'the cezar cockpit agent');
+        await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, `the ${productName('cezar', rebrand)} cockpit agent`);
       }
-      ctx.ui.info('Redeploying — restarting the cezar cockpit.');
+      ctx.ui.info(`Redeploying — restarting the ${productName('cezar', rebrand)} cockpit.`);
       const cezarCode = await ctx.runner.interactive('launchctl', ['kickstart', '-k', `gui/${uid}/${cockpit.name}`]);
       if (cezarCode !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${cockpit.name}\`.`);
       ctx.ui.info('Redeploying — restarting the ngrok tunnel.');

@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { DesktopControls, isDesktopShell } from './desktop-controls'
 import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldCheckIcon } from '@/components/design-icons'
 
@@ -288,7 +289,7 @@ export function AppShell({
         }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} pushed={pushed ? { onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
+          <MobileTopBar title={current?.label ?? productName('cezar')} pushed={pushed ? { onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <DesktopBreadcrumb breadcrumb={breadcrumb} repo={repo} label={current?.label} newTask={newTask} />
 
           {banner ? (
@@ -330,7 +331,7 @@ function DesktopBreadcrumb({ breadcrumb, repo, label, newTask }: {
     <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", newTask ? 'h-[72px] px-11' : 'h-16 px-9')}>
       <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
       {project ? <><span className="truncate font-medium text-foreground">{project}</span><span aria-hidden="true">/</span></> : null}
-      <span className="min-w-0 truncate">{breadcrumb?.page ?? label ?? 'Cezarion'}</span>
+      <span className="min-w-0 truncate">{breadcrumb?.page ?? label ?? productName('Cezarion')}</span>
       {branch ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]">{/* The one teal left beside the sidebar, deliberately (#617 01c): the header's ShieldCheck
           sits outside the sidebar list and waits for the brand accent's own review. */}<ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{branch}</span> : null}
     </header>
@@ -822,7 +823,7 @@ function MobileTopBar({ title, pushed, repo, elsewhere, onTrigger }: {
             </button>
           </SheetTrigger>
         ) : null}
-        {title !== 'cezar' ? (
+        {title !== productName('cezar') ? (
           // Beside a project the page title is redundant with the view itself, so it stays for
           // screen readers only; with no project (global routes) it is the bar's label.
           <span data-slot="mobile-route-title" className={cn('truncate text-[15px] font-semibold text-foreground', repo ? 'sr-only' : 'min-w-0 flex-1 pl-[8px]')}>

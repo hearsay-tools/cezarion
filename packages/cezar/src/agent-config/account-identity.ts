@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProviderId } from '../core/provider-auth.ts';
@@ -148,8 +149,8 @@ export async function readAccountIdentity(
 
 /** Why "Show details" has nothing for the agents whose identity is not read here. */
 const UNREADABLE_IDENTITY: Record<Exclude<ProviderId, 'claude' | 'codex'>, string> = {
-  opencode: 'OpenCode keeps its login outside its config folder, so cezar cannot read it.',
-  pi: 'cezar does not read which login a pi account is signed in as.',
-  omp: 'cezar does not read which login an omp account is signed in as.',
-  cursor: 'cezar does not read which login a Cursor account is signed in as.',
+  opencode: `OpenCode keeps its login outside its config folder, so ${productName('cezar')} cannot read it.`,
+  pi: `${productName('cezar')} does not read which login a pi account is signed in as.`,
+  omp: `${productName('cezar')} does not read which login an omp account is signed in as.`,
+  cursor: `${productName('cezar')} does not read which login a Cursor account is signed in as.`,
 };

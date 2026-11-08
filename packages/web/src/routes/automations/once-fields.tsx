@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useEffect, useId, useRef, useState } from 'react'
 import { ONCE_PAST_DUE_MESSAGE, onceInstant, onceWallParts, unknownTimeZoneMessage, type AutomationSchedule, type NormalizedSchedule } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 import { isValidTimeZone, zonedParts } from '@open-mercato/cezar-api-client/contract/zoned-time'
@@ -87,7 +88,7 @@ export function OnceFields({ value, stored, onChange }: { value: NormalizedSched
       <ZoneField value={value.timeZone ?? ''} onCommit={(timeZone) => set({ timeZone })} />
       <LatestStartField value={value.latestStartMinutes} onChange={(latestStartMinutes) => onChange(withLatestStart(value, latestStartMinutes))} />
       {summary ? (
-        <p className="text-sm break-words">{`Runs once at ${summary.time} on ${summary.date} (${value.timeZone}). ${summary.note ? `${summary.note} ` : ''}Cezarion must be running then.`}</p>
+        <p className="text-sm break-words">{`Runs once at ${summary.time} on ${summary.date} (${value.timeZone}). ${summary.note ? `${summary.note} ` : ''}${productName('Cezarion')} must be running then.`}</p>
       ) : null}
     </div>
   )
@@ -151,7 +152,7 @@ function LatestStartField({ value, onChange }: { value: number | undefined; onCh
           ))}
         </SelectContent>
       </Select>
-      <p className="text-xs break-words text-muted-foreground">If Cezarion was not running at the time, it still starts the task this long afterwards; later, the schedule is marked missed.</p>
+      <p className="text-xs break-words text-muted-foreground">If {productName('Cezarion')} was not running at the time, it still starts the task this long afterwards; later, the schedule is marked missed.</p>
     </div>
   )
 }

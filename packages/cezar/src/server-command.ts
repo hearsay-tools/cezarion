@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { commandText } from './home/command.ts';
 import { execFileSync } from 'node:child_process';
 import { productEnv } from './core/product-env.ts';
@@ -64,7 +65,7 @@ async function promptSecondInstanceDomain(): Promise<string | undefined> {
     const { createClackUi } = await import('./server-install/ui.ts');
     const answer = await createClackUi().text({
       message:
-        'This host already runs a cezar cockpit. Enter a NEW domain to host a second, independent instance — ' +
+        `This host already runs a ${productName('cezar')} cockpit. Enter a NEW domain to host a second, independent instance — ` +
         'or leave blank to manage/redeploy the existing one.',
       placeholder: 'shop.example.com',
     });
