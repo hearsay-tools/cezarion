@@ -348,7 +348,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
   async check(ctx) {
     if (ctx.dryRun) return false;
     const agent = agentArtifact(ctx, 'autostart', rebrand);
-    if (!existsSync(agent.path)) return false;
+    if (!await verifyCommand(ctx, 'test', ['-f', agent.path])) return false;
     const current = readLaunchdPlist(agent.path);
     return launchdRemoteEnv(current) === current;
   },
