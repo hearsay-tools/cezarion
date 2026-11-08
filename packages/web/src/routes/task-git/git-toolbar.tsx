@@ -28,6 +28,7 @@ import { BranchChip, DiffViewToggles, MarkdownPreviewToggle } from './diff-contr
  */
 export function GitToolbar({
   bar,
+  healthReady,
   branch,
   stat,
   mode,
@@ -39,6 +40,8 @@ export function GitToolbar({
   onAction,
 }: {
   bar: GitActionBar
+  /** The health input has reached this render, independently of action enablement. */
+  healthReady?: boolean
   branch?: string | undefined
   stat?: DiffStat | undefined
   mode: DiffMode
@@ -53,6 +56,7 @@ export function GitToolbar({
   return (
     <div
       data-slot="git-toolbar"
+      data-health-ready={healthReady}
       className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-[18px] py-[22px] md:px-9 [&_button]:min-h-11"
     >
       {branch ? <BranchChip branch={branch} /> : null}

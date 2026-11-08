@@ -146,7 +146,7 @@ describe('the Changes tab against a live dry run', () => {
     // Wait for their inputs, then assert the policy on the same sample.
     const actions = browser.waitForValue(`(() => {
       const toolbar = document.querySelector('[data-slot="git-toolbar"]')
-      if (!toolbar?.querySelector('[data-slot="changes-stat"]') || window.__cezIdle !== true
+      if (!toolbar?.querySelector('[data-slot="changes-stat"]') || toolbar.dataset.healthReady !== 'true'
         || toolbar.querySelector('[data-action="push"]')?.disabled !== false) return null
       return [...toolbar.querySelectorAll('[data-action]')]
         .map((el) => ({ id: el.dataset.action, disabled: el.disabled === true }))
