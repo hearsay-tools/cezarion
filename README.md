@@ -1648,6 +1648,10 @@ as in [Quick start](#quick-start)).
 
 **2. Clone & install**
 
+The npm global prefix must be writable by your user. Use Node installed with
+nvm, or set a user-owned prefix (`npm config set prefix ~/.npm-global`) and
+add `~/.npm-global/bin` to your `PATH` before these commands.
+
 ```bash
 git clone https://github.com/hearsay-tools/cezarion.git
 cd cezarion

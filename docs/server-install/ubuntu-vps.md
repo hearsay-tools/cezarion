@@ -54,8 +54,7 @@ Or from a git checkout on the box:
 ```bash
 git clone https://github.com/hearsay-tools/cezarion.git
 cd cezarion
-npm install --global pnpm@12.11.2
-pnpm install --frozen-lockfile
+npx --yes --package=pnpm@12.11.2 pnpm install --frozen-lockfile
 npm run build
 node packages/cezar/dist/index.js server-install --platform ubuntu-vps
 ```

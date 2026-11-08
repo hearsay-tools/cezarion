@@ -129,6 +129,9 @@ outside the pnpm workspaces so normal CLI builds do not require Rust.
 For an isolated macOS smoke test of a development build with the release switch
 off, launch its old-identity executable directly so it receives the test environment:
 
+Before running the test, check that your login shell startup files do not
+change or unset `CEZ_HOME` or `HSQ_DRY_RUN`. The sidecar uses a login shell.
+
 ```sh
 CEZ_HOME="$(mktemp -d)" HSQ_DRY_RUN=1 \
 HSQ_DESKTOP_ENTRY="$PWD/packages/cezar/dist/index.js" \
