@@ -1,10 +1,13 @@
 /** Main-thread measurements only: worker CPU does not count as loop blocking. */
 import { readFileSync } from 'node:fs';
 
-function readQueueWaitMs() {
+export function readQueueWaitMs({ read = readFileSync, platform = process.platform } = {}) {
   // Linux schedstat field 2 is cumulative run-queue wait in nanoseconds.
-  if (process.platform !== 'linux') return null;
-  try { return Number(readFileSync('/proc/thread-self/schedstat', 'utf8').trim().split(/\s+/)[1]) / 1e6; }
+  if (platform !== 'linux') return null;
+  try {
+    const waitNs = Number(read('/proc/thread-self/schedstat', 'utf8').trim().split(/\s+/)[1]);
+    return Number.isFinite(waitNs) && waitNs >= 0 ? waitNs / 1e6 : null;
+  }
   catch { return null; /* Optional diagnostic on restricted procfs mounts. */ }
 }
 

@@ -60,3 +60,15 @@ test('does not credit queue wait before the measured interval (B1)', async () =>
   assert.equal(sample.queueWaitMs, 0);
   assert.equal(blockingBudget(sample).blockingMs, 60);
 });
+
+test('malformed schedstat data selects CPU-only mode through the real reader', async () => {
+  const { readQueueWaitMs, timingSnapshot, timingDelta, blockingBudget } = await timing;
+  for (const content of ['', '1', '1 nope 3', '1 Infinity 3', '1 -1 3']) {
+    const readQueue = () => readQueueWaitMs({ read: () => content, platform: 'linux' });
+    assert.equal(readQueue(), null, JSON.stringify(content));
+    const start = timingSnapshot({ now: () => 0, readQueue, readCpu: () => ({ user: 0, system: 0 }) });
+    const end = timingSnapshot({ now: () => 100, readQueue, readCpu: () => ({ user: 2000, system: 0 }) });
+    assert.deepEqual(blockingBudget(timingDelta(start, end)), { mode: 'cpu-only', blockingMs: 2 });
+  }
+  assert.equal(readQueueWaitMs({ read: () => '1 2500000 3', platform: 'linux' }), 2.5);
+});
