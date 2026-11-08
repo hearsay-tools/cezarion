@@ -5,6 +5,7 @@ import type { ActivityProject } from '@open-mercato/cezar-api-client/contract/ac
 
 import { NOW, iso, project, request, run } from './activity.testkit'
 import { ActivityBoard } from './activity-board'
+import { EMPTY_MOTION, type MotionState } from './activity-motion'
 import type { Box } from './line-geometry'
 import { PEER_LABEL } from './line-measure'
 import { labelBox, overlaps, placeBoxes, samplePath } from './line-layout.testkit'
@@ -23,12 +24,12 @@ afterEach(() => {
 const WIDTH = 1092
 const col = (i: number) => i * 396
 
-function renderBoard(value: ActivityProject, boxes: Record<string, Box>) {
+function renderBoard(value: ActivityProject, boxes: Record<string, Box>, motion: MotionState = EMPTY_MOTION) {
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(WIDTH)
   placeBoxes('data-activity-card', boxes)
   return render(
     <MemoryRouter initialEntries={['/p/cezarion/activity']}>
-      <ActivityBoard project={value} now={NOW} watchingSince={iso(-60_000)} />
+      <ActivityBoard project={value} now={NOW} watchingSince={iso(-60_000)} motion={motion} />
     </MemoryRouter>,
   )
 }
@@ -124,6 +125,47 @@ describe('labels of several stubs at the bottom edge', () => {
 })
 
 describe('peer labels', () => {
+  const boxes = { a: { x: col(0), y: 0, w: 300, h: 160 }, b: { x: col(1), y: 0, w: 300, h: 160 } }
+
+  it('shows the question, age and deadline progress on an open request', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b', text: 'Review the API?', createdAt: iso(-25_000), deadline: iso(75_000) })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), boxes)
+    const el = label(peer.requestId)!
+    expect(el.textContent).toBe('Request0:25Review the API?')
+    expect(el.querySelector<HTMLElement>('span[style]')?.style.width).toBe('25%')
+    expect(el.classList.contains('activity-line-out')).toBe(false)
+    const line = document.querySelector(`path[data-request="${peer.requestId}"]`)!
+    expect(line.getAttribute('data-phase')).toBe('open')
+    expect(line.getAttribute('stroke-dasharray')).toBe('6 5')
+    expect(line.getAttribute('marker-end')).toBe('url(#activity-arrow-peer)')
+  })
+
+  it('omits the progress bar for a request with no deadline', () => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b', deadline: undefined })
+    renderBoard(project({ tasks: [A, B], requests: [peer] }), boxes)
+    expect(label(peer.requestId)?.querySelector('span[style]')).toBeNull()
+  })
+
+  it.each([
+    { phase: 'reply', replied: true, title: 'Request', bar: true, dashed: true, fading: false },
+    { phase: 'replied', replied: true, title: 'Replied', bar: false, dashed: false, fading: false },
+    { phase: 'fade', replied: true, title: 'Replied', bar: false, dashed: true, fading: true },
+    { phase: 'fade', replied: false, title: 'Request', bar: true, dashed: true, fading: true },
+  ] as const)('draws phase $phase with replied=$replied', ({ phase, replied, title, bar, dashed, fading }) => {
+    const peer = request({ senderRunId: 'a', recipientRunId: 'b', text: 'Review the API?' })
+    const motion: MotionState = { ...EMPTY_MOTION, closing: { [peer.requestId]: { key: 1, projectId: 'cezarion', request: peer, phase, replied } } }
+    renderBoard(project({ tasks: [A, B] }), boxes, motion)
+    const el = label(peer.requestId)!
+    expect(el.textContent).toBe(`${title}4:10Review the API?`)
+    expect(el.querySelector('span[style]') !== null).toBe(bar)
+    expect(el.classList.contains('activity-line-out')).toBe(fading)
+    const line = document.querySelector(`path[data-request="${peer.requestId}"]`)!
+    expect(line.getAttribute('data-phase')).toBe(phase)
+    expect(line.getAttribute('stroke-dasharray')).toBe(dashed ? '6 5' : null)
+    expect(line.classList.contains('activity-line-out')).toBe(fading)
+    expect(line.classList.contains('activity-march')).toBe(phase === 'reply')
+  })
+
   it('fit the 96 px column gap and never cover a card', () => {
     const boxes: Record<string, Box> = {
       a: { x: col(0), y: 0, w: 300, h: 160 },
