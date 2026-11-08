@@ -1,3 +1,4 @@
+import { ABSENT_PROCESS_PID, OTHER_ABSENT_PROCESS_PID } from '../delegation/process-enumeration.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { fixture as ownedFixture } from '../delegation/service.testkit.ts';
 import { createActiveRun } from './active-run.ts';
@@ -110,7 +111,7 @@ it.each(['fresh', 'continuation'] as const)('%s reads the session at callback ti
 
 function observePrepared(session: AgentSession) {
   const setup = signal();
-  Object.defineProperty(session, 'pid', { value: 12345 });
+  Object.defineProperty(session, 'pid', { value: ABSENT_PROCESS_PID });
   vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => setup.resolve());
   return setup.promise;
 }
@@ -133,7 +134,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
         setupFailure = vi.spyOn(runner.session, 'sendMessage').mockImplementation(() => { throw new Error('setup refused: deferred'); });
       } else if (failure === 'inputs') setupFailure = throwSetupAt(failure, runner.session);
     });
-    Object.defineProperty(runner.session, 'pid', { value: 12345 });
+    Object.defineProperty(runner.session, 'pid', { value: ABSENT_PROCESS_PID });
     vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => undefined);
     const tracked = vi.spyOn(fixtureWork(manager), 'trackSession');
     const finallyCalled = vi.spyOn(runner.session.result, 'finally');
@@ -160,7 +161,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
 
 it('the receipt setup contract propagates recordProcess failure before marking prepared or reading the result', () => {
   const runner = controlledRunner();
-  Object.defineProperty(runner.session, 'pid', { value: 12345 });
+  Object.defineProperty(runner.session, 'pid', { value: ABSENT_PROCESS_PID });
   const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'),
     semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false };
   const state = createActiveRun({ cwd: root, autonomous: false, pendingHumanAsk: false });
@@ -168,7 +169,7 @@ it('the receipt setup contract propagates recordProcess failure before marking p
   const host = unused<InputReceiptsHost>('receipts', { flushAgentInputs: () => { calls.push('inputs'); } });
   const steps = unused<InputReceiptSteps>('steps', {
     flushDeferred: () => { calls.push('deferred'); },
-    recordProcess: (id, pid) => { calls.push('record'); expect([id, pid]).toEqual(['run', 12345]); throw Error('record refused'); },
+    recordProcess: (id, pid) => { calls.push('record'); expect([id, pid]).toEqual(['run', ABSENT_PROCESS_PID]); throw Error('record refused'); },
   });
   vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => { calls.push('register'); });
   const prepared = vi.fn();
@@ -183,7 +184,7 @@ it.each(['fresh', 'continuation'] as const)('%s keeps a worker session live when
 
   const owned = ownedFixture();
   let runner = controlledRunner();
-  Object.defineProperty(runner.session, 'pid', { value: 12345 });
+  Object.defineProperty(runner.session, 'pid', { value: ABSENT_PROCESS_PID });
   vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => undefined);
   const { workerId } = await owned.service.spawn(owned.caller, { task: 'receipts', baseline: 'parent-head', requestId: randomUUID() });
   try {
@@ -195,7 +196,7 @@ it.each(['fresh', 'continuation'] as const)('%s keeps a worker session live when
       // bound: the first owned execution must terminate before Continue starts a new one.
       expect(await owned.manager.awaitRunTermination(workerId, 15_000)).toBe(true);
       runner = controlledRunner();
-      Object.defineProperty(runner.session, 'pid', { value: 12345 });
+      Object.defineProperty(runner.session, 'pid', { value: ABSENT_PROCESS_PID });
     }
     const recorded = signal();
     const write = vi.spyOn(owned.store, 'appendWorkerProcess').mockImplementation(() => {
@@ -205,7 +206,7 @@ it.each(['fresh', 'continuation'] as const)('%s keeps a worker session live when
     if (mode === 'fresh') await owned.releaseAdmission();
     else expect(owned.manager.continueRun(workerId, { text: 'continue receipts' })).toMatchObject({ ok: true });
     await recorded.promise;
-    expect(write).toHaveBeenCalledWith(workerId, expect.any(String), 12345, undefined);
+    expect(write).toHaveBeenCalledWith(workerId, expect.any(String), ABSENT_PROCESS_PID, undefined);
     expect(runner.session.interrupt).not.toHaveBeenCalled();
     expect(runner.session.open).toBe(true);
     expect(owned.manager.isActive(workerId)).toBe(true);
@@ -239,18 +240,18 @@ it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before re
     vi.spyOn(processes, 'replaceRunProcess').mockImplementation(() => { calls.push('replace'); });
     const append = owned.store.appendWorkerProcess.bind(owned.store);
     vi.spyOn(owned.store, 'appendWorkerProcess').mockImplementation((id, generation, pid, pgid) => {
-      if (pid === 23456) {
+      if (pid === OTHER_ABSENT_PROCESS_PID) {
         expect(calls).toEqual(['replace']);
         calls.push('record');
       }
       return append(id, generation, pid, pgid);
     });
-    opts.onPidChange?.(23456);
+    opts.onPidChange?.(OTHER_ABSENT_PROCESS_PID);
     expect(calls).toEqual(['replace', 'record']);
-    expect(processes.replaceRunProcess).toHaveBeenCalledWith(workerId, 23456);
+    expect(processes.replaceRunProcess).toHaveBeenCalledWith(workerId, OTHER_ABSENT_PROCESS_PID);
     const generation = owned.store.readWorkerExecution(workerId)!.generation;
     const recorded = owned.store.readWorkerProcesses(workerId, generation);
-    expect(recorded).toMatchObject({ processes: expect.arrayContaining([expect.objectContaining({ pid: 23456 })]) });
+    expect(recorded).toMatchObject({ processes: expect.arrayContaining([expect.objectContaining({ pid: OTHER_ABSENT_PROCESS_PID })]) });
   } finally {
     runner.close();
     await owned.close();
