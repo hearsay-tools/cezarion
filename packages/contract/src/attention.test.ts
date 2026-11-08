@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
-import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
+import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, attentionOfRung, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, workersWaitingLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
 import {
   makePeerWait,
@@ -168,6 +168,20 @@ describe('rung ids', () => {
   });
 });
 
+describe('attentionOfRung', () => {
+  // Activity snapshots render a rung without a full run, including the reserved unseen rung.
+  const presentations: readonly Attention[] = [
+    { rung: 'needs-permission', bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' },
+    { rung: 'waiting-for-merge', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for merge' },
+    { rung: 'monitoring', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' },
+    { rung: 'unseen', bucket: 'unseen', tone: 'accent', shape: 'filled', pulse: false, label: 'unseen' },
+  ];
+
+  it.each(presentations)('presents $rung from its id alone', expected => {
+    expect(attentionOfRung(expected.rung)).toEqual(expected);
+  });
+});
+
 /** A worker wait is a list entry (hearsay-tools/cezarion#1235), Cezar's completion wait included
  *  (hearsay-tools/cezarion#1301): `delegation.wait` is never read. */
 const workerEntry = (over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry => ({
@@ -179,6 +193,50 @@ const completionEntry = (over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry =
   const { deadline: _deadline, timeoutSeconds: _timeout, ...entry } = workerEntry({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, ...over });
   return { ...entry, mode: 'all' } as WorkerWaitEntry;
 };
+
+describe('workersWaitingLabel', () => {
+  it.each([
+    [0, 'waiting on workers'],
+    [1, 'waiting on 1 worker'],
+    [2, 'waiting on 2 workers'],
+  ] as const)('labels a summary with %i pending workers', (count, expected) => {
+    expect(workersWaitingLabel({ status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count } })).toBe(expected);
+  });
+
+  it('counts pending workers once across agent and completion waits', () => {
+    const input: AttentionInput = {
+      status: RUN_STATUS.waiting,
+      waits: [
+        workerEntry({ workerIds: ['a', 'b'], outcomes: [{ workerId: 'a', status: WORKER_OUTCOME_STATUS.done, observedAt: '2026-10-19T10:03:00.000Z' }] }),
+        completionEntry({ id: '88888888-8888-4888-8888-888888888882', workerIds: ['b', 'c'] }),
+        workerEntry({ id: '88888888-8888-4888-8888-888888888883', workerIds: ['d'], phase: WAIT_PHASE.resolved }),
+      ],
+    };
+    expect(workersWaitingLabel(input)).toBe('waiting on 2 workers');
+  });
+
+  it('distinguishes worker replies, peer replies and a reply to a worker', () => {
+    const input: AttentionInput = { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 1, replies: true } };
+    expect(workersWaitingLabel(input)).toBe('waiting on worker replies');
+    expect(workersWaitingLabel({ ...input, waitingOn: { kind: 'workers', count: 1, replies: true, peers: true } })).toBe('waiting on replies');
+    expect(workersWaitingLabel({ ...input, delegation: { role: 'worker', parentRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' } })).toBe('waiting on parent reply');
+  });
+
+  const withoutWorkerLabel: ReadonlyArray<[string, AttentionInput]> = [
+    ['no waits', { status: RUN_STATUS.waiting }],
+    ['an empty wait list', { status: RUN_STATUS.waiting, waits: [] }],
+    ['a settled worker wait', { status: RUN_STATUS.waiting, waits: [workerEntry({ phase: WAIT_PHASE.resolved })] }],
+    ['a timer wait', { status: RUN_STATUS.waiting, waits: [makeTimerWait()] }],
+    ['a peer task wait', { status: RUN_STATUS.waiting, waits: [makePeerWait()] }],
+    ['a native subagent wait', { status: RUN_STATUS.waiting, waits: [makeSubagentWait()] }],
+    ['a human wait above workers', { status: RUN_STATUS.waiting, waits: [workerEntry(), humanWait()] }],
+    ['a usage limit above workers', { status: RUN_STATUS.waiting, autoResumeAt: '2026-10-21T15:00:00.000Z', waits: [workerEntry()] }],
+  ];
+
+  it.each(withoutWorkerLabel)('returns no worker label for %s', (_name, input) => {
+    expect(workersWaitingLabel(input)).toBeUndefined();
+  });
+});
 
 describe('delegation rungs', () => {
   const parkedRoot = (waits: WorkerWaitEntry[] = [workerEntry()]): AttentionInput => ({
@@ -509,6 +567,7 @@ describe('deriveWebhookState', () => {
     ['a root on its workers', { status: RUN_STATUS.waiting, delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 2 } } as AttentionInput, 'waiting-workers'],
     ['a worker on its parent\'s reply', { status: RUN_STATUS.waiting, delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
     ['a CI wait', { status: RUN_STATUS.waiting, waitingOn: ci }, 'waiting-ci'],
+    ['a merge wait', { status: RUN_STATUS.waiting, waitingOn: { ...ci, until: 'merge' } }, 'waiting-other'],
     ['a root on named peer tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 1 } }, 'waiting-other'],
     ['a timer wait', { status: RUN_STATUS.waiting, waitingOn: timer }, 'waiting-timer'],
     // hearsay-tools/cezarion#2431: the owner chose the workers trigger.
