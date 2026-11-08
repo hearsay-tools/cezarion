@@ -102,6 +102,82 @@ const paste = (textarea: HTMLTextAreaElement, files: File[]) =>
     },
   })
 
+function stubComposerSpeech() {
+  let recognition!: { onresult: ((event: unknown) => void) | null; onerror: ((event: { error: string }) => void) | null }
+  const start = vi.fn()
+  const stop = vi.fn()
+  vi.stubGlobal('SpeechRecognition', class {
+    onresult = null
+    onerror = null
+    onend = null
+    start() { recognition = this; start() }
+    stop = stop
+    abort() {}
+  })
+  return {
+    start,
+    stop,
+    result: (transcript: string) => act(() => recognition.onresult?.({
+      resultIndex: 0, results: [{ isFinal: true, 0: { transcript } }],
+    })),
+    fail: () => act(() => recognition.onerror?.({ error: 'audio-capture' })),
+  }
+}
+
+describe('dictation in the composer draft', () => {
+  it('inserts speech after the draft and restores focus and the caret without sending', () => {
+    const speech = stubComposerSpeech()
+    const { textarea, onSubmit } = renderComposer()
+    type(textarea, 'Written text')
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    speech.result('spoken words')
+    fireEvent.click(screen.getByRole('button', { name: 'Insert transcription' }))
+    expect(textarea.value).toBe('Written text spoken words')
+    expect(document.activeElement).toBe(textarea)
+    expect(textarea.selectionStart).toBe(textarea.value.length)
+    expect(textarea.selectionEnd).toBe(textarea.value.length)
+    expect(screen.queryByRole('button', { name: 'Cancel dictation' })).toBeNull()
+    expect(speech.stop).toHaveBeenCalledOnce()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('sends speech with text and attachments (retain=%s)', async (retainDraftUntilSuccess) => {
+    const speech = stubComposerSpeech()
+    let resolve!: () => void
+    const onSubmit = vi.fn(() => new Promise<void>(done => { resolve = done }))
+    const { textarea } = renderComposer({ onSubmit, retainDraftUntilSuccess })
+    type(textarea, 'Written text')
+    paste(textarea, [textFile('brief.txt', 'text/plain', 'context')])
+    await screen.findByRole('button', { name: 'Remove brief.txt' })
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    speech.result('spoken words')
+    fireEvent.click(screen.getByRole('button', { name: 'Insert transcription and send' }))
+    expect(onSubmit).toHaveBeenCalledExactlyOnceWith('Written text spoken words', [
+      { mediaType: 'text/plain', data: btoa('context') },
+    ])
+    expect(textarea.value).toBe(retainDraftUntilSuccess ? 'Written text spoken words' : '')
+    expect(speech.stop).toHaveBeenCalledOnce()
+    await act(async () => resolve())
+    expect(textarea.value).toBe('')
+    expect(screen.queryByRole('button', { name: 'Remove brief.txt' })).toBeNull()
+  })
+
+  it('lets a user retry a recognition error from the toast', () => {
+    const speech = stubComposerSpeech()
+    const { textarea, onSubmit } = renderComposer()
+    type(textarea, 'Keep this')
+    fireEvent.click(screen.getByRole('button', { name: 'Start dictation' }))
+    speech.fail()
+    expect(textarea.value).toBe('Keep this')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(speech.start).toHaveBeenCalledTimes(2)
+    speech.result('retry words')
+    fireEvent.click(screen.getByRole('button', { name: 'Insert transcription' }))
+    expect(textarea.value).toBe('Keep this retry words')
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
+
 describe('submit shortcuts', () => {
   it('starts as a compact one-row phone input and restores the desktop minimum at md', () => {
     const { textarea } = renderComposer()
