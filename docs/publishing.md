@@ -1,5 +1,24 @@
 # Publishing — stable releases and npm previews
 
+## Staged package identity
+
+The disabled `REBRAND_SWITCH` keeps the current npm packages, alias directory,
+pack paths, tags and version-bump paths. Release tools read the shared
+`productIdentity` data through `product-identity.mjs` or the same source module.
+
+When the switch is enabled, stable, dev, nightly and PR archives select the new
+scoped package and `alias-hsq/`. Source workspace names stay unchanged: build
+commands and type imports still use those names. Version stamping updates source
+versions only. A single `publicationManifests` projection changes the service name
+in a disposable pack copy. Trusted PR archive validation uses that same projection.
+A failed pack or publish removes the copy and leaves source manifest bytes intact.
+The version-bump PR therefore remains a version-only change.
+The copy retains the source commit as `gitHead`, so stable-release retries can
+verify a version that npm already has.
+
+This preparation does not publish the new names or create compatibility releases.
+The owner performs publication and deprecation only after the switch release.
+
 ## Package identity
 
 This repository publishes as **`cezarion`** — chosen for this clone in #23, and

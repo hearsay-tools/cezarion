@@ -9,7 +9,8 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPublishable, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { withPublicationPackage } from '../packages/cezar/dist/release/publication.js';
 import {
   buildInstallLines,
   computeSnapshot,
@@ -77,8 +78,9 @@ if (!packOnly && !dryRun && !token) {
 
 const stamped = stampManifests(manifests, plan.version);
 for (const key of order) writeManifest(dirs[key], stamped[key]);
+const publication = publicationManifests(stamped);
 console.log(
-  `release-snapshot: stamped ${order.map((key) => stamped[key].name).join(' + ')} to ${plan.version} (dist-tag ${plan.distTag}${dryRun ? ', dry run' : ''})`,
+  `release-snapshot: stamped ${order.map((key) => publication[key].name).join(' + ')} to ${plan.version} (dist-tag ${plan.distTag}${dryRun ? ', dry run' : ''})`,
 );
 
 // Provenance needs the job's OIDC token (permissions: id-token: write); only
@@ -123,20 +125,20 @@ for (const key of order) {
     mkdirSync(destination, { recursive: true });
     const args = ['pack', '--ignore-scripts', '--json', '--pack-destination', destination];
     const output = npmExecpath
-      ? execFileSync(process.execPath, [npmExecpath, ...args], { cwd: dirs[key], encoding: 'utf8' })
-      : execFileSync('npm', args, { cwd: dirs[key], encoding: 'utf8' });
+      ? withPublicationPackage(dirs[key], publication[key], cwd => execFileSync(process.execPath, [npmExecpath, ...args], { cwd, encoding: 'utf8' }))
+      : withPublicationPackage(dirs[key], publication[key], cwd => execFileSync('npm', args, { cwd, encoding: 'utf8' }));
     const [packed] = JSON.parse(output);
     renameSync(path.join(destination, packed.filename), path.join(destination, `${key}.tgz`));
   } else {
-    publish(dirs[key], stamped[key].name);
+    withPublicationPackage(dirs[key], publication[key], cwd => publish(cwd, publication[key].name));
   }
-  published.push(stamped[key].name);
+  published.push(publication[key].name);
 }
 
 emitOutput({
   attempted: true,
   dryRun,
-  rootName: stamped.cezar.name,
+  rootName: publication.cezar.name,
   apiClientName: stamped.apiClient.name,
   aliasName: stamped.alias.name,
   version: plan.version,
