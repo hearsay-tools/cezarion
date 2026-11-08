@@ -289,7 +289,7 @@ class OpencodeSession implements AgentSession {
   /** Bumped by `discardQueuedMessages` so a `prompt()` waiter that captured
    * the previous generation returns instead of posting after idle. */
   private queuedPromptGeneration = 0;
-  /** Human `prompt()` waiters in the current generation that have not posted yet (#486). */
+  /** Human prompts of the current generation, held from `sendMessage` until they post (#486). */
   private humanPromptWaiters = 0;
   /** Native ask id → its live state, entered on receipt (hearsay-tools/cezarion#1266). Any
    * entry holds agent input and auto-end, like a pending question, until OpenCode settles it. */
@@ -500,10 +500,15 @@ class OpencodeSession implements AgentSession {
 
   private deliverPrompt(text: string): void {
     this.pendingPromptRequests += 1;
-    void this.ready.then(() => this.prompt(text)).then(() => {
+    // Held from admission, not from `ready`; a start that fails releases it (hearsay-tools/cezarion#2991).
+    const generation = this.queuedPromptGeneration;
+    this.humanPromptWaiters += 1;
+    let posting = false;
+    void this.ready.then(() => { posting = true; return this.prompt(text, 'human', undefined, generation); }).then(() => {
       this.pendingPromptRequests -= 1;
       this.notifyAgentInputReady();
     }, () => {
+      if (!posting && generation === this.queuedPromptGeneration) this.humanPromptWaiters = Math.max(0, this.humanPromptWaiters - 1);
       this.pendingPromptRequests -= 1;
     });
   }
@@ -788,20 +793,15 @@ class OpencodeSession implements AgentSession {
     });
   }
 
-  private async prompt(text: string, origin: PromptOrigin = 'human', signal?: AbortSignal): Promise<void> {
+  private async prompt(text: string, origin: PromptOrigin = 'human', signal?: AbortSignal, generation = this.queuedPromptGeneration): Promise<void> {
     // One turn at a time. `prompt_async` acknowledges before the turn runs,
     // so `ready` no longer serializes prompts the way the long-poll did — a
     // follow-up posted mid-turn would share the turnActive/turnEnded pair
     // with the running turn and let that turn's idle close this one. Waiters
     // resume in FIFO order; a teardown (`finishTurn` runs on every exit
     // path) releases them into the `serverOpen` check below.
-    const generation = this.queuedPromptGeneration;
-    const humanWaiter = origin === 'human';
-    if (humanWaiter) this.humanPromptWaiters += 1;
     while (this.turnActive || this.followOn) await (this.turnActive ? this.turnFinished : this.followOn);
-    if (humanWaiter && generation === this.queuedPromptGeneration) {
-      this.humanPromptWaiters = Math.max(0, this.humanPromptWaiters - 1);
-    }
+    if (origin === 'human' && generation === this.queuedPromptGeneration) this.humanPromptWaiters = Math.max(0, this.humanPromptWaiters - 1);
     if (generation !== this.queuedPromptGeneration) return;
     // A queued prompt may have started waiting before the preceding idle armed
     // auto-end. Cancel at actual delivery time, not only at sendMessage time.

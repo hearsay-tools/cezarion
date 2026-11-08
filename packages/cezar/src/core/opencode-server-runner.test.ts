@@ -861,6 +861,26 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     }
   });
 
+  // hearsay-tools/cezarion#2991: a follow-up is held from sendMessage, before the server is ready, and a
+  // start that fails releases it: it can never post, so no hold may outlive the start.
+  it('holds a follow-up sent before the server is ready and releases it when the start fails', async () => {
+    const child = enoentChild();
+    spawnHook.override = () => child;
+    try {
+      const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 })
+        .startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd() });
+      expect(session.sendMessage([{ type: 'text', text: 'follow-up before ready' }])).toBe(true);
+      expect(session.holdsHumanInput()).toBe(true);
+      expect(session.heldHumanInputCount?.()).toBe(1);
+      await expect(session.result).rejects.toThrow(/`opencode` not found on PATH/);
+      // bound: the rejected start releases the waiter on its own settlement, a few ticks later.
+      await vi.waitFor(() => expect(session.heldHumanInputCount?.()).toBe(0), { timeout: 10_000 });
+      expect(session.holdsHumanInput()).toBe(false);
+    } finally {
+      spawnHook.override = null;
+    }
+  });
+
   // hearsay-tools/cezarion#895: node reports a missing binary with `error` and `close` only, never
   // `exit`. The server URL wait must end on that, not on its start timeout.
   it('reports a missing binary without waiting for the server start timeout', async () => {

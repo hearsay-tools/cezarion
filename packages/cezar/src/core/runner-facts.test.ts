@@ -32,4 +32,11 @@ describe('declared runner facts (hearsay-tools/cezarion#2991)', () => {
   ] as const)('exempts a runner from %s exactly when its acknowledgement cannot be delayed or rejected', (criterion, exempt) => {
     expect(RUNNER_IDS.filter(runner => exemptionFor(criterion, runner) !== undefined)).toEqual(RUNNER_IDS.filter(exempt));
   });
+
+  // S40/S41 time a mid-turn human message against the turn's last model call; a boundary runner has
+  // no mid-turn input channel, so its mock has no read point to time it against.
+  it.each(['S40', 'S41'])('exempts a runner from %s exactly when its delivery is boundary', criterion => {
+    expect(RUNNER_IDS.filter(runner => exemptionFor(criterion, runner) !== undefined))
+      .toEqual(RUNNER_IDS.filter(runner => inputDeliveryOf(createRunner(runner)).mode === 'boundary'));
+  });
 });

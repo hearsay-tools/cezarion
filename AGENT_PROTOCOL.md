@@ -2051,14 +2051,16 @@ maps these exits to its own wire:
   `discardQueuedMessages` is a no-op on this wire, so it is not an exit. A
   `turn/steer` response is admission, not a release.
 - **OpenCode**: (a) the `turn.started` cezar emits at the follow-up's `prompt_async`
-  POST, once the running turn ends. (c) `discardQueuedMessages`. A follow-up sent
+  POST, once the running turn ends. (c) `discardQueuedMessages`, or a server start that
+  fails. The hold starts at `sendMessage`, before the server is ready. A follow-up sent
   while a question reply is in flight stays held until that reply succeeds, then posts
   like any other.
 - **Cursor print**: (a) the `system`/`init` frame of the print process that carries
   the follow-up, which the mapper turns into `turn.started`. (c)
   `discardQueuedMessages`, which drops the queue; for a spawned follow-up it drops
   only the hold, and that process can still run it. The queue shift and the spawn are
-  not a release. Before the print qualification check passes, the wrapper holds the
+  not a release. A follow-up sent between turns is held from `sendMessage` the same way,
+  and a held follow-up stays held through a model-admission retry. Before the print qualification check passes, the wrapper holds the
   follow-up itself and hands it to the print runner.
 - **Pi**: (a) its ack, when its write opened a normalized turn that is still open
   (cezar emits that `turn.started` at the write); for a steer, the first
@@ -2094,6 +2096,41 @@ exemptions: their wires write or steer immediately, so `discardQueuedMessages` c
 unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the CLI
 and runs as a fresh turn after the `cezar_ask` park while the card is pending — the inverted
 H2 assertion does not pin that.
+
+**Seam contract rows S36–S42** (hearsay-tools/cezarion#2991) live in
+`core/seam-contract.testkit.ts` and run from each runner's
+`harness-<runner>-contract-parity.test.ts`, on that runner's own native mock. They hold each
+runner to its declared facts, never to its id:
+
+- **S36** acknowledgement: `sendAgentMessage` resolves at the declared `acknowledgement`
+  point. With the native process stopped, a `write` acknowledgement still resolves and a
+  `response` one does not; a `model-work` one resolves only after the turn it opens has
+  started. An `observable` runner reports every accepted input read or unread; a read
+  follows the acknowledgement on a later native frame. An `unobservable` runner reports
+  none. S12 holds steer admission and boundary refusal.
+- **S37** turn start: a follow-up turn whose native start is late emits `turn.started`
+  before its content, its `turn.completed` and its `turn-end`.
+- **S38** held human input: `holdsHumanInput()` reads true as soon as `sendMessage`
+  returns, and releases after the `turn.started` of the turn that carries the input and by
+  that turn's end. It runs mid-turn, with H5's late acknowledgement, at an idle boundary
+  and during startup, each with `mock:deferred-turn-start`.
+- **S39** held input at finish: with `autoEndAfterFirstTurn`, a follow-up the turn did not
+  read is held at its `turn-end`, and runs in a turn of its own before the session closes.
+- **S40/S41** `humanInputAtTurnEnd`: a human message sent before (S40, `steer-tool`) or
+  after (S41, `steer-late`) the turn's last model call is read in that turn or held for the
+  next, as declared. `CEZ_MOCK_STEER_GATE` keeps the mock's steering window open until the
+  message is on its wire, so no timer decides early or late. A boundary runner has no read
+  point inside a turn, so it is exempt
+  (`scenario-unconstructible`); `runner-facts.test.ts` ties the exemption to the mode.
+- **S42** `systemPromptOnResume`: on a fresh and a resumed session, `spec.systemPrompt`
+  travels outside the conversation when the runner declares `resent`, and is prepended to
+  the opening turn when it declares `in-thread`. Both kinds send it again on a resume; the
+  value tells Continue whether the thread already holds the skill (R53/R55).
+
+A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends
+these rows, which run on every runner. Shared code above the seam (`run.ts` reading the
+hold, Continue reading `systemPromptOnResume`) stays covered by the run-tier rows H1–H5 and
+R53/R55.
 
 No-wait nudge rows **F7–F11** live in
 `core/workflow-final-message-cells.testkit.ts` and the same parity guard. They were written for the
