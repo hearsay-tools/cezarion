@@ -1036,11 +1036,8 @@ export function createApp(deps: ServerDeps) {
   // One builder for both transports: `GET /api/health` (the authoritative,
   // CORS-open discovery endpoint) and the `health` topic on `/api/v1/ws` below
   // push the byte-identical shape, so the two can never drift.
-  // Deliberately UNANNOTATED: this literal is the source of the `/health` shape. Annotating it
-  // with the api-client's `HealthResponse` made the contract circular — the DTO was declared by
-  // hand, the handler was checked against it, and `AppType` then reported the hand-written type
-  // back as if the server had proven it. Inferring here means the route says what it actually
-  // sends, which is what lets the DTO be derived instead of maintained.
+  // Infer the health shape here: annotating it with HealthResponse makes the
+  // contract circular, rather than deriving the DTO from what the handler sends.
   // Availability has its own lifetime: even a cold/max-stale health read must not
   // await agent startup. Repository/config freshness below remains independently bounded.
   let backendChecks: Awaited<ReturnType<typeof detectEnvironment>> = [];
@@ -1052,14 +1049,11 @@ export function createApp(deps: ServerDeps) {
         const changed = JSON.stringify(checks) !== JSON.stringify(backendChecks);
         backendChecks = checks;
         return changed;
-      })
-        .catch(() => false)
+      }).catch(() => false)
         .finally(() => { backendChecksAt = Date.now(); backendChecksPending = undefined; })
         .then((changed) => {
           if (!changed) return;
-          // Availability is settled before repository/workspace I/O starts.
-          // A cold snapshot may still hold the previous checks: let it finish,
-          // then replace it and notify both transports. Catch this separate job.
+          // Probe is settled; finish any cold snapshot, then refresh both transports separately.
           void (async () => {
             await healthInFlight?.catch(() => {});
             await refreshHealth();
