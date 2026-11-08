@@ -655,7 +655,7 @@ describe('workflow failures and submission guards', () => {
     expect(screen.queryByLabelText('Workflow name')).toBeNull()
   })
 
-  it.each(['save', 'auto', 'delete'] as const)('reports a %s failure with a danger alert and keeps the draft', async (action) => {
+  it.each(['save', 'auto', 'delete'] as const)('reports a %s failure with a danger status and keeps the draft', async (action) => {
     const endpoint = { save: 'POST /api/v1/workflows', auto: 'POST /api/v1/plan', delete: 'DELETE /api/v1/workflows/ship-it' }[action]
     stubFetch({ [endpoint]: [() => jsonResponse({ error: 'Read only', exists: false }, 403)] })
     renderAt('/workflows')
@@ -727,5 +727,157 @@ describe('workflow failures and submission guards', () => {
       await vi.advanceTimersByTimeAsync(0)
     })
     expect(nameInput().value).toBe('planned')
+  })
+})
+
+/** jsdom has no layout. Supply separate card, canvas-padding and palette rectangles so the
+ * real dnd-kit sensors and collision detector can select the same targets as a browser. */
+function layOutWorkflow() {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const card = this.closest('li')?.querySelector<HTMLElement>('[data-slot="wb-step"]')
+    const palette = this.closest<HTMLElement>('[data-slot="wb-skill"]')
+    if (card) {
+      const index = stepIds().indexOf(card.dataset.id)
+      return new DOMRect(0, index * 120, 400, 100)
+    }
+    if (this.matches('[data-slot="wb-steps"]')) return new DOMRect(0, 0, 400, stepIds().length * 120 + 240)
+    if (palette) return new DOMRect(600, palette.dataset.skill === 'om-fix' ? 0 : 60, 200, 44)
+    // DragOverlay measures its fixed wrapper, whose inline dimensions come from the source.
+    const overlay = this.parentElement
+    if (overlay?.style.position === 'fixed') {
+      return new DOMRect(Number.parseFloat(overlay.style.left), Number.parseFloat(overlay.style.top),
+        Number.parseFloat(overlay.style.width), Number.parseFloat(overlay.style.height))
+    }
+    return new DOMRect(0, 0, 0, 0)
+  })
+  // PointerSensor reads the standard pointer fields; jsdom has no PointerEvent constructor.
+  class TestPointerEvent extends MouseEvent {
+    readonly isPrimary = true
+    readonly pointerId = 1
+    readonly pointerType = 'mouse'
+  }
+  vi.stubGlobal('PointerEvent', TestPointerEvent)
+  vi.useFakeTimers()
+}
+
+async function dragKey(target: HTMLElement, code: string) {
+  await act(async () => {
+    fireEvent.keyDown(target, { code, key: code === 'Space' ? ' ' : code })
+    // Advance the sensor's listener attachment and animation frames, without real-time sleeps.
+    await vi.advanceTimersByTimeAsync(20)
+  })
+}
+
+async function pointerMove(x: number, y: number) {
+  act(() => { fireEvent.pointerMove(document, { clientX: x, clientY: y }) })
+  await act(() => vi.advanceTimersByTimeAsync(20))
+}
+
+async function dropPointer() {
+  await act(async () => {
+    fireEvent.pointerUp(document)
+    await vi.advanceTimersByTimeAsync(300)
+  })
+}
+
+const canvas = () => document.querySelector<HTMLElement>('[data-slot="wb-steps"]')!
+const canvasIds = () => [...canvas().querySelectorAll<HTMLElement>('[data-slot="wb-step"]')].map((card) => card.dataset.id)
+const dropLine = () => document.querySelector<HTMLElement>('[data-slot="wb-drop-line"]')
+
+async function liftPalette() {
+  const pill = document.querySelector<HTMLElement>('[data-slot="wb-skill"][data-skill="om-review"]')!
+  fireEvent.pointerDown(pill, { button: 0, clientX: 610, clientY: 82 })
+  await pointerMove(620, 82)
+  expect(canvas().getAttribute('data-dragging')).toBe('true')
+}
+
+describe('workflow drag and drop through real sensors', () => {
+  it('moves a step from the keyboard and removes the insert indicator after the drop', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    const grip = screen.getByRole('button', { name: 'Reorder step 1: om-fix' })
+    grip.focus()
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+    await dragKey(grip, 'Space')
+    expect(grip.getAttribute('aria-pressed')).toBe('true')
+    expect(canvas().getAttribute('data-dragging')).toBe('true')
+    expect(dropLine()).toBeNull() // The active card is never its own insertion target.
+    await dragKey(grip, 'ArrowDown')
+    expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
+    await dragKey(grip, 'Space')
+    await act(() => vi.advanceTimersByTimeAsync(300))
+    expect(canvasIds()).toEqual(['om-review', 'om-fix'])
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
+    expect(yamlText().indexOf('- om-review')).toBeLessThan(yamlText().indexOf('- om-fix'))
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+  })
+
+  it('cancels a move with Escape and leaves both execution order and indicators unchanged', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    const grip = screen.getByRole('button', { name: 'Reorder step 1: om-fix' })
+    grip.focus()
+    await dragKey(grip, 'Space')
+    await dragKey(grip, 'ArrowDown')
+    expect(dropLine()).toBeTruthy()
+    await dragKey(grip, 'Escape')
+    expect(canvasIds()).toEqual(['om-fix', 'om-review'])
+    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+  })
+
+  it('copies a palette skill before a hovered card instead of appending it', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    await liftPalette()
+    await pointerMove(110, 170)
+    expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
+    await dropPointer()
+    expect(stepIds()).toEqual(['om-fix', 'om-review-2', 'om-review'])
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+  })
+
+  it('appends a palette skill on canvas padding', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    await liftPalette()
+    await pointerMove(110, 300)
+    expect(dropLine()).toBeNull()
+    await dropPointer()
+    expect(stepIds()).toEqual(['om-fix', 'om-review', 'om-review-2'])
+  })
+
+  it('leaves a step in place when dropped on canvas padding', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    const grip = screen.getByRole('button', { name: 'Reorder step 1: om-fix' })
+    fireEvent.pointerDown(grip, { button: 0, clientX: 10, clientY: 50 })
+    await pointerMove(20, 50)
+    await pointerMove(10, 300)
+    await dropPointer()
+    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+  })
+
+  it('Move up returns a step to its earlier position', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(screen.getByLabelText('Move step 2 up'))
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
   })
 })
