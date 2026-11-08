@@ -7,6 +7,7 @@ import {
 } from '@open-mercato/cezar-contract/waits';
 import type { UiEvent, UiToolItem } from '../../core/ui-events.ts';
 import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';
+import { RUNNER_FACTS } from '../../core/runner-facts.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { openWaits } from '../waits.ts';
@@ -56,14 +57,14 @@ interface SubagentWaitsHost {
 }
 
 /**
- * The runners whose wire reports a backgrounded native subagent's start and end, so Cezar waits on
- * it (hearsay-tools/cezarion#2431). Pi and Cursor report no child signal, and the OMP and OpenCode
- * parents never end a turn while their children run: their sessions keep the monitoring timer.
- * `waits-parity-cells.testkit.ts` holds each other runner's exemption with its reason.
+ * Whether the runner's wire reports a backgrounded native subagent's start and end, so Cezar waits
+ * on it (hearsay-tools/cezarion#2431): its declared `nativeSubagents` is `reported`. A runner whose
+ * wire sends no child signal, or whose parent turn never ends while its children run, keeps the
+ * monitoring timer. `waits-subagents-parity-cells.testkit.ts` derives its exemptions from the same
+ * declaration.
  */
-const NATIVE_SUBAGENT_RUNNERS: ReadonlySet<RunnerId> = new Set(['claude', 'codex']);
 export function reportsNativeSubagents(runner: RunnerId | undefined): boolean {
-  return runner !== undefined && NATIVE_SUBAGENT_RUNNERS.has(runner);
+  return runner !== undefined && RUNNER_FACTS[runner].nativeSubagents === 'reported';
 }
 
 /** The child a UI event reports: a root tool item the runner marks background, with its status. A

@@ -4,19 +4,19 @@ import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
-import type {
-  AgentEvent,
-  AgentRunResult,
-  AgentRunSpec,
-  AgentRunner,
-  AgentSession,
-  AgentToolCallRecord,
-  ContentBlock,
-  SessionOptions,
-  AgentRunSpecSupport,
-  InputDelivery,
+import {
+  type AgentEvent,
+  type AgentRunResult,
+  type AgentRunSpec,
+  type AgentRunner,
+  type AgentSession,
+  type AgentToolCallRecord,
+  type ContentBlock,
+  type SessionOptions,
+  type AgentRunSpecSupport,
+  type InputDelivery, prependSystemPrompt, trackChildExit,
 } from './agent-runner.ts';
-import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { RUNNER_FACTS } from './runner-facts.ts';
 import { codexToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession } from './session-process.ts';
 import {
@@ -109,8 +109,9 @@ export class CodexAppServerRunner implements AgentRunner {
   readonly backend = 'codex' as const;
   readonly specSupport = CODEX_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'in-thread' as const;
+  readonly facts = RUNNER_FACTS.codex;
   readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable',
+    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'held-when-late',
     // The userMessage item marks the input entering the thread's history (probe 2026-09-24:
     // 0.8 s and 26.7 s after the steer, both before the tool ended); the next model call reads it.
     via: 'turn/steer with clientUserMessageId; item/started userMessage clientId once in the thread history',
@@ -1151,7 +1152,6 @@ const STREAM_PROGRESS_DELTAS = new Set([
   'item/agentMessage/delta', 'item/reasoning/textDelta', 'item/reasoning/summaryDelta',
   'item/reasoning/summaryTextDelta', 'item/commandExecution/outputDelta',
 ]);
-
 
 function codexAskQuestions(value: unknown): AskQuestion[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 4) return null;

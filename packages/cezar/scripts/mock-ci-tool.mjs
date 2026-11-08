@@ -1,5 +1,6 @@
 // Offline harness fixtures share the real bundled MCP protocol, never a fake receipt.
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { publishFile } from './mock-publish.mjs';
 import { basename, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -15,7 +16,7 @@ export async function probeCezarTool(backend, wire, name, args, record = true) {
   const result = backend === 'pi' || backend === 'omp'
     ? await probeExtensionTool(backend, wire, name, args)
     : await probeMcpTool(mcpServerOf(backend, wire), name, args);
-  if (record && process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
+  if (record && process.env.CEZ_MOCK_CI_RESULT) publishFile(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
   return result;
 }
 

@@ -27,6 +27,7 @@ import type {
   SessionOptions,
   ToolGrant,
 } from './agent-runner.js';
+import { RUNNER_FACTS } from './runner-facts.js';
 import { unknownToolGrant } from './agent-runner.js';
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
@@ -84,8 +85,9 @@ export class PiRunner implements AgentRunner {
   readonly backend = 'pi' as const;
   readonly specSupport = PI_SPEC_SUPPORT;
   readonly systemPromptOnResume = 'resent' as const;
+  readonly facts = RUNNER_FACTS.pi;
   readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable',
+    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'held-when-late',
     via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
   };
   private readonly bin: string;

@@ -27,7 +27,7 @@ import type { AgentEvent, RunnerId } from '../../core/agent-runner.ts';
 import { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { ExecutionEmit, LaunchCiTools, LaunchDelegation, RunModuleContext, SessionTurn } from './types.ts';
-import { claudeScheduleWakeupDelay } from './turn-markers.ts';
+import { nativeTimerDelay } from './turn-markers.ts';
 import { recordReportedCost } from './usage-accounting.ts';
 import { reportsNativeSubagents } from './subagent-waits.ts';
 
@@ -58,7 +58,7 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
         ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
     }
     if (event.type === 'token-usage') context.store.updateStep(runId, stepId, { tokensUsed: tokenBase + event.tokensUsed });
-    const wakeDelay = claudeScheduleWakeupDelay(event, backend);
+    const wakeDelay = nativeTimerDelay(event, backend);
     if (wakeDelay !== undefined) turn.scheduleWakeup = wakeDelay;
     if (event.type === 'turn-end') {
       host.markTurnBoundary(runId, state, event);

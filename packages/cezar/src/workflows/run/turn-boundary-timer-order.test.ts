@@ -91,6 +91,21 @@ it('a refused autonomous nudge retains its boundary before the idle bound and sp
   expect(f.state.boundary.autonomousNudgePending).toBe(f.wire);
 });
 
+// An accepted autonomous nudge starts a turn, so neither the idle bound nor the no-wait reply bound
+// can close or park the run while that turn runs.
+it('a delivered autonomous nudge cancels the idle bound and arms no other bound before charge and note', () => {
+  const f = fixture(true);
+  f.settler.armIdleTimer(f.run.id, f.state);
+  f.log.length = 0;
+  expect(f.nudges.tryAutonomousNudge(f.run.id, f.state, 'step')).toBe(true);
+  order(f.log, ['boundary:input-ready/clear-nudge', 'boundary:idle-expired/cancel', 'submit', 'charge', 'event:note']);
+  expect(f.log).not.toContain('boundary:idle-expired/armed');
+  expect(f.log).not.toContain('boundary:reply-expired/armed');
+  expect(f.state.boundary.idleTimer).toBeUndefined();
+  expect(f.state.boundary.noWaitNudgeReplyTimer).toBeUndefined();
+  expect(f.time.pending).toBe(0);
+});
+
 it('late parent content clears the reply bound before resuming and then clears the parked fact', () => {
   const f = fixture();
   transitionTurnBoundary(f.state, { kind: 'reply-expired', phase: 'park', session: f.wire });

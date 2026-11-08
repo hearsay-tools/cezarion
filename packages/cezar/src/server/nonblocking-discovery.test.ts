@@ -10,6 +10,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { ProviderAuthService } from '../core/provider-auth.ts';
 import type { TopicPublisher } from './ws.ts';
 import { createApp, WorkspaceEventBus, type ServerDeps } from './server.ts';
+import * as git from './git.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
@@ -48,7 +49,7 @@ it('answers cold Cursor models before discovery completes and returns them on th
   expect(discover).toHaveBeenCalledOnce();
 }, 1500);
 
-it('keeps last-known availability while a stale probe is pending, dedupes, and retries after failure', async () => {
+it.each([false, true])('keeps last-known availability while a stale probe is pending, dedupes, and retries after failure (held refresh=%s)', async (heldRefresh) => {
   vi.useFakeTimers({ toFake: ['Date'] });
   try {
     const checks: BackendCheck[] = [{ name: 'cursor', available: true, version: '1' }];
@@ -56,12 +57,32 @@ it('keeps last-known availability while a stale probe is pending, dedupes, and r
     vi.mocked(detectEnvironment).mockReset().mockResolvedValueOnce(checks)
       .mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }))
       .mockResolvedValueOnce([{ name: 'cursor', available: false }]);
+    const getRepoInfo = git.getRepoInfo;
+    let refreshEntered!: () => void;
+    const refreshEnteredPromise = new Promise<void>((resolve) => { refreshEntered = resolve; });
+    let releaseRefresh!: () => void;
+    const releaseRefreshPromise = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    let refreshFinished!: () => void;
+    const refreshFinishedPromise = new Promise<void>((resolve) => { refreshFinished = resolve; });
+    if (heldRefresh) {
+      vi.spyOn(git, 'getRepoInfo').mockImplementationOnce(getRepoInfo).mockImplementationOnce(async (...args) => {
+        refreshEntered();
+        await releaseRefreshPromise;
+        try { return await getRepoInfo(...args); }
+        finally { refreshFinished(); }
+      });
+    }
     const app = build();
     await apiRequest(app, '/api/v1/health');
+    if (heldRefresh) await refreshEnteredPromise;
     expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks });
     vi.setSystemTime(Date.now() + 120_000);
     for (let i = 0; i < 2; i++) {
       expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks });
+      if (heldRefresh && i === 0) {
+        releaseRefresh();
+        await refreshFinishedPromise;
+      }
     }
     expect(detectEnvironment).toHaveBeenCalledTimes(2);
     fail(new Error('unavailable'));

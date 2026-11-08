@@ -1174,3 +1174,38 @@ it('clears the submitted dictation draft after delayed creation succeeds', async
   await waitFor(() => expect(location()).toBe('/tasks/dictated-task'))
   expect(readDraft().text).toBe('')
 })
+
+// A back click can overtake the thread transition before even its loading fallback commits.
+it.each([
+  { mode: 'direct', boundary: 'outer' },
+  { mode: 'plan', boundary: 'outer' },
+  { mode: 'direct', boundary: 'inner' },
+  { mode: 'plan', boundary: 'inner' },
+] as const)('clears the spent $mode draft with the $boundary thread boundary', async ({ mode, boundary }) => {
+  serve({ createRun: { id: 'suspended-task' } })
+  renderNewTask('/new', boundary)
+  await pillReady()
+  if (mode === 'plan') await planTask('Spent task')
+  else fireEvent.change(textarea(), { target: { value: 'Spent task' } })
+  const original = textarea()
+  const push = window.history.pushState.bind(window.history)
+  let returned = false
+  const navigation = vi.spyOn(window.history, 'pushState').mockImplementation((...args) => {
+    push(...args)
+    if (window.location.pathname === '/tasks/suspended-task') queueMicrotask(() => {
+      fireEvent.click(screen.getByRole('link', { name: 'New task' }))
+      returned = true
+    })
+  })
+  try {
+    if (mode === 'plan') fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
+    else await startTask()
+    await waitFor(() => expect(returned).toBe(true))
+    await waitFor(() => expect(location()).toBe('/new'))
+    expect(textarea()).toBe(original)
+    expect(textarea().value).toBe('')
+    expect(readDraft().text).toBe('')
+  } finally {
+    navigation.mockRestore()
+  }
+})

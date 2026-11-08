@@ -26,8 +26,7 @@ describe('workflow final-message family registration', () => {
     }
     expect(new Set(names).size).toBe(names.length);
     for (const runner of RUNNER_IDS) for (const row of FINAL_MESSAGE_CRITERIA) {
-      const expectedModes = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'].includes(row.id) ? 2 : 1;
-      expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toHaveLength(expectedModes);
+      expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toHaveLength(1);
     }
   });
 });

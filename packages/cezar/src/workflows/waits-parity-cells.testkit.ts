@@ -18,7 +18,7 @@ import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit
 import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { ToolsUnavailableError } from '../ci-wait/controller.ts';
+import { CiToolController, ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, toolGenerationOf, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait-core.testkit.ts';
@@ -26,7 +26,7 @@ import { fireCapturedTimer, timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import { handoffPath } from '../handoff.ts';
-import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
+import { nativeTimerDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
@@ -757,6 +757,7 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
     it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
       const external = github();
       nativeWire(runner);
+      const provision = vi.spyOn(CiToolController.prototype, 'provision');
       const initial = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 });
       const changed = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 60 });
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${initial} ${initial} ${changed}`, runner });
@@ -766,10 +767,27 @@ function registrationCells(runners: RunnerId[], it: typeof registerTest = regist
       expect(store.getRun(run.id)?.waitRegistrations).toMatchObject([{ wait: { id: ci.id }, deduplicated: false }, { wait: { id: ci.id }, deduplicated: true }]);
       expect(agentWaits(run.id)).toHaveLength(1);
       expect(manager.isActive(run.id)).toBe(true);
+      // The wait outlives its session: a Continue's registration for the same PR returns it.
+      sessionOf(run.id).end();
+      await until(() => !manager.isActive(run.id));
+      const boundaries = turnEnds(run.id);
+      expect(manager.continueRun(run.id, { text: initial }).ok).toBe(true);
+      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')) && turnEnds(run.id) > boundaries);
+      expect(store.getRun(run.id)?.waitRegistrations?.at(-1)).toMatchObject({ wait: { id: ci.id }, deduplicated: true });
+      expect(agentWaits(run.id)).toMatchObject([{ id: ci.id }]);
+      // A recovery keeps it, and its result wakes the run with one observation.
+      await restart();
+      expect(manager.isActive(run.id)).toBe(false);
+      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
+      expect(agentWaits(run.id)).toMatchObject([{ id: ci.id, phase: WAIT_PHASE.open }]);
       external.settle();
       await until(() => settled(run.id, ci.id)?.phase === 'delivered');
       expect(inputsFor(run.id, ci.id).map(input => input.text)).toEqual([expect.stringContaining(`CI wait observation ${ci.id} for ${pr}`)]);
       await until(() => store.getRun(run.id)?.status === 'waiting');
+      // Each session, fresh, continued and woken after recovery, gets its own tool descriptor.
+      const descriptors = provision.mock.results.filter(result => result.type === 'return').map(result => result.value.descriptor.name);
+      expect(descriptors.length).toBeGreaterThanOrEqual(3);
+      expect(new Set(descriptors).size).toBe(descriptors.length);
 
       expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u1' }) }])).toBe(true);
       await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
@@ -1025,11 +1043,11 @@ function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest)
       if (exemptionFor('U7', runner)) {
         // capability-absent: the same tool name on this wire is not a scheduler.
         expect(exemptionFor('U7', runner)?.reason).toBe('native scheduler tool exists only on the Claude wire');
-        expect(claudeScheduleWakeupDelay(scheduler, runner)).toBeUndefined();
+        expect(nativeTimerDelay(scheduler, runner)).toBeUndefined();
         expect(store.getRun(run.id)?.waits?.map(wait => wait.via).sort()).toEqual(['cezar_wait']);
         return;
       }
-      expect(claudeScheduleWakeupDelay(scheduler, runner)).toBe(120);
+      expect(nativeTimerDelay(scheduler, runner)).toBe(120);
       const turns = turnEnds(run.id);
       expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:schedule-wakeup:120' }])).toBe(true);
       await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'schedule-wakeup')));
@@ -1629,26 +1647,47 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
     it(`${runner} U18 Finish on a run parked on an agent question closes the question without answering it`, async () => {
       nativeWire(runner);
       delete process.env.CEZ_MOCK_NUDGE_REPLY;
-      const finishParked = async (closeFirst: boolean) => {
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      // With a live session, fresh or continued, Finish ends the task at the parked step and a later
+      // step stays pending. Without one, Finish before the last step is refused, so that pass runs
+      // the one-step task.
+      const chain = workflowDefSchema.parse({ name: 'finish-chain', source: 'file', steps: [
+        { id: 'implement', prompt: '{{task}}' }, { id: 'verify', command: 'true' },
+      ] });
+      const finishParked = async (mode: 'live' | 'continued' | 'closed') => {
+        const run = manager.startRun(mode === 'closed' ? QUICK_TASK_WORKFLOW : chain, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
-        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
-        if (closeFirst) {
+        if (mode !== 'live') {
           sessionOf(run.id).end();
           await until(() => !manager.isActive(run.id));
           expect(pendingQuestion(run.id)).toBe(true);
         }
+        // The Continue answers the first question and asks the next one in a live session.
+        if (mode === 'continued') {
+          expect(manager.continueRun(run.id, { text: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }) }).ok).toBe(true);
+          await until(() => asks(run.id).length === 2 && pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq === asks(run.id)[1]!.seq);
+          expect(manager.isActive(run.id)).toBe(true);
+        }
+        const answeredBefore = asks(run.id).slice(0, -1).map(ask => ask.seq);
+        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
         expect(manager.finish(run.id)).toBe(true);
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+        // Finish is a successful end that frees the run's slot.
+        expect(store.getRun(run.id)?.status).toBe('done');
+        expect(semaphore.busy()).toBe(0);
         const events = store.readEvents(run.id);
         expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
-        expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
+        expect(events.filter(event => event.type === 'human-input-delivered').map(event => event.askSeq)).toEqual(answeredBefore);
         expect(pendingAskOf(events)).toBeUndefined();
         expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
         expect(hasPendingAsk(store, run.id)).toBeFalsy();
+        if (mode !== 'closed') {
+          expect(stepStatus(run.id, 'verify')).toBe('pending');
+          expect(events.filter(event => event.type === 'check-output')).toEqual([]);
+        }
       };
-      await finishParked(false);
-      await finishParked(true);
+      await finishParked('live');
+      await finishParked('continued');
+      await finishParked('closed');
     });
 
     // No prose classification (hearsay-tools/cezarion#1234): a question the agent only wrote gets
@@ -1746,6 +1785,9 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const closings = store.readEvents(run.id).filter(event => event.type === 'lifecycle' && String(event.message).endsWith('session closed'));
       expect(closings).toEqual([expect.objectContaining({ message: 'step complete — session closed', via: 'cezar_done' })]);
       expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === 'step shipped')).toBe(true);
+      // The step that signalled done is never nudged; only the next step's quiet turn end is.
+      const noWaitNudges = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE));
+      expect(noWaitNudges.map(event => event.stepId)).toEqual(['review']);
     });
 
     it(`${runner} U7d cezar_done finishes through the done path in a message turn and in a Continue`, async () => {
@@ -1754,10 +1796,13 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const finished = (id: string) => terminal.includes(store.getRun(id)?.status ?? '') && !manager.isActive(id);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
       await until(() => store.getRun(run.id)?.status === 'waiting');
+      // A turn that ends on an accepted done gets no no-wait nudge, fresh or continued.
+      const nudged = prompted(runner, NO_WAIT_NUDGE).length;
       expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_done', { summary: 'u7d shipped' }) }])).toBe(true);
       await until(() => finished(run.id));
       const status = store.getRun(run.id)!.status;
       expect(closings(run.id)).toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(nudged);
       // The summary is the note right before the closing event.
       const events = store.readEvents(run.id);
       expect(events[events.findIndex(event => event.seq === closings(run.id)[0]!.seq) - 1]).toMatchObject({ type: 'note', message: 'u7d shipped' });
@@ -1766,6 +1811,8 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       await until(() => closings(run.id).length === 2 && finished(run.id));
       expect(closings(run.id).map(event => event.via)).toEqual(['cezar_done', 'cezar_done']);
       expect(store.getRun(run.id)!.status).toBe(status);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(nudged);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE))).toHaveLength(nudged);
     });
 
     // The answer a Continue opens with is no longer a pending question to cezar_done.

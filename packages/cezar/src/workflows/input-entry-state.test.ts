@@ -44,7 +44,7 @@ function expectEmptyInput(group: InputGroup): void {
 }
 
 const f = setupMonitoringFixture();
-const policy = { mode: 'steer' as const, consumption: 'observable' as const, via: 'entry-state fixture' };
+const policy = { mode: 'steer' as const, consumption: 'observable' as const, acknowledgement: 'response' as const, humanInputAtTurnEnd: 'never-held' as const, via: 'entry-state fixture' };
 let opened = deferred<void>();
 let openedGroups: InputGroup[];
 let sendAck: Promise<void>;

@@ -62,9 +62,9 @@ function optionalSemaphore(semaphore: WorkspaceSemaphore | undefined): { semapho
  * Drive one backend through a real `RunManager` run against its offline mock.
  *
  * The run tier exists because three of the failure-mode groups are only uniform
- * ABOVE the seam: `ask.requested` comes from the runner for codex, opencode and cursor
- * and from `workflows/run.ts` for claude and pi, and whether a provider failure
- * fails the run or parks it is decided in the orchestrator either way.
+ * ABOVE the seam: `workflows/run/` emits `ask.requested` for every runner's `cezar_ask`
+ * card, while codex and opencode also emit it from the runner for a native ask, and
+ * whether a provider failure fails the run or parks it is decided in the orchestrator.
  *
  * Modelled on the #565 suite in `workflows/run.test.ts`: a temp git repo, a
  * store, a manager, and the built-in single-step workflow with `worktree: false`.
