@@ -55,11 +55,18 @@ function changeManifest(path: string, changes: Record<string, unknown>): void {
 describe('installed package validation', () => {
   it.each([
     { name: 'other-package' }, { version: '9.9.9' }, { bin: undefined }, { bin: { cez: 'other.js' } },
-    { dependencies: undefined }, { dependencies: 'invalid' }, { engines: { node: '^24' } },
+    { dependencies: undefined }, { dependencies: 'invalid' }, { dependencies: 42 }, { dependencies: false },
+    { engines: { node: '^24' } }, { engines: { node: 'x>=24' } }, { engines: { node: '>=x' } },
   ])('rejects an invalid manifest field %j', (changes) => {
     const { original } = fixture();
     changeManifest(original, changes);
     expect(() => validateInstalledPackage(original, '1.0.0')).toThrow();
+  });
+
+  it.each(['>24', '>= 24'])('accepts a supported engine %s and a CLI alongside another bin', (node) => {
+    const { original } = fixture();
+    changeManifest(original, { engines: { node }, bin: { other: 'other.js', cez: 'dist/index.js' } });
+    expect(() => validateInstalledPackage(original, '1.0.0')).not.toThrow();
   });
 
   it.each(['dist/index.js', 'web/dist/index.html'])('requires the installed asset %s', (asset) => {
@@ -174,11 +181,14 @@ describe('persisted application update state', () => {
     expect(f.service.snapshot().message).toBe('Update state needs retry.');
   });
 
-  it.each([undefined, 2147483647])('reports an interrupted preparation with owner PID %s', async (ownerPid) => {
+  it.each([
+    { status: 'preparing', ownerPid: undefined }, { status: 'preparing', ownerPid: 2147483647 },
+    { status: 'restarting', ownerPid: undefined }, { status: 'restarting', ownerPid: 2147483647 },
+  ])('reports an interrupted operation with owner %j', async ({ status, ownerPid }) => {
     const f = fixture();
-    await f.service.apply();
+    await f.service.apply(); await f.service.restart();
     const record = JSON.parse(readFileSync(f.statePath(), 'utf8'));
-    record.state.status = 'preparing'; record.ownerPid = ownerPid; record.startedAt = Date.now();
+    record.state.status = status; record.ownerPid = ownerPid; record.startedAt = Date.now();
     writeFileSync(f.statePath(), JSON.stringify(record));
     expect(f.service.snapshot()).toEqual({ status: 'error', supported: true, message: 'Update was interrupted. Retry Update.' });
   });
@@ -203,12 +213,23 @@ describe('persisted application update state', () => {
 });
 
 describe('application update lifecycle', () => {
+  it.each([{ name: 'other-package' }, { version: 42 }])('refuses changed running package identity %j', async (changes) => {
+    const f = fixture();
+    changeManifest(f.original, changes);
+    await expect(f.service.apply()).rejects.toThrow('package identity mismatch');
+    expect(f.runNpm).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, 'fixture-npm'])('uses the owned npm process with executable %s and the installation cache', async (npmBin) => {
     const f = fixture('2.0.0', { npmBin }, ['runNpm']);
     vi.mocked(runOwnedNpm).mockImplementation(async (_command, args) => { await f.runNpm(args); });
     expect((await f.service.apply()).status).toBe('ready');
-    expect(runOwnedNpm).toHaveBeenCalledWith(npmBin ?? 'npm', f.runNpm.mock.calls[0]![0],
-      expect.objectContaining({ npm_config_cache: f.options.npmCache }), expect.any(AbortSignal));
+    expect(runOwnedNpm).toHaveBeenCalledTimes(1);
+    const [command, args, env, signal] = vi.mocked(runOwnedNpm).mock.calls[0]!;
+    expect(command).toBe(npmBin ?? 'npm');
+    expect(args).toEqual(f.runNpm.mock.calls[0]![0]);
+    expect(env.npm_config_cache).toBe(f.options.npmCache);
+    expect(signal).toBeInstanceOf(AbortSignal);
   });
 
   it('handles denied filesystem access even when the installation has write mode bits', async () => {
