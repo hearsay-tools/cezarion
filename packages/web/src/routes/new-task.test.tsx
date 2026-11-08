@@ -1175,20 +1175,37 @@ it('clears the submitted dictation draft after delayed creation succeeds', async
   expect(readDraft().text).toBe('')
 })
 
-// A lazy thread can leave the same /new instance mounted through both transitions.
-it.each(['direct', 'plan'] as const)('clears the spent %s draft when returning before the thread loads', async (mode) => {
+// A back click can overtake the thread transition before even its loading fallback commits.
+it.each([
+  { mode: 'direct', boundary: 'outer' },
+  { mode: 'plan', boundary: 'outer' },
+  { mode: 'direct', boundary: 'inner' },
+  { mode: 'plan', boundary: 'inner' },
+] as const)('clears the spent $mode draft with the $boundary thread boundary', async ({ mode, boundary }) => {
   serve({ createRun: { id: 'suspended-task' } })
-  renderNewTask('/new', true)
+  renderNewTask('/new', boundary)
   await pillReady()
   if (mode === 'plan') await planTask('Spent task')
   else fireEvent.change(textarea(), { target: { value: 'Spent task' } })
   const original = textarea()
-  if (mode === 'plan') fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
-  else await startTask()
-  await waitFor(() => expect(window.location.pathname).toBe('/tasks/suspended-task'))
-  fireEvent.click(screen.getByRole('link', { name: 'New task' }))
-  await waitFor(() => expect(location()).toBe('/new'))
-  expect(textarea()).toBe(original)
-  expect(textarea().value).toBe('')
-  expect(readDraft().text).toBe('')
+  const push = window.history.pushState.bind(window.history)
+  let returned = false
+  const navigation = vi.spyOn(window.history, 'pushState').mockImplementation((...args) => {
+    push(...args)
+    if (window.location.pathname === '/tasks/suspended-task') queueMicrotask(() => {
+      fireEvent.click(screen.getByRole('link', { name: 'New task' }))
+      returned = true
+    })
+  })
+  try {
+    if (mode === 'plan') fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
+    else await startTask()
+    await waitFor(() => expect(returned).toBe(true))
+    await waitFor(() => expect(location()).toBe('/new'))
+    expect(textarea()).toBe(original)
+    expect(textarea().value).toBe('')
+    expect(readDraft().text).toBe('')
+  } finally {
+    navigation.mockRestore()
+  }
 })

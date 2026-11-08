@@ -9,6 +9,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { answerFixture, answerFromRoutes, jsonResponse, type FetchRoute } from '@/test/fetch-routes'
 import { readDraft, writeDraft } from './new-task-draft'
 import { NewTaskRoute } from './new-task'
+import { TaskPreviewLayout } from './task-thread/preview/task-preview-layout'
 
 export const HEALTH: HealthResponse = {
   version: '0.1.3',
@@ -290,7 +291,7 @@ export function LocationProbe() {
   return <output data-testid="location">{location.pathname + location.search}</output>
 }
 
-export function renderNewTask(entry = '/new', suspendThread = false) {
+export function renderNewTask(entry = '/new', suspendThread: false | 'outer' | 'inner' = false) {
   // Keep /new mounted while its outgoing transition suspends, as a cold thread chunk does.
   const PendingThread = lazy(() => new Promise<{ default: () => null }>(() => {}))
   const client = createQueryClient()
@@ -302,7 +303,10 @@ export function renderNewTask(entry = '/new', suspendThread = false) {
         <Link to="/new">New task</Link>
         <Suspense fallback={null}>
           <Routes>
-            {suspendThread ? <Route path="/tasks/:id" element={<PendingThread />} /> : null}
+            {suspendThread === 'outer' ? <Route path="/tasks/:id" element={<PendingThread />} /> : null}
+            {suspendThread === 'inner' ? <Route path="/tasks/:id" element={<TaskPreviewLayout />}>
+              <Route index element={<Suspense fallback={<div data-route="task-thread" />}><PendingThread /></Suspense>} />
+            </Route> : null}
             <Route path="/new" element={<NewTaskRoute />} />
             <Route path="/p/:projectId/new" element={<NewTaskRoute />} />
             <Route path="*" element={<div data-testid="elsewhere" />} />
