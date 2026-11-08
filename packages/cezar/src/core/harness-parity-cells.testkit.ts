@@ -959,6 +959,19 @@ type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'be
   probe?: true | ((group: string, title: string) => void);
 };
 
+/** Every matrix row with the scenario it drives, as the matrix guard reads them. */
+export function parityRowScenarios(): ReadonlyArray<{ readonly id: string; readonly scenario: ScenarioName }> {
+  return [
+    ...PERMISSION_CRITERIA, ...MODEL_REFUSAL_CRITERIA, ...SHUTDOWN_CRITERIA,
+    ...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA,
+    ...WAIT_CRITERIA, ...WORKFLOW_ASK_CRITERIA, ...STEP_COMPLETION_CRITERIA, ...FOLLOWUP_CRITERIA,
+    ...ANSWER_DELIVERY_CRITERIA, ...SKILL_RESUME_CRITERIA, ...SKILL_PROVISION_CRITERIA,
+    ...WORKTREE_SETUP_CRITERIA, ...AUTONOMOUS_CRITERIA, ...WORKER_PROGRESS_WAIT_CRITERIA,
+    ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
+    ...SEAM_CRITERIA, ...SEAM_CONTRACT_ROWS, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
+  ];
+}
+
 /** How many cells each group's suite registers for one runner, by suite name. A shared group can
  *  hold none for a runner outside the derived set, and Vitest 4 fails an empty suite. */
 function groupCellCounts(runner: RunnerId): Map<string, number> {
@@ -2231,15 +2244,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         ...CONTROL_CRITERIA.map((c) => c.id),
         ...RUN_CRITERIA.map((c) => c.id),
       ];
-      const rows: readonly { id: string; scenario: ScenarioName }[] = [
-        ...PERMISSION_CRITERIA, ...MODEL_REFUSAL_CRITERIA, ...SHUTDOWN_CRITERIA,
-        ...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA,
-        ...WAIT_CRITERIA, ...WORKFLOW_ASK_CRITERIA, ...STEP_COMPLETION_CRITERIA, ...FOLLOWUP_CRITERIA,
-        ...ANSWER_DELIVERY_CRITERIA, ...SKILL_RESUME_CRITERIA, ...SKILL_PROVISION_CRITERIA,
-        ...WORKTREE_SETUP_CRITERIA, ...AUTONOMOUS_CRITERIA, ...WORKER_PROGRESS_WAIT_CRITERIA,
-        ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
-        ...SEAM_CRITERIA, ...SEAM_CONTRACT_ROWS, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
-      ];
+      const rows = parityRowScenarios();
       const scenarioOf = (id: string): ScenarioName => {
         const row = rows.find(c => c.id === id);
         if (!row) throw new Error(`unknown criterion id "${id}"`);

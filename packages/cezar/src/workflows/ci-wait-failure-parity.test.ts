@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { parityRunners } from '../core/parity-classes.testkit.ts';
-import { CI_FAILURE_GROUPS, ciFailureRowKey } from './ci-wait-failure-parity.testkit.ts';
+import { CI_FAILURE_GROUPS, ciFailureRowKey } from './ci-wait-failure-rows.testkit.ts';
 
 it('registers every CI failure runner/outcome row exactly once', () => {
   const runnersOf = (row: string, keys: readonly string[]) => parityRunners('ci-wait-failure', row).flatMap(runner => keys.map(key => `${runner}:${key}`));

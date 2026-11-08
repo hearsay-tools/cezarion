@@ -6,8 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CiWaitResult, Wait } from '@open-mercato/cezar-contract';
-import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
-import { parityRunners } from '../core/parity-classes.testkit.ts';
+import { type RunnerId } from '../core/agent-runner.ts';
+import { CI_FAILURE_GROUPS, ciFailureRowId, type CiFailureGroup, type CiFailureRow } from './ci-wait-failure-rows.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { supportsProfiles } from '../core/agent-profiles.ts';
 import { acceptedWorkerIdentitySchema, workerWorkflowHash } from '../delegation/execution-identity.ts';
@@ -69,28 +69,6 @@ async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
   return run;
 }
 
-type CiFailureRow =
-  | { family: 'final'; runner: RunnerId; mode: 'fresh' | 'continued' }
-  | { family: 'nonfinal'; runner: RunnerId; outcome: 'passed' | 'failed' | 'restarted' | 'source-retry' }
-  | { family: 'restart'; runner: RunnerId; boundary: 'CI acknowledgement' | 'queued tail' };
-// R75 runs on every runner (core/parity-classes.testkit.ts); the pair split keeps each file under the per-file cap.
-const otherRunners = RUNNER_IDS.filter(runner => runner !== 'cursor' && runner !== 'opencode');
-const modelAndServerRunners = RUNNER_IDS.filter(runner => runner === 'cursor' || runner === 'opencode');
-export const CI_FAILURE_GROUPS = {
-  'final-recovery': (['fresh', 'continued'] as const).flatMap(mode => parityRunners('ci-wait-failure', mode === 'fresh' ? 'R72' : 'R73').map(runner => ({ family: 'final', runner, mode } as const))),
-  'nonfinal-passed': parityRunners('ci-wait-failure', 'R74').map(runner => ({ family: 'nonfinal', runner, outcome: 'passed' } as const)),
-  'nonfinal-failed': parityRunners('ci-wait-failure', 'R74').map(runner => ({ family: 'nonfinal', runner, outcome: 'failed' } as const)),
-  'nonfinal-restarted': parityRunners('ci-wait-failure', 'R74').map(runner => ({ family: 'nonfinal', runner, outcome: 'restarted' } as const)),
-  'nonfinal-source-retry': parityRunners('ci-wait-failure', 'R76').map(runner => ({ family: 'nonfinal', runner, outcome: 'source-retry' } as const)),
-  'restart-acknowledgement-cursor-opencode': modelAndServerRunners.map(runner => ({ family: 'restart', runner, boundary: 'CI acknowledgement' } as const)),
-  'restart-acknowledgement-claude-codex-pi-omp': otherRunners.map(runner => ({ family: 'restart', runner, boundary: 'CI acknowledgement' } as const)),
-  'restart-queued-tail-cursor-opencode': modelAndServerRunners.map(runner => ({ family: 'restart', runner, boundary: 'queued tail' } as const)),
-  'restart-queued-tail-claude-codex-pi-omp': otherRunners.map(runner => ({ family: 'restart', runner, boundary: 'queued tail' } as const)),
-};
-export type CiFailureGroup = keyof typeof CI_FAILURE_GROUPS;
-export function ciFailureRowKey(row: CiFailureRow): string {
-  return [row.runner, row.family, row.family === 'final' ? row.mode : row.family === 'nonfinal' ? row.outcome : row.boundary].join(':');
-}
 export function registerCiFailureGroup(group: CiFailureGroup): void {
  describe('CI wait failure history through every native runner (hearsay-tools/cezarion#994)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
@@ -99,7 +77,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
    if (row.family === 'final') {
     const { runner, mode } = row;
 
-    const cell = mode === 'fresh' ? 'R72' : 'R73';
+    const cell = ciFailureRowId(row);
     it(`${runner} ${cell} preserves a failed CI attempt through automatic recovery and final success`, async () => {
       const settle = github();
       const wire = gatedProviderFailure(root, runner);
@@ -159,7 +137,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
    if (row.family === 'nonfinal') {
     const { runner, outcome } = row;
 
-    const cell = outcome === 'source-retry' ? 'R76' : 'R74';
+    const cell = ciFailureRowId(row);
     it(`${runner} ${cell} resumes a failed nonfinal CI agent with ${outcome} checks and preserves failure history`, async () => {
       const settle = github();
       const wire = gatedProviderFailure(root, runner);

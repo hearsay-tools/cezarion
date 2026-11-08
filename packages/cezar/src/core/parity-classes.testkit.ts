@@ -82,6 +82,7 @@ interface ParityFamily {
 const NATIVE_ASK_SCENARIO = 'its scenario asks through the native ask on codex and opencode (nativeAsk answerable), which no runner of the shared set declares';
 const PROVIDER_FAILURE = 'the wake fails through the runner\'s own provider-error handling';
 const SMOKE = 'per-runner smoke row';
+const PROVIDER_ERROR_START = 'its step fails through the runner\'s own provider-error path';
 
 const everyRunner = (why: string): ParityFamily => ({ class: 'every-runner', why });
 const shared = (why: string, rows: Readonly<Record<string, string>> = {}): ParityFamily => ({ class: 'shared', why, everyRunner: rows });
@@ -129,14 +130,14 @@ export const PARITY_FAMILIES = {
   'ci-wait-conflict': shared('conflict resolution in the wait registry'),
   'ci-wait-rerun': shared('reruns in the CI supervisor'),
   'ci-wait-retry': shared('source retry in the CI supervisor'),
-  'ci-wait-failure': shared('CI failure outcomes through RunManager', {
-    R75: 'its owned chain builds each runner\'s own account and home (supportsProfiles, claudeLayout)',
-  }),
+  'ci-wait-failure': everyRunner('every row fails a CI agent through the runner\'s own provider-error path (gatedProviderFailure); R75 also builds each runner\'s own account and home'),
   'pr-merge-wait': shared('PR merge waits in the wait registry'),
   'worker-reboot': everyRunner('each runner reports its own process ids to the ledger the reboot reads; no seam row covers that report'),
   'worker-restart': everyRunner('each runner reports its own process ids to the ledger the restart reads; no seam row covers that report'),
   'session-context': shared('launch context is built in run/launch-context.ts; resume prompt and input delivery are turn-path facts'),
-  'resume-diagnostics': shared('resume diagnostics are built by Cezar; the in-thread prefix is systemPromptOnResume'),
+  'resume-diagnostics': shared('resume diagnostics are built by Cezar; the in-thread prefix is systemPromptOnResume', {
+    R85: PROVIDER_ERROR_START, R88: PROVIDER_ERROR_START, R89: PROVIDER_ERROR_START,
+  }),
   'completion-options': shared('completion options are Cezar\'s'),
   // Workflow families.
   'workflow-autonomous': shared('the autonomous policy is Cezar\'s'),

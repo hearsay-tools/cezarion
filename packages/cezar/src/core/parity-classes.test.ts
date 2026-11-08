@@ -2,7 +2,10 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { HARNESS_PARITY_GROUPS, harnessGroupRows } from './harness-parity-cells.testkit.ts';
+import { HARNESS_PARITY_GROUPS, harnessGroupRows, parityRowScenarios } from './harness-parity-cells.testkit.ts';
+import { CI_FAILURE_GROUPS, ciFailureRowId } from '../workflows/ci-wait-failure-rows.testkit.ts';
+import { RESUME_DIAGNOSTICS_GROUPS, resumeDiagnosticsCells } from '../workflows/resume-diagnostics.testkit.ts';
+import { registrationCollector } from './split-registration.testkit.ts';
 import {
   AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, FOLLOWUP_CRITERIA, MODEL_REFUSAL_CRITERIA, NO_PROGRESS_CRITERIA, SHUTDOWN_CRITERIA,
   SKILL_PROVISION_CRITERIA, SKILL_RESUME_CRITERIA, STEP_COMPLETION_CRITERIA, WORKFLOW_ASK_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA,
@@ -102,6 +105,20 @@ describe('the parity classification table (hearsay-tools/cezarion#2991)', () => 
     expect(parityRunners('server-contract', 'R1')).toEqual([NO_SESSION_RUNNER]);
   });
 
+  // A row whose scenario runs the runner's own code cannot be shared: a provider error is mapped by
+  // each runner, and a native ask or native subagents exist only where the facts say. Every
+  // registered row a catalog below lists is held to that, so a new shared row of this kind fails here.
+  it('runs every registered row whose scenario runs runner code on every runner', () => {
+    // An id two families reuse (R85: resume diagnostics and CI rerun) counts as runner code when any of its rows is.
+    const runnerCode = new Set(parityRowScenarios().filter(row => RUNNER_CODE_SCENARIOS.has(row.scenario)).map(row => row.id));
+    const shared = [...familyRowCatalog()].flatMap(([family, rows]) => [...rows]
+      .filter(row => runnerCode.has(row) && parityRunners(family as ParityFamilyName, row).length !== RUNNER_IDS.length)
+      .map(row => `${family} ${row}`));
+    expect(shared).toEqual([]);
+    expect(familyRowCatalog().get('ci-wait-failure')).toEqual(new Set(['R72', 'R73', 'R74', 'R75', 'R76']));
+    expect(familyRowCatalog().get('resume-diagnostics')).toEqual(new Set(['R85', 'R86', 'R87', 'R88', 'R89', 'R90', 'R91']));
+  });
+
   // cez/runner-fact-combination lets a reported function pass only with a reason. A real combination
   // also names a registered row of a classified family that runs on every runner; a family with no
   // row catalog here fails closed. A false positive (an unrelated same-named key) names no row.
@@ -119,10 +136,18 @@ describe('the parity classification table (hearsay-tools/cezarion#2991)', () => 
   });
 });
 
+/** Scenarios whose outcome is the runner's own code: its provider error, a native ask (answerable on
+ *  codex and opencode only) or native subagents. */
+const RUNNER_CODE_SCENARIOS = new Set(['provider-error', 'ask', 'ask-resume', 'ask-bad', 'ask-reply-late', 'subagent', 'subagent-after-park', 'forked-skill']);
+
 /** Row ids each family registers, where this guard can list them. */
 function familyRowCatalog(): Map<string, Set<string>> {
   const ids = (rows: ReadonlyArray<{ id: string }>) => new Set(rows.map(row => row.id));
   const catalog = new Map<string, Set<string>>([...harnessGroupRows()].map(([group, rows]) => [`harness:${group}`, rows]));
+  catalog.set('ci-wait-failure', new Set(Object.values(CI_FAILURE_GROUPS).flat().map(ciFailureRowId)));
+  const titles: string[] = [];
+  for (const rows of Object.values(RESUME_DIAGNOSTICS_GROUPS)) for (const row of rows) resumeDiagnosticsCells[row.family](row.runner, registrationCollector(titles));
+  catalog.set('resume-diagnostics', new Set(titles.map(parityRowId).filter((row): row is string => row !== undefined)));
   for (const [family, rows] of Object.entries({
     waits: WAIT_CRITERIA, 'workflow-autonomous': AUTONOMOUS_CRITERIA, 'workflow-ask': WORKFLOW_ASK_CRITERIA,
     'workflow-final-message': FINAL_MESSAGE_CRITERIA, 'workflow-followup': FOLLOWUP_CRITERIA, 'workflow-no-progress': NO_PROGRESS_CRITERIA,
