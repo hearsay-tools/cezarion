@@ -8,14 +8,14 @@ describe('shared product identity', () => {
   it('keeps the shipped identity with the switch off', () => {
     expect(productIdentity(false)).toEqual({
       rebrand: false, displayName: 'Cezarion', command: 'cez', npmPackage: '@wjarka/cezarion',
-      npmAlias: 'cezarion', envPrefix: 'CEZ_', desktopAppId: 'tools.hearsay.cezarion',
+      npmAlias: 'cezarion', npmAliasDirectory: 'alias-cezarion', envPrefix: 'CEZ_', desktopAppId: 'tools.hearsay.cezarion',
       mobileAppId: 'tools.hearsay.cezarion.mobile', desktopExecutable: 'cezar-desktop',
     });
   });
   it('selects the new identity with the switch on', () => {
     expect(productIdentity(true)).toEqual({
       rebrand: true, displayName: 'Squawk', command: 'hsq', npmPackage: '@hearsay-tools/squawk',
-      npmAlias: 'hsq', envPrefix: 'HSQ_', desktopAppId: 'tools.hearsay.squawk',
+      npmAlias: 'hsq', npmAliasDirectory: 'alias-hsq', envPrefix: 'HSQ_', desktopAppId: 'tools.hearsay.squawk',
       mobileAppId: 'tools.hearsay.squawk.mobile', desktopExecutable: 'squawk-desktop',
     });
   });

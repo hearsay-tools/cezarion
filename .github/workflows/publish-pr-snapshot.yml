@@ -71,7 +71,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         with:
           script: |
-            const fs = require('node:fs');
+            const { releasePackages } = require('./.github/scripts/release-packages.cjs');
             const { resolveSnapshot, validateArchives, publishArchives } = require('./.github/scripts/pr-snapshot.cjs');
             const plan = JSON.parse(process.env.PLAN);
             const current = await resolveSnapshot({ github, ...context.repo, trigger: context.payload.workflow_run });
@@ -79,8 +79,7 @@ jobs:
               core.info('Snapshot was superseded while waiting to publish.');
               return;
             }
-            const dirs = { contract: 'packages/contract', apiClient: 'packages/api-client', cezar: 'packages/cezar', web: 'packages/web', alias: 'alias-cezarion' };
-            const manifests = Object.fromEntries(Object.entries(dirs).map(([key, dir]) => [key, JSON.parse(fs.readFileSync(`${dir}/package.json`, 'utf8'))]));
+            const { publication: manifests } = releasePackages();
             const entries = validateArchives({ artifacts: process.env.ARCHIVES, manifests, plan });
             const dryRun = !process.env.NODE_AUTH_TOKEN;
             publishArchives({ entries, plan, dryRun });
