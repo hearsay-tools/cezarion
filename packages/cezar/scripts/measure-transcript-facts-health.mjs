@@ -8,7 +8,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { timingSnapshot, timingDelta } from './transcript-facts-timing.mjs';
+import { timingSnapshot, timingDelta, blockingBudget } from './transcript-facts-timing.mjs';
 import { seedColdHistories, verifyFacts } from './transcript-facts-fixture.mjs';
 
 const root = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cez-facts-health-'));
@@ -69,7 +69,7 @@ try {
     // Include EVERY request begun while cold warm-up was active, even one ending after it.
     const measurement = timingDelta(measurementStart, timingSnapshot());
     samples.push({ startMs: requestStart - start, endMs: requestEnd - start, latencyMs: requestEnd - requestStart,
-      ...measurement });
+      ...measurement, ...blockingBudget(measurement) });
     await delay(5);
   }
   await warming;
@@ -78,11 +78,12 @@ try {
   const result = { kind: 'transcript-facts-http-health', runtime: runtime.url.href,
     endpoint: '/api/v1/health', scenario: 'already-listening server during cold project open', primingLatencyMs,
     ...verifyFacts(dataDir, fixtures, store), durationMs: end - start,
+    maxBlockingMs: Math.max(...samples.map(sample => sample.blockingMs)),
     maxMainThreadCpuMs: Math.max(...samples.map(sample => sample.mainThreadCpuMs)),
     sampleCount: samples.length, maxLatencyMs: Math.max(...samples.map(sample => sample.latencyMs)), samples };
   console.log(JSON.stringify(result));
-  // Preserve the 50ms request CPU budget; wall latency includes host scheduling.
-  assert.ok(result.maxMainThreadCpuMs < 50, `max health main-thread CPU ${result.maxMainThreadCpuMs.toFixed(3)}ms must be <50ms`);
+  // Exclude run-queue delay, but retain synchronous blocking and request latency.
+  assert.ok(result.maxBlockingMs < 50, `max health blocking ${result.maxBlockingMs.toFixed(3)}ms must be <50ms`);
 } finally {
   clearTimeout(watchdog);
   let cleanupTimer;

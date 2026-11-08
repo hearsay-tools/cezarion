@@ -2,7 +2,7 @@
  * node --expose-gc --import tsx packages/cezar/scripts/measure-transcript-facts-lag.mjs
  * Built runtime: pass an absolute dist directory. Baseline source: pass its src directory and ts.
  * A separate process removes test-runner loop work, NOT unrelated host CPU scheduling.
- * Gate loop CPU; retain wall time and scheduler delay as diagnostic evidence.
+ * Gate loop CPU and blocking time; exclude host run-queue delay.
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { timingSnapshot, timingDelta } from './transcript-facts-timing.mjs';
+import { timingSnapshot, timingDelta, blockingBudget } from './transcript-facts-timing.mjs';
 import { seedColdHistories, verifyFacts } from './transcript-facts-fixture.mjs';
 
 const runtime = { url: process.argv[2] ? pathToFileURL(process.argv[2] + '/') : new URL('../src/', import.meta.url), ext: process.argv[3] ?? (process.argv[2] ? 'js' : 'ts') };
@@ -28,7 +28,7 @@ try {
   timer = setInterval(() => {
     const current = timingSnapshot();
     const sample = timingDelta(previous, current);
-    ticks.push({ at: current.at, lagMs: Math.max(0, sample.elapsedMs - periodMs), ...sample });
+    ticks.push({ at: current.at, lagMs: Math.max(0, sample.elapsedMs - periodMs), ...sample, ...blockingBudget(sample, periodMs) });
     previous = current;
   }, periodMs);
   // Establish a real interval before starting; retain the first tick after completion too.
@@ -45,6 +45,7 @@ try {
     beforeTicks: ticks.filter(tick => tick.at < start).length,
     trailingTicks: ticks.filter(tick => tick.at > end).length,
     overlappingTicks: overlapping.length, maxLagMs: Math.max(...ticks.map(tick => tick.lagMs)),
+    maxBlockingMs: Math.max(...ticks.map(tick => tick.blockingMs)),
     maxMainThreadCpuMs: Math.max(...ticks.map(tick => tick.mainThreadCpuMs)),
     samples: ticks.map(({ at, ...sample }) => ({ offsetMs: at - start, ...sample })) };
   console.log(JSON.stringify(result));
@@ -59,8 +60,8 @@ try {
   assert.ok(result.trailingTicks > 0, 'must retain a trailing tick after warming');
   assert.ok(overlapping.length > 0, 'must sample during cold warm-up');
   assert.ok(result.durationMs > 0);
-  // Preserve the 20ms loop-work budget without charging host descheduling.
-  assert.ok(result.maxMainThreadCpuMs < 20, `max interval main-thread CPU ${result.maxMainThreadCpuMs.toFixed(3)}ms must be <20ms`);
+  // Exclude planned timer sleep and run-queue delay, but retain synchronous blocking.
+  assert.ok(result.maxBlockingMs < 20, `max interval blocking ${result.maxBlockingMs.toFixed(3)}ms must be <20ms`);
 } finally {
   clearInterval(timer);
   store?.close();

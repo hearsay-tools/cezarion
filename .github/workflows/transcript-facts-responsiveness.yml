@@ -48,7 +48,7 @@ jobs:
         run: npm run build:server
         timeout-minutes: 3
       # These steps are serial on a dedicated hosted runner. No other test/build
-      # runs concurrently here. CPU gates exclude host scheduling delay; reports keep wall time.
+      # runs concurrently here. Gates exclude run-queue delay; reports keep wall time and CPU.
       - name: Measure strict server-free lag
         id: lag
         timeout-minutes: 2

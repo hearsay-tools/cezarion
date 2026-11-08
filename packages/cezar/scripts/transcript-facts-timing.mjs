@@ -21,3 +21,11 @@ export function timingDelta(start, end) {
   return { elapsedMs, mainThreadCpuMs, queueWaitMs,
     blockedMs: queueWaitMs === null ? null : Math.max(0, elapsedMs - mainThreadCpuMs - queueWaitMs) };
 }
+
+/** Timer samples exclude their planned sleep; requests have no planned sleep. */
+export function blockingBudget(sample, periodMs = 0) {
+  const mode = sample.queueWaitMs === null ? 'cpu-only' : 'scheduler-adjusted';
+  const blockingMs = sample.queueWaitMs === null ? sample.mainThreadCpuMs
+    : Math.max(0, sample.elapsedMs - periodMs - sample.queueWaitMs);
+  return { mode, blockingMs: Math.max(0, periodMs > 0 ? Math.max(sample.mainThreadCpuMs, blockingMs) : blockingMs) };
+}
