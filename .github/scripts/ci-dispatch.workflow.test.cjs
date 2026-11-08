@@ -19,8 +19,25 @@ function evaluate(value, context) {
   return typeof value === 'string' && value.startsWith('${{')
     ? runInNewContext(value.slice(3, -2).replace(/needs\.([\w-]+)/g, "needs['$1']"), context) : value;
 }
+function checkoutClassifier(dir, rebrand) {
+  // Match the trusted checkout's runtime dependencies, including the ESM boundary
+  // for Node's built-in TypeScript loader. The fixture root is CommonJS.
+  for (const file of [
+    '.github/scripts/release-bump-pr.cjs', '.github/scripts/change-surface.cjs',
+    'packages/cezar/package.json', 'packages/cezar/src/home/identity.ts',
+    'packages/cezar/src/home/switch.ts',
+  ]) {
+    const target = path.join(dir, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(root, file), target);
+  }
+  if (rebrand !== undefined) {
+    fs.writeFileSync(path.join(dir, 'packages/cezar/src/home/switch.ts'),
+      `export const REBRAND_SWITCH = ${rebrand};\n`);
+  }
+}
 function classify(jobName, { pr = prFixture(), number = '42', apiFails = false, appLogin = '',
-  files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' } } = {}) {
+  files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' }, rebrand } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-dispatch-'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
   const context = { needs: { 'pr-test-input': { outputs: { sha: '' } }, 'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } } }, github: { event_name: 'workflow_dispatch', sha: HEAD,
@@ -56,10 +73,7 @@ process.stdout.write(JSON.stringify(value));
       if (step.uses?.startsWith('actions/checkout@')) {
         if (['typecheck', 'build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
         assert.equal(evaluate(step.with.ref, context), BASE, 'classifier comes from API base, never dispatch head');
-        fs.mkdirSync(path.join(dir, '.github/scripts'), { recursive: true });
-        for (const name of ['release-bump-pr.cjs', 'change-surface.cjs']) {
-          fs.copyFileSync(path.join(__dirname, name), path.join(dir, '.github/scripts', name));
-        }
+        checkoutClassifier(dir, rebrand);
       }
       // The checkout above is simulated by copying scripts, so there is no history to fetch.
       if (!step.run || step.name === 'Fetch the history the baseline check compares') continue;
@@ -79,6 +93,17 @@ test('dispatch validates the live release PR and runs the trusted version-stamp 
     const pr = prFixture(); pr.base.ref = base;
     assert.equal(classify('classify-pr', { pr }).bump_pr, 'true');
     assert.equal(classify('change-surface', { pr }).surface, 'full-matrix');
+  }
+});
+
+test('dispatch loads the trusted identity and selects its alias in both switch states', () => {
+  for (const rebrand of [false, true]) {
+    for (const alias of ['alias-cezarion', 'alias-hsq']) {
+      const active = alias === (rebrand ? 'alias-hsq' : 'alias-cezarion');
+      assert.equal(classify('classify-pr', {
+        rebrand, files: [{ filename: `${alias}/package.json` }],
+      }).bump_pr, String(active));
+    }
   }
 });
 
