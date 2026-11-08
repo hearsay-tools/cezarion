@@ -34,3 +34,13 @@ Boot prints one warning naming `hsq server-migrate`. A successful explicit
 The existing server records identify completed non-dry-run installs. Desktop
 boot, staged read-only health checks, saved formats and switch-off behavior stay
 unchanged.
+
+Desktop identity changes are staged behind generated release metadata. The
+ordinary switch-off config, feed and artifacts retain their existing names.
+Native HSQ environment aliases are additive and use presence-first fallback;
+HOME keeps the P2 layout rules. Both generated sidecar aliases are pinned in
+both identities so an inherited setting cannot override supervision. Old and
+new managed npm package paths stay readable. The bridge retains source app
+state and binds its private journal to the source, target and payload before
+honoring a startup acknowledgement; it refuses conflicting destination data.
+System-package installs keep a working old app and a manual move notice.
