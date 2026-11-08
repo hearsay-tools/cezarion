@@ -134,8 +134,8 @@ export const PARITY_FAMILIES = {
   'ci-wait-retry': shared('source retry in the CI supervisor'),
   'ci-wait-failure': everyRunner('every row fails a CI agent through the runner\'s own provider-error path (gatedProviderFailure); R75 also builds each runner\'s own account and home'),
   'pr-merge-wait': shared('PR merge waits in the wait registry'),
-  'worker-reboot': everyRunner('each runner reports its own process ids to the ledger the reboot reads; no seam row covers that report'),
-  'worker-restart': everyRunner('each runner reports its own process ids to the ledger the restart reads; no seam row covers that report'),
+  'worker-reboot': shared('reboot settlement reads the worker process ledger; S43 holds each runner to reporting its native processes, and runner-shutdown to stopping them'),
+  'worker-restart': shared('restart settlement reads the worker process ledger; S43 holds each runner to reporting its native processes, and runner-shutdown to stopping them'),
   'session-context': shared('launch context is built in run/launch-context.ts; resume prompt and input delivery are turn-path facts'),
   'resume-diagnostics': shared('resume diagnostics are built by Cezar; the in-thread prefix is systemPromptOnResume', {
     R85: PROVIDER_ERROR_START, R88: PROVIDER_ERROR_START, R89: PROVIDER_ERROR_START,

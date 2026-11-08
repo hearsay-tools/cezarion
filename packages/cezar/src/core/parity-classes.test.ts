@@ -186,6 +186,8 @@ const SCANNED_KITS: Record<string, readonly string[]> = {
   'ci-wait-rerun': ['workflows/ci-wait-rerun-parity.testkit.ts'],
   'ci-wait-retry': ['workflows/ci-wait-retry-parity.test.ts'],
   'pr-merge-wait': ['workflows/pr-merge-wait-parity.test.ts'],
+  'worker-reboot': ['workflows/worker-reboot-parity.testkit.ts'],
+  'worker-restart': ['workflows/worker-restart-parity.testkit.ts'],
   'session-context': ['workflows/session-context-cells.testkit.ts'],
   'completion-options': ['workflows/completion-options-cells.testkit.ts'],
 };

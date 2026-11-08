@@ -7,7 +7,7 @@ import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from '
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
@@ -29,12 +29,16 @@ export const RESTART_GROUPS = {
  'same-boot-crash-lock': ['same-boot-crash-lock'],
 } as const;
 
+/** The runners each group runs on: a shared family (core/parity-classes.testkit.ts), whose
+ *  runner part, the native processes the ledger records, seam row S43 holds on every runner. */
+export const RESTART_RUNNERS = { r47: parityRunners('worker-restart', 'R47'), r60: parityRunners('worker-restart', 'R60') };
+
 export function registerRestartGroup(group: keyof typeof RESTART_GROUPS): void {
  describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker settlement (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture({ processScope: false });
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
   if (group === 'starting-proof') {
-it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join', async runner => {
+it.each(RESTART_RUNNERS.r60)('%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join', async runner => {
     // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
     process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
@@ -83,7 +87,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
 }
   if (group === 'destroy-absent-ledger' || group === 'destroy-incomplete-ledger') {
    const ledgerKind = group === 'destroy-absent-ledger' ? 'absent' : 'incomplete';
-    it.each(RUNNER_IDS)(`%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
+    it.each(RESTART_RUNNERS.r47)(`%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
       process.env.CEZ_DRY_RUN = '0';
       const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
       const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
@@ -149,7 +153,7 @@ it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execut
     });
  }
  if (group === 'same-boot-crash-lock') {
-it.each(RUNNER_IDS)('%s settles a same-boot crash as gone once recorded processes exit, whatever unreadable process runs, and keeps cleanup locks bounded', async runner => {
+it.each(RESTART_RUNNERS.r47)('%s settles a same-boot crash as gone once recorded processes exit, whatever unreadable process runs, and keeps cleanup locks bounded', async runner => {
     process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
