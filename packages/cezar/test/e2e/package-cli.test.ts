@@ -60,8 +60,8 @@ test('the release tarball installs and runs the dry-run CLI workflow', { timeout
     const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as {
       bin: { cezarion: string; cez: string };
     };
-    assert.equal(manifest.bin.cezarion, 'dist/index.js');
-    assert.equal(manifest.bin.cez, 'dist/index.js');
+    assert.equal(manifest.bin.cezarion, 'dist/cezarion.js');
+    assert.equal(manifest.bin.cez, 'dist/cez.js');
     const cliPath = join(packageRoot, manifest.bin.cezarion);
 
     // Installed adapters must resolve their SDK and inlined contract without

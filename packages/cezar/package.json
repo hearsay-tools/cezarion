@@ -5,8 +5,9 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "cezarion": "dist/index.js",
-    "cez": "dist/index.js"
+    "cezarion": "dist/cezarion.js",
+    "cez": "dist/cez.js",
+    "hsq": "dist/hsq.js"
   },
   "exports": {
     ".": "./dist/index.js",

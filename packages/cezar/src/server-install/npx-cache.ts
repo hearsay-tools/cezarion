@@ -1,12 +1,14 @@
+import { commandText } from '../home/command.ts';
+import { NPM_LAUNCH_PACKAGES, productIdentity } from '../home/identity.ts';
 import { readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { StepAborted } from './steps.ts';
 import type { InstallContext } from './types.ts';
 
-const OFFICIAL_CLI_PKG = 'cezarion';
+const OFFICIAL_CLI_PKG = productIdentity().npmAlias;
 
-const DEFAULT_RECONFIGURE_HINT = `  cez server-install --platform ubuntu-vps --reconfigure autostart`;
+const DEFAULT_RECONFIGURE_HINT = commandText(`  cez server-install --platform ubuntu-vps --reconfigure autostart`);
 
 /** The npx package cache root for the user the service runs as (this is the
  *  same user that runs `server-deploy`). Honors an `npm_config_cache` override,
@@ -16,11 +18,24 @@ function npxCacheDir(): string {
   return join(base, '_npx');
 }
 
-/** True when a launch command launches cezar via npx (the unpinned
- *  `npx --yes cezarion` form) rather than a checkout (`<node> …/dist/index.js`)
- *  or a global bin. */
+/** The exact npx executable and requested package, including systemctl's argv[] form. */
+export function npxLaunchPackage(execStart: string): string | undefined {
+  const command = execStart.match(/^\s*ExecStart=\{[^;]*;\s*argv\[\]=([^;]*)/)?.[1] ?? execStart;
+  const words = [...command.matchAll(/"([^"\n]*)"|'([^'\n]*)'|([^\s]+)/g)]
+    .map(match => match[1] ?? match[2] ?? match[3]!);
+  const executable = words.shift()?.split(/[\\/]/).pop();
+  if (!/^npx(?:\.cmd|\.exe)?$/.test(executable ?? '')) return;
+  if (words[0] === '--yes' || words[0] === '-y') words.shift();
+  return words[0];
+}
+
+export function ownedNpxPackage(execStart: string): string | undefined {
+  const request = npxLaunchPackage(execStart);
+  return NPM_LAUNCH_PACKAGES.find(pkg => request === pkg || (request?.startsWith(`${pkg}@`) && /^[\w~^<>=*.+|-]+$/.test(request.slice(pkg.length + 1))));
+}
+
 export function isNpxExecStart(execStart: string): boolean {
-  return /\bnpx\b/.test(execStart) && execStart.includes(OFFICIAL_CLI_PKG);
+  return ownedNpxPackage(execStart) !== undefined;
 }
 
 /** True when the unit is an npx launch of a package that is NOT ours — in practice a unit
@@ -33,12 +48,10 @@ export function isNpxExecStart(execStart: string): boolean {
  *  `server-deploy` then reports a green restart while the running version is unchanged. So the
  *  caller warns and names the remedy.
  *
- *  A checkout unit (`<node> …/dist/index.js`) is not foreign, including one running out of an
- *  `_npx` directory: `\bnpx\b` needs a non-word character before `npx`, and `_` is a word
- *  character, so `_npx` never matches. A global-bin unit names no `npx` at all and is likewise
- *  excluded — its restart picks up whatever the global bin now points at. */
+ *  Checkout and global-bin units do not execute npx, including an entry below `_npx`.
+ *  Their restart picks up the new build or global install directly. */
 export function isForeignNpxExecStart(execStart: string): boolean {
-  return /\bnpx\b/.test(execStart) && !execStart.includes(OFFICIAL_CLI_PKG);
+  return npxLaunchPackage(execStart) !== undefined && ownedNpxPackage(execStart) === undefined;
 }
 
 /**
@@ -59,7 +72,8 @@ export function refreshNpxCacheForRedeploy(
   execStart: string,
   opts: { reconfigureHint?: string } = {},
 ): void {
-  if (!isNpxExecStart(execStart)) {
+  const launchPackage = ownedNpxPackage(execStart);
+  if (!launchPackage) {
     if (isForeignNpxExecStart(execStart)) {
       ctx.ui.warn(
         `This service is launched by npx from a package other than ${OFFICIAL_CLI_PKG} — most likely a unit ` +
@@ -73,7 +87,7 @@ export function refreshNpxCacheForRedeploy(
   }
   const dir = npxCacheDir();
   if (ctx.dryRun) {
-    ctx.ui.info(`DRY RUN — would clear cached ${OFFICIAL_CLI_PKG} builds under ${dir} so npx refetches the latest.`);
+    ctx.ui.info(`DRY RUN — would clear cached ${launchPackage} builds under ${dir} so npx refetches the latest.`);
     return;
   }
 
@@ -82,7 +96,7 @@ export function refreshNpxCacheForRedeploy(
     entries = readdirSync(dir);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      ctx.ui.info(`No cached ${OFFICIAL_CLI_PKG} npx build found — the restart will fetch the latest published version.`);
+      ctx.ui.info(`No cached ${launchPackage} npx build found — the restart will fetch the latest published version.`);
       return;
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -92,7 +106,7 @@ export function refreshNpxCacheForRedeploy(
   let cleared = 0;
   for (const entry of entries) {
     const pkgDir = join(dir, entry);
-    const packageDir = join(pkgDir, 'node_modules', OFFICIAL_CLI_PKG);
+    const packageDir = join(pkgDir, 'node_modules', launchPackage);
     try {
       statSync(packageDir);
     } catch (error) {
@@ -104,13 +118,13 @@ export function refreshNpxCacheForRedeploy(
       rmSync(pkgDir, { recursive: true, force: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new StepAborted(`cannot remove the cached ${OFFICIAL_CLI_PKG} build at ${pkgDir}: ${message} — the service was not restarted`);
+      throw new StepAborted(`cannot remove the cached ${launchPackage} build at ${pkgDir}: ${message} — the service was not restarted`);
     }
     cleared++;
   }
   ctx.ui.info(
     cleared > 0
-      ? `Cleared ${cleared} cached ${OFFICIAL_CLI_PKG} npx build(s) — the restart will fetch the latest published version.`
-      : `No cached ${OFFICIAL_CLI_PKG} npx build found — the restart will fetch the latest published version.`,
+      ? `Cleared ${cleared} cached ${launchPackage} npx build(s) — the restart will fetch the latest published version.`
+      : `No cached ${launchPackage} npx build found — the restart will fetch the latest published version.`,
   );
 }

@@ -1,3 +1,4 @@
+import { commandText } from './command.ts';
 import { parseArgs } from 'node:util';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
 import type { Home } from './home.ts';
@@ -8,14 +9,14 @@ import { HomeStore } from './store.ts';
 import { homeFileLocation } from './file-location.ts';
 import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
 
-export const LEGACY_RECOVERY_COMMAND = 'hsq migrate --resolve-legacy <file> restore|accept';
-const HELP = `Usage: hsq migrate [--dry-run]
+export const LEGACY_RECOVERY_COMMAND = commandText('hsq migrate --resolve-legacy <file> restore|accept');
+const HELP = commandText(`Usage: hsq migrate [--dry-run]
        ${LEGACY_RECOVERY_COMMAND}
 Inspect or migrate the legacy home into the split layout.
 Resolve a legacy recovery incident before migration: restore its pinned version,
 or accept its current bytes. Use a supported home-relative file, such as config.json.
 Recovery does not migrate the home. Run hsq migrate again after recovery.
---resolve-legacy cannot be combined with --dry-run.`;
+--resolve-legacy cannot be combined with --dry-run.`);
 
 function recoveryAction(file: string | undefined, positionals: string[], dryRun: boolean | undefined): 'restore' | 'accept' | undefined {
   if (file === undefined) {
@@ -50,5 +51,5 @@ export async function runMigrationCommand(argv: string[], env: NodeJS.ProcessEnv
     console.log(JSON.stringify(values['dry-run'] ? { dryRun: true, plan: planLegacyMigration(legacy, target) }
       : migrateLegacyHome(legacy, target, { env }), null, 2));
     return 0;
-  } catch (error) { console.error(`[hsq] migration failed: ${error instanceof Error ? error.message : String(error)}`); return 1; }
+  } catch (error) { console.error(commandText(`[hsq] migration failed: ${error instanceof Error ? error.message : String(error)}`)); return 1; }
 }

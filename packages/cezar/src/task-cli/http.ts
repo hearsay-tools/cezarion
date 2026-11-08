@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 /**
  * The loopback HTTP half of `cez task` (#504, spec 2026-09-24-cez-task-cli): plain `fetch`
  * against the cockpit's own `/api/v1/p/:projectId` routes, with request deadlines.
@@ -12,7 +13,7 @@ export const REQUEST_TIMEOUT_MS = 45_000;
 /** Every failure carries its exit code and the JSON body the CLI prints. */
 export class TaskCliError extends Error {
   constructor(readonly exitCode: number, readonly body: Record<string, unknown>) {
-    super(typeof body.error === 'string' ? body.error : 'cez task failed');
+    super(typeof body.error === 'string' ? body.error : commandText('cez task failed'));
   }
 }
 

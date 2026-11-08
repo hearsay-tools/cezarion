@@ -1,3 +1,4 @@
+import { commandText } from './command.ts';
 import type { Home } from './home.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,7 +31,7 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
     && readMigrationRecord(home)?.stagedAt !== undefined) return { kind: 'staged' };
   if (marker?.state !== 'committed' && existsSync(join(home.config, 'install.json.failed'))
     && listServerInstances(legacy).some(({ state }) => state.installed && !state.dryRun)) {
-    console.warn(`[hsq] server migration was rolled back; serving legacy home ${legacy.root}. Run hsq server-migrate to retry.`);
+    console.warn(commandText(`[hsq] server migration was rolled back; serving legacy home ${legacy.root}. Run hsq server-migrate to retry.`));
     return { kind: 'legacy', home: legacy };
   }
   migrateLegacyHome(legacy, home, { env });

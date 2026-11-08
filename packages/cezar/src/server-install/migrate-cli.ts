@@ -1,13 +1,14 @@
+import { commandText } from '../home/command.ts';
 import { parseArgs } from 'node:util';
 import type { Home } from '../home/home.ts';
 import { prepareHome } from '../home/entry.ts';
 import { runServerMigrate, type ServerMigrateOptions } from './group-migrate.ts';
 import type { Runner, Ui } from './types.ts';
 
-const USAGE = `Usage: cez server-migrate [--dry-run] [--yes]
+const USAGE = commandText(`Usage: cez server-migrate [--dry-run] [--yes]
 Move every server install recorded in the legacy home to the new unit, site and home names, as one group.
   --dry-run   list every unit, site, file and environment line it would change; change nothing
-  --yes       accept safe defaults (privileged commands still need passwordless sudo or your paste)`;
+  --yes       accept safe defaults (privileged commands still need passwordless sudo or your paste)`);
 
 export interface ServerMigrateHomes {
   legacy: Home;

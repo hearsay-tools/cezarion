@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { execFileSync } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
@@ -133,12 +134,12 @@ function workerHelp(operation?: string): string {
     'cezar worker — manage owned coding workers', '', 'Usage:',
     ...names.flatMap(name => {
       const help = WORKER_HELP[name]!;
-      return [`  cez worker ${name} ${help.args}`, `    ${help.description}`];
+      return [commandText(`  cez worker ${name} ${help.args}`), `    ${help.description}`];
     }), '', 'Options:',
     ...flags.map(flag => `  ${flag} ${WORKER_FLAG_HELP[flag]}`),
     '  -h, --help                       Show help without a delegation session.', '',
     'Required flags are shown in each synopsis. Other flags are optional.',
-    'Use cez worker <operation> --help for operation help.',
+    commandText('Use cez worker <operation> --help for operation help.'),
     'Commands require an active cezar delegation session and return JSON.',
     'Explicit help prints text and exits successfully; invalid commands return JSON errors.',
   ].join('\n');
@@ -317,15 +318,15 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
   }
   const replacement = Object.hasOwn(REMOVED_WORKER_VERBS, argv[0] ?? '') ? REMOVED_WORKER_VERBS[argv[0]!] : undefined;
   const flags = optionArguments(argv);
-  if (replacement) return usageFailure(`Use cez message ${replacement}; cez worker ${argv[0]} was removed.`);
-  if (argv[0] === 'wait' && flags.some(arg => arg === '--request' || arg.startsWith('--request='))) return usageFailure('Use cez message wait --request <UUID>.');
-  if (argv[0] === 'wait' && flags.some(arg => arg === '--peer' || arg.startsWith('--peer='))) return usageFailure('Use cez message wait --peer <task-id>.');
+  if (replacement) return usageFailure(commandText(`Use cez message ${replacement}; cez worker ${argv[0]} was removed.`));
+  if (argv[0] === 'wait' && flags.some(arg => arg === '--request' || arg.startsWith('--request='))) return usageFailure(commandText('Use cez message wait --request <UUID>.'));
+  if (argv[0] === 'wait' && flags.some(arg => arg === '--peer' || arg.startsWith('--peer='))) return usageFailure(commandText('Use cez message wait --peer <task-id>.'));
   if (argv[0] === 'resume') {
     if (argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h')) { console.log(workerHelp('resume')); return 0; }
-    if (flags.some(arg => /^--(?:kind|resume|request-id)(?:=|$)/.test(arg))) return usageFailure('Use cez worker resume <worker-id> "<instruction>" --id <UUID> [--timeout-seconds <1-86400>].');
+    if (flags.some(arg => /^--(?:kind|resume|request-id)(?:=|$)/.test(arg))) return usageFailure(commandText('Use cez worker resume <worker-id> "<instruction>" --id <UUID> [--timeout-seconds <1-86400>].'));
     return runDelegationCommand(['send', '--kind', 'request', '--resume', ...argv.slice(1)], env, () => workerHelp('resume'));
   }
-  if (argv[0] === 'tasks') return usageFailure('Use cez message tasks.');
+  if (argv[0] === 'tasks') return usageFailure(commandText('Use cez message tasks.'));
   return runDelegationCommand(argv, env);
 }
 const MESSAGE_HELP: Record<string, string> = {
@@ -339,7 +340,7 @@ const MESSAGE_HELP: Record<string, string> = {
 };
 function messageHelp(operation?: string): string {
   const entries = operation === undefined ? Object.entries(MESSAGE_HELP) : [[operation, MESSAGE_HELP[operation]!]];
-  return ['cezar message — task conversations', '', 'Usage:', ...entries.map(([name, args]) => `  cez message ${name} ${args}`), '', 'Commands require an active delegation session and return JSON.'].join('\n');
+  return ['cezar message — task conversations', '', 'Usage:', ...entries.map(([name, args]) => commandText(`  cez message ${name} ${args}`)), '', 'Commands require an active delegation session and return JSON.'].join('\n');
 }
 /** Values after the option terminator are always message text or positionals. */
 function optionArguments(argv: string[]): string[] {
@@ -349,16 +350,16 @@ function optionArguments(argv: string[]): string[] {
 export async function runMessageCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
   const operation = argv[0];
   if (argv.length === 1 && (operation === '--help' || operation === '-h')) { console.log(messageHelp()); return 0; }
-  if (!operation || !Object.hasOwn(MESSAGE_HELP, operation)) return usageFailure('Use cez message --help for task messaging commands.');
+  if (!operation || !Object.hasOwn(MESSAGE_HELP, operation)) return usageFailure(commandText('Use cez message --help for task messaging commands.'));
   const flags = optionArguments(argv);
-  if (flags.some(arg => arg === '--resume' || arg.startsWith('--resume='))) return usageFailure('Use cez worker resume <worker-id> "<instruction>" --id <UUID> to resume an owned worker.');
-  if (flags.some(arg => arg === '--kind' || arg.startsWith('--kind='))) return usageFailure('The cez message verb selects the kind; use request, progress, follow-up or reply.');
+  if (flags.some(arg => arg === '--resume' || arg.startsWith('--resume='))) return usageFailure(commandText('Use cez worker resume <worker-id> "<instruction>" --id <UUID> to resume an owned worker.'));
+  if (flags.some(arg => arg === '--kind' || arg.startsWith('--kind='))) return usageFailure(commandText('The cez message verb selects the kind; use request, progress, follow-up or reply.'));
   if (flags.includes('--help') || flags.includes('-h')) {
     // Let parseArgs decide whether a flag is help or a string option's value.
     const internal = operation === 'request' ? 'send' : operation;
     return runDelegationCommand([internal, ...argv.slice(1)], env, () => messageHelp(operation));
   }
-  if (operation === 'wait' && !flags.some(arg => /^--(?:request|peer)(?:=|$)/.test(arg))) return usageFailure('Use cez message wait --request <UUID>, or cez message wait --peer <task-id>.');
+  if (operation === 'wait' && !flags.some(arg => /^--(?:request|peer)(?:=|$)/.test(arg))) return usageFailure(commandText('Use cez message wait --request <UUID>, or cez message wait --peer <task-id>.'));
   const args = operation === 'request' ? ['send', '--kind', 'request', ...argv.slice(1)] : argv;
   return runDelegationCommand(args, env, () => messageHelp(operation));
 }
