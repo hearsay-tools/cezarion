@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import {
@@ -96,7 +97,7 @@ async function reportBody(values: Parsed['values'], env: NodeJS.ProcessEnv, io: 
     }
     if (data === null || typeof data !== 'object' || Array.isArray(data)) usageError('--data must be a JSON object');
   }
-  const runId = env.CEZ_TASK_ID?.trim();
+  const runId = productEnv('TASK_ID', env)?.trim();
   return {
     message,
     ...(values.title?.trim() ? { title: values.title.trim() } : {}),

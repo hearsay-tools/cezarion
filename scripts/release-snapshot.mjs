@@ -4,6 +4,7 @@
 // The build and pack gate run beforehand; publishing uses --ignore-scripts.
 // Missing credentials or an ineligible channel degrade to the documented no-publish result.
 
+import { productEnv } from '../packages/cezar/dist/core/product-env.js';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -15,8 +16,8 @@ import {
   stampManifests,
 } from '../packages/cezar/dist/release/snapshot.js';
 
-const repoRoot = process.env.CEZ_SNAPSHOT_ROOT
-  ? path.resolve(process.env.CEZ_SNAPSHOT_ROOT)
+const repoRoot = productEnv('SNAPSHOT_ROOT')
+  ? path.resolve(productEnv('SNAPSHOT_ROOT'))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The workspace root publishes nothing; every stamped manifest is named by RELEASE_MANIFEST_DIRS.
 const order = Object.keys(RELEASE_MANIFEST_DIRS);
@@ -49,7 +50,7 @@ const nightlyDate = process.env.NIGHTLY_DATE || new Date().toISOString().slice(0
 const plan = computeSnapshot({
   eventName: process.env.GITHUB_EVENT_NAME ?? '',
   refName: process.env.GITHUB_REF_NAME ?? '',
-  requestedChannel: process.env.CEZ_RELEASE_CHANNEL || undefined,
+  requestedChannel: productEnv('RELEASE_CHANNEL') || undefined,
   nightlyDate,
   prNumber: /^\d+$/.test(prNumberRaw) ? Number(prNumberRaw) : undefined,
   headRepo: process.env.PR_HEAD_REPO || undefined,

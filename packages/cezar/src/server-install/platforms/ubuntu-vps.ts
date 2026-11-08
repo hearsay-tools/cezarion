@@ -1,3 +1,5 @@
+import { repairUnitEnv, writeFileStep } from './ubuntu-vps-files.ts';
+import { productEnvEntries } from '../../core/product-env.ts';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { homedir, userInfo } from 'node:os';
@@ -10,9 +12,7 @@ import { failedRestart, freshRestartOrFail, readExecStart, resolveRedeployScope,
 import { recordedSite, recordedUnit, sitePathsToRemove, unitHint } from './ubuntu-vps-names.ts';
 import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuService } from './ubuntu-vps-migration.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
-
 export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
-
 /**
  * The `ubuntu-vps` strategy: stand up an authenticated, proxied cezar on a bare
  * Ubuntu/Debian VPS. cezar itself stays loopback-bound; nginx is the single
@@ -179,39 +179,6 @@ ${http2}
     }
 }
 `;
-}
-
-/** Build a privileged command that writes file content atomically (base64 → no quoting hell). */
-function writeRootFileCmd(path: string, content: string, extra = ''): string {
-  const b64 = Buffer.from(content, 'utf8').toString('base64');
-  const dir = path.slice(0, path.lastIndexOf('/')) || '/';
-  return `install -d -m 0755 ${shquote(dir)} && printf %s ${shquote(b64)} | base64 --decode > ${shquote(path)}${extra ? ` && ${extra}` : ''}`;
-}
-
-/**
- * A sudoStep that writes a root-owned file. The command carries the content as
- * base64 (so quoting/newlines survive a copy-paste), which is unreadable — so we
- * always show the DECODED file content in a note first, so the operator can see
- * exactly what will land on disk and knows the base64 is not doing anything
- * hidden.
- */
-function writeFileStep(
-  ctx: InstallContext,
-  opts: {
-    description: string;
-    path: string;
-    content: string;
-    /** Extra shell appended after the write (` && …`). */
-    extra?: string;
-    verify: (c: InstallContext) => Promise<boolean>;
-  },
-): Promise<void> {
-  return sudoStep(ctx, {
-    description: opts.description,
-    note: `This writes ${opts.path} with exactly this content:\n\n${opts.content}`,
-    command: writeRootFileCmd(opts.path, opts.content, opts.extra),
-    verify: opts.verify,
-  });
 }
 
 const nginxProxyStep = (rebrand: boolean): InstallStep => ({
@@ -595,6 +562,7 @@ export function systemdUnit(
   scope: 'user' | 'system',
   execStart: string,
   bindHost?: string,
+  _rebrand = REBRAND_SWITCH,
 ): string {
   const userLine = scope === 'system' ? `User=${userInfo().username}\n` : '';
   const installTarget = scope === 'system' ? 'multi-user.target' : 'default.target';
@@ -619,7 +587,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ${userLine}WorkingDirectory=${repoRoot}
-Environment=CEZ_REMOTE=1
+${Object.entries(productEnvEntries('REMOTE', '1', true)).reverse().map(([key, value]) => `Environment=${key}=${value}`).join('\n')}
 Environment=PATH=${sysd(pathDirs.join(':'))}
 ExecStart=${sysd(execStart)} serve --no-open --port ${port}${sysd(bind)}
 Restart=on-failure
@@ -714,7 +682,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
         mkdirSync(join(homedir(), '.config', 'systemd', 'user'), { recursive: true });
         writeFileSync(
           unitPath,
-          systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'user', execStart, ctx.state.bindHost),
+          systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'user', execStart, ctx.state.bindHost, rebrand),
           'utf8',
         );
         await ctx.runner.interactive('systemctl', ['--user', 'daemon-reload']);
@@ -749,7 +717,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     await writeFileStep(ctx, {
       description: 'Install the cezar systemd unit, start it now, and enable it at boot.',
       path: `/etc/systemd/system/${UNIT_NAME}`,
-      content: systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'system', execStart, ctx.state.bindHost),
+      content: systemdUnit(ctx.repoRoot, ctx.state.primaryPort, 'system', execStart, ctx.state.bindHost, rebrand),
       extra: `systemctl daemon-reload && systemctl enable --now ${UNIT_NAME}`,
       verify: (c) => verifyCommand(c, 'systemctl', ['is-enabled', UNIT_NAME]),
     });
@@ -995,12 +963,13 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
       // Restart the systemd service so it picks up the new cezar (a fresh local
       // build the unit runs from, or a newly published cezarion via npx), then
       // re-run the same end-to-end verify install uses.
+      const userUnitPath = join(homedir(), '.config', 'systemd', 'user', UNIT_NAME);
       const scope = resolveRedeployScope(ctx,
         // No recorded artifact (older record, or the step was check()-satisfied):
         // prefer the scope whose unit file actually exists — the user unit is the
         // install default, so defaulting to `system` would sudo-restart a unit
         // that was never installed.
-        existsSync(join(homedir(), '.config', 'systemd', 'user', UNIT_NAME)));
+        existsSync(userUnitPath));
       // #696: an npx-launched unit re-execs its cached build on restart, so a
       // deploy that doesn't invalidate the npx cache never actually updates.
       // Clear the cezarion cache first (read the live ExecStart to know the
@@ -1010,6 +979,7 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
         ctx.ui.info(`DRY RUN — would reload+restart the cezar ${scope} service and re-verify the cockpit.`);
         return;
       }
+      await repairUnitEnv(ctx, scope, recordedUnit(ctx, rebrand).path ?? (scope === 'user' ? userUnitPath : `/etc/systemd/system/${UNIT_NAME}`));
       const before = await serviceSnapshot(ctx, scope, UNIT_NAME);
       const sudo = { used: false };
       const fail = (reason: string): Promise<never> => failedRestart(ctx, scope, UNIT_NAME, reason, sudo.used);

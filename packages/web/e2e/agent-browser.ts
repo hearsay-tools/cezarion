@@ -375,7 +375,7 @@ export function fixtureServeEnv(
   // Every ambient CEZ_* goes, not a list of known opt-ins: a denylist is one forgotten flag away
   // from this leak again (the unit-test scrub of hearsay-tools/cezarion#820 missed CEZ_FOLLOWUPS),
   // and nothing a fixture needs arrives through the parent's environment.
-  const ambient = Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('CEZ_'))
+  const ambient = Object.entries(process.env).filter(([key]) => !/^(CEZ|HSQ)_/i.test(key))
   const env: NodeJS.ProcessEnv = { ...Object.fromEntries(ambient), ...extra }
   for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key]
   // Cezar pins TMPDIR inside the ambient checkout. Without a ceiling, discovery
@@ -421,11 +421,11 @@ export function fixtureServeEnv(
     // One line on purpose: the `fixture-serve-must-pin-cez-home` design guardian reads these
     // two together, and a CEZ_DRY_RUN without CEZ_HOME beside it is exactly the mistake it
     // exists to catch.
-    CEZ_DRY_RUN: '1', CEZ_HOME: resolve(fixtureRoot, '.cez-home'),
+    CEZ_DRY_RUN: '1', CEZ_HOME: resolve(fixtureRoot, '.cez-home'), HSQ_DRY_RUN: '1', HSQ_HOME: resolve(fixtureRoot, '.cez-home'),
     // Local by default (#358). A hosted parent exports CEZ_REMOTE=1 into process.env; spreading
     // it would hide the account catalog and trip phone-layout assertions. Specs that exercise
     // hosted security pass CEZ_REMOTE: '1' in extra.
-    CEZ_REMOTE: extra.CEZ_REMOTE ?? '0',
+    CEZ_REMOTE: extra.HSQ_REMOTE ?? extra.CEZ_REMOTE ?? '0', HSQ_REMOTE: extra.HSQ_REMOTE ?? extra.CEZ_REMOTE ?? '0',
   }
 }
 /**

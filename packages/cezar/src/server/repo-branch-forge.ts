@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 /**
  * What branch classification asks GitHub: the states of the PRs runs created, and every PR whose
  * head is one of the branches still in question. The second is asked per head, never as one
@@ -161,7 +162,7 @@ export function createGithubBranchForge(deps: GithubBranchForgeDeps = {}): Branc
     },
     async prsForHeads(repoRoot, heads) {
       const wanted = [...new Set(heads)];
-      if (process.env.CEZ_DRY_RUN === '1' || wanted.length === 0) return { available: true, prs: [], incomplete: new Set() };
+      if (productEnv('DRY_RUN') === '1' || wanted.length === 0) return { available: true, prs: [], incomplete: new Set() };
       const prs: ForgePr[] = [];
       const misses: string[] = [];
       const now = Date.now();

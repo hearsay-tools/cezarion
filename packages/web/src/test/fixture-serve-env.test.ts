@@ -159,3 +159,14 @@ it('pins a fresh server HOME after caller overrides without changing the invokin
   expect(execFileSync('git', ['-C', path, 'var', 'GIT_AUTHOR_IDENT'], { env, encoding: 'utf8' }))
     .toMatch(/^Cezar Tests <tests@cezar.invalid> /)
 })
+
+it('pins fixture controls over hostile preferred values', () => {
+  vi.stubEnv('HSQ_REMOTE', '1')
+  vi.stubEnv('HSQ_DRY_RUN', '0')
+  vi.stubEnv('HSQ_HOME', '/live-home')
+  const env = fixtureServeEnv(root())
+  expect(env.HSQ_REMOTE).toBe('0')
+  expect(env.HSQ_DRY_RUN).toBe('1')
+  expect(env.HSQ_HOME).toBe(env.CEZ_HOME)
+  expect(fixtureServeEnv(root(), { CEZ_REMOTE: '1' }).HSQ_REMOTE).toBe('1')
+})

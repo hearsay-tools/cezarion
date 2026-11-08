@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin, type RecordPatch } from './record-write-rules.ts';
@@ -55,7 +56,6 @@ import { archivePullRequests, pullRequestKey } from './pull-requests.ts';
 import { isRepoScopedRef, promptNamesRepo, refUrlRepo } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
-
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
 import { ISSUE_URL_RE, originatingIssue, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, scanEventReferences, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
 import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
@@ -2641,7 +2641,7 @@ export class RunStore extends EventEmitter {
    */
   private redact<T extends RunEvent>(event: T): T {
     const safe = this.sessionSecrets.size ? redactDeep(event, [...this.sessionSecrets]) : event;
-    if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
+    if (productEnv('REDACT_SECRETS') === '0') return safe;
     return redactDeep(safe, this.hostSecrets());
   }
 

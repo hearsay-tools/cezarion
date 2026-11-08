@@ -1,15 +1,12 @@
+import type { ModelDiscoveryOptions } from './model-discovery-options.ts';
+import { productEnv } from './product-env.ts';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { effortLevelSchema, type EffortLevel } from '@open-mercato/cezar-contract/effort';
-import { trackChildExit } from './agent-runner.ts';
+import { modelProbeTeardown } from './model-probe-teardown.ts';
 import { buildChildEnv } from './agent-env.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 
-export interface PiModelDiscoveryOptions {
-  cwd: string;
-  bin?: string;
-  timeoutMs?: number;
-  spawn?: (bin: string, args: readonly string[], cwd: string) => ChildProcessWithoutNullStreams;
-}
+export type PiModelDiscoveryOptions = ModelDiscoveryOptions;
 
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 10_000;
 /** Grace between the probe's SIGTERM and the SIGKILL that follows it. */
@@ -31,7 +28,7 @@ const ANSI_RE = /\u001B\[[0-9;]*[A-Za-z]/g;
 
 /** The host binary, resolved exactly like `PiRunner` and the backend probe. */
 export function resolvePiExecutable(bin?: string): string {
-  return bin ?? process.env.CEZ_PI_BIN ?? 'pi';
+  return bin ?? productEnv('PI_BIN') ?? 'pi';
 }
 
 /**
@@ -46,7 +43,7 @@ export function resolvePiExecutable(bin?: string): string {
 export async function discoverPiModels(options: PiModelDiscoveryOptions): Promise<ModelOption[]> {
   // `PiRunner` swaps in the bundled mock under CEZ_DRY_RUN=1. Without an explicit binary, skip
   // both host probes so an offline dry-run cockpit never shells out to a real `pi`.
-  if (options.bin === undefined && process.env.CEZ_PI_BIN === undefined && process.env.CEZ_DRY_RUN === '1') {
+  if (options.bin === undefined && productEnv('PI_BIN') === undefined && productEnv('DRY_RUN') === '1') {
     return [];
   }
 
@@ -108,7 +105,7 @@ async function collectPiOutput(
   timeoutMs: number,
   label: string,
 ): Promise<string> {
-  const kill = teardown(child);
+  const kill = modelProbeTeardown(child, KILL_GRACE_MS);
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await new Promise<string>((resolve, reject) => {
@@ -277,26 +274,4 @@ export function spawnPi(
     cwd,
     env: buildChildEnv({ backend: 'pi' }),
   });
-}
-
-/**
- * Returns the probe's teardown: SIGTERM now, SIGKILL once the grace window elapses.
- *
- * Both steps gate on the child's *real* termination, never on `child.killed` — Node flips that
- * flag the moment a signal is delivered. Called from both the failure path and the `finally`,
- * so the escalation is armed at most once.
- */
-function teardown(child: ChildProcessWithoutNullStreams): () => void {
-  const hasExited = trackChildExit(child);
-  let signalled = false;
-  return () => {
-    if (signalled || hasExited()) return;
-    signalled = true;
-    child.kill('SIGTERM');
-    const escalation = setTimeout(() => {
-      if (hasExited()) return;
-      child.kill('SIGKILL');
-    }, KILL_GRACE_MS);
-    escalation.unref?.();
-  };
 }

@@ -201,12 +201,12 @@ function quantile(values: readonly number[], q: number): number {
 
 async function runChild(options: ChildOptions, resultPath: string): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'cez-bench-'));
-  process.env.CEZ_HOME = join(root, 'home');
+  process.env.HSQ_HOME = process.env.CEZ_HOME = join(root, 'home');
   const { resolveHome } = await import('../src/home/resolve.ts');
   const home = resolveHome({ purpose: 'cli' });
   const { Home } = await import('../src/home/home.ts');
   Home.sandbox(home.root);
-  process.env.CEZ_DRY_RUN = '1';
+  process.env.HSQ_DRY_RUN = process.env.CEZ_DRY_RUN = '1';
   try {
     const { RunStore } = await import('../src/runs/store.ts');
     const { seedRuns } = await import('../src/runs/run-store.testkit.ts');
@@ -411,7 +411,7 @@ interface ParentOptions { sizes: number[]; profiles: FixtureProfile[]; processes
 
 function runChildProcess(options: ChildOptions, resultPath: string): Promise<void> {
   const env = { ...process.env };
-  for (const key of Object.keys(env)) if (key.startsWith('CEZ_')) delete env[key];
+  for (const key of Object.keys(env)) if (/^(CEZ|HSQ)_/.test(key)) delete env[key];
   const args = [...process.execArgv, '--expose-gc', '--max-old-space-size=8192', SCRIPT, '--child',
     '--size', String(options.size), '--profile', options.profile, '--process', String(options.process),
     '--samples', String(options.samples), '--budget-seconds', String(options.budgetSeconds),

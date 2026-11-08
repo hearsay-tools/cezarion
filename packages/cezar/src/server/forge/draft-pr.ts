@@ -1,3 +1,4 @@
+import { productEnv } from '../../core/product-env.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { execFile } from 'node:child_process';
 import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-contract/handoff';
@@ -40,7 +41,7 @@ export async function createDraftPr(input: DraftPrInput): Promise<DraftPrOutcome
 
   // DRY-RUN (CEZ_DRY_RUN=1): no push, no gh — simulate success with a fake PR
   // URL so the whole review → PR flow is testable without GitHub.
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     return { ok: true, url: 'https://github.com/open-mercato/demo/pull/777', dryRun: true };
   }
 

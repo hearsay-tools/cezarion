@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { HomeStore, homeFileRoot, readHomeFile } from '../home/store.ts';
 import { z } from 'zod';
@@ -228,8 +229,8 @@ const agentDefaultsSchema = z
   })
   .passthrough();
 
-const workspacePathSchema = (envName: 'CEZ_BROWSE_ROOT' | 'CEZ_PROJECTS_DIR', fallback: string) => {
-  const defaultValue = () => process.env[envName]?.trim() || fallback;
+const workspacePathSchema = (read: () => string | undefined, fallback: string) => {
+  const defaultValue = () => read()?.trim() || fallback;
   return z.string().min(1).max(4096).default(defaultValue).catch(defaultValue);
 };
 
@@ -255,11 +256,11 @@ export const workspaceConfigSchema = z
     schemaVersion: z.number().int().min(0).default(0).catch(0),
     /** Root exposed by the Add project folder browser. Environment supplies
      *  the zero-config default; an explicit workspace value wins thereafter. */
-    browseRoot: workspacePathSchema('CEZ_BROWSE_ROOT', '~/'),
+    browseRoot: workspacePathSchema(() => productEnv('BROWSE_ROOT'), '~/'),
     /** Checkout root for GUI-cloned projects. Stored as written (a literal
      *  `~` is expanded by the checkout flow, not here); validated writable
      *  when *changed*, never at load. */
-    projectsDir: workspacePathSchema('CEZ_PROJECTS_DIR', '~/cezar/projects'),
+    projectsDir: workspacePathSchema(() => productEnv('PROJECTS_DIR'), '~/cezar/projects'),
     archiveOnMerge: z.boolean().optional().catch(undefined),
     /** Release channel the self-updater follows (`stable` → npm `latest`, `nightly` → `nightly`,
      *  `development` → none: a worktree or PR preview picked by hand). Absent inherits

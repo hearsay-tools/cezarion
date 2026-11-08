@@ -113,7 +113,7 @@ async function benchmark() {
     }
     const plain = join(fixture, 'plain'); mkdirSync(plain);
     child = fork(fileURLToPath(import.meta.url), ['--fixture-server'], {
-      env: { ...process.env, CEZ_HOME: join(fixture, 'home') }, stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+      env: { ...process.env, CEZ_HOME: join(fixture, 'home'), HSQ_HOME: join(fixture, 'home') }, stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
     });
     for (let repeat = 0; repeat < repeats; repeat++) {
       for (const count of [1, 10, 40]) {

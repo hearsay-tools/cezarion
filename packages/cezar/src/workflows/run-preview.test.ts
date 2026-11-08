@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreviewServeRequest, PreviewServeResult } from '@open-mercato/cezar-contract';
-import { CiToolController, type CezarToolHandlers } from '../ci-wait/controller.ts';
+import { CiToolController } from '../ci-wait/controller.ts';
 import type { PreviewHostLike } from '../preview/registration.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
@@ -70,7 +70,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
     rmSync(repoRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  const callbackAt = async (provision: { mock: { calls: Array<[CezarToolHandlers]> } }, index: number): Promise<PreviewCallback> => {
+  const callbackAt = async (provision: { mock: { calls: Array<Parameters<CiToolController['provision']>> } }, index: number): Promise<PreviewCallback> => {
     await expect.poll(() => provision.mock.calls.length, { timeout: 15_000 }).toBeGreaterThan(index);
     const callback = provision.mock.calls[index]![0].registerPreview;
     expect(callback).toBeTypeOf('function');

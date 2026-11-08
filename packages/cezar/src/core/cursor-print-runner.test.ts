@@ -323,7 +323,7 @@ describe('Cursor print logical session', () => {
     const syntheticToken = 'synthetic-tool-token-590';
     spec.restrictCrossSessionMessaging = true;
     spec.cezarTools = { name: 'cezar', command: 'node', args: ['/safe/mock-mcp.mjs'] };
-    spec.env = { ...spec.env, CEZ_TOOL_TOKEN: syntheticToken, CEZ_TOOL_SOCKET: '/tmp/synthetic-tool-socket' };
+    spec.env = { ...spec.env, CEZ_TOOL_TOKEN: syntheticToken, CEZ_TOOL_SOCKET: '/tmp/synthetic-tool-socket', HSQ_TOOL_TOKEN: syntheticToken, HSQ_AUTOMATIONS: '', CEZ_AUTOMATIONS: '0' };
     spec.additionalDirectories = [extraRoot];
     spec.effort = 'low';
     spec.images = [{ type: 'image', source: { type: 'base64', media_type: 'image/png',
@@ -366,6 +366,8 @@ describe('Cursor print logical session', () => {
     expect(turns[1]?.args).not.toContain('--image');
     expect(descriptor).toContain('${CEZ_TOOL_TOKEN}');
     expect(descriptor).toContain('${CEZ_TOOL_SOCKET}');
+    expect(descriptor).toContain('${HSQ_TOOL_TOKEN}');
+    expect(descriptor).toContain('${HSQ_AUTOMATIONS}');
     expect(descriptor).not.toContain(syntheticToken);
     const pluginDir = turns[0]?.args[(turns[0]?.args.indexOf('--plugin-dir') ?? -1) + 1];
     const imagePath = turns[0]?.args[(turns[0]?.args.indexOf('--image') ?? -1) + 1];

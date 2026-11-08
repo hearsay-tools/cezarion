@@ -59,7 +59,8 @@ test('two capture shards build evidence that the merge job validates before publ
   const suite = step(capture, 'Run the browser suite with V8 function logs').run;
   assert.match(suite, /--config packages\/web\/e2e\/spec-map\/vitest\.config\.ts --shard="\$SHARD\/2"/);
   assert.match(suite, /--outputFile\.json="\$RUNNER_TEMP\/spec-map\/results\.json"/);
-  assert.match(step(capture, 'Build the cockpit again with source maps').run, /VITE_CEZ_E2E=1 npm run build -w @open-mercato\/cezar-web -- \\\n\s+--outDir "\$RUNNER_TEMP\/spec-map\/sourcemaps" --emptyOutDir --sourcemap hidden/);
+  // D8 pins both aliases so inherited preferred values cannot disable the E2E build.
+  assert.match(step(capture, 'Build the cockpit again with source maps').run, /VITE_CEZ_E2E=1 VITE_HSQ_E2E=1 npm run build -w @open-mercato\/cezar-web -- \\\n\s+--outDir "\$RUNNER_TEMP\/spec-map\/sourcemaps" --emptyOutDir --sourcemap hidden/);
   // `partial` refuses source maps whose JavaScript differs from the served bundle.
   const partial = step(capture, 'Turn the logs into evidence').run;
   assert.match(partial, /build-map\.ts partial/);

@@ -1,3 +1,4 @@
+import { productEnvEntries } from '../../core/product-env.ts';
 import { atStepOpen, atContinue } from './launch-read-resolver.ts';
 import type { DelegationProvisioner } from '../../delegation/provision.ts';
 import { provisionArtifactDirectory } from '../../artifacts/lifecycle.ts';
@@ -39,15 +40,15 @@ export interface LaunchContextHost {
  *  write-probed here, on the last common path before a spawn, so an unusable
  *  temp directory throws `AgentTempDirError` at the caller rather than
  *  turning into empty command output inside a running agent. */
-export function agentEnv({ dataDir }: LaunchContext, cockpit: CockpitAddress, runId: string): Record<string, string> {
+export function agentEnv({ dataDir }: LaunchContext, cockpit: CockpitAddress, runId: string, rebrand?: boolean): Record<string, string> {
   return {
-    CEZ_ARTIFACTS_DIR: provisionArtifactDirectory(dataDir, runId),
-    CEZ_HANDOFF_FILE: handoffPath(dataDir, runId),
-    CEZ_TASK_ID: runId,
+    ...productEnvEntries('ARTIFACTS_DIR', provisionArtifactDirectory(dataDir, runId), rebrand),
+    ...productEnvEntries('HANDOFF_FILE', handoffPath(dataDir, runId), rebrand),
+    ...productEnvEntries('TASK_ID', runId, rebrand),
     // Shadow a path inherited from an older parent process.
-    CEZ_TODOS_FILE: '',
+    ...productEnvEntries('TODOS_FILE', '', rebrand),
     ...agentTmpEnv(dataDir, runId),
-    ...(cockpit ? { CEZ_COCKPIT_URL: cockpit.origin, CEZ_PROJECT_ID: cockpit.projectId } : {}),
+    ...(cockpit ? { ...productEnvEntries('COCKPIT_URL', cockpit.origin, rebrand), ...productEnvEntries('PROJECT_ID', cockpit.projectId, rebrand) } : {}),
   };
 }
 

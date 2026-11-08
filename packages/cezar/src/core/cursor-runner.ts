@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { fileURLToPath } from 'node:url';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
 import type {
@@ -48,7 +49,7 @@ export class CursorRunner implements AgentRunner {
 
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {
     const bundledPrintMock = fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url));
-    const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
+    const bin = this.options.bin ?? productEnv('CURSOR_BIN') ?? (productEnv('DRY_RUN') === '1'
       ? bundledPrintMock : 'agent');
     const isBundledMock = bin === bundledPrintMock;
     const mockModels: readonly ModelOption[] = [

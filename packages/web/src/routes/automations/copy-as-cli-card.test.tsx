@@ -19,7 +19,8 @@ const draft = fromDefinition({
 })
 /** Mounted where the editor lives: under a project, so the line names this cockpit and project. */
 const renderInProject = (ui: ReactElement) => render(<MemoryRouter initialEntries={['/p/my-proj/automations/a1']}>{ui}</MemoryRouter>)
-const address = `CEZ_COCKPIT_URL='${window.location.origin}' CEZ_PROJECT_ID='my-proj' `
+// D8: pin both names so inherited preferred settings cannot redirect the copied command.
+const address = `CEZ_COCKPIT_URL='${window.location.origin}' CEZ_PROJECT_ID='my-proj' HSQ_COCKPIT_URL='${window.location.origin}' HSQ_PROJECT_ID='my-proj' `
 const line = address + "cez automation add --name 'Nightly' --cron '0 4 * * *' --workflow 'quick-task' --no-autonomous --prompt 'Bump what'\\''s stale'"
 
 describe('CopyAsCliCard', () => {

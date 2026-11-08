@@ -41,3 +41,8 @@ an outside-write or reset incident on the legacy home. It uses the pinned restor
 or acceptance writer directly, without preparing or migrating the split home.
 Help lists both actions. The command is registered only with `REBRAND_SWITCH`
 enabled. See `BACKWARD_COMPATIBILITY.md` for output and exit codes.
+
+Product task-context reads accept `HSQ_*` first with permanent `CEZ_*` fallback.
+Generated child entries keep the legacy names with the release switch off; with
+it on they carry both names and the same value. Empty context values remain
+intentional clears. `core/product-env.ts` owns both selection and generation.

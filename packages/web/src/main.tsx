@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { setApiBaseUrl } from '@open-mercato/cezar-api-client/utils/project-scope'
+import { resolveBuildApiBase } from './lib/build-env'
 import { App } from './app'
 import './styles/index.css'
 import './styles/accessibility.css'
@@ -17,12 +18,8 @@ import './styles/accessibility.css'
  *   deployed bundle at a different service without rebuilding it. It wins, because the HTML is
  *   served per deployment while the bundle is baked once.
  */
-function resolveApiBase(): string {
-  const meta = document.querySelector('meta[name="cez-api-base"]')?.getAttribute('content')
-  return meta?.trim() || import.meta.env.VITE_CEZ_API_BASE || ''
-}
-
-setApiBaseUrl(resolveApiBase())
+const apiMeta = document.querySelector('meta[name="cez-api-base"]')?.getAttribute('content')
+setApiBaseUrl(resolveBuildApiBase(apiMeta, import.meta.env.VITE_HSQ_API_BASE, import.meta.env.VITE_CEZ_API_BASE))
 
 const container = document.getElementById('root')
 if (!container) throw new Error('cezar: #root container is missing from index.html')

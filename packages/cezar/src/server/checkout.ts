@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { execFile, spawn } from 'node:child_process';
 import { lstat, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -362,7 +363,7 @@ export async function checkoutRepo(opts: CheckoutOptions): Promise<CheckoutResul
   const emit = (event: Omit<CheckoutProgressEvent, 'name' | 'checkoutId'>): void =>
     opts.onProgress({ ...event, name, ...(opts.checkoutId ? { checkoutId: opts.checkoutId } : {}) });
 
-  const run = opts.run ?? (process.env.CEZ_DRY_RUN === '1' ? dryRunCloneRunner : ghCloneRunner);
+  const run = opts.run ?? (productEnv('DRY_RUN') === '1' ? dryRunCloneRunner : ghCloneRunner);
   let outcome: Awaited<ReturnType<CloneRunner>>;
   try {
     outcome = await run(ref, target, (line) => emit({ phase: 'cloning', line }), opts.signal);

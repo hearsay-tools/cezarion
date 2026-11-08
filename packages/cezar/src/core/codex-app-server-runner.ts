@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { uiAskQuestions } from './ask.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -52,7 +53,6 @@ import {
   type CodexUiMapping,
   type CodexUiMapperState,
 } from './codex-ui-mapper.ts';
-
 // One startup budget, including handshake ACKs and the first main-thread turn.
 // This is not a model-turn or human-question lifetime limit.
 const STARTUP_TIMEOUT_MS = 60_000;
@@ -631,7 +631,7 @@ class CodexSession implements AgentSession {
       this.emit({ type: 'note', message: 'Codex requirements unavailable; using Codex permission defaults' });
     }
     this.assertOpen();
-    const restrictNetwork = process.env.CEZ_CODEX_NETWORK === '0';
+    const restrictNetwork = productEnv('CODEX_NETWORK') === '0';
 
     const overrides = {
       model: this.spec.model,
@@ -1209,7 +1209,7 @@ const REASONING_SUMMARIES = new Set(['auto', 'concise', 'detailed', 'none']);
  * value falls back to `auto`.
  */
 export function reasoningSummary(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = env.CEZ_CODEX_REASONING?.trim().toLowerCase();
+  const raw = productEnv('CODEX_REASONING', env)?.trim().toLowerCase();
   if (!raw) return 'auto';
   return REASONING_SUMMARIES.has(raw) ? raw : 'auto';
 }

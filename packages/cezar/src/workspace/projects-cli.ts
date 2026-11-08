@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -55,7 +56,7 @@ export async function runProjectsCommand(
   opts: { home: Home; defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
 ): Promise<number> {
   const io = opts.io ?? defaultIo;
-  const singleProject = (opts.env ?? process.env).CEZ_SINGLE_PROJECT === '1';
+  const singleProject = productEnv('SINGLE_PROJECT', (opts.env ?? process.env)) === '1';
   const [sub = 'list', ...rest] = args;
   switch (sub) {
     case 'list':

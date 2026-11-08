@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 import { loadConfig } from '../config.ts';
@@ -28,8 +29,8 @@ export const TITLE_MAX = 40;
  * naming tests use.
  */
 export function autoNamingActive(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.CEZ_AUTONAME === '0') return false;
-  if (env.CEZ_DRY_RUN === '1' && env.CEZ_AUTONAME !== '1') return false;
+  if (productEnv('AUTONAME', env) === '0') return false;
+  if (productEnv('DRY_RUN', env) === '1' && productEnv('AUTONAME', env) !== '1') return false;
   return true;
 }
 
@@ -46,7 +47,7 @@ export function liveTitleUpdatesEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (config.liveTitleUpdates !== undefined) return config.liveTitleUpdates;
-  return env.CEZ_TITLE_UPDATES !== '0';
+  return productEnv('TITLE_UPDATES', env) !== '0';
 }
 
 export const NAMER_SYSTEM_PROMPT =

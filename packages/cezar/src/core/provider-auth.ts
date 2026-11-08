@@ -1,6 +1,6 @@
+import { productEnv } from './product-env.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
 import { withEnvPrefix } from './shell-env.ts';
 
@@ -65,7 +65,7 @@ export interface ProviderCommandOptions {
 export function providerAuthChecksDisabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env[AGENT_MODELS_LOCKED_ENV] === '1';
+  return productEnv('AGENT_MODELS_LOCKED', env) === '1';
 }
 
 interface ProviderDescriptor {
@@ -269,7 +269,7 @@ function parseCursorStatus(result: ProviderCommandResult): ProviderConnectionSta
 const DESCRIPTORS: readonly ProviderDescriptor[] = [
   {
     id: 'claude',
-    executable: () => process.env.CEZ_CLAUDE_BIN ?? 'claude',
+    executable: () => productEnv('CLAUDE_BIN') ?? 'claude',
     statusArgs: ['auth', 'status', '--json'],
     loginArgs: ['auth', 'login'],
     installHint: 'Install Claude Code, then run `claude auth login`.',
@@ -277,7 +277,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
   },
   {
     id: 'codex',
-    executable: () => process.env.CEZ_CODEX_BIN ?? 'codex',
+    executable: () => productEnv('CODEX_BIN') ?? 'codex',
     statusArgs: ['login', 'status'],
     loginArgs: ['login'],
     installHint: 'Install the Codex CLI, then run `codex login`.',
@@ -285,7 +285,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
   },
   {
     id: 'opencode',
-    executable: () => process.env.CEZ_OPENCODE_BIN ?? 'opencode',
+    executable: () => productEnv('OPENCODE_BIN') ?? 'opencode',
     statusArgs: ['auth', 'list'],
     loginArgs: ['auth', 'login'],
     installHint: 'Install OpenCode, then run `opencode auth login`.',
@@ -293,7 +293,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
   },
   {
     id: 'pi',
-    executable: () => process.env.CEZ_PI_BIN ?? 'pi',
+    executable: () => productEnv('PI_BIN') ?? 'pi',
     statusArgs: ['--list-models'],
     loginArgs: ['/login'],
     installHint: 'Install pi, then run `pi /login`.',
@@ -301,7 +301,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
   },
   {
     id: 'cursor',
-    executable: () => process.env.CEZ_CURSOR_BIN ?? 'agent',
+    executable: () => productEnv('CURSOR_BIN') ?? 'agent',
     statusArgs: ['status', '--format', 'json'],
     loginArgs: ['login'],
     installHint: 'Install Cursor CLI, then run `agent login`.',
@@ -309,7 +309,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
   },
   {
     id: 'omp',
-    executable: () => process.env.CEZ_OMP_BIN ?? 'omp',
+    executable: () => productEnv('OMP_BIN') ?? 'omp',
     statusArgs: ['models', '--json'],
     loginArgs: ['login'],
     installHint: 'Install OMP (curl -fsSL https://omp.sh/install | sh), then run `omp login`.',
@@ -462,7 +462,7 @@ export class ProviderAuthService {
    * refresh:true waits for a probe.
    */
   status(options?: { refresh?: boolean }): Promise<ProviderStatusResponse> {
-    if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) {
+    if (productEnv('DRY_RUN') === '1' || providerAuthChecksDisabled()) {
       return Promise.resolve({
         providers: PROVIDER_IDS.map((provider) => ({ provider, status: 'connected' })),
       });
@@ -486,7 +486,7 @@ export class ProviderAuthService {
   }
 
   reportRuntimeAuthFailure(provider: ProviderId): RuntimeAuthFailureReport | null {
-    if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) return null;
+    if (productEnv('DRY_RUN') === '1' || providerAuthChecksDisabled()) return null;
     const current = this.runtimeFailures.get(provider);
     const failure: RuntimeAuthFailure = {
       generation: ++this.nextRuntimeFailureGeneration,
@@ -524,7 +524,7 @@ export class ProviderAuthService {
     profile?: { id: string; configDir: string | null },
     observed?: { generation: number },
   ): Promise<ProviderStatus | null> {
-    if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) return null;
+    if (productEnv('DRY_RUN') === '1' || providerAuthChecksDisabled()) return null;
     const failure = this.runtimeFailures.get(provider);
     if (!failure) return null;
     const expectedGeneration = observed?.generation ?? failure.generation;
@@ -699,7 +699,7 @@ export class ProviderAuthService {
     provider: ProviderId,
     profile: { id: string; configDir: string | null },
   ): Promise<ProviderStatus> {
-    if (process.env.CEZ_DRY_RUN === '1') {
+    if (productEnv('DRY_RUN') === '1') {
       return { provider, status: 'connected', profileId: profile.id };
     }
     const key = profileCacheKey(provider, profile.id);
@@ -748,7 +748,7 @@ export class ProviderAuthService {
    * last-known status; callers needing a fresh answer must probe.
    */
   peekProfileStatus(provider: ProviderId, profileId: string): ProviderStatus | undefined {
-    if (process.env.CEZ_DRY_RUN === '1') {
+    if (productEnv('DRY_RUN') === '1') {
       return { provider, status: 'connected', profileId };
     }
     return this.completedProfiles.get(profileCacheKey(provider, profileId))?.status;
@@ -757,7 +757,7 @@ export class ProviderAuthService {
   /** The cached default-profile rows, or `undefined` when the probe has never completed. Same
    *  no-spawn contract as {@link peekProfileStatus}. */
   peekStatus(): ProviderStatusResponse | undefined {
-    if (process.env.CEZ_DRY_RUN === '1') {
+    if (productEnv('DRY_RUN') === '1') {
       return { providers: PROVIDER_IDS.map((provider) => ({ provider, status: 'connected' })) };
     }
     if (!this.completed) return undefined;

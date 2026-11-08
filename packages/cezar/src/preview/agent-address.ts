@@ -1,3 +1,4 @@
+import { productEnvEntries } from '../core/product-env.ts';
 import { existsSync } from 'node:fs';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import type { AgentGrant, RunContext } from './host.ts';
@@ -26,13 +27,13 @@ export function previewCdpUrl(cockpitOrigin: string, token: string): string | un
  * its `revoke` also revokes the grant, so every site that ends the tools closes the agent's browser
  * sockets too.
  */
-export function withPreviewCdp<S extends { env: Record<string, string>; revoke(): void }>(session: S, grant: AgentGrant, cockpitOrigin: string): S {
+export function withPreviewCdp<S extends { env: Record<string, string>; revoke(): void }>(session: S, grant: AgentGrant, cockpitOrigin: string, rebrand?: boolean): S {
   const url = previewCdpUrl(cockpitOrigin, grant.token);
   if (!url) {
     grant.revoke();
     return session;
   }
-  return { ...session, env: { ...session.env, CEZ_PREVIEW_CDP_URL: url }, revoke: () => { session.revoke(); grant.revoke(); } };
+  return { ...session, env: { ...session.env, ...productEnvEntries('PREVIEW_CDP_URL', url, rebrand) }, revoke: () => { session.revoke(); grant.revoke(); } };
 }
 
 /**

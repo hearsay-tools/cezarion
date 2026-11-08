@@ -1,7 +1,10 @@
+import { STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { resolveCapabilities } from '../server/capabilities.ts';
+import { saveServerState } from '../server-install/state.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +37,28 @@ describe('managed update review regressions', () => {
     restart: vi.fn(), trimPaths: () => hosted, registry,
   });
   const registry = () => new RegistryCache('@wjarka/cezarion', vi.fn(async () => Response.json(document)));
+
+  it.each(['service', 'launchd'])('tolerates an old CEZ-only %s artifact during self-update', async type => {
+    const path = join(home, type === 'service' ? 'cezar.service' : 'ai.cezar.cockpit.plist');
+    const old = type === 'service' ? '[Service]\nEnvironment=CEZ_REMOTE=1\n' : '<key>EnvironmentVariables</key><dict><key>CEZ_REMOTE</key><string>1</string></dict>';
+    writeFileSync(path, old);
+    await saveServerState({schema: 1, installed: true, primaryPort: 4321, steps: {
+      autostart: {status: STEP_STATUS.done, created: {artifacts: [{kind: 'owned', type, path}]}}
+    }}, 'default', testHome());
+    const restart = vi.fn();
+    const env = {CEZ_REMOTE: '1', HSQ_REMOTE: '0'};
+    const svc = new SelfUpdateService({home: testHome(), pkgName: '@wjarka/cezarion', version: '0.15.0',
+      entry: install('0.15.0', 'registry'), registry: registry(), restart, env,
+      trimPaths: () => !resolveCapabilities(env, '127.0.0.1').localHandoff});
+    install('0.16.0', 'registry');
+    expect(await svc.forwardOnlyRefusal('0.16.0')).toBeNull();
+    const job = svc.apply('0.16.0');
+    expect(job.status).toBe('restarting');
+    await vi.advanceTimersByTimeAsync(750);
+    expect(restart).toHaveBeenCalledOnce();
+    expect(readFileSync(path, 'utf8')).toBe(old);
+    expect(job.log.join(' ')).not.toMatch(/repair|reinstall|warning/i);
+  });
 
   it.each(['local', 'link'] as const)('refuses unpublished installed %s builds in hosted mode', async source => {
     const svc = service(registry(), true);

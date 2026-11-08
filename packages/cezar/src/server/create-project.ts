@@ -1,3 +1,4 @@
+import { productEnv } from '../core/product-env.ts';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -304,7 +305,7 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
     emit({ phase: 'error', error: failure.error });
     return failure;
   };
-  const run = opts.run ?? (process.env.CEZ_DRY_RUN === '1' ? dryRunCommandRunner : spawnCommandRunner);
+  const run = opts.run ?? (productEnv('DRY_RUN') === '1' ? dryRunCommandRunner : spawnCommandRunner);
   /** `cancellable` is false from `gh repo create` on: those steps always run to the end. */
   const exec = async (cmd: 'git' | 'gh', args: string[], cancellable: boolean, cwd = target): Promise<CommandResult> => {
     try {
@@ -480,7 +481,7 @@ async function githubPreflight(
  *  the signed-in user first, then their organisations, each with its avatar
  *  (and an org's description) for the dialog's owner cards. */
 export async function listGithubOwners(run?: CommandRunner): Promise<GithubOwnersResponse> {
-  if (!run && process.env.CEZ_DRY_RUN === '1') {
+  if (!run && productEnv('DRY_RUN') === '1') {
     return {
       available: true,
       owners: [

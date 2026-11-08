@@ -283,6 +283,58 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
     return calls.some((call) => call.program === 'launchctl' && call.args[0] === 'kickstart');
   }
 
+  it('repairs an old plist once and recognizes it on the next install check', async () => {
+    writeCockpitPlist(['/usr/bin/node', '/usr/local/bin/cezarion']);
+    const path = join(home, 'Library', 'LaunchAgents', 'ai.cezar.cockpit.plist');
+    const current = readFileSync(path, 'utf8').replace(/      <key>HSQ_REMOTE<\/key>\n      <string>1<\/string>\n/, '');
+    writeFileSync(path, current);
+    const { interactive, calls } = recordingInteractive();
+    const ctx = ctxFor(interactive);
+    const step = macosxNgrok.steps(ctx).find(step => step.id === 'autostart')!;
+    expect(await step.check(ctx)).toBe(false);
+    await macosxNgrok.redeploy!(ctx);
+    const repaired = readFileSync(path, 'utf8');
+    expect(repaired).toContain('<key>HSQ_REMOTE</key>');
+    expect(repaired.replace(/      <key>HSQ_REMOTE<\/key>\n      <string>1<\/string>\n/, '')).toBe(current);
+    expect(await step.check(ctx)).toBe(true);
+    expect(calls.filter(call => call.args[0] === 'bootstrap')).toHaveLength(1);
+    await macosxNgrok.redeploy!(ctx);
+    expect(readFileSync(path, 'utf8')).toBe(repaired);
+    expect(calls.filter(call => call.args[0] === 'bootstrap')).toHaveLength(1);
+  });
+
+  it('loads the repaired plist on retry after bootstrap failed', async () => {
+    writeCockpitPlist(['/usr/bin/node', '/usr/local/bin/cezarion']);
+    const path = join(home, 'Library', 'LaunchAgents', 'ai.cezar.cockpit.plist');
+    writeFileSync(path, readFileSync(path, 'utf8').replace(/      <key>HSQ_REMOTE<\/key>\n      <string>1<\/string>\n/, ''));
+    let loaded = true;
+    let bootstraps = 0;
+    const ctx = ctxFor(async (program, args) => {
+      if (program === 'launchctl' && args[0] === 'bootstrap') {
+        bootstraps++;
+        loaded = bootstraps > 1;
+        return loaded ? 0 : 1;
+      }
+      if (program === 'launchctl' && args[0] === 'kickstart' && args[2]?.endsWith('/ai.cezar.cockpit')) {
+        expect(loaded).toBe(true);
+      }
+      return 0;
+    });
+    const capture = ctx.runner.capture;
+    ctx.runner.capture = async (program, args) => {
+      if (program === 'launchctl' && args[0] === 'bootout') loaded = false;
+      if (program === 'launchctl' && args[0] === 'print') return {code: loaded ? 0 : 1, stdout: '', stderr: ''};
+      return capture(program, args);
+    };
+    await expect(macosxNgrok.redeploy!(ctx)).rejects.toThrow('could not load');
+    const repaired = readFileSync(path, 'utf8');
+    expect(repaired).toContain('<key>HSQ_REMOTE</key>');
+    await macosxNgrok.redeploy!(ctx);
+    expect(readFileSync(path, 'utf8')).toBe(repaired);
+    expect(bootstraps).toBe(2);
+    expect(loaded).toBe(true);
+  });
+
   it('clears the cached cezarion build before kickstart when the agent is an npx launch', async () => {
     writeCockpitPlist(['/n/npx', '--yes', 'cezarion']);
     const cached = plantCezarionCache();

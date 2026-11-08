@@ -1,3 +1,4 @@
+import { productEnv } from '../../core/product-env.ts';
 import type { RepoHandleDiscovery } from './repo-handle-discovery.ts';
 export type { RepoHandleDiscovery } from './repo-handle-discovery.ts';
 import { createDraftPr } from './draft-pr.ts';
@@ -45,7 +46,6 @@ import type {
   ForgeSearchData,
   ForgeTimelineEvent,
 } from './types.ts';
-
 /**
  * The GitHub forge driver — all `gh`-CLI logic in one place, moved here from
  * `src/server/github.ts` (tab listing) and `src/server/pr.ts` (draft PRs)
@@ -92,7 +92,7 @@ export async function fetchGithubPrDiff(
   number: number,
   refresh = false,
 ): Promise<ForgePrDiffResult> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubPrDiff(number);
+  if (productEnv('DRY_RUN') === '1') return mockGithubPrDiff(number);
   try {
     const head = ghPrHeadSchema.parse(
       JSON.parse(await gh(repoRoot, ['pr', 'view', String(number), '--json', 'headRefOid'])),
@@ -659,7 +659,7 @@ async function loadGithubPage(
 }
 
 export async function fetchGithub(repoRoot: string, refresh = false, limit = 30, page: GithubPageRequest = {}): Promise<GithubData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubPage(limit, page);
+  if (productEnv('DRY_RUN') === '1') return mockGithubPage(limit, page);
   const context = githubContext(repoRoot);
   const capped = Math.min(Math.max(limit, 1), GH_MAX_LIMIT);
   const key = listPageKey(context.key, page);
@@ -863,7 +863,7 @@ export async function searchGithubItems(
   const trimmed = query.trim();
   if (trimmed === '') return { available: true, items: [] };
   const capped = Math.min(Math.max(limit, 1), GH_SEARCH_MAX);
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     const mock = mockGithub();
     const pool = kind === 'issue' ? mock.issues : mock.prs;
     const queryText = trimmed.toLowerCase();
@@ -1170,7 +1170,7 @@ export async function fetchGithubItem(
   number: number,
   refresh = false,
 ): Promise<GithubItemResponse> {
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     const mock = mockGithub();
     const item = (kind === 'issue' ? mock.issues : mock.prs).find((i) => i.number === number);
     return item
@@ -1504,7 +1504,7 @@ const commentCountsSchema = z.object({
 export async function fetchGithubCommentCounts(
   repoRoot: string, kind: 'issue' | 'pr', numbers: number[], refresh = false,
 ): Promise<GithubCommentCountsData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubCommentCounts(kind, numbers);
+  if (productEnv('DRY_RUN') === '1') return mockGithubCommentCounts(kind, numbers);
   const context = githubContext(repoRoot);
   const wanted = [...new Set(numbers)].filter((n) => Number.isSafeInteger(n) && n > 0).slice(0, GITHUB_COMMENT_COUNTS_MAX);
   const counts: Record<number, number> = {};
@@ -1578,7 +1578,7 @@ export function __clearChecksCacheForTests(): void {
  * Numbers are de-duplicated, validated, and capped at `GH_CHECKS_MAX`.
  */
 export async function fetchGithubChecks(repoRoot: string, numbers: number[]): Promise<GithubChecksData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubChecks(numbers);
+  if (productEnv('DRY_RUN') === '1') return mockGithubChecks(numbers);
   const wanted = [...new Set(numbers)].filter((n) => Number.isInteger(n) && n > 0).slice(0, GH_CHECKS_MAX);
   const checks: Record<number, ChecksGlyph> = {};
   const misses: number[] = [];
@@ -2358,7 +2358,7 @@ export async function fetchGithubRefStatus(
   const context = githubContext(repoRoot);
   const asPrs = sanitizeRefNumbers(input.prs);
   const asIssues = sanitizeRefNumbers(input.issues);
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubRefStatus(asPrs, asIssues);
+  if (productEnv('DRY_RUN') === '1') return mockGithubRefStatus(asPrs, asIssues);
   const wanted = [...new Set([...asPrs, ...asIssues])];
 
   const resolved = { prs: {} as Record<number, ReferenceStatus>, issues: {} as Record<number, ReferenceStatus> };
@@ -2675,7 +2675,7 @@ export async function fetchGithubComments(
   number: number,
   refresh = false,
 ): Promise<ForgeCommentsData> {
-  if (process.env.CEZ_DRY_RUN === '1') return mockGithubComments(kind, number);
+  if (productEnv('DRY_RUN') === '1') return mockGithubComments(kind, number);
   const key = commentsCacheKey(repoRoot, kind, number);
   const cached = cachedGithubComments(key, refresh);
   if (cached) return cached;
@@ -2840,7 +2840,7 @@ async function probeGithub(repoRoot: string): Promise<ForgeAvailability> {
 }
 
 async function detectGithub(repoRoot: string): Promise<ForgeAvailability> {
-  if (process.env.CEZ_DRY_RUN === '1') return { available: true };
+  if (productEnv('DRY_RUN') === '1') return { available: true };
   const hit = detectCache.get(repoRoot);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.result;
   const pending = detectInflight.get(repoRoot);
@@ -2863,7 +2863,7 @@ async function detectGithub(repoRoot: string): Promise<ForgeAvailability> {
  * dropping `forge.available` and blinking the sidebar item out until the background probe warmed.
  */
 export function detectGithubCached(repoRoot: string): ForgeAvailability | null {
-  if (process.env.CEZ_DRY_RUN === '1') return { available: true };
+  if (productEnv('DRY_RUN') === '1') return { available: true };
   const hit = detectCache.get(repoRoot);
   const cached = hit?.result ?? null;
   const fresh = hit !== undefined && Date.now() - hit.at < CACHE_MS;
@@ -2883,7 +2883,7 @@ async function fetchPrMergeState(
   number: number,
   refresh = false,
 ): Promise<ForgePrMergeStateResult> {
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     return {
       available: true,
       mergeState: normalizeMergeState(
@@ -2986,7 +2986,7 @@ async function mergeActiveCiConflict(
   current: ForgePrMergeState,
   input: ForgeMergeInput,
 ): Promise<ForgeMergeResult | null> {
-  if (!(input.requirePassingChecks && process.env.CEZ_DRY_RUN !== '1')) return null;
+  if (!(input.requirePassingChecks && productEnv('DRY_RUN') !== '1')) return null;
   if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
   const active = parseActiveWorkflowRuns(await gh(repoRoot, activeWorkflowRunsArgs({
     repository: `${repoRef.owner}/${repoRef.repo}`, headSha: current.headSha,
@@ -3003,7 +3003,7 @@ async function executeGithubMerge(
   input: ForgeMergeInput,
   current: ForgePrMergeState,
 ): Promise<ForgeMergeResult> {
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     evictGithubProjectCaches(repoRoot);
     return { merged: true, number, url: current.url, method: input.method, mergeCommitSha: 'abcdef0123456789abcdef0123456789abcdef01' };
   }
@@ -3139,7 +3139,7 @@ async function readyPullRequest(
   mergeInflight.add(key);
   try {
     if (input.canProceed?.() === false) return readyCancelledResult();
-    if (process.env.CEZ_DRY_RUN !== '1') {
+    if (productEnv('DRY_RUN') !== '1') {
       const ownership = await readyPullRequestOwnership(repoRoot, repoRef, number, input);
       if (ownership) return ownership;
     }
@@ -3217,7 +3217,7 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     // Null covers everything from "no PR yet" to "gh missing" — the callers
     // (Create PR → View PR flip) treat all of it as "nothing to link".
     prStatus: async (branch) => {
-      if (process.env.CEZ_DRY_RUN === '1') return null;
+      if (productEnv('DRY_RUN') === '1') return null;
       try {
         const out = await gh(repoRoot, ['pr', 'view', branch, '--json', 'number,url,state,isDraft,statusCheckRollup,mergedAt']);
         const pr = ghPrViewSchema.parse(JSON.parse(out));
@@ -3333,7 +3333,7 @@ export async function fetchMergedPullRequests(runGraphql: GraphqlRunner, identit
 
 export async function lookupMergedPullRequests(repoRoot: string, identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]> {
   signal.throwIfAborted();
-  if (process.env.CEZ_DRY_RUN === '1') return [];
+  if (productEnv('DRY_RUN') === '1') return [];
   const unique = [...new Map(identities.map(pr => [pullRequestKey(pr), pr])).values()];
   const known = unique.flatMap(pr => mergedPullRequestObservations.get(pr) ?? []);
   const missing = unique.filter(pr => !mergedPullRequestObservations.get(pr));

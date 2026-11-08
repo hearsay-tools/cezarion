@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -31,14 +32,14 @@ export async function detectEnvironment(): Promise<BackendCheck[]> {
 }
 
 async function probeClaude(): Promise<BackendCheck> {
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     return { name: 'claude', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
   }
   // `CEZ_CLAUDE_BIN` like every other claude call site (the runner, provider-auth,
   // open-in-app). Probing a bare `claude` reported "not installed" for a host whose
   // only install is at a custom path — which drops claude from the composer and the
   // installer's dependency step even though runs would have worked fine.
-  const bin = process.env.CEZ_CLAUDE_BIN ?? 'claude';
+  const bin = productEnv('CLAUDE_BIN') ?? 'claude';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
     const version = stdout.trim();
@@ -71,8 +72,8 @@ async function probeCodex(): Promise<BackendCheck> {
   // spawning the real CLI: `opencode --version` alone cost ~1-3 s per dry-run boot
   // under load (hearsay-tools/cezarion#1042). An explicit CEZ_CODEX_BIN outranks the
   // mock in the runner too, so it is still probed.
-  const override = process.env.CEZ_CODEX_BIN;
-  if (process.env.CEZ_DRY_RUN === '1' && override === undefined) {
+  const override = productEnv('CODEX_BIN');
+  if (productEnv('DRY_RUN') === '1' && override === undefined) {
     return { name: 'codex', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
   }
   const bin = override ?? 'codex';
@@ -96,8 +97,8 @@ async function probeCodex(): Promise<BackendCheck> {
 async function probeOpencode(): Promise<BackendCheck> {
   // Dry-run stands the runner up on its bundled mock (hearsay-tools/cezarion#1042),
   // unless CEZ_OPENCODE_BIN overrides it there as well.
-  const override = process.env.CEZ_OPENCODE_BIN;
-  if (process.env.CEZ_DRY_RUN === '1' && override === undefined) {
+  const override = productEnv('OPENCODE_BIN');
+  if (productEnv('DRY_RUN') === '1' && override === undefined) {
     return { name: 'opencode', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
   }
   const bin = override ?? 'opencode';
@@ -120,10 +121,10 @@ async function probeOpencode(): Promise<BackendCheck> {
 
 async function probePi(): Promise<BackendCheck> {
   // Dry-run stands the runner up on the shared mock, so report it present.
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     return { name: 'pi', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
   }
-  const bin = process.env.CEZ_PI_BIN ?? 'pi';
+  const bin = productEnv('PI_BIN') ?? 'pi';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
     return {
@@ -144,10 +145,10 @@ async function probePi(): Promise<BackendCheck> {
 }
 
 async function probeCursor(): Promise<BackendCheck> {
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     return { name: 'cursor', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
   }
-  const bin = process.env.CEZ_CURSOR_BIN ?? 'agent';
+  const bin = productEnv('CURSOR_BIN') ?? 'agent';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
     return { name: 'cursor', available: true, version: stdout.trim(), hint: 'Run `agent login` to connect Cursor.' };
@@ -159,10 +160,10 @@ async function probeCursor(): Promise<BackendCheck> {
 // Copy of probePi with OMP's binary, env override and hints; it never spawns `pi`.
 export async function probeOmp(): Promise<BackendCheck> {
   // Dry-run stands the runner up on the shared mock, so report it present.
-  if (process.env.CEZ_DRY_RUN === '1') {
+  if (productEnv('DRY_RUN') === '1') {
     return { name: 'omp', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
   }
-  const bin = process.env.CEZ_OMP_BIN ?? 'omp';
+  const bin = productEnv('OMP_BIN') ?? 'omp';
   try {
     const { stdout } = await exec(bin, ['--version'], { timeout: 10_000 });
     return {

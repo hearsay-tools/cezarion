@@ -169,3 +169,51 @@ it('does not classify arrays, tuples, keys, scalar indexed types or unrelated al
     function named(collection: Array<ProcessEnv>) { return collection[key]; }`;
   expect(productEnvReads(source)).toEqual([]);
 });
+
+it('keeps permanent non-setting exemptions exact and rejects product settings in each file', async () => {
+  const { nonSettingEnvReads, nonSettingEnvRead } = await import('./product-env-read.ts');
+  for (const entry of nonSettingEnvReads) {
+    expect(entry.reason.length).toBeGreaterThan(10);
+    expect(scanProductEnvReads(entry.file, `${entry.expression};`, [])).toEqual([]);
+    expect(scanProductEnvReads(entry.file, 'process.env[other];', [])).toHaveLength(1);
+    for (const source of ['env.CEZ_DRY_RUN;', "env['HSQ_DRY_RUN'];", 'const {CEZ_DRY_RUN} = env;', 'productEnv(suffix);']) {
+      expect(scanProductEnvReads(entry.file, source, [])).toHaveLength(1);
+    }
+    if (entry.expression.endsWith('[name]')) expect(scanProductEnvReads(entry.file, `const name = 'CEZ_DRY_RUN'; const source = process.env; ${entry.expression};`, [])).toHaveLength(1);
+    expect(nonSettingEnvRead(entry.file, {form: 'dot', name: 'CEZ_DRY_RUN', offset: 0, expression: entry.expression})).toBe(false);
+  }
+});
+
+it('exempts only fixture control names in mock scripts, not product settings or other paths', () => {
+  const mock = 'packages/cezar/scripts/mock-native.mjs';
+  expect(scanProductEnvReads(mock, "process.env.CEZ_MOCK_CONTROL; env['CEZ_MOCK_CONTROL'];", [])).toEqual([]);
+  for (const file of [mock, 'packages/cezar/scripts/probe.mjs', 'packages/cezar/src/mock-native.ts']) {
+    expect(scanProductEnvReads(file, 'process.env.CEZ_DRY_RUN; env.HSQ_DRY_RUN;', [])).toHaveLength(2);
+  }
+  expect(scanProductEnvReads('packages/cezar/src/mock-native.ts', 'env.CEZ_MOCK_CONTROL;', [])).toHaveLength(1);
+  expect(scanProductEnvReads(mock, 'process.env.HSQ_MOCK_CONTROL;', [])).toHaveLength(1);
+});
+
+it.each(['config.key', "config['PATH']", 'config?.key', 'getKey()', '42', 'true', '`prefix_${key}`'])(
+  'keeps nonliteral key initializers visible: %s', initializer => {
+    expect(productEnvReads(`const name = ${initializer}; process.env[name];`).map(({form, name}) => [form, name]))
+      .toEqual([['computed', '*']]);
+  },
+);
+
+it('resolves only immutable literal key aliases and keeps mutable or cyclic keys unknown', () => {
+  expect(productEnvReads("const root = 'CEZ_DRY_RUN'; const name = root; env[name];").map(({form, name}) => [form, name]))
+    .toEqual([['bracket', 'CEZ_DRY_RUN']]);
+  expect(productEnvReads('const root = `HSQ_DRY_RUN`; const next = root; const name = next; env[name];').map(read => read.name))
+    .toEqual(['HSQ_DRY_RUN']);
+  expect(productEnvReads("let name = 'PATH'; name = config.key; env[name];").map(read => read.form)).toEqual(['computed']);
+  expect(productEnvReads('const name = next; const next = name; env[name];').map(read => read.form)).toEqual(['computed']);
+});
+
+it('keeps shadowed literal names unknown in computed reads', () => {
+  for (const source of [
+    "const key = 'PATH'; function f(key) { return process.env[key]; }",
+    "const key = 'PATH'; function f() { const key = config.key; return process.env[key]; }",
+    "const key = 'PATH'; try {} catch (key) { process.env[key]; }",
+  ]) expect(productEnvReads(source).map(({form, name}) => [form, name])).toEqual([['computed', '*']]);
+});

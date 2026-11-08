@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
@@ -92,7 +93,7 @@ export class PiRunner implements AgentRunner {
   private lastSession: AgentSession | null = null;
 
   constructor(opts: PiRunnerOptions = {}) {
-    this.bin = opts.bin ?? process.env.CEZ_PI_BIN ?? (process.env.CEZ_DRY_RUN === '1' ? mockPiPath() : 'pi');
+    this.bin = opts.bin ?? productEnv('PI_BIN') ?? (productEnv('DRY_RUN') === '1' ? mockPiPath() : 'pi');
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   }
 

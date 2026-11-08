@@ -1,3 +1,4 @@
+import { productEnv } from './product-env.ts';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,7 +64,7 @@ export class CursorPrintRunner implements AgentRunner {
     return this.startSession(spec, onEvent, { autoEndAfterFirstTurn: true }).result;
   }
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {
-    const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
+    const bin = this.options.bin ?? productEnv('CURSOR_BIN') ?? (productEnv('DRY_RUN') === '1'
       ? fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url)) : 'agent');
     return this.lastSession = new CursorPrintSession(bin, spec, this.options, onEvent, opts);
   }
@@ -180,7 +181,7 @@ class CursorPrintSession implements AgentSession {
     writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
       name: 'cezar-tools', version: '0.0.1', description: 'Cezar task tools',
     }), { mode: 0o600 });
-    const env = Object.fromEntries(cezarToolEnvNames(this.spec.env ?? {}).filter(name => this.spec.env?.[name])
+    const env = Object.fromEntries(cezarToolEnvNames(this.spec.env ?? {}).filter(name => this.spec.env?.[name] !== undefined)
       .map(name => [name, '${' + name + '}']));
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: {
       [tools.name]: { type: 'stdio', command: tools.command, args: tools.args, env },
