@@ -2,13 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DisplayIdentity } from '../../product-identity'
-import { execFileSync } from 'node:child_process'
-import { resolve } from 'node:path'
-
-function readProductIdentity(rebrand: boolean): DisplayIdentity {
-  return JSON.parse(execFileSync(process.execPath, [resolve('packages/cezar/scripts/product-identity.mjs'), '--rebrand', rebrand ? 'on' : 'off'], { encoding: 'utf8' }))
-}
+import { readProductIdentity, type DisplayIdentity } from '../../product-identity'
 import type { SelfUpdateStatus } from '@open-mercato/cezar-api-client'
 import { SelfUpdateDialog } from '@/components/self-update-dialog'
 import { selfUpdateQueryKeys } from '@/api/self-update-queries'
