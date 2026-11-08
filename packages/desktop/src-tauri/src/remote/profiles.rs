@@ -13,9 +13,9 @@ pub struct Connection {
     pub sign_in_origin: Option<String>,
 }
 
-pub fn store_path() -> PathBuf { super::super::cezar_home().join("desktop/connections.json") }
+pub fn store_path() -> PathBuf { super::super::desktop_home().state.join("desktop/connections.json") }
 #[cfg(not(target_os = "macos"))]
-pub fn profile_path(id: Uuid) -> PathBuf { super::super::cezar_home().join("desktop/profiles").join(id.to_string()) }
+pub fn profile_path(id: Uuid) -> PathBuf { super::super::desktop_home().data.join("desktop/profiles").join(id.to_string()) }
 
 pub fn persistent_sessions_supported() -> bool {
     #[cfg(target_os = "macos")]

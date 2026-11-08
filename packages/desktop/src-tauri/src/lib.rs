@@ -33,6 +33,9 @@ use std::time::{Duration, Instant};
 mod remote;
 mod disclaim;
 mod sidecar;
+mod product;
+mod identity { include!(concat!(env!("OUT_DIR"), "/product_identity.rs")); }
+use identity::PACKAGE;
 pub use disclaim::disclaim_exec_if_asked;
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -45,7 +48,7 @@ const LOG_TAIL: usize = 60;
 /// The cockpit's conventional port, tried first so `http://localhost:4321` works in a browser
 /// beside the app whenever it can; a busy one falls through to the next few, then to any.
 const PREFERRED_PORTS: std::ops::Range<u16> = 4321..4331;
-const PACKAGE: &str = "@wjarka/cezarion";
+
 
 /// Everything the supervisor thread and the menu handler share.
 struct Shell {
@@ -208,7 +211,7 @@ fn platform_name() -> &'static str {
 fn build_main_window(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<WebviewWindow> {
     let shell_for_navigation = shell.clone();
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Cezarion")
+        .title(identity::DISPLAY_NAME)
         .inner_size(1360.0, 900.0)
         .min_inner_size(720.0, 480.0)
         .center()
@@ -331,7 +334,7 @@ struct InstalledVersion {
 /// Every complete install under `~/.cezar/versions` (a manifest AND an entry file), newest
 /// install first — the same rule as cezar's own `listInstalled`.
 fn installed_versions() -> Vec<InstalledVersion> {
-    let dir = cezar_home().join("versions");
+    let dir = desktop_home().data.join("versions");
     let active = active_id(&dir);
     let mut rows: Vec<(String, InstalledVersion)> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -344,7 +347,7 @@ fn installed_versions() -> Vec<InstalledVersion> {
                 .ok()
                 .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
             let Some(manifest) = manifest else { continue };
-            if !entry.path().join("node_modules").join("@wjarka").join("cezarion").join("dist").join("index.js").is_file() {
+            if !entry_under(&entry.path()).is_file() {
                 continue;
             }
             let version = manifest.get("version").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
@@ -395,8 +398,8 @@ fn refresh_versions_menu(app: &AppHandle, shell: &Shell) {
 
 /// Point `current` at an installed id (atomic rename over the old link) and relaunch.
 fn switch_version(app: &AppHandle, shell: &Arc<Shell>, id: &str) -> bool {
-    let dir = cezar_home().join("versions");
-    if !dir.join(id).join("node_modules").join("@wjarka").join("cezarion").join("dist").join("index.js").is_file() {
+    let dir = desktop_home().data.join("versions");
+    if !entry_under(&dir.join(id)).is_file() {
         return false;
     }
     if activate(&dir, id).is_err() {
@@ -741,7 +744,7 @@ pub fn run() {
 /// running cockpit. `install_shell_update` installs at quit, and the next launch runs it.
 async fn check_shell_update(app: AppHandle, shell: Arc<Shell>) {
     use tauri_plugin_updater::UpdaterExt;
-    if std::env::var("CEZ_DESKTOP_NO_UPDATE").as_deref() == Ok("1") || cfg!(debug_assertions) {
+    if product::env("DESKTOP_NO_UPDATE").as_deref() == Some("1") || cfg!(debug_assertions) {
         return;
     }
     let Ok(updater) = app.updater() else { return };
@@ -986,7 +989,7 @@ fn watch_cockpit(shell: &Shell, window: &WebviewWindow, pid: u32, log: &Mutex<Ve
 /// The `node` the shell runs: `CEZ_DESKTOP_NODE` when set (a path, or a bogus one to test the
 /// missing-Node page), else whatever the user's PATH resolves.
 fn node_program() -> String {
-    std::env::var("CEZ_DESKTOP_NODE").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "node".into())
+    product::env("DESKTOP_NODE").filter(|v| !v.is_empty()).unwrap_or_else(|| "node".into())
 }
 
 /// npm ships as a batch file on Windows; std runs those through `cmd` with its own escaping.
@@ -1073,7 +1076,7 @@ fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
         shell.updating.store(false, Ordering::SeqCst);
         return false;
     };
-    let versions = cezar_home().join("versions");
+    let versions = desktop_home().data.join("versions");
     splash_reset(&window, title, &format!("{PACKAGE}@{tag} → {}", versions.display()));
 
     let mut lines: Vec<String> = Vec::new();
@@ -1126,7 +1129,7 @@ fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
 /// for `development`: a worktree or PR build picked by hand follows no tag, so nothing is ever
 /// offered or installed over it.
 fn release_tag() -> Option<&'static str> {
-    let config = cezar_home().join("config.json");
+    let config = desktop_home().config.join("config.json");
     let channel = std::fs::read_to_string(config)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -1148,13 +1151,13 @@ fn spawn_sidecar(entry: &Path, port: u16, cwd: &Path, log: Arc<Mutex<VecDeque<St
     let mut command = tool_command(&node_program(), &[&entry.to_string_lossy(), "serve", "--no-open", "--port", &port.to_string()]);
     command
         .current_dir(cwd)
-        .env("CEZ_DESKTOP", "1")
-        .env("CEZ_SUPERVISED", "1")
+        .envs(product::generated_env("DESKTOP", "1"))
+        .envs(product::generated_env("SUPERVISED", "1"))
         // cezar polls this pid and exits when it is gone — a force-quit of the shell never
         // leaves a headless cockpit behind (the Exit handler only runs on a clean quit).
-        .env("CEZ_SUPERVISOR_PID", std::process::id().to_string())
+        .envs(product::generated_env("SUPERVISOR_PID", std::process::id().to_string()))
         // The shell holds this pipe; closing it asks cezar to shut down (`sidecar.rs`).
-        .env("CEZ_SUPERVISOR_STDIN", "1")
+        .envs(product::generated_env("SUPERVISOR_STDIN", "1"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1162,7 +1165,7 @@ fn spawn_sidecar(entry: &Path, port: u16, cwd: &Path, log: Arc<Mutex<VecDeque<St
     // app (`disclaim.rs`). The cockpit server itself stays the app's own.
     if cfg!(target_os = "macos") {
         if let Ok(exe) = std::env::current_exe() {
-            command.env("CEZ_DISCLAIM_EXEC", exe);
+            command.envs(product::generated_env("DISCLAIM_EXEC", exe));
         }
     }
     let mut child = command.spawn().map_err(|error| format!("could not start node: {error}"))?;
@@ -1237,7 +1240,7 @@ fn shell_quote(value: &str) -> String {
 // set of tests — serves macOS, Linux and Windows.
 
 fn entry_under(root: &Path) -> PathBuf {
-    root.join("node_modules").join("@wjarka").join("cezarion").join("dist").join("index.js")
+    product::package_entry(root, PACKAGE, identity::LEGACY_PACKAGE, identity::NEXT_PACKAGE)
 }
 
 /// A version id becomes a directory name under `versions/`: a plain version and nothing else.
@@ -1310,7 +1313,7 @@ fn install_into(versions: &Path, run_npm: impl FnOnce(&Path) -> Result<(), Strin
     std::fs::create_dir_all(&staging).map_err(|error| format!("{}: {error}", staging.display()))?;
     let result = (|| {
         run_npm(&staging)?;
-        let manifest = staging.join("node_modules").join("@wjarka").join("cezarion").join("package.json");
+        let manifest = entry_under(&staging).parent().unwrap().parent().unwrap().join("package.json");
         let version = std::fs::read_to_string(&manifest)
             .ok()
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -1459,7 +1462,7 @@ fn pick_port() -> u16 {
 // monitor with a different scale came back at the wrong size — the bug this replaces.)
 
 fn geometry_path() -> PathBuf {
-    cezar_home().join("desktop-window.json")
+    desktop_home().state.join("desktop-window.json")
 }
 
 fn save_geometry(window: &WebviewWindow) {
@@ -1538,31 +1541,31 @@ fn home_dir() -> PathBuf {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn cezar_home() -> PathBuf {
-    std::env::var_os("CEZ_HOME").filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| home_dir().join(".cezar"))
+fn desktop_home() -> product::Home {
+    product::home(&home_dir(), platform_name(), identity::REBRAND, |key| std::env::var_os(key))
 }
 
 /// `CEZ_DESKTOP_ENTRY` (a checkout's `packages/cezar/dist/index.js` while developing), else the
 /// managed layout's `current` entry.
 fn resolve_entry() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("CEZ_DESKTOP_ENTRY").map(PathBuf::from) {
+    if let Some(explicit) = product::env_os("DESKTOP_ENTRY").map(PathBuf::from) {
         if explicit.is_file() {
             return Some(explicit);
         }
     }
-    managed_entry(&cezar_home().join("versions"))
+    managed_entry(&desktop_home().data.join("versions"))
 }
 
 /// The boot folder: `CEZ_DESKTOP_CWD`, else the most recently opened registered project, else
 /// the home directory (which cezar never registers as a project — the cockpit then shows the
 /// registry).
 fn pick_cwd() -> PathBuf {
-    if let Some(explicit) = std::env::var_os("CEZ_DESKTOP_CWD").map(PathBuf::from) {
+    if let Some(explicit) = product::env_os("DESKTOP_CWD").map(PathBuf::from) {
         if explicit.is_dir() {
             return explicit;
         }
     }
-    let config = cezar_home().join("config.json");
+    let config = desktop_home().config.join("config.json");
     let fallback = home_dir();
     let Ok(raw) = std::fs::read_to_string(config) else { return fallback };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else { return fallback };
@@ -1590,7 +1593,7 @@ fn pick_cwd() -> PathBuf {
 /// undiagnosable, and the page cannot report back any other way (document.title is not the
 /// native title).
 fn probe_ipc(window: &WebviewWindow) {
-    if !cfg!(debug_assertions) || std::env::var_os("CEZ_DESKTOP_DEBUG_IPC").is_none() {
+    if !cfg!(debug_assertions) || product::env_os("DESKTOP_DEBUG_IPC").is_none() {
         return;
     }
     let window = window.clone();
