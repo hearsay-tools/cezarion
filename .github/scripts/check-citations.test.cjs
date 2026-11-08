@@ -26,6 +26,15 @@ test('passes qualified citations and the documented fork and upstream forms', ()
   assert.deepEqual(cites('src/a.ts', text), []);
 });
 
+test('passes both product repository names in prose, comments and GitHub links', () => {
+  for (const repo of ['hearsay-tools/cezarion', 'hearsay-tools/squawk']) {
+    const text = `${repo}#2976, [#2778](https://github.com/${repo}/issues/2778), [#3016](https://github.com/${repo}/pull/3016/files).`;
+    assert.deepEqual(cites('notes.md', text), []);
+    assert.deepEqual(cites('src/a.ts', `// ${text}\n`), []);
+    assert.deepEqual(cites('notes.md', `[#12](https://github.com/${repo}/issues/34)`), ['1:12:Markdown prose']);
+  }
+});
+
 test('a GitHub link qualifies only the number of the issue or PR it opens', () => {
   const text = [
     'See [#46842](https://github.com/anomalyco/opencode/issues/46842) and [#16](https://github.com/o/r/pull/16/files).',

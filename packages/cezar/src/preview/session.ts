@@ -219,13 +219,13 @@ export class PreviewSession {
   }
 
   /** Makes `viewer` the one the page streams to and starts the screencast at the current viewport. */
-  attach(viewer: Viewer): void {
+  attach(viewer: Viewer, dpr?: number): void {
     this.viewer = viewer;
     this.announced = false;
     // A new viewer needs its own first frame, so its stream always restarts, whatever the size.
     this.streaming = undefined;
     this.silentStarts = 0;
-    void this.setViewport(this.viewport.w, this.viewport.h, this.viewport.dpr).catch(() => {});
+    void this.setViewport(this.viewport.w, this.viewport.h, dpr ?? this.viewport.dpr).catch(() => {});
   }
 
   detach(viewer: Viewer): void {
@@ -265,6 +265,12 @@ export class PreviewSession {
       if (streaming.scale !== scaleFor(quality, streaming.dpr)) return this.applyViewport(streaming.w, streaming.h, streaming.dpr);
       await this.restartScreencast({ ...streaming, quality });
     });
+  }
+
+  /** An open from the current viewer may update density without reattaching or requesting a first frame. */
+  refreshPixelRatio(dpr: number | undefined): Promise<void> {
+    if (dpr === undefined || dpr === this.viewport.dpr) return Promise.resolve();
+    return this.setViewport(this.viewport.w, this.viewport.h, dpr);
   }
 
   async navigate(url: string): Promise<void> {

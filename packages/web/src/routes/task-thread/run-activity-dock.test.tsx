@@ -225,6 +225,18 @@ describe('RunActivityDock — one card, one row per section', () => {
     expect(document.querySelectorAll('[data-slot="plan-item"]')).toHaveLength(0)
   })
 
+  it('folds an opened plan list away and keeps its meter', () => {
+    renderDock(run())
+    fireEvent.click(sectionHead('plan'))
+    expect(document.querySelectorAll('[data-slot="plan-item"]')).toHaveLength(3)
+
+    fireEvent.click(sectionHead('plan'))
+
+    expect(section('plan')?.getAttribute('data-state')).toBe('collapsed')
+    expect(document.querySelector('[data-slot="plan-list"]')).toBeNull()
+    expect(metaOf('plan')).toBe('1 of 3 complete')
+  })
+
   it('shows an unsettled subagent as stalled during a usage-limit hold, which has no session', () => {
     // hearsay-tools/cezarion#1236: a hold is `waiting` with no live session, so nothing will settle
     // the row until the resume; it must not pulse as live.
@@ -709,6 +721,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
     ensureOpen()
     expect(metaOf('workspace')).toBe('cez/parent')
     fireEvent.click(sectionHead('workspace'))
+    expect(section('workspace')!.querySelector('[data-slot="branch-chip"]')?.textContent).toBe('cez/parent')
     expect(screen.getByRole('button', { name: 'Copy branch name' })).not.toBeNull()
     expect(section('workspace')!.textContent).toContain('/repo/.ai/cezar/worktrees/parent')
   })

@@ -54,14 +54,6 @@ export const MONITORING_PARTITIONS = {
       "M13"
     ]
   },
-  "autonomous-ask-fresh": {
-    "modes": [
-      "fresh"
-    ],
-    "rows": [
-      "M23"
-    ]
-  },
   "timer-continuation": {
     "modes": [
       "continuation"
@@ -118,14 +110,6 @@ export const MONITORING_PARTITIONS = {
       "M14"
     ]
   },
-  "autonomous-ask-continuation": {
-    "modes": [
-      "continuation"
-    ],
-    "rows": [
-      "M23"
-    ]
-  },
   "ask-idle-closure": {
     "modes": [
       "fresh",
@@ -176,6 +160,6 @@ export function monitoringCells(partitions: readonly MonitoringPartition[]): str
     .filter(row => runsOn('monitoring-turn', row, runner)).map(row => `${runner}/${mode}/${row}`))));
 }
 export const expectedMonitoringCells = RUNNER_IDS.flatMap(runner => [
-  ...['fresh', 'continuation'].flatMap(mode => ['M1', 'M2', 'M3', 'M4', 'M5', 'M7', 'M18', 'M19', 'M21', 'M23'].map(row => `${runner}/${mode}/${row}`)),
+  ...['fresh', 'continuation'].flatMap(mode => ['M1', 'M2', 'M3', 'M4', 'M5', 'M7', 'M18', 'M19', 'M21'].map(row => `${runner}/${mode}/${row}`)),
   `${runner}/fresh/M13`, `${runner}/continuation/M14`, `${runner}/fresh/M17`,
 ].filter(cell => runsOn('monitoring-turn', cell.split('/')[2], runner)));

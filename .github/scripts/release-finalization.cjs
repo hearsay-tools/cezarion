@@ -2,7 +2,7 @@
 // no retry updates an existing branch, PR, tag, or release (#192).
 const { execFileSync } = require('node:child_process');
 const { appendFileSync } = require('node:fs');
-const { isReleaseBumpFile } = require('./release-bump-pr.cjs');
+const { isReleaseBumpFile, releaseBumpPaths } = require('./release-bump-pr.cjs');
 const { ensureReleaseCi } = require('./release-ci.cjs');
 const { releaseChangelog } = require('./release-changelog.cjs');
 
@@ -61,7 +61,7 @@ function expectVerifiableRelease(release, tag, body, context) {
 function collectBumpTree() {
   command('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--no-frozen-lockfile']);
   // Use Git pathspecs, not a shell. Stage all stamped workspaces and the alias.
-  git('add', 'packages/*/package.json', 'alias-cezarion/package.json', 'pnpm-lock.yaml');
+  git('add', ...releaseBumpPaths());
   const changed = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
   if (changed.some((file) => !isReleaseBumpFile(file))) {
     throw new Error('Unexpected staged changes; refusing to include them in the version-bump branch.');

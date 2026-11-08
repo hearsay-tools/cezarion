@@ -82,7 +82,7 @@ function values(text) {
 const descriptorPath = (worktree) => join(worktree, '.ai/qa/qa-fixture.json');
 const descriptor = (worktree) => JSON.parse(readFileSync(descriptorPath(worktree), 'utf8'));
 
-function alive(pid) {
+function alive(pid, readStat = readFileSync) {
   try {
     process.kill(pid, 0);
   } catch {
@@ -90,9 +90,27 @@ function alive(pid) {
   }
   // A zombie still answers signal 0 until its parent reaps it.
   if (process.platform !== 'linux') return true;
-  const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-  return !/^[ZX]$/.test(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[0]);
+  try {
+    const stat = readStat(`/proc/${pid}/stat`, 'utf8');
+    return !/^[ZX]$/.test(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[0]);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ESRCH') return false;
+    throw error;
+  }
 }
+
+// Signal 0 succeeds for this process, but its stat entry vanishes before the read.
+test('alive returns false when the proc entry disappears after signal 0', { skip: process.platform !== 'linux' }, () => {
+  for (const code of ['ENOENT', 'ESRCH']) {
+    const missing = Object.assign(new Error('process was reaped'), { code });
+    assert.equal(alive(process.pid, () => { throw missing; }), false);
+  }
+});
+
+test('alive rethrows other proc read errors', { skip: process.platform !== 'linux' }, () => {
+  const denied = Object.assign(new Error('access denied'), { code: 'EACCES' });
+  assert.throws(() => alive(process.pid, () => { throw denied; }), (error) => error === denied);
+});
 
 async function until(predicate, what) {
   // bound: hang guard only; the watcher under test polls every 100 ms.
@@ -136,14 +154,14 @@ test('up serves a registered project and down leaves no process or directory beh
   assert.equal(stub.env.GIT_CONFIG_GLOBAL, join(root, 'gitconfig'));
 
   const pids = [fixtureDescriptor.server.pid, fixtureDescriptor.watcher.pid, stub.child];
-  assert.deepEqual(pids.map(alive), [true, true, true]);
+  assert.deepEqual(pids.map((pid) => alive(pid)), [true, true, true]);
 
   const stopped = sink();
   await down(f.options({ stdout: stopped }));
   assert.equal(values(stopped.text).QA_FIXTURE_STATUS, 'stopped');
   // The group child gets the same SIGTERM; the kernel may need a moment to finish it.
   await until(() => !alive(stub.child), 'the server group to exit');
-  assert.deepEqual(pids.map(alive), [false, false, false]);
+  assert.deepEqual(pids.map((pid) => alive(pid)), [false, false, false]);
   assert.equal(existsSync(root), false, 'the temporary root survived down');
   assert.equal(existsSync(descriptorPath(f.worktree)), false, 'the descriptor survived down');
 

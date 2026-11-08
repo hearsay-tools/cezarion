@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from './run.ts';
+import type { WorkflowDef } from './types.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -78,15 +79,27 @@ describe('Continue after a Cursor bootstrap crash', () => {
   const LAUNCH_SESSION_ID = 'e339a973-0b14-4963-ab72-6c1dd4e3aa5b';
   const CURSOR_SESSION_ID = 'cursor-sess-confirmed';
 
-  function failedCursorRun(sessionId: string, confirmed: boolean): string {
+  /** Two agent steps at different efforts, so the spec shows which step a Continue runs as. */
+  const CHAIN_DEF: WorkflowDef = {
+    name: 'two-step',
+    source: 'file',
+    steps: [
+      { id: 'work', name: 'Work', prompt: '{{task}}', effort: 'high' },
+      { id: 'review', name: 'Review', prompt: 'review {{task}}', effort: 'low' },
+    ],
+  };
+
+  function failedCursorRun(sessionId: string, confirmed: boolean, workflowDef?: WorkflowDef): string {
     const record = store.createRun({
       title: 't',
-      workflow: 'quick-task',
+      workflow: workflowDef?.name ?? 'quick-task',
       task: 'do the thing',
       runner: 'cursor',
-      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
+      steps: (workflowDef?.steps ?? [{ id: 'work', name: 'Work' }]).map(step => ({ id: step.id, name: step.name ?? step.id, kind: STEP_KIND.agent })),
     });
-    setRunStatus(store, record.id, RUN_STATUS.failed, { finishedAt: new Date().toISOString(), error: 'Cursor ACP exited unexpectedly (1)' });
+    setRunStatus(store, record.id, RUN_STATUS.failed, { finishedAt: new Date().toISOString(), error: 'Cursor ACP exited unexpectedly (1)', ...(workflowDef ? { workflowDef } : {}) });
+    // A real launch writes its step-start event before the runner starts.
+    store.appendEvent(record.id, { type: 'step-start', stepId: 'work', name: 'Work', kind: STEP_KIND.agent, iteration: 1 });
     store.updateStep(record.id, 'work', {
       status: STEP_STATUS.failed,
       sessionId,
@@ -120,6 +133,14 @@ describe('Continue after a Cursor bootstrap crash', () => {
     const spec = await continueSpec(id);
     expect(spec.resume).toBeFalsy();
     expect(spec.sessionId).not.toBe(LAUNCH_SESSION_ID);
+    await settled(id);
+  });
+
+  it('opens the fresh session as the step it continues, not the chain tail', async () => {
+    const id = failedCursorRun(LAUNCH_SESSION_ID, false, CHAIN_DEF);
+    const spec = await continueSpec(id);
+    expect(spec.resume).toBeFalsy();
+    expect(spec.effort).toBe('high');
     await settled(id);
   });
 

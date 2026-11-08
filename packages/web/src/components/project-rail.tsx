@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import {
   closestCenter,
   DndContext,
@@ -522,13 +523,13 @@ const homeOf = (projectId: string): ProjectSwitchTarget => ({ href: String(scope
 /** The rail's app mark and name: a labelled block with the version when expanded, the bare mark
  *  with a tooltip when not. Reads the theme for the mark's variant, so it re-renders on a change. */
 function RailIdentity({ expanded, resolvedTheme, version }: { expanded: boolean; resolvedTheme: string; version: string | null }) {
-  const appLabel = version ? `Cezarion v${version}` : 'Cezarion'
+  const appLabel = version ? `${productName('Cezarion')} v${version}` : productName('Cezarion')
   return expanded ? (
     <div data-slot="rail-identity" className="flex shrink-0 flex-col gap-0.5">
       <div className="flex h-[34px] items-center gap-[10px] px-0.5">
         <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" data-slot="rail-app-mark" className="size-[34px] shrink-0 rounded-[8px]" />
         <span className={cn('flex min-w-0 items-baseline gap-[10px] whitespace-nowrap', TEXT_IN)} aria-label={appLabel}>
-          <span className="text-[15px] leading-none font-bold text-foreground">Cezarion</span>
+          <span className="text-[15px] leading-none font-bold text-foreground">{productName('Cezarion')}</span>
           {version ? <span data-slot="rail-version" title={`v${version}`} className="min-w-0 truncate text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
         </span>
       </div>

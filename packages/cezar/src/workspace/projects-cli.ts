@@ -1,3 +1,5 @@
+import { productName } from '../home/display.ts';
+import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { stat } from 'node:fs/promises';
@@ -33,14 +35,14 @@ const defaultIo: ProjectsCommandIo = {
   error: (line) => console.error(line),
 };
 
-const USAGE = `usage:
+const USAGE = commandText(`usage:
   cez projects [list]          list the registered projects
   cez projects add [<dir>]     register a folder (default: --repo, else cwd)
   cez projects remove|rm <id>  drop a registry entry (the repo is untouched)
   cez projects tag <id> [<tag>…]
                                set the grouping tags of a project (none clears them)
 
-  add/remove/tag are unavailable when CEZ_SINGLE_PROJECT=1`;
+  add/remove/tag are unavailable when CEZ_SINGLE_PROJECT=1`);
 
 const SINGLE_PROJECT_ADD_ERROR = 'single-project mode is enabled; adding projects is disabled';
 const SINGLE_PROJECT_REMOVE_ERROR = 'single-project mode is enabled; removing projects is disabled';
@@ -112,7 +114,7 @@ async function listCommand(
       : await listProjects(undefined, home);
   if (projects.length === 0) {
     io.log('\n  no projects registered yet');
-    io.log('  start the cockpit in a repo (npx cezarion) or add one: cez projects add <dir>\n');
+    io.log(commandText('  start the cockpit in a repo (npx cezarion) or add one: cez projects add <dir>\n'));
     return 0;
   }
   const idWidth = Math.max(...projects.map((p) => p.id.length));
@@ -140,7 +142,7 @@ async function addCommand(root: string, io: ProjectsCommandIo, home: Home): Prom
   // is served happily but never registered, and asking for it explicitly does
   // not buy an exemption.
   if (!(await shouldRegisterProject(root))) {
-    io.error(`refusing to register ${root} — cezar task worktrees and your home directory are not projects`);
+    io.error(`refusing to register ${root} — ${productName('cezar')} task worktrees and your home directory are not projects`);
     return 1;
   }
   const known = new Set((await loadWorkspaceConfig(home.workspaceConfig)).projects.map((p) => p.id));

@@ -126,7 +126,6 @@ export const PARITY_FAMILIES = {
   }),
   'waits-subagents': everyRunner('reads the nativeSubagents fact'),
   // CI, PR and worker waits.
-  'ci-wait-registration': shared('parks and wakes on a real tool call; tool transport is U1\'s'),
   'ci-wait-conflict': shared('conflict resolution in the wait registry'),
   'ci-wait-rerun': shared('reruns in the CI supervisor'),
   'ci-wait-retry': shared('source retry in the CI supervisor'),
@@ -138,14 +137,13 @@ export const PARITY_FAMILIES = {
   'resume-diagnostics': shared('resume diagnostics are built by Cezar; the in-thread prefix is systemPromptOnResume', {
     R85: PROVIDER_ERROR_START, R88: PROVIDER_ERROR_START, R89: PROVIDER_ERROR_START,
   }),
-  'completion-options': shared('completion options are Cezar\'s'),
   // Workflow families.
   'workflow-autonomous': shared('the autonomous policy is Cezar\'s'),
   'workflow-ask': shared('cezar_ask is Cezar\'s tool', {
     Q8: 'its authored timeout reaches each runner\'s own step deadline',
   }),
   'workflow-final-message': shared('the final-message rules are decided in turn-end.ts', {
-    F3: 'branches on cursor', F10: 'branches on cursor',
+    F10: 'branches on cursor',
   }),
   'workflow-followup': everyRunner('the follow-up hold (H rows) is each runner class\'s own'),
   'workflow-no-progress': everyRunner('each runner reports its own model progress'),
@@ -175,7 +173,6 @@ export const PARITY_FILES: ReadonlyArray<readonly [RegExp, readonly ParityFamily
   [/^core\/harness-(?:[a-z]+-[a-z-]+-)?parity(?:-closure)?\.test\.ts$/, Object.keys(PARITY_FAMILIES).filter(name => name.startsWith('harness:')) as ParityFamilyName[]],
   [/^workflows\/waits-(?:[a-z]+-subagents-)parity\.test\.ts$/, ['waits-subagents']],
   [/^workflows\/waits-(?![a-z]+-subagents-)(?:[a-z]+-[a-z-]+-)?parity\.test\.ts$/, ['waits']],
-  [/^workflows\/ci-wait-(?:parity|fresh|continued|recovered)(?:-parity)?\.test\.ts$/, ['ci-wait-registration']],
   [/^workflows\/ci-wait-conflict-.*parity\.test\.ts$/, ['ci-wait-conflict']],
   [/^workflows\/ci-wait-rerun-.*parity\.test\.ts$/, ['ci-wait-rerun']],
   [/^workflows\/ci-wait-retry-parity\.test\.ts$/, ['ci-wait-retry']],
@@ -185,8 +182,7 @@ export const PARITY_FILES: ReadonlyArray<readonly [RegExp, readonly ParityFamily
   [/^workflows\/worker-restart-.*parity\.test\.ts$/, ['worker-restart']],
   [/^workflows\/session-context-.*parity\.test\.ts$/, ['session-context']],
   [/^workflows\/resume-diagnostics-.*parity\.test\.ts$/, ['resume-diagnostics']],
-  [/^workflows\/completion-options-.*parity\.test\.ts$/, ['completion-options']],
-  [/^workflows\/context-completion-registration-parity\.test\.ts$/, ['session-context', 'completion-options']],
+  [/^workflows\/context-completion-registration-parity\.test\.ts$/, ['session-context']],
   [/^core\/workflow-autonomous-.*parity\.test\.ts$/, ['workflow-autonomous']],
   [/^core\/workflow-ask-.*parity\.test\.ts$/, ['workflow-ask']],
   [/^core\/workflow-final-message-.*parity\.test\.ts$/, ['workflow-final-message']],

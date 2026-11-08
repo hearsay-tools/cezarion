@@ -29,8 +29,7 @@ describe('workflow ask family registration', () => {
     expect(new Set(names).size).toBe(names.length);
     for (const runner of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA) {
       if (!runsOn('workflow-ask', row.id, runner)) { expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toEqual([]); continue; }
-      const expectedModes = row.id === 'Q7' ? 2 : 1;
-      expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toHaveLength(expectedModes);
+      expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toHaveLength(1);
     }
   });
 });

@@ -43,6 +43,7 @@ describe('globalShimPaths', () => {
     expect(globalShimPaths('/usr/local', 'linux')).toEqual([
       '/usr/local/bin/cezarion',
       '/usr/local/bin/cez',
+      '/usr/local/bin/hsq',
     ]);
   });
 
@@ -50,6 +51,7 @@ describe('globalShimPaths', () => {
     expect(globalShimPaths('C:\\npm-global', 'win32')).toEqual([
       'C:\\npm-global\\cezarion.cmd',
       'C:\\npm-global\\cez.cmd',
+      'C:\\npm-global\\hsq.cmd',
     ]);
   });
 

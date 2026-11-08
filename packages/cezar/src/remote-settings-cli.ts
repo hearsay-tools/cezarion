@@ -1,3 +1,5 @@
+import { productName } from './home/display.ts';
+import { commandText } from './home/command.ts';
 import { productEnv } from './core/product-env.ts';
 import type { Home } from './home/home.ts';
 import { parseArgs } from 'node:util';
@@ -21,7 +23,7 @@ import { COCKPIT_PORTS } from './task-cli/discovery.ts';
 export const REMOTE_SETTINGS_WARNING =
   'Anyone this cockpit admits can now save agent hooks, MCP servers and worktree setup commands that run on this machine as this user. Keep the cockpit behind owner-only Tailscale access or an authenticated HTTPS proxy, bound to loopback.';
 
-const USAGE = `cez remote-settings — let a remote cockpit (CEZ_REMOTE=1) edit Agent config and worktree setup.
+const USAGE = commandText(`cez remote-settings — let a remote cockpit (CEZ_REMOTE=1) edit Agent config and worktree setup.
 One JSON object per invocation; exit 0 ok, 2 refused, 64 usage.
 
   enable [--port <n>]    allow remote edits on the cockpit listening on that port. Without --port,
@@ -29,9 +31,9 @@ One JSON object per invocation; exit 0 ok, 2 refused, 64 usage.
   status                 show the grants and what each running cockpit on this machine does with them
   disable [--port <n>]   withdraw the grant for that port, or every grant without --port
 
-Takes effect on the next request; no restart. Run it on the machine that runs Cezarion, as the
+Takes effect on the next request; no restart. Run it on the machine that runs ${productName('Cezarion')}, as the
 cockpit's user. It applies only to a cockpit bound to loopback behind owner-only Tailscale access or
-an authenticated HTTPS proxy.`;
+an authenticated HTTPS proxy.`);
 
 export interface CockpitHealth { url: string; localHandoff: boolean; settingsAdmin?: boolean | undefined }
 

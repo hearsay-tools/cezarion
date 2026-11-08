@@ -1,3 +1,5 @@
+import { productName } from './home/display.ts';
+import { commandText, oldCommandNotice } from './home/command.ts';
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
 import { productEnv } from './core/product-env.ts';
@@ -27,7 +29,8 @@ export type CliDeps = typeof defaultCliDeps & {
   initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
 };
 
-const HELP = `cezar — local cockpit for AI agent tasks in your repo
+function cliHelp(rebrand: boolean): string {
+  return `${productName('cezar', rebrand)} — local cockpit for AI agent tasks in your repo
 
 Usage:
   cez                       start the cockpit (server + GUI) for the current repo
@@ -45,10 +48,10 @@ Usage:
   cez automation            create and manage automations from a task (see: automation --help)
   cez webhook               list and send to the project webhooks open to agents (see: webhook --help)
   cez artifact publish <path> publish a local task artifact (see: artifact --help)
-  cez server-install        interactive wizard to host cezar on a server
+  cez server-install        interactive wizard to host ${productName('cezar', rebrand)} on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
-${REBRAND_SWITCH ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
+${rebrand ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
   cez install | update      manage the desktop installation under ~/.cezar/versions
   cez versions | use <id>   list or switch managed versions
   cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
@@ -59,7 +62,7 @@ Options:
       --repo <dir>            repo to operate on (default: cwd)
       --workflow <name>       workflow for \`run\` (default: quick-task)
       --model <model>         model override for \`run\`
-      --no-workers            \`run\`: the task cannot start or resume Cezar workers
+      --no-workers            \`run\`: the task cannot start or resume ${productName('Cezar', rebrand)} workers
       --no-messaging          \`run\`: no new peer-task messages; worker messages and replies stay
       --no-open               don't open the browser
       --platform <id>         server-install target (ubuntu-vps | macosx-ngrok)
@@ -73,7 +76,7 @@ Options:
       --bind-host <host>      host the cockpit binds (default 127.0.0.1). Use with
                               --external-proxy when the proxy runs in a container and
                               cannot reach loopback (e.g. docker bridge 172.17.0.1).
-                              cezar has NO built-in auth — never expose this publicly.
+                              ${productName('cezar', rebrand)} has NO built-in auth — never expose this publicly.
       --yes                   server-install: accept safe defaults (never auto-sudo)
       --reconfigure <ids>     server-install: force re-run of step id(s), comma-separated
       --reinstall             server-install: force re-run of every step (full reinstall)
@@ -83,8 +86,16 @@ Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
 Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 (team skills come from "skillsRepos" in .ai/cezar/config.json, which the Skills page edits; none by default);
 workflows in .ai/cezar/workflows/.`;
+}
 
-export async function main(deps: CliDeps): Promise<void> {
+export async function main(deps: CliDeps, rebrand = REBRAND_SWITCH): Promise<void> {
+  const notice = oldCommandNotice(deps.process.argv[1], rebrand);
+  if (notice) deps.console.error(notice);
+  return dispatch(deps, rebrand);
+}
+
+async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
+  const help = commandText(cliHelp(rebrand), deps.process.argv[1], rebrand);
   let resolvedHome: Home | undefined;
   let homeEntry = deps.operatorHomeEntry(deps.process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.
@@ -132,7 +143,7 @@ export async function main(deps: CliDeps): Promise<void> {
     .some((a) => a === '-p' || a === '--port' || a.startsWith('--port=') || a.startsWith('-p='));
 
   if (values.help) {
-    deps.console.log(HELP);
+    deps.console.log(help);
     return;
   }
 
@@ -192,7 +203,7 @@ export async function main(deps: CliDeps): Promise<void> {
       return;
     default:
       deps.console.error(`unknown command: ${command}\n`);
-      deps.console.log(HELP);
+      deps.console.log(help);
       deps.process.exitCode = 1;
   }
 }

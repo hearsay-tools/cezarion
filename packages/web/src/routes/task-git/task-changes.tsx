@@ -156,6 +156,7 @@ function ChangesView({ run }: { run: ApiRun }) {
 
       <GitToolbar
         bar={bar}
+        healthReady={health.data !== undefined}
         branch={run.branch}
         stat={changes.data?.stat}
         mode={effectiveMode}

@@ -25,6 +25,18 @@ describe('declared runner facts (hearsay-tools/cezarion#2991)', () => {
   it('selects runners by fact in RUNNER_IDS order', () => {
     expect(runnersWhere(facts => facts.nativeSubagents === 'reported')).toEqual(['claude', 'codex']);
     expect(runnersWhere(facts => facts.nativeTimerTool !== null)).toEqual(['claude']);
+    expect(runnersWhere(facts => facts.sessionIdSource === 'launch')).toEqual(['claude', 'pi']);
+  });
+
+  // The turn-path facts (inputDelivery, systemPromptOnResume) and the narrow facts, including
+  // sessionIdSource (workflows/run/launch-read-resolver.ts), are declared on every row.
+  it('declares every fact on every runner row', () => {
+    const keys = ['costReport', 'inputDelivery', 'nativeAsk', 'nativeSubagents', 'nativeTimerTool', 'sessionIdSource', 'systemPromptOnResume'];
+    for (const id of RUNNER_IDS) {
+      expect(Object.keys(RUNNER_FACTS[id]).sort(), id).toEqual(keys);
+      expect(['launch', 'native'], id).toContain(RUNNER_FACTS[id].sessionIdSource);
+      expect(['resent', 'in-thread'], id).toContain(RUNNER_FACTS[id].systemPromptOnResume);
+    }
   });
 
   it('keeps every boundary runner holding a mid-turn human message until the turn ends', () => {

@@ -60,4 +60,16 @@ describe('the event timeline in assertion messages (hearsay-tools/cezarion#1292)
     await vi.advanceTimersByTimeAsync(15_000);
     await failed;
   });
+
+  it('keeps the original wait error and predicate when snapshot capture throws (hearsay-tools/cezarion#3042)', async () => {
+    const original = new Error('expected false to be true');
+    const waitFor = vi.spyOn(vi, 'waitFor').mockRejectedValueOnce(original);
+    onTestFinished(() => waitFor.mockRestore());
+    const sessionStarted = () => false;
+    const explain = () => { throw new TypeError('snapshot read failed'); };
+    await expect(until(sessionStarted, explain)).rejects.toBe(original);
+    expect(original.message).toContain(`Waiting for ${sessionStarted.toString()}`);
+    expect(original.message).toContain('expected false to be true');
+    expect(original.message).toContain('diagnostics unavailable: TypeError: snapshot read failed');
+  });
 });

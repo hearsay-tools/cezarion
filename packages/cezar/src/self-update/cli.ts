@@ -1,3 +1,6 @@
+import { productName } from '../home/display.ts';
+import { BINARY_NAMES } from '../home/identity.ts';
+import { commandText } from '../home/command.ts';
 /**
  * `cez install | update | versions | use | link | unlink` — the terminal side of the managed
  * install. No server, no repo: only `~/.cezar` and the npm registry. The cockpit's dialog drives
@@ -67,26 +70,27 @@ export async function runSelfUpdateCommand(command: string, args: string[], opts
 
 async function installCommand(opts: SelfUpdateCliOptions): Promise<number> {
   const { service } = opts;
-  console.log(`\n  cez install — managed layout under ${opts.home.root} (this build: ${service.installKind})\n`);
+  const launchName = commandText('cezarion');
+  console.log(commandText(`\n  cez install — managed layout under ${opts.home.root} (this build: ${service.installKind})\n`));
   try {
     const result = await service.installSelf((line) => console.log(`  · ${line}`));
     const dir = writeLaunchers(process.env, opts.home);
     console.log(`\n  ✓ installed ${result.id} and made it current`);
-    console.log(`  ✓ launchers: ${dir}/cezarion, ${dir}/cez`);
+    console.log(`  ✓ launchers: ${BINARY_NAMES.map(name => `${dir}/${name}`).join(', ')}`);
     if (isOnPath(dir)) {
-      console.log(`  ✓ ${dir} is already on PATH — run: cezarion\n`);
+      console.log(`  ✓ ${dir} is already on PATH — run: ${launchName}\n`);
       return 0;
     }
     if (!opts.modifyPath) {
-      console.log(`\n  add this to your shell profile, then run \`cezarion\`:\n\n    export PATH="${dir}:$PATH"\n`);
+      console.log(`\n  add this to your shell profile, then run \`${launchName}\`:\n\n    export PATH="${dir}:$PATH"\n`);
       return 0;
     }
     const hook = ensurePathHook(dir);
     if (hook.file) {
       console.log(`  ${hook.alreadyPresent ? '✓' : '+'} PATH hook in ${hook.file}${hook.alreadyPresent ? ' (already there)' : ''}`);
-      console.log(`\n  open a new terminal (or: source ${hook.file}) and run: cezarion\n`);
+      console.log(`\n  open a new terminal (or: source ${hook.file}) and run: ${launchName}\n`);
     } else {
-      console.log(`\n  add ${dir} to PATH, then run \`cezarion\`:\n\n    ${hook.line}\n`);
+      console.log(`\n  add ${dir} to PATH, then run \`${launchName}\`:\n\n    ${hook.line}\n`);
     }
     return 0;
   } catch (error) {
@@ -109,9 +113,9 @@ async function updateChannel(opts: SelfUpdateCliOptions): Promise<string | undef
 function printDevelopmentChannelHelp(): void {
   // Development follows no dist-tag: there is no "newest" to update to.
   console.log('\n  channel development — nothing to update to. Pick a build by hand:');
-  console.log('    cez link [<worktree>] --use   run a cez worktree');
-  console.log('    cez update --version <version> install a release or a PR preview (e.g. 0.13.0-pr1169.1234)');
-  console.log('    cez update --channel stable    go back to releases\n');
+  console.log(commandText('    cez link [<worktree>] --use   run a cez worktree'));
+  console.log(commandText('    cez update --version <version> install a release or a PR preview (e.g. 0.13.0-pr1169.1234)'));
+  console.log(commandText('    cez update --channel stable    go back to releases\n'));
 }
 
 /** Install `target` unless it is already installed, make it current, and write the launchers. */
@@ -121,7 +125,7 @@ async function activateTarget(target: string, home: Home): Promise<number> {
     const id = installed ? installed.id : (await installFromRegistry(target, { home, onLog: (line) => console.log(`  · ${line}`) })).id;
     activate(id, process.env, home);
     const dir = writeLaunchers(process.env, home);
-    console.log(`\n  ✓ ${id} is now current — start it with: ${isOnPath(dir) ? 'cez' : `${dir}/cezarion`}\n`);
+    console.log(`\n  ✓ ${id} is now current — start it with: ${isOnPath(dir) ? commandText('cez') : `${dir}/${commandText('cezarion')}`}\n`);
     return 0;
   } catch (error) {
     console.error(`\n  ✗ update failed: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -131,6 +135,7 @@ async function activateTarget(target: string, home: Home): Promise<number> {
 
 async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
   const { service } = opts;
+  const launchName = commandText('cezarion');
   const channel = await updateChannel(opts);
   if (channel === undefined) return 1;
   if (channel === 'development' && !opts.version) {
@@ -148,14 +153,14 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
     return 1;
   }
   const active = status.installed.find((entry) => entry.active);
-  console.log(`\n  cez update — channel ${channel}, running ${status.version}${active ? ` (${active.id})` : ''}, target ${target}\n`);
+  console.log(commandText(`\n  cez update — channel ${channel}, running ${status.version}${active ? ` (${active.id})` : ''}, target ${target}\n`));
   if (!opts.version && compareVersions(target, status.version) <= 0 && active?.source === 'registry') {
     console.log('  ✓ already up to date\n');
     return 0;
   }
   if (!status.canSelfUpdate) {
     // Not managed: install the target into the managed layout anyway, then explain the switch.
-    console.log(`  ${status.reason ?? ''}\n  installing ${target} into the managed layout so \`cezarion\` can run it:\n`);
+    console.log(`  ${status.reason ?? ''}\n  installing ${target} into the managed layout so \`${launchName}\` can run it:\n`);
   }
   return activateTarget(target, opts.home);
 }
@@ -163,7 +168,7 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
 async function versionsCommand(home: Home): Promise<number> {
   const installed = listInstalled(process.env, home);
   if (installed.length === 0) {
-    console.log('\n  no managed versions — run: cez install (or `cez link` in a built cez checkout)\n');
+    console.log(commandText('\n  no managed versions — run: cez install (or `cez link` in a built cez checkout)\n'));
     return 0;
   }
   console.log('');
@@ -173,7 +178,7 @@ async function versionsCommand(home: Home): Promise<number> {
   }
   const unlinked = (await discoverCheckouts(process.env, home).catch(() => [])).filter((checkout) => !checkout.linked);
   if (unlinked.length > 0) {
-    console.log('\n  cez worktrees (not linked yet — `cez link <dir>` or pick one in the cockpit):');
+    console.log(commandText('\n  cez worktrees (not linked yet — `cez link <dir>` or pick one in the cockpit):'));
     for (const checkout of unlinked) {
       console.log(`    ${checkout.branch.padEnd(34)} ${checkout.built ? 'built    ' : 'not built'} ${checkout.worktree}`);
     }
@@ -182,19 +187,19 @@ async function versionsCommand(home: Home): Promise<number> {
   if (registry) {
     console.log(`\n  registry: stable ${registry.distTags[distTagFor('stable')] ?? '—'} · nightly ${registry.distTags[distTagFor('nightly')] ?? '—'}`);
   }
-  console.log('\n  switch with: cez use <id>\n');
+  console.log(commandText('\n  switch with: cez use <id>\n'));
   return 0;
 }
 
 async function useCommand(id: string | undefined, home: Home): Promise<number> {
   if (!id) {
-    console.error('  usage: cez use <id>   (see: cez versions)');
+    console.error(commandText('  usage: cez use <id>   (see: cez versions)'));
     return 1;
   }
   const installed = listInstalled(process.env, home);
   const match = installed.find((entry) => entry.id === id) ?? installed.find((entry) => entry.version === id);
   if (!match) {
-    console.error(`  ✗ ${id} is not installed — see: cez versions`);
+    console.error(commandText(`  ✗ ${id} is not installed — see: cez versions`));
     return 1;
   }
   activate(match.id, process.env, home);
@@ -206,7 +211,7 @@ async function linkCommand(dir: string | undefined, use: boolean, home: Home): P
   const target = resolve(dir ?? process.cwd());
   const packageRoot = cezarPackageRoot(target);
   if (!packageRoot) {
-    console.error(`  ✗ ${target} is not a cez checkout (no @wjarka/cezarion package.json there or in packages/cezar)`);
+    console.error(commandText(`  ✗ ${target} is not a cez checkout (no @wjarka/cezarion package.json there or in packages/cezar)`));
     return 1;
   }
   try {
@@ -218,7 +223,7 @@ async function linkCommand(dir: string | undefined, use: boolean, home: Home): P
       console.log(`  ✓ now using ${result.id}`);
       console.log('    the desktop app picks it up on its next start (Cmd+Q, reopen) — a running cockpit keeps its version');
     } else {
-      console.log(`    switch with: cez use ${result.id}  ·  desktop: Cezar ▸ Versions  ·  cockpit: the version chip`);
+      console.log(commandText(`    switch with: cez use ${result.id}  ·  desktop: ${productName('Cezar')} ▸ Versions  ·  cockpit: the version chip`));
     }
     console.log('    rebuild the checkout (npm run build) and restart to run new code — the link needs no refresh\n');
     return 0;
@@ -230,16 +235,16 @@ async function linkCommand(dir: string | undefined, use: boolean, home: Home): P
 
 async function unlinkCommand(id: string | undefined, home: Home): Promise<number> {
   if (!id) {
-    console.error('  usage: cez unlink <id>   (see: cez versions)');
+    console.error(commandText('  usage: cez unlink <id>   (see: cez versions)'));
     return 1;
   }
   const match = listLinks(process.env, home).find((entry) => entry.id === id || entry.checkout === resolve(id));
   if (!match) {
-    console.error(`  ✗ ${id} is not a linked checkout — see: cez versions`);
+    console.error(commandText(`  ✗ ${id} is not a linked checkout — see: cez versions`));
     return 1;
   }
   if (match.id === activeId(process.env, home)) {
-    console.error(`  ✗ ${match.id} is the active version — \`cez use <another id>\` first`);
+    console.error(commandText(`  ✗ ${match.id} is the active version — \`cez use <another id>\` first`));
     return 1;
   }
   removeInstalled(match.id, process.env, home);

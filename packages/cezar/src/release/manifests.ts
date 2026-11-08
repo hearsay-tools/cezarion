@@ -4,9 +4,12 @@
  *  its sibling: a caret range for stable, an exact pin for a snapshot), so everything else
  *  lives here rather than twice.
  *
- *  Deliberately name-agnostic: names come from the checked-out manifests at call time, never
- *  from constants, so a package rename lands without touching this pipeline.
+ *  Source stamping retains workspace names from checked-out manifests. Publication projects
+ *  the active service name from productIdentity without renaming source workspaces.
  */
+
+import { productIdentity } from '../home/identity.ts';
+import { REBRAND_SWITCH } from '../home/switch.ts';
 
 /** The minimal manifest shape the stamper touches; everything else passes through. */
 export interface ManifestLike {
@@ -40,13 +43,23 @@ export function isPublishable(pkg: ManifestLike): boolean {
  * new workspace that is not listed here fails CI rather than shipping a bump `npm ci` cannot
  * install. `alias` is not a workspace (it lives next to `packages/`) and is the one extra entry.
  */
-export const RELEASE_MANIFEST_DIRS = {
-  contract: 'packages/contract',
-  apiClient: 'packages/api-client',
-  cezar: 'packages/cezar',
-  web: 'packages/web',
-  alias: 'alias-cezarion',
-} as const;
+export function releaseManifestDirs(rebrand = REBRAND_SWITCH) {
+  return {
+    contract: 'packages/contract',
+    apiClient: 'packages/api-client',
+    cezar: 'packages/cezar',
+    web: 'packages/web',
+    alias: productIdentity(rebrand).npmAliasDirectory,
+  } as const;
+}
+
+export const RELEASE_MANIFEST_DIRS = releaseManifestDirs();
+
+/** Source workspaces keep their names so builds and version-only bump PRs still work. */
+export function publicationManifests(manifests: ReleaseManifests, rebrand = REBRAND_SWITCH): ReleaseManifests {
+  if (!rebrand) return manifests;
+  return { ...manifests, cezar: { ...manifests.cezar, name: productIdentity(rebrand).npmPackage } };
+}
 
 /**
  * Every manifest a release stamps.
@@ -124,6 +137,9 @@ export function stampManifestSet(
 ): ReleaseManifests {
   const { contract, apiClient, cezar, web, alias } = manifests;
   const range = pin(version);
+  // The new alias depends on the published identity; workspace consumers retain the source name.
+  const aliasTarget = alias.name === productIdentity(true).npmAlias
+    ? productIdentity(true).npmPackage : cezar.name;
 
   const inherited: Partial<ManifestLike> = {};
   for (const field of ['repository', 'homepage', 'bugs'] as const) {
@@ -144,10 +160,10 @@ export function stampManifestSet(
       range,
     ),
     alias: {
-      ...pinDependency({ ...alias, ...inherited, version }, cezar.name, range),
+      ...pinDependency({ ...alias, ...inherited, version }, aliasTarget, range),
       // The alias exists only to depend on the service — an unpinned or missing entry would
       // make `npx <alias>` install nothing useful, so this one is asserted, not merged.
-      dependencies: { ...alias.dependencies, [cezar.name]: range },
+      dependencies: { ...alias.dependencies, [aliasTarget]: range },
     },
   };
 }

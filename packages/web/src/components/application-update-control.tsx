@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import * as React from 'react'
 import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
 import { DownloadIcon, RefreshCwIcon } from '@/components/design-icons'
@@ -75,7 +76,7 @@ export function ApplicationUpdateControl({ version, latestVersion, state, onAppl
     </div>
       <AlertDialogContent onCloseAutoFocus={(event) => { event.preventDefault(); restartTrigger.current?.focus() }}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Restart Cezarion?</AlertDialogTitle>
+          <AlertDialogTitle>Restart {productName('Cezarion')}?</AlertDialogTitle>
           <AlertDialogDescription>Running tasks will be recovered after restart. The cockpit will reconnect when the new version is ready.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -100,7 +101,7 @@ function manualUpdateMessage({ state, version, latestVersion }: {
 }): string | null {
   const manualUpdate = state && !state.supported && version && latestVersion && isNewerVersion(latestVersion, version)
   const manualInstructions = state?.message && state.message !== 'Update this installation manually.'
-    ? state.message : 'Install the newer release using your original installation method, then restart Cezarion.'
+    ? state.message : `Install the newer release using your original installation method, then restart ${productName('Cezarion')}.`
   return manualUpdate ? `In-app updates are unavailable for this installation. ${manualInstructions}` : null
 }
 

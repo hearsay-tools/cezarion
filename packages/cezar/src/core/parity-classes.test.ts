@@ -181,7 +181,6 @@ function familyRowScenarios(): Map<string, Map<string, Set<ScenarioName>>> {
  * `mock:ci-wait` is the dry-run mock's `cezar_wait` call, counted as `cezar-wait`.
  */
 const SCANNED_KITS: Record<string, readonly string[]> = {
-  'ci-wait-registration': ['workflows/ci-wait-registration-parity.testkit.ts'],
   'ci-wait-conflict': ['workflows/ci-wait-conflict-parity.testkit.ts'],
   'ci-wait-rerun': ['workflows/ci-wait-rerun-parity.testkit.ts'],
   'ci-wait-retry': ['workflows/ci-wait-retry-parity.test.ts'],
@@ -189,7 +188,6 @@ const SCANNED_KITS: Record<string, readonly string[]> = {
   'worker-reboot': ['workflows/worker-reboot-parity.testkit.ts'],
   'worker-restart': ['workflows/worker-restart-parity.testkit.ts'],
   'session-context': ['workflows/session-context-cells.testkit.ts'],
-  'completion-options': ['workflows/completion-options-cells.testkit.ts'],
 };
 
 function kitScenarios(files: readonly string[]): Set<ScenarioName> {

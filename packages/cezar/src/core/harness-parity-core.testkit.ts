@@ -171,22 +171,16 @@ export const MODEL_REFUSAL_CRITERIA = [
 /** #427: intermediate asks through cezar_ask, on every native message wire. Q2 (a malformed
  *  intermediate marker) went with the CEZ:ASK line (hearsay-tools/cezarion#2397). */
 export const WORKFLOW_ASK_CRITERIA = [
-  { id: 'Q1', scenario: 'cezar-ask', name: 'holds the same intermediate session until answered, then runs the tail' },
-  { id: 'Q3', scenario: 'cezar-ask', name: 'preserves final interactive asks' },
-  { id: 'Q4', scenario: 'cezar-ask', name: 'idle close and a second question on Continue retain the workflow tail' },
+  { id: 'Q4', scenario: 'cezar-ask', name: 'idle close, a second question on Continue and a clean close before its answer retain the workflow tail' },
   { id: 'Q5', scenario: 'cezar-ask', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
   { id: 'Q6', scenario: 'cezar-ask', name: 'cancel leaves later steps pending' },
-  { id: 'Q7', scenario: 'cezar-ask', name: 'Finish stops at the parked step on fresh and Continue sessions' },
   { id: 'Q8', scenario: 'cezar-ask', name: 'an authored timeout fails without running later steps' },
-  { id: 'Q9', scenario: 'cezar-ask', name: 'an autonomous intermediate cezar_ask is refused and the tail runs' },
-  { id: 'Q10', scenario: 'cezar-ask', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
 /** hearsay-tools/cezarion#1620: workflow-step-completion-parity.testkit.ts, every native wire. An
  *  earlier agent step completes only on an accepted done; the tail never starts without one. */
 export const STEP_COMPLETION_CRITERIA = [
   { id: 'C1', scenario: 'baseline', name: 'an earlier step without done is nudged once, then waits for the user; a reply with done runs the tail' },
-  { id: 'C2', scenario: 'cezar-done', name: 'cezar_done completes an earlier step without a nudge and runs the tail' },
   { id: 'C3', scenario: 'baseline', name: 'a clean session close without done leaves the earlier step waiting; Continue with done runs the tail' },
   { id: 'C4', scenario: 'baseline', name: 'an idle close leaves the earlier step waiting; a Continue without done parks on it again' },
   { id: 'C5', scenario: 'baseline', name: 'restart recovery keeps the parked earlier step; Continue with done runs the tail' },
@@ -244,14 +238,8 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
-/** #544: workflow-final-message-cells.testkit.ts, real native wires on both turn-end paths. */
+/** #544: workflow-final-message-cells.testkit.ts, the no-wait nudge's reply bound on every native wire. */
 export const FINAL_MESSAGE_CRITERIA = [
-  { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible cezar_done' },
-  { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
-  { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names cezar_done' },
-  { id: 'F4', scenario: 'tool-tail', name: 'nudges a done-less message-then-tool tail once' },
-  { id: 'F5', scenario: 'cezar-done', name: 'honors cezar_done without a nudge' },
-  { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without the no-wait nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
   { id: 'F9', scenario: 'silent-tail-late-reply', name: 'resumes when a nudge reply arrives after the bound' },

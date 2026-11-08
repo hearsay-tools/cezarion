@@ -16,6 +16,7 @@ import { handoffPath } from '../handoff.ts';
 import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { RUN_EXITS } from '../runs/run-exits.ts';
+import { askErrorMessage } from '../ci-wait/errors.ts';
 import { WAIT_KIND, WAIT_PHASE, RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
@@ -313,6 +314,8 @@ describe('autonomous turn-end parity — #426', () => {
             expect(notes.every(note => note.stepId === stepId)).toBe(true);
             if (row.id === 'A3' || row.id === 'A4') {
               expect(askRefusals()).toBeGreaterThanOrEqual(1);
+              // The refusal reaches the agent through its own native wire, which echoes it.
+              expect(events.some(e => e.type === 'text' && String(e.text).includes(askErrorMessage('autonomous_run')))).toBe(true);
               expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
               expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             }

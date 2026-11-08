@@ -1,3 +1,4 @@
+import { ABSENT_PROCESS_PID } from '../delegation/process-enumeration.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -65,7 +66,7 @@ it.each(RESTART_RUNNERS.r60)('%s R60 cold terminal starting-proof recovery repai
     writeFileSync(join(files, `${w.id}.execution.json`), JSON.stringify(proof));
     const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
     writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...recorded,
-      controller: { pid: 2147483001, startToken: `${boot}:100` } }));
+      controller: { pid: ABSENT_PROCESS_PID, startToken: `${boot}:100` } }));
     for (const id of [p.id, w.id]) rmSync(historyPaths(dataDir, id).facts, { force: true });
     const joins = vi.spyOn(TranscriptFactsQueue.prototype, 'join');
     reopenRuntime();
@@ -112,7 +113,7 @@ it.each(RESTART_RUNNERS.r60)('%s R60 cold terminal starting-proof recovery repai
         const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
         // Structurally valid legacy evidence with a missing incarnation token.
         writeFileSync(join(files, `${w.id}.processes.json`), JSON.stringify({ ...recorded,
-          controller: { pid: 2147483001, startToken: `${boot}:100` },
+          controller: { pid: ABSENT_PROCESS_PID, startToken: `${boot}:100` },
           processes: recorded.processes.map(({ pid }) => ({ pid })) }));
       }
       const holder = spawn(process.execPath, ['-e', "process.stdin.resume(); process.stdin.on('end',()=>process.exit(0)); console.log('ready')"],
@@ -173,7 +174,7 @@ it.each(RESTART_RUNNERS.r47)('%s settles a same-boot crash as gone once recorded
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'retained'), 'scratch');
     const files = join(root, '.ai/cezar/runs');
     const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
-    const ledger = { ...recorded, controller: { pid: 2147483001, startToken: `${boot}:100` } };
+    const ledger = { ...recorded, controller: { pid: ABSENT_PROCESS_PID, startToken: `${boot}:100` } };
     writeFileSync(join(files, `${w.id}.execution.json`), JSON.stringify(proof));
     // A real unreadable recorded descendant still blocks settlement, regardless of cwd.
     const descendant = await nonDumpableHolder(root);

@@ -1,3 +1,5 @@
+import { productName } from '../home/display.ts';
+import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { randomUUID } from 'node:crypto';
 import { open as openFile } from 'node:fs/promises';
@@ -88,7 +90,7 @@ export const OPERATIONS: Record<string, Operation> = {
       'archive-when-done': { type: 'boolean', help: '  Archive after Done (default off); with --auto-merge-pr, merge first.' },
       'auto-merge-pr': { type: 'boolean', help: '      Merge the task PR after Done when current-head CI and GitHub rules pass (default off); may mark a draft ready.' },
       'no-worktree': { type: 'boolean', help: '      Run in the repo working tree, not a worktree.' },
-      'no-workers': { type: 'boolean', help: '       Do not let this task start or resume Cezar workers (default on).' },
+      'no-workers': { type: 'boolean', help: `       Do not let this task start or resume ${productName('Cezar')} workers (default on).` },
       'no-messaging': { type: 'boolean', help: '     Block new peer-task messages; worker messages and replies to earlier requests stay (default on).' },
       wait: { type: 'boolean', help: '               Then wait until the task needs you or ends (see wait).' },
       until: UNTIL_FLAG,
@@ -197,17 +199,17 @@ const ATTENTION_HELP = [
   '    ("needs you", "needs review", "failed").',
   '  --until attention (default) stops when the task needs you or ends. --until settled is the',
   '  opt-in for autonomous runs and bots that want terminal state only (done/review/failed/cancelled).',
-  '  cez task wait <id>                   # default: stops when the task needs you',
-  '  cez task wait <id> --until settled   # terminal status only',
-  "  cez task start '…' --wait            # returns as soon as the agent parks for follow-up",
-  "  cez task start '…' --wait --autonomous --until settled   # runs to completion, then returns",
-  '  cez task log <id> --follow             # default: stops when the task needs you',
-  '  cez task log <id> --follow --until settled   # streams until a terminal status',
+  commandText('  cez task wait <id>                   # default: stops when the task needs you'),
+  commandText('  cez task wait <id> --until settled   # terminal status only'),
+  commandText("  cez task start '…' --wait            # returns as soon as the agent parks for follow-up"),
+  commandText("  cez task start '…' --wait --autonomous --until settled   # runs to completion, then returns"),
+  commandText('  cez task log <id> --follow             # default: stops when the task needs you'),
+  commandText('  cez task log <id> --follow --until settled   # streams until a terminal status'),
   '',
 ];
 
 function usage() {
-  return { operations: Object.entries(OPERATIONS).map(([name, op]) => ({ name, synopsis: `cez task ${name} ${op.args}`.trim() })) };
+  return { operations: Object.entries(OPERATIONS).map(([name, op]) => ({ name, synopsis: commandText(`cez task ${name} ${op.args}`).trim() })) };
 }
 
 function usageError(error: string, detail: Record<string, unknown> = {}): never {
@@ -220,38 +222,38 @@ export function taskHelp(operation?: string): string {
   for (const name of names) for (const [flag, spec] of Object.entries(OPERATIONS[name]!.flags)) flags.set(flag, spec);
   for (const [flag, spec] of Object.entries(COMMON)) flags.set(flag, spec);
   return [
-    'cezar task — start, watch and steer cockpit tasks from the terminal', '', 'Usage:',
-    '  cez task [--url <origin> | --repo <dir>] <operation> …',
+    `${productName('cezar')} task — start, watch and steer cockpit tasks from the terminal`, '', 'Usage:',
+    commandText('  cez task [--url <origin> | --repo <dir>] <operation> …'),
     ...names.flatMap((name) => {
       const op = OPERATIONS[name]!;
-      return [`  cez task ${name} ${op.args}`.trimEnd(), `    ${op.description}`];
+      return [commandText(`  cez task ${name} ${op.args}`).trimEnd(), `    ${op.description}`];
     }), '', 'Options:',
     ...[...flags].map(([flag, spec]) => `  --${flag} ${spec.help}`), '',
     ...(names.some((name) => ATTENTION_HELP_OPERATIONS.has(name)) ? ATTENTION_HELP : []),
     ...(names.includes('start') ? [
       'Safe task input (file or stdin):',
-      '  cez task start --task-file task.md',
-      "  cez task start --task-file - <<'EOF'",
-      'Fix the `cez task` docs; keep $(example) literal.',
+      commandText('  cez task start --task-file task.md'),
+      commandText("  cez task start --task-file - <<'EOF'"),
+      commandText('Fix the `cez task` docs; keep $(example) literal.'),
       'EOF', '',
       'POSIX shells expand backticks and $() in double-quoted arguments',
       'before the CLI receives the text. Do not put raw backticks in double-quoted task arguments.',
       'Use --task-file PATH or --task-file - with a quoted heredoc delimiter as above.',
-      "For short tasks, a single-quoted positional argument still works: cez task start 'Fix the typo'.", '',
+      commandText("For short tasks, a single-quoted positional argument still works: cez task start 'Fix the typo'."), '',
     ] : []),
     ...(names.includes('send') ? [
       'Send — steer, answer or reopen:',
       '  delivery: delivered means the live session accepted the text; queued means it is saved',
       '  for a task that has not started; resumed means --resume reopened a closed session.',
       '  Steer while running:',
-      "    cez task send <id> 'Use the retry helper instead'",
+      commandText("    cez task send <id> 'Use the retry helper instead'"),
       '  Answer a pending question after wait ends with attention: waiting, or status shows question:',
-      "    cez task send <id> 'Use option A'",
+      commandText("    cez task send <id> 'Use option A'"),
       '  Reopen a settled session:',
-      "    cez task send <id> --resume '…'",
+      commandText("    cez task send <id> --resume '…'"),
       '  Without --resume a closed session returns delivery: not-delivered and a next command.',
       '  Use --text-file <path|-> for multi-line or shell-sensitive text; --text-file - reads stdin.',
-      '  See the safe task input / quoting note in cez task start --help; the same shell rules apply.',
+      commandText('  See the safe task input / quoting note in cez task start --help; the same shell rules apply.'),
       '',
     ] : []),
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
@@ -463,7 +465,7 @@ function workerParent(run: Pick<ApiRun, 'delegation'> | Pick<RunSummary, 'delega
 async function refuseWorkerNotify(cockpit: Cockpit, id: string): Promise<void> {
   const parentId = workerParent(await getRun(cockpit, id));
   if (parentId !== undefined) {
-    usageError(`task ${id} is a worker of task ${parentId}; notify the parent instead: cez task notify ${parentId}`, { parentId });
+    usageError(commandText(`task ${id} is a worker of task ${parentId}; notify the parent instead: cez task notify ${parentId}`), { parentId });
   }
 }
 
@@ -578,7 +580,7 @@ async function send(cockpit: Cockpit, values: Values, id: string, text: string, 
   const closed = delivered.status === 409 && (delivered.data as { error?: unknown } | undefined)?.error === 'session closed';
   if (!closed) refuse(delivered);
   if (!values.resume) {
-    print({ id, delivery: 'not-delivered', reason: 'session closed', next: `cez task send ${id} '…' --resume`, ...notified });
+    print({ id, delivery: 'not-delivered', reason: 'session closed', next: commandText(`cez task send ${id} '…' --resume`), ...notified });
     return EXIT.failed;
   }
   const resumed = await request(cockpit, `${path}/continue`, { body: { text } });
@@ -736,13 +738,13 @@ async function execute(
   }
 }
 
-export const AGENT_TASK_SEND_REMEDY = "cez message progress <task-id> '<text>' --id <message-UUID> (needs task messaging on)";
+export const AGENT_TASK_SEND_REMEDY = commandText("cez message progress <task-id> '<text>' --id <message-UUID> (needs task messaging on)");
 
 function refuseAgentSend(name: string, env: NodeJS.ProcessEnv): void {
   if (name === 'send' && productEnv('TASK_ID', env)?.trim()) {
     throw new TaskCliError(EXIT.usage, {
       code: 'invalid_input',
-      error: 'cez task send is human input. An agent inside a task cannot use it to message another task.',
+      error: commandText('cez task send is human input. An agent inside a task cannot use it to message another task.'),
       next: AGENT_TASK_SEND_REMEDY,
     });
   }

@@ -21,7 +21,7 @@ const record = recordedRun(recordJson)
  * next. The assertions are on rendered POSITIONS (top of each line, left of each indent), not on
  * the DOM shape, because the DOM was always fine.
  *
- * Same boot-own-server doctrine as task-thread.e2e.ts: the transcript is the recorded NDJSON
+ * Same boot-own-server doctrine as task-thread-fixture.ts: the transcript is the recorded NDJSON
  * with its user follow-up and markdown reply swapped for the fences below.
  */
 

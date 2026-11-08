@@ -95,9 +95,11 @@ for (const step of steps) {
 }
 
 if (mode === 'uninstall') {
-  console.log('install-as-command: global cezarion / cez removed.');
+  console.log(`install-as-command: global ${planner?.BIN_NAMES.join(' / ') ?? 'cezarion / cez'} removed.`);
   process.exit(0);
 }
+
+const commandName = planner?.COMMAND_NAME ?? 'cez';
 
 // Verify the shims and print a PATH hint.
 let prefix = '';
@@ -116,7 +118,7 @@ if (planner && prefix) {
     console.log(`\ninstall-as-command: done, but only ${present.length}/${planner.BIN_NAMES.length} shims found in ${binDir}`);
   }
   console.log(`  Ensure this is on your PATH:\n    ${binDir}`);
-  console.log('  Then, from any repo:  cez --help');
+  console.log(`  Then, from any repo:  ${commandName} --help`);
 } else {
-  console.log('\ninstall-as-command: done. Ensure your npm global bin dir is on PATH, then run `cez --help`.');
+  console.log(`\ninstall-as-command: done. Ensure your npm global bin dir is on PATH, then run \`${commandName} --help\`.`);
 }

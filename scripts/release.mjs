@@ -9,7 +9,8 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPublishable, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { withPublicationPackage } from '../packages/cezar/dist/release/publication.js';
 import {
   computeStableVersion,
   isReleaseBump,
@@ -70,7 +71,15 @@ if (!dryRun && !token && !oidc) {
 
 const stamped = stampStableManifests(manifests, version);
 for (const key of order) writeManifest(dirs[key], stamped[key]);
-const stampedNames = order.map((key) => stamped[key].name);
+const publication = publicationManifests(stamped);
+// A renamed stable package packs outside Git. Require its source before any npm
+// publication; otherwise a successful publish could not be verified on retry.
+if (!dryRun && publication.cezar.name !== stamped.cezar.name) {
+  publication.cezar.gitHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: dirs.cezar, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+const stampedNames = order.map((key) => publication[key].name);
 console.log(
   `release: stamped ${stampedNames.join(' + ')} to ${version} (bump ${bump}, dist-tag latest${dryRun ? ', dry run' : ''})`,
 );
@@ -129,9 +138,9 @@ for (const key of order) {
     console.log(`release: ${stamped[key].name} is private — stamped to ${version}, not published.`);
     continue;
   }
-  const name = stamped[key].name;
+  const name = publication[key].name;
   try {
-    publish(dirs[key], name);
+    withPublicationPackage(dirs[key], publication[key], cwd => publish(cwd, name));
     published.push(name);
   } catch (err) {
     const existing = !dryRun && versionOnRegistry(name, version);
@@ -153,7 +162,7 @@ emitOutput({
   dryRun,
   bump,
   version,
-  rootName: stamped.cezar.name,
+  rootName: publication.cezar.name,
   apiClientName: stamped.apiClient.name,
   aliasName: stamped.alias.name,
   publishedNames: published.join(','),

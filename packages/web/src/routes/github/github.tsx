@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import './github-layout.css'
 import { useQueryClient } from '@tanstack/react-query'
 import { LoaderCircleIcon } from 'lucide-react'
@@ -16,7 +17,6 @@ import {
   type SetStateAction,
 } from 'react'
 import { useParams } from 'react-router'
-
 import { Link, Navigate } from '@/lib/project-router'
 
 import { getGithubComments, putUiState } from '@/api/client'
@@ -585,7 +585,7 @@ function GithubUnavailable({ reason, refreshing, onRetry }: {
         <p className="text-xs leading-relaxed text-soft-foreground">
           The tab needs the <span className="font-mono">gh</span> CLI, logged in (
           <span className="font-mono">gh auth login</span>), and a repo with a GitHub remote.
-          Everything else in cezar works without it.
+          Everything else in {productName('cezar')} works without it.
         </p>
       </CenteredState>
     </div>

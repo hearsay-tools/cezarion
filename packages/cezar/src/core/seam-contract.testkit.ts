@@ -288,7 +288,10 @@ async function observeAcknowledgement(backend: RunnerId): Promise<ContractObserv
       if (steer) {
         // S12 owns admission: startup may refuse once (Codex has no thread yet); the running turn admits.
         let first: false | Promise<void> = false;
-        await waitFor(() => (first = send(ACK_IDS[0])) !== false);
+        await waitFor(() => {
+          first = send(ACK_IDS[0]);
+          return first !== false;
+        });
         rec.mark(`sent:${ACK_IDS[0]}`);
         await acknowledged(ACK_IDS[0], first as unknown as Promise<void>);
         // A stopped native process can neither read the wire nor answer it: only a local write

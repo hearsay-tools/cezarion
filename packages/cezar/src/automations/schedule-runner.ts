@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { nextOccurrence, occurrencesBetween, onceCutoff, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
 import type { AutomationLease, AutomationStore } from './store.ts';
 import {
@@ -237,7 +238,7 @@ export class ScheduleRunner {
         automationId: definition.id,
         revision: definition.revision,
         result: 'missed',
-        reason: `Missed: Cezarion was not running at ${wallTime(due, definition.schedule.timeZone)} and started ${minutes} minutes later, past its latest start. Nothing was launched; use Run now to start it.`,
+        reason: `Missed: ${productName('Cezarion')} was not running at ${wallTime(due, definition.schedule.timeZone)} and started ${minutes} minutes later, past its latest start. Nothing was launched; use Run now to start it.`,
       });
       return { result: 'skipped', occurrenceAt };
     }
@@ -522,8 +523,8 @@ export class ScheduleRunner {
       revision: definition.revision,
       result: 'skipped',
       reason: latestCaughtUp
-        ? `Missed ${count} older occurrence${plural} while cezar was not running or the machine was asleep; only the latest one caught up.`
-        : `Missed ${count} occurrence${plural} while cezar was not running or the machine was asleep; nothing was launched for them.`,
+        ? `Missed ${count} older occurrence${plural} while ${productName('cezar')} was not running or the machine was asleep; only the latest one caught up.`
+        : `Missed ${count} occurrence${plural} while ${productName('cezar')} was not running or the machine was asleep; nothing was launched for them.`,
     });
   }
 }
@@ -543,7 +544,7 @@ function onceReason(occurrence: ScheduleOccurrence, now: number, timeZone: strin
   const due = Date.parse(occurrence.at);
   const when = wallTime(due, timeZone);
   switch (occurrence.trigger) {
-    case 'late': return `Started ${Math.round((now - due) / 60_000)} minutes late: the one-time schedule was due at ${when} while Cezarion was not running or the machine was asleep.`;
+    case 'late': return `Started ${Math.round((now - due) / 60_000)} minutes late: the one-time schedule was due at ${when} while ${productName('Cezarion')} was not running or the machine was asleep.`;
     case 'manual': return `Started by hand; the one-time schedule was due at ${when}.`;
     case 'retry': return `Retried a failed launch of the one-time schedule due at ${when}.`;
     default: return `One-time schedule due at ${when}.`;
@@ -554,7 +555,7 @@ function reasonFor(occurrence: ScheduleOccurrence, timeZone: string): string {
   const when = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(occurrence.at));
   switch (occurrence.trigger) {
     case 'schedule': return `Scheduled run at ${when}.`;
-    case 'catch-up': return `Caught up the ${when} occurrence missed while cezar was not running or the machine was asleep.`;
+    case 'catch-up': return `Caught up the ${when} occurrence missed while ${productName('cezar')} was not running or the machine was asleep.`;
     case 'manual': return `Started by hand at ${when}.`;
     case 'late': return `Started late; it was due at ${when}.`;
     case 'retry': return `Retried the ${when} launch.`;

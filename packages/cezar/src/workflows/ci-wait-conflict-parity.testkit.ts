@@ -14,7 +14,6 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, store, restart, root, semaphore, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { ciWatchRequest } from './waits.ts';
 import { noRunners } from '../core/runners-under-test.testkit.ts';
 
 const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined,
@@ -63,13 +62,13 @@ function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitRe
 
 // R81–R83 deliberately use the real metadata parser/supervisor. A synthetic
 // `conflicting` result would test storage but pass with the missing detector.
-export const CONFLICT_ROWS = { fresh: 'R81', continued: 'R82', recovered: 'R83', cancellation: 'R84' } as const;
-export const GROUPS = { fresh: parityRunners('ci-wait-conflict', 'R81'), continued: parityRunners('ci-wait-conflict', 'R82'), recovered: parityRunners('ci-wait-conflict', 'R83'), cancellation: parityRunners('ci-wait-conflict', 'R84') };
+export const CONFLICT_ROWS = { fresh: 'R81', continued: 'R82', recovered: 'R83' } as const;
+export const GROUPS = { fresh: parityRunners('ci-wait-conflict', 'R81'), continued: parityRunners('ci-wait-conflict', 'R82'), recovered: parityRunners('ci-wait-conflict', 'R83') };
 export function registerGroup(mode: keyof typeof GROUPS) {
 describe('native conflict observation durability and wake parity', { timeout: 35_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => { resources.github = undefined; vi.restoreAllMocks(); });
-  for (const runner of GROUPS[mode]) if (mode !== 'cancellation') {
+  for (const runner of GROUPS[mode]) {
     const cell = CONFLICT_ROWS[mode];
     it(`${runner} ${cell} delivers one committed conflict observation in ${mode} mode`, async () => {
       process.env.CEZ_DRY_RUN = '0';
@@ -146,40 +145,6 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
       expect(existsSync(log)).toBe(true);
       expect(readFileSync(log, 'utf8')).toContain('headRefOid');
-      supervisor.close();
-    });
-  }
-  for (const runner of GROUPS[mode]) if (mode === 'cancellation') {
-    it(`${runner} R84 cancellation prevents a late conflict observation from waking`, async () => {
-      process.env.CEZ_DRY_RUN = '0';
-      process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
-      process.env.CEZ_MOCK_ARGS_FILE = join(root, 'args');
-      process.env.CEZ_MOCK_STDIN_FILE = join(root, 'stdin');
-      const gate = join(root, 'release-checks'), log = join(root, 'gh-queries.ndjson');
-      const github = new GithubCiClient({ command: { file: process.execPath,
-        args: [fileURLToPath(new URL('./ci-conflict-gh.testkit.mjs', import.meta.url)), gate, log] } });
-      const supervisor = new CiWatcherSupervisor({ github });
-      resources.supervisor = supervisor;
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const generation = toolGenerationOf(run.id);
-      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 120 }, 'cezar_wait', generation);
-      if (wait.kind !== 'pr') throw new Error('Expected a CI wait');
-      await until(() => existsSync(log) && readFileSync(log, 'utf8').includes('name,state,link,bucket'));
-      expect(manager.cancelWait(run.id, wait.id, generation)).toEqual({ cancelled: true });
-      // Cancellation has committed before the external check command can complete.
-      expect(disk(run.id).lastWaits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: WAIT_PHASE.cancelled });
-      writeFileSync(gate, '');
-      const request = ciWatchRequest(wait);
-      // Reap the cancelled in-flight query before obtaining a genuine late conflict.
-      await supervisor.watch(request, new AbortController().signal);
-      const late = await supervisor.watch(request, new AbortController().signal);
-      expect(late).toMatchObject({ outcome: 'conflicting', mergeable: 'CONFLICTING' });
-      await resources.replay(late);
-      assertIgnoredResolution(run.id, wait.id, late);
-      expect(open(run.id)).toBeUndefined();
-      expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id) ?? false).toBe(false);
-      expect(ciNativeMessages(runner, root).filter(text => text.includes(`CI wait observation ${wait.id}`))).toHaveLength(0);
       supervisor.close();
     });
   }

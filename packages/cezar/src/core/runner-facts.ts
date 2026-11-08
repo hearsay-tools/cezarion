@@ -32,6 +32,13 @@ export interface RunnerFacts {
   /** `cumulative`: each cost report is the session total so far, Continue steps included.
    *  `per-turn`: each report is new cost since the previous report. */
   readonly costReport: 'cumulative' | 'per-turn';
+  /**
+   * Who names the session. `launch`: the runner opens its session under the id Cezar saves on the
+   * step before launch, so that id resumes at once. `native`: the runner mints its own id and
+   * reports it in a `session` event; until then the step holds only Cezar's launch id, which the
+   * runner never knew. The `sessionId` row of each runner's `specSupport` names the wire.
+   */
+  readonly sessionIdSource: 'launch' | 'native';
 }
 
 export const RUNNER_FACTS = {
@@ -41,7 +48,7 @@ export const RUNNER_FACTS = {
       via: 'stream-json stdin line with uuid; --replay-user-messages echo at consumption',
     },
     systemPromptOnResume: 'resent',
-    nativeAsk: 'none', nativeSubagents: 'reported', nativeTimerTool: 'ScheduleWakeup', costReport: 'cumulative',
+    nativeAsk: 'none', nativeSubagents: 'reported', nativeTimerTool: 'ScheduleWakeup', costReport: 'cumulative', sessionIdSource: 'launch',
   },
   codex: {
     inputDelivery: {
@@ -51,7 +58,7 @@ export const RUNNER_FACTS = {
       via: 'turn/steer with clientUserMessageId; item/started userMessage clientId once in the thread history',
     },
     systemPromptOnResume: 'in-thread',
-    nativeAsk: 'answerable', nativeSubagents: 'reported', nativeTimerTool: null, costReport: 'per-turn',
+    nativeAsk: 'answerable', nativeSubagents: 'reported', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native',
   },
   opencode: {
     inputDelivery: {
@@ -59,7 +66,7 @@ export const RUNNER_FACTS = {
       via: 'prompt_async while busy; assistant message.updated parentID at consumption',
     },
     systemPromptOnResume: 'in-thread',
-    nativeAsk: 'answerable', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn',
+    nativeAsk: 'answerable', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native',
   },
   pi: {
     inputDelivery: {
@@ -67,7 +74,7 @@ export const RUNNER_FACTS = {
       via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
     },
     systemPromptOnResume: 'resent',
-    nativeAsk: 'none', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn',
+    nativeAsk: 'none', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'launch',
   },
   // Every Cursor session runs on print (hearsay-tools/cezarion#1267).
   cursor: {
@@ -76,7 +83,7 @@ export const RUNNER_FACTS = {
       via: 'next exact-resume print process',
     },
     systemPromptOnResume: 'in-thread',
-    nativeAsk: 'auto-skipped', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn',
+    nativeAsk: 'auto-skipped', nativeSubagents: 'unreported', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native',
   },
   omp: {
     inputDelivery: {
@@ -84,7 +91,7 @@ export const RUNNER_FACTS = {
       via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
     },
     systemPromptOnResume: 'resent',
-    nativeAsk: 'none', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn',
+    nativeAsk: 'none', nativeSubagents: 'turn-held', nativeTimerTool: null, costReport: 'per-turn', sessionIdSource: 'native',
   },
 } as const satisfies Readonly<Record<RunnerId, RunnerFacts>>;
 

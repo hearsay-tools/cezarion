@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
 import { waitForSettledSample } from './visual-ready'
+import { waitForStatus } from './poll'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import recordJson from './fixtures/subagents-run.record.json'
@@ -20,7 +21,7 @@ const record = recordedRun(recordJson)
  * NDJSON file — `fixtures/subagents-run.ndjson`, the verbatim output of a `mock:subagents`
  * dry run (two parallel `Task` spawns whose children carry `parent_tool_use_id`).
  *
- * Same boot-own-server doctrine as task-thread.e2e.ts: the store reads `runs.json` once at
+ * Same boot-own-server doctrine as task-thread-fixture.ts: the store reads `runs.json` once at
  * startup, so the fixture must exist before boot, and a terminal (`done`) status keeps
  * `recover()` from touching the run. The server replays it over the per-run SSE stream exactly
  * as it would for any finished run, so this covers the full pipe — store → SSE replay →
@@ -131,6 +132,7 @@ function revealSubagentSection(): void {
   if (browser.evaluate(`document.querySelector('${CARD} > button').getAttribute('aria-expanded')`) === 'false') {
     clickThreadControl(`${CARD} > button`)
   }
+  browser.waitForFunction(`document.querySelector('${CARD} > button')?.getAttribute('aria-expanded') === 'true'`)
   browser.waitForFunction(`document.querySelector('${DOCK} > button') !== null`)
 }
 
@@ -311,6 +313,7 @@ describe('the Agents dock against a dry-run OMP sub-agent', () => {
     // A refused POST fails here, at its cause, not as a 120 s wait for a run that never existed.
     if (!created.ok) throw new Error(`POST /api/v1/runs answered ${created.status}: ${await created.text()}`)
     const runId = ((await created.json()) as { id: string }).id
+    await waitForStatus(ompBase, runId, ['waiting'])
     ompTaskUrl = `${ompBase}/p/${bootProject}/tasks/${runId}`
   }, 120_000)
 
@@ -321,6 +324,8 @@ describe('the Agents dock against a dry-run OMP sub-agent', () => {
 
   it('lists the OMP sub-agent as a row with its type and tool count', () => {
     browser.goto(ompTaskUrl)
+    // The waiting hint shifts the sticky footer's Activity header; wait before aiming the click.
+    browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
     revealSubagentSection()
     browser.waitForFunction(`document.querySelector('${METER}')?.textContent === '1 of 1 complete'`)
     clickThreadControl(`${DOCK} > button`)

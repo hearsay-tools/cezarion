@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
 import { homeFileLocation } from '../home/file-location.ts';
@@ -9,19 +10,19 @@ import { workspaceConfigSchema } from './config.ts';
 import { resolveLegacyRecovery } from '../home/legacy-recovery.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 
-const HELP = `usage:
+const HELP = commandText(`usage:
   cez backup list [<file>]
   cez backup restore <file> [--at <time>]
 
 Restore the newest backup, or the newest at or before an ISO UTC time.
 Use a home-relative file, such as config.json or remote-settings/4321.json.
-Account config directories are not restored.`;
+Account config directories are not restored.`);
 
 function backupHelp(legacyCanary: boolean): string {
-  return HELP + (legacyCanary ? `\n\nLegacy home changes:
+  return HELP + (legacyCanary ? commandText(`\n\nLegacy home changes:
   cez backup import <file>   merge changes from the old home
   cez backup ignore <file>   keep the live file and clear the old-home incident
-Import requires a successful backup. Deleted legacy files can only be ignored.` : '');
+Import requires a successful backup. Deleted legacy files can only be ignored.`) : '');
 }
 
 /** Host CLI actions share the recovery writer; grant files remain blocked in HTTP. */
