@@ -1671,6 +1671,9 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
         const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
         expect(manager.finish(run.id)).toBe(true);
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+        // Finish is a successful end that frees the run's slot.
+        expect(store.getRun(run.id)?.status).toBe('done');
+        expect(semaphore.busy()).toBe(0);
         const events = store.readEvents(run.id);
         expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
         expect(events.filter(event => event.type === 'human-input-delivered').map(event => event.askSeq)).toEqual(answeredBefore);
