@@ -9,8 +9,9 @@ import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider } from '@/components/reference-status'
+import { resetToasts, Toaster } from '@/components/ui/toaster'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
-import type { GithubItem, GithubPrMergeState, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
+import type { GithubItem, GithubPrChangesData, GithubPrMergeState, GithubPrMergeStateResponse } from '@open-mercato/cezar-api-client'
 
 import { GithubItemDetail } from './github-item-detail'
 
@@ -67,6 +68,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  resetToasts()
   vi.unstubAllGlobals()
 })
 
@@ -464,7 +466,7 @@ describe('merging from the detail (#692)', () => {
   })
 })
 
-describe('PR changes cache scope (#734)', () => {
+describe('PR changed files', () => {
   const changesFor = (path: string, headSha: string) => ({
     available: true, number: 42, headSha, additions: 1, deletions: 0, truncated: false,
     files: [{ path, status: 'added', additions: 1, deletions: 0, patch: `@@ -0,0 +1 @@\n+${path}` }],
@@ -473,13 +475,142 @@ describe('PR changes cache scope (#734)', () => {
     new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
   const A_HEAD = 'a'.repeat(40)
   const B_HEAD = 'b'.repeat(40)
-  const renderChanges = (client = createQueryClient()) => render(
+  const renderChanges = (client = createQueryClient(), item = PR_42) => render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <GithubItemDetail item={PR_42} colors={{}} backLink={null} subNav={{ filter: null, changes: true }} />
+        <GithubItemDetail item={item} colors={{}} backLink={null} subNav={{ filter: null, changes: true }} />
+        <Toaster />
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  const seedChanges = (data: GithubPrChangesData) => {
+    const client = createQueryClient()
+    client.setQueryData(queryKeys.githubPrChanges(42), data)
+    return client
+  }
+  const threeFiles = () => ({
+    ...changesFor('src/Alpha.ts', A_HEAD),
+    files: [
+      changesFor('src/Alpha.ts', A_HEAD).files[0]!,
+      changesFor('src/beta.ts', A_HEAD).files[0]!,
+      changesFor('docs/guide.md', A_HEAD).files[0]!,
+    ],
+  })
+  const selectedFile = () => (screen.getByRole('combobox', { name: 'Select changed file' }) as HTMLSelectElement).value
+  const shownPath = () => document.querySelector('[data-slot="diff-file"]')?.getAttribute('data-path')
+
+  it('selects files with both navigation buttons, the list and the phone selector', async () => {
+    renderChanges(seedChanges(threeFiles()))
+    await waitFor(() => expect(shownPath()).toBe('src/Alpha.ts'))
+    expect(screen.getByRole('button', { name: 'Previous file' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Next file' }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Next file' }))
+    await waitFor(() => expect(shownPath()).toBe('src/beta.ts'))
+    expect(selectedFile()).toBe('src/beta.ts')
+    fireEvent.click(screen.getByRole('button', { name: 'Next file' }))
+    await waitFor(() => expect(shownPath()).toBe('docs/guide.md'))
+    expect(screen.getByRole('button', { name: 'Next file' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Previous file' }))
+    await waitFor(() => expect(shownPath()).toBe('src/beta.ts'))
+    fireEvent.click(screen.getByRole('button', { name: /added · src\/Alpha.ts/ }))
+    await waitFor(() => expect(shownPath()).toBe('src/Alpha.ts'))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Select changed file' }), { target: { value: 'docs/guide.md' } })
+    await waitFor(() => expect(shownPath()).toBe('docs/guide.md'))
+    expect(document.querySelectorAll('[data-slot="diff-file"]')).toHaveLength(1)
+  })
+
+  it('filters paths without case sensitivity and keeps a selection only while it matches', async () => {
+    renderChanges(seedChanges(threeFiles()))
+    await waitFor(() => expect(shownPath()).toBe('src/Alpha.ts'))
+    const filter = screen.getByRole('textbox', { name: 'Filter changed files' })
+    fireEvent.change(filter, { target: { value: 'SRC/' } })
+    expect(selectedFile()).toBe('src/Alpha.ts')
+    const selector = screen.getByRole('combobox', { name: 'Select changed file' })
+    expect(within(selector).getAllByRole('option').map((option) => option.textContent)).toEqual(['src/Alpha.ts', 'src/beta.ts'])
+    fireEvent.change(filter, { target: { value: 'BETA' } })
+    await waitFor(() => expect(shownPath()).toBe('src/beta.ts'))
+    expect(screen.getByRole('button', { name: 'Previous file' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Next file' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.change(filter, { target: { value: 'no-such-file' } })
+    expect(screen.getByText('No changed files match this filter.')).toBeTruthy()
+    expect(document.querySelector('[data-slot="diff-file"]')).toBeNull()
+    expect(within(selector).queryAllByRole('option')).toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Next file' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.change(filter, { target: { value: '' } })
+    await waitFor(() => expect(shownPath()).toBe('src/beta.ts'))
+  })
+
+  it.each([
+    ['binary', 'binary'], ['too-large', 'too-large'], [undefined, 'not-provided'],
+  ] as const)('explains a missing %s patch and keeps the renamed path and statistics', async (reason, label) => {
+    const data: GithubPrChangesData = {
+      ...changesFor('new.dat', A_HEAD), additions: 7, deletions: 3,
+      files: [{ path: 'new.dat', previousPath: 'old.dat', status: 'renamed', additions: 7, deletions: 3,
+        ...(reason ? { patchUnavailableReason: reason } : {}) }],
+    }
+    renderChanges(seedChanges(data))
+    expect(await screen.findByText(`Patch unavailable: ${label}.`)).toBeTruthy()
+    await waitFor(() => expect(document.querySelector('[data-slot="diff-file"]')?.textContent).toContain('old.dat'))
+    expect(screen.getByText(`head ${A_HEAD.slice(0, 8)}`).getAttribute('title')).toBe(A_HEAD)
+    const diff = document.querySelector('[data-slot="diff-file"]') as HTMLElement
+    expect(within(diff).getByText('+7')).toBeTruthy()
+    expect(within(diff).getByText('−3')).toBeTruthy()
+    expect(Boolean(within(diff).queryByText('Binary file — no text diff.'))).toBe(reason === 'binary')
+  })
+
+  it.each([
+    [PR_42.url, undefined, true], ['javascript:void(0)', 'The file limit was reached.', false],
+  ] as const)('explains truncated changes for %s with only a safe GitHub fallback', (url, reason, linked) => {
+    renderChanges(seedChanges({ ...changesFor('a.ts', A_HEAD), truncated: true, ...(reason ? { reason } : {}) }), { ...PR_42, url })
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain(reason ?? 'This response is incomplete.')
+    const link = within(status).queryByRole('link', { name: 'Open all files on GitHub' })
+    expect(Boolean(link)).toBe(linked)
+    if (link) {
+      expect(link.getAttribute('href')).toBe(`${PR_42.url}/files`)
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+    }
+  })
+
+  it('keeps the selected file on a same-head refresh and resets it when the head changes', async () => {
+    const client = seedChanges(threeFiles())
+    let next = threeFiles()
+    const refreshUrls: string[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/changes')) { refreshUrls.push(url); return respond(next) }
+      return respond(MERGE_STATE)
+    })
+    renderChanges(client)
+    await waitFor(() => expect(shownPath()).toBe('src/Alpha.ts'))
+    fireEvent.click(screen.getByRole('button', { name: 'Next file' }))
+    await waitFor(() => expect(shownPath()).toBe('src/beta.ts'))
+    const refresh = within(document.querySelector('[data-slot="gh-pr-changes"]') as HTMLElement).getByRole('button', { name: 'Refresh' })
+    fireEvent.click(refresh)
+    await waitFor(() => expect(refreshUrls).toHaveLength(1))
+    await waitFor(() => expect(client.getQueryData(queryKeys.githubPrChanges(42))).toEqual(next))
+    expect(selectedFile()).toBe('src/beta.ts')
+    expect(screen.queryByText('The reviewed revision changed.')).toBeNull()
+    next = { ...threeFiles(), headSha: B_HEAD }
+    fireEvent.click(refresh)
+    await screen.findByText('The reviewed revision changed.')
+    await waitFor(() => expect(shownPath()).toBe('src/Alpha.ts'))
+    expect(refreshUrls.every((url) => url.endsWith('/prs/42/changes?refresh=1'))).toBe(true)
+  })
+
+  it('shows an unavailable reason and a failed request instead of an empty diff', async () => {
+    const first = renderChanges(seedChanges({ available: false, reason: 'The repository is offline.' }))
+    expect(screen.getByText('The repository is offline.')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: 'Filter changed files' })).toBeNull()
+    first.unmount()
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => String(input).includes('/changes')
+      ? new Response(JSON.stringify({ error: 'Offline' }), { status: 503 }) : respond(MERGE_STATE))
+    renderChanges()
+    expect(screen.getByText('Loading changed files…').getAttribute('aria-live')).toBe('polite')
+    await screen.findByText('Changed files could not be loaded.')
+    expect(screen.queryByText('No changed files match this filter.')).toBeNull()
+  })
 
   it('keeps the same PR number in two projects as two cache entries', async () => {
     vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
