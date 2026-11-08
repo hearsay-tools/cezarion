@@ -20,3 +20,50 @@ it('prints global CLI help without resolving a Home', async () => {
     vi.restoreAllMocks();
   }
 });
+
+it('keeps init command generation inside the CLI home boundary', async () => {
+  const { mkdtempSync, rmSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'cli-init-'));
+  const argv = process.argv;
+  let completed!: () => void;
+  const done = new Promise<void>(resolve => { completed = resolve; });
+  const log = vi.spyOn(console, 'log').mockImplementation(message => {
+    if (String(message).startsWith('\nDone.')) completed();
+  });
+  process.argv = [process.execPath, 'cez', 'init', '--repo', root];
+  try {
+    vi.resetModules();
+    await import('../index.ts');
+    await done;
+    expect(log).toHaveBeenCalledWith('\nDone. Start the cockpit with: npx cezarion');
+    expect(readFileSync(join(root, '.ai/cezar/workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
+  } finally {
+    process.argv = argv;
+    vi.restoreAllMocks();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('keeps the missing-task usage on stderr', async () => {
+  const argv = process.argv;
+  const exitCode = process.exitCode;
+  let completed!: () => void;
+  const done = new Promise<void>(resolve => { completed = resolve; });
+  const error = vi.spyOn(console, 'error').mockImplementation(message => {
+    if (String(message).startsWith('usage: cez run')) completed();
+  });
+  process.argv = [process.execPath, 'cez', 'run'];
+  try {
+    vi.resetModules();
+    await import('../index.ts');
+    await done;
+    expect(error).toHaveBeenCalledWith('usage: cez run "<task>" [--workflow name] [--model model] [--no-workers] [--no-messaging]');
+    expect(process.exitCode).toBe(1);
+  } finally {
+    process.argv = argv;
+    process.exitCode = exitCode;
+    vi.restoreAllMocks();
+  }
+});

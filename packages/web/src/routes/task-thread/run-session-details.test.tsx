@@ -394,6 +394,16 @@ describe('Usage & agent — metrics', () => {
     expect(metaOf('usage')).toContain('$0.04')
   })
 
+  it('guesses no token count from tokensUsed when the record has no input/output counters', () => {
+    stubFetch()
+    const { inputTokens: _input, outputTokens: _output, ...historical } = run('done', { id: freshId(), tokensUsed: 3_620, costUsd: 0.04 })
+    renderCard(historical)
+    openRow('usage')
+    expect(metaOf('usage')).not.toContain('3.6k')
+    expect(metaOf('usage')).not.toContain('IN ')
+    expect(metaOf('usage')).toContain('$0.04')
+  })
+
   it('omits token and cost text when health disables token metrics', async () => {
     stubFetch({
       '/api/v1/health': () => jsonResponse({

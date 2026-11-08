@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { disableRemoteSettings, isGranted, readRemoteSettings } from '../remote-settings.ts';
@@ -139,7 +140,7 @@ async function withdrawRemoteSettings(ctx: InstallContext, port: number, why: st
     return;
   }
   await disableRemoteSettings(process.env, port, ctx.home);
-  ctx.ui.info(`Withdrew the remote settings grant for port ${port} (${why}). \`cez remote-settings enable --port ${port}\` grants it again.`);
+  ctx.ui.info(commandText(`Withdrew the remote settings grant for port ${port} (${why}). \`cez remote-settings enable --port ${port}\` grants it again.`));
 }
 
 function setupInstallRecord(state: ServerState, strategy: PlatformStrategy, opts: RunOptions): boolean {

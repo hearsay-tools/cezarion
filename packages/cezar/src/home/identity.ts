@@ -24,3 +24,12 @@ export function productIdentity(rebrand: boolean = REBRAND_SWITCH): ProductIdent
     mobileAppId: 'tools.hearsay.cezarion.mobile', desktopExecutable: 'cezar-desktop',
   };
 }
+
+/** Additive binary names. Package aliases have separate ownership rules. */
+export const BINARY_NAMES = ['cezarion', 'cez', 'hsq'] as const;
+export type BinaryName = typeof BINARY_NAMES[number];
+
+/** Read-only launch identities; npm package naming belongs to P3c. */
+export const NPM_LAUNCH_PACKAGES = [
+  '@wjarka/cezarion', 'cezarion', '@hearsay-tools/squawk', 'hsq',
+] as const;

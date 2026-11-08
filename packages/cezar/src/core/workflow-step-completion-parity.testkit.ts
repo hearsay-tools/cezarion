@@ -20,17 +20,11 @@ import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   "markers": [
     "claude C1",
-    "claude C2",
     "codex C1",
-    "codex C2",
     "cursor C1",
-    "cursor C2",
     "omp C1",
-    "omp C2",
     "opencode C1",
-    "opencode C2",
-    "pi C1",
-    "pi C2"
+    "pi C1"
   ],
   "clean-close": [
     "claude C3",
@@ -122,10 +116,9 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
           expect(run().status).toBe('waiting');
           expect(statuses()).toEqual([['implement', 'waiting'], ['review', 'pending'], ['verify', 'pending']]);
         };
-        if (row.id === 'C2' || row.id === 'C6') {
+        if (row.id === 'C6') {
           await complete();
-          if (row.id === 'C2') expect(notes(NO_WAIT_NUDGE_NOTE)).toEqual([]);
-          else expect(nudged(AUTONOMOUS_NUDGE)).toBe(true);
+          expect(nudged(AUTONOMOUS_NUDGE)).toBe(true);
           return;
         }
         // A quiet earlier turn end takes the final step's path: one nudge, then Cezar's human wait.

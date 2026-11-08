@@ -6,7 +6,8 @@
   "type": "module",
   "bin": {
     "cezarion": "dist/index.js",
-    "cez": "dist/index.js"
+    "cez": "dist/index.js",
+    "hsq": "dist/hsq.js"
   },
   "exports": {
     ".": "./dist/index.js",

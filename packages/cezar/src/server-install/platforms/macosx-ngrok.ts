@@ -1,3 +1,6 @@
+import { shellQuote } from '../../core/shell-env.ts';
+import { productIdentity } from '../../home/identity.ts';
+import { commandText } from '../../home/command.ts';
 import { launchdRemoteEnv } from './service-env.ts';
 import { productEnvEntries } from '../../core/product-env.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -254,7 +257,6 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
 
 /* ── autostart: run cezar itself as a launchd agent ─────────────────── */
 
-const OFFICIAL_CLI_PKG = 'cezarion';
 
 /** Live launchd `ProgramArguments` joined into one string so the shared npx-cache
  *  helper can classify the launch form the same way ubuntu-vps classifies ExecStart.
@@ -267,31 +269,32 @@ function readCezarProgramArguments(path: string): string {
     if (inner === undefined) return '';
     return [...inner.matchAll(/<string>([\s\S]*?)<\/string>/g)]
       .map((m) => (m[1] ?? '').replaceAll('&amp;', '&').replaceAll('&lt;', '<').replaceAll('&gt;', '>'))
-      .join(' ');
+      .map(shellQuote).join(' ');
   } catch {
     return '';
   }
 }
 
 /** Resolve the argv array for the cezar launchd agent, mirroring how the CLI was launched. */
-async function resolveCezarArgv(ctx: InstallContext): Promise<string[]> {
+export async function resolveCezarArgv(ctx: InstallContext, rebrand = REBRAND_SWITCH): Promise<string[]> {
   const node = process.execPath;
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-  const entry = join(pkgRoot, 'dist', 'index.js');
+  const entry = join(pkgRoot, 'dist', rebrand ? `${productIdentity(rebrand).command}.js` : 'index.js');
+  const cliPackage = productIdentity(rebrand).npmAlias;
   const npxPath = join(dirname(node), 'npx');
 
-  if (/[/\\]_npx[/\\]/.test(pkgRoot)) return [npxPath, '--yes', OFFICIAL_CLI_PKG];
+  if (/[/\\]_npx[/\\]/.test(pkgRoot)) return [npxPath, '--yes', cliPackage];
   if (ctx.dryRun || existsSync(entry)) return [node, entry];
 
-  const out = (await ctx.runner.capture('bash', ['-lc', `command -v ${OFFICIAL_CLI_PKG} || command -v cez`])).stdout.trim();
+  const out = (await ctx.runner.capture('bash', ['-lc', rebrand ? `command -v ${productIdentity(rebrand).command}` : `command -v ${cliPackage} || command -v cez`])).stdout.trim();
   const globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
   if (globalBin) return [node, globalBin];
 
   // No runnable cezar → installing a KeepAlive agent would make launchd
   // respawn-throttle a permanently failing job across reboots. Fail the step.
   throw new StepAborted(
-    `could not locate a runnable cezar (${entry} missing, no global ${OFFICIAL_CLI_PKG}) — ` +
-      `install it (npm i -g ${OFFICIAL_CLI_PKG}) or build the checkout, then re-run with --reconfigure autostart`,
+    `could not locate a runnable cezar (${entry} missing, no global ${cliPackage}) — ` +
+      `install it (npm i -g ${cliPackage}) or build the checkout, then re-run with --reconfigure autostart`,
   );
 }
 
@@ -353,7 +356,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     return launchdRemoteEnv(current) === current;
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    const argv = await resolveCezarArgv(ctx);
+    const argv = await resolveCezarArgv(ctx, rebrand);
     const previous = agentArtifact(ctx, 'autostart', rebrand);
     const name = labelFor('cockpit', rebrand);
     const path = join(launchAgentsDir(ctx), `${name}.plist`);
@@ -429,7 +432,7 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       // Clear the cezarion cache first (read the live ProgramArguments to know the
       // launch form); a checkout / global agent is left alone.
       refreshNpxCacheForRedeploy(ctx, readCezarProgramArguments(agentArtifact(ctx, 'autostart', rebrand).path), {
-        reconfigureHint: `  cez server-install --platform macosx-ngrok --reconfigure autostart`,
+        reconfigureHint: commandText(`  cez server-install --platform macosx-ngrok --reconfigure autostart`, undefined, rebrand),
       });
       // Restart both the cezar cockpit and the ngrok tunnel, then re-verify.
       if (ctx.dryRun) {

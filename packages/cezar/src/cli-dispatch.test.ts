@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { defaultCliDeps, main, type CliDeps } from './cli-dispatch.ts';
 import { testHome } from './home/test-home.testkit.ts';
@@ -196,5 +197,58 @@ describe('main dispatch', () => {
     expect(f.deps.runManagedCommand).toHaveBeenCalledBefore(f.deps.runSubcommand);
     expect(f.deps.runSubcommand).toHaveBeenCalledBefore(f.deps.parseArgs);
     expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+  });
+});
+
+describe('binary help and notices', () => {
+  it.each([false, true])('uses legacy help and one gated notice for an npm target entry (switch %s)', async rebrand => {
+    const f = fixture(['--help']);
+    f.processStub.argv[1] = String.raw`C:\npm\node_modules\@wjarka\cezarion\dist\index.js`;
+    await main(f.deps as unknown as CliDeps, rebrand);
+    expect(f.deps.console.log.mock.calls[0]![0]).toContain('  cez run "<task>"');
+    expect(f.deps.console.error.mock.calls).toEqual(rebrand ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []);
+  });
+  it('keeps legacy help byte-identical to the pre-rebrand entry', async () => {
+    const expected = readFileSync(new URL('./home/fixtures/cli-help-legacy.txt', import.meta.url), 'utf8');
+    for (const name of ['cez', 'cezarion']) {
+      const f = fixture(['--help']);
+      f.processStub.argv[1] = `/pkg/dist/${name}.js`;
+      await main(f.deps as unknown as CliDeps, false);
+      expect(f.deps.console.log).toHaveBeenCalledWith(expected);
+      expect(f.deps.console.error).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([false, true])('keeps JSON subcommands separate from old-name notices (switch %s)', async rebrand => {
+    for (const name of ['cez', 'cezarion', 'hsq']) {
+      const f = fixture(['automation', 'schema']);
+      f.processStub.argv[1] = `/pkg/dist/${name}.js`;
+      f.deps.runSubcommand.mockResolvedValue(0);
+      await main(f.deps as unknown as CliDeps, rebrand);
+      expect(f.deps.console.error.mock.calls).toEqual(rebrand && name !== 'hsq'
+        ? [[`[${name}] '${name}' is deprecated; use 'hsq' instead.`]] : []);
+      expect(f.deps.console.log).not.toHaveBeenCalled();
+      expect(f.deps.runSubcommand).toHaveBeenCalled();
+      expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    }
+  });
+  it.each([false, true])('uses the allowed help identity (switch %s)', async rebrand => {
+    for (const name of ['cez', 'cezarion', 'hsq']) {
+      const f = fixture(['--help']);
+      f.processStub.argv[1] = `/pkg/dist/${name}.js`;
+      await main(f.deps as unknown as CliDeps, rebrand);
+      const expected = rebrand || name === 'hsq' ? name : 'cez';
+      const help = f.deps.console.log.mock.calls[0]![0] as string;
+      expect(help).toContain(`  ${expected} run "<task>"`);
+      expect(help.includes(`  ${expected} migrate [--dry-run]`)).toBe(rebrand);
+      expect(help).toContain('cezar — local cockpit');
+    }
+  });
+  it('prints the notice before a managed command can return', async () => {
+    const f = fixture(['versions']);
+    f.deps.runManagedCommand.mockResolvedValue(0);
+    await main(f.deps as unknown as CliDeps, true);
+    expect(f.deps.console.error).toHaveBeenCalledBefore(f.deps.runManagedCommand);
+    expect(f.deps.console.error).toHaveBeenCalledTimes(1);
   });
 });

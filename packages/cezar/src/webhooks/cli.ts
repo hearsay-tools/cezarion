@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { productEnv } from '../core/product-env.ts';
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -25,7 +26,7 @@ export interface WebhookIo {
   http?: (cockpit: Cockpit, path: string, init?: { method?: string; body?: unknown }) => Promise<HttpResult>;
 }
 
-const USAGE = `cez webhook — send reports to the project webhooks the owner exposed to agents.
+const USAGE = commandText(`cez webhook — send reports to the project webhooks the owner exposed to agents.
 One JSON object per invocation; exit 0 ok, 1 not delivered, 2 refused or no cockpit, 64 usage.
 
   list                                     the exposed webhooks: id, name and what each is for
@@ -34,7 +35,7 @@ One JSON object per invocation; exit 0 ok, 1 not delivered, 2 refused or no cock
                                            report names this task when CEZ_TASK_ID is set
 
 Address: CEZ_COCKPIT_URL + CEZ_PROJECT_ID (set inside a task). --url <origin> or --repo <dir> look
-for a cockpit instead.`;
+for a cockpit instead.`);
 
 const NO_COCKPIT = 'no cockpit address — this command works inside a task run by a cockpit';
 

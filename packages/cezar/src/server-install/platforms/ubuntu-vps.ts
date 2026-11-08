@@ -1,3 +1,5 @@
+import { productIdentity } from '../../home/identity.ts';
+import { commandText } from '../../home/command.ts';
 import { repairUnitEnv, writeFileStep } from './ubuntu-vps-files.ts';
 import { productEnvEntries } from '../../core/product-env.ts';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,7 +23,6 @@ export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
  * Phase 1 ships deps → nginx+htpasswd → identity-verify (and their `undo`s).
  * Phase 2 appends the optional SSL and autostart steps to `steps()`.
  */
-
 /** Best-effort current OS username, suggested as the default cockpit login. */
 function currentUsername(): string {
   try {
@@ -597,10 +598,6 @@ RestartSec=5
 WantedBy=${installTarget}
 `;
 }
-
-/** Our official npm package/alias — what `npx <this>` reinstalls the CLI as. */
-const OFFICIAL_CLI_PKG = 'cezarion';
-
 /**
  * Decide the absolute ExecStart command for the service, mirroring how the
  * installer itself was launched so the box keeps running the same cezar:
@@ -620,21 +617,24 @@ export function serviceExecStart(opts: {
   entryExists: boolean;
   npxPath: string;
   globalBin?: string | undefined;
-}): string {
-  if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return `${opts.npxPath} --yes ${OFFICIAL_CLI_PKG}`;
-  if (opts.entryExists) return `${opts.node} ${opts.entry}`;
+}, rebrand = REBRAND_SWITCH): string {
+  const cliPackage = productIdentity(rebrand).npmAlias;
+  const entry = rebrand ? join(dirname(opts.entry), `${productIdentity(rebrand).command}.js`) : opts.entry;
+  if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return `${opts.npxPath} --yes ${cliPackage}`;
+  if (opts.entryExists) return `${opts.node} ${entry}`;
   if (opts.globalBin) return `${opts.node} ${opts.globalBin}`;
-  return `${opts.node} ${opts.entry}`;
+  return `${opts.node} ${entry}`;
 }
 
-async function resolveExecStart(ctx: InstallContext): Promise<string> {
+async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<string> {
+  const cliPackage = productIdentity(rebrand).npmAlias;
   const node = process.execPath; // absolute node running this installer
   // The CLI's OWN package root (…/dist/server-install/platforms/ → up 3), NOT the
   // repo being operated on — `--repo` / cwd can differ from where cezar lives.
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const entry = join(pkgRoot, 'dist', 'index.js');
   let npxPath = join(dirname(node), 'npx');
-  if (ctx.dryRun) return serviceExecStart({ node, pkgRoot, entry, entryExists: true, npxPath });
+  if (ctx.dryRun) return serviceExecStart({ node, pkgRoot, entry, entryExists: true, npxPath }, rebrand);
   // A standalone node binary has no adjacent npx — fall back to the login
   // shell's, or ExecStart would 203/EXEC (the exact bug 9fea263 fixed).
   if (!existsSync(npxPath)) {
@@ -644,16 +644,16 @@ async function resolveExecStart(ctx: InstallContext): Promise<string> {
 
   let globalBin: string | undefined;
   if (!existsSync(entry) && !/[/\\]_npx[/\\]/.test(pkgRoot)) {
-    const out = (await ctx.runner.capture('bash', ['-lc', `command -v ${OFFICIAL_CLI_PKG} || command -v cez`])).stdout.trim();
+    const out = (await ctx.runner.capture('bash', ['-lc', rebrand ? `command -v ${productIdentity(rebrand).command}` : `command -v ${cliPackage} || command -v cez`])).stdout.trim();
     globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
     if (!globalBin) {
       ctx.ui.warn(
-        `Could not locate a built cezar to run (${entry} missing, no global ${OFFICIAL_CLI_PKG}).\n` +
-          `Install it (npm i -g ${OFFICIAL_CLI_PKG}) or build the checkout, then re-run with --reconfigure autostart.`,
+        `Could not locate a built cezar to run (${entry} missing, no global ${cliPackage}).\n` +
+          `Install it (npm i -g ${cliPackage}) or build the checkout, then re-run with --reconfigure autostart.`,
       );
     }
   }
-  return serviceExecStart({ node, pkgRoot, entry, entryExists: existsSync(entry), npxPath, globalBin });
+  return serviceExecStart({ node, pkgRoot, entry, entryExists: existsSync(entry), npxPath, globalBin }, rebrand);
 }
 
 const autostartStep = (rebrand: boolean): InstallStep => ({
@@ -667,7 +667,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
     const UNIT_NAME = recordedUnit(ctx, rebrand).name, hint = unitHint(ctx, rebrand);
-    const execStart = await resolveExecStart(ctx);
+    const execStart = await resolveExecStart(ctx, rebrand);
     // Prefer a rootless `systemd --user` service + linger; fall back to a system
     // unit (via sudoStep) when the user bus is not reachable. `show-environment`
     // exits 0 iff the user manager is up — on a headless SSH box with no session
@@ -882,7 +882,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
       if (!https) {
         ctx.ui.warn(
           'This cockpit is HTTP-only (no domain/SSL configured). To serve it over HTTPS with this same auth, ' +
-            're-run: cez server-install --platform ubuntu-vps --reconfigure ssl',
+            commandText('re-run: cez server-install --platform ubuntu-vps --reconfigure ssl', undefined, rebrand),
         );
       }
       return { artifacts: [] };
@@ -943,7 +943,7 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
             `Port 80 is already served by "${holder}" on this host.\n` +
               `cezar's ubuntu-vps install wants :80/:443 for its own nginx, so these will collide.\n\n` +
               `If that is a reverse proxy you rely on (Dokploy/Traefik, Coolify, Caddy), re-run with:\n` +
-              `  cez server-install --platform ubuntu-vps --external-proxy${ctx.state.domain ? ` --domain ${ctx.state.domain}` : ''} [--bind-host 172.17.0.1]\n` +
+              commandText(`  cez server-install --platform ubuntu-vps --external-proxy${ctx.state.domain ? ` --domain ${ctx.state.domain}` : ''} [--bind-host 172.17.0.1]\n`, undefined, rebrand) +
               `That installs the cezar service only and lets your proxy front it.`,
           );
         }

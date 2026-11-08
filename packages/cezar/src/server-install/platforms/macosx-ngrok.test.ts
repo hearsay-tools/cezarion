@@ -245,6 +245,7 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
     const entry = join(cache, '_npx', 'aaaa', 'node_modules', 'cezarion');
     mkdirSync(entry, { recursive: true });
     writeFileSync(join(entry, 'x'), '');
+    writeFileSync(join(cache, '_npx', 'aaaa', 'package.json'), JSON.stringify({ dependencies: { cezarion: '^0.17.0' } }));
     return join(cache, '_npx', 'aaaa');
   }
 
