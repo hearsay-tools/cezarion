@@ -1,6 +1,6 @@
 import { commandText } from '../home/command.ts';
 import { NPM_LAUNCH_PACKAGES, productIdentity } from '../home/identity.ts';
-import { readdirSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { StepAborted } from './steps.ts';
@@ -29,9 +29,29 @@ export function npxLaunchPackage(execStart: string): string | undefined {
   return words[0];
 }
 
-export function ownedNpxPackage(execStart: string): string | undefined {
-  const request = npxLaunchPackage(execStart);
+function ownedPackageRequest(request: string | undefined): string | undefined {
   return NPM_LAUNCH_PACKAGES.find(pkg => request === pkg || (request?.startsWith(`${pkg}@`) && /^[\w~^<>=*.+|-]+$/.test(request.slice(pkg.length + 1))));
+}
+
+export function ownedNpxPackage(execStart: string): string | undefined {
+  return ownedPackageRequest(npxLaunchPackage(execStart));
+}
+
+/** A hoisted dependency does not make the surrounding npx install ours. */
+function cacheRequestsPackage(root: string, name: string): boolean {
+  const manifestPath = join(root, 'package.json');
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (!manifest || typeof manifest !== 'object' || !('dependencies' in manifest)) return false;
+    const dependencies = manifest.dependencies;
+    if (!dependencies || typeof dependencies !== 'object' || Object.keys(dependencies).length !== 1) return false;
+    const spec = (dependencies as Record<string, unknown>)[name];
+    return typeof spec === 'string' && ownedPackageRequest(`${name}@${spec}`) === name;
+  } catch (error) {
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new StepAborted(`cannot inspect the npx cache entry at ${manifestPath}: ${message} — the service was not restarted`);
+  }
 }
 
 export function isNpxExecStart(execStart: string): boolean {
@@ -58,8 +78,8 @@ export function isForeignNpxExecStart(execStart: string): boolean {
  * The npx trap (#696 / #32): `npx --yes cezarion` caches the resolved package under
  * `~/.npm/_npx/<hash>` and reuses it forever — a service restart re-execs the
  * SAME cached build, so `server-deploy` would never actually update. Before
- * restarting an npx-based unit we delete the cache entries that contain
- * `cezarion`, so the next launch re-resolves `latest`. Surgical: other npx
+ * restarting an npx-based unit we delete cache entries whose root manifest requests
+ * only the launched package, so the next launch re-resolves `latest`. Other npx
  * packages' caches are left untouched. A checkout / global-bin unit has no
  * npx cache to clear and is skipped (its restart picks up the new build/global
  * directly).
@@ -106,6 +126,7 @@ export function refreshNpxCacheForRedeploy(
   let cleared = 0;
   for (const entry of entries) {
     const pkgDir = join(dir, entry);
+    if (!cacheRequestsPackage(pkgDir, launchPackage)) continue;
     const packageDir = join(pkgDir, 'node_modules', launchPackage);
     try {
       statSync(packageDir);

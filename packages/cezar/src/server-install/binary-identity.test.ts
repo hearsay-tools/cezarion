@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,7 @@ describe('exact npm launch ownership', () => {
     vi.stubEnv('npm_config_cache', cache);
     for (const [index, candidate] of [...NPM_LAUNCH_PACKAGES, 'cez', 'cezar-cli'].entries()) {
       mkdirSync(join(cache, '_npx', String(index), 'node_modules', candidate), { recursive: true });
+      writeFileSync(join(cache, '_npx', String(index), 'package.json'), JSON.stringify({ dependencies: { [candidate]: '^0.17.0' } }));
     }
     const command = `/usr/bin/npx --yes ${pkg} serve --no-open`;
     expect(isNpxExecStart(command)).toBe(true);
@@ -42,6 +43,36 @@ describe('exact npm launch ownership', () => {
     for (const [index, candidate] of [...NPM_LAUNCH_PACKAGES, 'cez', 'cezar-cli'].entries()) {
       expect(existsSync(join(cache, '_npx', String(index)))).toBe(candidate !== pkg);
     }
+  });
+  it.each([
+    { dependencies: { foreign: '^1.0.0' } },
+    { dependencies: { '@wjarka/cezarion': 'npm:foreign@1.0.0' } },
+    { dependencies: { '@wjarka/cezarion': 'file:/foreign' } },
+    { dependencies: { '@wjarka/cezarion': '^0.17.0', foreign: '^1.0.0' } },
+    { dependencies: { '@wjarka/cezarion': '' } },
+    { dependencies: null },
+    null,
+  ])('preserves unowned roots even when our scoped package is hoisted: %j', manifest => {
+    const ctx = context();
+    const cache = join(ctx.home.root, 'npm');
+    const root = join(cache, '_npx/foreign');
+    vi.stubEnv('npm_config_cache', cache);
+    mkdirSync(join(root, 'node_modules/@wjarka/cezarion'), { recursive: true });
+    writeFileSync(join(root, 'package.json'), JSON.stringify(manifest));
+    refreshNpxCacheForRedeploy(ctx, '/usr/bin/npx --yes @wjarka/cezarion serve');
+    expect(existsSync(root)).toBe(true);
+  });
+  it('preserves roots with missing or malformed request metadata', () => {
+    const ctx = context();
+    const cache = join(ctx.home.root, 'npm');
+    const root = join(cache, '_npx/unknown');
+    vi.stubEnv('npm_config_cache', cache);
+    mkdirSync(join(root, 'node_modules/@wjarka/cezarion'), { recursive: true });
+    refreshNpxCacheForRedeploy(ctx, '/usr/bin/npx --yes @wjarka/cezarion serve');
+    expect(existsSync(root)).toBe(true);
+    writeFileSync(join(root, 'package.json'), '{');
+    refreshNpxCacheForRedeploy(ctx, '/usr/bin/npx --yes @wjarka/cezarion serve');
+    expect(existsSync(root)).toBe(true);
   });
   it.each(['cez', 'cezar-cli', 'foreign-cezarion', 'cezarion-foreign', '@foreign/cezarion', '@hearsay-tools/squawk-foreign', 'cezarion@npm:cezar-cli', 'hsq@file:/foreign', 'hsq@'])('rejects foreign package %s', pkg => {
     const command = `/usr/bin/npx --yes ${pkg} serve --repo /srv/cezarion`;

@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { execFile as execFileCallback } from 'node:child_process';
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { stripTypeScriptTypes } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -62,7 +63,14 @@ test('packed, alias, linked and managed binaries retain their name and keep noti
     const tarball = await pack(join(repo, 'packages/cezar'), root);
     await execFile(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', tarball], { cwd: consumer, shell: process.platform === 'win32', maxBuffer: 10 * 1024 * 1024 });
     const scoped = join(consumer, 'node_modules/@wjarka/cezarion');
-    const scopedManifest = JSON.parse(await readFile(join(scoped, 'package.json'), 'utf8')) as { bin: Record<string, string> };
+    const scopedManifest = JSON.parse(await readFile(join(scoped, 'package.json'), 'utf8')) as { version: string; bin: Record<string, string> };
+    // Run the stable release's frozen validator against the installed tarball.
+    const shippedValidator = stripTypeScriptTypes(await readFile(new URL('../fixtures/v0.17.0-package-validator.ts.txt', import.meta.url), 'utf8'));
+    const validatorArgs = ['--input-type=module', '-e', `${shippedValidator}\nvalidateInstalledPackage(process.argv[1], process.argv[2], process.argv[3]);`, scoped, scopedManifest.version, consumer];
+    await execFile(process.execPath, validatorArgs);
+    await writeFile(join(scoped, 'package.json'), JSON.stringify({ ...scopedManifest, bin: { hsq: 'dist/hsq.js' } }));
+    await assert.rejects(execFile(process.execPath, validatorArgs), /staged CLI entry missing/);
+    await writeFile(join(scoped, 'package.json'), JSON.stringify(scopedManifest));
     const alias = join(consumer, 'node_modules/cezarion');
     await mkdir(alias);
     // Install the real alias files beside the packed dependency without contacting a registry for its unpublished version.
@@ -95,7 +103,7 @@ test('packed, alias, linked and managed binaries retain their name and keep noti
       // Only the installed test copy changes. The repository's release switch stays false.
       await writeFile(join(scoped, 'dist/home/switch.js'), `export const REBRAND_SWITCH = ${rebrand};\n`);
       for (const name of BINARY_NAMES) {
-        assert.equal(scopedManifest.bin[name], `dist/${name}.js`);
+        assert.equal(scopedManifest.bin[name], name === 'hsq' ? 'dist/hsq.js' : 'dist/index.js');
         assert.equal(aliasManifest.bin[name], `${name}.js`);
         const managed = join(root, `${name}${process.platform === 'win32' ? '.cmd' : ''}`);
         if (process.platform !== 'win32') {
@@ -104,8 +112,10 @@ test('packed, alias, linked and managed binaries retain their name and keep noti
           assert.equal(used.stderr, rebrand && name !== 'hsq' ? `[${name}] '${name}' is deprecated; use 'hsq' instead.\n` : '');
         }
         const linked = process.platform === 'win32' ? join(prefix, `${name}.cmd`) : join(prefix, 'bin', name);
+        const installed = join(consumer, 'node_modules/.bin', name + (process.platform === 'win32' ? '.cmd' : ''));
         const entries: Entry[] = [
-          [process.execPath, [join(scoped, scopedManifest.bin[name]!)], false],
+          [process.execPath, [join(scoped, 'dist', `${name}.js`)], false],
+          [installed, [], process.platform === 'win32'],
           [process.execPath, [join(alias, aliasManifest.bin[name]!)], false],
           [managed, [], process.platform === 'win32'],
           [linked, [], process.platform === 'win32'],
