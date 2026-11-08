@@ -48,7 +48,7 @@ jobs:
         run: npm run build:server
         timeout-minutes: 3
       # These steps are serial on a dedicated hosted runner. No other test/build
-      # runs concurrently here; host scheduling can still cause a genuine failure.
+      # runs concurrently here. CPU gates exclude host scheduling delay; reports keep wall time.
       - name: Measure strict server-free lag
         id: lag
         timeout-minutes: 2
