@@ -41,7 +41,15 @@ export const terminal = ['review', 'done', 'failed', 'cancelled'];
 export async function until(predicate: () => boolean, explain?: () => string) {
   // bound: fail a stuck state/termination check after 15 s; the predicate remains the signal.
   await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }).catch((error: unknown) => {
-    if (error instanceof Error) error.message = `Waiting for ${predicate.toString()}\n${explain ? `${explain()}: ` : ''}${error.message}`;
+    if (error instanceof Error) {
+      let explanation = '';
+      try {
+        if (explain) explanation = `${explain()}: `;
+      } catch (diagnosticError) {
+        explanation = `diagnostics unavailable: ${String(diagnosticError)}: `;
+      }
+      error.message = `Waiting for ${predicate.toString()}\n${explanation}${error.message}`;
+    }
     throw error;
   });
 }
