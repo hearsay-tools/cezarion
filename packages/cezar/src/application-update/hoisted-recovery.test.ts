@@ -54,6 +54,30 @@ it.each(['hoisted', 'nested', 'direct'] as const)('old %s records cannot falsely
   } else expect(readdirSync(join(f.recordPath(), '..')).filter(name => name === 'recovery-package')).toEqual([]);
 });
 
+it.each(['hoisted', 'nested'] as const)('rejects an unpublished %s alias release during preparation', async layout => {
+  const f = fixture(layout);
+  const install = f.runNpm.getMockImplementation()!;
+  f.runNpm.mockImplementationOnce(async args => {
+    await install(args);
+    const alias = join(args[args.indexOf('--prefix') + 1]!, 'node_modules/cezarion/package.json');
+    const manifest = JSON.parse(readFileSync(alias, 'utf8'));
+    writeFileSync(alias, JSON.stringify({ ...manifest, version: '1.0.0' }));
+  });
+  await expect(f.service.apply()).rejects.toThrow('preparation failed');
+  expect(f.service.snapshot().status).toBe('error');
+  expect(readFileSync(join(f.original, 'dist/index.js'), 'utf8')).toBe('original CLI');
+});
+
+it.each(['hoisted', 'nested'] as const)('invalidates Ready if the %s alias changes after preparation', async layout => {
+  const f = fixture(layout);
+  await f.service.apply();
+  const alias = join(f.readRecord().stage, 'node_modules/cezarion/package.json');
+  const manifest = JSON.parse(readFileSync(alias, 'utf8'));
+  writeFileSync(alias, JSON.stringify({ ...manifest, version: '1.0.0' }));
+  expect(f.service.snapshot().status).toBe('error');
+  await expect(f.service.restart()).rejects.toThrow('Prepare');
+});
+
 it.each(['missing', 'corrupt', 'wrong version', 'missing CLI', 'foreign path', 'oversized path'] as const)('invalidates hoisted Ready with %s recovery metadata or files', async damage => {
   const f = fixture(); await f.service.apply();
   const record = f.readRecord();
