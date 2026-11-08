@@ -177,12 +177,12 @@ delivery, holds or resume inside a runner class extends these rows.
 
 | Row | Scenario | Asserts |
 |---|---|---|
-| S36 | `hold-gated` | agent input is acknowledged at the declared point: `write` while the native process is stopped, `response` only once it answers, `model-work` only after the turn it opens has started; consumption is reported after the acknowledgement and on a later native frame, never for an `unobservable` runner. S12 holds the steer and boundary admission |
+| S36 | `hold-gated` | agent input is acknowledged at the declared point: `write` while the native process is stopped, `response` only once it answers, `model-work` only after the turn it opens has started; an `observable` runner reports each input read or unread, a read after the acknowledgement and on a later native frame; an `unobservable` runner reports none. S12 holds the steer and boundary admission |
 | S37 | `hold` | a follow-up turn whose native start is late emits `turn.started` before its content, its `turn.completed` and its `turn-end` |
 | S38 | `hold-gated` ×4 | `holdsHumanInput()` reads true as soon as `sendMessage` returns, and releases after the `turn.started` of the turn that carries the follow-up and by its end; mid-turn, late-acknowledged (H5's ordering), at an idle boundary and during startup, each with a late native turn start |
 | S39 | `hold-gated` | with `autoEndAfterFirstTurn`, a follow-up the turn did not read is held at that turn's `turn-end`, and runs in a turn of its own before the session closes |
-| S40 | `steer-tool` | a human message sent before the turn's last model call is read in that turn, or held for the next, as `humanInputAtTurnEnd` declares |
-| S41 | `steer-late` | the same for a message sent after the last model call |
+| S40 | `steer-tool` | a human message sent before the turn's last model call is read in that turn, or held for the next, as `humanInputAtTurnEnd` declares; `CEZ_MOCK_STEER_GATE` holds the tool open until the message is on the wire |
+| S41 | `steer-late` | the same for a message sent after the last model call, with the turn's tail held open the same way |
 | S42 | `baseline` ×2 | on a fresh and a resumed session, `spec.systemPrompt` travels outside the conversation when the runner declares `resent`, and is prepended to the opening turn when it declares `in-thread` |
 
 A boundary runner has no read point inside a running turn, so S40 and S41 exempt it

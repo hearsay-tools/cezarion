@@ -2100,8 +2100,9 @@ runner to its declared facts, never to its id:
 - **S36** acknowledgement: `sendAgentMessage` resolves at the declared `acknowledgement`
   point. With the native process stopped, a `write` acknowledgement still resolves and a
   `response` one does not; a `model-work` one resolves only after the turn it opens has
-  started. Consumption follows the acknowledgement on a later native frame, and an
-  `unobservable` runner reports none. S12 holds steer admission and boundary refusal.
+  started. An `observable` runner reports every accepted input read or unread; a read
+  follows the acknowledgement on a later native frame. An `unobservable` runner reports
+  none. S12 holds steer admission and boundary refusal.
 - **S37** turn start: a follow-up turn whose native start is late emits `turn.started`
   before its content, its `turn.completed` and its `turn-end`.
 - **S38** held human input: `holdsHumanInput()` reads true as soon as `sendMessage`
@@ -2112,7 +2113,9 @@ runner to its declared facts, never to its id:
   read is held at its `turn-end`, and runs in a turn of its own before the session closes.
 - **S40/S41** `humanInputAtTurnEnd`: a human message sent before (S40, `steer-tool`) or
   after (S41, `steer-late`) the turn's last model call is read in that turn or held for the
-  next, as declared. A boundary runner has no read point inside a turn, so it is exempt
+  next, as declared. `CEZ_MOCK_STEER_GATE` keeps the mock's steering window open until the
+  message is on its wire, so no timer decides early or late. A boundary runner has no read
+  point inside a turn, so it is exempt
   (`scenario-unconstructible`); `runner-facts.test.ts` ties the exemption to the mode.
 - **S42** `systemPromptOnResume`: on a fresh and a resumed session, `spec.systemPrompt`
   travels outside the conversation when the runner declares `resent`, and is prepended to
