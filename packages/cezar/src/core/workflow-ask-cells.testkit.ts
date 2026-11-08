@@ -11,7 +11,7 @@ import { driveRun } from './workflow-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-cleanup.testkit.ts';
-import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { hasPendingAsk, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 const STEP_TIMEOUT_MS = 2_000;
 
@@ -117,7 +117,8 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(run().error).toContain('timed out');
             expect(run().steps[0]?.status).toBe('failed');
           } else {
-            // Q4: idle close, then a Continue that asks again; its answer runs the tail.
+            // Q4: idle close, then a Continue that asks again. That Continue closes cleanly before its
+            // answer and keeps the question; the next Continue asks again, and its answer runs the tail.
             await idleClock!.advance(IDLE_TIMEOUT_MS);
             await waitFor(() => !manager.isActive(runId));
             expect(run().status).toBe('waiting');
@@ -125,6 +126,14 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(manager.continueRun(runId, { text: promptFor(backend, 'cezar-ask') }).ok).toBe(true);
             await waitFor(() => run().status === 'waiting');
             expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(2);
+            [...fixtureWork(manager).liveSessions][0]!.end();
+            await waitFor(() => !manager.isActive(runId));
+            expect(run().status).toBe('waiting');
+            expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending', 'waiting']);
+            expect(hasPendingAsk(store, runId)).toBe(true);
+            expect(checks()).toEqual([]);
+            expect(manager.continueRun(runId, { text: promptFor(backend, 'cezar-ask') }).ok).toBe(true);
+            await waitFor(() => run().status === 'waiting' && events().filter(e => e.type === 'ask.requested').length === 3);
             expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:cezar-done' }])).toBe(true);
             await complete();
             return;

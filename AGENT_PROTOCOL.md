@@ -1898,13 +1898,14 @@ Intermediate question rows **Q4–Q6 and Q8** (hearsay-tools/cezarion#427) live 
 `core/workflow-ask-cells.testkit.ts` and the shared parity guard. Every
 `RUNNER_IDS` adapter drives the `cezar-ask` scenario, one `cezar_ask` call over its
 native wire. No wire exemption is needed. The rows cover idle close and a second
-question on Continue whose answer runs the trailing check (Q4), disk-round-trip
+question on Continue, whose clean close before its answer keeps the question and the
+tail, and a later answer runs the trailing check (Q4); disk-round-trip
 restart recovery (Q5), cancellation (Q6) and authored timeouts (Q8). Unrun checks
 remain pending on stop/failure. hearsay-tools/cezarion#2991 retired Q1, Q3, Q7, Q9
 and Q10, which repeated wait rows: U7h, U7k and U7d pin the ask, its answer and the
 answering done; U18 pins Finish on a parked question, fresh and after a Continue, with the
-later step left pending;
-U9h pins a clean close with a question open; A3/A4 pin the autonomous refusal.
+later step left pending; U9h pins a clean close with a question open; Q4 pins that close
+after a Continue; A3/A4 pin the autonomous refusal.
 
 
 Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.testkit.ts`

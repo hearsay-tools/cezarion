@@ -169,7 +169,7 @@ export const MODEL_REFUSAL_CRITERIA = [
 /** #427: intermediate asks through cezar_ask, on every native message wire. Q2 (a malformed
  *  intermediate marker) went with the CEZ:ASK line (hearsay-tools/cezarion#2397). */
 export const WORKFLOW_ASK_CRITERIA = [
-  { id: 'Q4', scenario: 'cezar-ask', name: 'idle close and a second question on Continue retain the workflow tail' },
+  { id: 'Q4', scenario: 'cezar-ask', name: 'idle close, a second question on Continue and a clean close before its answer retain the workflow tail' },
   { id: 'Q5', scenario: 'cezar-ask', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
   { id: 'Q6', scenario: 'cezar-ask', name: 'cancel leaves later steps pending' },
   { id: 'Q8', scenario: 'cezar-ask', name: 'an authored timeout fails without running later steps' },
