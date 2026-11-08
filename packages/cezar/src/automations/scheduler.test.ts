@@ -463,6 +463,32 @@ describe('ProjectAutomationScheduler', () => {
 });
 
 describe('WorkspaceAutomationScheduler', () => {
+  it.each(['store', 'handle'] as const)('skips a project with no %s and still checks a healthy project', async missing => {
+    vi.useFakeTimers();
+    const { store, definition } = await setup();
+    const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: {
+        refresh: async () => undefined,
+        enabledProjectIds: () => ['unavailable', 'healthy'],
+        store: (id: string) => id === 'unavailable' && missing === 'store' ? undefined : store,
+        hasProjects: () => true,
+      } as never,
+      handle: (projectId, projectStore) => projectId === 'unavailable' ? undefined : {
+        projectId, store: projectStore, timeZone: 'UTC',
+        github: { owner: 'acme', repo: 'demo', poller: { poll } as never },
+        launch: async () => ({ runId: 'unused' }),
+      },
+    });
+    try {
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(poll).toHaveBeenCalledTimes(1);
+      expect(store.state(definition.id)?.lastSuccessAt).toBeDefined();
+      expect(store.receipts()).toEqual([]);
+    } finally { scheduler.stop(); vi.useRealTimers(); }
+  });
+
   it('arms its first timer when a definition is enabled after startup', async () => {
     const { store, definition } = await setup();
     store.update(definition.id, definition.revision, { ...definition, enabled: false });
