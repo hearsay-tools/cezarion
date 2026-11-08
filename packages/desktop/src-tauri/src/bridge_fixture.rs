@@ -1,6 +1,6 @@
 //! Native CI fixture only. Never compiled into a normal installer.
-use std::{fs, io::{Read, Write}, net::TcpListener, path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use std::{fs, io::Write, net::TcpListener, path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
 
 pub fn run_if_asked() -> bool {
@@ -42,11 +42,12 @@ pub fn run_if_asked() -> bool {
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        super::bridge_state::prepare_accepted_stream(&stream).unwrap();
-                        let mut bytes = Vec::new(); let mut buffer = [0; 1024];
-                        while bytes.len() < 16384 && !bytes.ends_with(b"\r\n\r\n") {
-                            let count = stream.read(&mut buffer).unwrap_or(0); if count == 0 { break; }
-                            bytes.extend_from_slice(&buffer[..count]);
+                        let bytes = match super::bridge_state::read_accepted_message(&mut stream, Some(b"\r\n\r\n"), 16384, deadline) {
+                            Ok(bytes) => bytes,
+                            Err(reason) => { eprintln!("Ignored fixture connection: {reason}"); continue; },
+                        };
+                        if let Err(reason) = stream.set_write_timeout(Some(Duration::from_secs(2))) {
+                            eprintln!("Ignored fixture connection: set write timeout: {reason}"); continue;
                         }
                         let request = String::from_utf8_lossy(&bytes);
                         if request.starts_with("GET /report?storage=kept ") {

@@ -163,10 +163,14 @@ impl Platform for Native {
         let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline {
             match listener.accept() {
-                Ok((stream, _)) => {
-                    bridge_state::prepare_accepted_stream(&stream)?;
-                    let mut bytes = Vec::new(); stream.take(4096).read_to_end(&mut bytes)?;
-                    return validate_acknowledgement(&bytes, &token);
+                Ok((mut stream, _)) => {
+                    match bridge_state::read_accepted_message(&mut stream, None, 4096, deadline) {
+                        Ok(bytes) => match validate_acknowledgement(&bytes, &token) {
+                            Ok(()) => return Ok(()),
+                            Err(reason) => eprintln!("Ignored bridge acknowledgement: {reason}"),
+                        },
+                        Err(reason) => eprintln!("Ignored bridge connection: {reason}"),
+                    }
                 },
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => (),
                 Err(e) => return Err(e),

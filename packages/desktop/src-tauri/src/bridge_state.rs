@@ -9,8 +9,33 @@ pub enum Outcome { Manual, Complete }
 
 /// BSD and Windows can inherit the listener's nonblocking mode on accepted sockets.
 pub fn prepare_accepted_stream(stream: &std::net::TcpStream) -> io::Result<()> {
-    stream.set_nonblocking(false)?;
+    stream.set_nonblocking(false).map_err(|e| io::Error::new(e.kind(), format!("set accepted socket blocking mode: {e}")))?;
     stream.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .map_err(|e| io::Error::new(e.kind(), format!("set accepted socket read timeout: {e}")))
+}
+
+/// One failed/preconnected socket must not abort either listener's overall wait.
+/// None reads through EOF (acknowledgement); Some reads through the HTTP header terminator.
+pub fn read_accepted_message(stream: &mut std::net::TcpStream, terminator: Option<&[u8]>, limit: usize, deadline: std::time::Instant) -> io::Result<Vec<u8>> {
+    use std::io::Read;
+    prepare_accepted_stream(stream)?;
+    let deadline = deadline.min(std::time::Instant::now() + std::time::Duration::from_secs(2));
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 1024];
+    while bytes.len() < limit {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() { return Err(io::Error::new(io::ErrorKind::TimedOut, "accepted socket message deadline")); }
+        stream.set_read_timeout(Some(remaining)).map_err(|e| io::Error::new(e.kind(), format!("set accepted socket remaining timeout: {e}")))?;
+        let count = stream.read(&mut buffer[..1024.min(limit - bytes.len())])
+            .map_err(|e| io::Error::new(e.kind(), format!("read accepted socket message: {e}")))?;
+        if count == 0 {
+            if terminator.is_none() && !bytes.is_empty() { return Ok(bytes); }
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "accepted socket closed before a complete message"));
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+        if terminator.is_some_and(|end| bytes.ends_with(end)) { return Ok(bytes); }
+    }
+    Err(io::Error::new(io::ErrorKind::InvalidData, "accepted socket message exceeds limit"))
 }
 
 #[cfg(windows)]
@@ -405,6 +430,33 @@ mod tests {
         fn install(&mut self) -> io::Result<()> { self.step("install") }
         fn start_and_acknowledge(&mut self) -> io::Result<()> { self.step("start") }
         fn remove_old_app(&mut self) -> io::Result<bool> { self.step("remove")?; Ok(true) }
+    }
+    fn closed_peer_then_valid_message(terminator: Option<&[u8]>, message: &[u8]) {
+        use std::{net::{TcpListener, TcpStream, Shutdown}, time::{Duration, Instant}};
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut closed, _) = listener.accept().unwrap();
+        // The peer closes after accept, before either mode/timeout preparation or read.
+        drop(peer);
+        // bound: exercise the real socket close; only guards a hung test.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        assert!(read_accepted_message(&mut closed, terminator, 4096, deadline).is_err());
+        let mut peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut accepted, _) = listener.accept().unwrap();
+        peer.write_all(message).unwrap();
+        if terminator.is_none() { peer.shutdown(Shutdown::Write).unwrap(); }
+        // bound: a bad first connection must leave the listener able to receive this one.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        assert_eq!(read_accepted_message(&mut accepted, terminator, 4096, deadline).unwrap(), message);
+    }
+    #[test]
+    fn acknowledgement_listener_survives_peer_close_before_prepare() {
+        closed_peer_then_valid_message(None, b"{\"token\":\"expected\"}");
+    }
+    #[test]
+    fn fixture_listener_survives_peer_close_before_prepare() {
+        closed_peer_then_valid_message(Some(b"\r\n\r\n"), b"GET /report?storage=kept HTTP/1.1\r\nCookie: bridge_auth=authenticated\r\n\r\n");
     }
     #[test]
     fn accepted_stream_waits_for_bytes_after_accept() {
