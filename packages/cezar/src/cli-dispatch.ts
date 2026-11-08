@@ -154,7 +154,7 @@ export async function main(deps: CliDeps): Promise<void> {
       home();
       deps.initCommand(repoRoot);
       return;
-    case 'projects':
+    case 'projects': {
       // Registry-only (no server, no HTTP) — see workspace/projects-cli.ts.
       // In single-project mode a listing is a launch-context read: register
       // the boot repo through the normal self-healing path and pin the output
@@ -166,6 +166,7 @@ export async function main(deps: CliDeps): Promise<void> {
         : undefined;
       deps.process.exitCode = await deps.runProjectsCommand(projectArgs, { defaultRoot: repoRoot, bootProjectId, home: home() });
       return;
+    }
     case 'server-install':
       await deps.serverCommand('install', home(), repoRoot, values.platform, {
         yes: Boolean(values.yes),
