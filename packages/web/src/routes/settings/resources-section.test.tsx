@@ -98,7 +98,7 @@ const saveMemory = () =>
   document.querySelector<HTMLButtonElement>('[data-action="resources-save-memory"]')
 const puts = () => requests.filter((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/config')
 const monitoringSelect = () => document.querySelector<HTMLSelectElement>('[data-slot="resources-max-monitoring"]')
-const wakeMode = () => document.querySelector<HTMLSelectElement>('[data-slot="resources-monitoring-wake-mode"]')
+const wakeMode = () => document.querySelector<HTMLButtonElement>('[data-slot="resources-monitoring-wake-mode"]')
 const wakeInterval = () => document.querySelector<HTMLInputElement>('[data-slot="resources-monitoring-wake-interval"]')
 const saveWake = () => document.querySelector<HTMLButtonElement>('[data-action="resources-save-monitoring-wake"]')
 
@@ -157,11 +157,69 @@ describe('Global settings → Resources', () => {
     await waitFor(() => expect(wakeMode()).not.toBeNull())
     expect(wakeMode()!.getAttribute('aria-checked')).toBe('false')
     expect(wakeInterval()).toBeNull()
+    expect(saveWake()!.disabled).toBe(true)
     fireEvent.click(wakeMode()!)
+    expect(wakeMode()!.getAttribute('aria-checked')).toBe('true')
     expect(wakeInterval()!.value).toBe('5')
+    expect(saveWake()!.disabled).toBe(false)
     fireEvent.click(saveWake()!)
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.body).toEqual({ resources: { monitoringWakeIntervalMinutes: 5 } })
+    expect(await screen.findByText('Monitoring will re-check every 5 minutes')).toBeTruthy()
+    await waitFor(() => expect(saveWake()!.disabled).toBe(true))
+  })
+
+  it.each(['0', '1.5', '61'])('rejects a wake interval of %s minutes', async (value) => {
+    serve({ monitoringWakeIntervalMinutes: 10 })
+    renderResources()
+    await waitFor(() => expect(wakeInterval()).not.toBeNull())
+
+    fireEvent.change(wakeInterval()!, { target: { value } })
+    expect(wakeInterval()!.value).toBe(value)
+    expect(screen.getByText('Enter a whole number from 1 to 60 minutes.')).toBeTruthy()
+    expect(saveWake()!.disabled).toBe(true)
+    fireEvent.click(saveWake()!)
+    expect(puts()).toHaveLength(0)
+  })
+
+  it.each([1, 60])('saves the inclusive wake interval boundary of %s minutes', async (minutes) => {
+    serve({ monitoringWakeIntervalMinutes: 10 })
+    renderResources()
+    await waitFor(() => expect(wakeInterval()).not.toBeNull())
+    expect(wakeMode()!.getAttribute('aria-checked')).toBe('true')
+    expect(wakeInterval()!.value).toBe('10')
+    expect(saveWake()!.disabled).toBe(true)
+
+    fireEvent.change(wakeInterval()!, { target: { value: String(minutes) } })
+    expect(saveWake()!.disabled).toBe(false)
+    expect(screen.queryByText('Enter a whole number from 1 to 60 minutes.')).toBeNull()
+    fireEvent.click(saveWake()!)
+    expect(await screen.findByText(`Monitoring will re-check every ${minutes} minutes`)).toBeTruthy()
+    expect(puts().at(-1)?.body).toEqual({ resources: { monitoringWakeIntervalMinutes: minutes } })
+    await waitFor(() => expect(saveWake()!.disabled).toBe(true))
+  })
+
+  it('parks monitoring with an invalid draft interval, then restores the saved parked state', async () => {
+    serve({ monitoringWakeIntervalMinutes: 10 })
+    renderResources()
+    await waitFor(() => expect(wakeInterval()).not.toBeNull())
+    fireEvent.change(wakeInterval()!, { target: { value: '61' } })
+    fireEvent.click(wakeMode()!)
+
+    expect(wakeMode()!.getAttribute('aria-checked')).toBe('false')
+    expect(wakeInterval()).toBeNull()
+    expect(screen.queryByText('Enter a whole number from 1 to 60 minutes.')).toBeNull()
+    expect(saveWake()!.disabled).toBe(false)
+    fireEvent.click(saveWake()!)
+    expect(await screen.findByText('Monitoring will stay parked')).toBeTruthy()
+    expect(puts().at(-1)?.body).toEqual({ resources: { monitoringWakeIntervalMinutes: null } })
+    await waitFor(() => expect(saveWake()!.disabled).toBe(true))
+
+    fireEvent.click(wakeMode()!)
+    expect(wakeInterval()!.value).toBe('61')
+    expect(saveWake()!.disabled).toBe(true)
+    fireEvent.click(wakeMode()!)
+    expect(saveWake()!.disabled).toBe(true)
   })
 
   it('shows auto-resume on by default and saves the opt-out', async () => {
@@ -181,16 +239,37 @@ describe('Global settings → Resources', () => {
     serve({ memoryLimitMb: null })
     renderResources()
     await waitFor(() => expect(memoryInput()).not.toBeNull())
+    expect(memoryInput()!.value).toBe('')
+    expect(saveMemory()!.disabled).toBe(true)
 
     fireEvent.change(memoryInput()!, { target: { value: '2048' } })
     fireEvent.click(saveMemory()!)
     await waitFor(() => expect(puts()).toHaveLength(1))
     expect(puts()[0]?.body).toEqual({ resources: { memoryLimitMb: 2048 } })
+    expect(await screen.findByText('Memory limit set to 2048 MiB')).toBeTruthy()
+    await waitFor(() => expect(saveMemory()!.disabled).toBe(true))
 
     fireEvent.change(memoryInput()!, { target: { value: '' } })
     fireEvent.click(saveMemory()!)
     await waitFor(() => expect(puts()).toHaveLength(2))
     expect(puts()[1]?.body).toEqual({ resources: { memoryLimitMb: null } })
+    expect(await screen.findByText('Memory limit cleared')).toBeTruthy()
+    await waitFor(() => expect(saveMemory()!.disabled).toBe(true))
+  })
+
+  it('accepts the minimum memory limit and keeps an unchanged limit saved', async () => {
+    serve({ memoryLimitMb: 1024 })
+    renderResources()
+    await waitFor(() => expect(memoryInput()).not.toBeNull())
+    expect(saveMemory()!.disabled).toBe(true)
+
+    fireEvent.change(memoryInput()!, { target: { value: '256' } })
+    expect(saveMemory()!.disabled).toBe(false)
+    expect(document.querySelector('[data-slot="resources-memory-invalid"]')).toBeNull()
+    fireEvent.click(saveMemory()!)
+    expect(await screen.findByText('Memory limit set to 256 MiB')).toBeTruthy()
+    expect(puts().at(-1)?.body).toEqual({ resources: { memoryLimitMb: 256 } })
+    await waitFor(() => expect(saveMemory()!.disabled).toBe(true))
   })
 
   it('rejects a memory limit below the floor — Save stays disabled and nothing is PUT', async () => {
