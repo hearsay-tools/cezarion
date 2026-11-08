@@ -23,6 +23,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import {
   CommandPalette,
+  openCommandPalette,
   mergeTasks,
   referenceKeywords,
   orderProjects,
@@ -205,6 +206,14 @@ function openWith(init: { metaKey?: boolean; ctrlKey?: boolean }) {
 }
 
 describe('opening and closing', () => {
+  it('opens programmatically and keeps an already open palette open', async () => {
+    renderPalette()
+    openCommandPalette()
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    openCommandPalette()
+    expect(dialog()).not.toBeNull()
+  })
+
   it.each([
     { name: '⌘K', init: { metaKey: true } },
     { name: 'Ctrl+K', init: { ctrlKey: true } },
@@ -259,6 +268,25 @@ describe('opening and closing', () => {
 })
 
 describe('Views group', () => {
+  it('opens All tasks outside the active project and closes the palette', async () => {
+    renderPalette({
+      projects: [project({ id: 'cezar' }), project({ id: 'shop' })],
+      entry: '/p/cezar/',
+    })
+    openWith({ metaKey: true })
+    fireEvent.click(await screen.findByRole('option', { name: 'All tasks' }))
+    expect(location()).toBe('/tasks')
+    await waitFor(() => expect(dialog()).toBeNull())
+  })
+
+  it('keeps a project view in the active project and closes the palette', async () => {
+    renderPalette({ projects: [project({ id: 'cezar' })], entry: '/p/cezar/' })
+    openWith({ metaKey: true })
+    fireEvent.click(await screen.findByRole('option', { name: 'Workflows' }))
+    expect(location()).toBe('/p/cezar/workflows')
+    await waitFor(() => expect(dialog()).toBeNull())
+  })
+
   it('leads with New task and its C hint, then the 9 nav destinations', async () => {
     renderPalette({ automations: true })
     openWith({ metaKey: true })
@@ -992,6 +1020,20 @@ describe('Actions group', () => {
 })
 
 describe('Skills group', () => {
+  it('finds a skill by description when its name does not match', async () => {
+    renderPalette({ skills: [
+      skill({ name: 'release', source: 'global', description: 'Publish packages' }),
+      skill({ name: 'review', source: 'agents', description: 'Inspect changes' }),
+    ] })
+    openWith({ metaKey: true })
+    await screen.findByRole('option', { name: /release.*Publish packages/ })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Publish' } })
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /release.*Publish packages/ })).toBeTruthy()
+      expect(screen.queryByRole('option', { name: /review.*Inspect changes/ })).toBeNull()
+    })
+  })
+
   const MIXED: Skill[] = [
     skill({ name: 'global-deploy', source: 'global', description: 'Deploy from anywhere' }),
     skill({ name: 'project-review', source: 'agents', description: 'Review the diff' }),
