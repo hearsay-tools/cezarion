@@ -201,7 +201,8 @@ const THREAD_HOLDS_PORT = [
   'signal.signal(signal.SIGTERM, signal.SIG_IGN)',
   "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()",
   'threading.Thread(target=lambda: time.sleep(60)).start()',
-  "open(os.path.join(sys.argv[1], 'thread.port.tmp'), 'w').write('%d\\n' % s.getsockname()[1])",
+  "with open(os.path.join(sys.argv[1], 'thread.port.tmp'), 'w') as port_file:",
+  "    port_file.write('%d\\n' % s.getsockname()[1])",
   "os.replace(os.path.join(sys.argv[1], 'thread.port.tmp'), os.path.join(sys.argv[1], 'thread.port'))",
   'ctypes.CDLL(None).pthread_exit(None)',
 ].join('\n');
