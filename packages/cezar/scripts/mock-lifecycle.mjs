@@ -1,9 +1,9 @@
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+// Publish a pid atomically: readers never see an empty file whose Number() is 0
+// (hearsay-tools/cezarion#953).
 import { publishFile as writePid } from './mock-publish.mjs';
 
-// Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
-// file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
 export function stall(prompt, { closeInput } = {}) {
   if (!prompt.includes('mock:no-progress')) return false;
   if (prompt.includes('input-closed')) {
