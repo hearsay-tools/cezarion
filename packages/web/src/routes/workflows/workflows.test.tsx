@@ -12,6 +12,7 @@ import { WorkflowsRoute } from './workflows'
 afterEach(() => {
   act(() => resetToasts())
   cleanup()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -74,7 +75,7 @@ const jsonResponse = (body: unknown, status = 200) =>
  *  the fixtures, and lets a test override specific `METHOD path` keys — per call, so a 409
  *  can turn into a 201 on the retry. */
 function stubFetch(
-  overrides: Record<string, Array<() => Response>> = {},
+  overrides: Record<string, Array<() => Response | Promise<Response>>> = {},
   workflows: WorkflowDef[] = [QUICK, SHIP],
 ): SentRequest[] {
   const sent: SentRequest[] = []
@@ -231,15 +232,22 @@ describe('workflow editor presentation', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       expect(this.download).toBe('ship-it.yaml')
       expect(this.href).toBe('blob:workflow-yaml')
+      expect(this.isConnected).toBe(true)
     })
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL')
+    vi.useFakeTimers()
 
     fireEvent.click(document.querySelector('[data-slot="wb-export"]')!)
 
     expect(createObjectUrl).toHaveBeenCalledOnce()
     const exported = createObjectUrl.mock.calls[0]?.[0]
     expect(exported).toBeInstanceOf(Blob)
+    expect((exported as Blob).type).toBe('text/yaml')
     await expect((exported as Blob).text()).resolves.toContain('name: ship-it')
     expect(click).toHaveBeenCalledOnce()
+    expect(document.querySelector('a[download]')).toBeNull()
+    await act(() => vi.runOnlyPendingTimersAsync())
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:workflow-yaml')
   })
 })
 
@@ -523,5 +531,362 @@ describe('design workflow controls', () => {
     expect(stepIds()).toEqual(['om-review', 'om-fix'])
     expect(yamlText().indexOf('- om-review')).toBeLessThan(yamlText().indexOf('- om-fix'))
     expect((screen.getByLabelText('Move step 2 down') as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+// The route owns these transitions; the section tests cover only the individual controls.
+describe('draft editing and cancelled actions', () => {
+  it('clears metadata for a new draft and only offers Delete for the matching saved file', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.change(nameInput(), { target: { value: 'unsaved' } })
+    expect(document.querySelector('[data-slot="wb-delete"]')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Load an existing workflow'), { target: { value: 'quick-task' } })
+    expect(document.querySelector('[data-slot="wb-delete"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'New workflow' }))
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('')
+    expect(stepIds()).toEqual([])
+  })
+
+  it('filters the palette and marks only skills already in the flow', async () => {
+    stubFetch({}, [{ ...SHIP, steps: [SHIP.steps[0]!, QUICK.steps[0]!] }])
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    const palette = (skill: string) => document.querySelector(`[data-slot="wb-skill"][data-skill="${skill}"]`)!
+    expect(palette('om-fix').getAttribute('data-in-flow')).toBe('true')
+    expect(palette('om-review').hasAttribute('data-in-flow')).toBe(false)
+    const filter = screen.getByLabelText('Filter skills') as HTMLInputElement
+    expect(filter.value).toBe('')
+    fireEvent.change(filter, { target: { value: 'om-review' } })
+    expect(document.querySelectorAll('[data-slot="wb-skill"]')).toHaveLength(1)
+    expect(palette('om-review')).toBeTruthy()
+  })
+
+  it('resets the picker filter and selection on each opening', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add step' })
+    expect((within(dialog).getByLabelText('Filter skills') as HTMLInputElement).value).toBe('')
+    fireEvent.change(within(dialog).getByLabelText('Filter skills'), { target: { value: 'om-review' } })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /om-review/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add step' }))
+    const reopened = await screen.findByRole('dialog', { name: 'Add step' })
+    expect((within(reopened).getByLabelText('Filter skills') as HTMLInputElement).value).toBe('')
+    expect(within(reopened).getAllByRole('radio')).toHaveLength(2)
+    expect((within(reopened).getByRole('radio', { name: /om-review/ }) as HTMLInputElement).checked).toBe(false)
+    expect((within(reopened).getByRole('button', { name: 'Add selected skill' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('cancels import, clears the error and paste, then clears the successful paste too', async () => {
+    stubFetch({ 'POST /api/v1/workflows/parse': [
+      () => jsonResponse({ error: 'Invalid workflow' }, 400),
+      () => jsonResponse({ name: 'recovered', description: 'Imported description', steps: [SHIP.steps[1]!] }),
+    ] })
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    const open = () => fireEvent.click(document.querySelector('[data-slot="wb-import"]')!)
+    open()
+    expect((screen.getByLabelText('Workflow YAML to import') as HTMLTextAreaElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('Workflow YAML to import'), { target: { value: 'invalid' } })
+    fireEvent.click(document.querySelector('[data-slot="wb-import-run"]')!)
+    await screen.findByText('Invalid workflow')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    open()
+    expect((screen.getByLabelText('Workflow YAML to import') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Workflow YAML to import'), { target: { value: 'name: recovered' } })
+    fireEvent.click(document.querySelector('[data-slot="wb-import-run"]')!)
+    await waitFor(() => expect(nameInput().value).toBe('recovered'))
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('Imported description')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    open()
+    expect((screen.getByLabelText('Workflow YAML to import') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('cancels a proposed chain and clears the brief on cancel and on success', async () => {
+    stubFetch({ 'POST /api/v1/plan': [() => jsonResponse({ steps: [QUICK.steps[0]!], fallback: false })] })
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    const open = () => fireEvent.click(document.querySelector('[data-slot="wb-auto"]')!)
+    open()
+    expect((screen.getByLabelText('Describe the chain to build') as HTMLTextAreaElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('Describe the chain to build'), { target: { value: 'discard this' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByLabelText('Describe the chain to build')).toBeNull()
+    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+    open()
+    expect((screen.getByLabelText('Describe the chain to build') as HTMLTextAreaElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('Describe the chain to build'), { target: { value: 'build this' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Build chain' }))
+    await screen.findByText('Built "ship-it" — review, tweak, then Save.')
+    expect(screen.queryByLabelText('Describe the chain to build')).toBeNull()
+    open()
+    expect((screen.getByLabelText('Describe the chain to build') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it.each(['overwrite', 'delete'] as const)('dismissing %s keeps the draft and makes no write', async (action) => {
+    const sent = stubFetch({ 'POST /api/v1/workflows': [() => jsonResponse({ error: 'Exists', exists: true }, 409)] })
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(document.querySelector(`[data-slot="wb-${action === 'overwrite' ? 'save' : 'delete'}"]`)!)
+    const dialog = await screen.findByRole('alertdialog')
+    // Fake time drains mutation callbacks; the refused write cannot arrive after the assertion.
+    vi.useFakeTimers()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep the file' }))
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+    expect(sent.filter((r) => r.method !== 'GET')).toHaveLength(action === 'overwrite' ? 1 : 0)
+  })
+})
+
+describe('workflow failures and submission guards', () => {
+  it('shows a workflow catalog error instead of the editor', async () => {
+    stubFetch({ 'GET /api/v1/workflows': [() => jsonResponse({ error: 'Cannot read workflows' }, 403)] })
+    renderAt('/workflows')
+    await screen.findByText('Could not load workflows')
+    expect(screen.getByText('Cannot read workflows')).toBeTruthy()
+    expect(screen.queryByLabelText('Workflow name')).toBeNull()
+  })
+
+  it.each(['save', 'auto', 'delete'] as const)('reports a %s failure with a danger status and keeps the draft', async (action) => {
+    const endpoint = { save: 'POST /api/v1/workflows', auto: 'POST /api/v1/plan', delete: 'DELETE /api/v1/workflows/ship-it' }[action]
+    stubFetch({ [endpoint]: [() => jsonResponse({ error: 'Read only', exists: false }, 403)] })
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(document.querySelector(`[data-slot="wb-${action}"]`)!)
+    if (action === 'auto') {
+      fireEvent.change(screen.getByLabelText('Describe the chain to build'), { target: { value: 'build chain' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Build chain' }))
+    }
+    if (action === 'delete') fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete workflow' }))
+    expect((await screen.findByText('Read only')).closest('[role="status"]')?.getAttribute('data-tone')).toBe('danger')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(nameInput().value).toBe('ship-it')
+    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+  })
+
+  it('focuses a blank name without submitting, and recognises a padded saved name', async () => {
+    const sent = stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.change(nameInput(), { target: { value: '  ship-it  ' } })
+    expect(document.querySelector('[data-slot="wb-delete"]')).toBeTruthy()
+    fireEvent.change(nameInput(), { target: { value: '  ' } })
+    vi.useFakeTimers()
+    fireEvent.click(document.querySelector('[data-slot="wb-save"]')!)
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(document.activeElement).toBe(nameInput())
+    expect(sent.filter((r) => r.method === 'POST')).toEqual([])
+  })
+
+  it('ignores whitespace-only import and keyboard auto requests', async () => {
+    const sent = stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    vi.useFakeTimers()
+    fireEvent.click(document.querySelector('[data-slot="wb-import"]')!)
+    fireEvent.change(screen.getByLabelText('Workflow YAML to import'), { target: { value: ' \n ' } })
+    fireEvent.click(document.querySelector('[data-slot="wb-import-run"]')!)
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(sent.filter((r) => r.method === 'POST')).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(document.querySelector('[data-slot="wb-auto"]')!)
+    const brief = screen.getByLabelText('Describe the chain to build')
+    fireEvent.change(brief, { target: { value: ' \n ' } })
+    fireEvent.keyDown(brief, { key: 'Enter', ctrlKey: true })
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(sent.filter((r) => r.method === 'POST')).toEqual([])
+  })
+
+  it('trims a brief and refuses a second keyboard request while the planner is pending', async () => {
+    let finish!: (response: Response) => void
+    const response = new Promise<Response>((resolve) => { finish = resolve })
+    const sent = stubFetch({ 'POST /api/v1/plan': [() => response] })
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(document.querySelector('[data-slot="wb-auto"]')!)
+    const brief = screen.getByLabelText('Describe the chain to build')
+    fireEvent.change(brief, { target: { value: '  test then review  ' } })
+    fireEvent.keyDown(brief, { key: 'Enter', ctrlKey: true })
+    await screen.findByRole('button', { name: 'Building…' })
+    vi.useFakeTimers()
+    fireEvent.keyDown(brief, { key: 'Enter', ctrlKey: true })
+    await act(() => vi.advanceTimersByTimeAsync(0))
+    expect(sent.filter((r) => r.path === '/api/v1/plan')).toEqual([
+      { path: '/api/v1/plan', method: 'POST', body: { task: 'test then review' } },
+    ])
+    await act(async () => {
+      finish(jsonResponse({ name: 'planned', steps: [QUICK.steps[0]!], fallback: false }))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(nameInput().value).toBe('planned')
+  })
+})
+
+/** jsdom has no layout. Model 100px cards with the canvas's gap-4 (16px) between them.
+ * The canvas fits those cards; its absolute tail indicator adds no height or padding.
+ * An empty canvas instead fits the padded drop hint. */
+function layOutWorkflow() {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const ids = canvasIds()
+    const card = this.closest('li')?.querySelector<HTMLElement>('[data-slot="wb-step"]')
+    const palette = this.closest<HTMLElement>('[data-slot="wb-skill"]')
+    if (card) {
+      const index = ids.indexOf(card.dataset.id)
+      return new DOMRect(0, index * 116, 400, 100)
+    }
+    if (this.matches('[data-slot="wb-steps"]')) {
+      const height = ids.length === 0 ? 100 : ids.length * 100 + (ids.length - 1) * 16
+      return new DOMRect(0, 0, 400, height)
+    }
+    if (palette) return new DOMRect(600, palette.dataset.skill === 'om-fix' ? 0 : 60, 200, 44)
+    // DragOverlay measures its fixed wrapper, whose inline dimensions come from the source.
+    const overlay = this.parentElement
+    if (overlay?.style.position === 'fixed') {
+      return new DOMRect(Number.parseFloat(overlay.style.left), Number.parseFloat(overlay.style.top),
+        Number.parseFloat(overlay.style.width), Number.parseFloat(overlay.style.height))
+    }
+    return new DOMRect(0, 0, 0, 0)
+  })
+  // PointerSensor reads the standard pointer fields; jsdom has no PointerEvent constructor.
+  class TestPointerEvent extends MouseEvent {
+    readonly isPrimary = true
+    readonly pointerId = 1
+    readonly pointerType = 'mouse'
+  }
+  vi.stubGlobal('PointerEvent', TestPointerEvent)
+  vi.useFakeTimers()
+}
+
+async function dragKey(target: HTMLElement, code: string) {
+  await act(async () => {
+    fireEvent.keyDown(target, { code, key: code === 'Space' ? ' ' : code })
+    // Advance the sensor's listener attachment and animation frames, without real-time sleeps.
+    await vi.advanceTimersByTimeAsync(20)
+  })
+}
+
+async function pointerMove(x: number, y: number) {
+  act(() => { fireEvent.pointerMove(document, { clientX: x, clientY: y }) })
+  await act(() => vi.advanceTimersByTimeAsync(20))
+}
+
+async function dropPointer() {
+  await act(async () => {
+    fireEvent.pointerUp(document)
+    await vi.advanceTimersByTimeAsync(300)
+  })
+}
+
+const canvas = () => document.querySelector<HTMLElement>('[data-slot="wb-steps"]')!
+const canvasIds = () => [...canvas().querySelectorAll<HTMLElement>('[data-slot="wb-step"]')].map((card) => card.dataset.id)
+const dropLine = () => document.querySelector<HTMLElement>('[data-slot="wb-drop-line"]')
+
+async function liftPalette() {
+  const pill = document.querySelector<HTMLElement>('[data-slot="wb-skill"][data-skill="om-review"]')!
+  fireEvent.pointerDown(pill, { button: 0, clientX: 610, clientY: 82 })
+  await pointerMove(620, 82)
+  expect(canvas().getAttribute('data-dragging')).toBe('true')
+}
+
+describe('workflow drag and drop through real sensors', () => {
+  it('moves a step from the keyboard and removes the insert indicator after the drop', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    const grip = screen.getByRole('button', { name: 'Reorder step 1: om-fix' })
+    grip.focus()
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+    await dragKey(grip, 'Space')
+    expect(grip.getAttribute('aria-pressed')).toBe('true')
+    expect(canvas().getAttribute('data-dragging')).toBe('true')
+    expect(dropLine()).toBeNull() // The active card is never its own insertion target.
+    await dragKey(grip, 'ArrowDown')
+    expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
+    await dragKey(grip, 'Space')
+    await act(() => vi.advanceTimersByTimeAsync(300))
+    expect(canvasIds()).toEqual(['om-review', 'om-fix'])
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
+    expect(yamlText().indexOf('- om-review')).toBeLessThan(yamlText().indexOf('- om-fix'))
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+  })
+
+  it('cancels a move with Escape and leaves both execution order and indicators unchanged', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    const grip = screen.getByRole('button', { name: 'Reorder step 1: om-fix' })
+    grip.focus()
+    await dragKey(grip, 'Space')
+    await dragKey(grip, 'ArrowDown')
+    expect(dropLine()).toBeTruthy()
+    await dragKey(grip, 'Escape')
+    expect(canvasIds()).toEqual(['om-fix', 'om-review'])
+    expect(stepIds()).toEqual(['om-fix', 'om-review'])
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+  })
+
+  it('copies a palette skill before a hovered card instead of appending it', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    await liftPalette()
+    await pointerMove(110, 166)
+    expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
+    await dropPointer()
+    expect(stepIds()).toEqual(['om-fix', 'om-review-2', 'om-review'])
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+    expect(dropLine()).toBeNull()
+  })
+
+  it('copies a palette skill into an empty canvas', async () => {
+    stubFetch({}, [QUICK])
+    renderAt('/workflows')
+    await screen.findByText('Drop a skill here — or Import a workflow.yaml')
+    layOutWorkflow()
+    await liftPalette()
+    await pointerMove(110, 50)
+    expect(dropLine()).toBeNull()
+    await dropPointer()
+    expect(stepIds()).toEqual(['om-review'])
+    expect(screen.queryByText('Drop a skill here — or Import a workflow.yaml')).toBeNull()
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+  })
+
+  it('moves a step to the last card when dropped below the content-sized canvas', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    layOutWorkflow()
+    const grip = screen.getByRole('button', { name: 'Reorder step 1: om-fix' })
+    fireEvent.pointerDown(grip, { button: 0, clientX: 10, clientY: 50 })
+    await pointerMove(20, 50)
+    await pointerMove(10, 300)
+    // closestCenter keeps the last card as the nearest target even below its bottom edge.
+    expect(dropLine()?.parentElement?.querySelector<HTMLElement>('[data-slot="wb-step"]')?.dataset.id).toBe('om-review')
+    await dropPointer()
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
+    expect(canvas().hasAttribute('data-dragging')).toBe(false)
+  })
+
+  it('Move up returns a step to its earlier position', async () => {
+    stubFetch()
+    renderAt('/workflows')
+    await waitFor(() => expect(stepCards()).toHaveLength(2))
+    fireEvent.click(screen.getByLabelText('Move step 2 up'))
+    expect(stepIds()).toEqual(['om-review', 'om-fix'])
   })
 })
