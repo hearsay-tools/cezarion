@@ -61,7 +61,9 @@ Three guards hold the rule:
 3. `core/parity-classes.test.ts` fails when a parity test file belongs to no
    classified family, or a family has no file. It also fails when a registered
    row whose scenario runs runner code (`provider-error`, a native ask scenario,
-   native subagents) does not run on every runner.
+   native subagents) does not run on every runner. A scenario is `shared` only when
+   a seam contract row holds the runner's part of it on every runner, as S44 does
+   for `provider-error-controlled`.
 
 A per-runner parity file loads only its own adapter. It picks its runner with
 `useRunners(onlyRunner(...))`. The testkits it reaches import a kit's `-core` file, never

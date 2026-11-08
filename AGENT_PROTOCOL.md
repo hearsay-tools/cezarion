@@ -1485,8 +1485,8 @@ mock models Codex's MCP tool gate, so Codex rows of `ci-wait-{fresh,continued,re
 wires carry no MCP tool approval request have named exemptions.
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-final-recovery-parity.test.ts`,
-drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
-wire with a pending CI wait, on fresh and scheduler-owned continuation attempts.
+drive the shared runner set through its `HARNESS_ADAPTERS` native provider-error
+wire (the `provider-error-controlled` scenario, which S44 holds on every runner) with a pending CI wait, on fresh and scheduler-owned continuation attempts.
 The failed step retains its error, finish timestamp and `session.ended(error)`;
 the run stays `waiting` with its CI wait open until automatic recovery delivers
 the observation. Later successful settlement must leave that failed attempt intact.
@@ -1540,7 +1540,8 @@ rejection lifts, the answer delivers the result once. Claude is exempt from U12 
 neither delay nor reject that acknowledgement. Cursor is exempt from U13 only: Cursor print
 acknowledges on the first model work of the process it spawns, which U12 delays, but the
 print wire has no rejection of an admitted prompt. U14 fails every wait-wake continuation's
-opening prompt through each runner's native provider-error wire, with a resolved timer and no
+opening prompt through each runner's native provider-error wire (on the shared runner set; S44 holds
+that failure on every runner), with a resolved timer and no
 question: the same bound, a timer that resolves on the failed run stays resolved and wakes
 nothing (no queued continuation, admission retry or backoff is left), and Continue delivers both
 results once. A second U14 case closes every session cleanly at a turn end while the result is
@@ -1707,7 +1708,7 @@ before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
 **R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-starting-proof-parity.test.ts`,
-uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
+uses each shared-set backend's `HARNESS_ADAPTERS` native wire (S43 holds the process report on every runner) to persist a
 starting execution generation. A fully terminal modern root and worker have no
 live or deferred anchor; their plain history is nonempty and facts sidecars are
 missing. Immediate boot recovery must prepare the selected family off-loop,
@@ -1787,7 +1788,7 @@ the SIGKILL is sent. Cursor print reaches the same reap when it ends its group a
 win32 skips both rows. No wire exemptions.
 
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-{collect,destroy,reuse}-parity.test.ts` and
-`workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
+`workflows/worker-location-evidence.test.ts`, drives each shared-set
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
 Both collect-first and destroy-first unblock parent Finish after collection. A real same-user
@@ -1813,7 +1814,7 @@ process exit, native wires, stores and Git remain real. Linux-only OS coverage e
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
 **R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-same-boot-crash-lock-parity.test.ts`,
-drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
+drives each shared-set backend through its native `HARNESS_ADAPTERS` wire,
 cancellation, and same-boot interrupted checkpoint recovery. A live recorded
 unreadable process still blocks settlement, and that partial collection cannot
 authorize parent Finish. Once the recorded incarnations exit (a reused PID does
@@ -1930,14 +1931,19 @@ are never retried (`opencode-serve-retry.test.ts`). The other runners speak over
 spawned process's stdio, with no listen phase, and carry named
 `scenario-unconstructible` exemptions; retrying their starts is out of scope.
 
-Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
+Workflow deadline rows **T1–T7** (hearsay-tools/cezarion#470) live in
 `core/workflow-timeout-parity.testkit.ts` and are registered in the shared parity
-guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
+guard. Each backend uses its own `HARNESS_ADAPTERS` native wire:
 non-final managed steps outlive the default runner deadline, explicit zero disables
 it, authored positive limits fail before trailing checks, and standalone sessions
 retain their default cap. Longer authored limits override that cap, while default
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
-manager, runners, transports and terminal signals remain real.
+manager, runners, transports and terminal signals remain real. Cezar passes
+`step.timeoutMs ?? 0` (`workflows/run/step-session.ts`), so T1, T2, T3, T5 and T6 test
+Cezar's deadline logic and run on the shared runner set (hearsay-tools/cezarion#2991). T7 is
+their seam row on every runner: through `driveSeam`, a `spec.timeoutMs` of zero and one longer
+than the default both outlive the default, and a shorter one ends the turn with a timed-out
+error. T4 (the default itself) also runs on every runner.
 
 Intermediate question rows **Q1 and Q3–Q10** (hearsay-tools/cezarion#427) live in
 `core/workflow-ask-cells.testkit.ts` and the shared parity guard. Every
@@ -2093,7 +2099,7 @@ unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the 
 and runs as a fresh turn after the `cezar_ask` park while the card is pending — the inverted
 H2 assertion does not pin that.
 
-**Seam contract rows S36–S42** (hearsay-tools/cezarion#2991) live in
+**Seam contract rows S36–S44** (hearsay-tools/cezarion#2991) live in
 `core/seam-contract.testkit.ts` and run from each runner's
 `harness-<runner>-contract-parity.test.ts`, on that runner's own native mock. They hold each
 runner to its declared facts, never to its id:
@@ -2122,6 +2128,21 @@ runner to its declared facts, never to its id:
   travels outside the conversation when the runner declares `resent`, and is prepended to
   the opening turn when it declares `in-thread`. Both kinds send it again on a resume; the
   value tells Continue whether the thread already holds the skill (R53/R55).
+- **S43** process report: every native process the mock starts (each mock appends its pid to
+  `CEZ_MOCK_PID_FILE`) is reported while it runs, the first as `pid` when `startSession`
+  returns and each later one through `onPidChange`, over an opening and a follow-up turn. The
+  worker process ledger records exactly these pids, so worker-reboot (R43) and worker-restart
+  (R47, R60) run on the shared runner set.
+- **S44** provider failure: the mock's failure control raises a provider error at a resumed
+  session's wake opening (`persistent`) and in a turn that runs until the test releases it
+  (`gated-once`). The runner emits a v1 `error` with a message before any v1 `turn-end`, and a v2
+  `session.error` or `turn.completed(error)` and never `end_turn`; after Cezar's interrupt (as
+  `recordSessionFault` does) the session ends. Rows that raise the same failure through the
+  control read Cezar's handling above it: their scenario is `provider-error-controlled`, classed
+  shared, and U9, U9h, U9w, U9p, U14, R18 and R72–R76 run on the shared runner set. U14m stays on
+  every runner: its Claude cell exits through Claude's own `unread` failure, and no failing
+  opening turn may read a steered message, which S44 does not hold. `provider-error` itself stays
+  `runner-code`.
 
 A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends
 these rows, which run on every runner. Shared code above the seam (`run.ts` reading the
@@ -2238,6 +2259,7 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close |
 | `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park |
 | `provider-error` | a runtime provider rejection in its own native error shape |
+| `provider-error-controlled` | the same prompt as `provider-error`; a row that names it raises the error through `CEZ_MOCK_FAILURE_CONTROL`, as S44 does |
 | `cezar-ask` | call `cezar_ask` with one question, then end the turn; the same tool call on every wire, fresh or resumed |
 | `cezar-wait` | call `cezar_wait` for a 60 s timer, then end the turn; a declared monitoring park on every wire |
 | `ask` | an ask: native where the wire has one (Codex, OpenCode), a `cezar_ask` call otherwise |

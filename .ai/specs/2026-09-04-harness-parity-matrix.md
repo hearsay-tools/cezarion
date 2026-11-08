@@ -169,7 +169,7 @@ Driven by `driveSeam()`: the real runner class, a real child process, the real m
 
 #### The seam contract (hearsay-tools/cezarion#2991)
 
-Rows S36–S42 run from `core/seam-contract.testkit.ts`, in each runner's own
+Rows S36–S44 run from `core/seam-contract.testkit.ts`, in each runner's own
 `harness-<runner>-contract-parity.test.ts`. They hold every runner to what it declares
 (`inputDelivery`, `systemPromptOnResume`), so a shared row above the seam can run on fewer
 runners. Each row reads the declared fact, never a runner id. A fix to runner lifecycle, input
@@ -184,6 +184,8 @@ delivery, holds or resume inside a runner class extends these rows.
 | S40 | `steer-tool` | a human message sent before the turn's last model call is read in that turn, or held for the next, as `humanInputAtTurnEnd` declares; `CEZ_MOCK_STEER_GATE` holds the tool open until the message is on the wire |
 | S41 | `steer-late` | the same for a message sent after the last model call, with the turn's tail held open the same way |
 | S42 | `baseline` ×2 | on a fresh and a resumed session, `spec.systemPrompt` travels outside the conversation when the runner declares `resent`, and is prepended to the opening turn when it declares `in-thread` |
+| S43 | `hold` | every native process the mock starts (`CEZ_MOCK_PID_FILE`) is reported while it runs: the first as `pid` when `startSession` returns, each later one through `onPidChange`, over an opening and a follow-up turn. The worker process ledger records these pids |
+| S44 | `provider-error-controlled` ×2 | a provider error from the mock's failure control, at a resumed session's wake opening and in a running turn the test releases, reaches v1 as an `error` before any `turn-end` and v2 as an error, never `end_turn`; the session ends once interrupted, as `recordSessionFault` does |
 
 A boundary runner has no read point inside a running turn, so S40 and S41 exempt it
 (`scenario-unconstructible`); `runner-facts.test.ts` ties those exemptions to the declared mode.
@@ -206,7 +208,9 @@ that shows every declared value of each turn-path fact (`inputDelivery.mode`, `.
 `RUNNER_IDS` order. A row that depends on runner code stays on every runner: R1 (the smoke row),
 R2 (a provider error), R3 (a native ask on codex and opencode), every row with an exemption, and every
 row whose scenario runs runner code (`provider-error`, a native ask, native subagents), which
-`core/parity-classes.test.ts` checks.
+`core/parity-classes.test.ts` checks. A row that raises the provider error through the mock's
+failure control names `provider-error-controlled` instead, which S44 holds on every runner, so it
+runs on the derived set.
 The classification table in that file names each family's class and these rows; its guards are
 listed in `AGENT_PROTOCOL.md` §7.
 
