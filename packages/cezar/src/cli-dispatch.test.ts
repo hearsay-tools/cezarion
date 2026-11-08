@@ -201,6 +201,13 @@ describe('main dispatch', () => {
 });
 
 describe('binary help and notices', () => {
+  it.each([false, true])('uses legacy help and one gated notice for an npm target entry (switch %s)', async rebrand => {
+    const f = fixture(['--help']);
+    f.processStub.argv[1] = String.raw`C:\npm\node_modules\@wjarka\cezarion\dist\index.js`;
+    await main(f.deps as unknown as CliDeps, rebrand);
+    expect(f.deps.console.log.mock.calls[0]![0]).toContain('  cez run "<task>"');
+    expect(f.deps.console.error.mock.calls).toEqual(rebrand ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []);
+  });
   it('keeps legacy help byte-identical to the pre-rebrand entry', async () => {
     const expected = readFileSync(new URL('./home/fixtures/cli-help-legacy.txt', import.meta.url), 'utf8');
     for (const name of ['cez', 'cezarion']) {

@@ -1,9 +1,11 @@
 import { BINARY_NAMES, productIdentity, type BinaryName } from './identity.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 
-/** Named npm/alias shims and managed launchers retain their basename in argv[1]. */
+/** npm's Windows wrappers pass the old bin target, index.js, rather than their name. */
 export function invokedCommand(entry: string | undefined = process.argv[1]): BinaryName | undefined {
-  const name = entry?.split(/[\\/]/).pop()?.replace(/\.(?:js|cmd|exe)$/i, '');
+  const basename = entry?.split(/[\\/]/).pop();
+  if (basename === 'index.js') return productIdentity(false).command;
+  const name = basename?.replace(/\.(?:js|cmd|exe)$/i, '');
   return BINARY_NAMES.find(binary => binary === name);
 }
 

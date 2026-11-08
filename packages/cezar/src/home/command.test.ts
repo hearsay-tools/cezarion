@@ -9,11 +9,24 @@ describe('invoked binary identity', () => {
       expect(cliCommand(entry, false)).toBe(name === 'hsq' ? 'hsq' : 'cez');
     }
   });
-  it.each(['', '/pkg/dist/index.js', '/bin/cezar-cli', '/bin/foreign-cez', '/bin/hsq.js.bak'])('does not infer a binary from %j', entry => {
+  it.each(['', '/bin/cezar-cli', '/bin/foreign-cez', '/bin/hsq.js.bak', '/pkg/dist/index.ts', '/pkg/dist/index.cmd'])('does not infer a binary from %j', entry => {
     expect(invokedCommand(entry)).toBeUndefined();
     expect(cliCommand(entry, false)).toBe('cez');
     expect(cliCommand(entry, true)).toBe('hsq');
     expect(oldCommandNotice(entry, true)).toBeUndefined();
+  });
+  it.each([
+    'index.js', 'dist/index.js', '/pkg/dist/index.js',
+    String.raw`C:\Users\operator\AppData\Roaming\npm\node_modules\@wjarka\cezarion\dist\index.js`,
+    String.raw`D:\npm prefix\node_modules\@wjarka\cezarion\dist\index.js`,
+    'C:/npm/node_modules/@wjarka/cezarion/dist/index.js',
+  ])('treats the old target passed by npm wrappers as cez: %s', entry => {
+    expect(invokedCommand(entry)).toBe('cez');
+    expect(cliCommand(entry, false)).toBe('cez');
+    expect(cliCommand(entry, true)).toBe('cez');
+    expect(oldCommandNotice(entry, false)).toBeUndefined();
+    expect(oldCommandNotice(entry, true)).toBe("[cez] 'cez' is deprecated; use 'hsq' instead.");
+    expect(commandText('Usage: cez run\nRun hsq migrate', entry, true)).toBe('Usage: cez run\nRun cez migrate');
   });
   it.each(['cez', 'cezarion', 'hsq'])('renders %s help without renaming paths or product prose', name => {
     const text = 'cezar — cockpit\nUsage: cez run\nRun hsq migrate\n.ai/cezar/config.json';
