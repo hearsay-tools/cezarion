@@ -1,5 +1,6 @@
 import { ReadonlyMapView, ReadonlySetView } from './readonly-collections.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
+import { RUNNER_FACTS } from '../../core/runner-facts.ts';
 import { unregisterRunProcess } from '../../core/process-usage.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
 import type { RunRecord, RunStore, StepState } from '../../runs/store.ts';
@@ -90,20 +91,21 @@ export function beginUsageInvocation(store: RunStore, runId: string, state: Acti
   usageWrites.begin(state.usage, stepId, epoch);
 }
 
-/** Claude's `total_cost_usd` is cumulative for the conversation, including
- * turns in Continue steps. Other runners emit per-message cost deltas. */
+/** A runner whose declared `costReport` is `cumulative` (Claude's `total_cost_usd`) reports the
+ * conversation total, including turns in Continue steps; its reports become deltas here. The
+ * others report new cost since their previous report. */
 export function recordReportedCost(store: RunStore, runId: string, stepId: string, state: ActiveRun, backend: RunnerId, reportedUsd: number): void {
   if (!Number.isFinite(reportedUsd) || reportedUsd < 0) return;
   const run = store.getRun(runId);
   const step = run?.steps.find((candidate) => candidate.id === stepId);
   if (!run || !step) return;
   let delta = reportedUsd;
-  if (backend === 'claude') {
+  if (RUNNER_FACTS[backend].costReport === 'cumulative') {
     const sessionKey = step.sessionId ?? step.id;
     const costs = usageWrites.costs(state.usage);
     let previous = costs.get(sessionKey);
     if (previous === undefined) {
-      previous = restoreReportedClaudeCost(store, runId, stepId, run, step, reportedUsd);
+      previous = restoreCumulativeSessionCost(store, runId, stepId, run, step, reportedUsd);
     }
     delta = Math.max(0, reportedUsd - previous);
     costs.set(sessionKey, Math.max(previous, reportedUsd));
@@ -111,8 +113,8 @@ export function recordReportedCost(store: RunStore, runId: string, stepId: strin
   store.updateStep(runId, stepId, { costUsd: (step.costUsd ?? 0) + delta });
 }
 
-/** Rebuild Claude's session checkpoint and restore reports missing from step totals. */
-function restoreReportedClaudeCost(
+/** Rebuild a cumulative session's checkpoint and restore reports missing from step totals. */
+function restoreCumulativeSessionCost(
   store: RunStore,
   runId: string,
   stepId: string,
@@ -133,7 +135,8 @@ function restoreReportedClaudeCost(
     }
   }
   const sessionStepIds = new Set(run.steps.filter((candidate) => {
-    return (candidate.backend === 'claude' || candidate.backend === undefined) && (step.sessionId
+    // A step with no recorded backend ran on the default runner, Claude.
+    return RUNNER_FACTS[candidate.backend ?? 'claude'].costReport === 'cumulative' && (step.sessionId
       ? candidate.sessionId === step.sessionId
       : candidate.id === step.id);
   }).map((candidate) => candidate.id));

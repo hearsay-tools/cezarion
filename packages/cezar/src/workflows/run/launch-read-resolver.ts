@@ -657,6 +657,7 @@ function ciWorkflowResumeStepIndex(run: RunRecord): number {
  */
 function resumableSessionId(store: Pick<RunStore, 'getRun' | 'readEvents'>, runId: string, sessionStep: StepState | undefined): string | undefined {
   if (!sessionStep?.sessionId) return undefined;
+  // A later slice of hearsay-tools/cezarion#2991 replaces this runner-id check with a declared fact.
   if ((sessionStep.backend ?? store.getRun(runId)?.runner) === 'cursor') {
     const run = store.getRun(runId);
     const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
