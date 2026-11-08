@@ -240,6 +240,15 @@ describe('AgentBrowser auto-wait (#405)', () => {
     ])
   })
 
+  it('preserves provider snapshot refs when filling', () => {
+    const { browser, commands } = open()
+    browser.fill('@e2', 'nightly')
+    expect(commands()).toEqual([
+      ['wait', '@e2'],
+      ['fill', '@e2', 'nightly'],
+    ])
+  })
+
   it('count, isVisible and evaluate assert without waiting', () => {
     const { browser, commands } = open()
     browser.count('[data-slot="drawer"]')
