@@ -22,9 +22,9 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  *
  * Two tiers. The seam tier drives each real runner class against that backend's
  * own offline mock. The run tier drives a real `RunManager`, because
- * `ask.requested` comes from the RUNNER for codex, opencode and cursor and from
- * `workflows/run.ts` for claude and pi — groups 1, 3 and 6 are only uniform
- * above the seam.
+ * `workflows/run/` emits `ask.requested` for every runner's `cezar_ask` card,
+ * while codex and opencode also emit it from the runner for a native ask —
+ * groups 1, 3 and 6 are only uniform above the seam.
  *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
  * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`
