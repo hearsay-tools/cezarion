@@ -20,7 +20,7 @@ export function cliCommand(entry: string | undefined = process.argv[1], rebrand 
 export function commandText(text: string, entry: string | undefined = process.argv[1], rebrand = REBRAND_SWITCH): string {
   if (!rebrand && invokedCommand(entry) !== 'hsq') return text;
   if (text === 'cezarion' || text === 'cez') return cliCommand(entry, rebrand);
-  return text.replace(/\b(?:cez|hsq)(?=\s|\])/g, cliCommand(entry, rebrand))
+  return text.replace(/\b(?:cez|hsq)(?=\s|\]|`|$)/g, cliCommand(entry, rebrand))
     .replace(/\bnpx cezarion\b/g, `npx ${productIdentity(rebrand).npmAlias}`);
 }
 

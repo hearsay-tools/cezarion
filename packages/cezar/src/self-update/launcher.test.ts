@@ -65,3 +65,29 @@ it.skipIf(process.platform === 'win32')('keeps the use escape hatch silent when 
   const withoutNode = execFileSync('/bin/sh', [script, 'use', 'old'], { encoding: 'utf8', env: { PATH: tools } });
   expect(withoutNode).toContain('now using old');
 });
+
+it.each(['single%', 'paired%PATH%'])('escapes percent paths in Windows named and fallback launchers: %s', suffix => {
+  const home = Home.sandbox(join(sandbox().root, suffix));
+  const dist = join(home.data, 'versions', 'current', 'node_modules', '@wjarka', 'cezarion', 'dist');
+  mkdirSync(dist, { recursive: true });
+  const index = join(dist, 'index.js');
+  writeFileSync(index, 'console.log("fallback");');
+  for (const name of BINARY_NAMES) {
+    const entry = join(dist, `${name}.js`);
+    const script = windowsLauncher({}, home, name);
+    const escapedEntry = entry.replaceAll('%', '%%');
+    const escapedIndex = index.replaceAll('%', '%%');
+    expect(script).toContain(`if exist "${escapedEntry}"`);
+    expect(script).toContain(`node "${escapedEntry}" %*`);
+    expect(script).toContain(`node "${escapedIndex}" %*`);
+    expect(windowsLauncher({}, home)).toContain(`node "${escapedIndex}" %*`);
+    if (process.platform === 'win32') {
+      const launcher = join(dirname(home.root), `${name}.cmd`);
+      writeFileSync(launcher, script);
+      writeFileSync(entry, 'console.log("named");');
+      expect(execFileSync('cmd.exe', ['/d', '/c', launcher], { encoding: 'utf8' }).trim()).toBe('named');
+      rmSync(entry);
+      expect(execFileSync('cmd.exe', ['/d', '/c', launcher], { encoding: 'utf8' }).trim()).toBe('fallback');
+    }
+  }
+});

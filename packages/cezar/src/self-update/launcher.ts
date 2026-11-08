@@ -66,7 +66,7 @@ ${namedEntry}exec node "$ENTRY" "$@"
 }
 
 export function windowsLauncher(env: NodeJS.ProcessEnv, home: Home, name?: BinaryName): string {
-  const entry = (home.layout === 'split' ? win32.join : join)(home.data, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+  const entry = (home.layout === 'split' ? win32.join : join)(home.data, 'versions', CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js').replaceAll('%', '%%');
   if (name) {
     const namedEntry = entry.replace(/index\.js$/, `${name}.js`);
     return `@echo off\r\nrem ${PATH_MARKER}\r\nif exist "${namedEntry}" (\r\n  node "${namedEntry}" %*\r\n) else (\r\n  node "${entry}" %*\r\n)\r\n`;

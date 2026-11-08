@@ -38,3 +38,10 @@ describe('invoked binary identity', () => {
     expect(oldCommandNotice(name, true)).toBe(name === 'hsq' ? undefined : `[${name}] '${name}' is deprecated; use 'hsq' instead.`);
   });
 });
+
+it('rewrites standalone command examples before backticks and at end of text', () => {
+  const text = 'Run `cez` or `hsq`; finish with cez';
+  expect(commandText(text, '/bin/hsq', true)).toBe('Run `hsq` or `hsq`; finish with hsq');
+  expect(commandText(text, '/bin/cezarion', true)).toBe('Run `cezarion` or `cezarion`; finish with cezarion');
+  expect(commandText(text, '/bin/cez', false)).toBe(text);
+});
