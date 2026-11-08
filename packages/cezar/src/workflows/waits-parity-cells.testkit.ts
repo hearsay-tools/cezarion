@@ -1647,35 +1647,44 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
     it(`${runner} U18 Finish on a run parked on an agent question closes the question without answering it`, async () => {
       nativeWire(runner);
       delete process.env.CEZ_MOCK_NUDGE_REPLY;
-      // With a live session, Finish ends the task at the parked step and a later step stays pending.
-      // Without one, Finish before the last step is refused, so that pass runs the one-step task.
+      // With a live session, fresh or continued, Finish ends the task at the parked step and a later
+      // step stays pending. Without one, Finish before the last step is refused, so that pass runs
+      // the one-step task.
       const chain = workflowDefSchema.parse({ name: 'finish-chain', source: 'file', steps: [
         { id: 'implement', prompt: '{{task}}' }, { id: 'verify', command: 'true' },
       ] });
-      const finishParked = async (closeFirst: boolean) => {
-        const run = manager.startRun(closeFirst ? QUICK_TASK_WORKFLOW : chain, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      const finishParked = async (mode: 'live' | 'continued' | 'closed') => {
+        const run = manager.startRun(mode === 'closed' ? QUICK_TASK_WORKFLOW : chain, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
-        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
-        if (closeFirst) {
+        if (mode !== 'live') {
           sessionOf(run.id).end();
           await until(() => !manager.isActive(run.id));
           expect(pendingQuestion(run.id)).toBe(true);
         }
+        // The Continue answers the first question and asks the next one in a live session.
+        if (mode === 'continued') {
+          expect(manager.continueRun(run.id, { text: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }) }).ok).toBe(true);
+          await until(() => asks(run.id).length === 2 && pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq === asks(run.id)[1]!.seq);
+          expect(manager.isActive(run.id)).toBe(true);
+        }
+        const answeredBefore = asks(run.id).slice(0, -1).map(ask => ask.seq);
+        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
         expect(manager.finish(run.id)).toBe(true);
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
         const events = store.readEvents(run.id);
         expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
-        expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
+        expect(events.filter(event => event.type === 'human-input-delivered').map(event => event.askSeq)).toEqual(answeredBefore);
         expect(pendingAskOf(events)).toBeUndefined();
         expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
         expect(hasPendingAsk(store, run.id)).toBeFalsy();
-        if (!closeFirst) {
+        if (mode !== 'closed') {
           expect(stepStatus(run.id, 'verify')).toBe('pending');
           expect(events.filter(event => event.type === 'check-output')).toEqual([]);
         }
       };
-      await finishParked(false);
-      await finishParked(true);
+      await finishParked('live');
+      await finishParked('continued');
+      await finishParked('closed');
     });
 
     // No prose classification (hearsay-tools/cezarion#1234): a question the agent only wrote gets

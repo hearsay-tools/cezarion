@@ -1575,8 +1575,9 @@ and pins that an agent question still blocks Finish of a root with workers; a ro
 workers finishes and closes it (hearsay-tools/cezarion#2784). U5d pins that the no-wait wait raises no
 question (its `askSeq` is its note, and no gate fact is pending), and that a timer the agent
 registers cancels it into `lastWaits` and parks the run as monitoring. U18 finishes a run parked
-on the agent's `cezar_ask` card, with its session open and with it closed: Finish records
-`human-ask-closed` for that question and no `human-input-delivered`, so no question stays pending.
+on the agent's `cezar_ask` card, with its session open, in a Continue that asked again, and with
+it closed: Finish records `human-ask-closed` for that question and no `human-input-delivered`, so
+no question stays pending. With a live session, fresh or continued, the later step stays pending.
 U17 sends a prose question
 with no wait, which gets the nudge, then the same question beside a `cezar_wait` timer, which
 parks the run on that timer as monitoring with no gate note. U15 nudges an autonomous run with the autonomous
@@ -1901,7 +1902,8 @@ question on Continue whose answer runs the trailing check (Q4), disk-round-trip
 restart recovery (Q5), cancellation (Q6) and authored timeouts (Q8). Unrun checks
 remain pending on stop/failure. hearsay-tools/cezarion#2991 retired Q1, Q3, Q7, Q9
 and Q10, which repeated wait rows: U7h, U7k and U7d pin the ask, its answer and the
-answering done; U18 pins Finish on a parked question, with the later step left pending;
+answering done; U18 pins Finish on a parked question, fresh and after a Continue, with the
+later step left pending;
 U9h pins a clean close with a question open; A3/A4 pin the autonomous refusal.
 
 
