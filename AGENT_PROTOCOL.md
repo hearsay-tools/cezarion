@@ -2201,9 +2201,11 @@ on every runner too. A `no-session` family runs once, on the set's first runner.
 R1 and U1 are smoke rows on every runner. The guards: `core/parity-classes.test.ts`
 fails when the set misses a declared value, or a parity file belongs to no
 family; `cez/runner-fact-combination` fails when one function in
-`packages/cezar/src/workflows/` reads two different declared facts, because one
-runner per value cannot show a combination. Such a function needs a combination
-row on every runner.
+`packages/cezar/src/workflows/` touches a fact source and reads two different
+declared fact keys from any object, because one runner per value cannot show a
+combination. It tracks no value, so it over-approximates: a real combination
+needs a combination row on every runner, and a same-named key of an unrelated
+object needs an exception with its reason (`docs/sdlc/lint.md`).
 
 Drive each real runner through its own native mock frames. Register each new
 criterion in the total-coverage guard, and use a named, executable exemption only

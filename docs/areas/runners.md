@@ -43,13 +43,18 @@ Three guards hold the rule:
 
 1. `core/parity-classes.test.ts` fails when the derived set misses a declared
    value of a turn-path fact.
-2. The `cez/runner-fact-combination` lint rule fails when one function in
-   `packages/cezar/src/workflows/` reads two different declared facts. Such a
-   function needs a combination row that runs on every runner, named in the
-   rule's `COMBINATION_ROWS` as `<family> <row>`. `core/parity-classes.test.ts`
-   fails an entry whose row is not registered in that family or does not run on
-   every runner. The rule follows a fact source into locals, aliases and
-   destructuring, but not through a helper call.
+2. The `cez/runner-fact-combination` lint rule fails closed. It tracks no value:
+   it flags a function in `packages/cezar/src/workflows/`, nested callbacks
+   included, that touches any fact source (`.inputDelivery`, `.facts`,
+   `.systemPromptOnResume`, `RUNNER_FACTS`, `inputDeliveryOf`, or the
+   `InputDelivery` or `RunnerFacts` type) and reads two or more different fact
+   keys from any object. The keys come from the declared types. A real
+   combination needs a parity row that runs on every runner. Each reported
+   function goes in the rule's `COMBINATION_ROWS` with a reason; a real
+   combination also names its row as `<family> <row>`, and a false positive
+   (an unrelated object with a same-named key) names none.
+   `core/parity-classes.test.ts` fails an entry with no reason, or with a row
+   that is not registered in that family or does not run on every runner.
 3. `core/parity-classes.test.ts` fails when a parity test file belongs to no
    classified family, or a family has no file.
 

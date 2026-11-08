@@ -1,16 +1,16 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COMBINATION_ROWS, factCombinations, runnerFactCombination } from './runner-fact-combination.ts';
+import { COMBINATION_ROWS, combinationFindings, declaredFactKeys, factCombinations, runnerFactCombination } from './runner-fact-combination.ts';
 import { repoRoot } from './source-rule.ts';
 
 describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
   it.each([
     ['a row fact and the resume prompt', "function f(runner, id) { return runner.systemPromptOnResume === 'resent' && RUNNER_FACTS[id].nativeAsk === 'none'; }", 'f', ['nativeAsk', 'systemPromptOnResume']],
-    ['two delivery fields', "const g = (state, runner) => state.inputState.inputDelivery?.consumption === 'observable' && inputDeliveryOf(runner).mode === 'steer';", 'g', ['inputDelivery.consumption', 'inputDelivery.mode']],
-    ['a fact in a nested callback', "class A { settle(runner) { if (runner.facts.costReport === 'cumulative') return list.filter(x => x.inputDelivery.acknowledgement === 'write'); } }", 'settle', ['costReport', 'inputDelivery.acknowledgement']],
+    ['two delivery fields', "const g = (state, runner) => state.inputState.inputDelivery?.consumption === 'observable' && inputDeliveryOf(runner).mode === 'steer';", 'g', ['consumption', 'mode']],
+    ['a fact in a nested callback', "class A { settle(runner) { if (runner.facts.costReport === 'cumulative') return list.filter(x => x.inputDelivery.acknowledgement === 'write'); } }", 'settle', ['acknowledgement', 'costReport']],
     ['destructured facts', "function h(id) { const { nativeAsk, nativeTimerTool } = RUNNER_FACTS[id]; return nativeAsk && nativeTimerTool; }", 'h', ['nativeAsk', 'nativeTimerTool']],
-    ['a private method', "class B { #pick(id, runner) { return RUNNER_FACTS[id]?.nativeSubagents ?? inputDeliveryOf(runner).humanInputAtTurnEnd; } }", '#pick', ['inputDelivery.humanInputAtTurnEnd', 'nativeSubagents']],
+    ['a private method', "class B { #pick(id, runner) { return RUNNER_FACTS[id]?.nativeSubagents ?? inputDeliveryOf(runner).humanInputAtTurnEnd; } }", '#pick', ['humanInputAtTurnEnd', 'nativeSubagents']],
   ])('names a function that reads %s', (_case, source, name, facts) => {
     expect(factCombinations(source)).toEqual([{ name, line: 1, facts }]);
   });
@@ -27,34 +27,34 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
   // Each way a function can hold a fact source in a local, then read two facts from it.
   it.each([
     ['a const bound to .inputDelivery', "function f(runner) { const d = runner.inputDelivery; return d.mode === 'steer' && d.humanInputAtTurnEnd === 'always-held'; }",
-      ['inputDelivery.humanInputAtTurnEnd', 'inputDelivery.mode']],
+      ['humanInputAtTurnEnd', 'mode']],
     ['a const bound to inputDeliveryOf(…)', 'function f(runner) { const d = inputDeliveryOf(runner); return d.mode && d.acknowledgement; }',
-      ['inputDelivery.acknowledgement', 'inputDelivery.mode']],
+      ['acknowledgement', 'mode']],
     ['a let assigned later', 'function f(runner) { let d; d = inputDeliveryOf(runner); return d.mode && d.consumption; }',
-      ['inputDelivery.consumption', 'inputDelivery.mode']],
+      ['consumption', 'mode']],
     ['a const bound to RUNNER_FACTS[x]', 'function f(id) { const row = RUNNER_FACTS[id]; return row.nativeAsk && row.costReport; }', ['costReport', 'nativeAsk']],
     ['a const bound to RUNNER_FACTS.x', 'function f() { const row = RUNNER_FACTS.claude; return row.nativeTimerTool && row.nativeSubagents; }',
       ['nativeSubagents', 'nativeTimerTool']],
     ['a const bound to .facts', 'function f(runner) { const facts = runner.facts; return facts.nativeAsk && facts.costReport; }', ['costReport', 'nativeAsk']],
     ['a delivery read off a row alias', 'function f(id) { const row = RUNNER_FACTS[id]; const d = row.inputDelivery; return d.mode && row.nativeAsk; }',
-      ['inputDelivery.mode', 'nativeAsk']],
+      ['mode', 'nativeAsk']],
     ['an alias of an alias', 'function f(runner) { const d = runner.inputDelivery; const e = d; return e.mode && e.acknowledgement; }',
-      ['inputDelivery.acknowledgement', 'inputDelivery.mode']],
+      ['acknowledgement', 'mode']],
     ['optional chaining through an alias', "function f(state) { const d = state.inputDelivery; return d?.mode === 'steer' && d?.consumption === 'observable'; }",
-      ['inputDelivery.consumption', 'inputDelivery.mode']],
+      ['consumption', 'mode']],
     ['a cast or non-null alias', 'function f(runner) { const d = runner.inputDelivery as InputDelivery; return d!.mode && (d).consumption; }',
-      ['inputDelivery.consumption', 'inputDelivery.mode']],
+      ['consumption', 'mode']],
     ['a runner destructured to its delivery and resume prompt', 'function f(runner) { const { inputDelivery, systemPromptOnResume } = runner; return inputDelivery.mode && systemPromptOnResume; }',
-      ['inputDelivery.mode', 'systemPromptOnResume']],
+      ['mode', 'systemPromptOnResume']],
     ['a runner destructured to nested delivery fields', 'function f(runner) { const { inputDelivery: { mode, acknowledgement } } = runner; return mode && acknowledgement; }',
-      ['inputDelivery.acknowledgement', 'inputDelivery.mode']],
+      ['acknowledgement', 'mode']],
     ['a runner destructured to a renamed fact row', 'function f(runner) { const { facts: row } = runner; return row.nativeAsk && row.costReport; }', ['costReport', 'nativeAsk']],
     ['a delivery alias destructured', 'function f(runner) { const d = runner.inputDelivery; const { mode, humanInputAtTurnEnd } = d; return mode && humanInputAtTurnEnd; }',
-      ['inputDelivery.humanInputAtTurnEnd', 'inputDelivery.mode']],
+      ['humanInputAtTurnEnd', 'mode']],
     ['a destructuring assignment', 'function f(runner) { let mode, consumption; ({ mode, consumption } = inputDeliveryOf(runner)); return mode && consumption; }',
-      ['inputDelivery.consumption', 'inputDelivery.mode']],
+      ['consumption', 'mode']],
     ['a destructured parameter', 'function f({ inputDelivery }) { return inputDelivery.mode && inputDelivery.consumption; }',
-      ['inputDelivery.consumption', 'inputDelivery.mode']],
+      ['consumption', 'mode']],
   ])('names a function that reads two facts through %s', (_case, source, facts) => {
     expect(factCombinations(source)).toEqual([{ name: 'f', line: 1, facts }]);
   });
@@ -63,10 +63,54 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
     ['one fact read twice through aliases', 'function f(a, b) { const d = a.inputDelivery; const e = b.inputDelivery; return d.mode === e.mode; }'],
     ['one fact on two runners', 'function f(a, b) { const x = RUNNER_FACTS[a]; const y = RUNNER_FACTS[b]; return x.costReport === y.costReport; }'],
     ['a name that a parameter shadows', 'const d = runner.inputDelivery;\nfunction f(d) { return d.mode && d.consumption; }'],
-    ['a local reassigned to another value', 'function f(runner, options) { let d = runner.inputDelivery; d = options; return d.mode && d.consumption; }'],
     ['same-named fields of another object', 'function f(options) { const { mode, consumption, nativeAsk } = options; return mode && consumption && nativeAsk; }'],
   ])('passes %s', (_case, source) => {
     expect(factCombinations(source)).toEqual([]);
+  });
+
+  // Review round 2 bypasses of value tracking: the rule now tracks no value, so each is flagged.
+  it.each([
+    ['a source chosen by ??', "function f(state, runner) { const d = state.inputState.inputDelivery ?? inputDeliveryOf(runner); return d.acknowledgement === 'response' && d.humanInputAtTurnEnd === 'held-when-late'; }",
+      ['acknowledgement', 'humanInputAtTurnEnd']],
+    ['a source chosen by a ternary', 'function f(runner, other, c) { const d = c ? runner.inputDelivery : other.inputDelivery; return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['a name a block shadows', 'function f(runner, x) { const d = runner.inputDelivery; if (x) { const d = 1; void d; } return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['a conditional reassignment', 'function f(runner, options, c) { let d = runner.inputDelivery; if (c) d = options; return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['rest destructuring', 'function f(runner) { const { inputDelivery: { ...d } } = runner; return d.mode && d.acknowledgement; }', ['acknowledgement', 'mode']],
+    ['a parameter default', 'function f(runner, d = runner.inputDelivery) { return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['a value typed InputDelivery', 'function f(d: InputDelivery) { return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['a value typed RunnerFacts', 'function f(row: Readonly<RunnerFacts>) { return row.nativeAsk && row.costReport; }', ['costReport', 'nativeAsk']],
+  ])('names a function that reads two facts through %s', (_case, source, facts) => {
+    expect(factCombinations(source)).toEqual([{ name: 'f', line: 1, facts }]);
+  });
+
+  // The over-approximation: a fact source anywhere plus two fact keys from any object.
+  it.each([
+    ['a local reassigned to another value', 'function f(runner, options) { let d = runner.inputDelivery; d = options; return d.mode && d.consumption; }', ['consumption', 'mode']],
+    ['an unrelated object with a same-named key', "function f(runner, options) { const resent = runner.systemPromptOnResume === 'resent'; return resent && options.mode === 'fast'; }",
+      ['mode', 'systemPromptOnResume']],
+    ['a source in one callback and keys in another', 'function f(ids, list) { ids.map(id => RUNNER_FACTS[id]); return list.filter(x => x.mode).map(x => x.costReport); }', ['costReport', 'mode']],
+  ])('flags %s, by design', (_case, source, facts) => {
+    expect(factCombinations(source)).toEqual([{ name: 'f', line: 1, facts }]);
+  });
+
+  it('lets a reported function pass only through an exception, which names its reason', () => {
+    const source = "function f(runner, options) { return runner.systemPromptOnResume === 'resent' && options.mode === 'fast'; }";
+    const file = 'packages/cezar/src/workflows/run/x.ts';
+    expect(combinationFindings(file, source, {})).toEqual([{ line: 1, message: expect.stringMatching(/^f touches a runner fact source and reads mode and systemPromptOnResume\. .*COMBINATION_ROWS/) }]);
+    expect(combinationFindings(file, source, { [`${file}#f`]: { reason: 'options.mode is the CLI mode, not a delivery mode' } })).toEqual([]);
+    expect(combinationFindings(file, source, { [`${file}#g`]: { reason: 'another function' } })).toHaveLength(1);
+  });
+
+  it('reads the fact keys from the declared types, so a new fact joins the rule', () => {
+    expect([...declaredFactKeys()].sort()).toEqual(['acknowledgement', 'consumption', 'costReport', 'humanInputAtTurnEnd', 'mode',
+      'nativeAsk', 'nativeSubagents', 'nativeTimerTool', 'systemPromptOnResume']);
+    const grown = declaredFactKeys(path => {
+      const text = readFileSync(join(repoRoot, path), 'utf8');
+      return path.endsWith('runner-facts.ts') ? text.replace('export interface RunnerFacts {', 'export interface RunnerFacts {\n  readonly nativeVoice: boolean;') : text;
+    });
+    expect(grown.has('nativeVoice')).toBe(true);
+    expect(factCombinations('function f(id) { return RUNNER_FACTS[id].nativeVoice && RUNNER_FACTS[id].nativeAsk; }', grown))
+      .toEqual([{ name: 'f', line: 1, facts: ['nativeAsk', 'nativeVoice'] }]);
   });
 
   it('reports only the innermost function that combines facts', () => {

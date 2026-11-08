@@ -35,7 +35,7 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  * when it adds a value. Each `describeRunners` group is one family in
  * `parity-classes.testkit.ts`, and a cell registers only on the runners its row's class names.
  * Guards: `parity-classes.test.ts` (the set covers every value; every parity file has a family)
- * and `cez/runner-fact-combination` (no workflow function reads two facts).
+ * and `cez/runner-fact-combination` (no workflow function touches a fact source and reads two fact keys).
  *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
  * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`

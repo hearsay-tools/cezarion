@@ -14,7 +14,7 @@ import {
   type ParityFamilyName,
 } from './parity-classes.testkit.ts';
 import { RUNNER_FACTS, type RunnerFacts } from './runner-facts.ts';
-import { COMBINATION_ROWS } from '../lint/runner-fact-combination.ts';
+import { COMBINATION_ROWS, type CombinationException } from '../lint/runner-fact-combination.ts';
 
 const src = join(import.meta.dirname, '..');
 const facts = (overrides: Partial<RunnerFacts['inputDelivery']> & { systemPromptOnResume?: RunnerFacts['systemPromptOnResume'] } = {}): RunnerFacts => {
@@ -102,16 +102,20 @@ describe('the parity classification table (hearsay-tools/cezarion#2991)', () => 
     expect(parityRunners('server-contract', 'R1')).toEqual([NO_SESSION_RUNNER]);
   });
 
-  // cez/runner-fact-combination lets a function combine two facts only beside a registered row of a
-  // classified family that runs on every runner. A family with no row catalog here fails closed.
-  it('names, for each allowed fact combination, a registered row that runs on every runner', () => {
+  // cez/runner-fact-combination lets a reported function pass only with a reason. A real combination
+  // also names a registered row of a classified family that runs on every runner; a family with no
+  // row catalog here fails closed. A false positive (an unrelated same-named key) names no row.
+  it('gives every fact-combination exception a reason, and a real one a registered row on every runner', () => {
     expect(combinationRowProblems(COMBINATION_ROWS)).toEqual([]);
-    expect(combinationRowProblems({ 'a#f': 'harness:run R1', 'b#g': 'waits U1', 'c#h': 'workflow-followup H1' })).toEqual([]);
-    expect(combinationRowProblems({ 'a#f': 'waits' })).toEqual(['a#f: "waits" names no row id']);
-    expect(combinationRowProblems({ 'a#f': 'harness:contract S999' })).toEqual(['a#f: S999 is not a registered row of harness:contract']);
-    expect(combinationRowProblems({ 'a#f': 'waits U2' })).toEqual(['a#f: waits U2 does not run on every runner']);
-    expect(combinationRowProblems({ 'a#f': 'nowhere R1' })).toEqual(['a#f: nowhere is not a classified family']);
-    expect(combinationRowProblems({ 'a#f': 'ci-wait-retry R92' })).toEqual(['a#f: ci-wait-retry has no row catalog here; add one before naming its rows']);
+    const real = (row: string): CombinationException => ({ reason: 'decides on two facts together', row });
+    expect(combinationRowProblems({ 'a#f': real('harness:run R1'), 'b#g': real('waits U1'), 'c#h': real('workflow-followup H1'),
+      'd#i': { reason: 'options.mode is the CLI mode, not a delivery mode' } })).toEqual([]);
+    expect(combinationRowProblems({ 'a#f': real('waits') })).toEqual(['a#f: "waits" names no row id']);
+    expect(combinationRowProblems({ 'a#f': real('harness:contract S999') })).toEqual(['a#f: S999 is not a registered row of harness:contract']);
+    expect(combinationRowProblems({ 'a#f': real('waits U2') })).toEqual(['a#f: waits U2 does not run on every runner']);
+    expect(combinationRowProblems({ 'a#f': real('nowhere R1') })).toEqual(['a#f: nowhere is not a classified family']);
+    expect(combinationRowProblems({ 'a#f': real('ci-wait-retry R92') })).toEqual(['a#f: ci-wait-retry has no row catalog here; add one before naming its rows']);
+    expect(combinationRowProblems({ 'a#f': { reason: ' ' } })).toEqual(['a#f: the exception gives no reason']);
   });
 });
 
@@ -129,10 +133,12 @@ function familyRowCatalog(): Map<string, Set<string>> {
   return catalog;
 }
 
-/** Each exception that does not name `<family> <row>`: a registered row of a classified family that runs on every runner. */
-function combinationRowProblems(rows: Readonly<Record<string, string>>): string[] {
+/** Each exception with no reason, or whose row is not `<family> <row>`: a registered row of a classified family that runs on every runner. */
+function combinationRowProblems(exceptions: Readonly<Record<string, CombinationException>>): string[] {
   const catalog = familyRowCatalog();
-  return Object.entries(rows).flatMap(([site, entry]) => {
+  return Object.entries(exceptions).flatMap(([site, { reason, row: entry }]) => {
+    if (!reason.trim()) return [`${site}: the exception gives no reason`];
+    if (entry === undefined) return [];
     const [family = '', row, ...rest] = entry.split(' ');
     if (!Object.hasOwn(PARITY_FAMILIES, family)) return [`${site}: ${family} is not a classified family`];
     if (row === undefined || rest.length) return [`${site}: "${entry}" names no row id`];
