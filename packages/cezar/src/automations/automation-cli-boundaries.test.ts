@@ -1,3 +1,4 @@
+import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -229,7 +230,7 @@ describe('automation CLI response boundaries', () => {
     vi.useFakeTimers();
     const http = vi.fn<NonNullable<AutomationIo['http']>>()
       .mockResolvedValueOnce({ status: 202, data: { checkId: 'chk' } })
-      .mockResolvedValueOnce({ status: 200, data: { status: 'running' } })
+      .mockResolvedValueOnce({ status: 200, data: { status: automationCheckSchema.shape.status.enum.running } })
       .mockResolvedValue({ status: 200, data: { status: 'complete', matches: 1 } });
     const cli = client(http);
     const result = cli.run(['check', 'a1']);
