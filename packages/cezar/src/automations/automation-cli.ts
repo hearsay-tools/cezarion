@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -57,7 +58,7 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                                            --at or --in runs once: --at is a local wall time in --tz (an IANA
                                            name; the cockpit's zone when left out), --in is elapsed time from
                                            now. --latest-start (10m to 30d) bounds how late a start may still
-                                           launch after Cezarion was down
+                                           launch after ${productName('Cezarion')} was down
                                            --archive-when-done archives each task after Done (default off).
                                            --auto-merge-pr merges its PR after Done when current-head CI and
                                            GitHub rules pass (default off); it may mark a draft ready.

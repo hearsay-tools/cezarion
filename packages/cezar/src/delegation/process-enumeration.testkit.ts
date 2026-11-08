@@ -1,5 +1,10 @@
 import fs from 'node:fs';
 
+// Above the kernel PID limit, but within signed 32-bit range for process.kill.
+// Synthetic sessions must never record a PID that belongs to a host process.
+export const ABSENT_PROCESS_PID = 2147483001;
+export const OTHER_ABSENT_PROCESS_PID = 2147483002;
+
 /** Shared by Vitest and installed-package node:test fixtures. Only enumeration is scoped;
  * PID/token/cwd/ownership reads and errors remain real, including observed orphan descendants. */
 export function fixtureProcessEnumeration(): typeof fs.readdirSync {

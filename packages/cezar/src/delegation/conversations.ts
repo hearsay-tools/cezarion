@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { createHash } from 'node:crypto';
 import type { AgentInput, ConversationMessage, ConversationSendRequest, ConversationState, DelegationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
@@ -203,7 +204,7 @@ export function commitAccepted(store: RunStore, ledgerId: string, next: Conversa
   catch (error) {
     if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message);
     // Another cezar process controls the recipient (a headless run beside the cockpit): nothing is written.
-    if (error instanceof RunWriteRefusedError) throw new DelegationPolicyError('incompatible_state', `Not delivered: run ${error.runId} is controlled by another cezar process. Messages reach only tasks this cezar process runs.`);
+    if (error instanceof RunWriteRefusedError) throw new DelegationPolicyError('incompatible_state', `Not delivered: run ${error.runId} is controlled by another ${productName('cezar')} process. Messages reach only tasks this ${productName('cezar')} process runs.`);
     throw error;
   }
 }

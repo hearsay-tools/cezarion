@@ -135,6 +135,23 @@ const toolbarAction = (id: string) =>
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Changes tab route', () => {
+  it('marks health ready only after its answer renders, even when the forge is unavailable', async () => {
+    let answerHealth!: (response: Response) => void
+    const healthAnswer = new Promise<Response>((resolve) => { answerHealth = resolve })
+    stubFetch()
+    const fetchFixture = globalThis.fetch
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/v1/health' ? healthAnswer : fetchFixture(input, init))
+    renderChangesRoute()
+    const toolbar = () => document.querySelector('[data-slot="git-toolbar"]')
+    await waitFor(() => expect(toolbar()).not.toBeNull())
+    expect(toolbar()?.getAttribute('data-health-ready')).toBe('false')
+
+    await act(async () => answerHealth(jsonResponse({ ...HEALTH, forge: null })))
+    await waitFor(() => expect(toolbar()?.getAttribute('data-health-ready')).toBe('true'))
+    expect(toolbarAction('create-pr')?.disabled).toBe(true)
+  })
+
   it('renders the run header with the Changes tab active and all tabs deep-linkable', async () => {
     stubFetch()
     renderChangesRoute()

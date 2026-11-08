@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes, type Hash } from 'node:crypto';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
@@ -416,7 +417,7 @@ export class WorktreeFiles {
    */
   async put(path: string, content: EntryContent, meta: EntryMeta): Promise<string | null> {
     const before = await this.inspect(path);
-    if (before.owner !== 'free' && before.owner !== 'ours') throw new Error(`${path} is not cezar's to write`);
+    if (before.owner !== 'free' && before.owner !== 'ours') throw new Error(`${path} is not ${productName('cezar')}'s to write`);
     const dest = join(this.worktree, path);
     let staged: string | undefined;
     let identity: string | null;

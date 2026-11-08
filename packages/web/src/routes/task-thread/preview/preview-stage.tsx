@@ -68,6 +68,7 @@ export function PreviewStage({
   /** Overlays: states, banners, dialogs. They fill the stage. */
   children?: ReactNode
 }) {
+  const frameSequence = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState<StageSize | null>(null)
@@ -76,13 +77,14 @@ export function PreviewStage({
 
   useImperativeHandle(ref, () => ({
     async draw(frame) {
+      const sequence = ++frameSequence.current
       const target = canvas.current
       const context = target?.getContext('2d')
       if (!target || !context || !pageIsActive()) return
       try {
         const decoded = await decode(frame)
         try {
-          if (!pageIsActive() || canvas.current !== target) return
+          if (sequence !== frameSequence.current || !pageIsActive() || canvas.current !== target) return
           if (target.width !== decoded.width) target.width = decoded.width
           if (target.height !== decoded.height) target.height = decoded.height
           context.drawImage(decoded.source, 0, 0)

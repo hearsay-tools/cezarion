@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ExternalLinkIcon, IdCardIcon } from 'lucide-react'
 import { CpuIcon } from '@/components/design-icons'
@@ -738,7 +739,7 @@ function AccountManagement({ account, onRemove }: { account: AgentProfile; onRem
               {/* The label is cezar's own; the folder is the account. Saying so here is what keeps
                   Rename from reading as "point this at a different directory". */}
               <span className="text-xs text-muted-foreground">
-                Renaming changes what cezar calls this account, not its folder.
+                Renaming changes what {productName('cezar')} calls this account, not its folder.
               </span>
             </>
           )}

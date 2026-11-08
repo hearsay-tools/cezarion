@@ -196,11 +196,9 @@ describe('the full-screen /new against a live dry-run server', () => {
     expect(browser.url()).toBe(`${baseUrl}${scoped('/new')}`)
     expect(browser.text('h1')).toBe('What should the agent work on?')
     expect(browser.isVisible('[data-route="new"] [data-slot="composer"]')).toBe(true)
-    expect(
-      browser.evaluate(
-        `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
-      ),
-    ).toBe(true)
+    browser.waitForFunction(
+      `document.activeElement === document.querySelector('[data-slot="composer"] textarea')`,
+    )
     expect(browser.count('[data-slot="suggested-chip"]')).toBe(0)
   })
 

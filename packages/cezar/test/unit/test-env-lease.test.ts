@@ -30,13 +30,14 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     copyFileSync(resolve(import.meta.dirname, '../../src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
     writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
     writeFileSync(join(root, 'mutator.mjs'), `
-      import { writeFileSync } from 'node:fs';
-      writeFileSync('mutator.pid', String(process.pid));
+      import { renameSync, writeFileSync } from 'node:fs';
       process.on('SIGTERM', () => writeFileSync('term-received', 'yes'));
+      writeFileSync('mutator.pid.tmp', String(process.pid));
+      renameSync('mutator.pid.tmp', 'mutator.pid');
       setInterval(() => {}, 1000);
     `);
     const script = join(root, 'mutation.sh');
-    writeFileSync(script, `node '${localHelper}' join "$$"\necho $$ > shell.pid\nnode mutator.mjs\n`);
+    writeFileSync(script, `node '${localHelper}' join "$$"\necho $$ > shell.pid.tmp\nmv shell.pid.tmp shell.pid\nnode mutator.mjs\n`);
     const supervisor = spawn(process.execPath, [localHelper, 'run', 'sh', script], { cwd: root, env: fixtureEnv, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     supervisor.stderr!.on('data', data => { stderr += data; });
@@ -45,12 +46,11 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     let mutator: number | undefined;
     try {
       const deadline = Date.now() + 10_000;
-      while (!existsSync(join(root, 'mutator.pid'))) {
+      while ((mutator = readPid(join(root, 'mutator.pid'))) === undefined) {
         assert.equal(supervisor.exitCode, null, `supervisor exited before mutator started: ${stderr}`);
         assert.ok(Date.now() < deadline, `mutator must start: ${stderr}`);
         await delay(20);
       }
-      mutator = requirePid(join(root, 'mutator.pid'));
       supervisor.kill(signal);
       if (signal === 'SIGKILL') process.kill(requirePid(join(root, 'shell.pid')), 'SIGKILL');
       await closed;
@@ -155,7 +155,7 @@ test('stop-app stops a group whose leader is an unreaped zombie, a member that i
   const root = mkdtempSync(join(tmpdir(), 'cez-env-zombie-'));
   // The outer shell execs into sleep, which never reaps, so the leader it forked stays a zombie.
   // setsid makes that leader a group of its own, and the member it forks ignores SIGTERM.
-  const parent = spawn('sh', ['-c', `setsid sh -c 'trap "" TERM; sleep 1000 & echo $! > member.pid; echo $$ > leader.pid' & exec sleep 1000`], { cwd: root, stdio: 'ignore' });
+  const parent = spawn('sh', ['-c', `setsid sh -c 'trap "" TERM; sleep 1000 & echo $! > member.pid.tmp; mv member.pid.tmp member.pid; echo $$ > leader.pid.tmp; mv leader.pid.tmp leader.pid' & exec sleep 1000`], { cwd: root, stdio: 'ignore' });
   let member: number | undefined;
   try {
     const deadline = Date.now() + 10_000; // bound: the shells start in milliseconds; this guards a hang

@@ -68,6 +68,9 @@ function shownTarget(next: Target): PreviewTarget {
 
 /** One mounted pane owns the socket, its target refs and every transport effect. */
 export function usePreviewPaneTransport({ run, servers, request, onTarget, onLive, onClose }: PreviewPaneProps) {
+  const dpr = useDevicePixelRatio()
+  const dprRef = useRef(dpr)
+  dprRef.current = dpr
   const pageActive = usePageActive()
   const viewerId = useRef(crypto.randomUUID())
   const opened = useRef(false)
@@ -177,7 +180,7 @@ export function usePreviewPaneTransport({ run, servers, request, onTarget, onLiv
           if (state !== 'open') return
           setEverOpened(true)
           if (target.current) {
-            conn?.send({ t: 'open', target: target.current, viewerId: viewerId.current, resume: opened.current, quality: qualityRef.current })
+            conn?.send({ t: 'open', target: target.current, viewerId: viewerId.current, resume: opened.current, quality: qualityRef.current, dpr: dprRef.current })
             opened.current = true
           }
         },
@@ -196,7 +199,6 @@ export function usePreviewPaneTransport({ run, servers, request, onTarget, onLiv
   const connected = pageActive && transport.state === 'open' && takenOver === undefined
   const desired = compact || viewport === 'fit' ? stageSize : viewport
   // Ultra renders at this ratio (hearsay-tools/cezarion#2069). At 1 the message stays as it was, and the server reads its absence as 1.
-  const dpr = useDevicePixelRatio()
   useEffect(() => {
     if (desired && connected && (stage?.stage === 'streaming' || stage?.stage === 'loading')) {
       send({ t: 'resize', w: desired.w, h: desired.h, ...(dpr !== 1 ? { dpr } : {}) })
@@ -259,7 +261,7 @@ export function usePreviewPaneTransport({ run, servers, request, onTarget, onLiv
       setPort('port' in next ? next.port : undefined)
       setAgent('agent' in next)
       setShown(shownTarget(next))
-      send({ t: 'open', target: next, viewerId: viewerId.current, quality: qualityRef.current })
+      send({ t: 'open', target: next, viewerId: viewerId.current, quality: qualityRef.current, dpr: dprRef.current })
       opened.current = socketOpen.current
     },
     [send],

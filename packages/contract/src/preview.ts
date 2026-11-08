@@ -124,6 +124,8 @@ export const previewClientMessageSchema = z.discriminatedUnion('t', [
     target: z.union([z.object({ port }), z.object({ url: z.string().min(1).max(2048) }), z.object({ agent: z.literal(true) })]),
     /** Absent from an older cockpit, which streams `normal`. */
     quality: previewQualitySchema.optional(),
+    /** First-frame ratio. Older viewers omit it and retain the session ratio until resize. */
+    dpr: z.number().finite().transform(clampPixelRatio).optional(),
   }),
   /** The owner switched the mode: the stream restarts at it, the page stays as it is. */
   z.object({ t: z.literal('quality'), quality: previewQualitySchema }),

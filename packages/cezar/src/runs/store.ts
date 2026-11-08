@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
@@ -61,7 +62,6 @@ import { ISSUE_URL_RE, originatingIssue, refUrlNumber, referencedPrDeclaration, 
 import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitCall, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
-
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
@@ -452,16 +452,16 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup' | 'maintenance';
 export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined';
 
 /** The one answer every control gives for a run another cezar process owns (`409 { error }`). */
-export const RUN_IN_USE_ELSEWHERE = 'run is in use by another cezar process';
+export const RUN_IN_USE_ELSEWHERE = `run is in use by another ${productName('cezar')} process`;
 /** The answer for a run this process stopped writing after a conflicting write. */
-export const RUN_QUARANTINED = 'run changed under this cezar process — restart cezar to reload it';
+export const RUN_QUARANTINED = `run changed under this ${productName('cezar')} process — restart ${productName('cezar')} to reload it`;
 
 /** A write this store must not make: another process owns the run, its owner died with work
  *  still live (adopt it first), or a conflict quarantined it. Nothing was changed. */
 export class RunWriteRefusedError extends Error {
   constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>) {
     super(ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
-      : ownership === 'orphaned' ? `run ${runId} belongs to a cezar process that exited; take it over before writing it`
+      : ownership === 'orphaned' ? `run ${runId} belongs to a ${productName('cezar')} process that exited; take it over before writing it`
         : `${RUN_IN_USE_ELSEWHERE}: ${runId}`);
     this.name = 'RunWriteRefusedError';
   }
@@ -3384,7 +3384,7 @@ export class RunStore extends EventEmitter {
         this.base.delete(conflict.id);
         this.emit('deleted', conflict.id);
       }
-      console.error(`[cez] run ${conflict.id} was changed by another writer (${conflict.reason}); this process will not write it again until cezar restarts. Evidence: ${join(this.dataDir, RUNS_DB_FILE)}, table run_conflicts, seq ${seqs[index]}.`);
+      console.error(`[cez] run ${conflict.id} was changed by another writer (${conflict.reason}); this process will not write it again until ${productName('cezar')} restarts. Evidence: ${join(this.dataDir, RUNS_DB_FILE)}, table run_conflicts, seq ${seqs[index]}.`);
     });
     this.scheduleSave();
   }

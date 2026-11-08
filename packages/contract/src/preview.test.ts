@@ -119,6 +119,8 @@ describe('previewClientMessageSchema', () => {
     ['an unknown message type', { t: 'eval', expression: '1' }],
     ['an unknown quality', { t: 'quality', quality: 'lossless' }],
     ['a quality message without a mode', { t: 'quality' }],
+    ['an open with a non-numeric ratio', { t: 'open', target: { port: 5173 }, dpr: '2' }],
+    ['an open with an infinite ratio', { t: 'open', target: { port: 5173 }, dpr: Infinity }],
     ['an open with an unknown quality', { t: 'open', target: { port: 5173 }, quality: 'max' }],
     ['an unknown mouse type', { t: 'mouse', type: 'mouseTeleport', x: 1, y: 1 }],
     ['an unknown key type', { t: 'key', type: 'char', key: 'a' }],
@@ -148,6 +150,16 @@ describe('previewClientMessageSchema', () => {
     expect(dpr(0.5)).toBe(1);
     expect(dpr(1.5)).toBe(1.5);
     expect(dpr(10 / 9)).toBe(10 / 9);
+  });
+
+  it.each([1, 1.5, 2, 3])('validates and clamps open ratio %s', dpr => {
+    expect(previewClientMessageSchema.parse({ t: 'open', target: { port: 5173 }, dpr }))
+      .toEqual({ t: 'open', target: { port: 5173 }, dpr: Math.min(dpr, PREVIEW_MAX_PIXEL_RATIO) });
+  });
+
+  it('keeps a legacy open without a ratio valid', () => {
+    const message = { t: 'open', target: { port: 5173 } };
+    expect(previewClientMessageSchema.parse(message)).toEqual(message);
   });
 
   it('leaves the pixel ratio out when an older cockpit sends none', () => {

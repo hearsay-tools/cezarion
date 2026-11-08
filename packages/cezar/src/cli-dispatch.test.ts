@@ -241,7 +241,11 @@ describe('binary help and notices', () => {
       const help = f.deps.console.log.mock.calls[0]![0] as string;
       expect(help).toContain(`  ${expected} run "<task>"`);
       expect(help.includes(`  ${expected} migrate [--dry-run]`)).toBe(rebrand);
-      expect(help).toContain('cezar — local cockpit');
+      expect(help).toContain(`${rebrand ? 'Squawk' : 'cezar'} — local cockpit`);
+      expect(help).toContain(`host ${rebrand ? 'Squawk' : 'cezar'} on a server`);
+      expect(help).toContain(`resume ${rebrand ? 'Squawk' : 'Cezar'} workers`);
+      expect(help).toContain('.ai/cezar/config.json');
+      expect(help).toContain('~/.cezar/versions');
     }
   });
   it('prints the notice before a managed command can return', async () => {

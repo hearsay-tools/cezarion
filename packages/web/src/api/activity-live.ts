@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { activitySnapshotSchema, type ActivitySnapshot } from '@open-mercato/cezar-api-client/contract/activity'
@@ -26,7 +27,7 @@ export const activityPath = (scope: ActivityScope): string =>
 
 /** The error a snapshot that fails the contract becomes. The view draws lines between the ids it
  *  finds in a snapshot, so a malformed one, read or pushed, is an error it shows, never a crash. */
-export const UNEXPECTED_ACTIVITY = 'the cezar server answered /workspace/activity with an unexpected body'
+export const UNEXPECTED_ACTIVITY = `the ${productName('cezar')} server answered /workspace/activity with an unexpected body`
 
 /** A read or pushed snapshot, checked against the contract. */
 export function parseActivity(value: unknown): ActivitySnapshot {

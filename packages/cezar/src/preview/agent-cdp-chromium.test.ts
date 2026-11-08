@@ -19,8 +19,8 @@ import { fakeViewer } from './preview.testkit.ts';
  * owner's pane streams; the pane sees the navigation. Skipped where no Chromium is installed.
  */
 
-// bound: a cold Chrome start on a loaded CI runner took over 30 s (hearsay-tools/cezarion#1467);
-// every wait below still ends on its own event.
+// bound: page navigation and the first streamed frame settle on their own events;
+// this budget guards a hung browser or stream.
 const BUDGET_MS = 120_000;
 const bin = resolveChromium(undefined, undefined, undefined, undefined, testHome());
 

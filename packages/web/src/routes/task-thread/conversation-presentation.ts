@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, RelatedRunTitle, Runner, RunSummary } from '@open-mercato/cezar-api-client'
 
@@ -131,7 +132,7 @@ export function conversationDeliveryExplanation(
   if (message.state === 'continuation-required') {
     return isPeerMessage(message)
       ? 'Not delivered. The recipient is not running. Only its human can continue it.'
-      : 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with cez worker resume; workers cannot resume parents.'
+      : `Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with ${productCommand()} worker resume; workers cannot resume parents.`
   }
   return message.state === 'destroyed' ? 'Not delivered. This worker was destroyed.' : undefined
 }

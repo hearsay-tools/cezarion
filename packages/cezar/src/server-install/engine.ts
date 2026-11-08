@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
@@ -361,8 +362,8 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
     state.updatedAt = opts.now;
     if (leftover.length > 0) {
       ctx.ui.warn(
-        `Not reversed (recorded by a different cezar version): ${leftover.join(', ')}. ` +
-          'Their record is kept — re-run server-uninstall with the cezar version that installed them.',
+        `Not reversed (recorded by a different ${productName('cezar')} version): ${leftover.join(', ')}. ` +
+          `Their record is kept — re-run server-uninstall with the ${productName('cezar')} version that installed them.`,
       );
       await ctx.save();
       return { status: 'failed', state };

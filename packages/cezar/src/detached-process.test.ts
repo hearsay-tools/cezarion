@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { readPid, requirePid } from './pid-file.testkit.ts';
+
 import {
   groupExists, groupRunning, leaderRunning, processStartToken, startAndForget, startOwnedGroup, stopGroup, watchGroup,
   type GroupLeader,
@@ -63,15 +65,15 @@ function alive(pid: number): boolean {
 /** The pid a fixture script wrote to `name`, once it is there. */
 async function pidFrom(name: string): Promise<number> {
   const file = join(dir, name);
-  await until(() => existsSync(file) && readFileSync(file, 'utf8').endsWith('\n'), `${name} to be written`);
-  return Number(readFileSync(file, 'utf8').trim());
+  await until(() => readPid(file) !== undefined, `${name} to be written`);
+  return requirePid(file);
 }
 
 /** A Node script as `-e` code: `out` names a file in the test directory. */
 const script = (body: string) => ['-e', `const out = (name) => require('node:path').join(${JSON.stringify(dir)}, name); ${body}`];
 const IDLE = 'setInterval(() => {}, 1000);';
 /** A member that ignores SIGTERM. It records its pid only once its handler is in place. */
-const MEMBER = `process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.argv[1], process.pid + '\\n'); ${IDLE}`;
+const MEMBER = `process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.argv[1] + '.tmp', process.pid + '\\n'); require('node:fs').renameSync(process.argv[1] + '.tmp', process.argv[1]); ${IDLE}`;
 /** Forks MEMBER into the leader's group, writing `member.pid`. */
 const STUBBORN_MEMBER = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(MEMBER)}, out('member.pid')], { stdio: 'ignore' });`;
 /** The leader exits once its member is ready, so the member outlives it. */
@@ -102,10 +104,11 @@ describe.runIf(posix)('startOwnedGroup', () => {
     const readStart = (pid: number): undefined => {
       leaderPid = pid;
       const file = join(dir, 'member.pid');
-      // bound: hang guard only; the leader writes the file as its first statement.
+      // bound: hang guard only; the member records its pid once its signal handler is installed.
       const deadline = performance.now() + 20_000;
       const sleeper = new Int32Array(new SharedArrayBuffer(4));
-      while (!existsSync(file) && performance.now() < deadline) Atomics.wait(sleeper, 0, 0, 20);
+      // Wait for the published pid before the group is killed.
+      while (readPid(file) === undefined && performance.now() < deadline) Atomics.wait(sleeper, 0, 0, 20);
       return undefined;
     };
     await expect(startOwnedGroup(process.execPath, script(STUBBORN_MEMBER + IDLE), { stdio: 'ignore', readStart, requireStart: true }))
@@ -146,7 +149,7 @@ describe.runIf(posix)('stopGroup', () => {
     // `true` stays in the group as a zombie: the shell that forked it becomes `sleep` in a session of
     // its own, which never reaps it.
     const { leader } = await startLeader(`const sh = require('node:child_process').spawn('sh', ['-c', 'true & exec setsid sleep 1000'], { stdio: 'ignore' });
-require('node:fs').writeFileSync(out('sleeper.pid'), sh.pid + '\\n'); ${IDLE}`);
+require('node:fs').writeFileSync(out('sleeper.pid.tmp'), sh.pid + '\\n'); require('node:fs').renameSync(out('sleeper.pid.tmp'), out('sleeper.pid')); ${IDLE}`);
     const sleeper = await pidFrom('sleeper.pid');
     strays.push(sleeper);
     const states = () => readdirSync('/proc').filter((name) => /^\d+$/.test(name)).flatMap((name) => {
@@ -198,7 +201,9 @@ const THREAD_HOLDS_PORT = [
   'signal.signal(signal.SIGTERM, signal.SIG_IGN)',
   "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()",
   'threading.Thread(target=lambda: time.sleep(60)).start()',
-  "open(os.path.join(sys.argv[1], 'thread.port'), 'w').write('%d\\n' % s.getsockname()[1])",
+  "with open(os.path.join(sys.argv[1], 'thread.port.tmp'), 'w') as port_file:",
+  "    port_file.write('%d\\n' % s.getsockname()[1])",
+  "os.replace(os.path.join(sys.argv[1], 'thread.port.tmp'), os.path.join(sys.argv[1], 'thread.port'))",
   'ctypes.CDLL(None).pthread_exit(None)',
 ].join('\n');
 const python = linux && spawnSync('python3', ['-I', '-c', 'import ctypes'], { stdio: 'ignore' }).status === 0;
@@ -257,7 +262,7 @@ describe.runIf(posix)('stopGroup with the leader\'s handle', () => {
 
 describe.runIf(posix)('startAndForget', () => {
   it('starts the leader of its own process group and reports it started', async () => {
-    expect(await startAndForget(process.execPath, script(`require('node:fs').writeFileSync(out('forgotten.pid'), process.pid + '\\n'); ${IDLE}`))).toBe(true);
+    expect(await startAndForget(process.execPath, script(`require('node:fs').writeFileSync(out('forgotten.pid.tmp'), process.pid + '\\n'); require('node:fs').renameSync(out('forgotten.pid.tmp'), out('forgotten.pid')); ${IDLE}`))).toBe(true);
     const pid = await pidFrom('forgotten.pid');
     strays.push(pid);
     // Its own group: signal 0 to the group its pid names reaches it.
@@ -270,7 +275,7 @@ describe.runIf(posix)('startAndForget', () => {
 
   it('keeps nothing alive: its caller exits while the process runs and before the settle window ends', async () => {
     const helper = new URL('./detached-process.ts', import.meta.url).href;
-    const child = `require('node:fs').writeFileSync(${JSON.stringify(join(dir, 'forgotten.pid'))}, process.pid + '\\n'); ${IDLE}`;
+    const child = `require('node:fs').writeFileSync(${JSON.stringify(join(dir, 'forgotten.pid.tmp'))}, process.pid + '\\n'); require('node:fs').renameSync(${JSON.stringify(join(dir, 'forgotten.pid.tmp'))}, ${JSON.stringify(join(dir, 'forgotten.pid'))}); ${IDLE}`;
     const caller = `const { startAndForget } = await import(${JSON.stringify(helper)});
 startAndForget(process.execPath, ['-e', ${JSON.stringify(child)}], { settleMs: 600_000 });`;
     // bound: hang guard only; a caller that waited for the 600 s window or the child would hit it.
