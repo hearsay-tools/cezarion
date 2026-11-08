@@ -2,7 +2,13 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { HARNESS_PARITY_GROUPS } from './harness-parity-cells.testkit.ts';
+import { HARNESS_PARITY_GROUPS, harnessGroupRows } from './harness-parity-cells.testkit.ts';
+import {
+  AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, FOLLOWUP_CRITERIA, MODEL_REFUSAL_CRITERIA, NO_PROGRESS_CRITERIA, SHUTDOWN_CRITERIA,
+  SKILL_PROVISION_CRITERIA, SKILL_RESUME_CRITERIA, STEP_COMPLETION_CRITERIA, WORKFLOW_ASK_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA,
+  WORKTREE_SETUP_CRITERIA,
+} from './harness-parity-core.testkit.ts';
+import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
 import {
   NO_SESSION_RUNNER, PARITY_FAMILIES, PARITY_FILES, SHARED_RUNNERS, deriveRunnerSet, parityRowId, parityRunners, turnPathValues,
   type ParityFamilyName,
@@ -96,12 +102,44 @@ describe('the parity classification table (hearsay-tools/cezarion#2991)', () => 
     expect(parityRunners('server-contract', 'R1')).toEqual([NO_SESSION_RUNNER]);
   });
 
-  // cez/runner-fact-combination lets a function combine two facts only beside a row on every runner.
-  it('names, for each allowed fact combination, a row that runs on every runner', () => {
-    for (const [site, row] of Object.entries(COMBINATION_ROWS)) {
-      const [family, id] = row.split(' ') as [ParityFamilyName, string];
-      expect(PARITY_FAMILIES[family], site).toBeDefined();
-      expect(parityRunners(family, id), site).toEqual(RUNNER_IDS);
-    }
+  // cez/runner-fact-combination lets a function combine two facts only beside a registered row of a
+  // classified family that runs on every runner. A family with no row catalog here fails closed.
+  it('names, for each allowed fact combination, a registered row that runs on every runner', () => {
+    expect(combinationRowProblems(COMBINATION_ROWS)).toEqual([]);
+    expect(combinationRowProblems({ 'a#f': 'harness:run R1', 'b#g': 'waits U1', 'c#h': 'workflow-followup H1' })).toEqual([]);
+    expect(combinationRowProblems({ 'a#f': 'waits' })).toEqual(['a#f: "waits" names no row id']);
+    expect(combinationRowProblems({ 'a#f': 'harness:contract S999' })).toEqual(['a#f: S999 is not a registered row of harness:contract']);
+    expect(combinationRowProblems({ 'a#f': 'waits U2' })).toEqual(['a#f: waits U2 does not run on every runner']);
+    expect(combinationRowProblems({ 'a#f': 'nowhere R1' })).toEqual(['a#f: nowhere is not a classified family']);
+    expect(combinationRowProblems({ 'a#f': 'ci-wait-retry R92' })).toEqual(['a#f: ci-wait-retry has no row catalog here; add one before naming its rows']);
   });
 });
+
+/** Row ids each family registers, where this guard can list them. */
+function familyRowCatalog(): Map<string, Set<string>> {
+  const ids = (rows: ReadonlyArray<{ id: string }>) => new Set(rows.map(row => row.id));
+  const catalog = new Map<string, Set<string>>([...harnessGroupRows()].map(([group, rows]) => [`harness:${group}`, rows]));
+  for (const [family, rows] of Object.entries({
+    waits: WAIT_CRITERIA, 'workflow-autonomous': AUTONOMOUS_CRITERIA, 'workflow-ask': WORKFLOW_ASK_CRITERIA,
+    'workflow-final-message': FINAL_MESSAGE_CRITERIA, 'workflow-followup': FOLLOWUP_CRITERIA, 'workflow-no-progress': NO_PROGRESS_CRITERIA,
+    'workflow-step-completion': STEP_COMPLETION_CRITERIA, 'workflow-timeout': WORKFLOW_TIMEOUT_CRITERIA, 'skill-resume': SKILL_RESUME_CRITERIA,
+    'skill-provision': SKILL_PROVISION_CRITERIA, 'worktree-setup': WORKTREE_SETUP_CRITERIA, 'runner-shutdown': SHUTDOWN_CRITERIA,
+    'model-refusal': MODEL_REFUSAL_CRITERIA,
+  })) catalog.set(family, ids(rows));
+  return catalog;
+}
+
+/** Each exception that does not name `<family> <row>`: a registered row of a classified family that runs on every runner. */
+function combinationRowProblems(rows: Readonly<Record<string, string>>): string[] {
+  const catalog = familyRowCatalog();
+  return Object.entries(rows).flatMap(([site, entry]) => {
+    const [family = '', row, ...rest] = entry.split(' ');
+    if (!Object.hasOwn(PARITY_FAMILIES, family)) return [`${site}: ${family} is not a classified family`];
+    if (row === undefined || rest.length) return [`${site}: "${entry}" names no row id`];
+    const registered = catalog.get(family);
+    if (!registered) return [`${site}: ${family} has no row catalog here; add one before naming its rows`];
+    if (!registered.has(row)) return [`${site}: ${row} is not a registered row of ${family}`];
+    if (parityRunners(family as ParityFamilyName, row).length !== RUNNER_IDS.length) return [`${site}: ${entry} does not run on every runner`];
+    return [];
+  });
+}

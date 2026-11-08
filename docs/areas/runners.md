@@ -46,7 +46,10 @@ Three guards hold the rule:
 2. The `cez/runner-fact-combination` lint rule fails when one function in
    `packages/cezar/src/workflows/` reads two different declared facts. Such a
    function needs a combination row that runs on every runner, named in the
-   rule's `COMBINATION_ROWS`.
+   rule's `COMBINATION_ROWS` as `<family> <row>`. `core/parity-classes.test.ts`
+   fails an entry whose row is not registered in that family or does not run on
+   every runner. The rule follows a fact source into locals, aliases and
+   destructuring, but not through a helper call.
 3. `core/parity-classes.test.ts` fails when a parity test file belongs to no
    classified family, or a family has no file.
 

@@ -954,8 +954,9 @@ export const harnessParityFile = (backend: RunnerId, part: HarnessParityPart): s
 type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'beforeAll' | 'afterAll'> & {
   toolGrants: typeof describeToolGrantParity;
   allGroups?: boolean;
-  /** A dry collection: it counts the cells of each group, for `groupCellCounts`. */
-  probe?: boolean;
+  /** A dry collection, for `groupCellCounts` and `harnessGroupRows`. A function also hears each
+   *  cell the file's runner registers, with its group. */
+  probe?: true | ((group: string, title: string) => void);
 };
 
 /** How many cells each group's suite registers for one runner, by suite name. A shared group can
@@ -979,6 +980,26 @@ function groupCellCounts(runner: RunnerId): Map<string, number> {
   return counts;
 }
 
+/** The row ids each group registers on any runner, from its cell titles (hearsay-tools/cezarion#2991). */
+export function harnessGroupRows(): Map<string, Set<string>> {
+  const rows = new Map<string, Set<string>>();
+  for (const runner of RUNNER_IDS) {
+    describeHarnessParity({ runner, part: 'session' }, {
+      describe: ((_name: string, ...args: unknown[]) => { (args.at(-1) as () => void)(); }) as typeof describe,
+      it: (() => undefined) as unknown as typeof it,
+      beforeAll: (() => undefined) as typeof beforeAll,
+      afterAll: (() => undefined) as typeof afterAll,
+      toolGrants: () => undefined,
+      allGroups: true,
+      probe: (group, title) => {
+        const row = parityRowId(title);
+        if (row) rows.set(group, (rows.get(group) ?? new Set()).add(row));
+      },
+    });
+  }
+  return rows;
+}
+
 export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessParityPart } | 'once',
   registration: HarnessRegistration = { describe, it, beforeAll, afterAll, toolGrants: describeToolGrantParity }): void {
   const { beforeAll, afterAll } = registration;
@@ -998,6 +1019,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
     apply: (target, self, args: unknown[]) => {
       if (scope !== 'once' && currentGroup !== undefined && typeof args[0] === 'string'
         && !runsOn(`harness:${currentGroup}` as ParityFamilyName, parityRowId(args[0]), scope.runner)) return undefined;
+      if (typeof registration.probe === 'function' && currentGroup !== undefined && typeof args[0] === 'string') registration.probe(currentGroup, args[0]);
       return Reflect.apply(target, self, args);
     },
   });
