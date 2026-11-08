@@ -25,3 +25,17 @@ it('passes the open ratio to both a new session and the session reused on reload
     attach.mockRestore();
   }
 });
+
+it.each([1, 2, undefined])('same-viewer open with ratio %s restarts only for a changed ratio', async dpr => {
+  const { host, ctx, answering, browsers } = make();
+  answering.add(5173);
+  const viewer = fakeViewer();
+  await host.handle(ctx, viewer, { t: 'open', target: { port: 5173 }, quality: 'ultra', dpr: 2 });
+  await flush();
+  const browser = browsers[0]!;
+  const before = browser.cdpFake.sent('Page.startScreencast').length;
+  // A typed URL reuses the same page without reattaching the viewer.
+  await host.handle(ctx, viewer, { t: 'open', target: { url: 'http://localhost:5173/next' }, quality: 'ultra', ...(dpr === undefined ? {} : { dpr }) });
+  await flush();
+  expect(browser.cdpFake.sent('Page.startScreencast')).toHaveLength(before + (dpr === 1 ? 1 : 0));
+});

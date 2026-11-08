@@ -647,7 +647,10 @@ export class PreviewHost implements PreviewHostLike {
   private claim(entry: RunEntry, viewer: Viewer): void {
     this.clearIdle(entry);
     const previous = entry.viewer;
-    if (previous === viewer) return;
+    if (previous === viewer) {
+      void entry.session?.refreshPixelRatio(entry.viewerDpr).catch(() => {});
+      return;
+    }
     if (previous) {
       entry.session?.detach(previous);
       previous.send({ t: 'replaced', by: viewer.userAgent });

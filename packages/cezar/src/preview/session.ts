@@ -267,6 +267,12 @@ export class PreviewSession {
     });
   }
 
+  /** An open from the current viewer may update density without reattaching or requesting a first frame. */
+  refreshPixelRatio(dpr: number | undefined): Promise<void> {
+    if (dpr === undefined || dpr === this.viewport.dpr) return Promise.resolve();
+    return this.setViewport(this.viewport.w, this.viewport.h, dpr);
+  }
+
   async navigate(url: string): Promise<void> {
     this.announced = false;
     this.expectFrame();
