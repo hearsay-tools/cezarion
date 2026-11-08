@@ -72,6 +72,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
   'raw-query-setter': ['packages/web/src/c.tsx', "import { useSearchParams } from 'react-router';\nconst [p, setP] = useSearchParams();\n"],
   'run-fact-reader': ['packages/web/src/lib/d.ts', "const held = attention.label === 'usage limit';\n"],
   'run-history-reader': ['packages/cezar/src/raw-history.ts', 'const text = readFileSync(historyPaths(dir, id).plain);\n'],
+  'runner-fact-combination': ['packages/cezar/src/workflows/run/fact-pair.ts', "function f(runner, id) {\n  return runner.systemPromptOnResume === 'resent' && RUNNER_FACTS[id].nativeAsk === 'none';\n}\n"],
   'undocumented-env-name': ['packages/cezar/scripts/e.mjs', "process.env.CEZ_NOT_DOCUMENTED_ANYWHERE = '1';\n"],
 };
 
@@ -104,6 +105,9 @@ const APPROVED: Record<string, string> = {
   'packages/cezar/src/i.test.ts': "until(() => run.status === 'waiting' && run.autoResumeAt !== undefined);\n",
   'packages/cezar/src/fixed-history-name.ts': 'readFileSync("prefix".concat("run.ndjson"));\n',
   'packages/cezar/src/runs/history-stream.ts': 'const paths = historyPaths(dir, id);\n',
+  // runner-fact-combination: one fact per function, and a test outside its scope.
+  'packages/cezar/src/workflows/run/fact-single.ts': "const a = runner => runner.systemPromptOnResume === 'resent';\nconst b = id => RUNNER_FACTS[id].nativeAsk;\n",
+  'packages/cezar/src/workflows/run/fact-pair.test.ts': "it('x', () => { expect(runner.systemPromptOnResume).toBe(RUNNER_FACTS[id].nativeAsk); });\n",
   // undocumented-env-name: a documented name, a mock control, and a test.
   'packages/cezar/src/j.ts': "process.env.CEZ_DRY_RUN = '1'; env.CEZ_MOCK_ANYTHING = '1';\n",
   'packages/cezar/src/k.test.ts': 'const c = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n',
