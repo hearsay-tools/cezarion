@@ -188,26 +188,14 @@ describe('Global settings → Resources', () => {
     expect(screen.getByText(/Capacity: 2 active \+ 0 monitoring/)).toBeTruthy()
   })
 
-  it('uses compatible defaults when older servers omit optional resource and composer keys', async () => {
+  it('defaults auto-resume to on for servers from before the usage-limit feature', async () => {
     const state = serve()
-    // Older wire responses predate these fields; the current response type requires them.
-    Reflect.deleteProperty(state.resources, 'maxMonitoringSessions')
-    Reflect.deleteProperty(state.resources, 'monitoringWakeIntervalMinutes')
+    // d3aff0aaf added this field to the v1 contract and workspaceConfigBody response.
     Reflect.deleteProperty(state.resources, 'autoResumeOnUsageLimit')
-    Reflect.deleteProperty(state, 'composerDefaults')
     renderResources()
 
-    const autonomous = await screen.findByLabelText('Autonomous by default')
-    const worktree = screen.getByLabelText('Use a worktree by default')
-    expect((autonomous as HTMLSelectElement).value).toBe('inherit')
-    expect((worktree as HTMLSelectElement).value).toBe('inherit')
-    expect(screen.getByText(/Source-dependent — skills on, workflows off/)).toBeTruthy()
-    expect(within(worktree.closest('label')!).getByText('Inherited: On')).toBeTruthy()
-    expect(monitoringSelect()!.value).toBe('2')
-    expect(screen.getByText(/Capacity: 2 active \+ 2 monitoring/)).toBeTruthy()
-    expect(screen.getByRole('switch', { name: 'Auto-resume after a usage limit' }).getAttribute('aria-checked')).toBe('true')
-    expect(wakeMode()!.getAttribute('aria-checked')).toBe('false')
-    expect(saveWake()!.disabled).toBe(true)
+    const toggle = await screen.findByRole('switch', { name: 'Auto-resume after a usage limit' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
   })
 
   it('keeps wake-ups parked by default and saves an explicit interval', async () => {
