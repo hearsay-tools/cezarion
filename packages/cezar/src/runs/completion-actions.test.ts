@@ -32,9 +32,10 @@ describe('task completion options', () => {
   });
 
   it('keeps the default off', () => {
-    const { store, id } = setup();
+    const { store, id, dir } = setup();
     setRunStatus(store, id, RUN_STATUS.done);
     expect(store.getRun(id)?.archived).toBe(false);
+    expect(readPersistedRuns(dir).find(run => run.id === id)?.completionAction).toBeUndefined();
   });
 
   it('keeps a manually restored task visible across unrelated writes and restart', () => {

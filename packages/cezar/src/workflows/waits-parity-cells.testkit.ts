@@ -1629,8 +1629,13 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
     it(`${runner} U18 Finish on a run parked on an agent question closes the question without answering it`, async () => {
       nativeWire(runner);
       delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      // With a live session, Finish ends the task at the parked step and a later step stays pending.
+      // Without one, Finish before the last step is refused, so that pass runs the one-step task.
+      const chain = workflowDefSchema.parse({ name: 'finish-chain', source: 'file', steps: [
+        { id: 'implement', prompt: '{{task}}' }, { id: 'verify', command: 'true' },
+      ] });
       const finishParked = async (closeFirst: boolean) => {
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+        const run = manager.startRun(closeFirst ? QUICK_TASK_WORKFLOW : chain, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
         const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
         if (closeFirst) {
@@ -1646,6 +1651,10 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
         expect(pendingAskOf(events)).toBeUndefined();
         expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
         expect(hasPendingAsk(store, run.id)).toBeFalsy();
+        if (!closeFirst) {
+          expect(stepStatus(run.id, 'verify')).toBe('pending');
+          expect(events.filter(event => event.type === 'check-output')).toEqual([]);
+        }
       };
       await finishParked(false);
       await finishParked(true);
@@ -1746,6 +1755,9 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const closings = store.readEvents(run.id).filter(event => event.type === 'lifecycle' && String(event.message).endsWith('session closed'));
       expect(closings).toEqual([expect.objectContaining({ message: 'step complete — session closed', via: 'cezar_done' })]);
       expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === 'step shipped')).toBe(true);
+      // The step that signalled done is never nudged; only the next step's quiet turn end is.
+      const noWaitNudges = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE));
+      expect(noWaitNudges.map(event => event.stepId)).toEqual(['review']);
     });
 
     it(`${runner} U7d cezar_done finishes through the done path in a message turn and in a Continue`, async () => {
@@ -1754,10 +1766,13 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       const finished = (id: string) => terminal.includes(store.getRun(id)?.status ?? '') && !manager.isActive(id);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
       await until(() => store.getRun(run.id)?.status === 'waiting');
+      // A turn that ends on an accepted done gets no no-wait nudge, fresh or continued.
+      const nudged = prompted(runner, NO_WAIT_NUDGE).length;
       expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_done', { summary: 'u7d shipped' }) }])).toBe(true);
       await until(() => finished(run.id));
       const status = store.getRun(run.id)!.status;
       expect(closings(run.id)).toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(nudged);
       // The summary is the note right before the closing event.
       const events = store.readEvents(run.id);
       expect(events[events.findIndex(event => event.seq === closings(run.id)[0]!.seq) - 1]).toMatchObject({ type: 'note', message: 'u7d shipped' });
@@ -1766,6 +1781,8 @@ function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest):
       await until(() => closings(run.id).length === 2 && finished(run.id));
       expect(closings(run.id).map(event => event.via)).toEqual(['cezar_done', 'cezar_done']);
       expect(store.getRun(run.id)!.status).toBe(status);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(nudged);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE))).toHaveLength(nudged);
     });
 
     // The answer a Continue opens with is no longer a pending question to cezar_done.
