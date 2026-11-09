@@ -2,6 +2,7 @@
 
 Decision record: [ADR 0061](../../docs/adr/0061-one-wait-engine-executes-wait-kind-rows.md).
 Glossary: [Wait kind](../../GLOSSARY.md#wait-kind), [Wait engine](../../GLOSSARY.md#wait-engine).
+Epic: hearsay-tools/cezarion#3079.
 Baseline: `main` at `721c19b00`. The owner approved the plan on 2026-11-09 (planner task
 f50d920b). The rules of [the unified-waits spec](2026-10-17-unified-waits.md) stay; this spec
 changes where the per-kind rules live and who executes them.
