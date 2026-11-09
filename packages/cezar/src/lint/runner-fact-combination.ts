@@ -138,7 +138,7 @@ function sourceNames(program: Extract<Node, { type: 'Program' }>): Names {
 function typeNames(node: Node): string[] {
   const found: string[] = [];
   const visit = (current: Node) => {
-    if (current.type === 'TSTypeReference') found.push(current.typeName.type === 'Identifier' ? current.typeName.name : current.typeName.type === 'TSQualifiedName' ? current.typeName.right.name : '');
+    if (current.type === 'TSTypeReference') found.push(typeRefName(current) ?? '');
     for (const value of Object.values(current)) for (const child of Array.isArray(value) ? value : [value]) {
       if (child && typeof child === 'object' && typeof (child as Node).type === 'string') visit(child as Node);
     }
@@ -147,20 +147,30 @@ function typeNames(node: Node): string[] {
   return found;
 }
 
+/** The name a type reference uses: `T` or the right side of `ns.T`. */
+function typeRefName(node: Extract<Node, { type: 'TSTypeReference' }>): string | undefined {
+  if (node.typeName.type === 'Identifier') return node.typeName.name;
+  return node.typeName.type === 'TSQualifiedName' ? node.typeName.right.name : undefined;
+}
+
+type Contribution = { source: boolean; key?: string | undefined };
+
+/** A property read or destructuring key: a source when it names one, a fact when it names one. */
+function keyContribution(key: string | undefined, keys: Set<string>, namespaced = false): Contribution {
+  return { source: namespaced || (key !== undefined && SOURCE_KEYS.has(key)), key: key !== undefined && keys.has(key) ? key : undefined };
+}
+
 /** What one node contributes: whether it touches a fact source, and the fact key it reads. */
-function inspect(node: Node, parent: Node | undefined, keys: Set<string>, names: Names): { source: boolean; key?: string | undefined } {
+function inspect(node: Node, parent: Node | undefined, keys: Set<string>, names: Names): Contribution {
   if (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') {
     const key = staticKey(node.property, node.computed);
     const namespaced = node.object.type === 'Identifier' && names.namespaces.has(node.object.name) && key !== undefined && SOURCE_NAMES.has(key);
-    return { source: namespaced || (key !== undefined && SOURCE_KEYS.has(key)), key: key !== undefined && keys.has(key) ? key : undefined };
+    return keyContribution(key, keys, namespaced);
   }
-  if (node.type === 'ObjectProperty' && parent?.type === 'ObjectPattern') {
-    const key = staticKey(node.key, node.computed);
-    return { source: key !== undefined && SOURCE_KEYS.has(key), key: key !== undefined && keys.has(key) ? key : undefined };
-  }
+  if (node.type === 'ObjectProperty' && parent?.type === 'ObjectPattern') return keyContribution(staticKey(node.key, node.computed), keys);
   if (node.type === 'Identifier') return { source: names.values.has(node.name) };
   if (node.type === 'TSTypeReference') {
-    const name = node.typeName.type === 'Identifier' ? node.typeName.name : node.typeName.type === 'TSQualifiedName' ? node.typeName.right.name : undefined;
+    const name = typeRefName(node);
     return { source: name !== undefined && names.types.has(name) };
   }
   return { source: false };
@@ -192,34 +202,46 @@ function qualifiedName(state: Walk, own: string | undefined): string {
   return count === 1 ? base : `${base}#${count}`;
 }
 
-function walk(node: Node, parent: Node | undefined, state: Walk): void {
-  let scope: Scope | undefined;
-  let segment: string | undefined;
+/** The AST nodes directly under a node, in source order. */
+function childNodes(node: Node): Node[] {
+  const out: Node[] = [];
+  for (const value of Object.values(node)) for (const child of Array.isArray(value) ? value : [value]) {
+    if (child && typeof child === 'object' && typeof (child as Node).type === 'string') out.push(child as Node);
+  }
+  return out;
+}
+
+/** Open a function scope or a class name segment for a node; neither for any other node. */
+function enter(node: Node, parent: Node | undefined, state: Walk): { scope?: Scope | undefined; segment?: string | undefined } {
   if (FUNCTION_TYPES.has(node.type)) {
-    scope = { node, name: qualifiedName(state, ownName(node, parent)), source: false, facts: new Set(), children: [] };
+    const scope: Scope = { node, name: qualifiedName(state, ownName(node, parent)), source: false, facts: new Set(), children: [] };
     (state.scopes.at(-1)?.children ?? state.roots).push(scope);
     state.scopes.push(scope);
-    segment = scope.name.split('>').at(-1);
-  } else if (CLASS_TYPES.has(node.type)) {
-    const id = (node as Extract<Node, { type: 'ClassDeclaration' }>).id;
-    segment = id?.name ?? (parent?.type === 'VariableDeclarator' && parent.id.type === 'Identifier' ? parent.id.name : '(anonymous class)');
+    return { scope, segment: scope.name.split('>').at(-1) };
   }
-  if (node.type !== 'ImportDeclaration') {
-    const { source, key } = inspect(node, parent, state.keys, state.names);
-    if (source && !state.scopes.length) state.moduleSource = true;
-    for (const open of state.scopes) {
-      if (source) open.source = true;
-      if (key) open.facts.add(key);
-    }
+  if (!CLASS_TYPES.has(node.type)) return {};
+  const id = (node as Extract<Node, { type: 'ClassDeclaration' }>).id;
+  const held = parent?.type === 'VariableDeclarator' && parent.id.type === 'Identifier' ? parent.id.name : '(anonymous class)';
+  return { segment: id?.name ?? held };
+}
+
+/** Credit what one node contributes to every open function scope, or to the module level. */
+function record(node: Node, parent: Node | undefined, state: Walk): void {
+  const { source, key } = inspect(node, parent, state.keys, state.names);
+  if (source && !state.scopes.length) state.moduleSource = true;
+  for (const open of state.scopes) {
+    if (source) open.source = true;
+    if (key) open.facts.add(key);
   }
+}
+
+function walk(node: Node, parent: Node | undefined, state: Walk): void {
+  // An import binds names only; sourceNames resolves them, so the walk skips its subtree.
+  if (node.type === 'ImportDeclaration') return;
+  const { scope, segment } = enter(node, parent, state);
+  record(node, parent, state);
   if (segment !== undefined) state.path.push(segment);
-  if (node.type !== 'ImportDeclaration') {
-    for (const value of Object.values(node)) {
-      for (const child of Array.isArray(value) ? value : [value]) {
-        if (child && typeof child === 'object' && typeof (child as Node).type === 'string') walk(child as Node, node, state);
-      }
-    }
-  }
+  for (const child of childNodes(node)) walk(child, node, state);
   if (segment !== undefined) state.path.pop();
   if (scope) state.scopes.pop();
 }
