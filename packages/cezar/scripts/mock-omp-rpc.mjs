@@ -202,7 +202,7 @@ function endTurn({ status = 'completed', error, settle = true } = {}) {
   activeTurn = null;
   const readNow = steeringMode === 'all' ? turn.steers : turn.steers.slice(0, 1);
   const deferred = steeringMode === 'all' ? [] : turn.steers.slice(1);
-  if (turn.late && readNow.length > 0) {
+  if ((turn.late || status === 'error') && readNow.length > 0) {
     // A steer queued after the last model call: `AgentSession` rewrites this agent_end to
     // `isTerminal: false` while `agent.hasQueuedMessages()`, and the next run reads the queue
     // before the session settles (agent-session.ts, v18.4.11).
@@ -213,7 +213,8 @@ function endTurn({ status = 'completed', error, settle = true } = {}) {
   }
   for (const steer of readNow) {
     userMessage(steer.message);
-    assistantText([steer.message], { usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } } });
+    if (status === 'error') providerFailure();
+    else assistantText([steer.message], { usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } } });
   }
   write({ type: 'turn_end' });
   write({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
@@ -420,12 +421,14 @@ const promptScenarios = [
 const beforeNativeFailure = new Set(['busy-progress', 'no-progress', 'cezar-ask',
   'subagent-after-park', 'steer-late', 'hold-cezar-done', 'hold-cezar-ask', 'cezar-done']);
 
-function providerError() {
-  // The provider failed before any queued steer could reach the model.
-  activeTurn.steers = [];
+function providerFailure() {
   const error = { message: 'Not Found', provider: 'anthropic', model: 'claude-mock', retryable: false };
   assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Not Found' } });
-  endTurn({ status: 'error', error });
+  return error;
+}
+
+function providerError() {
+  endTurn({ status: 'error', error: providerFailure() });
 }
 
 function toolFrame(kind, call, child = false) {

@@ -41,8 +41,8 @@ const scenarioContext = {
 const deferredStart = message => scenarioFor(message, scenarioContext)?.name === 'deferred-turn-start';
 const sendNow = (value) => {
   // Held frames can reach this path after a steer was admitted. A provider error
-  // must not replay that unread input as a successful turn at settlement.
-  if (value?.type === 'message_end' && value.message?.stopReason === 'error' && activeTurn) activeTurn.steers = [];
+  // must also fail the model call that drains steering, rather than echoing success.
+  if (value?.type === 'message_end' && value.message?.stopReason === 'error' && activeTurn) activeTurn.failure = value;
   if (value?.type === 'turn_start' && !activeTurn) {
     activeTurn = { steers: [], late: false };
     write(value);
@@ -58,12 +58,7 @@ const sendNow = (value) => {
     const turn = activeTurn; activeTurn = null;
     const deliverNow = turn.late ? [] : (steeringMode === 'all' ? turn.steers : turn.steers.slice(0, 1));
     const defer = turn.late ? turn.steers : (steeringMode === 'all' ? [] : turn.steers.slice(1));
-    for (const text of deliverNow) {
-      write({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text }] } });
-      write({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text }] } });
-      sendText([text]);
-      write({ type: 'message_end', message: { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } });
-    }
+    for (const text of deliverNow) replaySteer(text, turn.failure);
     write(value);
     // one-at-a-time leftover, or a late steer, runs as the next prompt.
     for (const text of defer) queue = queue.then(() => { currentPrompt = text; return handle({ type: 'prompt', message: text }); });
@@ -71,6 +66,22 @@ const sendNow = (value) => {
   }
   write(value);
 };
+
+function replaySteer(text, failure) {
+  if (failure) {
+    write({ type: 'turn_end', message: failure.message, toolResults: [] });
+    write({ type: 'agent_end', messages: [], willRetry: false });
+    write({ type: 'agent_start' });
+    write({ type: 'turn_start' });
+  }
+  write({ type: 'message_start', message: { role: 'user', content: [{ type: 'text', text }] } });
+  write({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text }] } });
+  if (failure) write(failure);
+  else {
+    sendText([text]);
+    write({ type: 'message_end', message: { role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } } });
+  }
+}
 // A configured delivery control decides when a prompt's acknowledgement and its turn content
 // go out. Every scripted branch sends through here, so none of them needs its own hook.
 const deliveryTexts = new Map();
