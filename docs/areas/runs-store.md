@@ -50,7 +50,8 @@ rest of its batch, so a refused change is never retried and never stalls a save.
 check is per row, not per family, so a fallback member another process adds to a
 family this process holds does not block its legacy rows. The
 one exception is the `adoptFallback` intent, set only by `RunStore.adoptFallbackFamily`,
-which the `adoptFallbackControl` middleware calls before `requireRunControl` for an explicit run control (not `read`, `unread`
+which the `adoptFallbackControl` middleware calls before `requireRunControl` only when the router matched a control
+handler for the request's mutating method, after the Origin guard (never a preflight, a read, an unknown path, `read`, `unread`
 or `DELETE /runs/:id`). Adoption copies the whole family's records and run files into
 `.ai/cezar/` inside one transaction, refuses a family a live process of the migrating
 binary claims, and leaves every fallback byte unchanged. A retry accepts

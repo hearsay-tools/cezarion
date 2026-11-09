@@ -170,3 +170,21 @@ it('answers a refused worker-destroy adoption in the delegation error shape', as
     expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
   } finally { db.close(); closeClaimSession(owner.session); }
 });
+
+it('adopts only for a matched same-origin control: no preflight, read, unknown path or cross-origin write copies', async () => {
+  const family = seedFamily(false, false);
+  start();
+  const before = readFileSync(join(fallback, RUNS_DB_FILE));
+  const foreign = { origin: 'https://foreign.example', 'sec-fetch-site': 'cross-site', 'content-type': 'application/json' };
+  const requests: Array<[string, string, Record<string, string>?]> = [
+    ['OPTIONS', 'pin', foreign], ['HEAD', ''], ['GET', ''], ['POST', 'no-such-control'], ['POST', 'pin', foreign],
+  ];
+  for (const [method, suffix, headers] of requests) {
+    await apiRequest(app, `/api/v1/runs/${family.parentId}${suffix ? `/${suffix}` : ''}`, { method, headers: headers ?? {}, ...(method === 'POST' ? { body: '{"pinned":true}' } : {}) });
+    expect(existsSync(join(primary, RUNS_DB_FILE)), `${method} ${suffix}`).toBe(false);
+    expect(store.runOwnership(family.parentId)).toBe('fallback');
+  }
+  expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(before);
+  expect((await post(`${family.parentId}/pin`, { pinned: true })).status).toBe(200);
+  expect(primaryIds()).toEqual(expect.arrayContaining([family.parentId, family.workerId]));
+});

@@ -1,6 +1,7 @@
 import { artifactDirectory } from '../artifacts/store.ts';
 import type { RunStore } from '../runs/store.ts';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
+import { matchedRoutes } from 'hono/route';
 import { delegationFailure } from '../delegation/routes.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import type { ProjectApiEnv } from './server.ts';
@@ -15,6 +16,15 @@ export function protectFallbackRun(kind: 'record' | 'worktree'): MiddlewareHandl
   };
 }
 
+const CONTROL_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+/** An allow-list from the router itself: a handler registered for this mutating method matched this
+ *  request. A preflight, a read or an unknown path under `/runs/:id` matches only the prefix middleware.
+ *  Cross-origin writes never get here: the `/api/*` Origin guard runs first. */
+function controlRoute(context: Context): boolean {
+  const { method } = context.req;
+  return CONTROL_METHODS.has(method) && matchedRoutes(context).some(route => route.method === method);
+}
+
 /**
  * The one explicit write that copies a family read from `.ai/squawk/` into this store, before
  * `requireRunControl` applies ownership. View state (`read`, `unread`) and record deletion never
@@ -23,7 +33,7 @@ export function protectFallbackRun(kind: 'record' | 'worktree'): MiddlewareHandl
 export const adoptFallbackControl: MiddlewareHandler<ProjectApiEnv> = async (context, next) => {
   const id = context.req.param('id');
   const { method, path } = context.req;
-  if (method === 'GET' || method === 'HEAD' || id === undefined || /\/(?:read|unread)$/.test(path) || (method === 'DELETE' && path.endsWith(`/runs/${id}`))) return next();
+  if (id === undefined || !controlRoute(context) || /\/(?:read|unread)$/.test(path) || (method === 'DELETE' && path.endsWith(`/runs/${id}`))) return next();
   const store = context.get('project').store;
   if (store.runOwnership(id) !== 'fallback') return next();
   try { store.adoptFallbackFamily(id); }
