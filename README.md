@@ -1478,6 +1478,17 @@ For a deliverable outside the project, an agent must explicitly publish a snapsh
 cez artifact publish /tmp/decision.md
 ```
 
+An agent starts a long command, such as a benchmark or a full test run, with `cez job start`:
+
+```sh
+cez job start bench -- npm run benchmark
+cez job status bench
+```
+
+The command keeps running after the agent's shell call, turn and session end. Its output goes
+to `bench.log` and its exit code to `bench.exit` in the task's temp directory. The agent waits
+for it with a process wait. A second start of a name that still runs is refused.
+
 Cezarion supplies the bundled command and task context to agent sessions automatically
 (`CEZ_TASK_ID` and `CEZ_ARTIFACTS_DIR`; do not configure these yourself). The command
 returns JSON with a Markdown link for the agent to share. When the owning project

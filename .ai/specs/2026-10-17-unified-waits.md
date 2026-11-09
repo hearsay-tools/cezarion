@@ -1369,16 +1369,12 @@ Calls made by the owner (2026-10-23):
 | `note` | optional, at most 512 characters, as a timer's |
 
 The flat MCP schema gains `pid` and `exit_file`; `timeout_seconds` and `note` gain the process
-kind in their descriptions. The tool description gains this text about `exit_file`:
+kind in their descriptions. The tool description tells the agent to start the command with
+`cez job start <name> -- <command> [args...]` and to pass the `pid` and `exitFile` it prints
+(hearsay-tools/cezarion#3097, [the job command](#the-job-command-2026-11-10)). It also says not to
+start a long command with `&`, `nohup`, `setsid` or a runner's own background-task tool.
 
-> kind "process" wakes you when a command you started in the background ends. Start it as
-> `sh -c '( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!'`
-> and pass the printed PID as `pid` and the exit file as `exit_file`, so the wake reports the exit
-> code. Use a new exit file name for each command: a file that already exists resolves the wait at once.
-
-The `sh -c` wrapper is required: omp's built-in shell prints no `$!` (checked 2026-10-23), and a
-real `sh` gives the same recipe on every runner. The redirect keeps the job from holding the shell
-tool's stdout open; `$TMPDIR` is the run's Cezar temp directory, outside the worktree, so autosave
+`$TMPDIR` is the run's Cezar temp directory, outside the worktree, so autosave
 never commits the log or the exit file. With `CEZ_AGENT_TMPDIR=0`, `$TMPDIR` is the host's and the
 `exit_file_outside` refusal names the allowed directories (the worktree and, when on, the Cezar
 temp directory), so the agent can choose a git-ignored worktree path instead.
@@ -1397,7 +1393,8 @@ In this order, refusing with a typed code:
    `core/session-process.ts`) → `process_not_allowed`.
 4. `kill(pid, 0)` answering `EPERM` → `process_not_owned`.
 5. The start token is read with `processStartToken`. A PID already gone is no error: the
-   command was fast, and the wait opens and resolves at its first check (exit file, else `exited`).
+   wait opens and resolves at its first check, from the exit file, else as `exited` with the
+   "was not running when this wait was registered" wake text below.
 
 The exit file is checked before the PID at every tick, so a command that already finished and
 wrote its file reports its code even when its PID was since reused.
@@ -1417,6 +1414,7 @@ The supervisor polls every 5 s and resolves the first of:
 | --- | --- | --- |
 | `exit_file` | the exit file exists | `exited with code N`, or `exit file present, not an exit code` |
 | `exited` | the PID is gone, a zombie, or its start token differs | `exited, code unknown` |
+| `exited`, found at registration | the PID was already gone when the wait was registered, and no exit file exists | `PID N was not running when this wait was registered. If the command should still run, this is not its PID: find the command before you start it again.` |
 | `deadline` | the deadline passed with the process still running | `still running at the deadline` (distinct from an exit) |
 | `error` | the probe threw | `could not be checked` with a short diagnostic; never reads as success |
 
@@ -1459,6 +1457,9 @@ Checked on the build host on 2026-10-23, by reading each runner's shell process'
 and `sid` (live Cezar sessions for Claude and Codex, one `-p`/`run` call each for OpenCode, pi and
 omp):
 
+This table records where the job sits, not whether it survives. Its Codex row was wrong about
+survival: see [the job command](#the-job-command-2026-11-10).
+
 | Runner | Where a shell-tool command runs | A `sh -c '( … ) & echo $!'` job |
 | --- | --- | --- |
 | claude | `/bin/bash -c` in a new session (`sid` = its pid) | Leaves the agent's process group |
@@ -1473,7 +1474,50 @@ never reaches the job: it survives an idle close, a provider failure, a clean cl
 per-turn exit and a Cezar restart, and the wait keeps watching it through all of them. The other
 side of the same fact: Stop and Finish do not end it either (hearsay-tools/cezarion#1311). No
 runner gets a refusal or a parity exemption. The tool description says the job outlives the session
-and is not stopped by Cezar.
+and is not stopped by Cezar. Since 2026-11-10 it says so only of a job started with `cez job start`.
+
+### The job command (2026-11-10)
+
+hearsay-tools/cezarion#3097. Nine runs lost about five hours to background jobs that died or that a
+process wait reported as ended while they ran. Two causes, both reproduced on the build host on
+2026-11-09 (Claude Code in a live session, Codex 0.164.0 in a worker, Linux):
+
+- Codex ends the process group of a shell command when the command returns. A job that stays in
+  that group dies with no output and no exit file.
+- Claude Code runs its shell with job control on. A `&` job then leads its own process group, so
+  `setsid` forks and exits, and `$!` names the exited parent.
+
+| Launch form | Claude | Codex |
+| --- | --- | --- |
+| `nohup cmd &` | survives | killed when the command returns |
+| `sh -c '( cmd; echo $? > exit ) > /dev/null 2>&1 & echo $!'` (the recipe before this change) | survives | killed when the command returns |
+| `setsid nohup cmd & echo $!` | survives; `$!` is a PID that has already exited | survives; PID correct |
+| `cez job start <name> -- cmd` | survives; PID correct | survives; PID correct |
+
+OpenCode, Pi, Cursor and omp were not probed. `cez job start` does not read `$!` and does not
+depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longer applies.
+
+`cez job start <name> [--dir <dir>] -- <command> [args...]` is a task command. The agent runs it
+in its own shell, so the runner's sandbox and approvals still govern the command, and Cezar still
+starts nothing itself.
+
+- It starts a supervisor through `startOwnedGroup` (`detached-process.ts`). The supervisor leads a
+  session of its own, which is what survives Codex's cleanup and Cezar's group signal at session
+  close. macOS has no `setsid` binary, so the text recipe could not be made portable.
+- The supervisor writes the command's output to `<dir>/<name>.log`, then its exit code to
+  `<dir>/<name>.exit` by a rename, so a reader never sees a half-written file. `<dir>` defaults
+  to `$TMPDIR`. A command that cannot run exits 127; a signalled command exits 128 plus the signal.
+- It prints one JSON object: `name`, `pid` (the supervisor's), `log`, `exitFile`, `replaced`.
+- `<dir>/<name>.job.json` records the supervisor's PID and start identity. A start while that
+  process runs exits 1 and names the PID. A start after it ended removes the old exit file,
+  replaces the log and answers `replaced: true`: a stale exit file would resolve the next wait at
+  once. Without a start identity (Windows) a live PID counts as running.
+- `cez job status <name> [--dir <dir>]` answers `state: "running"` or `"exited"`, with `exitCode`
+  when the exit file holds one. A later session finds a job by its name this way.
+- There is no `cez job stop`: ending a job belongs to process ownership
+  (hearsay-tools/cezarion#2180).
+- No store, contract or schema change. The new wake text is derived from fields the wait already
+  holds: no `startToken`, and a result observed at the registration instant.
 
 ### Verification
 
