@@ -24,7 +24,8 @@ import { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { ownedByAnotherCockpit, CockpitOwnership } from './cockpit-ownership.ts';
+import { admitProject, assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, withProjectAdmission, CockpitOwnership, type ProjectMigrationFence } from './cockpit-ownership.ts';
+import { isLiveRecord } from '../runs/run-row.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -143,10 +144,25 @@ export async function sweepRegisteredPreviewLeftovers(
     if (project.status === 'missing') continue;
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
-    if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir)) continue;
+    if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir) || projectAdmissionRefusal(dataDir)) continue;
     killed += await sweepPreviewOnce(dataDir, host);
   }
   return killed;
+}
+
+/** Tasks that keep a project busy: this store's live rows, and every family another live process
+ *  (a headless `cez run`, another binary) claims in the same database. */
+export function projectLiveTaskCount(store: Pick<RunStore, 'listRuns' | 'liveForeignClaimCount'>): number {
+  return store.listRuns().filter(isLiveRecord).length + store.liveForeignClaimCount();
+}
+
+/**
+ * The owning cockpit's migration fence over one of its projects: new reads and task starts are
+ * refused at once; resolves when admitted operations drained and no task is live (queued,
+ * running, waiting, or held by another process). The caller holds it until every rewrite ends.
+ */
+export function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store'>, signal?: AbortSignal): Promise<ProjectMigrationFence> {
+  return ownership.fenceProject(project.dataDir, { liveTasks: () => projectLiveTaskCount(project.store), signal });
 }
 
 /** A build that finished after `disposeAll`: its context was torn down, never registered. */
@@ -212,7 +228,7 @@ export class ProjectContexts {
    *  Throws `ProjectContextError` for unknown ids and missing roots. */
   async context(projectId: string): Promise<ProjectContext> {
     const existing = this.contexts.get(projectId);
-    if (existing) return existing;
+    if (existing) { assertProjectAdmitted(existing.dataDir); return existing; }
     const inFlight = this.building.get(projectId);
     if (inFlight) return inFlight;
     const generation = this.generation;
@@ -246,7 +262,7 @@ export class ProjectContexts {
     let active = true;
     const current = () => active && generation === this.generation && epoch === (this.epochs.get(projectId) ?? 0);
     const built = this.peek(projectId);
-    if (built) return work(built.store, current).finally(() => { active = false; });
+    if (built) return withProjectAdmission(built.dataDir, () => work(built.store, current).finally(() => { active = false; }), () => undefined);
     if (this.building.has(projectId) || this.maintenance.has(projectId)) return undefined;
     const lease = (async () => {
       const project = (await this.deps.listProjects()).find(project => project.id === projectId);
@@ -254,33 +270,37 @@ export class ProjectContexts {
       noticeLegacyProject(project.root);
       const dataDir = projectPaths(project.root).write;
       if (ownedByAnotherCockpit(dataDir)) return undefined;
-      // Skip empty projects, but let the established fenced importer discover legacy-only
-      // history. Maintenance mode never normalizes live rows or recovers a manager.
-      const reader = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
-      let imported = false;
-      try { imported = reader?.getMeta(RUNS_IMPORT_COMPLETE_KEY) !== undefined; }
-      finally { reader?.close(); }
-      if (!imported && !existsSync(join(dataDir, 'runs.json')) &&
-          !projectPaths(project.root).reads.slice(1).some(directory => existsSync(join(directory, RUNS_DB_FILE)) || existsSync(join(directory, 'runs.json')))) return undefined;
-      const temporaryOwnership = new CockpitOwnership();
-      let store: RunStore | undefined;
-      try {
-        // Existing process claims protect managers even after disposal. Borrow those;
-        // otherwise maintenance owns only this lease, never the server's lifetime.
-        if (!this.deps.ownership?.owns(dataDir)) await temporaryOwnership.acquire(dataDir);
-        if (!current()) return undefined;
-        ensureDataGitignore(project.root);
-        store = RunStore.open(dataDir, { keepLive: true, maintenance: true });
-        return await work(store, current);
-      } finally {
-        active = false;
-        if (store) { await store.historyIdle(); store.close(); }
-        temporaryOwnership.releaseAll();
-      }
+      return withProjectAdmission(dataDir, () => this.maintainColdStore(project.root, dataDir, work, current).finally(() => { active = false; }), () => undefined);
     })();
     this.maintenance.set(projectId, lease);
     try { return await lease; }
     finally { if (this.maintenance.get(projectId) === lease) this.maintenance.delete(projectId); }
+  }
+
+  /** The cold half of `withMaintenanceStore`: a temporary claim and a maintenance-mode store. */
+  private async maintainColdStore<T>(root: string, dataDir: string, work: (store: RunStore, current: () => boolean) => Promise<T>, current: () => boolean): Promise<T | undefined> {
+    // Skip empty projects, but let the established fenced importer discover legacy-only
+    // history. Maintenance mode never normalizes live rows or recovers a manager.
+    const reader = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
+    let imported = false;
+    try { imported = reader?.getMeta(RUNS_IMPORT_COMPLETE_KEY) !== undefined; }
+    finally { reader?.close(); }
+    if (!imported && !existsSync(join(dataDir, 'runs.json')) &&
+        !projectPaths(root).reads.slice(1).some(directory => existsSync(join(directory, RUNS_DB_FILE)) || existsSync(join(directory, 'runs.json')))) return undefined;
+    const temporaryOwnership = new CockpitOwnership();
+    let store: RunStore | undefined;
+    try {
+      // Existing process claims protect managers even after disposal. Borrow those;
+      // otherwise maintenance owns only this lease, never the server's lifetime.
+      if (!this.deps.ownership?.owns(dataDir)) await temporaryOwnership.acquire(dataDir);
+      if (!current()) return undefined;
+      ensureDataGitignore(root);
+      store = RunStore.open(dataDir, { keepLive: true, maintenance: true });
+      return await work(store, current);
+    } finally {
+      if (store) { await store.historyIdle(); store.close(); }
+      temporaryOwnership.releaseAll();
+    }
   }
 
   /**
@@ -303,7 +323,8 @@ export class ProjectContexts {
       await yieldToEventLoop();
       if (generation !== this.generation) break;
       if (project.status === 'missing' || this.contexts.has(project.id) || this.building.has(project.id)) continue;
-      if (ownedByAnotherCockpit(projectPaths(project.root).write)) continue;
+      const dataDir = projectPaths(project.root).write;
+      if (ownedByAnotherCockpit(dataDir) || projectAdmissionRefusal(dataDir)) continue;
       try {
         await this.context(project.id);
         warmed.push(project.id);
@@ -438,6 +459,14 @@ export class ProjectContexts {
 
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
+    // Admitted until recovery ends, so a migration fence drains this build before it moves anything.
+    const leave = admitProject(dataDir);
+    try { return await this.open(project, dataDir, stale); }
+    finally { leave(); }
+  }
+
+  private async open(project: ProjectContextSource, dataDir: string, stale: () => boolean): Promise<ProjectContext> {
+    const projectId = project.id;
     await this.deps.ownership?.acquire(dataDir);
     if (stale()) throw new ProjectContextsClosedError();
     // keepLive + recover() (#367), same as serveCommand: runs that were live

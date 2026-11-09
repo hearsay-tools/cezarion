@@ -10,6 +10,7 @@ import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-fac
 import { seedRuns } from '../runs/run-store.testkit.ts';
 import { buildCheckout, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { SelfUpdateService } from './service.ts';
+import { CockpitOwnership } from '../server/cockpit-ownership.ts';
 import { activate, activeId, branchSlug, currentEntry, linkCheckout, linkId, listInstalled, listLinks, removeInstalled, versionDir, versionsDir } from './layout.ts';
 
 /** A built cezar monorepo checkout: packages/cezar with dist/index.js and web/dist/index.html. */
@@ -173,6 +174,32 @@ describe('linked checkouts', () => {
       stale: true,
     });
     expect(found[1]).toMatchObject({ task: null, commit: { subject: 'init' }, stale: false });
+  });
+
+  // A project under a migration fence (hearsay-tools/cezarion#3087) is not read: no cold run lookup.
+  it('lists a fenced project\'s checkouts without reading its run store', async () => {
+    const repo = join(home, 'repo');
+    fakeCheckout(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    writeFileSync(join(repo, '.gitignore'), 'dist\nweb/dist\n.ai\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-q', '-m', 'init');
+    const task = join(repo, '.ai', 'cezar', 'worktrees', 'def67890-run');
+    git(repo, 'worktree', 'add', '-q', '-b', 'cez/def67890', task);
+    fakeCheckout(task);
+    seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', branch: 'cez/def67890' })]);
+    mkdirSync(env.CEZ_HOME!, { recursive: true });
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    const migrator = new CockpitOwnership();
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => 0 });
+    try {
+      const found = await discoverCheckouts(env, testHome(env));
+      expect(found.map((c) => [c.branch, c.task])).toEqual(expect.arrayContaining([['cez/def67890', null], ['main', null]]));
+    } finally {
+      fence.release();
+      migrator.releaseAll();
+    }
+    expect((await discoverCheckouts(env, testHome(env))).find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run' });
   });
 
   // Retention reclaims a task's worktree directory; the branch still names its task.

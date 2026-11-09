@@ -10,6 +10,7 @@ import { armRepoHandle } from './runs/arm-repo-handle.ts';
 import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
+import { assertProjectAdmitted } from './server/cockpit-ownership.ts';
 import { warnLegacyEnv } from './home/deprecation.ts';
 import { resolveHome } from './home/resolve.ts';
 import type { Home } from './home/home.ts';
@@ -93,6 +94,7 @@ async function runCommand(
 async function initCommand(repoRoot: string): Promise<void> {
   const workflowsDir = join(projectPaths(repoRoot).write, 'workflows');
   const skillsDir = join(projectPaths(repoRoot).write, 'skills');
+  assertProjectAdmitted(projectPaths(repoRoot).write);
   mkdirSync(workflowsDir, { recursive: true });
   mkdirSync(skillsDir, { recursive: true });
 
@@ -153,6 +155,7 @@ description: House rules the agent should follow in this repo.
 function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHandleSignal?: AbortSignal }): RunStore {
   noticeLegacyProject(repoRoot);
   const dataDir = projectPaths(repoRoot).write;
+  assertProjectAdmitted(dataDir);
   // First: an open that fails may already have created the database and the history backups.
   ensureDataGitignore(repoRoot);
   const store = RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });

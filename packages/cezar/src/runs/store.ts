@@ -83,7 +83,7 @@ import { archiveStoreFamily } from './archive-family.ts';
 import { claimStoreFamilies } from './claim-families.ts';
 import { createStoreOwnedRun } from './owned-run-create.ts';
 import { commitStoreWorkerResult } from './worker-result-commit.ts';
-import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
+import { claimOwnerLive, closeClaimSession, foreignClaimedRunIds, liveForeignClaimCount, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
 export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
@@ -893,16 +893,10 @@ export class RunStore extends EventEmitter {
   /** Run files are written only for a family this store may write, never a fallback family. */
   private writeDir(id: string): string { if (this.runOwnership(id) === 'fallback') throw this.fallbackRefusal(id); return this.dataDir; }
 
-  /** Every run whose family another process owns — alive, or dead with a live run left to
-   *  recover (cleanup keeps their scratch: it is theirs, or recovery's once someone adopts them).
-   *  A dead owner's claim on a family with nothing live is no claim (see `runOwnership`). */
-  listForeignClaimedRunIds(): string[] {
-    const db = this.db, owner = this.owner;
-    if (!db || !owner) return [];
-    const kept = new Set(db.listClaims().filter((claim) => claim.session !== owner.session &&
-      (claimOwnerLive(claim) || db.familyHasLive(claim.family))).map((claim) => claim.family));
-    return kept.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => kept.has(row.family)).map((row) => row.id);
-  }
+  /** Every run whose family another process owns (`foreignClaimedRunIds`). */
+  listForeignClaimedRunIds(): string[] { return foreignClaimedRunIds(this.db, this.owner); }
+  /** Families another live store claims here (`liveForeignClaimCount`). */
+  liveForeignClaimCount(): number { return liveForeignClaimCount(this.db, this.owner); }
 
   /**
    * Whether a held run anchors itself (and its family) in memory. Anything else held is a family
