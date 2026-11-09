@@ -19,8 +19,8 @@ At the baseline:
 
 - **28 production files in `packages/cezar/src` branch on a wait's kind** (a `kind === '<kind>'`
   test, a `case` label or an entry literal). Table F lists each file and the slice that removes
-  its branch, or its allow-list entry. Three more in `packages/contract` and eight in
-  `packages/web` stay out of scope.
+  its branch, or its allow-list entry. The same search matches two files in `packages/contract`
+  (`attention.ts`, `waits.ts`) and five in `packages/web`; both packages stay out of scope.
 - **One per-kind table exists, and nothing executes it.** `WAIT_KINDS` (`workflows/run-states.ts:271-299`)
   holds deadline, keeps-slot, resolves and cancels per kind. Only `run-states.test.ts:48` reads it.
   `WAIT_PHASES` (`run-states.ts:302-313`) has no reader at all.
