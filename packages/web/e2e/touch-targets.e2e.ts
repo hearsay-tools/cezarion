@@ -466,7 +466,8 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
 
 /** Keep the next missed click diagnosable without changing its readiness or input sequence. */
 function traceSidebarClick(row: string, width: number): (failed: boolean) => void {
-  browser.evaluate(`(() => {
+  try {
+    browser.evaluate(`(() => {
     const selector = ${JSON.stringify(row)};
     const originalRow = document.querySelector(selector);
     const originalChip = originalRow?.querySelector('[data-slot="pr-chip"]');
@@ -501,6 +502,10 @@ function traceSidebarClick(row: string, width: number): (failed: boolean) => voi
       return { selector, initial, events, final: sample() };
     };
   })()`)
+  } catch (error) {
+    console.error('Sidebar click trace installation unavailable:', error)
+    return () => {}
+  }
   return (failed) => {
     try {
       const evidence = browser.evaluate('window.__sidebarClickTrace?.()')
