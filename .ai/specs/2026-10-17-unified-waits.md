@@ -8,6 +8,9 @@ The process wait kind was added for hearsay-tools/cezarion#1446 (owner approved 
 [Process wait decisions](#process-wait-decisions)).
 Supersedes the narrow re-arm design for hearsay-tools/cezarion#1197 and absorbs
 hearsay-tools/cezarion#1226 (agent-facing cancel).
+See also [the wait-kind table and engine spec](2026-11-09-wait-kind-table-and-engine.md)
+(2026-11-09): the per-kind rules below move into one row per kind, executed by one wait engine.
+The rules stay.
 
 ## Current interface (2026-10-23)
 
