@@ -1,5 +1,5 @@
+import { WAIT_KINDS, registersThroughDelegation } from './run/wait-kinds.ts';
 import { assertWaitCapacity, WaitCapacityError } from '../runs/wait-capacity.ts';
-import { randomUUID } from 'node:crypto';
 import type { AgentInput, CezarWaitRequest, PeerWaitEntry, PeerWaitResult, RunRecord, Wait, WaitErrorCode } from '@open-mercato/cezar-contract';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { peerPair } from '../delegation/conversations.ts';
@@ -68,10 +68,7 @@ export function peerWaitEntry(run: RunRecord, request: { peerIds: string[]; time
     if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
     throw error;
   }
-  const now = Date.now();
-  return { id: randomUUID(), kind: 'peer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-    deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
-    turnId: turnId(), phase: 'open', peerIds: request.peerIds };
+  return WAIT_KINDS.peer.entry(request, via, turnId);
 }
 
 /** The run's peer wait `waitId`, open or settled, for `cez message cancel-wait`. */
@@ -108,13 +105,12 @@ export function runsAwaitingPeer(peer: RunRecord | string, runs: () => readonly 
 type DelegationWait = Extract<CezarWaitRequest, { kind: 'worker' | 'request' | 'peer' }>;
 /** The `cezar_wait` kinds the delegation registration serves, under the tool's own codes. */
 export function isDelegationWait(request: CezarWaitRequest): request is DelegationWait {
-  return request.kind === 'worker' || request.kind === 'request' || request.kind === 'peer';
+  return registersThroughDelegation(request.kind);
 }
 
 /** `cezar_wait` kinds `worker` and `request` as the worker entry's target (hearsay-tools/cezarion#1995). */
 export function workerListTarget(request: Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>) {
-  return { ...(request.kind === 'worker' ? { workerIds: request.worker_ids } : { requestIds: request.request_ids }),
-    ...(request.mode === undefined ? {} : { mode: request.mode }), timeoutSeconds: request.timeout_seconds };
+  return WAIT_KINDS.worker.workerListTarget(request);
 }
 
 /** A delegation wait's refusal under `cezar_wait`'s own codes. Anything but a policy refusal is

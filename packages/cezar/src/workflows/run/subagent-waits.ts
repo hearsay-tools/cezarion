@@ -2,7 +2,6 @@ import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
-import { randomUUID } from 'node:crypto';
 import {
   SUBAGENT_WAIT_CHILD_LIMIT, SUBAGENT_WAIT_DEADLINE_SECONDS, SUBAGENT_WAIT_GRACE_SECONDS,
   type SubagentChild, type SubagentWaitEntry, type SubagentWaitResult, type Wait,
@@ -172,8 +171,7 @@ export class SubagentWaits {
   /** Open the wait. A refused checkpoint (the open-wait bound) leaves the turn end to the timer
    *  alias it would have opened before. */
   private openSubagentWait(runId: string, state: ActiveRun): void {
-    const wait: SubagentWaitEntry = { id: randomUUID(), kind: 'subagent', source: 'cezar', via: 'native-subagents', registeredAt: new Date().toISOString(),
-      phase: 'open', turnId: state.waitIdentity.ciTurnId ?? 'subagents', deadline: this.deadline(), children: this.children(state) };
+    const wait = WAIT_KINDS.subagent.entry(state.waitIdentity.ciTurnId ?? 'subagents', this.deadline(), this.children(state));
     try { this.context.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
     this.host.armWait(runId, wait);
