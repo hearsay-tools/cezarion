@@ -14,6 +14,7 @@
 // npm is invoked through process.execPath + npm_execpath — same cross-platform
 // pattern as scripts/dev.mjs / scripts/check-pack.mjs (no .cmd shim assumptions).
 
+import { productIdentity } from '../src/home/identity.ts';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -71,7 +72,7 @@ const plannerPath = path.join(distDir, 'install-as-command.js');
 if (existsSync(plannerPath)) {
   planner = await import(pathToFileURL(plannerPath).href);
 }
-const PACKAGE_NAME = planner?.PACKAGE_NAME ?? '@wjarka/cezarion';
+const PACKAGE_NAME = planner?.PACKAGE_NAME ?? productIdentity(false).npmPackage;
 const steps = planner
   ? planner.planInstall({ mode, build }).steps
   : [{ args: ['rm', '--global', PACKAGE_NAME], label: `remove global ${PACKAGE_NAME}` }];
