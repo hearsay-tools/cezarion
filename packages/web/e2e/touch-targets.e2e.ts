@@ -464,6 +464,58 @@ describe('keyboard, draft and choice journeys across appearance changes (hearsay
   }
 })
 
+/** Keep the next missed click diagnosable without changing its readiness or input sequence. */
+function traceSidebarClick(row: string, width: number): (failed: boolean) => void {
+  browser.evaluate(`(() => {
+    const selector = ${JSON.stringify(row)};
+    const originalRow = document.querySelector(selector);
+    const originalChip = originalRow?.querySelector('[data-slot="pr-chip"]');
+    const describe = el => el instanceof Element ? {
+      tag: el.tagName, slot: el.getAttribute('data-slot'), text: el.textContent?.slice(0, 120),
+      runId: el.closest('[data-run-id]')?.getAttribute('data-run-id'),
+    } : null;
+    const box = el => el?.getBoundingClientRect().toJSON() ?? null;
+    const sample = () => {
+      const currentRow = document.querySelector(selector);
+      const chip = currentRow?.querySelector('[data-slot="pr-chip"]');
+      const rect = chip?.getBoundingClientRect();
+      const centre = rect ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;
+      return { time: performance.now(), row: box(currentRow), chip: box(chip), target: describe(chip), centre,
+        centreHit: centre ? describe(document.elementFromPoint(centre.x, centre.y)) : null,
+        sameRow: currentRow === originalRow, sameChip: chip === originalChip,
+        url: location.href, viewport: { width: innerWidth, height: innerHeight } };
+    };
+    const initial = sample();
+    const events = [];
+    const types = ['pointermove', 'pointerdown', 'pointerup', 'click'];
+    const listener = event => {
+      if (events.length >= 16) return;
+      events.push({ type: event.type, x: event.clientX, y: event.clientY,
+        target: describe(event.target), path: event.composedPath().map(describe).filter(Boolean),
+        hit: describe(document.elementFromPoint(event.clientX, event.clientY)), ...sample() });
+    };
+    types.forEach(type => document.addEventListener(type, listener, true));
+    window.__sidebarClickTrace = () => {
+      types.forEach(type => document.removeEventListener(type, listener, true));
+      delete window.__sidebarClickTrace;
+      return { selector, initial, events, final: sample() };
+    };
+  })()`)
+  return (failed) => {
+    try {
+      const evidence = browser.evaluate('window.__sidebarClickTrace?.()')
+      if (failed) {
+        const directory = resolve(import.meta.dirname, '../../../.ai/qa/failures/touch-targets')
+        mkdirSync(directory, { recursive: true })
+        writeFileSync(join(directory, `${width}-sidebar-row-click.json`), JSON.stringify(evidence, null, 2))
+      }
+    } catch (error) {
+      // Diagnostic collection must preserve the click/navigation failure.
+      console.error('Sidebar click evidence unavailable:', error)
+    }
+  }
+}
+
 describe('references on a device that cannot hover (#617 01b)', () => {
   for (const [width, height] of [[360, 640], [390, 844]] as const) {
     it(`${width}px: Session activity carries the 44px links, and the touch sidebar row is the tap target`, () => {
@@ -525,8 +577,16 @@ describe('references on a device that cannot hover (#617 01b)', () => {
       // Tapping the reference text opens the task: the row is the one target. A plain click on
       // the text, not `tapEdge`: on the 390px run its right-edge hit test missed this inline
       // span (hits [true, false, true, true, true]); the edge probes are for block controls.
-      browser.click(`${row} [data-slot="task-row-meta"] [data-slot="pr-chip"]`)
-      browser.waitForFunction(`location.pathname.endsWith('/tasks/${runId}')`)
+      // hearsay-tools/cezarion#3048: retain event-time geometry if this click misses again.
+      const finishTrace = traceSidebarClick(row, width)
+      let failed = true
+      try {
+        browser.click(`${row} [data-slot="task-row-meta"] [data-slot="pr-chip"]`)
+        browser.waitForFunction(`location.pathname.endsWith('/tasks/${runId}')`)
+        failed = false
+      } finally {
+        finishTrace(failed)
+      }
     })
   }
 })
