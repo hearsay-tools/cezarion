@@ -1,3 +1,4 @@
+import { assertWaitCapacity, WaitCapacityError } from '../runs/wait-capacity.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentInput, CezarWaitRequest, PeerWaitEntry, PeerWaitResult, RunRecord, Wait, WaitErrorCode } from '@open-mercato/cezar-contract';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
@@ -57,7 +58,11 @@ export function peerWaitEntry(run: RunRecord, request: { peerIds: string[]; time
   for (const id of request.peerIds) if (!peerPair(run, getRun(id), false)) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
   const repeated = identicalPeerWait(run.waits ?? [], request.peerIds);
   if (repeated) return repeated;
-  if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+  try { assertWaitCapacity(run); }
+  catch (error) {
+    if (error instanceof WaitCapacityError) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+    throw error;
+  }
   const now = Date.now();
   return { id: randomUUID(), kind: 'peer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
     deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,

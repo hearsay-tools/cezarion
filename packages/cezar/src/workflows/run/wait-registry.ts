@@ -1,3 +1,4 @@
+import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { registrationIdentity, registrationReceipt, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
@@ -101,14 +102,22 @@ export class WaitRegistry {
     else assertRequestWaitScope(run, run.delegation, request.requestIds ?? [], getRun);
     const repeated = identicalWorkerWait(run.waits ?? [], request);
     if (repeated && hasWorkerDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
-    if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+    try { assertWaitCapacity(run); }
+    catch (error) {
+      if (error instanceof WaitCapacityError) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+      throw error;
+    }
     const now = Date.now();
     const target = workerWaitTarget(request, getRun);
     const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
       turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
     this.host.withdrawCezarHumanWaits(runId);
-    this.context.store.commitWait(runId, entry, undefined, registrationReceipt(registration, entry));
+    try { this.context.store.commitWait(runId, entry, undefined, registrationReceipt(registration, entry)); }
+    catch (error) {
+      if (error instanceof WaitCapacityError) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+      throw error;
+    }
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
     this.host.reconcileWorkerWaits(familyOf(run));
     // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
@@ -238,7 +247,8 @@ export class WaitRegistry {
     const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
       (answering === undefined || wait.askSeq !== answering));
     if (open?.askSeq !== undefined) return open;
-    if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    try { if (!open) assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
     const { context: _replaced, ...kept } = base;
     return this.openWait(runId, active, { ...kept, ...card });
@@ -265,7 +275,8 @@ export class WaitRegistry {
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
     if (existing) return repeatRegistration(this.context.store, runId, existing, parsed.kind === 'timer' ? undefined : parsed.timeout_seconds, registration) as typeof existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
-    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    try { assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     if (parsed.kind === 'timer') {
       if (this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
       if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
@@ -295,7 +306,8 @@ export class WaitRegistry {
       // The same PR may have registered while this lookup was in flight under another spelling.
       const repeated = identicalWait(this.context.store.getRun(runId)?.waits ?? [], parsed, turnId);
       if (repeated && repeated.kind !== 'process') return repeatRegistration(this.context.store, runId, repeated, parsed.timeout_seconds, registration) as PrWaitEntry | TimerWaitEntry;
-      if (openWaits(this.context.store.getRun(runId) ?? {}).length >= WAIT_LIMIT) refuse('capacity');
+      try { assertWaitCapacity(this.context.store.getRun(runId) ?? {}); }
+      catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
       const now = Date.now();
       const wait = prWaitEntry(identity, parsed, via, generation, turnId, now);
       return this.openWait(runId, active, wait, registration);
@@ -341,7 +353,8 @@ export class WaitRegistry {
     const startToken = live ? processStartToken(request.pid) : undefined;
     const existing = identicalWait(run.waits ?? [], request, turnId, { ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }) });
     if (existing?.kind === 'process') return repeatRegistration(this.context.store, runId, existing, request.timeout_seconds, registration) as ProcessWaitEntry;
-    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    try { assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     const now = Date.now();
     const wait = processWaitEntry(request, via, turnId, now, startToken, exitFile);
     const opened = this.openWait(runId, active, wait, registration);
@@ -356,7 +369,13 @@ export class WaitRegistry {
   openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W, registration?: RegistrationIdentity): W {
     this.host.withdrawCezarHumanWaits(runId);
     try { this.context.store.commitWait(runId, wait, undefined, registrationReceipt(registration, wait)); }
-    catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
+    catch (error) {
+      if (error instanceof WaitCapacityError) {
+        console.warn('[cez] wait registration refused: capacity');
+        throw Object.assign(new Error(waitErrorMessage('capacity')), { code: 'capacity' });
+      }
+      throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' });
+    }
     this.host.armWait(runId, wait);
     if (state.boundary.atTurnBoundary === state.liveSession.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
     // The store keeps the entry it was given; only its phase can have moved since.

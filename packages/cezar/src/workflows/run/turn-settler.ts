@@ -1,6 +1,7 @@
+import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, type HumanWaitEntry, type TimerWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
+import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type HumanWaitEntry, type TimerWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AskRequest } from '../../core/ask.ts';
@@ -460,7 +461,8 @@ export class TurnSettler {
       this.host.humanWaits.openHumanAlias(runId, state, 'budget');
       return;
     }
-    if (openWaits(run).length >= WAIT_LIMIT) return;
+    try { assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) return; throw error; }
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
     // `seconds` is the record's bound; the live-workers deadline is the interval itself (tests run it sub-minute).
