@@ -1,3 +1,4 @@
+import { seedWaits } from '../../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeHumanWait, makeTimerWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -57,10 +58,10 @@ it('worker turn-end no-wait routes parent ask before park and slot release', () 
 it.each(['full', 'existing'] as const)('worker turn-end no-wait with %s ask parks without duplicate routing', mode => {
   clock();
   const f = workerFixture();
-  if (mode === 'full') f.store.updateRun(f.run.id, { waits: Array.from({ length: WAIT_LIMIT }, () => makeTimerWait()) });
+  if (mode === 'full') seedWaits(f.store, f.run.id, { waits: Array.from({ length: WAIT_LIMIT }, () => makeTimerWait()) });
   else {
     const event = f.store.appendEvent(f.run.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{ header: 'Choice', question: 'Next?' }] });
-    f.store.updateRun(f.run.id, { waits: [makeHumanWait({ askSeq: event.seq })] });
+    seedWaits(f.store, f.run.id, { waits: [makeHumanWait({ askSeq: event.seq })] });
   }
   const before = f.store.readEvents(f.run.id).filter(event => event.type === 'ask.requested').length;
   f.log.length = 0;

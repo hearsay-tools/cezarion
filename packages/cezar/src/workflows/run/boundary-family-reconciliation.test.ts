@@ -1,3 +1,4 @@
+import { seedWaits } from '../../runs/run-store.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeWorkerWait, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { unused } from '../fixture-cleanup.testkit.ts';
@@ -16,7 +17,7 @@ it.each([true, false])('destroyed worker receipts retire only during an executin
     destroy: { requestedAt: new Date().toISOString(), phase: 'complete', remaining: [] },
   } });
   const wait = makeWorkerWait({ phase: WAIT_PHASE.resolved, workerIds: [child.id] });
-  f.store.updateRun(f.run.id, { waits: [wait] });
+  seedWaits(f.store, f.run.id, { waits: [wait] });
   if (atBoundary) transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'ui-completed', session: f.wire });
   type Host = ConstructorParameters<typeof FamilyReconciler>[1];
   const reconciler = new FamilyReconciler(f.context, unused<Host>('family host', {

@@ -11,7 +11,7 @@ import { ActivityDemand } from '../activity/demand.ts';
 import { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { CiProgressRegistry } from '../ci-wait/progress.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
-import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { seedWaits, setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -183,7 +183,8 @@ describe('workspace activity API', () => {
     const boot = await registerProject(repoRoot, undefined, testHome());
     const wait = makePrWait();
     const run = store.createRun({ title: 'Boot task', workflow: 'build', task: 't', steps: [] });
-    setRunStatus(store, run.id, RUN_STATUS.waiting, { waits: [wait] });
+    seedWaits(store, run.id, { waits: [wait] });
+    setRunStatus(store, run.id, RUN_STATUS.waiting);
     ciProgress.publish(wait.id, [{ name: 'build', state: 'PENDING', link: '', bucket: 'pending' }]);
     try {
       expect(ciProgress.wanted(wait.id)).toBe(false);
@@ -206,7 +207,8 @@ describe('workspace activity API', () => {
       const seeded = (runs: RunStore, title: string) => {
         const wait = makePrWait();
         const run = runs.createRun({ title, workflow: 'build', task: 't', steps: [] });
-        setRunStatus(runs, run.id, RUN_STATUS.waiting, { waits: [wait] });
+        seedWaits(runs, run.id, { waits: [wait] });
+        setRunStatus(runs, run.id, RUN_STATUS.waiting);
         return wait;
       };
       const project = (id: string, root: string, runs: RunStore) => {

@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { seedWaits, setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import {
   AUTO_RESUME_GRACE_MS,
@@ -775,7 +775,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // run for its result; the usage limit holds it until the resume.
     const timerId = '99999999-9999-4999-8999-999999999999';
     const due = new Date(Date.now() - 1_000).toISOString();
-    store.updateRun(record.id, { waits: [{ id: timerId, kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: due, deadline: due, phase: WAIT_PHASE.open, turnId: 'turn', seconds: 60 }] });
+    seedWaits(store, record.id, { waits: [{ id: timerId, kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: due, deadline: due, phase: WAIT_PHASE.open, turnId: 'turn', seconds: 60 }] });
 
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();

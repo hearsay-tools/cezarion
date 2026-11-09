@@ -183,7 +183,7 @@ export function setRunStatus(
   store: Pick<RunStore, 'updateRun'>,
   id: string,
   status: RunRecord['status'],
-  extras: Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> = {},
+  extras: Partial<Omit<RunRecord, 'id' | 'steps' | 'status' | 'waits' | 'lastWaits'>> & { waits?: never; lastWaits?: never } = {},
 ): RunRecord | undefined {
   const update = store.updateRun as (id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>) => RunRecord | undefined;
   return update.call(store, id, { ...extras, status });
