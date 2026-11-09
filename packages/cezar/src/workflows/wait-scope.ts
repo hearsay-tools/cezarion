@@ -1,4 +1,4 @@
-import { WAIT_KINDS } from './run/wait-kinds.ts';
+import { WAIT_KINDS, registersThroughDelegation } from './run/wait-kinds.ts';
 import { assertWaitCapacity, WaitCapacityError } from '../runs/wait-capacity.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentInput, CezarWaitRequest, PeerWaitEntry, PeerWaitResult, RunRecord, Wait, WaitErrorCode } from '@open-mercato/cezar-contract';
@@ -109,7 +109,7 @@ export function runsAwaitingPeer(peer: RunRecord | string, runs: () => readonly 
 type DelegationWait = Extract<CezarWaitRequest, { kind: 'worker' | 'request' | 'peer' }>;
 /** The `cezar_wait` kinds the delegation registration serves, under the tool's own codes. */
 export function isDelegationWait(request: CezarWaitRequest): request is DelegationWait {
-  return Object.values(WAIT_KINDS).some(row => row.delegation && row.requestKinds.includes(request.kind));
+  return registersThroughDelegation(request.kind);
 }
 
 /** `cezar_wait` kinds `worker` and `request` as the worker entry's target (hearsay-tools/cezarion#1995). */

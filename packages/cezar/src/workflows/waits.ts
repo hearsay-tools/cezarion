@@ -1,4 +1,4 @@
-import { WAIT_KINDS, normalizePrUrl } from './run/wait-kinds.ts';
+import { WAIT_KINDS } from './run/wait-kinds.ts';
 import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type CezarWaitRequest, type WaitVia, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
@@ -119,43 +119,7 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
     : { wait_id: wait.id, kind: wait.kind as Exclude<Wait['kind'], 'human'>, deadline: ('deadline' in wait ? wait.deadline : undefined)!, summary: summary(wait) });
 }
 
-/**
- * The open wait a registration repeats, if any. PR: the same PR, target and conflict switch, whatever
- * its timeout (hearsay-tools/cezarion#1425). Timer: the
- * same seconds and note, registered in the same turn (a later turn asking again means a new check).
- * Process: the same PID, start token and resolved exit file in `context`, whatever its timeout or
- * note (hearsay-tools/cezarion#1446).
- */
-export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string,
-  context: { startToken?: string; exitFile?: string } = {}): PrWaitEntry | TimerWaitEntry | ProcessWaitEntry | undefined {
-  return waits.find((wait): wait is PrWaitEntry | TimerWaitEntry | ProcessWaitEntry => {
-    // Worker and request waits: `identicalWorkerWait`; peer waits: `identicalPeerWait`.
-    if (wait.phase !== 'open' || Object.values(WAIT_KINDS).some(row => row.delegation && row.requestKinds.includes(request.kind))) return false;
-    if (request.kind === 'pr') return wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr)
-      && wait.until === (request.until ?? 'checks') && wait.wakeOnConflict === (request.wake_on_conflict ?? true);
-    if (request.kind === 'process') {
-      return wait.kind === 'process' && wait.pid === request.pid && wait.startToken === context.startToken && wait.exitFile === context.exitFile;
-    }
-    return 'seconds' in request && wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
-  });
-}
-
-/**
- * The open worker wait a registration repeats (hearsay-tools/cezarion#1235): the same target kind,
- * the same ids in any order and the same mode (`any` when omitted), whatever its timeout.
- */
-export function identicalWorkerWait(waits: readonly Wait[], target: { workerIds?: readonly string[]; requestIds?: readonly string[] | undefined; mode?: string | undefined }): WorkerWaitEntry | undefined {
-  const key = (ids: readonly string[] | undefined) => ids ? [...ids].sort().join(',') : undefined;
-  return waits.find((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open' &&
-    key(wait.workerIds) === key(target.workerIds) && key(wait.requestIds) === key(target.requestIds) && (wait.mode ?? 'any') === (target.mode ?? 'any'));
-}
-
-/** The open peer wait a registration repeats (hearsay-tools/cezarion#1995): the same peers in any
- *  order, whatever its timeout. */
-export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly string[]): PeerWaitEntry | undefined {
-  const key = (ids: readonly string[]) => [...ids].sort().join(',');
-  return waits.find((wait): wait is PeerWaitEntry => wait.kind === 'peer' && wait.phase === 'open' && key(wait.peerIds) === key(peerIds));
-}
+export { identicalWait, identicalWorkerWait, identicalPeerWait } from './run/wait-kinds.ts';
 
 /** The agent input that delivers a resolved wait's result: the wait's own id, or for an upgraded
  *  worker wait whose wake was already queued, that input (`wakeInputId`). */

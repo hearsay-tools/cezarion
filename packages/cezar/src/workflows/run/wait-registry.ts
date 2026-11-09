@@ -249,8 +249,7 @@ export class WaitRegistry {
     // a question asked in that turn is a new one, never the answered one returned
     // (hearsay-tools/cezarion#2397).
     const answering = active.liveSession.session?.open ? active.inputState.openingAnswerAskSeq : undefined;
-    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
-      (answering === undefined || wait.askSeq !== answering));
+    const open = WAIT_KINDS.human.duplicateAsk(openWaits(run), answering);
     if (open?.askSeq !== undefined) return open;
     try { if (!open) assertWaitCapacity(run); }
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
@@ -278,7 +277,7 @@ export class WaitRegistry {
     const turnId = active.waitIdentity.ensureCiTurn();
     if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId, registration);
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
-    if (existing) return repeatRegistration(this.context.store, runId, existing, parsed.kind === 'timer' ? undefined : parsed.timeout_seconds, registration) as typeof existing;
+    if (existing) return repeatRegistration(this.context.store, runId, existing, WAIT_KINDS[parsed.kind].requestedTimeout(parsed), registration) as typeof existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
     try { assertWaitCapacity(run); }
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
