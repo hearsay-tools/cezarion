@@ -118,9 +118,9 @@ export class RunCancel {
   cancelWorkerWait(parentId: string, waitId: string): WorkerWait {
     const run = this.context.store.getRun(parentId);
     if (!run?.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    const entry = run.waits?.find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && WAIT_KINDS.worker.hasDeadline(wait));
+    const entry = WAIT_KINDS.worker.select(run.waits ?? []).find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && WAIT_KINDS.worker.hasDeadline(wait));
     if (!entry) {
-      const settled = run.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && WAIT_KINDS.worker.hasDeadline(wait)).at(-1);
+      const settled = WAIT_KINDS.worker.select(run.lastWaits ?? []).filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && WAIT_KINDS.worker.hasDeadline(wait)).at(-1);
       if (settled) return workerWaitEntryToLegacy(settled);
       throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
     }
@@ -129,7 +129,7 @@ export class RunCancel {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
     const settled = cancelWaits(this.context.store, id => this.host.disarmWait(id), parentId, [waitId]);
-    const cancelled = settled.find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && WAIT_KINDS.worker.hasDeadline(wait));
+    const cancelled = WAIT_KINDS.worker.select(settled).find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && WAIT_KINDS.worker.hasDeadline(wait));
     if (!cancelled) throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
     return workerWaitEntryToLegacy(cancelled);
   }

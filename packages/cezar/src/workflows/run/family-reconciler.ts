@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { holdsOwedResults } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
@@ -209,7 +210,7 @@ export class FamilyReconciler {
     if (parent.stopping && parent.delegation?.role === 'root' && !recovering) this.host.closeRoutedQuestions(parent.id);
     if (['queued', 'running', 'waiting'].includes(parent.status)) return false;
     if (recovering) return true;
-    const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
+    const stale = WAIT_KINDS.worker.select(parent.waits ?? []).filter(wait => wait.phase === 'open' || wait.phase === 'resolved').map(wait => wait.id);
     if (stale.length) cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, stale);
     this.host.closeRoutedQuestions(parent.id);
     for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
@@ -255,7 +256,7 @@ export class FamilyReconciler {
    * armed. Messages never resolve one.
    */
   private reconcileWorkerEntries(parent: RunRecord, observe: (now: string) => WorkerObservations): void {
-    const entries = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
+    const entries = WAIT_KINDS.worker.select(parent.waits ?? []);
     if (!entries.length) return;
     const now = new Date().toISOString();
     const { outcomes, deletedResults } = observe(now);

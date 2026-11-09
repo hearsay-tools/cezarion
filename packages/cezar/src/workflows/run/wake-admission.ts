@@ -287,7 +287,7 @@ export class WakeAdmission {
   restoreWorkerWaitInputs(runId: string): void {
     const run = this.context.store.getRun(runId);
     for (const wait of resolvedWaits(run ?? {})) {
-      if (!run || wait.kind !== 'worker' || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
+      if (!run || !WAIT_KINDS.worker.is(wait) || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
       if ((this.context.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.context.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
         text: waitResultText(wait, { workerStatus: this.host.waitRegistry.workerStatus }) });

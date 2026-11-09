@@ -93,7 +93,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
 }[K];
 
 /** Typed selectors share the stored kind's list order and phase rule. */
-function waitSelectors<K extends Wait['kind']>(kind: K): Pick<WaitKindRow<K>, 'is' | 'select' | 'selectOpen'> {
+function waitSelectors<K extends Wait['kind']>(kind: K) {
   const is = (wait: Wait): wait is Extract<Wait, { kind: K }> => wait.kind === kind;
   const select = (waits: readonly Wait[]) => waits.filter(is);
   const selectOpen = (waits: readonly Wait[]) => select(waits).filter(wait => wait.phase === 'open');
