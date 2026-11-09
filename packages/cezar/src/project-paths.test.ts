@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -81,15 +82,29 @@ describe('project directory reads before P5', () => {
     expect(skills.find(s => s.name === 'shared')?.body).toBe('cezar');
   });
 
+  it('keeps same-directory duplicate workflow names unchanged', async () => {
+    seed('cezar', 'workflows/first.yaml', 'name: same\nskills: [one]\n');
+    seed('cezar', 'workflows/second.yaml', 'name: same\nskills: [two]\n');
+    seed('squawk', 'workflows/third.yaml', 'name: same\nskills: [three]\n');
+    const workflows = (await loadWorkflows(repo)).workflows.filter(w => w.name === 'same');
+    expect(workflows).toHaveLength(2);
+    expect(workflows.map(w => w.steps[0]?.skill).sort()).toEqual(['one', 'two']);
+  });
+
   it('adds fallback ignore rules without creating the fallback directory', () => {
+    execFileSync('git', ['init', repo], { stdio: 'ignore' });
+    writeFileSync(join(repo, '.git', 'info', 'exclude'), '/.ai/cezar/\n');
     ensureDataGitignore(repo);
     expect(existsSync(join(repo, '.ai', 'squawk'))).toBe(false);
-    const shared = readFileSync(join(repo, '.ai', '.gitignore'), 'utf8');
-    expect(shared).toContain('/squawk/runs.db-wal\n');
-    expect(shared).toContain('/squawk/runs/\n');
-    expect(shared).toContain('/squawk-migration.json\n');
-    expect(shared).not.toContain('/squawk/workflows');
+    const shared = readFileSync(join(repo, '.git', 'info', 'exclude'), 'utf8');
+    expect(shared).toContain('/.ai/squawk/runs.db-wal\n');
+    expect(shared).toContain('/.ai/squawk/runs/\n');
+    expect(shared).toContain('/.ai/squawk-migration.json\n');
+    expect(shared).not.toContain('/.ai/squawk/workflows');
+    expect(execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
+    seed('squawk', 'runs.db', 'runtime');
+    expect(execFileSync('git', ['-C', repo, 'check-ignore', '.ai/squawk/runs.db'], { encoding: 'utf8' }).trim()).toBe('.ai/squawk/runs.db');
     ensureDataGitignore(repo);
-    expect(readFileSync(join(repo, '.ai', '.gitignore'), 'utf8')).toBe(shared);
+    expect(readFileSync(join(repo, '.git', 'info', 'exclude'), 'utf8')).toBe(shared);
   });
 });

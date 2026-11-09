@@ -26,11 +26,11 @@ export async function loadWorkflows(
   repoRoot: string,
 ): Promise<{ workflows: WorkflowDef[]; issues: WorkflowLoadIssue[] }> {
   const dirs = projectPaths(repoRoot).reads.map(root => join(root, 'workflows'));
-  const seen = new Set<string>();
   const issues: WorkflowLoadIssue[] = [];
   const fromFiles: WorkflowDef[] = [];
 
   for (const dir of dirs) {
+    const earlierNames = new Set(fromFiles.map(workflow => workflow.name));
     let entries: string[] = [];
     try {
       entries = await readdir(dir);
@@ -57,8 +57,7 @@ export async function loadWorkflows(
           issues.push({ path, message: issue });
           continue;
         }
-        if (!seen.has(normalized.name)) {
-          seen.add(normalized.name);
+        if (!earlierNames.has(normalized.name)) {
           fromFiles.push({ ...normalized, source: 'file', path });
         }
       } catch (err) {
