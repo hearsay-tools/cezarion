@@ -75,7 +75,19 @@ A regression test must fail without the fix: require
 may stay; say which is which.
 
 A change to a shared name, value or default finds and updates every reader, or
-states why a reader stays. Find every construction site of a shared in-memory
+states why a reader stays. Search source, browser e2e, package tests and scripts,
+including embedded child scripts, mock parity/final-message cells and records
+later automation runs read. Start with both forms across the tracked trees:
+
+```sh
+rg --hidden -n -e '<old form>' -e '<new form>' packages scripts .ai .github
+```
+
+A search cannot find a caller that omits a newly required field: keep executable
+fixtures in typed modules and use the root typecheck, including its coverage guard.
+Review active spec rules and case-table rows for semantic changes; edit the rules
+themselves. A dated note alone preserves old rules only in a superseded spec.
+Find every construction site of a shared in-memory
 object by grepping its type, not its field, and give it one factory where a new
 required field fails to compile. For saved data and user-facing messages, search both
 the old and new form. Follow [saved-format compatibility](BACKWARD_COMPATIBILITY.md).

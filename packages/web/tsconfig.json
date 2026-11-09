@@ -33,5 +33,9 @@
   },
   // `e2e/**` is Node code, not bundled DOM code, but it lives under this tsconfig so it is
   // typechecked by `npm run typecheck:web` rather than by nothing at all.
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.config.ts", "vitest.setup.ts", "e2e/**/*.ts"]
+  "include": [
+    "src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.config.ts", "vitest.setup.ts",
+    "e2e/**/*.ts", "scripts/**/*.ts",
+    "../../.ai/skills/check-code-quality/scripts/fixtures/**/*.ts"
+  ]
 }

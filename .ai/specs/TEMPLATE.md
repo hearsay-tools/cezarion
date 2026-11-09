@@ -23,3 +23,10 @@ show behavior at shipped defaults, and state impossible cases with their reason.
 
 The phase tables in [the unified-waits spec](2026-10-17-unified-waits.md#transitions-out-phase-2a)
 show the form. The tables make cases explicit; they do not decide which cases share a policy.
+
+A record that a later automation or prompt run reads is a cross-run relationship,
+even when it is a Markdown comment. Identify its writer and authority, when it is
+final, how older formats are read, and where the reader searches. Include an
+unfinished record, a record from another writer, an older format and an absent or
+unreadable record in the applicable cases. A table exposes the decisions; it does
+not enforce a record protocol implemented only in prompt text.
