@@ -91,8 +91,27 @@ The command creates and removes its own standalone checkout of `HEAD`, with no r
 `CEZ_*` variables, so Stryker never edits the worktree that Squeal validates and a mutant cannot reach
 the live repository or cockpit. Contract files also run their direct server and web consumer tests; add
 `--tests <test files>` for more contract consumers. The file's own package pass measures static
-mutants (code that runs at import) and counts them; the consumer pass skips them. Use
-`--compare ~/.cache/cez/mutants/earlier.json` to compare runs of the same result version.
+mutants (code that runs at import) and counts them; the consumer pass skips them. The command measures the committed HEAD, including committed tests, rather than uncommitted edits.
+It prints phase changes and progress every 30 seconds: completed/total mutants and elapsed time.
+Preparation and the initial test run show an unknown count until Stryker has a mutation plan.
+It validates `--compare` inputs and the `--out` destination before creating the scratch checkout;
+validation does not reserve the destination, so a later filesystem change can still make the write fail.
+Use `--compare ~/.cache/cez/mutants/earlier.json` to compare runs of the same result version and file.
+
+The baseline and final measurement can run independently. Save each with `--out`, then compare:
+
+```bash
+node .github/scripts/mutants-file.cjs --compare-results baseline.json final.json --out delta.json
+node .github/scripts/mutants-file.cjs --rescore final.json --out rescored.json
+```
+
+These stored-result modes run no installs, builds, tests or mutants. Rescore applies the current
+counting rules, targets and equivalent entries to the original outcomes and source evidence;
+it preserves the measured HEAD and consumer failures and marks the output as rescored.
+New version-2 results include the complete scoring evidence. Older results without that evidence
+can still be compared, but rescore rejects them with a request to measure again. Rescore does not
+prove that current tests pass. Without `--out`, stored modes print their result only. Output must
+not alias either input, including through a symbolic or hard link.
 
 The **Weekly mutation targets** workflow
 ([`mutants-weekly.yml`](../../.github/workflows/mutants-weekly.yml)) runs this command on `main` every
