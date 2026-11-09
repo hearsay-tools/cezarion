@@ -493,3 +493,86 @@ Contributor and release builds install with pinned pnpm and the frozen
 `pnpm-lock.yaml`. Release finalization refreshes only that lockfile after stamping
 the workspace versions. Packing, publishing, and npm consumer-install tests
 continue to use npm; end users do not need pnpm.
+
+## Owner runbook for the npm rename
+
+This section is staged for `REBRAND_SWITCH = true`. It does not change the
+switch-off release procedure above. The owner performs registry writes. Agents
+prepare and verify the patch and artifacts; they do not publish, move tags,
+deprecate packages or unpublish versions.
+
+Planner decision X4 interprets the rename table in
+[the approved spec](../.ai/specs/2026-11-06-rebrand-and-home-layout.md#2-new-name-squawk)
+as matching forwarding releases throughout the deprecation window. For every
+supported stable, dev, nightly and PR version `V`, publish this set in order:
+
+1. `@hearsay-tools/squawk@V`, then `hsq@V`.
+2. `@wjarka/cezarion@V`, then `cezarion@V`. Each old manifest depends exactly on
+   `@hearsay-tools/squawk@V`, including stable releases.
+
+The old packages are generated in temporary release directories. They do not
+rename workspaces or change checked-in alias files. Their old bins still target
+`dist/index.js` so shipped update validators accept them. The shim imports the
+new public entry and prints nothing. The new dispatcher prints one old-command
+notice on stderr; JSON stdout stays parseable.
+
+Exact matching versions keep installed copies updating: the updater reinstalls
+the original outer name at the selected runtime version. A single pinned wrapper
+at rename would freeze those copies. A range cannot create a missing
+`cezarion@V` or old scoped version, and a satisfied dependency need not refresh.
+Do not replace the exact pins with a range or `latest`.
+
+### Cutover order: publish, verify, dist-tags, deprecate
+
+Use a dedicated release checkout at the approved source commit. Confirm package
+ownership and trusted-publisher/token access for all four names first. Keep the
+release version, source commit, tarball integrity values and prior channel tags
+in the owner release record. The switch must already be on in the build.
+
+1. **Pack and inspect.** Build the approved source and run the release dry-run
+   matrix before any write. Preview archive preparation uses
+   `node scripts/release-snapshot.mjs --pack-only`. It emits `cezar.tgz`,
+   `alias.tgz`, `legacyScoped.tgz` and `legacyAlias.tgz`. For a stable release,
+   stamp the approved version with `node scripts/release.mjs <bump> --dry-run`,
+   then pack the projected service, alias and temporary compatibility trees with
+   the same `withPublicationPackage` and `withCompatibilityPackages` helpers
+   used by the release scripts. Keep their callback open until packing ends;
+   the helpers delete the temporary directories when it returns. Inspect every
+   packed name, version, exact forwarding pin, bin path and source `gitHead`.
+2. **Publish.** For the rename cutover, publish those approved tarballs in the
+   dependency order above with `npm publish <tarball> --ignore-scripts
+   --access public --tag <candidate-tag>`. Use a temporary candidate tag, not
+   `latest`, `dev`, `nightly` or `pr-N`. Use the normal trusted-publishing or
+   provenance credentials for this repository. The automated release scripts
+   publish directly to their selected channel tag; use this staged owner
+   procedure when verification must precede public tag movement.
+3. **Verify.** Read each `name@V` manifest and `dist.integrity` from npm. Confirm
+   the recorded source and exact dependency pins. Install the complete set in a
+   clean directory. Run `cezarion` and `cez` through both old names, confirm one
+   stderr notice, parse JSON output, and check `hsq` has no notice. Verify an
+   old-name install can update and roll back while retaining its launch path.
+   Stop on any missing package, mismatch or failed consumer check. Retry only
+   the same source/version; never retag an incomplete set.
+4. **Move dist-tags.** Only after verification, run `npm dist-tag add <name>@V
+   <channel>` in the same dependency order. The channel is `latest`, `dev`,
+   `nightly` or the intended `pr-N`. Read all tags back and compare with the
+   release record. Restore prior tags if the owner rolls back a channel. Keep
+   the published versions available. PR cleanup removes its tag from both new
+   names and both forwarding names.
+5. **End the window, then deprecate.** Continue matching forwarding releases
+   until **two minor releases or 60 days after cutover, whichever is later**.
+   At window end, publish and verify the last matching old-name pair and finish
+   its dist-tags as above. Then stop future forwarding publication. The owner
+   must remove the forwarding targets from the release flow in the window-end
+   change before the next release; this patch keeps them enabled for the whole
+   window. Finally run `npm deprecate '@wjarka/cezarion@*' '<message>'` and
+   `npm deprecate 'cezarion@*' '<message>'`. Use the message
+   `This package has moved to @hearsay-tools/squawk. Use hsq instead.` Read the
+   deprecation fields back. **Never unpublish.** Do not write upstream package
+   names. Deprecation text is registry metadata; the dispatcher remains the
+   sole runtime notice.
+
+Neither dry runs nor archive preparation move dist-tags or call `npm deprecate`.
+The forwarding tarball consumer test uses the actual built implementation with
+bundled local dependencies, an empty npm cache and `--offline`; it needs no npm
+registry access.

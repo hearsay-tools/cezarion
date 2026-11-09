@@ -1,4 +1,5 @@
 import { npmPackageIdentity, productIdentity, type NpmLaunchPackage } from '../home/identity.ts';
+import { installedRuntime } from './runtime-layout.ts';
 import { realpathSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
@@ -107,12 +108,35 @@ function discoverOuterPackage(layout: InstallLayout, launchPath: string): Instal
     launchEntry: resolve(launchPath), outerPackage, request };
 }
 
+function discoverForwardingPackage(layout: InstallLayout, launchPath: string): Installation | undefined {
+  if (!layout.identity.rebrand) return undefined;
+  const legacy = productIdentity(false);
+  let outerPackage: NpmLaunchPackage | undefined;
+  if (layout.kind === 'npx') {
+    const request = discoverNpxRequest(layout.installRoot, legacy);
+    if (typeof request === 'string') outerPackage = request as NpmLaunchPackage;
+  } else {
+    outerPackage = [legacy.npmPackage, legacy.npmAlias]
+      .find(name => inside(layout.launchEntry, join(layout.modules, name)));
+  }
+  if (!outerPackage) return undefined;
+  const runtime = installedRuntime(layout.modules, outerPackage, true);
+  const outerRoot = join(layout.modules, outerPackage);
+  if (runtime.path !== layout.packageRoot || (!inside(layout.launchEntry, outerRoot)
+    && !(layout.kind === 'npx' && inside(layout.launchEntry, runtime.path)))) {
+    return unsupported('mixed forwarding layout');
+  }
+  return { kind: layout.kind, prefix: layout.prefix, cache: layout.cache, installRoot: layout.installRoot,
+    packageRoot: layout.packageRoot, outerRoot, outerPackage, request: outerPackage, launchEntry: resolve(launchPath) };
+}
+
 /** Match only npm-owned, canonical layouts. A matched but unsafe layout is explicit. */
 export function discoverInstallation(input: DiscoveryInput, rebrand = productIdentity().rebrand): Installation {
   try {
     const layout = discoverInstallLayout(input, rebrand);
     if (layout.kind === 'unsupported') return layout;
-    return discoverOuterPackage(layout, input.launchEntry);
+    return (rebrand ? discoverForwardingPackage(layout, input.launchEntry) : undefined)
+      ?? discoverOuterPackage(layout, input.launchEntry);
   } catch {
     return unsupported('installation metadata is unavailable');
   }
