@@ -110,16 +110,39 @@ test('flushes a terminated mock and preserves its SIGTERM exit signal', async ()
   const { directory, child } = await fixture()
   const spec = 'packages/web/e2e/terminated.e2e.ts'
   await beginNodeCapture(directory, spec)
+  const created = once(child.stdout, 'data')
+  child.stdin.write('create\n')
+  const taskId = (await created)[0].toString().trim().slice('created:'.length)
   const ready = once(child.stdout, 'data')
-  child.stdin.write('task-terminated\n')
+  child.stdin.write(`${taskId}\n`)
   await ready
+  expect(readdirSync(directory).filter(file => file.startsWith('ambiguous-task-'))).toEqual([])
   const stopped = once(child.stdout, 'data')
   child.stdin.write('stop\n')
   expect((await stopped)[0].toString()).toContain('stopped:SIGTERM')
   await endNodeCapture(directory, spec)
+  expect(nodeCaptureComplete(directory, spec)).toBe(true)
   const evidence = results(join(directory, 'terminated', 'node'))
   expect(evidence.find(script => script.url.endsWith('/mock-case.mjs'))?.functions)
     .toEqual(expect.arrayContaining([expect.objectContaining({ functionName: 'scenario' })]))
+})
+
+
+test('rejects a terminated mock with no coverage for its pid', async () => {
+  const { directory } = await fixture()
+  const spec = 'packages/web/e2e/missing-coverage.e2e.ts'
+  await beginNodeCapture(directory, spec)
+  const coverageDirectory = join(directory, 'missing-coverage', 'node', 'tasks', 'terminated')
+  mkdirSync(coverageDirectory, { recursive: true })
+  const pid = 123456789
+  // A different process's coverage must not acknowledge this terminated mock.
+  writeFileSync(join(coverageDirectory, `coverage-${pid + 1}-0-0.json`), '{}')
+  writeFileSync(join(directory, 'processes', `${pid}.json`), JSON.stringify({
+    pid, spec, coverageDirectory, socket: join(directory, 'absent.sock'),
+  }))
+  await expect(endNodeCapture(directory, spec)).rejects.toThrow(
+    `Node coverage missing for terminated process ${pid} (${spec}) in ${coverageDirectory}`,
+  )
 })
 
 
