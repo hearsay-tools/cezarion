@@ -24,7 +24,7 @@ import { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, trackProjectWork, withProjectAdmission, CockpitOwnership, type LiveProjectTask, type ProjectMigrationFence } from './cockpit-ownership.ts';
+import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, holdProjectWork, withProjectAdmission, CockpitOwnership, type LiveProjectTask, type ProjectMigrationFence } from './cockpit-ownership.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 
@@ -129,7 +129,7 @@ export function armPreview(store: RunStore, dataDir: string, host: PreviewHost |
   // Before the sweep's first await: a crash's agent state is reconciled before any agent can connect.
   reconcileAgentMarkers(dataDir, store, runId => host?.hasAgents(runId) ?? false);
   void sweepPreviewOnce(dataDir, host);
-  if (host) store.on('deleted', (runId: string) => trackProjectWork(dataDir, host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined)));
+  if (host) store.on('deleted', (runId: string) => void holdProjectWork(dataDir, function previewRelease() { return host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined); }));
 }
 
 /**
@@ -184,11 +184,11 @@ export async function fenceProjectContext(ownership: CockpitOwnership, project: 
   const fence = await ownership.fenceProject(project.dataDir, {
     liveTasks: () => projectLiveTasks(project.store),
     inFlight: () => project.store.listRuns().length + project.manager.pendingWork(),
+    // History compression and a reports scan write run files and the database; both end within
+    // the bound. The rest of the store's own work ends when the holder closes the store.
+    settle: () => Promise.all([project.store.historyIdle(), project.store.reports.idle()]),
     signal,
   });
-  // History compression writes run files; the rest of the store's own work ends when the holder
-  // closes the store, before its first move (docs/areas/project-routes.md).
-  await project.store.historyIdle();
   return fence;
 }
 

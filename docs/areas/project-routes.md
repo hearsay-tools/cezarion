@@ -38,8 +38,9 @@ pid plus start-token liveness and token-checked release.
   async call chain (`AsyncLocalStorage`): everything the admitted work calls, a task start
   or a context build included, passes admission while the lease is open, and the drain
   then waits for what it started. Work that admitted or live work set going (webhook
-  deliveries, preview releases, a manual automation check) is counted with
-  `trackProjectWork`, never refused. Entry points: every project route (409), finite
+  deliveries, preview releases) runs through `holdProjectWork`: counted, admitted for its
+  whole length, never refused. A detached job (a manual automation check) opens its own
+  `withProjectAdmission` span before its request answers. Entry points: every project route (409), finite
   run-event reads, lazy context builds, maintenance (`withMaintenanceStore`),
   archive-on-merge and completion actions (`withStore`), automation timer fires, the
   preview leftover sweep. Point checks: `acquire` (before `mkdir` and after its claim),
@@ -72,12 +73,17 @@ pid plus start-token liveness and token-checked release.
   10 s with backoff), a context build with recovery and one bounded archive or
   automation tick; short enough that no migration hangs. At the bound the migration stops
   by itself: the fence is released and the same error lists what is still live. An abort
-  signal releases it earlier. The owning cockpit then waits for history compression. The
-  holder keeps the fence until `release()`, after the last rewrite.
+  signal releases it earlier. Inside the same bound and abort, the owning cockpit waits for
+  history compression and queued report scans (`settle`). The holder keeps the fence until
+  `release()`, after the last rewrite.
 - **Holder duty (P4b2).** After the drain and before the first move, the holder disposes
-  the project's context with previews released and closes its store. That ends the
-  store's own work (save debounce, transcript facts, the reports index, the repo-handle
-  retry) and the manager's timers. Branch sweeps touch Git refs only.
+  the project's context with previews released and closes its store. `close()` saves once
+  and leaves no save timer; later saves return without a database. It stops the
+  transcript-facts queue and settles its jobs, so no sidecar is written later. A late
+  repo-handle result finds no database and writes nothing (lazy contexts also abort it).
+  The reports index and history compression are drained before (`settle`); after close the
+  reports index starts no queued scan and checks `closed` before each write. Branch sweeps
+  touch Git refs only.
 - **Journal.** The journal blocks admission whether its owner lives or not; only the
   fence holder passes. P4b2 removes it as its last step before `release()`. P4b3 adds
   early recovery in front of admission.

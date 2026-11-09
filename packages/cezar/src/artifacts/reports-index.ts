@@ -99,6 +99,8 @@ export class ReportsIndex {
     this.started = true;
     void this.backfill().catch(error => console.warn('[cez] Reports backfill failed:', error));
   }
+  /** Settles once the scans queued so far end; a project migration fence drains it. */
+  idle(): Promise<void> { return this.queue; }
   private serial(work: () => Promise<void>): Promise<void> {
     const next = this.queue.then(async () => { if (!this.closed) await work(); });
     this.queue = next.catch(() => undefined);
@@ -140,6 +142,7 @@ export class ReportsIndex {
     const scan = await this.storage(runId, directory => scanArtifactsForIndex(directory, runId));
     if (scan.state === 'indeterminate') {
       console.warn(`[cez] Report scan could not be completed: ${runId}`, scan.error);
+      if (this.closed) return false;
       this.db.reports.retry(runId, revision);
       return false;
     }

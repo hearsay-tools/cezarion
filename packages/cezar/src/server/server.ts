@@ -279,7 +279,7 @@ import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resol
 import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
-import { projectAdmissionRefusal, trackProjectWork, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
+import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -3043,7 +3043,7 @@ export function createApp(deps: ServerDeps) {
       const check: ManualCheck = { id, automationId: automation.id, mode: parsed.data.mode, status: 'queued', createdAt: new Date().toISOString() };
       if (manualChecks.size >= 200) manualChecks.delete(manualChecks.keys().next().value!);
       manualChecks.set(id, check);
-      trackProjectWork(project.dataDir, (async () => {
+      void withProjectAdmission(project.dataDir, async function manualCheck() {
         check.status = 'running';
         try {
           const repoRemote = (await getRepoInfo(project.root))?.remote;
@@ -3064,7 +3064,7 @@ export function createApp(deps: ServerDeps) {
         } catch (error) {
           Object.assign(check, { status: 'error', completedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
         }
-      })());
+      }, (error) => { Object.assign(check, { status: 'error', completedAt: new Date().toISOString(), error: error.message }); });
       return c.json({ checkId: id }, 202);
     })
 

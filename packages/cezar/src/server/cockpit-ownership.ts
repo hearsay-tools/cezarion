@@ -171,20 +171,26 @@ export function admitProject(dataDir: string): () => void {
 }
 
 /**
- * Count `work` towards the drain until it settles, without refusing it: work that admitted or
- * live work already set going (a webhook delivery, a preview release), which a fence must wait
- * for rather than drop.
+ * Run `work` counted towards the drain and admitted for its whole length, without refusing it:
+ * work that admitted or live work already set going (a webhook delivery, a preview release),
+ * which a fence must wait for rather than drop. Everything it calls passes admission.
  */
-export function trackProjectWork(dataDir: string, work: Promise<unknown>): void {
+export function holdProjectWork<T>(dataDir: string, work: () => Promise<T>): Promise<T> {
   const lock = migrationFencePaths(dataDir)?.lock;
-  if (!lock) return;
+  if (!lock) return work();
   admitted.set(lock, (admitted.get(lock) ?? 0) + 1);
+  const lease = { lock, open: true };
   const settle = () => {
+    lease.open = false;
     const left = admitted.get(lock)! - 1;
     if (left > 0) admitted.set(lock, left);
     else admitted.delete(lock);
   };
-  void work.then(settle, settle);
+  let running: Promise<T>;
+  try { running = leases.run([...(leases.getStore() ?? []), lease], work); }
+  catch (error) { settle(); throw error; }
+  void running.then(settle, settle);
+  return running;
 }
 
 /**
@@ -192,15 +198,9 @@ export function trackProjectWork(dataDir: string, work: Promise<unknown>): void 
  * Everything `work` calls passes admission for this project while the lease is open.
  */
 export async function withProjectAdmission<T, R>(dataDir: string, work: () => Promise<T>, refused: (error: ProjectMigrationFencedError) => R): Promise<T | R> {
-  let leave: () => void;
-  try { leave = admitProject(dataDir); }
-  catch (error) {
-    if (error instanceof ProjectMigrationFencedError) return refused(error);
-    throw error;
-  }
-  const lease = { lock: migrationFencePaths(dataDir)?.lock ?? '', open: true };
-  try { return await leases.run([...(leases.getStore() ?? []), lease], work); }
-  finally { lease.open = false; leave(); }
+  const refusal = projectAdmissionRefusal(dataDir);
+  if (refusal) return refused(refusal);
+  return holdProjectWork(dataDir, work);
 }
 
 /** A task that is not terminal: it keeps a project from being fenced for a migration. */
@@ -229,6 +229,20 @@ export interface ProjectMigrationFence {
   lock: string;
   journal: string;
   release(): void;
+}
+
+/** `work`, or `timedOut()` once `deadline` passes, or the abort reason of `signal`. */
+async function withinDeadline(work: Promise<unknown>, deadline: number, signal: AbortSignal | undefined, timedOut: () => Error): Promise<void> {
+  const timer = new AbortController();
+  const abort = () => timer.abort(signal?.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    await Promise.race([work, delay(Math.max(0, deadline - Date.now()), undefined, { signal: timer.signal }).then(() => { throw timedOut(); })]);
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    timer.abort();
+  }
 }
 
 /** The live cockpit other than this process that owns `dataDir`, if any: its pid and, once it
@@ -313,6 +327,9 @@ export class CockpitOwnership {
    */
   async fenceProject(dataDir: string, options: {
     liveTasks: () => readonly LiveProjectTask[]; inFlight: () => number; signal?: AbortSignal | undefined; drainMs?: number;
+    /** Work that ends on its own once nothing new starts (history compression, a reports scan),
+     *  awaited inside the same bound and abort. */
+    settle?: () => Promise<unknown>;
   }): Promise<ProjectMigrationFence> {
     const paths = migrationFencePaths(dataDir);
     if (!paths) throw new Error(`Not a project data directory: ${dataDir}`);
@@ -336,6 +353,7 @@ export class CockpitOwnership {
         if (Date.now() >= deadline) throw new ProjectMigrationBusyError('drain-timeout', options.liveTasks(), project);
         await delay(50, undefined, { signal: options.signal });
       }
+      if (options.settle) await withinDeadline(options.settle(), deadline, options.signal, () => new ProjectMigrationBusyError('drain-timeout', options.liveTasks(), project));
       return fence;
     } catch (error) {
       fence.release();

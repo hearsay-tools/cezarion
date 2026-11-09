@@ -31,7 +31,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import {
   CockpitAlreadyRunningError, CockpitOwnership, MIGRATION_JOURNAL_FILE, ProjectMigrationBusyError, ProjectMigrationFencedError, admitProject,
-  migrationFencePaths, projectAdmissionRefusal,
+  holdProjectWork, migrationFencePaths, projectAdmissionRefusal, withProjectAdmission,
 } from './cockpit-ownership.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { ProjectContexts, fenceProjectContext, sweepRegisteredPreviewLeftovers } from './project-context.ts';
@@ -428,6 +428,61 @@ describe('the owning cockpit', () => {
       pin.mockRestore();
       expect(ctx.store.getRun(held)?.autoResumeAt).toBe('2026-11-10T00:00:00.000Z');
     } finally { fence.release(); }
+  });
+
+  it('keeps detached work admitted and drained after the request that started it answers', async () => {
+    const { dataDir } = project();
+    const cockpit = owner();
+    await cockpit.acquire(dataDir);
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let check!: Promise<string | undefined>;
+    let delivery!: Promise<string | undefined>;
+    // A request answers 202 and leaves a manual check and a webhook delivery running.
+    await withProjectAdmission(dataDir, async function request() {
+      check = withProjectAdmission(dataDir, async function manualCheck() { await gate; return projectAdmissionRefusal(dataDir)?.reason; }, () => 'refused');
+      delivery = holdProjectWork(dataDir, async function webhookDelivery() { await gate; return projectAdmissionRefusal(dataDir)?.reason; });
+    }, () => undefined);
+    let polls = 0;
+    let wake: (() => void) | undefined;
+    const waitPolls = async (count: number) => {
+      const target = polls + count;
+      while (polls < target) await new Promise<void>((resolve) => { wake = resolve; });
+    };
+    let held = false;
+    const fencing = cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => { polls += 1; wake?.(); return 0; } })
+      .then((fence) => { held = true; return fence; });
+    await waitPolls(2);
+    expect(held).toBe(false);
+    expect(projectAdmissionRefusal(dataDir)?.reason).toBe('migrating');
+    finish();
+    expect(await check).toBeUndefined();
+    expect(await delivery).toBeUndefined();
+    (await fencing).release();
+  });
+
+  it('waits for work that settles on its own inside the drain bound and the abort', async () => {
+    const { dataDir } = project();
+    const cockpit = owner();
+    await cockpit.acquire(dataDir);
+    let finish!: () => void;
+    const scan = new Promise<void>((resolve) => { finish = resolve; });
+    let asked!: () => void;
+    const settling = new Promise<void>((resolve) => { asked = resolve; });
+    let held = false;
+    const fencing = cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: () => { asked(); return scan; } })
+      .then((fence) => { held = true; return fence; });
+    await settling;
+    expect(held).toBe(false);
+    finish();
+    (await fencing).release();
+    const never = () => new Promise<void>(() => undefined);
+    const timedOut = await cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: never, drainMs: 100 }).catch((error: unknown) => error);
+    expect((timedOut as ProjectMigrationBusyError).reason).toBe('drain-timeout');
+    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+    const abort = new AbortController();
+    await expect(cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: () => { abort.abort(); return never(); }, signal: abort.signal })).rejects.toThrow();
+    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
   });
 
   it('gives up the fence when its wait is aborted', async () => {
