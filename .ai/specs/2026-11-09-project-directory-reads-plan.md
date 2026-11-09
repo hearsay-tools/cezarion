@@ -85,7 +85,7 @@ Other approved rules:
 | Dead fallback live family | Readable; no boot recovery write | A control adopts it, then normal orphan adoption recovers it |
 | Automatic fallback cleanup | Retain bytes and evidence | Skip; one count per sweep |
 | Explicit fallback or duplicate deletion | Retain bytes and evidence | Refuse; name source path and required binary |
-| Writes in a fallback worktree | Refuse agent launch/Continue, setup, preview commands and Git writes; autosave/cleanup skip with a count; diff, files and result collection remain readable |
+| Writes in a fallback worktree | Diff, files and result collection remain readable | Refuse agent launch/Continue, setup, preview commands and Git writes; autosave/cleanup skip with a count |
 | Release switch off | Dual reads | No migration or deprecation notice |
 | Release switch on | Same dual reads and precedence | Legacy notice; writes remain legacy until P5 |
 

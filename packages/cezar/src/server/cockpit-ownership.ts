@@ -15,10 +15,12 @@ const ownerSchema = z.object({
 type Owner = z.infer<typeof ownerSchema>;
 
 export class CockpitAlreadyRunningError extends Error {
-  constructor(dataDir: string, owner?: Owner) {
-    super(owner?.url
-      ? `A cockpit already serves ${dataDir} at ${owner.url}`
-      : `A cockpit already owns ${dataDir} and is still starting; retry shortly`);
+  constructor(dataDir: string, owner?: Owner, unreadableLock?: string) {
+    super(unreadableLock
+      ? `Cannot read the cockpit lock ${unreadableLock}; a cockpit of the binary that migrated the project may own ${dataDir}. Remove the file only if no cockpit runs from that directory`
+      : owner?.url
+        ? `A cockpit already serves ${dataDir} at ${owner.url}`
+        : `A cockpit already owns ${dataDir} and is still starting; retry shortly`);
     this.name = 'CockpitAlreadyRunningError';
   }
 }
@@ -156,7 +158,8 @@ export class CockpitOwnership {
     if (!existsSync(path)) return;
     const owner = readOwner(path);
     // Invalid fallback claims cannot be repaired by this binary; retain them unchanged.
-    if (!owner || alive(owner)) throw new CockpitAlreadyRunningError(fallback, owner);
+    if (!owner) throw new CockpitAlreadyRunningError(fallback, undefined, path);
+    if (alive(owner)) throw new CockpitAlreadyRunningError(fallback, owner);
   }
 
   publishUrl(url: string): void {

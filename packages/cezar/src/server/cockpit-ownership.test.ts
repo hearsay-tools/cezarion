@@ -160,3 +160,14 @@ it('refuses a live fallback cockpit before creating legacy state and keeps its c
   expect(existsSync(dataDir)).toBe(false);
   expect(readFileSync(path, 'utf8')).toBe(bytes);
 });
+
+it('refuses an unreadable fallback cockpit lock with its path and keeps the file unchanged', async () => {
+  const { root, owner, dataDir } = fixture();
+  const fallback = join(root, '.ai/squawk');
+  mkdirSync(fallback, { recursive: true });
+  const path = join(fallback, 'cockpit.lock');
+  writeFileSync(path, '{"schema":"from a newer binary"}');
+  await expect(owner.acquire(dataDir)).rejects.toThrow(`Cannot read the cockpit lock ${path}`);
+  expect(existsSync(dataDir)).toBe(false);
+  expect(readFileSync(path, 'utf8')).toBe('{"schema":"from a newer binary"}');
+});
