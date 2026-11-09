@@ -1,6 +1,8 @@
 import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract';
 import type { ArchiveOnMergeSnapshot, RunStore } from '../runs/store.ts';
 import { pullRequestKey } from '../runs/pull-requests.ts';
+import { projectPaths } from '../project-paths.ts';
+import { withProjectAdmission } from './cockpit-ownership.ts';
 
 export interface ArchiveProject { id: string; root: string; status?: string }
 export interface ArchiveOnMergeDeps {
@@ -61,7 +63,8 @@ export class ArchiveOnMergeCoordinator {
       // Four projects per tick avoids a minute per unopened project. Each project remains bounded.
       for (let i = 0; i < Math.min(4, projects.length) && current(); i++) {
         const project = projects[this.projectCursor++ % projects.length]!;
-        await this.tickProject(project, abort.signal, current);
+        // Admitted for the whole tick, the config read included; a fenced project waits a tick.
+        await withProjectAdmission(projectPaths(project.root).write, this.tickProject.bind(this, project, abort.signal, current), () => undefined);
       }
     } catch {
       // A registry outage leaves tasks visible until the next bounded poll.

@@ -1,5 +1,6 @@
 import { fallbackProjectWriteError, projectPaths } from '../project-paths.ts';
 import { assertProjectAdmitted, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
+import { isLiveRecord } from '../runs/run-row.ts';
 import type { Home } from '../home/home.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './run/launch-read-resolver.ts';
 import { composeRunModules, type RunModules } from './run/compose.ts';
@@ -589,9 +590,11 @@ export class RunManager {
     deferForCapacity = false,
     conversation?: Parameters<RunStore['commitWorkerContinuation']>[4],
   ): { ok: boolean; error?: string } {
-    const fenced = projectAdmissionRefusal(this.#dataDir);
-    if (fenced) return { ok: false, error: fenced.message };
     const record = this.#store.getRun(runId);
+    // A migration fence refuses new work only. An automatic resume or a wait wake continues a run
+    // that is already live, which the fence lists and waits for; it is never refused here.
+    const fenced = record && isLiveRecord(record) ? undefined : projectAdmissionRefusal(this.#dataDir);
+    if (fenced) return { ok: false, error: fenced.message };
     const workspace = record?.worktreePath ?? (record?.delegation?.role === 'worker' ? record.delegation.workspace.path : undefined);
     const fallback = workspace && fallbackProjectWriteError(workspace);
     if (fallback) return { ok: false, error: fallback };

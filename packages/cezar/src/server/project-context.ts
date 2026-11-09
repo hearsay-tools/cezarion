@@ -17,14 +17,16 @@ import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './repo-branch-sweep.ts';
-import { RunStore } from '../runs/store.ts';
+import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, trackProjectWork, withProjectAdmission, CockpitOwnership, type ProjectMigrationFence } from './cockpit-ownership.ts';
+import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, trackProjectWork, withProjectAdmission, CockpitOwnership, type LiveProjectTask, type ProjectMigrationFence } from './cockpit-ownership.ts';
+import { isLiveRecord } from '../runs/run-row.ts';
+import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -152,21 +154,37 @@ export async function sweepRegisteredPreviewLeftovers(
   return killed;
 }
 
-/** Work that keeps a project busy: every run this store holds live or pinned (an active run, a
- *  Continue, retention, publish or branch cleanup), and every family another live process (a
- *  headless `cez run`, another binary) claims in the same database. */
-export function projectLiveTaskCount(store: Pick<RunStore, 'listRuns' | 'liveForeignClaimCount'>): number {
-  return store.listRuns().length + store.liveForeignClaimCount();
+/** The state a live-task list shows: the status, and what an idle-looking task still waits for. */
+function liveState(run: RunRecord): string {
+  if (isUsageLimitHold(run)) return `${run.status}, usage-limit auto-resume`;
+  const waits = run.waits?.filter((wait) => wait.phase === 'open' || wait.phase === 'resolved').map((wait) => wait.kind) ?? [];
+  return waits.length ? `${run.status}, waiting on ${[...new Set(waits)].join(', ')}` : run.status;
 }
 
 /**
- * The owning cockpit's migration fence over one of its projects: new reads and task starts are
- * refused at once; resolves when admitted operations drained and no task is live (queued,
- * running, waiting, or held by another process). The caller holds it until every rewrite ends.
+ * Every task of a project that is not terminal (`isLiveRecord`): queued, running, waiting on a
+ * human, a usage-limit auto-resume, a timer, a PR or a worker. Plus the runs of every family
+ * another live process (a headless `cez run`, another binary) claims in the same database.
+ * Admission, the fence's preflight and its drain share this one notion of live.
+ */
+export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'liveForeignClaimedRunIds' | 'getRun'>): LiveProjectTask[] {
+  const own = store.listRuns().filter(isLiveRecord);
+  const ids = new Set(own.map((run) => run.id));
+  const foreign = store.liveForeignClaimedRunIds().filter((id) => !ids.has(id)).map((id) => store.getRun(id)).filter((run): run is RunRecord => run !== undefined);
+  return [...own, ...foreign].map((run) => ({ id: run.id, title: run.title, state: liveState(run) }));
+}
+
+/**
+ * The owning cockpit's migration fence over one of its projects: refuse new reads and starts,
+ * refuse to proceed while any task is live (listing them), then drain the work in flight (runs
+ * pinned by retention, publish or branch cleanup, the manager's tracked work) for a bounded time.
+ * The caller holds it until every rewrite ends.
  */
 export async function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store' | 'manager'>, signal?: AbortSignal): Promise<ProjectMigrationFence> {
   const fence = await ownership.fenceProject(project.dataDir, {
-    liveTasks: () => projectLiveTaskCount(project.store) + project.manager.pendingWork(), signal,
+    liveTasks: () => projectLiveTasks(project.store),
+    inFlight: () => project.store.listRuns().length + project.manager.pendingWork(),
+    signal,
   });
   // History compression writes run files; the rest of the store's own work ends when the holder
   // closes the store, before its first move (docs/areas/project-routes.md).

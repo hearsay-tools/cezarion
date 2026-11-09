@@ -203,6 +203,27 @@ export async function withProjectAdmission<T, R>(dataDir: string, work: () => Pr
   finally { lease.open = false; leave(); }
 }
 
+/** A task that is not terminal: it keeps a project from being fenced for a migration. */
+export interface LiveProjectTask { id: string; title: string; state: string }
+
+/**
+ * How long a fence drains work already in flight before the migration stops by itself: longer
+ * than one webhook delivery series (3 attempts of 10 s with backoff), a project context build with
+ * recovery and one bounded archive or automation tick; short enough that no migration hangs.
+ */
+export const PROJECT_FENCE_DRAIN_MS = 60_000;
+
+/** The fence was given up: tasks are live, or work still ran when the drain bound passed. */
+export class ProjectMigrationBusyError extends Error {
+  constructor(readonly reason: 'live' | 'drain-timeout', readonly tasks: readonly LiveProjectTask[], readonly project: string) {
+    const list = tasks.map((task) => `\n- ${task.id} ${task.title} (${task.state})`).join('');
+    super(reason === 'live'
+      ? `Cannot migrate ${project}: ${tasks.length} task${tasks.length === 1 ? ' is' : 's are'} live. Finish or cancel each one, then retry:${list}`
+      : `The migration of ${project} stopped: work was still running after ${PROJECT_FENCE_DRAIN_MS / 1000} s. Nothing was moved. Finish or cancel each task below, then retry:${list}`);
+    this.name = 'ProjectMigrationBusyError';
+  }
+}
+
 /** A held migration fence: exclusive until `release`, which never removes another owner's claim. */
 export interface ProjectMigrationFence {
   lock: string;
@@ -284,11 +305,15 @@ export class CockpitOwnership {
 
   /**
    * Take the project's exclusive migration fence: own the project (taking `cockpit.lock` when this
-   * instance does not hold it), refuse new operations, then wait until no admitted operation and
-   * no live task (`liveTasks`) remains. Only the `cockpit.lock` holder ever holds the fence, so no
-   * other cockpit boots or serves the project meanwhile. Held until `release`; an abort releases it.
+   * instance does not hold it) and refuse new operations. Then, with no wait in between, refuse
+   * while any task is live (`liveTasks`), and drain the work in flight (`inFlight` and admitted
+   * operations) for at most `drainMs`. Only the `cockpit.lock` holder ever holds the fence, so no
+   * other cockpit boots or serves the project meanwhile. A refusal, the bound or an abort releases
+   * the fence; otherwise it is held until `release`.
    */
-  async fenceProject(dataDir: string, options: { liveTasks: () => number; signal?: AbortSignal | undefined }): Promise<ProjectMigrationFence> {
+  async fenceProject(dataDir: string, options: {
+    liveTasks: () => readonly LiveProjectTask[]; inFlight: () => number; signal?: AbortSignal | undefined; drainMs?: number;
+  }): Promise<ProjectMigrationFence> {
     const paths = migrationFencePaths(dataDir);
     if (!paths) throw new Error(`Not a project data directory: ${dataDir}`);
     // The directory that exists, so resuming after the move never recreates the old name.
@@ -303,7 +328,14 @@ export class CockpitOwnership {
       release(paths.lock, owner);
     } };
     try {
-      while (options.liveTasks() > 0 || (admitted.get(paths.lock) ?? 0) > 0) await delay(50, undefined, { signal: options.signal });
+      const project = dirname(dirname(paths.lock));
+      const live = options.liveTasks();
+      if (live.length > 0) throw new ProjectMigrationBusyError('live', live, project);
+      const deadline = Date.now() + (options.drainMs ?? PROJECT_FENCE_DRAIN_MS);
+      while (options.liveTasks().length > 0 || options.inFlight() > 0 || (admitted.get(paths.lock) ?? 0) > 0) {
+        if (Date.now() >= deadline) throw new ProjectMigrationBusyError('drain-timeout', options.liveTasks(), project);
+        await delay(50, undefined, { signal: options.signal });
+      }
       return fence;
     } catch (error) {
       fence.release();

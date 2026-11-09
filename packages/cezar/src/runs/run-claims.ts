@@ -49,9 +49,10 @@ export function foreignClaimedRunIds(db: RunDatabase | null, owner: ClaimOwner |
   return kept.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => kept.has(row.family)).map((row) => row.id);
 }
 
-/** Families a live store other than `owner` claims: a headless `cez run`, another binary, or a
- *  second store of this process. A project migration fence waits until none remains. */
-export function liveForeignClaimCount(db: RunDatabase | null, owner: ClaimOwner | undefined): number {
-  if (!db || !owner) return 0;
-  return db.listClaims().filter((claim) => claim.session !== owner.session && claimOwnerLive(claim)).length;
+/** The runs of every family a live store other than `owner` claims: a headless `cez run`, another
+ *  binary, or a second store of this process. A project migration fence refuses while any exists. */
+export function liveForeignClaimedRunIds(db: RunDatabase | null, owner: ClaimOwner | undefined): string[] {
+  if (!db || !owner) return [];
+  const live = new Set(db.listClaims().filter((claim) => claim.session !== owner.session && claimOwnerLive(claim)).map((claim) => claim.family));
+  return live.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => live.has(row.family)).map((row) => row.id);
 }

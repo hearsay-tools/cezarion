@@ -12,7 +12,10 @@ import { isGithubAutomation, isScheduleAutomation, type AutomationDefinition, ty
  * or counted, and the timer retries at its floor.
  */
 function admitted<T>(dataDir: string, fire: () => Promise<T>): Promise<T> {
-  return withProjectAdmission(dataDir, fire, (error) => { throw new AutomationProjectUnavailableError(error.message, { cause: error }); });
+  return withProjectAdmission(dataDir, fire, (error) => {
+    console.warn(`[cez] automation fire deferred until the project migration ends: ${error.message}`);
+    throw new AutomationProjectUnavailableError(error.message, { cause: error });
+  });
 }
 
 export interface AutomationLaunchResult { runId: string; existing?: boolean }

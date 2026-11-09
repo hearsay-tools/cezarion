@@ -83,7 +83,7 @@ import { archiveStoreFamily } from './archive-family.ts';
 import { claimStoreFamilies } from './claim-families.ts';
 import { createStoreOwnedRun } from './owned-run-create.ts';
 import { commitStoreWorkerResult } from './worker-result-commit.ts';
-import { claimOwnerLive, closeClaimSession, foreignClaimedRunIds, liveForeignClaimCount, openClaimSession, type ClaimOwner } from './run-claims.ts';
+import { claimOwnerLive, closeClaimSession, foreignClaimedRunIds, liveForeignClaimedRunIds, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
 export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
@@ -895,8 +895,8 @@ export class RunStore extends EventEmitter {
 
   /** Every run whose family another process owns (`foreignClaimedRunIds`). */
   listForeignClaimedRunIds(): string[] { return foreignClaimedRunIds(this.db, this.owner); }
-  /** Families another live store claims here (`liveForeignClaimCount`). */
-  liveForeignClaimCount(): number { return liveForeignClaimCount(this.db, this.owner); }
+  /** The runs of families another live store claims here (`liveForeignClaimedRunIds`). */
+  liveForeignClaimedRunIds(): string[] { return liveForeignClaimedRunIds(this.db, this.owner); }
 
   /**
    * Whether a held run anchors itself (and its family) in memory. Anything else held is a family

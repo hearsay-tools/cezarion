@@ -47,15 +47,33 @@ pid plus start-token liveness and token-checked release.
   search, the activity snapshot, socket upgrades and live feeds, `RunManager.startRun`
   and `continueRun`, the artifact writer before each write. CLI points are in
   [the CLI area](cli.md#project-migration-fence).
-- **Automatic jobs.** A refusal inside an automatic job is a skip: an automation fire
-  becomes `AutomationProjectUnavailableError` (nothing reserved, advanced, logged or
-  counted; the timer retries at its floor), maintenance and sweeps return nothing.
-- **Who drains.** The fence holder. It waits until no lease or tracked work remains for
-  the project in its process, no run is held (live, or pinned by an active run, a
-  Continue, retention, publish or branch cleanup), the manager has no tracked async work,
-  and no other live store claims a family in `run_claims` (a headless `cez run`, another
-  binary). The owning cockpit then waits for history compression. It holds the fence
-  until `release()`, after the last rewrite.
+- **Automatic jobs.** A refusal inside an automatic job is a skip that writes nothing into
+  the fenced project: an automation fire becomes `AutomationProjectUnavailableError`
+  (nothing reserved, advanced, logged or counted; the timer retries at its floor), and the
+  coordinator arms no timer for a fenced project. The skip goes to the cockpit's process
+  log once per fence. The occurrence stays in the persisted state and fires after the
+  fence ends, once, through the scheduler's catch-up (24 h), also after a restart.
+  Maintenance and sweeps return nothing. An automatic resume or wait wake continues a run
+  that is already live, so `continueRun` never refuses it; it refuses only a run that is
+  not live.
+- **Live tasks (strict fence).** `projectLiveTasks(store)`: every non-terminal task
+  (`isLiveRecord`: queued, running, waiting on a human, a usage-limit auto-resume, a
+  timer, a PR or a worker) plus the runs of families another live store claims in
+  `run_claims` (a headless `cez run`, another binary). Right after the claim, with no
+  wait in between, the fence refuses while any exists: it releases at once and throws
+  `ProjectMigrationBusyError` with each task's id, title and state and the next step
+  (finish or cancel each one). The preflight and the drain share this one notion of live.
+  Chosen over letting controls of live tasks through during a drain: a strict fence never
+  waits on a task that only a person can settle.
+- **Bounded drain.** After a clean preflight the holder drains work in flight: leases and
+  tracked work in its process, runs pinned by an active run, a Continue, retention,
+  publish or branch cleanup, and the manager's tracked async work. The bound is
+  `PROJECT_FENCE_DRAIN_MS`, 60 s: longer than one webhook delivery series (3 attempts of
+  10 s with backoff), a context build with recovery and one bounded archive or
+  automation tick; short enough that no migration hangs. At the bound the migration stops
+  by itself: the fence is released and the same error lists what is still live. An abort
+  signal releases it earlier. The owning cockpit then waits for history compression. The
+  holder keeps the fence until `release()`, after the last rewrite.
 - **Holder duty (P4b2).** After the drain and before the first move, the holder disposes
   the project's context with previews released and closes its store. That ends the
   store's own work (save debounce, transcript facts, the reports index, the repo-handle

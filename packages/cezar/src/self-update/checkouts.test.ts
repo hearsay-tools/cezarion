@@ -191,7 +191,7 @@ describe('linked checkouts', () => {
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
     const migrator = new CockpitOwnership();
-    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => 0 });
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
     try {
       const found = await discoverCheckouts(env, testHome(env));
       expect(found.map((c) => [c.branch, c.task])).toEqual(expect.arrayContaining([['cez/def67890', null], ['main', null]]));
