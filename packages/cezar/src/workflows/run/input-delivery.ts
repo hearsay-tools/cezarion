@@ -1,4 +1,4 @@
-import { WAIT_KINDS } from './wait-kinds.ts';
+import { WAIT_KINDS, waitDeliveryLabel } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
@@ -12,7 +12,7 @@ import { writeInput, type ActiveRun } from '../active-run.ts';
 import type { PastedContent } from '../pasted-content.ts';
 import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
-import { chargesBudget, hasPrWait, isMonitoringTimer, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
+import { chargesBudget, hasPrWait, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import { enqueueAgentInput, agentInputBatch } from '../../delegation/input.ts';
@@ -584,7 +584,7 @@ export class InputDelivery {
     const { session } = flight;
     if (spent !== undefined) {
       flightWrites.reserve(flight, false);
-      const kind = !timers.length && peers.length ? 'peer message' : timers.some(isMonitoringTimer) ? 'monitoring' : (['timer', 'process', 'peer'] as const).find(k => timers.some(wait => wait.kind === k));
+      const kind = !timers.length && peers.length ? 'peer message' : waitDeliveryLabel(timers);
       this.context.store.appendEvent(runId, { type: 'note', message: `automatic ${kind} wake-up (${spent}/${this.maxAutoContinues})` });
     }
     // A wake of results always spends its admission; a wake of messages alone, only one it holds.
