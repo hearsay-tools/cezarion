@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { processStartToken } from '../delegation/process-liveness.ts';
+import * as legacyIndex from './legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseDiskFullError } from './run-database.ts';
 import { blockRunWrites, readPersistedRuns, runIds } from './run-store.testkit.ts';
 import { LEGACY_INDEX_BACKUP_FILE, RunStore, __setLegacyImportHookForTests } from './store.ts';
@@ -404,13 +405,15 @@ describe('an older cezar still writing runs.json', () => {
     let reachedTransaction = 0;
     __setLegacyImportHookForTests({ beforeTransaction: () => { reachedTransaction++; } });
     await olderCockpit(60_000, true);
-    const started = performance.now();
+    const cockpitChecks = vi.spyOn(legacyIndex, 'assertNoLegacyCockpit');
+    const indexReads = vi.spyOn(legacyIndex, 'readLegacyIndex');
     expect(openFailure({ retryBusy: true }).kind).toBe('legacy-writer');
-    // The pauses between attempts, and nothing more: no attempt imports anything.
-    expect(performance.now() - started).toBeLessThan(5_000);
+    // Exercise retries, but refuse each one before reading or parsing the index.
+    expect(cockpitChecks.mock.calls.length).toBeGreaterThan(1);
+    expect(indexReads).not.toHaveBeenCalled();
     expect(reachedTransaction).toBe(0);
     expect(backups()).toEqual([]);
-  }, 15_000);
+  }, 15_000); // bound: child startup and the synchronous retry loop must finish.
 
   it('saving runs.json during every attempt: no refused attempt leaves a backup, and the import that commits leaves one', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
