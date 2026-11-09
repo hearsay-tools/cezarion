@@ -723,7 +723,7 @@ export class RunStore extends EventEmitter {
   sourceDataDir(id: string): string { return this.isFallbackRun(id) ? dataReadDirs(this.dataDir)[1]! : this.dataDir; }
   isFallbackRun(id: string): boolean { return this.db?.isFallback(id) ?? false; }
   hasFallbackRun(id: string): boolean { return this.db?.hasFallback(id) ?? false; }
-  fallbackDeleteError(id: string): string | undefined { return fallbackRunDeleteError(this.dataDir, this.hasFallbackRun(id), this.peek(id)?.worktreePath); }
+  fallbackDeleteError(id: string, kind: 'record' | 'worktree' = 'record'): string | undefined { return fallbackRunDeleteError(this.dataDir, kind === 'record' ? this.hasFallbackRun(id) : this.isFallbackRun(id), this.peek(id)?.worktreePath); }
   /**
    * Open-time load: the live rows, the finished rows a load normalization repairs, then the
    * delegation families of the live ones. A row that does not parse is skipped and left in the
@@ -2982,8 +2982,8 @@ export class RunStore extends EventEmitter {
     });
   }
 
-  canDeleteRun(id: string): boolean {
-    if (this.fallbackDeleteError(id)) return false;
+  canDeleteRun(id: string, kind: 'record' | 'worktree' = 'record'): boolean {
+    if (this.fallbackDeleteError(id, kind)) return false;
     if (autosaveCleanupBlocker(this.dataDir, id)) return false;
     const run = this.peek(id);
     if (run?.delegation?.role === 'invalid') return false;

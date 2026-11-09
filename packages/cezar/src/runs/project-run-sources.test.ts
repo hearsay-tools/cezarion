@@ -130,6 +130,8 @@ describe('project run sources', () => {
     seed('squawk', [{ ...duplicate, title: 'fallback copy' }]);
     const store = open();
     expect(store.isFallbackRun(duplicate.id)).toBe(false);
+    expect(store.canDeleteRun(duplicate.id, 'worktree')).toBe(true);
+    expect(store.canDeleteRun(duplicate.id)).toBe(false);
     expect(() => store.deleteRun(duplicate.id)).toThrow(/\.ai\/squawk.*binary that migrated/);
     expect(store.deleteRun(old.id)).toBe(true);
     store.flush();

@@ -1,3 +1,4 @@
+import { protectFallbackRun } from './project-write-guards.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from '../project-paths.ts';
 import { productIdentity } from '../home/identity.ts';
@@ -3985,15 +3986,13 @@ export function createApp(deps: ServerDeps) {
 
     // Archived tasks keep their worktree for inspection; this is the explicit
     // "🧹 Remove worktree" cleanup (spec 006).
-    .post('/runs/:id/remove-worktree', async (c) => {
+    .post('/runs/:id/remove-worktree', protectFallbackRun('worktree'), async (c) => {
       const { root: repoRoot, store, manager } = c.get('project');
       const id = c.req.param('id');
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
-      const fallbackRefusal = store.fallbackDeleteError(id);
-      if (fallbackRefusal) return c.json({ error: fallbackRefusal }, 409);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      if (run.delegation?.role === 'worker' || !store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
+      if (run.delegation?.role === 'worker' || !store.canDeleteRun(id, 'worktree')) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
       const release = manager.claimForPublish(id);
       if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
       try {
@@ -4003,14 +4002,12 @@ export function createApp(deps: ServerDeps) {
       } finally { release(); }
     })
 
-    .delete('/runs/:id', async (c) => {
+    .delete('/runs/:id', protectFallbackRun('record'), async (c) => {
       const { root: repoRoot, store, manager } = c.get('project');
       const id = c.req.param('id');
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
-      const fallbackRefusal = store.fallbackDeleteError(id);
-      if (fallbackRefusal) return c.json({ error: fallbackRefusal }, 409);
       // Delete cleans up after itself: worktree + branch go with the run (spec 006).
       if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
       const release = manager.claimForPublish(id);
