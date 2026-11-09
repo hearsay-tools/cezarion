@@ -282,12 +282,13 @@ describe('task quick-list', () => {
   })
 
   it('paints one dot per row, in the tone deriveAttention picked', () => {
-    const tones = browser.evaluate(`(() => {
+    const tones = browser.waitForValue(`(() => {
       const of = (id) => {
         const dot = document.querySelector('[data-run-id="' + id + '"] [data-slot="status-dot"]')
         return dot && { tone: dot.dataset.tone, pulses: getComputedStyle(dot).animationName !== 'none' }
       }
-      return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
+      const review = of('fix-review-pr'), done = of('fix-done'), failed = of('fix-failed')
+      return review && done && failed ? { review, done, failed } : null
     })()`) as Record<string, { tone: string; pulses: boolean }>
 
     // Review is info blue since the #617 status key (it used to be brand teal, which read as done).
@@ -298,14 +299,15 @@ describe('task quick-list', () => {
 
     // The design system's size rule, resolved by the real CSS rather than asserted from a class.
     expect(
-      browser.evaluate(
+      browser.waitForValue(
         `getComputedStyle(document.querySelector('[data-run-id="fix-done"] [data-slot="status-dot"]')).width`
       )
     ).toBe('7px')
   })
 
   it('links a row to its task, and the PR chip to the PR', () => {
-    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-done"] a').getAttribute('href')`)).toBe(
+    // A bucket can mount before either row; assert on each row's accepted sample.
+    expect(browser.waitForValue(`document.querySelector('[data-slot="task-row"][data-run-id="fix-done"] a')?.getAttribute('href') ?? null`)).toBe(
       scoped('/tasks/fix-done')
     )
 
@@ -313,8 +315,9 @@ describe('task quick-list', () => {
     // sidebar reference is plain text there, and the whole row is the tap target. The pointer
     // path (a real link with the status panel) is pinned in selection-states, which forces a
     // hover-capable pointer, and in the unit suite.
-    const chip = browser.evaluate(`(() => {
+    const chip = browser.waitForValue(`(() => {
       const el = document.querySelector('[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
+      if (!el) return null
       return { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent }
     })()`) as { noHover: boolean; tag: string; inert: string | null; text: string }
     expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: '#396' })
@@ -431,10 +434,10 @@ describe('tasks table overview', () => {
   })
 
   it('is the home: the table renders every active fixture run with its status', () => {
-    const rows = browser.evaluate(`[...document.querySelectorAll('${TABLE_ROW}')].map((tr) => ({
+    const rows = browser.waitForValue<Array<{ id: string; status: string }>>(`[...document.querySelectorAll('${TABLE_ROW}')].map((tr) => ({
       id: tr.dataset.runId,
       status: tr.querySelector('[data-slot="pill"]').textContent,
-    }))`) as Array<{ id: string; status: string }>
+    }))`, value => value.length === FIXTURE.filter(run => !run.archived).length)
 
     expect(Object.fromEntries(rows.map((r) => [r.id, r.status]))).toEqual({
       'fix-review-pr': 'needs review',
@@ -451,9 +454,10 @@ describe('tasks table overview', () => {
 
     // A spot check across the columns: tokens formatted, the PR chip numbered and pointed out —
     // and the Task cell shows the auto-summary, never the raw fixture title behind it.
-    const reviewRow = browser.evaluate(`(() => {
+    const reviewRow = browser.waitForValue(`(() => {
       const tr = document.querySelector('${TABLE_ROW}[data-run-id="fix-review-pr"]')
-      const pr = tr.querySelector('[data-slot="pr-chip"]')
+      const pr = tr?.querySelector('[data-slot="pr-chip"]')
+      if (!tr || !pr) return null
       return { text: tr.textContent, prHref: pr.href, prTarget: pr.target }
     })()`) as { text: string; prHref: string; prTarget: string }
     expect(browser.evaluate(`document.querySelector('[data-run-id="fix-review-pr"] [aria-label="Input tokens: 999,900; output tokens: 888,800"]') !== null`)).toBe(true)
@@ -468,12 +472,12 @@ describe('tasks table overview', () => {
 
   it('fills the ± column where a run recorded a diff, and keeps the honest dash where none exists', () => {
     // Column 5 is ± (Status | Task | Workflow | Branch | ±) — read it for every row at once.
-    const diffs = browser.evaluate(`Object.fromEntries(
+    const diffs = browser.waitForValue<Record<string, string>>(`Object.fromEntries(
       [...document.querySelectorAll('${TABLE_ROW}')].map((tr) => [
         tr.dataset.runId,
         tr.querySelector('[role=cell][data-column-id="diff"]').textContent,
       ])
-    )`) as Record<string, string>
+    )`, value => Object.keys(value).length === FIXTURE.filter(run => !run.archived).length)
 
     expect(diffs).toEqual({
       'fix-review-pr': '+128 −14',
@@ -495,7 +499,7 @@ describe('tasks table overview', () => {
         `document.querySelector('[data-slot="view-tab"][data-view="active"]').getAttribute('aria-pressed')`
       )
     ).toBe('true')
-    expect(browser.count('[data-slot="task-row"][data-run-id="fix-review-pr"]')).toBe(1)
+    expect(browser.waitForValue<number>(`document.querySelectorAll('[data-slot="task-row"][data-run-id="fix-review-pr"]').length`, value => value > 0)).toBe(1)
 
     browser.click('[data-slot="view-tab"][data-view="automations"]')
     browser.waitForFunction(`document.querySelector('[data-slot="view-tab"][data-view="automations"]').getAttribute('aria-pressed') === 'true'`)
@@ -537,7 +541,7 @@ describe('tasks table overview', () => {
         const metadata = mobile
           ? `${row} [data-slot="mobile-task-meta"] > span:last-child`
           : `${row} [data-column-id="started"]`
-        const normal = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
+        const normal = browser.waitForValue(contrastSampleExpression(metadata)) as ContrastSample
         expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
         browser.hover(row)
         const hovered = browser.evaluate(contrastSampleExpression(metadata)) as ContrastSample
