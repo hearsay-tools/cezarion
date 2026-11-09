@@ -135,8 +135,10 @@ test('trusted PR gate uses live labels and head blobs, and refuses changed metad
   pr.base.sha = 'b'.repeat(40);
   await assert.rejects(checkPullRequest(input), /PR changed/);
   pr.base.sha = r.base;
-  r.git('update-ref', 'refs/pull/42/head', r.base);
+  let reads = 0;
+  github.rest.pulls.get = async () => ({ data: ++reads === 1 ? pr : { ...pr, head: { sha: r.base } } });
   await assert.rejects(checkPullRequest(input), /changed during fetch/);
+  assert.equal(reads, 2);
   await checkPullRequest({ ...input, context: { eventName: 'push' } });
 });
 
@@ -159,6 +161,23 @@ test('trusted PR gate measures from the branch tip it runs from, not the stale e
   const core = { setFailed: message => failures.push(message), info: () => {} };
   await checkPullRequest({ github: { rest: { pulls: { get: async () => ({ data: pr }) } } }, context, core, cwd: r.cwd });
   assert.deepEqual(failures, []);
+});
+
+test('trusted PR gate fetches the head commit before the PR ref exists', async (t) => {
+  const { checkPullRequest } = require('./baseline-growth.cjs');
+  const r = repository(t);
+  r.write('feature.txt', 'the PR change');
+  const head = r.commit();
+  r.git('remote', 'add', 'origin', r.cwd);
+  assert.equal(spawnSync('git', ['show-ref', '--verify', 'refs/pull/42/head'], { cwd: r.cwd }).status, 128);
+  const pr = { number: 42, head: { sha: head }, base: { sha: r.base }, labels: [] };
+  const context = { eventName: 'pull_request_target', sha: r.base, repo: { owner: 'owner', repo: 'repo' },
+    payload: { pull_request: pr } };
+  const messages = [];
+  const core = { setFailed: message => assert.fail(message), info: message => messages.push(message) };
+  await checkPullRequest({ github: { rest: { pulls: { get: async () => ({ data: pr }) } } }, context, core, cwd: r.cwd });
+  assert.equal(r.git('rev-parse', 'FETCH_HEAD'), head);
+  assert.deepEqual(messages, ['Baseline ratchets did not grow.']);
 });
 
 test('duplicate site counts can reorder without consuming the wrong allowance', () => {
