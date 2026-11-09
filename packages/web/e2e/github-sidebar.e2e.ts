@@ -399,7 +399,8 @@ describe('GitHub desktop sidebar (#622)', () => {
   it('keeps every view tab and More inside the narrowest sidebar, the widest active label unclipped', () => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
     browser.goto(`${base}/settings`)
-    browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Settings"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
+    // GitHub mounts only after health or the project registry confirms forge availability.
+    browser.waitForFunction(`document.querySelector('[data-slot="view-tabs"] a[aria-label="GitHub"]') !== null && document.querySelector('[data-slot="view-tabs"] a[aria-current="page"][aria-label="Settings"]') !== null && document.querySelector('[data-slot="view-tabs"] button[aria-label="More views"]') !== null`)
     const fit = waitForSettledSample(browser, `(() => {
       const nav = document.querySelector('[data-slot="view-tabs"]');
       const inner = nav.getBoundingClientRect().right - parseFloat(getComputedStyle(nav).paddingRight);
