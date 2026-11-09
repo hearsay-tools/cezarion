@@ -379,6 +379,9 @@ export class RunManager {
    */
   startRunIdempotent(workflow: WorkflowDef, input: StartRunInput, request: { id: string; hash: string }): { run: RunRecord; created: boolean } | { conflict: true } { return this.#modules.runStart.startRunIdempotent(workflow, input, request); }
 
+  /** Async work this manager still owns (`TrackedWork`): a project migration fence waits for none. */
+  pendingWork(): number { return this.#context.work.pending.size; }
+
   /** Every task start, from any source, passes the project's migration admission first. */
   startRun(workflow: WorkflowDef, input: StartRunInput, clientRequest?: { id: string; hash: string }): RunRecord {
     assertProjectAdmitted(this.#dataDir);

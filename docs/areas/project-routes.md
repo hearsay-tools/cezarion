@@ -22,27 +22,44 @@ directory move never carries it and never creates a second owner. It uses the
 `CockpitOwnership` claim protocol: exclusive link-create, the `.reclaim` guard,
 pid plus start-token liveness and token-checked release.
 
-- **Who claims.** `CockpitOwnership.fenceProject(dataDir, { liveTasks })`. An owning
-  cockpit calls `fenceProjectContext(ownership, context)`. A CLI with no cockpit calls
-  `fenceProject` directly: it claims the fence, then `cockpit.lock` in whichever
-  project directory exists, so a resume after the move never recreates the old name.
-  A competing CLI fails at once; a cockpit that won `cockpit.lock` first makes the
-  migrator release the fence and fail.
-- **Who drains.** The fence holder. It waits until no operation admitted in its
-  process (`admitProject` leases) and no live task remain. Live tasks are the store's
-  live rows (queued, running, waiting, open waits, auto-resume, pending worker destroy)
-  plus every family another live store claims in `run_claims` (a headless `cez run`,
-  another binary). It holds the fence until `release()`, after the last rewrite.
-- **What admission checks.** `projectAdmissionRefusal(dataDir)`: two `lstat` calls when
-  dormant, nothing written. It refuses a live fence (the process's own included), an
-  unreadable lock (the message names the file and when it is safe to remove it) and an
-  existing journal `.ai/squawk-migration.json`. A dead owner without a journal admits;
-  the next fence claim reclaims the file. Admission points: `acquire` (before `mkdir`
-  and after its claim), lazy builds and built contexts, maintenance, warm-up, the
-  registered preview sweep, `projectRunSources` (runs index and search), the activity
-  snapshot, the boot-project branch of archive-on-merge, every project route (409, a
-  lease until the handler returns; workspace routes keep answering), `RunManager.startRun`
-  and `continueRun`. CLI points are in [the CLI area](cli.md#project-migration-fence).
+- **Who claims.** `CockpitOwnership.fenceProject(dataDir, { liveTasks })`. It first owns
+  `cockpit.lock` (an owning cockpit already does; a CLI with no cockpit takes it in
+  whichever project directory exists, so a resume after the move never recreates the old
+  name), then claims the fence. Only the `cockpit.lock` holder ever holds the fence, so
+  no other cockpit boots or serves the project meanwhile. A competing CLI meets the held
+  fence and fails at once. An owning cockpit calls `fenceProjectContext(ownership, context)`.
+- **Admission.** `projectAdmissionRefusal(dataDir)`: two `lstat` calls when dormant,
+  nothing written. It refuses a live fence (the process's own included), an unreadable
+  lock (the message names the file and when it is safe to remove it) and an existing
+  journal `.ai/squawk-migration.json`. A dead owner without a journal admits; the next
+  fence claim reclaims the file.
+- **Leases.** New project work enters through `withProjectAdmission(dataDir, work, refused)`:
+  refused when fenced, otherwise counted until `work` settles. The lease travels with the
+  async call chain (`AsyncLocalStorage`): everything the admitted work calls, a task start
+  or a context build included, passes admission while the lease is open, and the drain
+  then waits for what it started. Work that admitted or live work set going (webhook
+  deliveries, preview releases, a manual automation check) is counted with
+  `trackProjectWork`, never refused. Entry points: every project route (409), finite
+  run-event reads, lazy context builds, maintenance (`withMaintenanceStore`),
+  archive-on-merge and completion actions (`withStore`), automation timer fires, the
+  preview leftover sweep. Point checks: `acquire` (before `mkdir` and after its claim),
+  built contexts, warm-up, `AutomationCoordinator.store` and `refresh`, runs index and
+  search, the activity snapshot, socket upgrades and live feeds, `RunManager.startRun`
+  and `continueRun`, the artifact writer before each write. CLI points are in
+  [the CLI area](cli.md#project-migration-fence).
+- **Automatic jobs.** A refusal inside an automatic job is a skip: an automation fire
+  becomes `AutomationProjectUnavailableError` (nothing reserved, advanced, logged or
+  counted; the timer retries at its floor), maintenance and sweeps return nothing.
+- **Who drains.** The fence holder. It waits until no lease or tracked work remains for
+  the project in its process, no run is held (live, or pinned by an active run, a
+  Continue, retention, publish or branch cleanup), the manager has no tracked async work,
+  and no other live store claims a family in `run_claims` (a headless `cez run`, another
+  binary). The owning cockpit then waits for history compression. It holds the fence
+  until `release()`, after the last rewrite.
+- **Holder duty (P4b2).** After the drain and before the first move, the holder disposes
+  the project's context with previews released and closes its store. That ends the
+  store's own work (save debounce, transcript facts, the reports index, the repo-handle
+  retry) and the manager's timers. Branch sweeps touch Git refs only.
 - **Journal.** The journal blocks admission whether its owner lives or not; only the
   fence holder passes. P4b2 removes it as its last step before `release()`. P4b3 adds
   early recovery in front of admission.
@@ -51,7 +68,7 @@ pid plus start-token liveness and token-checked release.
   another process takes the fence can still read project files until it ends. Each CLI
   write path re-checks admission right before its first project write, and a headless
   run's claims keep the drain waiting. Long-lived event streams over an already open
-  store end only when the owner closes that store (P4b2).
+  store end when the holder closes that store.
 
 ## Rules
 

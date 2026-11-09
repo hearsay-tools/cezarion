@@ -279,7 +279,7 @@ import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resol
 import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
-import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
+import { projectAdmissionRefusal, trackProjectWork, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -3043,7 +3043,7 @@ export function createApp(deps: ServerDeps) {
       const check: ManualCheck = { id, automationId: automation.id, mode: parsed.data.mode, status: 'queued', createdAt: new Date().toISOString() };
       if (manualChecks.size >= 200) manualChecks.delete(manualChecks.keys().next().value!);
       manualChecks.set(id, check);
-      void (async () => {
+      trackProjectWork(project.dataDir, (async () => {
         check.status = 'running';
         try {
           const repoRemote = (await getRepoInfo(project.root))?.remote;
@@ -3064,7 +3064,7 @@ export function createApp(deps: ServerDeps) {
         } catch (error) {
           Object.assign(check, { status: 'error', completedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
         }
-      })();
+      })());
       return c.json({ checkId: id }, 202);
     })
 
@@ -5120,11 +5120,11 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;
     },
-    withStore: async (project, work) => {
-      if (project.root === deps.repoRoot) return withProjectAdmission(projectPaths(deps.repoRoot).write, () => work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening), () => undefined);
+    withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, async () => {
+      if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
       return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
-    },
+    }, () => undefined),
     lookup: (root, identities, signal) => resolveForgeRoot(root, deps.forgeFactory).mergedPullRequests(identities, signal),
   };
   const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);

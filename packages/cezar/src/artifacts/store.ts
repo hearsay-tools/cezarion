@@ -1,11 +1,12 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { constants, realpathSync, type BigIntStats } from 'node:fs';
 import { mkdir, open, opendir, realpath, lstat, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
-import { basename, isAbsolute, join, parse, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { hostname } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { publishedArtifactSchema, type PublishedArtifact } from '@open-mercato/cezar-contract/artifacts';
+import { assertProjectAdmitted } from '../server/cockpit-ownership.ts';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_METADATA_BYTES = 32 * 1024;
@@ -130,6 +131,8 @@ type Directory = { path: string; check: () => Promise<void>; close: () => Promis
  * descriptors; other platforms revalidate identity before/after use, not a same-user sandbox. */
 async function storageDirectory(path: string, create = false): Promise<Directory> {
   const absolute = resolve(path);
+  // A writer re-checks the migration fence of `<dataDir>/runs/<task>-artifacts` before each write.
+  const admitted = () => { if (create) assertProjectAdmitted(dirname(dirname(absolute))); };
   let file: FileHandle | undefined;
   const root = parse(absolute).root;
   let current = root;
@@ -138,6 +141,7 @@ async function storageDirectory(path: string, create = false): Promise<Directory
     for (const part of absolute.slice(root.length).split(sep).filter(Boolean)) {
       current = join(current, part);
       const anchored = process.platform === 'linux' ? join(`/proc/self/fd/${file.fd}`, part) : current;
+      admitted();
       if (create) await mkdir(anchored, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
       const next = await open(anchored, readFlags | constants.O_DIRECTORY);
       await file.close(); file = next;
@@ -145,6 +149,7 @@ async function storageDirectory(path: string, create = false): Promise<Directory
     const handle = file;
     const original = await handle.stat({ bigint: true });
     const check = async () => {
+      admitted();
       if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     };
     await check();

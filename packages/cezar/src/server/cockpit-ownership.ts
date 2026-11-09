@@ -1,6 +1,7 @@
 import { dataReadDirs, pathPresent } from '../project-paths.ts';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
@@ -47,15 +48,6 @@ function release(path: string, owner: Owner): void {
   // A delayed cleanup must never remove a replacement owner's claim.
   if (readOwner(path)?.token === owner.token) {
     try { unlinkSync(path); } catch { /* process exit cleanup is best effort */ }
-  }
-}
-
-/** Remove only the empty directories this call created, innermost first. */
-function removeCreated(dataDir: string, created: string | undefined): void {
-  if (!created) return;
-  for (let directory = resolve(dataDir); ; directory = dirname(directory)) {
-    try { rmdirSync(directory); } catch { return; }
-    if (directory === resolve(created) || directory === dirname(directory)) return;
   }
 }
 
@@ -139,7 +131,7 @@ export class ProjectMigrationFencedError extends Error {
  */
 export function projectAdmissionRefusal(dataDir: string): ProjectMigrationFencedError | undefined {
   const paths = migrationFencePaths(dataDir);
-  if (!paths) return undefined;
+  if (!paths || leased(paths.lock)) return undefined;
   if (pathPresent(paths.lock)) {
     const owner = readOwner(paths.lock);
     if (!owner && pathPresent(paths.lock)) return new ProjectMigrationFencedError('unreadable', paths.lock);
@@ -155,6 +147,12 @@ export function assertProjectAdmitted(dataDir: string): void {
 
 /** Operations admitted per fence path in this process; a fence drains them to zero. */
 const admitted = new Map<string, number>();
+/** The open leases of the current async call chain: an operation admitted before a fence
+ *  finishes, task starts included, and the drain waits for what it started. */
+const leases = new AsyncLocalStorage<ReadonlyArray<{ lock: string; open: boolean }>>();
+function leased(lock: string): boolean {
+  return leases.getStore()?.some((lease) => lease.open && lease.lock === lock) ?? false;
+}
 
 /** Admit one operation until the returned release runs; throws `ProjectMigrationFencedError`. */
 export function admitProject(dataDir: string): () => void {
@@ -172,7 +170,27 @@ export function admitProject(dataDir: string): () => void {
   };
 }
 
-/** Run `work` admitted until it settles, so a fence drains it; a fenced project answers `refused`. */
+/**
+ * Count `work` towards the drain until it settles, without refusing it: work that admitted or
+ * live work already set going (a webhook delivery, a preview release), which a fence must wait
+ * for rather than drop.
+ */
+export function trackProjectWork(dataDir: string, work: Promise<unknown>): void {
+  const lock = migrationFencePaths(dataDir)?.lock;
+  if (!lock) return;
+  admitted.set(lock, (admitted.get(lock) ?? 0) + 1);
+  const settle = () => {
+    const left = admitted.get(lock)! - 1;
+    if (left > 0) admitted.set(lock, left);
+    else admitted.delete(lock);
+  };
+  void work.then(settle, settle);
+}
+
+/**
+ * Run `work` admitted until it settles, so a fence drains it; a fenced project answers `refused`.
+ * Everything `work` calls passes admission for this project while the lease is open.
+ */
 export async function withProjectAdmission<T, R>(dataDir: string, work: () => Promise<T>, refused: (error: ProjectMigrationFencedError) => R): Promise<T | R> {
   let leave: () => void;
   try { leave = admitProject(dataDir); }
@@ -180,8 +198,9 @@ export async function withProjectAdmission<T, R>(dataDir: string, work: () => Pr
     if (error instanceof ProjectMigrationFencedError) return refused(error);
     throw error;
   }
-  try { return await work(); }
-  finally { leave(); }
+  const lease = { lock: migrationFencePaths(dataDir)?.lock ?? '', open: true };
+  try { return await leases.run([...(leases.getStore() ?? []), lease], work); }
+  finally { lease.open = false; leave(); }
 }
 
 /** A held migration fence: exclusive until `release`, which never removes another owner's claim. */
@@ -221,10 +240,15 @@ export class CockpitOwnership {
   }
 
   async acquire(dataDir: string): Promise<void> {
+    return this.claimProject(dataDir, false);
+  }
+
+  /** `forFence`: the claim a fence holder takes first, which an unfinished journal does not stop. */
+  private async claimProject(dataDir: string, forFence: boolean): Promise<void> {
     // Before mkdir: a project moved under a fence never gets an empty directory back.
-    this.checkMigrationFence(dataDir);
+    this.checkMigrationFence(dataDir, forFence);
     this.checkFallbackOwner(dataDir);
-    const created = mkdirSync(dataDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
     const canonical = realpathSync(dataDir);
     const path = join(canonical, 'cockpit.lock');
     if (this.owned.has(path)) return;
@@ -236,9 +260,9 @@ export class CockpitOwnership {
       if (this.owned.has(path)) return;
       this.checkFallbackOwner(dataDir);
       if (claim(path, owner)) {
-        // A fence claimed while this claim landed wins: back off and leave nothing behind.
-        try { this.checkFallbackOwner(dataDir); this.checkMigrationFence(dataDir); }
-        catch (error) { release(path, owner); removeCreated(dataDir, created); throw error; }
+        // A fence claimed while this claim landed wins: back off.
+        try { this.checkFallbackOwner(dataDir); this.checkMigrationFence(dataDir, forFence); }
+        catch (error) { release(path, owner); throw error; }
         this.owned.set(path, owner); return;
       }
       const current = readOwner(path);
@@ -249,23 +273,27 @@ export class CockpitOwnership {
   }
 
   /** Refuse a fenced project, unless the fence is this instance's own. */
-  private checkMigrationFence(dataDir: string): void {
+  private checkMigrationFence(dataDir: string, journalAllowed: boolean): void {
     const paths = migrationFencePaths(dataDir);
     if (!paths) return;
     const held = this.fences.get(paths.lock);
     if (held && readOwner(paths.lock)?.token === held.token) return;
-    assertProjectAdmitted(dataDir);
+    const refusal = projectAdmissionRefusal(dataDir);
+    if (refusal && !(journalAllowed && refusal.reason === 'journal')) throw refusal;
   }
 
   /**
-   * Take the project's exclusive migration fence: refuse new operations, own the project
-   * (taking `cockpit.lock` when no cockpit of this instance does), then wait until no admitted
-   * operation and no live task (`liveTasks`) remains. Held until `release`; an abort releases it.
+   * Take the project's exclusive migration fence: own the project (taking `cockpit.lock` when this
+   * instance does not hold it), refuse new operations, then wait until no admitted operation and
+   * no live task (`liveTasks`) remains. Only the `cockpit.lock` holder ever holds the fence, so no
+   * other cockpit boots or serves the project meanwhile. Held until `release`; an abort releases it.
    */
   async fenceProject(dataDir: string, options: { liveTasks: () => number; signal?: AbortSignal | undefined }): Promise<ProjectMigrationFence> {
     const paths = migrationFencePaths(dataDir);
     if (!paths) throw new Error(`Not a project data directory: ${dataDir}`);
-    mkdirSync(dirname(paths.lock), { recursive: true });
+    // The directory that exists, so resuming after the move never recreates the old name.
+    const target = dataReadDirs(resolve(dataDir)).find(pathPresent) ?? dataDir;
+    if (!this.owns(target)) await this.claimProject(target, true);
     const owner: Owner = { ...newOwner(), ...(this.url ? { url: this.url } : {}) };
     if (!claim(paths.lock, owner)) throw projectAdmissionRefusal(dataDir) ?? new ProjectMigrationFencedError('migrating', paths.lock);
     this.fences.set(paths.lock, owner);
@@ -275,9 +303,6 @@ export class CockpitOwnership {
       release(paths.lock, owner);
     } };
     try {
-      // The directory that exists, so resuming after the move never recreates the old name.
-      const target = dataReadDirs(resolve(dataDir)).find(pathPresent) ?? dataDir;
-      if (!this.owns(target)) await this.acquire(target);
       while (options.liveTasks() > 0 || (admitted.get(paths.lock) ?? 0) > 0) await delay(50, undefined, { signal: options.signal });
       return fence;
     } catch (error) {

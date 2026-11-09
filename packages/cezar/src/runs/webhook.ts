@@ -12,6 +12,7 @@ import { loadWorkspaceConfig, type WorkspaceProject } from '../workspace/config.
 import { taskWebhooks } from '../workspace/webhooks.ts';
 import { deriveRunContextEvents } from './event-history.ts';
 import type { RunRecord, RunStore } from './store.ts';
+import { trackProjectWork } from '../server/cockpit-ownership.ts';
 
 /**
  * Opted-in task webhooks from selected derived-state entries. One store subscriber queues
@@ -236,6 +237,8 @@ export class TaskWebhook {
         if (map.get(key) === next) map.delete(key);
       });
     map.set(key, next);
+    // A project migration fence waits for queued and retrying deliveries.
+    trackProjectWork(this.options.dataDir, next);
   }
 
   /** Resolve the webhooks as they are now, then queue one send per webhook that wants it. The

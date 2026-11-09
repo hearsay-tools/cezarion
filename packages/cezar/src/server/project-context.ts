@@ -24,8 +24,7 @@ import { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { admitProject, assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, withProjectAdmission, CockpitOwnership, type ProjectMigrationFence } from './cockpit-ownership.ts';
-import { isLiveRecord } from '../runs/run-row.ts';
+import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, trackProjectWork, withProjectAdmission, CockpitOwnership, type ProjectMigrationFence } from './cockpit-ownership.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -104,14 +103,17 @@ export interface ProjectContextDeps {
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
 const sweptPreviewDirs = new Set<string>();
 
-/** One data dir's crash leftovers, once per process; whatever the live host runs is spared. */
+/** One data dir's crash leftovers, once per process; whatever the live host runs is spared. Admitted
+ *  for its whole length; a project under a migration fence is swept after the fence ends. */
 function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promise<number> {
-  if (sweptPreviewDirs.has(dataDir)) return Promise.resolve(0);
+  if (sweptPreviewDirs.has(dataDir) || projectAdmissionRefusal(dataDir)) return Promise.resolve(0);
   sweptPreviewDirs.add(dataDir);
   const keep = host
     ? (runId: string, what: number | 'browser') => (what === 'browser' ? host.ownsBrowser(runId) : host.ownsServer(runId, what))
     : undefined;
-  return sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
+  return withProjectAdmission(dataDir, async () => {
+    return sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
+  }, () => 0);
 }
 
 /**
@@ -125,7 +127,7 @@ export function armPreview(store: RunStore, dataDir: string, host: PreviewHost |
   // Before the sweep's first await: a crash's agent state is reconciled before any agent can connect.
   reconcileAgentMarkers(dataDir, store, runId => host?.hasAgents(runId) ?? false);
   void sweepPreviewOnce(dataDir, host);
-  if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined));
+  if (host) store.on('deleted', (runId: string) => trackProjectWork(dataDir, host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined)));
 }
 
 /**
@@ -144,16 +146,17 @@ export async function sweepRegisteredPreviewLeftovers(
     if (project.status === 'missing') continue;
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
-    if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir) || projectAdmissionRefusal(dataDir)) continue;
+    if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir)) continue;
     killed += await sweepPreviewOnce(dataDir, host);
   }
   return killed;
 }
 
-/** Tasks that keep a project busy: this store's live rows, and every family another live process
- *  (a headless `cez run`, another binary) claims in the same database. */
+/** Work that keeps a project busy: every run this store holds live or pinned (an active run, a
+ *  Continue, retention, publish or branch cleanup), and every family another live process (a
+ *  headless `cez run`, another binary) claims in the same database. */
 export function projectLiveTaskCount(store: Pick<RunStore, 'listRuns' | 'liveForeignClaimCount'>): number {
-  return store.listRuns().filter(isLiveRecord).length + store.liveForeignClaimCount();
+  return store.listRuns().length + store.liveForeignClaimCount();
 }
 
 /**
@@ -161,8 +164,14 @@ export function projectLiveTaskCount(store: Pick<RunStore, 'listRuns' | 'liveFor
  * refused at once; resolves when admitted operations drained and no task is live (queued,
  * running, waiting, or held by another process). The caller holds it until every rewrite ends.
  */
-export function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store'>, signal?: AbortSignal): Promise<ProjectMigrationFence> {
-  return ownership.fenceProject(project.dataDir, { liveTasks: () => projectLiveTaskCount(project.store), signal });
+export async function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store' | 'manager'>, signal?: AbortSignal): Promise<ProjectMigrationFence> {
+  const fence = await ownership.fenceProject(project.dataDir, {
+    liveTasks: () => projectLiveTaskCount(project.store) + project.manager.pendingWork(), signal,
+  });
+  // History compression writes run files; the rest of the store's own work ends when the holder
+  // closes the store, before its first move (docs/areas/project-routes.md).
+  await project.store.historyIdle();
+  return fence;
 }
 
 /** A build that finished after `disposeAll`: its context was torn down, never registered. */
@@ -262,7 +271,12 @@ export class ProjectContexts {
     let active = true;
     const current = () => active && generation === this.generation && epoch === (this.epochs.get(projectId) ?? 0);
     const built = this.peek(projectId);
-    if (built) return withProjectAdmission(built.dataDir, () => work(built.store, current).finally(() => { active = false; }), () => undefined);
+    if (built) {
+      return withProjectAdmission(built.dataDir, async () => {
+        try { return await work(built.store, current); }
+        finally { active = false; }
+      }, () => undefined);
+    }
     if (this.building.has(projectId) || this.maintenance.has(projectId)) return undefined;
     const lease = (async () => {
       const project = (await this.deps.listProjects()).find(project => project.id === projectId);
@@ -270,7 +284,10 @@ export class ProjectContexts {
       noticeLegacyProject(project.root);
       const dataDir = projectPaths(project.root).write;
       if (ownedByAnotherCockpit(dataDir)) return undefined;
-      return withProjectAdmission(dataDir, () => this.maintainColdStore(project.root, dataDir, work, current).finally(() => { active = false; }), () => undefined);
+      return withProjectAdmission(dataDir, async () => {
+        try { return await this.maintainColdStore(project.root, dataDir, work, current); }
+        finally { active = false; }
+      }, () => undefined);
     })();
     this.maintenance.set(projectId, lease);
     try { return await lease; }
@@ -460,9 +477,9 @@ export class ProjectContexts {
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
     // Admitted until recovery ends, so a migration fence drains this build before it moves anything.
-    const leave = admitProject(dataDir);
-    try { return await this.open(project, dataDir, stale); }
-    finally { leave(); }
+    return withProjectAdmission(dataDir, async () => {
+      return this.open(project, dataDir, stale);
+    }, (error) => { throw error; });
   }
 
   private async open(project: ProjectContextSource, dataDir: string, stale: () => boolean): Promise<ProjectContext> {

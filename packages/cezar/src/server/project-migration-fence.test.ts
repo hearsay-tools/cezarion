@@ -11,6 +11,10 @@ import { activitySnapshotSchema } from '@open-mercato/cezar-contract/activity';
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runsIndexResponseSchema } from '@open-mercato/cezar-contract/workspace-events';
 import { runArtifactCommand } from '../artifacts/cli.ts';
+import { AutomationStore } from '../automations/store.ts';
+import { AutomationCoordinator } from '../automations/coordinator.ts';
+import { publishArtifact } from '../artifacts/store.ts';
+import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { defaultCliDeps, main, type CliDeps } from '../cli-dispatch.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
@@ -60,6 +64,18 @@ function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array
 }
 
 const fenced = (promise: Promise<unknown>) => expect(promise).rejects.toBeInstanceOf(ProjectMigrationFencedError);
+
+/** The drain polls the busy count through `listRuns`: each call is the signal that it looked and kept waiting. */
+function drainPolls(store: RunStore): (count: number) => Promise<void> {
+  const listRuns = store.listRuns.bind(store);
+  let polls = 0;
+  let wake: (() => void) | undefined;
+  vi.spyOn(store, 'listRuns').mockImplementation(() => { polls += 1; wake?.(); return listRuns(); });
+  return async (count) => {
+    const target = polls + count;
+    while (polls < target) await new Promise<void>((resolve) => { wake = resolve; });
+  };
+}
 
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
@@ -219,18 +235,17 @@ describe('the owning cockpit', () => {
     setRunStatus(other, theirs.id, RUN_STATUS.running);
     other.flush();
     expect(store.liveForeignClaimCount()).toBe(1);
-    // The drain polls the live-task count: each call is the signal that it looked and kept waiting.
-    const listRuns = store.listRuns.bind(store);
-    let polls = 0;
-    let wake: (() => void) | undefined;
-    vi.spyOn(store, 'listRuns').mockImplementation(() => { polls += 1; wake?.(); return listRuns(); });
-    const waitPolls = async (count: number) => {
-      const target = polls + count;
-      while (polls < target) await new Promise<void>((resolve) => { wake = resolve; });
-    };
+    // Retention, publish and branch cleanup pin a finished run while they touch its files.
+    const settled = store.createRun({ title: 'settled', workflow: 'w', task: 't', steps: [] });
+    setRunStatus(store, settled.id, RUN_STATUS.done);
+    expect(store.pin(settled.id, 'maintenance')).toBeDefined();
+    const waitPolls = drainPolls(store);
     const inFlight = admitProject(dataDir);
     let held = false;
-    const fencing = fenceProjectContext(cockpit, { dataDir, store }).then((fence) => { held = true; return fence; });
+    // The manager's own async work (retention, settlement, autosave) counts too.
+    let managerWork = 1;
+    const manager = { pendingWork: () => managerWork } as unknown as RunManager;
+    const fencing = fenceProjectContext(cockpit, { dataDir, store, manager }).then((fence) => { held = true; return fence; });
     expect(() => admitProject(dataDir)).toThrow(ProjectMigrationFencedError);
     await fenced(contextsFor(cockpit, { id: 'p', root: dataDir.slice(0, -'/.ai/cezar'.length) }).context('p'));
     await waitPolls(2);
@@ -243,12 +258,80 @@ describe('the owning cockpit', () => {
     }
     await waitPolls(2);
     expect(held).toBe(false);
+    store.unpin(settled.id, 'maintenance');
+    await waitPolls(2);
+    expect(held).toBe(false);
     other.close();
+    await waitPolls(2);
+    expect(held).toBe(false);
+    managerWork = 0;
     const fence = await fencing;
     expect(held).toBe(true);
     expect(() => admitProject(dataDir)).toThrow(ProjectMigrationFencedError);
     fence.release();
     admitProject(dataDir)();
+  });
+
+  it('lets an operation admitted before the fence finish, and waits for it, while new ones are refused', async () => {
+    const { root, dataDir } = project();
+    seedRuns(dataDir, [makeRunRecord({ id: 'done', title: 'done', status: RUN_STATUS.done })]);
+    const cockpit = owner();
+    const contexts = contextsFor(cockpit, { id: 'p', root });
+    const ctx = await contexts.context('p');
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    const insideLease: Array<string | undefined> = [];
+    const job = contexts.withMaintenanceStore('p', async () => {
+      started();
+      await gate;
+      // A task start or a context read inside the admitted job still passes.
+      insideLease.push(projectAdmissionRefusal(dataDir)?.reason);
+      return 'maintained';
+    });
+    await running;
+    const waitPolls = drainPolls(ctx.store);
+    let held = false;
+    const fencing = fenceProjectContext(cockpit, ctx).then((fence) => { held = true; return fence; });
+    await waitPolls(2);
+    expect(held).toBe(false);
+    expect(projectAdmissionRefusal(dataDir)?.reason).toBe('migrating');
+    expect(await contexts.withMaintenanceStore('p', async () => 'second')).toBeUndefined();
+    finish();
+    expect(await job).toBe('maintained');
+    expect(insideLease).toEqual([undefined]);
+    (await fencing).release();
+  });
+
+  it('skips an automation timer that meets the fence without recording anything, then fires it after release', async () => {
+    const { dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+    const at = '2026-09-14T04:00:00.000Z';
+    store.setState('nightly', (current) => ({ ...current, nextRunAt: at }));
+    const before = { state: store.state('nightly'), receipts: [...store.latestReceipts().values()], logs: store.logs({ automationId: 'nightly' }) };
+    const fence = await owner().fenceProject(dataDir, none);
+    const launchSchedule = vi.fn(async () => ({ runId: 'nightly-run' }));
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse('2026-09-14T04:00:01Z'));
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store, hasProjects: () => true } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', launchSchedule }),
+      now: () => Date.now(),
+    });
+    try {
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(launchSchedule).not.toHaveBeenCalled();
+      expect({ state: store.state('nightly'), receipts: [...store.latestReceipts().values()], logs: store.logs({ automationId: 'nightly' }) }).toEqual(before);
+      fence.release();
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(launchSchedule).toHaveBeenCalledTimes(1);
+    } finally {
+      scheduler.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('gives up the fence when its wait is aborted', async () => {
@@ -292,7 +375,7 @@ describe('admission sweep', () => {
     seedRuns(owned.dataDir, [record('owned-run')]);
     seedRuns(cold.dataDir, [record('cold-run')]);
     seedRuns(free.dataDir, [record('free-run')]);
-    const [ownedId, coldId, freeId] = await Promise.all([owned, cold, free].map(async ({ root }) => (await registerProject(root, undefined, testHome())).id));
+    const [ownedId, coldId, freeId] = await Promise.all([owned, cold, free].map(async ({ root }) => { return (await registerProject(root, undefined, testHome())).id; }));
     const cockpit = owner();
     await cockpit.acquire(owned.dataDir);
     cockpit.publishUrl('http://127.0.0.1:4321');
@@ -318,36 +401,46 @@ describe('admission sweep', () => {
     const serve = () => serveCommand(testHome(), cold.root, 0, false, undefined, false,
       { ...defaultServeDeps, acquireServeListener: serveListener, process: new EventEmitter() } as unknown as ServeDeps)
       .then(() => false, (error: Error) => error instanceof ProjectMigrationFencedError && !error.message.includes('\n') && serveListener.mock.calls.length === 0);
-    const route = async (path: string) => (await apiRequest(app, path)).status;
+    const route = async (path: string) => { return (await apiRequest(app, path)).status; };
     const indexIds = async () => runsIndexResponseSchema.parse(await (await apiRequest(app, '/api/v1/workspace/runs-index')).json()).runs.map((run) => run.id);
     const activity = async () => activitySnapshotSchema.parse(await (await apiRequest(app, '/api/v1/workspace/activity')).json())
       .projects.find((entry) => entry.projectId === ownedId);
     const maintenanceWork = vi.fn(async () => 'maintained');
+    const finiteRead = async () => {
+      const response = await apiRequest(app, '/api/v1/workspace/run-event-batches', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runs: [{ projectId: ownedId, runId: 'owned-run', afterSeq: 0 }] }) });
+      return ((await response.json()) as { results: Array<{ type: string; status?: number }> }).results[0];
+    };
+    const automations = new AutomationCoordinator({ listProjects: async () => [{ id: coldId!, root: cold.root, status: 'not-git' }] });
+    writeFileSync(join(cold.dataDir, 'automations.json'), '{"version":1,"automations":[]}');
     const live = createWorkspaceProjects({ bootRoot: owned.root, bootProjectId: ownedId, home: testHome() });
     live.bindContexts(ctx, lazy);
     const artifactError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const probes: Record<string, () => Promise<boolean>> = {
-      'cockpit boot claim': () => owner().acquire(cold.dataDir).then(() => false, (error) => error instanceof ProjectMigrationFencedError),
+      'cockpit boot claim': () => { return owner().acquire(cold.dataDir).then(() => false, (error) => error instanceof ProjectMigrationFencedError); },
       'serve: one-line refusal before the listener': serve,
-      'built lazy context': () => contexts.context(ownedId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError),
-      'cold lazy context and recovery': () => lazy.context(coldId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError),
+      'built lazy context': () => { return contexts.context(ownedId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError); },
+      'cold lazy context and recovery': () => { return lazy.context(coldId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError); },
       'background warm-up': async () => { lazyContext.mockClear(); return (await lazy.warmAll([{ id: coldId!, root: cold.root, status: 'not-git' }])).length === 0 && lazyContext.mock.calls.length === 0; },
-      'maintenance over a built context': async () => (await contexts.withMaintenanceStore(ownedId!, maintenanceWork)) === undefined && maintenanceWork.mock.calls.length === 0,
-      'cold maintenance': async () => (await lazy.withMaintenanceStore(coldId!, maintenanceWork)) === undefined && maintenanceWork.mock.calls.length === 0,
-      'registered preview sweep': async () => (await sweepRegisteredPreviewLeftovers([{ root: cold.root }], undefined)) === 0 && existsSync(leftover),
-      'boot project route': async () => (await route('/api/v1/runs')) === 409,
-      'lazy project route': async () => (await route(`/api/v1/p/${coldId}/runs`)) === 409,
+      'maintenance over a built context': async () => { return (await contexts.withMaintenanceStore(ownedId!, maintenanceWork)) === undefined && maintenanceWork.mock.calls.length === 0; },
+      'cold maintenance': async () => { return (await lazy.withMaintenanceStore(coldId!, maintenanceWork)) === undefined && maintenanceWork.mock.calls.length === 0; },
+      'registered preview sweep': async () => { return (await sweepRegisteredPreviewLeftovers([{ root: cold.root }], undefined)) === 0 && existsSync(leftover); },
+      'boot project route': async () => { return (await route('/api/v1/runs')) === 409; },
+      'lazy project route': async () => { return (await route(`/api/v1/p/${coldId}/runs`)) === 409; },
       'workspace runs index (owned and cold reads)': async () => { const ids = await indexIds(); return !ids.includes('owned-run') && !ids.includes('cold-run'); },
-      'workspace activity': async () => (await activity())?.unavailable?.status === 409,
-      'socket upgrade (boot)': async () => (await live.lookupProject(ownedId)) === undefined,
-      'socket upgrade (lazy)': async () => (await live.lookupProject(coldId)) === undefined,
-      'live feed (boot)': () => live.resolveLiveProject(ownedId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError),
-      'live feed (lazy)': () => live.resolveLiveProject(coldId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError),
+      'workspace activity': async () => { return (await activity())?.unavailable?.status === 409; },
+      'socket upgrade (boot)': async () => { return (await live.lookupProject(ownedId)) === undefined; },
+      'socket upgrade (lazy)': async () => { return (await live.lookupProject(coldId)) === undefined; },
+      'live feed (boot)': () => { return live.resolveLiveProject(ownedId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError); },
+      'live feed (lazy)': () => { return live.resolveLiveProject(coldId!).then(() => false, (error) => error instanceof ProjectMigrationFencedError); },
       'task start': async () => { try { ctx.manager.startRun({} as Parameters<RunManager['startRun']>[0], { task: 'x' } as Parameters<RunManager['startRun']>[1]); return false; } catch (error) { return error instanceof ProjectMigrationFencedError; } },
-      'task continue and recovery continuation': async () => ctx.manager.continueRun('owned-run').error?.includes('project migration') === true,
-      'cli run': () => cli(['run', 'task']),
-      'cli init': () => cli(['init']),
-      'cli single-project listing': () => cli(['projects'], { SINGLE_PROJECT: '1' }),
+      'task continue and recovery continuation': async () => { return ctx.manager.continueRun('owned-run').error?.includes('project migration') === true; },
+      'finite run-event read': async () => { const result = await finiteRead(); return result?.type === 'error' && result.status === 409; },
+      'automation store lookup': async () => { return automations.store(coldId!, cold.root) === undefined; },
+      'artifact storage write': () => { const task = randomUUID(); return publishArtifact(join(cold.dataDir, 'runs', `${task}-artifacts`), task, join(cold.root, 'missing.txt')).then(() => false, (error) => error instanceof ProjectMigrationFencedError && !existsSync(join(cold.dataDir, 'runs'))); },
+      'cli run': () => { return cli(['run', 'task']); },
+      'cli init': () => { return cli(['init']); },
+      'cli single-project listing': () => { return cli(['projects'], { SINGLE_PROJECT: '1' }); },
       'artifact publish': async () => {
         const code = await runArtifactCommand(['publish', join(cold.root, 'missing.txt')], { CEZ_ARTIFACTS_DIR: join(cold.dataDir, 'runs', 'task-artifacts'), CEZ_TASK_ID: 'task' });
         return code === 1 && String(artifactError.mock.calls.at(-1)?.[0]).includes('project migration') && !existsSync(join(cold.dataDir, 'runs'));
@@ -367,6 +460,8 @@ describe('admission sweep', () => {
     expect(await indexIds()).toEqual(expect.arrayContaining(['owned-run', 'cold-run', 'free-run']));
     expect((await activity())?.unavailable).toBeUndefined();
     expect((await live.lookupProject(ownedId))?.dataDir).toBe(owned.dataDir);
+    expect((await finiteRead())?.type).toBe('batch');
+    expect(automations.store(coldId!, cold.root)).toBeDefined();
     expect(await sweepRegisteredPreviewLeftovers([{ root: cold.root }], undefined)).toBe(0);
     expect(existsSync(leftover)).toBe(false);
     expect(await cli(['run', 'task'])).toBe(false);
