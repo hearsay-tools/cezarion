@@ -1,3 +1,4 @@
+import { cancelWaits } from './wait-cancel.ts';
 import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { registrationIdentity, registrationReceipt, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
@@ -192,8 +193,7 @@ export class WaitRegistry {
     if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || rootFinishRequested(this.context.store, runId) || historyDeletionPending(this.context.store, runId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a peer wait');
     }
-    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
-    this.host.disarmWait(waitId);
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return peerWaitOf(this.context.store.getRun(runId), waitId);
   }
 
@@ -401,8 +401,7 @@ export class WaitRegistry {
     if (!wait) return { cancelled: false, code: 'not_found' };
     if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
     if (wait.kind === 'human' && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
-    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
-    this.host.disarmWait(waitId);
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return { cancelled: true };
   }
 
