@@ -283,8 +283,7 @@ export class WaitRegistry {
     try { assertWaitCapacity(run); }
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     if (parsed.kind === 'timer') {
-      if (WAIT_KINDS.timer.timersDisabled && this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-      if (WAIT_KINDS.timer.refusesSpentBudget && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+      this.checkAutomaticWaitAdmission('timer', runId, refuse);
       const now = Date.now();
       const wait = timerWaitEntry(parsed, via, turnId, now);
       return this.openWait(runId, active, wait, registration);
@@ -333,6 +332,13 @@ export class WaitRegistry {
         return refuse(delegationWaitRefusal(error, () => this.host.executionBlockedByRootFinish(run))); }
   }
 
+  /** The two automatic kinds share refusal rules, but keep each caller's error policy. */
+  private checkAutomaticWaitAdmission(kind: 'timer' | 'process', runId: string, refuse: (code: WaitErrorCode) => never): void {
+    const row = WAIT_KINDS[kind];
+    if (row.timersDisabled && this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
+    if (row.refusesSpentBudget && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+  }
+
   /**
    * A process wait (hearsay-tools/cezarion#1446, spec § Process wait decisions). Cezar refuses only
    * what it cannot watch to an end: another user's PID, its own, and an agent session's leader;
@@ -342,8 +348,7 @@ export class WaitRegistry {
    */
   private registerProcessWait(runId: string, active: ActiveRun, run: RunRecord, request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, registration?: RegistrationIdentity): ProcessWaitEntry {
     const refuse = (code: WaitErrorCode): never => { throw Object.assign(new Error(waitErrorMessage(code)), { code }); };
-    if (WAIT_KINDS.process.timersDisabled && this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-    if (WAIT_KINDS.process.refusesSpentBudget && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+    this.checkAutomaticWaitAdmission('process', runId, refuse);
     const roots = this.host.exitFileRoots(runId, run);
     let exitFile: string | undefined;
     if (request.exit_file !== undefined) {
