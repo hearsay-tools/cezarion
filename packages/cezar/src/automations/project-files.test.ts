@@ -137,4 +137,25 @@ describe('project automation sources', () => {
     for (let page = store.logs({ limit: 1 }); page.length; page = store.logs({ cursor, limit: 1 })) { pages.push(page[0]!.reason!); cursor = page[0]!.seq; }
     expect(pages).toEqual(['legacy-3', 'fallback-2', 'legacy-1']);
   });
+
+  it('never skips a merged log row when legacy compaction drops the oldest rows between pages', async () => {
+    seed('cezar', ['legacy']); seed('squawk', ['fallback']);
+    const row = (automationId: string, seq: number, minute: number) => JSON.stringify({ automationId, revision: 1, seq,
+      ts: new Date(Date.parse('2026-10-01T00:00:00.000Z') + minute * 60_000).toISOString(), result: 'skipped', reason: `${automationId}-${seq}` });
+    // 10,005 legacy rows: compaction keeps the newest 10,000 and drops the five oldest.
+    writeFileSync(join(root('cezar'), 'automation-log.ndjson'), Array.from({ length: 10_005 }, (_, index) => row('legacy', index + 1, index * 2)).join('\n') + '\n');
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), Array.from({ length: 50 }, (_, index) => row('fallback', index + 1, index * 2 + 1)).join('\n') + '\n');
+    const store = open();
+    const first = store.logs({ limit: 100 });
+    await store.compact();
+    const reopened = open();
+    // Keep paging from page 1's cursor after compaction: rows may repeat, none may be missing.
+    const later: Array<{ ts: string; reason?: string | undefined }> = [];
+    for (let page = reopened.logs({ cursor: first.at(-1)!.seq, limit: 100 }); page.length; page = reopened.logs({ cursor: page.at(-1)!.seq, limit: 100 })) later.push(...page);
+    const all: Array<{ ts: string; reason?: string | undefined }> = [];
+    for (let page = reopened.logs({ limit: 100 }); page.length; page = reopened.logs({ cursor: page.at(-1)!.seq, limit: 100 })) all.push(...page);
+    const seen = new Set([...first, ...later].map(entry => entry.reason));
+    expect(all.map(entry => entry.reason).filter(reason => !seen.has(reason))).toEqual([]);
+    expect(readFileSync(join(root('cezar'), 'automation-log.ndjson'), 'utf8').trim().split('\n')).toHaveLength(10_000);
+  });
 });
