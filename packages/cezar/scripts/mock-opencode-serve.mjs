@@ -921,6 +921,8 @@ function playScenarioChild(step, playChild, encoder) {
   barrier();
 }
 function sendProviderFailure() {
+  // A failed model call never reads steers queued behind its opening prompt.
+  turnLate = true;
   send({ type: 'message.part.updated', properties: { part: { id: 'prt_mock_perr', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'Starting the review' } } });
   send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired — run `opencode auth login`' } } } });
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
