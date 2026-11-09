@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { noticeLegacyProject, projectPaths } from './project-paths.ts';
+import { fallbackWorkflowPath } from './workflows/load.ts';
+import { fallbackSkillPath } from './skills.ts';
 import { commandText } from './home/command.ts';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -88,15 +90,16 @@ async function runCommand(
 
 // ---- init --------------------------------------------------------------------
 
-function initCommand(repoRoot: string): void {
+async function initCommand(repoRoot: string): Promise<void> {
   const workflowsDir = join(projectPaths(repoRoot).write, 'workflows');
   const skillsDir = join(projectPaths(repoRoot).write, 'skills');
   mkdirSync(workflowsDir, { recursive: true });
   mkdirSync(skillsDir, { recursive: true });
 
-  const examples: Array<{ path: string; content: string }> = [
+  const examples: Array<{ path: string; fallback: () => Promise<string | undefined>; content: string }> = [
     {
       path: join(workflowsDir, 'fix-and-verify.yaml'),
+      fallback: () => fallbackWorkflowPath(repoRoot, 'fix-and-verify'),
       content: `name: fix-and-verify
 description: Implement the task, then run your test command; on failure the agent retries with the failing output.
 steps:
@@ -113,6 +116,7 @@ steps:
     },
     {
       path: join(skillsDir, 'project-conventions.md'),
+      fallback: () => fallbackSkillPath(repoRoot, 'project-conventions'),
       content: `---
 name: project-conventions
 description: House rules the agent should follow in this repo.
@@ -127,8 +131,12 @@ description: House rules the agent should follow in this repo.
   ];
 
   for (const example of examples) {
+    // A starter with the same name under .ai/squawk/ is the user's: a legacy copy would hide it.
+    const fallback = existsSync(example.path) ? undefined : await example.fallback();
     if (existsSync(example.path)) {
       console.log(`  = ${example.path} (exists, left untouched)`);
+    } else if (fallback) {
+      console.log(`  = ${fallback} (exists, left untouched)`);
     } else {
       writeFileSync(example.path, example.content, 'utf8');
       console.log(`  + ${example.path}`);

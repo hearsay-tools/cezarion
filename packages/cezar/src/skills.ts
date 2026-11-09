@@ -203,6 +203,11 @@ async function skillEntryPaths(
   return paths;
 }
 
+/** The path of a skill named `name` under `.ai/squawk/skills`, the fallback catalog; legacy wins it otherwise. */
+export async function fallbackSkillPath(repoRoot: string, name: string): Promise<string | undefined> {
+  return (await readMarkdownSkills(resolve(repoRoot, SKILL_DIRS[1]!.dir), 'cezar')).find(skill => skill.name === name)?.path;
+}
+
 async function readMarkdownSkills(dir: string, source: Skill['source']): Promise<Skill[]> {
   const paths = await skillEntryPaths(dir, 4, new Set());
   const skills: Skill[] = [];

@@ -10,6 +10,8 @@ import { serveCommand } from './serve-command.ts';
 import { runHeadless } from './headless-run.ts';
 import { RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './runs/run-database.ts';
 import { encodeRunRow } from './runs/run-row.ts';
+import { loadWorkflows } from './workflows/load.ts';
+import { discoverSkills } from './skills.ts';
 
 vi.mock('./cli-dispatch.ts', () => ({ defaultCliDeps: {}, main: vi.fn(async () => undefined) }));
 vi.mock('./serve-command.ts', () => ({ defaultServeDeps: {}, serveCommand: vi.fn(async () => undefined) }));
@@ -38,19 +40,34 @@ describe('CLI project paths at real entry points', () => {
     return record;
   }
 
-  it('initializes examples under legacy and keeps authored files intact on repeated init', () => {
+  it('initializes examples under legacy and keeps authored files intact on repeated init', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mkdirSync(join(repo, '.ai/squawk/workflows'), { recursive: true });
     writeFileSync(join(repo, '.ai/squawk/workflows/custom.yaml'), 'fallback workflow');
-    cli.initCommand(repo);
+    await cli.initCommand(repo);
     const example = join(repo, '.ai/cezar/workflows/fix-and-verify.yaml');
     expect(existsSync(example)).toBe(true);
     expect(existsSync(join(repo, '.ai/cezar/skills/project-conventions.md'))).toBe(true);
     writeFileSync(example, 'authored workflow');
-    cli.initCommand(repo);
+    await cli.initCommand(repo);
     expect(readFileSync(example, 'utf8')).toBe('authored workflow');
     expect(readFileSync(join(repo, '.ai/squawk/workflows/custom.yaml'), 'utf8')).toBe('fallback workflow');
     expect(log).toHaveBeenCalled();
+  });
+
+  it('skips a starter whose name an authored .ai/squawk/ workflow or skill already uses', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mkdirSync(join(repo, '.ai/squawk/workflows'), { recursive: true });
+    mkdirSync(join(repo, '.ai/squawk/skills'), { recursive: true });
+    writeFileSync(join(repo, '.ai/squawk/workflows/mine.yaml'), 'name: fix-and-verify\nskills: [implement]\n');
+    writeFileSync(join(repo, '.ai/squawk/skills/conventions.md'), '---\nname: project-conventions\n---\n\n# Mine\n');
+    await cli.initCommand(repo);
+    expect(existsSync(join(repo, '.ai/cezar/workflows/fix-and-verify.yaml'))).toBe(false);
+    expect(existsSync(join(repo, '.ai/cezar/skills/project-conventions.md'))).toBe(false);
+    const { workflows } = await loadWorkflows(repo);
+    expect(workflows.find(workflow => workflow.name === 'fix-and-verify')?.path).toBe(join(repo, '.ai/squawk/workflows/mine.yaml'));
+    expect((await discoverSkills(repo, { builtin: [] }, testHome())).find(skill => skill.name === 'project-conventions')?.path)
+      .toBe(join(repo, '.ai/squawk/skills/conventions.md'));
   });
 
   it('serves fallback history without creating an empty legacy runs database', async () => {

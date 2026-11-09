@@ -10,7 +10,8 @@
 
 Project entry points use `projectPaths`: `.ai/cezar/` is the write root and the first
 read root; `.ai/squawk/` is the fallback. Dual reads work with the release switch
-off. `init`, generated task paths, task state and config writes stay legacy.
+off. `init`, generated task paths, task state and config writes stay legacy; `init`
+skips a starter whose workflow or skill name already exists under `.ai/squawk/`.
 Singleton config/context files use whole-file presence precedence. Reads never
 create a fallback directory or an empty legacy run store that hides its data.
 Git excludes cover both runtime trees and `.ai/squawk-migration.json`; tracked
