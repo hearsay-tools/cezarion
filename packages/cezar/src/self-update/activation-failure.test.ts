@@ -70,9 +70,10 @@ it('cockpit apply keeps current unchanged and reports failure when launcher refr
   expect(f.restart).not.toHaveBeenCalled();
 });
 
-it('CLI use keeps current unchanged when launcher refresh fails', async () => {
+it('CLI use reports failure and keeps current unchanged when launcher refresh fails', async () => {
   const f = fixture(true);
-  await expect(runSelfUpdateCommand('use', [f.id], { home: f.home, service: f.service, modifyPath: false })).rejects.toThrow();
+  expect(await runSelfUpdateCommand('use', [f.id], { home: f.home, service: f.service, modifyPath: false })).toBe(1);
+  expect(console.error).toHaveBeenCalledWith(expect.stringContaining('use failed:'));
   expect(activeId({}, f.home)).toBe('1.0.0');
   expect(readFileSync(f.oldLauncher)).toEqual(f.oldBytes);
 });

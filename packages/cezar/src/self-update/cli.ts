@@ -202,7 +202,12 @@ async function useCommand(id: string | undefined, home: Home): Promise<number> {
     console.error(commandText(`  ✗ ${id} is not installed — see: cez versions`));
     return 1;
   }
-  activateManaged(match.id, process.env, home);
+  try {
+    activateManaged(match.id, process.env, home);
+  } catch (error) {
+    console.error(`  ✗ use failed: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
   console.log(`  ✓ now using ${match.id}`);
   return 0;
 }
