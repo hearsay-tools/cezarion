@@ -1,5 +1,6 @@
-import { WAIT_LIMIT, waitSchema, waitRegistrationReceiptSchema, type Wait, type WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
+import { waitSchema, waitRegistrationReceiptSchema, type Wait, type WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
 import { agentInputSchema, type AgentInput } from '@open-mercato/cezar-contract/delegation';
+import { assertWaitCapacity } from './wait-capacity.ts';
 import type { RunRecord } from './store.ts';
 
 function matchingReceipt(run: RunRecord, registration: WaitRegistrationReceipt, waitId: string): boolean {
@@ -14,7 +15,7 @@ export function registeredWaitRecord(run: RunRecord, wait: Wait, input?: AgentIn
   if (entry.phase !== 'open' && entry.phase !== 'resolved') throw new Error('a settled wait is committed through its delivery or cancellation');
   const waits = run.waits ?? [];
   const known = waits.some(row => row.id === entry.id);
-  if (!known && entry.phase === 'open' && waits.filter(row => row.phase === 'open').length >= WAIT_LIMIT) throw new Error(`open wait limit reached (${WAIT_LIMIT})`);
+  if (entry.phase === 'open') assertWaitCapacity(run, entry.id);
   const agentInput = input ? agentInputSchema.parse(input) : undefined;
   const receiptRun = registration ? registeredReceiptRecord(run, registration) : run;
   return { ...receiptRun, waits: known ? waits.map(row => row.id === entry.id ? entry : row) : [...waits, entry], lastWaitsError: undefined,

@@ -9,7 +9,7 @@ import type { HelperPlan } from './helper.ts';
 /** Every module the copied helper loads, by its path from this directory in `dist`. Each copy
  *  keeps that path from `helper/`, so `../detached-process.js` lands in the state directory.
  *  `launcher.test.ts` checks the list against the helper's import closure. */
-export const HELPER_MODULES = ['helper.js', 'lock.js', 'npm-process.js', 'bin-recovery.js', '../detached-process.js'] as const;
+export const HELPER_MODULES = ['helper.js', 'runtime-layout.js', 'scoped-recovery.js', 'lock.js', 'npm-process.js', 'bin-recovery.js', '../detached-process.js', '../home/identity.js', '../home/switch.js'] as const;
 
 /** Copy the helper out of the package npm will replace; pass credentials only via inherited env. */
 export async function armRestartHelper(plan: RestartPlan, launch: {
@@ -19,7 +19,10 @@ export async function armRestartHelper(plan: RestartPlan, launch: {
   const target = join(dirname(plan.recordPath), 'helper');
   assertCezarHomeWriteIsSandboxed(target);
   await mkdir(target, { recursive: true, mode: 0o700 });
-  for (const module of HELPER_MODULES) await copyFile(join(source, module), join(target, module));
+  for (const module of HELPER_MODULES) {
+    await mkdir(dirname(join(target, module)), { recursive: true, mode: 0o700 });
+    await copyFile(join(source, module), join(target, module));
+  }
   // Every directory a copy lands in gets the marker that makes its modules ES modules.
   for (const dir of new Set(HELPER_MODULES.map((module) => dirname(join(target, module))))) {
     await writeFile(join(dir, 'package.json'), '{"type":"module"}', { mode: 0o600 });

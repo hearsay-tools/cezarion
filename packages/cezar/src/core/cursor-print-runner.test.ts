@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -272,6 +272,48 @@ describe('Cursor print logical session', () => {
     // bound: wait for this native turn-end before sending the next input.
     await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
     expect(consumed).toEqual([]);
+    session.end();
+    await session.result;
+  });
+
+  // hearsay-tools/cezarion#2991: a follow-up sent between turns is held from sendMessage until its
+  // process emits init, like a queued one; a process that can never open its turn releases it.
+  it('holds an idle follow-up from sendMessage and releases it when its spawn fails', async () => {
+    const { spec } = fixture();
+    const bin = join(spec.cwd, 'cursor-agent');
+    symlinkSync(mock, bin);
+    const events: AgentEvent[] = [];
+    const session = new CursorPrintRunner({ bin, processOptions: { drainMs: 20 } }).startSession(spec, event => events.push(event));
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
+    unlinkSync(bin);
+    expect(session.sendMessage([{ type: 'text', text: 'followup' }])).toBe(true);
+    expect(session.holdsHumanInput()).toBe(true);
+    expect(session.heldHumanInputCount?.()).toBe(1);
+    await session.result.catch(() => undefined);
+    expect(session.holdsHumanInput()).toBe(false);
+    expect(session.heldHumanInputCount?.()).toBe(0);
+  });
+
+  it('keeps an idle follow-up held through a process that exits before init, until its retry starts', async () => {
+    const { spec, log } = fixture('model-rejection-on-resume');
+    const events: AgentEvent[] = [];
+    const held: boolean[] = [];
+    let session: ReturnType<CursorPrintRunner['startSession']> | undefined;
+    session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } }).startSession(spec, event => {
+      events.push(event);
+      if (event.type === 'note' && session) held.push(session.holdsHumanInput());
+    });
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
+    expect(session.sendMessage([{ type: 'text', text: 'followup' }])).toBe(true);
+    expect(session.holdsHumanInput()).toBe(true);
+    // bound: wait for the retried process to finish the follow-up's turn.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
+    expect(logs(log).length).toBeGreaterThanOrEqual(3);
+    expect(held.length).toBeGreaterThan(0);
+    expect(held.every(Boolean)).toBe(true);
+    expect(session.holdsHumanInput()).toBe(false);
     session.end();
     await session.result;
   });

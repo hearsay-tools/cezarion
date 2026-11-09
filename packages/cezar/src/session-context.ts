@@ -1,5 +1,6 @@
+import { readProjectPath } from './project-paths.ts';
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 
@@ -111,7 +112,7 @@ function readBoundedUtf8(path: string, limit: number): ReadResult {
  * a bad, duplicate or reserved rule skips that rule alone.
  */
 export function loadSessionContextRules(projectRoot: string): { rules: SessionContextRule[]; reports: SessionContextReport[] } {
-  const file = readBoundedUtf8(join(projectRoot, SESSION_CONTEXT_FILE), CONFIG_LIMIT_BYTES);
+  const file = readBoundedUtf8(readProjectPath(projectRoot, 'context.yaml'), CONFIG_LIMIT_BYTES);
   if (!file.ok) {
     return file.missing ? { rules: [], reports: [] } : { rules: [], reports: [configSkip(file.reason)] };
   }

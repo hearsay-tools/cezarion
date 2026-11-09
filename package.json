@@ -39,7 +39,7 @@
     "test:e2e": "sh .ai/scripts/e2e.sh",
     "test:e2e:affected": "node scripts/e2e-affected.mjs",
     "test:e2e:local": "node .ai/scripts/e2e-lanes.mjs",
-    "typecheck": "npm run typecheck:web && npm run typecheck:contract && npm run typecheck:client && npm run typecheck:server",
+    "typecheck": "npm run typecheck:web && npm run typecheck:contract && npm run typecheck:client && npm run typecheck:server && node scripts/check-typecheck-coverage.mjs",
     "typecheck:client": "npm run typecheck -w @open-mercato/cezar-api-client",
     "typecheck:server": "npm run typecheck -w @wjarka/cezarion",
     "typecheck:package": "npm run typecheck:package -w @wjarka/cezarion",

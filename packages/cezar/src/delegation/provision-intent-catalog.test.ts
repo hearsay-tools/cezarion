@@ -220,6 +220,31 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions[3]!.spec.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
     expect(sessions[3]!.spec.env?.CODEX_HOME).not.toBe(codexHome);
   });
+  // hearsay-tools/cezarion#2991: Codex mints its own session id, so the launch UUID on a step whose
+  // process ended before Codex reported a session cannot be resumed. The Continue opens a fresh
+  // Codex session and still runs as that step, under its pinned identity.
+  it('continues a mixed chain whose codex step ended before its session event as that step, in a fresh session', async () => {
+    const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
+    writeFileSync(join(codexHome, 'config.toml'), 'model = "gpt-5.1-codex"');
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'mixed.yaml'), ['name: mixed', 'steps:',
+      '  - id: implement', '    prompt: "Implement: {{task}}"', '    runner: codex', '    allowedTools: [Read]',
+      '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
+    const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
+    await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
+    const launchId = f.store.getRun(a.child.workerId)!.steps.find(step => step.id === 'implement')!.sessionId;
+    expect(launchId).toBeDefined();
+    sessions[1]!.finish();
+    expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
+    expect(f.manager.continueRun(a.child.workerId, { text: 'again' })).toEqual({ ok: true });
+    await until(() => sessions.length === 3 || f.store.getRun(a.child.workerId)?.status === 'failed');
+    expect(f.store.getRun(a.child.workerId)?.error).toBeUndefined();
+    const continued = sessions[2]!.spec;
+    expect(continued.resume).toBeFalsy();
+    expect(continued.sessionId).not.toBe(launchId);
+    expect(continued).toMatchObject({ model: 'gpt-5.1-codex', toolGrant: { kind: 'inherited', tools: ['Read'] } });
+    expect(continued.env?.CODEX_HOME).toBe(codexHome);
+  }, 60_000);
   it('launches a later step under its own account even after the first step\'s account home is gone (#465 review)', async () => {
     const codexHome = join(f.root, 'codex-account'); mkdirSync(codexHome); vi.stubEnv('CODEX_HOME', codexHome);
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });

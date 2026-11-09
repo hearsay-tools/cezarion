@@ -10,14 +10,23 @@ test('mock publication exposes complete values during creation and replacement',
   const dir = fs.mkdtempSync(join(tmpdir(), 'cezar-mock-publish-'));
   const target = join(dir, 'result.json');
   const write = fs.writeFileSync;
+  const rename = fs.renameSync;
+  const foreign = `${dir}.log`;
+  write(foreign, 'previous\n');
   let observed;
   let boundaries = 0;
-  fs.writeFileSync = (path, value) => {
+  fs.writeFileSync = (path, value, ...options) => {
+    if (path !== `${target}.${process.pid}.tmp`) return write(path, value, ...options);
     // Force the open-before-write boundary that a polling reader can observe.
     write(path, '');
     assert.deepEqual(fs.existsSync(target) ? JSON.parse(fs.readFileSync(target, 'utf8')) : undefined, observed);
     boundaries++;
-    write(path, value);
+    write(path, value, ...options);
+  };
+  fs.renameSync = (...args) => {
+    // Model a recorder that appends when it observes publication renames.
+    fs.appendFileSync(foreign, 'written\n');
+    return rename(...args);
   };
   syncBuiltinESMExports();
   try {
@@ -27,9 +36,12 @@ test('mock publication exposes complete values during creation and replacement',
       observed = value;
     }
     assert.equal(boundaries, 2);
+    assert.equal(fs.readFileSync(foreign, 'utf8'), 'previous\nwritten\nwritten\n');
     assert.deepEqual(fs.readdirSync(dir), ['result.json']);
   } finally {
     fs.writeFileSync = write;
+    fs.renameSync = rename;
+    fs.rmSync(foreign, { force: true });
     syncBuiltinESMExports();
     fs.rmSync(dir, { recursive: true, force: true });
   }

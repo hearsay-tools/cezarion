@@ -147,3 +147,27 @@ it.runIf(process.platform === 'linux' || process.platform === 'darwin')('reclaim
   owner.publishUrl('http://127.0.0.1:4321');
   await expect(fixture().owner.acquire(dataDir)).rejects.toThrow('http://127.0.0.1:4321');
 });
+
+
+it('refuses a live fallback cockpit before creating legacy state and keeps its claim unchanged', async () => {
+  const { root, owner, dataDir } = fixture();
+  const fallback = join(root, '.ai/squawk');
+  mkdirSync(fallback, { recursive: true });
+  const path = join(fallback, 'cockpit.lock');
+  const bytes = JSON.stringify({ pid: process.pid, token: randomUUID(), startToken: processStartToken(process.pid), url: 'http://127.0.0.1:4321' });
+  writeFileSync(path, bytes);
+  await expect(owner.acquire(dataDir)).rejects.toThrow('http://127.0.0.1:4321');
+  expect(existsSync(dataDir)).toBe(false);
+  expect(readFileSync(path, 'utf8')).toBe(bytes);
+});
+
+it('refuses an unreadable fallback cockpit lock with its path and keeps the file unchanged', async () => {
+  const { root, owner, dataDir } = fixture();
+  const fallback = join(root, '.ai/squawk');
+  mkdirSync(fallback, { recursive: true });
+  const path = join(fallback, 'cockpit.lock');
+  writeFileSync(path, '{"schema":"from a newer binary"}');
+  await expect(owner.acquire(dataDir)).rejects.toThrow(`Cannot read the cockpit lock ${path}`);
+  expect(existsSync(dataDir)).toBe(false);
+  expect(readFileSync(path, 'utf8')).toBe('{"schema":"from a newer binary"}');
+});

@@ -25,6 +25,58 @@ describe('PreviewHost', () => {
     return env;
   };
 
+  it('refuses a preview server start in a fallback worktree without spawning a server', async () => {
+    const { host, ctx, devServers } = make();
+    ctx.worktreePath = '/repo/.ai/squawk/worktrees/task';
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    expect(devServers).toEqual([]);
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-exited', logTail: expect.stringMatching(/\.ai\/squawk.*binary that migrated/) });
+    await host.close();
+  });
+
+  it('refuses a start for a run this store may not write before reserving a port, and other tasks start', async () => {
+    const { host, ctx, devServers, store } = make();
+    const refusal = 'Cannot write read-only project data in /repo/.ai/squawk. Use the binary that migrated the project.';
+    ctx.store = { ...ctx.store, writeRefusal: (id: string) => id === 'run-1' ? refusal : undefined };
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await host.run(ctx.runId, 5173);
+      expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-exited', logTail: refusal });
+    }
+    expect(devServers).toEqual([]);
+    expect(host.portOwner(5173)).toBeUndefined();
+    expect(store.stateEvents()).toEqual([]);
+    const other = { ...ctx, runId: 'run-2', store: { ...ctx.store, writeRefusal: () => undefined } };
+    await host.open(other, fakeViewer(), { port: 5173 });
+    await host.run('run-2', 5173);
+    expect(host.portOwner(5173)?.runId).toBe('run-2');
+    await host.close();
+  });
+
+  it('holds no port and starts nothing when the start record write is refused, and a retry starts', async () => {
+    const { host, ctx, devServers } = make();
+    let refuse = true;
+    const appendEvent = ctx.store.appendEvent.bind(ctx.store);
+    ctx.store = { ...ctx.store, appendEvent: ((id, event) => {
+      if (refuse) throw new Error('run is read only');
+      return appendEvent(id, event);
+    }) as RunContext['store']['appendEvent'] };
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-exited', logTail: 'run is read only' });
+    expect(devServers.every(dev => !dev.started)).toBe(true);
+    expect(host.portOwner(5173)).toBeUndefined();
+    refuse = false;
+    await host.run(ctx.runId, 5173);
+    expect(devServers.at(-1)?.started).toBe(true);
+    expect(host.portOwner(5173)?.runId).toBe('run-1');
+    await host.close();
+  });
+
   it('a hidden viewer resuming cannot reclaim a preview another tab explicitly opened', async () => {
     const { host, ctx } = make();
     const a = fakeViewer(), b = fakeViewer(), restored = fakeViewer();

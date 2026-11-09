@@ -46,6 +46,22 @@ never a pass.
 | Squeal | Edit-time oxlint diagnostics require Squeal 0.1.392 or later; its provider loads `.oxlintrc.json` and the `cez` JS plugin. Older Squeal reports `lint.tools` as unknown and keeps validating through `packages/cezar/src/lint/lint-runner.test.ts` and `lint-ast-grep-{1,2}.test.ts`: runner checks and two disjoint groups of ast-grep rules only. The split keeps each bridge file below the Vitest per-file duration cap; the sorted rule list assigns every new rule to one group. `npm run lint` before the first push of a package change and CI’s required Lint step remain the gate (hearsay-tools/cezarion#2426) |
 | By hand | `npm run lint` from the repository root, about 5 s on an idle host |
 
+## New safety guards
+
+Prefer a boundary enforced by the language or compiler before adding a safety scanner
+(hearsay-tools/cezarion#3100). ES `#private` prevents external access at runtime;
+opaque types constrain checked TypeScript callers but do not enforce a runtime boundary.
+When a scanner is needed, ban syntax — names and call shapes — with a reasoned
+annotation escape for deliberate uses. Track values only when the rule's issue explicitly
+asks for it. Existing rules keep their documented analysis and exception mechanisms.
+
+State the rule's static scope at the top of its section: the files and syntax it checks,
+its exceptions, and the forms it does not follow. Review findings about rule coverage
+against that stated scope. An unsupported value-flow form is not a missing syntax case
+when value tracking is outside the contract; do not expand the contract one bypass at
+a time. If the required guarantee needs binding, type or value resolution, choose the
+appropriate boundary or checker explicitly.
+
 ## The `cez` rules
 
 | Rule | Refuses | Exceptions |
@@ -54,17 +70,48 @@ never a pass.
 | `cez/contract-root-import` | A runtime import of a contract package root (hearsay-tools/cezarion#1237) | `contract-root-import.baseline.json`, shrink-only |
 | `cez/design-guardian` | The ten original cockpit design checks; each finding names its original rule, reason and token (hearsay-tools/cezarion#2422) | Original inline allowed predicates and reason comments; tests keep their original scope and the guardian suite excludes itself |
 | `cez/home-boundary` | `cezarHomeDir` references, `resolveHome` outside `home/` and CLI dispatch, unlisted `homedir()` calls in non-test `packages/cezar/src/`, and test-side CEZ_HOME writes/stubs/deletes | `home-readers.baseline.json`: reasoned OS-user readers with exact call counts, shrink-only; shared `vitest.setup.ts` selects test homes |
-| `cez/test-home-write` | An ambient `cezarHomeDir()` or `homedir()` result reaching a filesystem write in test code | None; use an explicit sandbox path (hearsay-tools/cezarion#2813) |
+| `cez/test-home-write` | Guarded home names in calls, destructuring, runtime import/export specifiers and member references in test code | Same-line `// test-home-read: <reason>` for a deliberate use; use an explicit sandbox path for writes (hearsay-tools/cezarion#2813) |
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
 | `cez/run-history-reader` | An unlisted raw `historyPaths` or `eventsPath` use, or a string/template literal containing `.ndjson` with no preceding character or a preceding character outside `[A-Za-z0-9_-]` (hearsay-tools/cezarion#2420) | `run-history-readers.json`: each file and access kind has a reason; stale entries fail |
+| `cez/runner-fact-combination` | A function in a non-test `packages/cezar/src/workflows/` source, nested callbacks included, that touches a runner fact source and reads two or more different fact keys (by property name, static computed key or destructuring key) from any object. Sources: `.inputDelivery`, `.facts`, `.systemPromptOnResume`, `RUNNER_FACTS`, `inputDeliveryOf`, the `InputDelivery` or `RunnerFacts` type, any import of these under another name, a namespace member or a local type alias of them; a source touched at module level counts for every function in the file. The keys come from the declared `RunnerFacts` and `InputDelivery` types. The rule tracks no value, so it over-approximates. Every qualifying function is reported under a name qualified by its enclosing classes and functions. Limits: it does not see a fact read in or returned by a called helper, a dynamic computed key, a source carried in another object's property into a function that touches no source, or a source re-exported or passed in from another module. Shared parity rows run on a derived runner set that shows each value once, not each combination (hearsay-tools/cezarion#2991) | `COMBINATION_ROWS` in the rule, each with a reason, clears only the function it names: a real combination also names the `<family> <row>` that runs it on every runner; a false positive (an unrelated object with a same-named key) names none. `core/parity-classes.test.ts` checks the reason and that a named row is registered and runs on every runner |
 | `cez/test-wait-discipline` | Bare sleeps, bounds under 10 s and poll loops without a sufficient deadline in server tests (hearsay-tools/cezarion#2421) | `packages/cezar/src/test-wait-discipline.baseline.json` and `test-wait-discipline-polls.baseline.json`, shrink-only |
 | `cez/undocumented-env-name` | A `CEZ_*` name in a shipped source or runner script that `.env.example` lacks | The `CEZ_MOCK_*` prefix |
 | `cez/unit-wait-discipline` | Bare sleeps, bounds under 3 s and poll loops without a sufficient deadline in cockpit unit tests (hearsay-tools/cezarion#2421) | `packages/web/src/test/unit-wait-discipline.baseline.json`, shrink-only |
 
+### Static scope of guards without a separate section
+
+These are source checks, not proofs of the values a program will use. Each scanner's
+`applies` predicate in `packages/cezar/src/lint/` defines its file scope; the table
+below states the checked forms and limits. The exceptions in the rule table above
+remain in force.
+
+| Guard | Static scope |
+| --- | --- |
+| `cez/card-2-contrast` | Cockpit TSX source: JSX text and literal class branches, inherited card surfaces, ink, size and weight. Unknown sizes are conservatively small. Arbitrary runtime class values and computed styles require rendered checks; this is not a browser contrast audit. |
+| `cez/contract-root-import` | Static root specifiers in runtime imports and re-exports in the selected package TS/TSX trees, including literal dynamic imports; `import type` declarations and import queries inside type aliases stay allowed. Inline type specifiers and variable-annotation queries are still reported. It does not resolve computed specifiers or transitive imports. |
+| `cez/native-mock-source` | TS files under service `src/` and `test/`, excluding the scanner itself: named read calls whose argument text identifies native mock source, `.mockBin` assignments and mock-patcher specifiers. It does not track arbitrary aliases or source bytes through helpers. |
+| `cez/mock-scenario-boundary` | Service `mock-*.mjs` scripts except `mock-scenario.mjs`: required runner mocks must contain a recognized scenario-module import. Scripts with that import are checked for shared scenario tokens in string, template and regex literals, with listed native-token exceptions. It does not resolve computed imports or constructed token values. |
+| `cez/raw-query-setter` | Cockpit JS/TS source, including tests: variable declarations that acquire a tuple or setter from a direct imported or namespace `useSearchParams` call. Named import aliases are recognized; inter-module value flow is not followed. |
+| `cez/run-fact-reader` | Selected package TS/TSX trees: named attention-label comparisons, nearby waiting/resume-time condition shapes, and `.autoResumeAt` reads. Contract owners and test oracles have the existing exclusions. It does not infer arbitrary receivers' types or follow values between modules. |
+| `cez/run-history-reader` | Non-test `.ts` files beneath service `src/`: named history path calls, renamed `historyPaths` imports and literal `.ndjson` fragments. It does not track path values through arbitrary aliases, helpers or computed strings. |
+| `cez/runner-fact-combination` | Non-test workflow TS files: functions touching the listed fact sources and at least two declared fact-key names. Import/type aliases and static keys are recognized; receiver values are not tracked. Its source/key forms, over-approximation and excluded helper/dynamic/cross-module flows are listed in the rule table above. |
+| `cez/test-wait-discipline` | Server `src/` `.test.ts`/`.testkit.ts` files, excluding fixtures and scanner self-fixtures: source-text patterns for awaited sleeps, recognized wait calls and poll-loop exits, with a 10 s floor. Strings and comments are blanked. The scanner evaluates supported local bound expressions; bounds supplied from outside the file or through parameters are left to callers. It does not prove those bounds are sufficient or cover arbitrary helper/control-flow forms. Reasoned `// bound:` comments and the shrink-only baselines remain the exceptions. |
+| `cez/unit-wait-discipline` | Cockpit `src/` `.test.ts`/`.test.tsx` files: source-text sleep, wait-bound and poll-deadline patterns with a 3 s floor. Strings and comments are blanked. Supported local bound expressions are evaluated; externally supplied bounds are left to callers. It does not prove those bounds are sufficient or analyze arbitrary helper/control-flow forms. Reasoned `// bound:` comments and the shrink-only baseline remain the exceptions. |
+| `cez/undocumented-env-name` | Shipped package source and runner scripts, excluding tests and fixtures: literal `CEZ_*`/`HSQ_*` spellings and literal suffixes passed to `productEnv`, including named import aliases. It proves name documentation, not computed-name completeness or default behavior. |
+
 The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter and card-2 contrast baselines,
 which keep their paths. CI's baseline-growth gate refuses a `*.baseline.json` that grows.
+
+### Home boundary
+
+**Static scope:** the service's JS/TS source and test trees, plus repository test/testkit
+files through the shared test pattern. The scanner checks home resolver references,
+recognized `homedir` callee forms and aliases, and test-side CEZ_HOME selection syntax.
+The shared setup is exempt. Static keys are resolved; dynamic keys, computed variables
+and eval are outside the scan. Reasoned OS-user readers retain their exact call-count
+baseline. This is not general home-value flow analysis.
 
 Home resolution has two named source entry points: `src/index.ts` and
 `src/subcommands.ts`. Operator dispatch resolves once; task commands receive no Home.
@@ -77,13 +124,16 @@ New calls fail per-file lint. Removed calls or files fail the whole-repository
 stale-entry check until the count or entry shrinks. CI's baseline-growth gate
 refuses additions and increased counts after this list lands.
 
-The home-boundary rule resolves statically known keys and callee forms; dynamic keys, computed variables and eval are out of scope.
-
 Tests use `Home.sandbox(dir)` and the shared test selector. Reading CEZ_HOME and
 passing it in a child process environment remain allowed. Test fixtures prove each
 forbidden form, parser errors, stale entries and the CI growth ratchet.
 
 ### Test home boundary
+
+**Static scope:** guarded names in test/testkit runtime syntax, with a reasoned same-line
+annotation escape. This rule checks names and positions, not aliases, filesystem sinks
+or whether a home value is later written. The file pattern, checked positions and
+excluded computed/type-only forms are detailed below.
 
 `cez/test-home-write` and `cez/home-boundary` share `TEST_FILE`, the regular
 expression `\.(?:test|testkit)\.[cm]?[jt]sx?$`, across the repository. Both cover
@@ -146,6 +196,9 @@ they retain host HOME and USERPROFILE for installed browser discovery (the P0b
 exception), while CEZ_HOME and XDG overrides use a private marked sandbox.
 
 ## Add a rule
+
+For a safety guard, first apply [New safety guards](#new-safety-guards) and document
+its static scope before implementing its scanner.
 
 1. Write the scanner as a pure function of a file's path and source, in
    `packages/cezar/src/lint/<rule>.ts`, and export a `SourceRule` with its scope (`applies`) and its
@@ -228,6 +281,10 @@ The 15 type-aware TypeScript correctness rules remain off and outside this adopt
 
 ### Design guardian (M09)
 
+**Static scope:** the existing source-text patterns and CSS selector/body patterns in
+the rule table, with their original file predicates and reasoned exceptions. The fixture
+home check is a same-line heuristic; it does not establish a child's environment.
+
 hearsay-tools/cezarion#2422 accounts for all 18 original cases (the issue's count of 17 omitted
 one). The shared table and string-aware comment stripper live in
 `packages/cezar/src/lint/design-guardian.ts`; strings remain visible to these rules. The original
@@ -262,12 +319,23 @@ benchmark snapshots keep their original measurements.
 
 ### Mock lifecycle boundary
 
+**Static scope:** named helper definitions and a literal in service `mock-*.mjs` scripts,
+excluding the shared lifecycle owner. This checks source spellings, not lifecycle
+behavior or helper aliases.
+
 `cez/mock-lifecycle-boundary` keeps the no-progress stall, readiness pid and release
 wait in `scripts/mock-lifecycle.mjs` (hearsay-tools/cezarion#1529). Other `mock-*.mjs`
 scripts cannot define the old lifecycle helpers or contain the `watchdog.pid` literal.
 Synthetic cases pin the scanner; tests never read native mock source.
 
 ### Product environment reads
+
+**Static scope:** shipped source and runner scripts selected by `scannedEnvFile`, excluding
+tests and fixtures. The scanner recognizes the env objects, local aliases, static keys
+and type annotations listed below; it is not whole-program value-flow or type analysis.
+The product-env accessor itself is exempt. Computed reads on recognized env objects
+are reported; unrecognized cross-module paths
+remain outside the scan. Existing exact-expression exemptions remain in force.
 
 `cez/product-env-read` requires shipped source and runner scripts to use
 `productEnv('SUFFIX', env?)` from `core/product-env.ts`. The helper selects `HSQ_`

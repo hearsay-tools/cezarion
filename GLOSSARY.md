@@ -87,6 +87,28 @@ state table names the exit it takes.
 
 _Avoid_: transition (as a noun for the declared kind), status patch
 
+## Wait kind
+
+What a wait waits for: `pr`, `timer`, `process`, `human`, `worker`, `peer` or
+`subagent`. Each kind has one row in the wait-kind table. The row states the
+kind's rules: its deadline, whether it keeps the slot, whether its wake costs
+budget, whether the agent can cancel it, its duplicate check, its entry, its
+watch, its default result and its text. `request` is a `worker` wait on
+replies, and `ci` is an old name that the store reads as `pr`.
+
+_Avoid_: wait type, `request` or `merge` as a kind
+
+## Wait engine
+
+The run module that executes the wait-kind rows: it opens, resolves, re-arms
+and cancels waits. Opening checks the open-wait limit through one function, then
+commits, arms and parks, with the steps each registration path runs. Cancelling commits, then disarms every watch the wait holds. Wake
+admission and the wake budget call the engine; they are not part of it. In the
+service, only the engine, the table, the watch adapters, the boundary views and
+the read-time upgrade of old rows branch on a wait's kind.
+
+_Avoid_: wait registry (the part that validates requests), wait manager
+
 ## No-progress stall
 
 The native mock mode that a `mock:no-progress-*` prompt selects: the mock stops

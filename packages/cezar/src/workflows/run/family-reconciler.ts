@@ -1,3 +1,4 @@
+import { cancelWaits } from './wait-cancel.ts';
 import { holdsOwedResults } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunModuleContext } from './types.ts';
@@ -22,6 +23,8 @@ interface FamilyReconcilerHost {
   armWait(id: string, wait: Wait): void;
   armWorkerDeadline(id: string, wait: WorkerWaitEntry, delay?: number): void;
   disarmWait(id: string): void;
+  hasWorkerResolveRetry(id: string): boolean;
+  recordWorkerResolveRetry(id: string): void;
   resolveWait(id: string, waitId: string, result: undefined, observed: WorkerWaitEntry): void;
   retireSettledQuestions(id: string): void;
   closeRoutedQuestions(id: string): void;
@@ -47,14 +50,12 @@ export class FamilyReconciler {
     this.host.resolvePeerWaits(runsAwaitingPeer(run, () => this.context.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
 
-  private readonly workerResolveRetries = new Set<string>();
   private readonly requestDeadlineTimers = new Map<string, NodeJS.Timeout>();
   private reconcilingWorkers = false;
   private reconcilingFamily: string | undefined;
   private readonly pendingReconciliations = new Set<string | undefined>();
   recoveryFactsPending = false;
   constructor(private readonly context: RunModuleContext, private readonly host: FamilyReconcilerHost) {}
-  forgetRetry(waitId: string): void { this.workerResolveRetries.delete(waitId); }
   setRecoveryFactsPending(value: boolean): void { this.recoveryFactsPending = value; }
   dispose(): void {
     for (const timer of this.requestDeadlineTimers.values()) clearTimeout(timer);
@@ -168,6 +169,8 @@ export class FamilyReconciler {
   /** One pass reads each cold run once (hearsay-tools/cezarion#2378): a family's conversation
    *  names its sender and recipient on every message. */
   private reconcileWorkerFamily(familyRootId?: string): void {
+    // As the global pass: a family this store may not write (foreign, fallback) is not repaired here.
+    if (familyRootId !== undefined && this.context.store.writeRefusal(familyRootId)) return;
     this.context.store.withReadCache(() => this.reconcileFamilyPass(familyRootId));
   }
 
@@ -207,7 +210,7 @@ export class FamilyReconciler {
     if (['queued', 'running', 'waiting'].includes(parent.status)) return false;
     if (recovering) return true;
     const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
-    if (stale.length) { this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.host.disarmWait(id); }
+    if (stale.length) cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, stale);
     this.host.closeRoutedQuestions(parent.id);
     for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
       if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
@@ -278,16 +281,15 @@ export class FamilyReconciler {
       }
       const { entry: next, reason } = reconcileWorkerEntry(selected, outcomes, now, requests);
       if (reason && destroyed(next)) {
-        this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: [entry.id] });
-        this.host.disarmWait(entry.id);
+        cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, [entry.id]);
       } else if (reason) {
         // The deadline stays armed until the resolution is durable. A failed write is retried in a
         // second, since nothing else may touch this family again before the deadline.
         try { this.host.resolveWait(parent.id, entry.id, undefined, { ...next, result: { reason } }); }
         catch {
-          if (!this.workerResolveRetries.has(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
+          if (!this.host.hasWorkerResolveRetry(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
           this.host.disarmWait(entry.id);
-          this.workerResolveRetries.add(entry.id);
+          this.host.recordWorkerResolveRetry(entry.id);
           this.host.armWorkerDeadline(parent.id, entry, 1_000);
           continue;
         }

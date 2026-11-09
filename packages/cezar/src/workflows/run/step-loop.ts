@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { atTaskHead, atStepOpen, type LaunchSource } from './launch-read-resolver.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -410,7 +411,7 @@ export class StepLoop {
    */
   expireStepDeadlineWaits(runId: string, step: WorkflowStepDef, failure: string | null, attemptStartedAt: number): void {
     if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
-      const human = openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
+      const human = openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => WAIT_KINDS[wait.kind].userAnswers).map(wait => wait.id);
       if (human.length) this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: human });
     }
   }

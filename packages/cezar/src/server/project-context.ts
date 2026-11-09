@@ -1,3 +1,4 @@
+import { noticeLegacyProject, projectPaths } from '../project-paths.ts';
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import type { ForgeFactory } from './forge/index.ts';
@@ -140,7 +141,8 @@ export async function sweepRegisteredPreviewLeftovers(
   let killed = 0;
   for (const project of projects) {
     if (project.status === 'missing') continue;
-    const dataDir = join(project.root, '.ai/cezar');
+    noticeLegacyProject(project.root);
+    const dataDir = projectPaths(project.root).write;
     if (sweptPreviewDirs.has(dataDir) || ownedByAnotherCockpit(dataDir)) continue;
     killed += await sweepPreviewOnce(dataDir, host);
   }
@@ -249,7 +251,8 @@ export class ProjectContexts {
     const lease = (async () => {
       const project = (await this.deps.listProjects()).find(project => project.id === projectId);
       if (!project || project.status === 'missing' || !current()) return undefined;
-      const dataDir = join(project.root, '.ai/cezar');
+      noticeLegacyProject(project.root);
+      const dataDir = projectPaths(project.root).write;
       if (ownedByAnotherCockpit(dataDir)) return undefined;
       // Skip empty projects, but let the established fenced importer discover legacy-only
       // history. Maintenance mode never normalizes live rows or recovers a manager.
@@ -257,7 +260,8 @@ export class ProjectContexts {
       let imported = false;
       try { imported = reader?.getMeta(RUNS_IMPORT_COMPLETE_KEY) !== undefined; }
       finally { reader?.close(); }
-      if (!imported && !existsSync(join(dataDir, 'runs.json'))) return undefined;
+      if (!imported && !existsSync(join(dataDir, 'runs.json')) &&
+          !projectPaths(project.root).reads.slice(1).some(directory => existsSync(join(directory, RUNS_DB_FILE)) || existsSync(join(directory, 'runs.json')))) return undefined;
       const temporaryOwnership = new CockpitOwnership();
       let store: RunStore | undefined;
       try {
@@ -299,7 +303,7 @@ export class ProjectContexts {
       await yieldToEventLoop();
       if (generation !== this.generation) break;
       if (project.status === 'missing' || this.contexts.has(project.id) || this.building.has(project.id)) continue;
-      if (ownedByAnotherCockpit(join(project.root, '.ai/cezar'))) continue;
+      if (ownedByAnotherCockpit(projectPaths(project.root).write)) continue;
       try {
         await this.context(project.id);
         warmed.push(project.id);
@@ -432,7 +436,8 @@ export class ProjectContexts {
     if (!project) throw new ProjectContextError('unknown-project', projectId);
     if (project.status === 'missing') throw new ProjectContextError('missing-root', projectId);
 
-    const dataDir = join(project.root, '.ai/cezar');
+    noticeLegacyProject(project.root);
+    const dataDir = projectPaths(project.root).write;
     await this.deps.ownership?.acquire(dataDir);
     if (stale()) throw new ProjectContextsClosedError();
     // keepLive + recover() (#367), same as serveCommand: runs that were live

@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 /**
  * Collect a family that may archive. `RunStore.archiveFamily` is a thin call into
  * `archiveStoreFamily`; unnormalized evidence, ownership and activity checks stay here.
@@ -126,7 +127,7 @@ function archiveMemberPendingBlocker(
   memberId: string,
   run: RunRecord,
 ): string | undefined {
-  if (run.waits?.some((wait) => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission) {
+  if (run.waits?.some((wait) => WAIT_KINDS[wait.kind].userAnswers && wait.phase === 'open') || run.hasPendingPermission) {
     return 'Task needs an answer or permission. Open it to respond, or archive manually.';
   }
   if (run.delegation?.role === 'invalid') return 'Worker ownership is invalid. Inspect the task or archive manually.';

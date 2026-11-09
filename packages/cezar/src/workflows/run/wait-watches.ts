@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import type { RunModuleContext } from './types.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import { familyOf } from './run-guards.ts';
@@ -32,6 +33,7 @@ export class WaitWatches {
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** Process waits' watches (hearsay-tools/cezarion#1446), by wait id. */
   private readonly processWatches = new Map<string, { runId: string; abort: AbortController }>();
+  private readonly workerResolveRetries = new Set<string>();
   private readonly processSupervisor = new ProcessWaitSupervisor();
   /** One timer per open timer wait, keyed by wait id. */
   readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
@@ -47,17 +49,18 @@ export class WaitWatches {
    *  overdue timer (restart) resolves at once. */
   armWait(runId: string, wait: Wait): void {
     if (this.context.disposed() || wait.phase !== 'open') return;
-    if (wait.kind === 'pr') { this.startCiWatch(runId, wait); return; }
-    if (wait.kind === 'process') { this.startProcessWatch(runId, wait); return; }
+    const watch = WAIT_KINDS[wait.kind].watch;
+    if (watch === 'ci') { this.startCiWatch(runId, wait as PrWaitEntry); return; }
+    if (watch === 'process') { this.startProcessWatch(runId, wait as ProcessWaitEntry); return; }
     // Only the user's answer, or a cancel, ends a human wait: nothing to arm.
-    if (wait.kind === 'human') return;
+    if (watch === 'none') return;
     if (this.waitTimers.has(wait.id)) return;
-    if (wait.kind === 'worker') { this.host.armWorkerDeadline(runId, wait); return; }
+    if (watch === 'worker') { this.host.armWorkerDeadline(runId, wait as WorkerWaitEntry); return; }
     // A peer that already wrote or settled resolves it first, at registration and recovery alike.
-    if (wait.kind === 'peer' && this.host.resolvePeerWait(runId, wait)) return;
+    if (watch === 'peer' && this.host.resolvePeerWait(runId, wait as PeerWaitEntry)) return;
     // Native subagents live only in their session: with none, as at a restart, they stopped
     // (hearsay-tools/cezarion#2431). At its deadline a lost session reads the same.
-    const interrupted = () => wait.kind === 'subagent' && !this.host.subagentSessionLive(runId);
+    const interrupted = () => watch === 'subagent' && !this.host.subagentSessionLive(runId);
     if (interrupted()) { this.host.interruptSubagentWait(runId, wait.id); return; }
     // A stopping, stopped or finishing run takes no self-generated wake: the timer stays open
     // for that transition to cancel, as the monitoring timer did before it was a wait.
@@ -67,7 +70,7 @@ export class WaitWatches {
       if (interrupted()) this.host.interruptSubagentWait(runId, wait.id);
       else this.host.settleWait(runId, wait.id);
     };
-    const due = Date.parse(wait.deadline) - Date.now();
+    const due = Date.parse((wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline) - Date.now();
     if (due <= 0) { fire(); return; }
     const timer = setTimeout(() => {
       if (this.waitTimers.get(wait.id)?.timer !== timer) return;
@@ -108,14 +111,15 @@ export class WaitWatches {
     arm(Math.max(0, firstDelay ?? Date.parse(wait.deadline!) - Date.now()));
   }
 
+  hasWorkerResolveRetry(waitId: string): boolean { return this.workerResolveRetries.has(waitId); }
+  recordWorkerResolveRetry(waitId: string): void { this.workerResolveRetries.add(waitId); }
+
   /** Stop everything that could still resolve this wait. */
   disarmWait(waitId: string): void {
     this.ciWatches.get(waitId)?.abort.abort(); this.ciWatches.delete(waitId);
     const timer = this.waitTimers.get(waitId); if (timer) clearTimeout(timer.timer); this.waitTimers.delete(waitId);
     const retry = this.ciRetries.get(waitId); if (retry) clearTimeout(retry.timer); this.ciRetries.delete(waitId);
-  }
-
-  disarmProcessWatch(waitId: string): void {
+    this.workerResolveRetries.delete(waitId);
     this.processWatches.get(waitId)?.abort.abort(); this.processWatches.delete(waitId);
   }
 

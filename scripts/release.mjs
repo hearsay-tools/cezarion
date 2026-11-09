@@ -10,6 +10,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { withCompatibilityPackages } from '../packages/cezar/dist/release/compatibility.js';
 import { withPublicationPackage } from '../packages/cezar/dist/release/publication.js';
 import {
   computeStableVersion,
@@ -133,29 +134,35 @@ const publish = (dir, label) => {
 // exactly this reason. A `private` manifest is stamped above but never published: it is part of
 // the release (its version moves, its pins are rewritten) without being on the registry.
 const published = [];
-for (const key of order) {
-  if (!isPublishable(stamped[key])) {
-    console.log(`release: ${stamped[key].name} is private — stamped to ${version}, not published.`);
-    continue;
-  }
-  const name = publication[key].name;
-  try {
-    withPublicationPackage(dirs[key], publication[key], cwd => publish(cwd, name));
-    published.push(name);
-  } catch (err) {
-    const existing = !dryRun && versionOnRegistry(name, version);
-    if (existing && existing.version === version) {
-      const source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
-      if (existing.gitHead !== source) {
-        throw new Error(`release: ${name}@${version} has published source ${existing.gitHead ?? 'unknown'}, not source commit ${source}. Retry the original run, or merge its version-bump PR before dispatching a new release. No finalization will run.`);
-      }
-      console.log(`release: ${name}@${version} already on the registry — skipping`);
-      published.push(name);
+withCompatibilityPackages(dirs.cezar, publication.cezar, compatibility => {
+  const targets = [
+    ...order.map(key => ({ key, dir: dirs[key], manifest: publication[key] })),
+    ...Object.entries(compatibility).map(([key, value]) => ({ key, ...value })),
+  ];
+  for (const { dir, manifest } of targets) {
+    if (!isPublishable(manifest)) {
+      console.log(`release: ${manifest.name} is private — stamped to ${version}, not published.`);
       continue;
     }
-    throw err;
+    const name = manifest.name;
+    try {
+      withPublicationPackage(dir, manifest, cwd => publish(cwd, name));
+      published.push(name);
+    } catch (err) {
+      const existing = !dryRun && versionOnRegistry(name, version);
+      if (existing && existing.version === version) {
+        const source = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+        if (existing.gitHead !== source) {
+          throw new Error(`release: ${name}@${version} has published source ${existing.gitHead ?? 'unknown'}, not source commit ${source}. Retry the original run, or merge its version-bump PR before dispatching a new release. No finalization will run.`);
+        }
+        console.log(`release: ${name}@${version} already on the registry — skipping`);
+        published.push(name);
+        continue;
+      }
+      throw err;
+    }
   }
-}
+});
 
 emitOutput({
   published: !dryRun,

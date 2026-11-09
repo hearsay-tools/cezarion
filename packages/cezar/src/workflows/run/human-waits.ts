@@ -1,6 +1,8 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
+import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
-import { WAIT_LIMIT, type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
+import { type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AskRequest } from '../../core/ask.ts';
 import { PROSE_HUMAN_GATE } from '../../runs/transcript-facts.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -59,12 +61,12 @@ export class HumanWaits {
   openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, card?: AskRequest): HumanWaitEntry | undefined {
     const run = this.context.store.getRun(runId);
     if (!run) return undefined;
-    const source = via === 'budget' || via === 'no-wait' || via === 'completion' ? 'cezar' : 'agent';
+    const source = WAIT_KINDS.human.aliasSource(via);
     if (source === 'agent') this.withdrawCezarHumanWaits(runId);
     const open = openWaits(this.context.store.getRun(runId) ?? run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
-    if (open || openWaits(this.context.store.getRun(runId) ?? run).length >= WAIT_LIMIT) return open;
-    const wait: HumanWaitEntry = { id: randomUUID(), kind: 'human', source, via,
-      registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.waitIdentity.ciTurnId ?? via, ...(card ? askCardFields(card) : {}) };
+    if (open) return open;
+    if (!waitCapacityAvailable(this.context.store.getRun(runId) ?? run)) return undefined;
+    const wait = WAIT_KINDS.human.aliasEntry(source, via, state?.waitIdentity.ciTurnId ?? via, card ? askCardFields(card) : undefined);
     try { this.context.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return undefined; }
     return wait;

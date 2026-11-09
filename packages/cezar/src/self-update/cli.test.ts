@@ -67,6 +67,20 @@ describe('managed version selection', () => {
     expect(activeId(undefined, testHome())).toBe(other);
   });
 
+  it('lists managed versions and registry tags without a registry request', async () => {
+    const entry = install('0.12.0', '0.12.0', 'registry', '2026-10-01');
+    activate('0.12.0', undefined, testHome());
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+      'dist-tags': { latest: '0.13.0', nightly: '0.14.0-nightly.1' }, versions: { '0.13.0': {} },
+    }));
+    expect(await runSelfUpdateCommand('versions', [], { home: testHome(), service: service(entry, '0.12.0'), modifyPath: false })).toBe(0);
+    expect(fetch.mock.calls[0]?.[0]).toBe('https://registry.npmjs.org/@wjarka%2Fcezarion');
+    const text = vi.mocked(console.log).mock.calls.map(call => call.join(' ')).join('\n');
+    expect(text).toContain('* 0.12.0');
+    expect(text).toContain('stable 0.13.0');
+    expect(text).toContain('nightly 0.14.0-nightly.1');
+  });
+
   it('keeps version-only fallback when no exact ID exists', async () => {
     const id = '0.12.0+local'; const entry = install(id, '0.12.0', 'local', '2026-10-01');
     expect(await runSelfUpdateCommand('use', ['0.12.0'], { home: testHome(), service: service(entry, '0.12.0'), modifyPath: false })).toBe(0);

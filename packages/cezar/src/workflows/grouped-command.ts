@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from '../project-paths.ts';
 import { spawn } from 'node:child_process';
 
 /** Stop on a workflow check: SIGTERM first, SIGKILL to its process group after this grace. */
@@ -35,6 +36,8 @@ export interface GroupedCommandResult {
  */
 export function runGroupedCommand(opts: GroupedCommandOptions): Promise<GroupedCommandResult> {
   const { command, cwd, env, setInterrupt, timeoutMs, keep, cap } = opts;
+  const refusal = fallbackProjectWriteError(cwd);
+  if (refusal) return Promise.resolve({ exitCode: null, output: '', timedOut: false, spawnError: refusal });
   return new Promise((resolve) => {
     const grouped = process.platform !== 'win32';
     const child = spawn('bash', ['-lc', command], { cwd, env, detached: grouped });

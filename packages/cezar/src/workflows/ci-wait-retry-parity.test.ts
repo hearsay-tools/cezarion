@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { CiGithubError, GithubCiClient } from '../ci-wait/github.ts';
 import { manager, store, root, restart, toolGenerationOf, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
@@ -33,7 +33,7 @@ const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind=
 
 describe('CI query retries across native harnesses', {timeout:30_000},()=>{
  useWorkerWaitFixture();
- for(const runner of RUNNER_IDS) for(const recovered of [false,true]) {
+ for(const runner of parityRunners('ci-wait-retry', 'R92')) for(const recovered of [false,true]) {
   it(`${runner} R92 ${recovered?'recovered without a session':'fresh'} retains a failed query until the CI verdict`,async()=>{
    process.env.CEZ_DRY_RUN='0';
    process.env[HARNESS_ADAPTERS[runner].binEnv]=HARNESS_ADAPTERS[runner].mockBin;

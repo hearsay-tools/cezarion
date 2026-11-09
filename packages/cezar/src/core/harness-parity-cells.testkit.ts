@@ -21,10 +21,22 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  * those groups, named in its comment.
  *
  * Two tiers. The seam tier drives each real runner class against that backend's
- * own offline mock. The run tier drives a real `RunManager`, because
- * `workflows/run/` emits `ask.requested` for every runner's `cezar_ask` card,
- * while codex and opencode also emit it from the runner for a native ask —
- * groups 1, 3 and 6 are only uniform above the seam.
+ * own offline mock, on every runner. The run tier drives a real `RunManager`, because
+ * `workflows/run/` emits `ask.requested` for every runner's `cezar_ask` card, while codex and
+ * opencode also emit it from the runner for a native ask, and provider failures, asks and parks
+ * settle in the orchestrator (groups 1, 3 and 6).
+ *
+ * Rows S36–S44 are the seam contract (hearsay-tools/cezarion#2991): each runner proves on its own
+ * wire that it behaves as its declared facts say. They live in `seam-contract.testkit.ts`.
+ *
+ * Coverage rule (hearsay-tools/cezarion#2991): a fix inside a runner class extends the seam
+ * contract or that runner's own rows, which run on every runner. A fix above the seam extends a
+ * shared row, which runs on the derived runner set `SHARED_RUNNERS`: the smallest set that shows
+ * every declared value of each turn-path fact. A new runner declares its facts and joins the set
+ * when it adds a value. Each `describeRunners` group is one family in
+ * `parity-classes.testkit.ts`, and a cell registers only on the runners its row's class names.
+ * Guards: `parity-classes.test.ts` (the set covers every value; every parity file has a family)
+ * and `cez/runner-fact-combination` (no workflow function touches a fact source and reads two fact keys).
  *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
  * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`
@@ -79,6 +91,8 @@ import { supportsProfiles } from './agent-profiles.ts';
 import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { promptFor, driveSeam, lastIndexWhere, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
+import { SEAM_CONTRACT_ROWS } from './seam-contract.testkit.ts';
+import { parityRowId, runsOn, type ParityFamilyName } from './parity-classes.testkit.ts';
 import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
@@ -601,12 +615,12 @@ const CONTROL_CRITERIA = [
   { id: 'R79', scenario: 'baseline' },
   // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.testkit.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
-  { id: 'R72', scenario: 'provider-error' },
-  { id: 'R73', scenario: 'provider-error' },
+  { id: 'R72', scenario: 'provider-error-controlled' },
+  { id: 'R73', scenario: 'provider-error-controlled' },
   // Nonfinal CI recovery retains failure history and runs the tail/check retries, including restart.
-  { id: 'R74', scenario: 'provider-error' },
-  { id: 'R75', scenario: 'provider-error' },
-  { id: 'R76', scenario: 'provider-error' },
+  { id: 'R74', scenario: 'provider-error-controlled' },
+  { id: 'R75', scenario: 'provider-error-controlled' },
+  { id: 'R76', scenario: 'provider-error-controlled' },
   { id: 'R26', scenario: 'ask-resume' },
   // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
   { id: 'R27', scenario: 'hold' },
@@ -915,12 +929,13 @@ const RETIREMENTS = [
   { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
 ] as const;
 
-export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup' | 'owned-workflows';
+export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup' | 'owned-workflows' | 'contract';
 
 // Adjacent semantic families; every group below belongs to exactly one part.
 export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly string[]>> = {
   startup: ['startup'],
   provider: ['provider'],
+  contract: ['contract'],
   session: ['seam', 'session', 'input', 'governed', 'native-message', 'spec', 'tools', 'cdp', 'tool-grants'],
   run: ['run', 'diagnostics', 'child', 'hooks', 'answer', 'monitoring', 'prs'],
   'owned-workflows': ['owned-workflows'],
@@ -936,11 +951,90 @@ export const harnessParityFile = (backend: RunnerId, part: HarnessParityPart): s
 type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'beforeAll' | 'afterAll'> & {
   toolGrants: typeof describeToolGrantParity;
   allGroups?: boolean;
+  /** A dry collection, for `groupCellCounts` and `harnessGroupRows`. A function also hears each
+   *  cell the file's runner registers, with its group. */
+  probe?: true | ((group: string, title: string) => void);
 };
+
+/** Every matrix row with the scenario it drives, as the matrix guard reads them. */
+export function parityRowScenarios(): ReadonlyArray<{ readonly id: string; readonly scenario: ScenarioName }> {
+  return [
+    ...PERMISSION_CRITERIA, ...MODEL_REFUSAL_CRITERIA, ...SHUTDOWN_CRITERIA,
+    ...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA,
+    ...WAIT_CRITERIA, ...WORKFLOW_ASK_CRITERIA, ...STEP_COMPLETION_CRITERIA, ...FOLLOWUP_CRITERIA,
+    ...ANSWER_DELIVERY_CRITERIA, ...SKILL_RESUME_CRITERIA, ...SKILL_PROVISION_CRITERIA,
+    ...WORKTREE_SETUP_CRITERIA, ...AUTONOMOUS_CRITERIA, ...WORKER_PROGRESS_WAIT_CRITERIA,
+    ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
+    ...SEAM_CRITERIA, ...SEAM_CONTRACT_ROWS, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
+  ];
+}
+
+/** How many cells each group's suite registers for one runner, by suite name. A shared group can
+ *  hold none for a runner outside the derived set, and Vitest 4 fails an empty suite. */
+function groupCellCounts(runner: RunnerId): Map<string, number> {
+  const counts = new Map<string, number>();
+  let cells = 0;
+  describeHarnessParity({ runner, part: 'session' }, {
+    describe: ((name: string, ...args: unknown[]) => {
+      const before = cells;
+      (args.at(-1) as () => void)();
+      counts.set(name, (counts.get(name) ?? 0) + cells - before);
+    }) as typeof describe,
+    it: (() => { cells++; }) as unknown as typeof it,
+    beforeAll: (() => undefined) as typeof beforeAll,
+    afterAll: (() => undefined) as typeof afterAll,
+    toolGrants: () => { cells += TOOL_GRANT_CASES.length; },
+    allGroups: true,
+    probe: true,
+  });
+  return counts;
+}
+
+/** The row ids each group registers on any runner, from its cell titles (hearsay-tools/cezarion#2991). */
+export function harnessGroupRows(): Map<string, Set<string>> {
+  const rows = new Map<string, Set<string>>();
+  for (const runner of RUNNER_IDS) {
+    describeHarnessParity({ runner, part: 'session' }, {
+      describe: ((_name: string, ...args: unknown[]) => { (args.at(-1) as () => void)(); }) as typeof describe,
+      it: (() => undefined) as unknown as typeof it,
+      beforeAll: (() => undefined) as typeof beforeAll,
+      afterAll: (() => undefined) as typeof afterAll,
+      toolGrants: () => undefined,
+      allGroups: true,
+      probe: (group, title) => {
+        const row = parityRowId(title);
+        if (row) rows.set(group, (rows.get(group) ?? new Set()).add(row));
+      },
+    });
+  }
+  return rows;
+}
 
 export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessParityPart } | 'once',
   registration: HarnessRegistration = { describe, it, beforeAll, afterAll, toolGrants: describeToolGrantParity }): void {
-  const { describe, it, beforeAll, afterAll } = registration;
+  const { beforeAll, afterAll } = registration;
+  // Each group is one parity family (core/parity-classes.testkit.ts, hearsay-tools/cezarion#2991):
+  // a cell registers only when its row runs on this file's runner. The group is carried into each
+  // suite factory, which Vitest may call after describeRunners returns.
+  let currentGroup: string | undefined;
+  const inGroup = <A extends unknown[]>(group: string | undefined, factory: (...args: A) => unknown) => {
+    return (...args: A) => {
+      const previous = currentGroup;
+      currentGroup = group;
+      try { return factory(...args); } finally { currentGroup = previous; }
+    };
+  };
+  const describe = new Proxy(registration.describe, {
+    apply: (target, self, args: unknown[]) => Reflect.apply(target, self, args.map(arg => typeof arg === 'function' ? inGroup(currentGroup, arg as () => unknown) : arg)),
+  });
+  const it = new Proxy(registration.it, {
+    apply: (target, self, args: unknown[]) => {
+      if (scope !== 'once' && currentGroup !== undefined && typeof args[0] === 'string'
+        && !runsOn(`harness:${currentGroup}` as ParityFamilyName, parityRowId(args[0]), scope.runner)) return undefined;
+      if (typeof registration.probe === 'function' && currentGroup !== undefined && typeof args[0] === 'string') registration.probe(currentGroup, args[0]);
+      return Reflect.apply(target, self, args);
+    },
+  });
   /**
    * Register one cell. An exempt cell still produces a named test that fails the
    * day the backend gains the thing — see `ExemptionKind` for the two ways that
@@ -994,16 +1088,19 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
 
   const runners: RunnerId[] = scope === 'once' ? [] : [scope.runner];
   const registeredGroups: string[] = [];
+  const cellCounts = scope === 'once' || registration.probe ? undefined : groupCellCounts(scope.runner);
   const describeRunners = (group: string, name: string, body: () => void, once = false): void => {
     registeredGroups.push(group);
     if (scope === 'once') {
       if (once) describe(name, body);
       return;
     }
+    if (cellCounts?.get(name) === 0) return;
+    const grouped = inGroup(group, body) as () => void;
     // Iterate rather than use includes: duplicate routes register twice and fail the guard.
-    if (registration.allGroups) { describe(name, body); return; }
+    if (registration.allGroups) { describe(name, grouped); return; }
     for (const selected of HARNESS_PARITY_GROUPS[scope.part]) {
-      if (selected === group) describe(name, body);
+      if (selected === group) describe(name, grouped);
     }
   };
 
@@ -1014,6 +1111,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }
     }
   };
+  // hearsay-tools/cezarion#2991: the seam contract every runner keeps, read from its declared facts.
+  describeRunners('contract', 'harness parity — seam contract (hearsay-tools/cezarion#2991)', () => {
+    for (const backend of runners) for (const row of SEAM_CONTRACT_ROWS) parityRow(backend, row, () => row.observe(backend));
+  });
   describeRunners('startup', 'harness parity — missing executable', () => seamRows(SEAM_CRITERIA.filter(row => row.id === 'S20')));
   describeRunners('seam', 'harness parity — seam tier', () => seamRows(SEAM_CRITERIA.filter(row => row.id !== 'S20')));
   // hearsay-tools/cezarion#1810: the Tool-list kinds case table, one cell per case and runner.
@@ -2136,20 +2237,13 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         ...NO_PROGRESS_CRITERIA.map(c => c.id),
         ...WORKFLOW_TIMEOUT_CRITERIA.map((c) => c.id),
         ...SEAM_CRITERIA.map((c) => c.id),
+        ...SEAM_CONTRACT_ROWS.map((c) => c.id),
         ...INPUT_CRITERIA.map((c) => c.id),
         FOLLOW_ON_CRITERION.id,
         ...CONTROL_CRITERIA.map((c) => c.id),
         ...RUN_CRITERIA.map((c) => c.id),
       ];
-      const rows: readonly { id: string; scenario: ScenarioName }[] = [
-        ...PERMISSION_CRITERIA, ...MODEL_REFUSAL_CRITERIA, ...SHUTDOWN_CRITERIA,
-        ...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA,
-        ...WAIT_CRITERIA, ...WORKFLOW_ASK_CRITERIA, ...STEP_COMPLETION_CRITERIA, ...FOLLOWUP_CRITERIA,
-        ...ANSWER_DELIVERY_CRITERIA, ...SKILL_RESUME_CRITERIA, ...SKILL_PROVISION_CRITERIA,
-        ...WORKTREE_SETUP_CRITERIA, ...AUTONOMOUS_CRITERIA, ...WORKER_PROGRESS_WAIT_CRITERIA,
-        ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
-        ...SEAM_CRITERIA, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
-      ];
+      const rows = parityRowScenarios();
       const scenarioOf = (id: string): ScenarioName => {
         const row = rows.find(c => c.id === id);
         if (!row) throw new Error(`unknown criterion id "${id}"`);

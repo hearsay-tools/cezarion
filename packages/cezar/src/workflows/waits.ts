@@ -1,8 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type CezarWaitRequest, type WaitVia, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
+import { WAIT_KINDS } from './run/wait-kinds.ts';
+import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
-import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
  * Pure wait-list readers and agent-facing text. RunManager owns registration, resolution and
@@ -36,8 +35,9 @@ export function waitNamedInputIds(run: RunRecord): Set<string> {
 /** The kind a `cezar_wait` answer names: the kind the call asked for. A request wait is stored as a
  *  `worker` entry with `requestIds` (hearsay-tools/cezarion#1995). */
 export function waitAnswerKind(wait: Wait): Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' {
-  if (wait.kind === 'human' || wait.kind === 'subagent') throw new Error(`a ${wait.kind} wait is not a cezar_wait answer`);
-  return wait.kind === 'worker' && wait.requestIds ? 'request' : wait.kind;
+  const kind = WAIT_KINDS[wait.kind].answerKind(wait);
+  if (kind === undefined) throw new Error(`a ${wait.kind} wait is not a cezar_wait answer`);
+  return kind;
 }
 
 /** Waits still waiting for their event, in list order. */
@@ -66,8 +66,8 @@ export function isMonitoringTimer(wait: Wait): boolean {
 export function chargesBudget(wait: Wait): boolean {
   // A subagent wait spends a wake only at its safety deadline: its children ending is an external
   // event, like CI (hearsay-tools/cezarion#2431).
-  if (wait.kind === 'subagent') return wait.result?.reason === 'timeout';
-  return wait.kind === 'timer' || wait.kind === 'process' || wait.kind === 'peer';
+  const charge = WAIT_KINDS[wait.kind].chargesWake;
+  return charge === 'timeout' ? 'result' in wait && !!wait.result && 'reason' in wait.result && wait.result.reason === 'timeout' : charge;
 }
 
 /**
@@ -86,10 +86,7 @@ export function isCezarHumanWait(wait: Wait): boolean {
   return wait.kind === 'human' && wait.source === 'cezar';
 }
 
-/** One PR, however the agent spelled it: case-insensitive, trailing slash ignored. */
-export function normalizePrUrl(url: string): string {
-  return url.replace(/\/+$/, '').toLowerCase();
-}
+export { normalizePrUrl } from './run/wait-kinds.ts';
 
 function clip(text: string, max = SUMMARY_MAX): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -117,53 +114,19 @@ function subagentPhrase(wait: SubagentWaitEntry): string {
 /** The open waits as both tools list them back to the agent. A human wait has no deadline, and
  *  Cezar's own deadline-less worker wait is not the agent's to list (hearsay-tools/cezarion#1301). */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && !(wait.kind === 'worker' && wait.deadline === undefined)).map((wait): OpenWait => wait.kind === 'human'
-    ? { wait_id: wait.id, kind: wait.kind, summary: summary(wait) }
-    : { wait_id: wait.id, kind: wait.kind, deadline: wait.deadline!, summary: summary(wait) });
+  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && (WAIT_KINDS[wait.kind].deadline === 'none' || WAIT_KINDS[wait.kind].hasDeadline(wait))).map((wait): OpenWait => WAIT_KINDS[wait.kind].deadline === 'none'
+    ? { wait_id: wait.id, kind: wait.kind as 'human', summary: summary(wait) }
+    : { wait_id: wait.id, kind: wait.kind as Exclude<Wait['kind'], 'human'>, deadline: ('deadline' in wait ? wait.deadline : undefined)!, summary: summary(wait) });
 }
 
-/**
- * The open wait a registration repeats, if any. PR: the same PR, target and conflict switch, whatever
- * its timeout (hearsay-tools/cezarion#1425). Timer: the
- * same seconds and note, registered in the same turn (a later turn asking again means a new check).
- * Process: the same PID, start token and resolved exit file in `context`, whatever its timeout or
- * note (hearsay-tools/cezarion#1446).
- */
-export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string,
-  context: { startToken?: string; exitFile?: string } = {}): PrWaitEntry | TimerWaitEntry | ProcessWaitEntry | undefined {
-  return waits.find((wait): wait is PrWaitEntry | TimerWaitEntry | ProcessWaitEntry => {
-    // Worker and request waits: `identicalWorkerWait`; peer waits: `identicalPeerWait`.
-    if (wait.phase !== 'open' || request.kind === 'worker' || request.kind === 'request' || request.kind === 'peer') return false;
-    if (request.kind === 'pr') return wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr)
-      && wait.until === (request.until ?? 'checks') && wait.wakeOnConflict === (request.wake_on_conflict ?? true);
-    if (request.kind === 'process') {
-      return wait.kind === 'process' && wait.pid === request.pid && wait.startToken === context.startToken && wait.exitFile === context.exitFile;
-    }
-    return wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
-  });
-}
-
-/**
- * The open worker wait a registration repeats (hearsay-tools/cezarion#1235): the same target kind,
- * the same ids in any order and the same mode (`any` when omitted), whatever its timeout.
- */
-export function identicalWorkerWait(waits: readonly Wait[], target: { workerIds?: readonly string[]; requestIds?: readonly string[] | undefined; mode?: string | undefined }): WorkerWaitEntry | undefined {
-  const key = (ids: readonly string[] | undefined) => ids ? [...ids].sort().join(',') : undefined;
-  return waits.find((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open' &&
-    key(wait.workerIds) === key(target.workerIds) && key(wait.requestIds) === key(target.requestIds) && (wait.mode ?? 'any') === (target.mode ?? 'any'));
-}
-
-/** The open peer wait a registration repeats (hearsay-tools/cezarion#1995): the same peers in any
- *  order, whatever its timeout. */
-export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly string[]): PeerWaitEntry | undefined {
-  const key = (ids: readonly string[]) => [...ids].sort().join(',');
-  return waits.find((wait): wait is PeerWaitEntry => wait.kind === 'peer' && wait.phase === 'open' && key(wait.peerIds) === key(peerIds));
-}
+export { identicalWait } from './run/wait-kinds.ts';
+export const identicalWorkerWait = WAIT_KINDS.worker.duplicateWorker;
+export const identicalPeerWait = WAIT_KINDS.peer.duplicatePeer;
 
 /** The agent input that delivers a resolved wait's result: the wait's own id, or for an upgraded
  *  worker wait whose wake was already queued, that input (`wakeInputId`). */
 export function waitInputId(wait: Wait): string {
-  return wait.kind === 'worker' ? wait.wakeInputId ?? wait.id : wait.id;
+  return WAIT_KINDS[wait.kind].inputId(wait);
 }
 
 /** The CI watcher still speaks the schema-3 `CiWait`; an open entry is a parked one to it. */
@@ -275,8 +238,8 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map(describeWait);
-  const asked = open.some((wait) => wait.kind === 'human');
-  const cancellable = open.some((wait) => wait.kind !== 'human');
+  const asked = open.some((wait) => WAIT_KINDS[wait.kind].userAnswers);
+  const cancellable = open.some((wait) => !WAIT_KINDS[wait.kind].userAnswers);
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
     : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer, process or subagent wait or timer you no longer need."
     : "The user's reply answers it.";
@@ -285,44 +248,15 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
 
 /** An open or resolved PR wait: it holds conversation input for its own wake (#476). */
 export function hasPrWait(run: Pick<RunRecord, 'waits'>): boolean {
-  return (run.waits ?? []).some((wait) => wait.kind === 'pr' && (wait.phase === 'open' || wait.phase === 'resolved'));
+  return (run.waits ?? []).some((wait) => WAIT_KINDS[wait.kind].holdsConversationInput && (wait.phase === 'open' || wait.phase === 'resolved'));
 }
 
-export function timerWaitEntry(parsed: Extract<CezarWaitRequest, { kind: 'timer' }>, via: WaitVia, turnId: string, now: number) {
-  const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-        deadline: new Date(now + parsed.seconds * 1000).toISOString(), phase: 'open', turnId, seconds: parsed.seconds,
-        ...(parsed.note === undefined ? {} : { note: parsed.note }) };
-  return wait;
-}
-
-export function prWaitEntry(identity: Awaited<ReturnType<CiWatcherSupervisor['resolve']>>, parsed: Extract<CezarWaitRequest, { kind: 'pr' }>, via: WaitVia, generation: string, turnId: string, now: number) {
-  const wait: PrWaitEntry = { ...identity, id: randomUUID(), kind: 'pr', source: 'agent', via, generation, turnId,
-        timeoutSeconds: parsed.timeout_seconds, until: parsed.until, wakeOnConflict: parsed.wake_on_conflict, registeredAt: new Date(now).toISOString(),
-        deadline: new Date(now + parsed.timeout_seconds * 1000).toISOString(), phase: 'open' };
-  return wait;
-}
-
-export function processWaitEntry(request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, now: number, startToken: string | undefined, exitFile: string | undefined) {
-  const wait: ProcessWaitEntry = { id: randomUUID(), kind: 'process', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + request.timeout_seconds * 1000).toISOString(), phase: 'open', turnId, timeoutSeconds: request.timeout_seconds,
-      pid: request.pid, ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }),
-      ...(request.note === undefined ? {} : { note: request.note }) };
-  return wait;
-}
+export const timerWaitEntry = WAIT_KINDS.timer.entry;
+export const prWaitEntry = WAIT_KINDS.pr.entry;
+export const processWaitEntry = WAIT_KINDS.process.entry;
 
 export type WaitResult = CiWaitResult | ProcessWaitResult | PeerWaitResult | SubagentWaitResult;
 
 export function settledWaitEntry(latest: Wait, result: WaitResult | undefined, observed: WorkerWaitEntry | undefined, resolvedAt: string): Wait {
-  const settled: Wait = latest.kind === 'pr'
-      ? { ...latest, phase: 'resolved', resolvedAt, result: (result as CiWaitResult | undefined) ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
-      : latest.kind === 'process'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as ProcessWaitResult | undefined) ?? { outcome: 'deadline', observedAt: resolvedAt } }
-      : latest.kind === 'worker'
-        ? { ...observed ?? latest, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }
-      : latest.kind === 'peer'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as PeerWaitResult | undefined) ?? { reason: 'timeout' } }
-      : latest.kind === 'subagent'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as SubagentWaitResult | undefined) ?? { reason: 'timeout' } }
-        : { ...latest, phase: 'resolved', resolvedAt };
-  return settled;
+  return WAIT_KINDS[latest.kind].resolve(latest, result, observed, resolvedAt);
 }

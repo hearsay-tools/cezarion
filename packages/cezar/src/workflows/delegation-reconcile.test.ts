@@ -8,12 +8,12 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { TrackedWork } from './run/tracked-work.ts';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { RunStore } from '../runs/store.ts';
@@ -59,6 +59,74 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     // pass over live families would skip them.
     await manager.recover();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
+  });
+
+  it('leaves fallback conversation families readable and unchanged during boot recovery', async () => {
+    manager.dispose(); store.close();
+    renameSync(join(root, '.ai/cezar'), join(root, '.ai/squawk'));
+    store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
+    const writes = vi.spyOn(store, 'commitConversation');
+    const prepare = vi.spyOn(store, 'prepareRecoveryFacts');
+    const before = store.readEvents(a.parentId);
+    await manager.recover();
+    store.flush();
+    expect(store.getRun(a.parentId)).toBeDefined();
+    expect(store.readEvents(a.parentId)).toEqual(before);
+    expect(writes).not.toHaveBeenCalled();
+    expect(prepare.mock.calls).not.toContainEqual([a.parentId]);
+    expect(existsSync(join(root, '.ai/cezar/runs.db'))).toBe(false);
+    expect(store.isFallbackRun(a.parentId)).toBe(true);
+    expect(store.isFallbackRun(a.workerId)).toBe(true);
+  });
+
+  it('leaves a mixed legacy/fallback family untouched at boot until an explicit control adopts it', async () => {
+    manager.dispose();
+    setRunStatus(store, a.parentId, RUN_STATUS.running);
+    setRunStatus(store, a.workerId, RUN_STATUS.running);
+    store.close();
+    const primary = join(root, '.ai/cezar');
+    const fallback = join(root, '.ai/squawk');
+    const records = readPersistedRuns(primary);
+    const worker = records.find(run => run.id === a.workerId)!;
+    seedRuns(primary, records.filter(run => run.id !== a.workerId));
+    seedRuns(fallback, [worker]);
+    const history = join(fallback, 'runs', `${a.workerId}.ndjson`);
+    // Seed evidence through the public history layout, without opening a fallback store.
+    mkdirSync(join(fallback, 'runs'), { recursive: true });
+    writeFileSync(history, '{"seq":1,"type":"text","text":"fallback evidence"}\n');
+    const databaseBytes = readFileSync(join(fallback, RUNS_DB_FILE));
+    const historyBytes = readFileSync(history);
+    const rootRow = () => {
+      const db = new DatabaseSync(join(primary, RUNS_DB_FILE), { readOnly: true });
+      try { return db.prepare('SELECT data, revision FROM runs WHERE id = ?').get(a.parentId); } finally { db.close(); }
+    };
+    const rootBefore = rootRow();
+    store = RunStore.open(primary, { keepLive: true });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
+    vi.spyOn(manager, 'continueRun').mockReturnValue({ ok: false, error: 'fixture stops agent launch' });
+    expect(store.listWorkersOf(a.parentId).map(run => run.id)).toContain(a.workerId);
+    await manager.recover();
+    store.flush();
+    // Automatic recovery treats the whole family as read only: both runs keep their stored status.
+    expect(store.runOwnership(a.parentId)).toBe('fallback');
+    expect(store.getRun(a.parentId)?.status).toBe(RUN_STATUS.running);
+    expect(store.getRun(a.workerId)?.status).toBe(RUN_STATUS.running);
+    expect(store.listRuns().map(run => run.id)).toEqual([]);
+    expect(rootRow()).toEqual(rootBefore);
+    const db = new DatabaseSync(join(primary, RUNS_DB_FILE), { readOnly: true });
+    try { expect(db.prepare('SELECT id FROM runs WHERE id = ?').get(a.workerId)).toBeUndefined(); }
+    finally { db.close(); }
+    expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(databaseBytes);
+    expect(readFileSync(history)).toEqual(historyBytes);
+    // An explicit control adopts the family, then the existing orphan adoption recovers it.
+    expect(store.adoptFallbackFamily(a.parentId)).toBe(true);
+    expect(await manager.adoptOrphanedRun(a.parentId, { stop: true })).toBe(true);
+    store.flush();
+    expect(store.isFallbackRun(a.workerId)).toBe(false);
+    expect(store.getRun(a.parentId)?.status).not.toBe(RUN_STATUS.running);
+    expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(databaseBytes);
+    expect(readFileSync(history)).toEqual(historyBytes);
   });
 
   it.each(['boot', 'adopt'] as const)('%s recovery awaits cold family facts before projections', async mode => {

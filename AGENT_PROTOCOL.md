@@ -88,17 +88,21 @@ type InputDelivery = {
   | { readonly mode: 'boundary'; readonly humanInputAtTurnEnd: 'always-held' }  // refused while busy
 );
 interface RunnerFacts {                  // core/runner-facts.ts, one row per runner id
+  readonly inputDelivery: InputDelivery;
+  readonly systemPromptOnResume: 'resent' | 'in-thread';
   readonly nativeAsk: 'answerable' | 'auto-skipped' | 'none';
   readonly nativeSubagents: 'reported' | 'unreported' | 'turn-held';
   readonly nativeTimerTool: string | null;
   readonly costReport: 'cumulative' | 'per-turn';
+  readonly sessionIdSource: 'launch' | 'native';
 }
 ```
 
 - **Declared facts, not runner ids** (hearsay-tools/cezarion#2991). Shared code outside
   `packages/cezar/src/core/` reads what a runner declares; it never compares runner ids to
-  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in three places: `systemPromptOnResume`,
-  `inputDelivery`, and its row of `RUNNER_FACTS` (`core/runner-facts.ts`). The table is keyed
+  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in its row of `RUNNER_FACTS`
+  (`core/runner-facts.ts`), which holds its `inputDelivery` and `systemPromptOnResume`
+  too; the class reads both from the row. The table is keyed
   by runner id because shared code often holds only a `RunnerId` before it builds the runner.
   Each runner class exposes its row as `facts`, and `core/runner-facts.test.ts` checks every
   runner `createRunner` builds against the table. Parity exemptions that follow a fact select
@@ -131,6 +135,12 @@ interface RunnerFacts {                  // core/runner-facts.ts, one row per ru
     `ScheduleWakeup`), the equivalent of a `cezar_wait` timer; null when none.
   - `costReport`: `cumulative` when each cost report is the session total (Claude
     `total_cost_usd`), which usage accounting turns into deltas; `per-turn` otherwise.
+  - `sessionIdSource`: `launch` when the runner opens its session under the id Cezar saves on
+    the step before launch (Claude and Pi `--session-id`), so that id resumes at once; `native`
+    when the runner mints its own id and reports it in a `session` event (Codex
+    `thread/start`, OpenCode `POST /session`, OMP `get_state`, Cursor print `system/init`).
+    Until that event the step holds only Cezar's launch id. §7 *Continue: session and step*
+    gives the resume rule.
 
 - `run()` is a one-shot convenience; `startSession()` is the real contract.
 - `systemPromptOnResume` is required (hearsay-tools/cezarion#790). `resent` means every
@@ -1484,8 +1494,8 @@ mock models Codex's MCP tool gate, so the Codex U1 row of `workflows/waits-parit
 wires carry no MCP tool approval request have named exemptions.
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-final-recovery-parity.test.ts`,
-drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
-wire with a pending CI wait, on fresh and scheduler-owned continuation attempts.
+drive the shared runner set through its `HARNESS_ADAPTERS` native provider-error
+wire (the `provider-error-controlled` scenario, which S44 holds on every runner) with a pending CI wait, on fresh and scheduler-owned continuation attempts.
 The failed step retains its error, finish timestamp and `session.ended(error)`;
 the run stays `waiting` with its CI wait open until automatic recovery delivers
 the observation. Later successful settlement must leave that failed attempt intact.
@@ -1541,7 +1551,8 @@ rejection lifts, the answer delivers the result once. Claude is exempt from U12 
 neither delay nor reject that acknowledgement. Cursor is exempt from U13 only: Cursor print
 acknowledges on the first model work of the process it spawns, which U12 delays, but the
 print wire has no rejection of an admitted prompt. U14 fails every wait-wake continuation's
-opening prompt through each runner's native provider-error wire, with a resolved timer and no
+opening prompt through each runner's native provider-error wire (on the shared runner set; S44 holds
+that failure on every runner), with a resolved timer and no
 question: the same bound, a timer that resolves on the failed run stays resolved and wakes
 nothing (no queued continuation, admission retry or backoff is left), and Continue delivers both
 results once. A second U14 case closes every session cleanly at a turn end while the result is
@@ -1709,7 +1720,7 @@ before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
 **R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-starting-proof-parity.test.ts`,
-uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
+uses each shared-set backend's `HARNESS_ADAPTERS` native wire (S43 holds the process report on every runner) to persist a
 starting execution generation. A fully terminal modern root and worker have no
 live or deferred anchor; their plain history is nonempty and facts sidecars are
 missing. Immediate boot recovery must prepare the selected family off-loop,
@@ -1789,7 +1800,7 @@ the SIGKILL is sent. Cursor print reaches the same reap when it ends its group a
 win32 skips both rows. No wire exemptions.
 
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-{collect,destroy,reuse}-parity.test.ts` and
-`workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
+`workflows/worker-location-evidence.test.ts`, drives each shared-set
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
 Both collect-first and destroy-first unblock parent Finish after collection. A real same-user
@@ -1815,7 +1826,7 @@ process exit, native wires, stores and Git remain real. Linux-only OS coverage e
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
 **R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-same-boot-crash-lock-parity.test.ts`,
-drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
+drives each shared-set backend through its native `HARNESS_ADAPTERS` wire,
 cancellation, and same-boot interrupted checkpoint recovery. A live recorded
 unreadable process still blocks settlement, and that partial collection cannot
 authorize parent Finish. Once the recorded incarnations exit (a reused PID does
@@ -1856,6 +1867,58 @@ id (OpenCode GETs `/session/{id}` and does not `POST /session`; the other runner
 resume channel). A fresh-session continuation on an `in-thread` runner still receives the
 skill. OpenCode's lost-session 404 fallback is covered alongside R57: one notice, a new
 session id, skill present in the fresh session's system prompt. No runner is exempt.
+
+### Continue: session and step (hearsay-tools/cezarion#2991)
+
+A Continue makes two separate choices. **Which step it continues** names the skill, tool
+grants, model, effort and worker identity of its turn. **Which session it resumes** decides
+whether that turn reopens the step's conversation or opens a fresh one. The first never depends
+on the second: the continued step owns the run's latest recorded session from before the
+Continue (`continuedSessionId` in `workflows/run/launch-read-resolver.ts`), which is also the step
+admission checks the worker identity against and queued revival rebuilds from. A synthetic
+`continue-N` that owns a session of its own extends the definition's last agent step, as before.
+
+Cezar saves a launch UUID on every agent step before the runner starts (`step-session.ts`), so
+the step rail has an id at once. `resumableSessionId` decides whether the saved id resumes:
+
+| Runner class (`sessionIdSource`) | Saved id | Event history | Session the Continue opens |
+| --- | --- | --- | --- |
+| `launch`: claude, pi | any | any | Resumes the saved id. The runner opened its session under it. |
+| `native`: codex, opencode, omp, untagged cursor | named by a `session` event | present | Resumes the saved id. |
+| `native` | not named by a `session` event | present, with the `step-start` of the step that first holds the id | Fresh session. The process ended before the runner reported its id, so the runner never knew the saved one. |
+| `native` | any | absent or unreadable (`readEvents` returns `[]`), or without that step's `step-start` | Resumes the saved id. Nothing shows the runner never reported it, so older or salvaged run data keeps its conversation. A wrong id fails loudly: Codex `thread/resume` and OMP `--resume` fail the step, OpenCode answers 404 and opens one fresh session with the lost-session notice, and Cursor refuses an untagged id with `CURSOR_ACP_RESUME_REFUSED`. |
+| `native`, recorded transport `cursor-print` | named by a print `session` event of a step, up to the session step, that holds the same id and transport | present | Resumes through print. |
+| `native`, recorded transport `cursor-print` | without that event | present or absent | Refused: `Cursor print session identity lacks a matching recorded session event`. Queued revival fails the run with the same error. |
+| any | any | any | A runner or account switch opens a fresh session on the new runner, as before. |
+
+A confirmed id with absent history cannot occur: the `session` event is the confirmation. A
+workflow step appends its `step-start` event (a synchronous NDJSON write) before the record saves
+the launch id, so a crash in that window leaves both in place. A Continue step saves only an id it
+resumes or one its runner reported.
+
+The step each Continue runs as, for every row above:
+
+| Chain | Latest recorded session belongs to | Session | Skill, grants, model, effort and worker identity from |
+| --- | --- | --- | --- |
+| Single step | the step | resumed or fresh | the step |
+| Multi-step | step *k* (for example failed mid-chain) | resumed | step *k* |
+| Multi-step | step *k* | fresh: native id not reported | step *k* (was the chain's last agent step) |
+| Multi-step | step *k* | fresh: runner or account switch | step *k* (was the chain's last agent step) |
+| Mixed-runner worker, codex `implement` then claude `review` | `implement` | fresh Codex session: id not reported | `implement`'s pinned identity: Codex account, model and grants (was `review`'s, which failed with `Accepted worker provider identity cannot change`) |
+| Mixed-runner worker | `review` | resumed | `review`'s pinned identity |
+| Any | a synthetic `continue-N` that owns its own session | resumed or fresh | the chain's last agent step |
+| Any | a failed CI source step (`workflowResumeStepId`) | resumed or fresh | the CI source step |
+| Legacy record without `workflowDef` | any | resumed or fresh | the defaults |
+
+Only a resumed session reads the account (`profileId`) and transport recorded on its owning step;
+a fresh session takes the account the run or the worker's pinned step identity names.
+
+`workflows/native-session-continue.test.ts` drives every `RUNNER_IDS` backend through its native
+`HARNESS_ADAPTERS` wire: a Continue after a crash before the `session` event resumes the launch
+id on `launch` runners and opens a fresh session on `native` ones, as the continued step; a native
+id without event history resumes. `continuation-tools.test.ts`, `cursor-bootstrap-continue.test.ts`
+and `delegation/provision-intent-catalog.test.ts` pin the step for multi-step, Cursor and
+mixed-runner worker chains.
 
 **PR1–PR2** (hearsay-tools/cezarion#922), in `core/harness-parity.test.ts`, drive
 all `RUNNER_IDS` through the native `multi-pr-refs` scenario. PR1 retains five
@@ -1932,14 +1995,19 @@ are never retried (`opencode-serve-retry.test.ts`). The other runners speak over
 spawned process's stdio, with no listen phase, and carry named
 `scenario-unconstructible` exemptions; retrying their starts is out of scope.
 
-Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
+Workflow deadline rows **T1–T7** (hearsay-tools/cezarion#470) live in
 `core/workflow-timeout-parity.testkit.ts` and are registered in the shared parity
-guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
+guard. Each backend uses its own `HARNESS_ADAPTERS` native wire:
 non-final managed steps outlive the default runner deadline, explicit zero disables
 it, authored positive limits fail before trailing checks, and standalone sessions
 retain their default cap. Longer authored limits override that cap, while default
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
-manager, runners, transports and terminal signals remain real.
+manager, runners, transports and terminal signals remain real. Cezar passes
+`step.timeoutMs ?? 0` (`workflows/run/step-session.ts`), so T1, T2, T3, T5 and T6 test
+Cezar's deadline logic and run on the shared runner set (hearsay-tools/cezarion#2991). T7 is
+their seam row on every runner: through `driveSeam`, a `spec.timeoutMs` of zero and one longer
+than the default both outlive the default, and a shorter one ends the turn with a timed-out
+error. T4 (the default itself) also runs on every runner.
 
 Intermediate question rows **Q4–Q6 and Q8** (hearsay-tools/cezarion#427) live in
 `core/workflow-ask-cells.testkit.ts` and the shared parity guard. Every
@@ -2051,14 +2119,16 @@ maps these exits to its own wire:
   `discardQueuedMessages` is a no-op on this wire, so it is not an exit. A
   `turn/steer` response is admission, not a release.
 - **OpenCode**: (a) the `turn.started` cezar emits at the follow-up's `prompt_async`
-  POST, once the running turn ends. (c) `discardQueuedMessages`. A follow-up sent
+  POST, once the running turn ends. (c) `discardQueuedMessages`, or a server start that
+  fails. The hold starts at `sendMessage`, before the server is ready. A follow-up sent
   while a question reply is in flight stays held until that reply succeeds, then posts
   like any other.
 - **Cursor print**: (a) the `system`/`init` frame of the print process that carries
   the follow-up, which the mapper turns into `turn.started`. (c)
   `discardQueuedMessages`, which drops the queue; for a spawned follow-up it drops
   only the hold, and that process can still run it. The queue shift and the spawn are
-  not a release. Before the print qualification check passes, the wrapper holds the
+  not a release. A follow-up sent between turns is held from `sendMessage` the same way,
+  and a held follow-up stays held through a model-admission retry. Before the print qualification check passes, the wrapper holds the
   follow-up itself and hands it to the print runner.
 - **Pi**: (a) its ack, when its write opened a normalized turn that is still open
   (cezar emits that `turn.started` at the write); for a steer, the first
@@ -2095,6 +2165,56 @@ unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the 
 and runs as a fresh turn after the `cezar_ask` park while the card is pending — the inverted
 H2 assertion does not pin that.
 
+**Seam contract rows S36–S44** (hearsay-tools/cezarion#2991) live in
+`core/seam-contract.testkit.ts` and run from each runner's
+`harness-<runner>-contract-parity.test.ts`, on that runner's own native mock. They hold each
+runner to its declared facts, never to its id:
+
+- **S36** acknowledgement: `sendAgentMessage` resolves at the declared `acknowledgement`
+  point. With the native process stopped, a `write` acknowledgement still resolves and a
+  `response` one does not; a `model-work` one resolves only after the turn it opens has
+  started. An `observable` runner reports every accepted input read or unread; a read
+  follows the acknowledgement on a later native frame. An `unobservable` runner reports
+  none. S12 holds steer admission and boundary refusal.
+- **S37** turn start: a follow-up turn whose native start is late emits `turn.started`
+  before its content, its `turn.completed` and its `turn-end`.
+- **S38** held human input: `holdsHumanInput()` reads true as soon as `sendMessage`
+  returns, and releases after the `turn.started` of the turn that carries the input and by
+  that turn's end. It runs mid-turn, with H5's late acknowledgement, at an idle boundary
+  and during startup, each with `mock:deferred-turn-start`.
+- **S39** held input at finish: with `autoEndAfterFirstTurn`, a follow-up the turn did not
+  read is held at its `turn-end`, and runs in a turn of its own before the session closes.
+- **S40/S41** `humanInputAtTurnEnd`: a human message sent before (S40, `steer-tool`) or
+  after (S41, `steer-late`) the turn's last model call is read in that turn or held for the
+  next, as declared. `CEZ_MOCK_STEER_GATE` keeps the mock's steering window open until the
+  message is on its wire, so no timer decides early or late. A boundary runner has no read
+  point inside a turn, so it is exempt
+  (`scenario-unconstructible`); `runner-facts.test.ts` ties the exemption to the mode.
+- **S42** `systemPromptOnResume`: on a fresh and a resumed session, `spec.systemPrompt`
+  travels outside the conversation when the runner declares `resent`, and is prepended to
+  the opening turn when it declares `in-thread`. Both kinds send it again on a resume; the
+  value tells Continue whether the thread already holds the skill (R53/R55).
+- **S43** process report: every native process the mock starts (each mock appends its pid to
+  `CEZ_MOCK_PID_FILE`) is reported while it runs, the first as `pid` when `startSession`
+  returns and each later one through `onPidChange`, over an opening and a follow-up turn. The
+  worker process ledger records exactly these pids, so worker-reboot (R43) and worker-restart
+  (R47, R60) run on the shared runner set.
+- **S44** provider failure: the mock's failure control raises a provider error at a resumed
+  session's wake opening (`persistent`) and in a turn that runs until the test releases it
+  (`gated-once`). The runner emits a v1 `error` with a message before any v1 `turn-end`, and a v2
+  `session.error` or `turn.completed(error)` and never `end_turn`; after Cezar's interrupt (as
+  `recordSessionFault` does) the session ends. Rows that raise the same failure through the
+  control read Cezar's handling above it: their scenario is `provider-error-controlled`, classed
+  shared, and U9, U9h, U9w, U9p, U14, R18 and R72–R76 run on the shared runner set. U14m stays on
+  every runner: its Claude cell exits through Claude's own `unread` failure, and no failing
+  opening turn may read a steered message, which S44 does not hold. `provider-error` itself stays
+  `runner-code`.
+
+A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends
+these rows, which run on every runner. Shared code above the seam (`run.ts` reading the
+hold, Continue reading `systemPromptOnResume`) stays covered by the run-tier rows H1–H5 and
+R53/R55.
+
 No-wait nudge rows **F7–F11** live in
 `core/workflow-final-message-cells.testkit.ts` and the same parity guard. They were written for the
 final-message nudge (hearsay-tools/cezarion#544), which the no-wait nudge absorbed
@@ -2130,7 +2250,10 @@ latch keeps #48 closed; completion comes only from the `cezar_done` call, never 
 never replaced by the no-wait nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
-> or carry a declared exemption naming the wire limitation that prevents it.
+> or carry a declared exemption naming the wire limitation that prevents it. A row
+> that tests runner code runs on every backend. A row that tests Cezar's shared
+> logic above the seam runs on the derived runner set, which shows every declared
+> value of each turn-path fact (hearsay-tools/cezarion#2991).
 
 §6 pins what a mapper emits. This pins the rest of the contract in
 `agent-runner.ts`: session lifecycle, provider-failure surfacing, `sendMessage`,
@@ -2139,11 +2262,37 @@ hearsay-tools/cezarion#6, hearsay-tools/cezarion#46, hearsay-tools/cezarion#48, 
 shared contract covered, so the same class of bug shipped again on the next one.
 
 **Regression coverage belongs in the fixing PR.** A fix to runner lifecycle,
-input delivery, attention, asks or completion MUST add or extend a shared
-`RUNNER_IDS` case in this matrix, or an equivalent exhaustive adapter loop such
-as `workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
+input delivery, attention, asks or completion MUST add or extend a parity row in
+this matrix, or in an equivalent adapter loop such as
+`workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
 separate parity issue is not a prerequisite. Keep a focused backend test when it
-helps explain the wire, but it is not the shared regression proof.
+helps explain the wire, but it is not the shared regression proof. Where the fix
+lives decides where its row runs (hearsay-tools/cezarion#2991):
+
+- A fix inside a runner class extends the seam contract suite
+  (`core/seam-contract.testkit.ts`) or that runner's own rows. They run on every
+  runner.
+- A fix above the seam extends a shared row. It runs on the derived runner set:
+  the smallest set of runners that shows every declared value of
+  `inputDelivery.mode`, `.consumption`, `.acknowledgement`,
+  `.humanInputAtTurnEnd` and `systemPromptOnResume` (`SHARED_RUNNERS` in
+  `core/parity-classes.testkit.ts`, ties broken by `RUNNER_IDS` order).
+- A new runner declares its facts in `RUNNER_FACTS`. When it adds a value that no
+  member of the set has, the set takes it in.
+
+`core/parity-classes.testkit.ts` classes every parity family as `every-runner`,
+`shared` or `no-session`. A shared family names the rows that still run on every
+runner; a row any runner is exempt from, and a cell whose title has no row id and
+whose kit passes no row key to `parityRunners`, run on every runner too. A kit that
+passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the set's first runner.
+R1 and U1 are smoke rows on every runner. The guards: `core/parity-classes.test.ts`
+fails when the set misses a declared value, or a parity file belongs to no
+family; `cez/runner-fact-combination` fails when one function in
+`packages/cezar/src/workflows/` touches a fact source and reads two different
+declared fact keys from any object, because one runner per value cannot show a
+combination. It tracks no value, so it over-approximates: a real combination
+needs a combination row on every runner, and a same-named key of an unrelated
+object needs an exception with its reason (`docs/sdlc/lint.md`).
 
 Drive each real runner through its own native mock frames. Register each new
 criterion in the total-coverage guard, and use a named, executable exemption only
@@ -2154,12 +2303,14 @@ that another runner constructs or attributes that event correctly.
 
 **Two tiers.** The seam tier drives each real runner class against that
 backend's own offline mock and asserts over the v1 and v2 streams plus the
-settled result. The run tier drives a real `RunManager` run in a temp git repo.
-The second tier is not redundant: `workflows/run/` (`human-waits.ts`, `turn-settler.ts`)
-emits `ask.requested` for every runner's `cezar_ask` card, while codex and opencode also emit it
-from the runner for a native ask (`codex-app-server-runner.ts`, `opencode-server-runner.ts`),
-and whether a provider failure fails the run or parks it is decided in the orchestrator either way. Provider
-failures, asks and park declarations are only uniform above the seam.
+settled result. It runs on every runner. The run tier drives a real `RunManager`
+run in a temp git repo. `workflows/run/` (`human-waits.ts`, `turn-settler.ts`) emits
+`ask.requested` for every runner's `cezar_ask` card, while codex and opencode also emit it
+from the runner for a native ask (`codex-app-server-runner.ts`, `opencode-server-runner.ts`).
+Whether a provider failure fails the run or parks it, and how a wait, an ask or a park
+settles, is decided in the orchestrator. A run tier row whose outcome depends on runner code
+(a provider error, a native ask on codex and opencode, a native wire recording) runs on every
+runner; the rest run on the derived runner set (`core/parity-classes.testkit.ts`).
 
 **Shared scenario names, per-backend spellings.** Every mock is already driven by
 `mock:<scenario>` markers found in the prompt text. The matrix names a scenario
@@ -2175,6 +2326,7 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close |
 | `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park |
 | `provider-error` | a runtime provider rejection in its own native error shape |
+| `provider-error-controlled` | the same prompt as `provider-error`; a row that names it raises the error through `CEZ_MOCK_FAILURE_CONTROL`, as S44 does |
 | `cezar-ask` | call `cezar_ask` with one question, then end the turn; the same tool call on every wire, fresh or resumed |
 | `cezar-wait` | call `cezar_wait` for a 60 s timer, then end the turn; a declared monitoring park on every wire |
 | `ask` | an ask: native where the wire has one (Codex, OpenCode), a `cezar_ask` call otherwise |
@@ -2758,8 +2910,10 @@ To be first-class:
    `inputDelivery` (§1) from a live probe of mid-turn input, including its
    `acknowledgement` and `humanInputAtTurnEnd`, and pass the §7 I1/I2
    rows or declare their exemption. Add the runner's row to `RUNNER_FACTS`
-   (`core/runner-facts.ts`, §1) and expose it as `facts`; the table's type fails to
-   compile until the row exists. Shared code reads these facts, so a new runner never
+   (`core/runner-facts.ts`, §1), with its `inputDelivery` and
+   `systemPromptOnResume`, and expose it as `facts`; the class reads both from its
+   row, and the table's type fails to compile until the row exists. A new value of
+   a turn-path fact brings the runner into the derived parity set (§7). Shared code reads these facts, so a new runner never
    needs a runner-id branch outside `packages/cezar/src/core/`.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in

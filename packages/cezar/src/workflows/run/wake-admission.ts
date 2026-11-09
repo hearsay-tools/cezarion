@@ -1,3 +1,5 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
+import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
@@ -57,9 +59,8 @@ export class WakeAdmission {
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
     if (!waits.length) return;
-    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: waits.map(wait => wait.id) });
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waits.map(wait => wait.id));
     for (const wait of waits) {
-      this.host.disarmWait(wait.id);
       this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer' || wait.kind === 'subagent'
         ? `automatic ${wait.kind} wake-up cap reached (${this.maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`
         : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${this.maxAutoContinues}); timer ${wait.id} cancelled` });
@@ -407,7 +408,7 @@ export class WakeAdmission {
 /** Native subagents live in the session, so any park with a subagent wait open keeps the session
  *  and a slot, whichever wait ranks first (hearsay-tools/cezarion#2431). */
 function holdsNativeSubagents(run: RunRecord): boolean {
-  return openWaits(run).some((wait) => wait.kind === 'subagent');
+  return openWaits(run).some((wait) => WAIT_KINDS[wait.kind].holdsSession);
 }
 
 /** Whether the park keeps the session and a slot. Live children hold them even when their wait
@@ -423,5 +424,8 @@ function parkHold(run: RunRecord, state: ActiveRun, top: WaitingOn['kind'] | und
 
 /** A CI, process or timer park keeps its slot, and so does a wake due now with nothing open. */
 function parkTopKeepsSlot(run: RunRecord, top: WaitingOn['kind'] | undefined): boolean {
-  return top === 'subagents' || top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+  if (top === undefined) return resolvedWaits(run).length > 0;
+  if (top === 'human' || top === 'usage-limit') return false;
+  const kind = top === 'workers' ? 'worker' : top === 'peers' ? 'peer' : top === 'subagents' ? 'subagent' : top;
+  return WAIT_KINDS[kind].keepsSlot;
 }

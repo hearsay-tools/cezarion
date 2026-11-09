@@ -1,5 +1,5 @@
 import { productName } from '../home/display.ts';
-import { BINARY_NAMES } from '../home/identity.ts';
+import { BINARY_NAMES, productIdentity } from '../home/identity.ts';
 import { commandText } from '../home/command.ts';
 /**
  * `cez install | update | versions | use | link | unlink` — the terminal side of the managed
@@ -12,8 +12,8 @@ import { parseArgs } from 'node:util';
 import type { Home } from '../home/home.ts';
 
 import { branchOf, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
-import { activate, activeId, findInstalled, linkCheckout, listInstalled, listLinks, removeInstalled } from './layout.ts';
-import { ensurePathHook, isOnPath, writeLaunchers } from './launcher.ts';
+import { activeId, binDir, findInstalled, linkCheckout, listInstalled, listLinks, removeInstalled } from './layout.ts';
+import { activateManaged, ensurePathHook, isOnPath, writeLaunchers } from './launcher.ts';
 import { installFromRegistry } from './installer.ts';
 import { distTagFor, RegistryCache } from './registry.ts';
 import { compareVersions } from './semver.ts';
@@ -74,7 +74,7 @@ async function installCommand(opts: SelfUpdateCliOptions): Promise<number> {
   console.log(commandText(`\n  cez install — managed layout under ${opts.home.root} (this build: ${service.installKind})\n`));
   try {
     const result = await service.installSelf((line) => console.log(`  · ${line}`));
-    const dir = writeLaunchers(process.env, opts.home);
+    const dir = productIdentity().rebrand ? binDir(process.env, opts.home) : writeLaunchers(process.env, opts.home);
     console.log(`\n  ✓ installed ${result.id} and made it current`);
     console.log(`  ✓ launchers: ${BINARY_NAMES.map(name => `${dir}/${name}`).join(', ')}`);
     if (isOnPath(dir)) {
@@ -123,8 +123,8 @@ async function activateTarget(target: string, home: Home): Promise<number> {
   try {
     const installed = findInstalled(target, process.env, home);
     const id = installed ? installed.id : (await installFromRegistry(target, { home, onLog: (line) => console.log(`  · ${line}`) })).id;
-    activate(id, process.env, home);
-    const dir = writeLaunchers(process.env, home);
+    activateManaged(id, process.env, home);
+    const dir = productIdentity().rebrand ? binDir(process.env, home) : writeLaunchers(process.env, home);
     console.log(`\n  ✓ ${id} is now current — start it with: ${isOnPath(dir) ? commandText('cez') : `${dir}/${commandText('cezarion')}`}\n`);
     return 0;
   } catch (error) {
@@ -183,7 +183,7 @@ async function versionsCommand(home: Home): Promise<number> {
       console.log(`    ${checkout.branch.padEnd(34)} ${checkout.built ? 'built    ' : 'not built'} ${checkout.worktree}`);
     }
   }
-  const registry = await new RegistryCache('@wjarka/cezarion').get();
+  const registry = await new RegistryCache(productIdentity().npmPackage).get();
   if (registry) {
     console.log(`\n  registry: stable ${registry.distTags[distTagFor('stable')] ?? '—'} · nightly ${registry.distTags[distTagFor('nightly')] ?? '—'}`);
   }
@@ -202,7 +202,12 @@ async function useCommand(id: string | undefined, home: Home): Promise<number> {
     console.error(commandText(`  ✗ ${id} is not installed — see: cez versions`));
     return 1;
   }
-  activate(match.id, process.env, home);
+  try {
+    activateManaged(match.id, process.env, home);
+  } catch (error) {
+    console.error(`  ✗ use failed: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
   console.log(`  ✓ now using ${match.id}`);
   return 0;
 }
@@ -219,7 +224,7 @@ async function linkCommand(dir: string | undefined, use: boolean, home: Home): P
     const result = linkCheckout(packageRoot, branch, process.env, undefined, home);
     console.log(`\n  ✓ linked ${result.id}  → ${packageRoot}`);
     if (use) {
-      activate(result.id, process.env, home);
+      activateManaged(result.id, process.env, home);
       console.log(`  ✓ now using ${result.id}`);
       console.log('    the desktop app picks it up on its next start (Cmd+Q, reopen) — a running cockpit keeps its version');
     } else {

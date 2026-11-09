@@ -1,3 +1,5 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
+import { fallbackProjectWriteError } from '../../project-paths.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { continuationNextStep, waitingWorkflowStepIndex, ciWorkflowResumeStepIndex } from './workflow-position.ts';
 import type { QueuedInput } from './queued-input.ts';
@@ -45,12 +47,12 @@ import { existsSync } from 'node:fs';
 import type { RunRecord, StepState } from '../../runs/store.ts';
 import { rematerializeReclaimedWorktree } from '../../runs/retention.ts';
 import { ownedContinuationWorkspace } from './run-workspace.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, RunPatch } from '../../runs/run-exits.ts';
 import type { RunLine } from './run-line.ts';
 import type { RunModuleContext, WorkerDelegationRecord } from './types.ts';
 
 export interface ContinuationSessionHost {
-  move(runId: string, exit: RunExitId, patch?: Partial<RunRecord>): void;
+  move(runId: string, exit: RunExitId, patch?: RunPatch): void;
   dropActive(runId: string): void;
   repositoryRootLockDisabled(): boolean;
   beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void;
@@ -95,6 +97,9 @@ export class ContinuationSession {
     stepId: string,
     record: RunRecord | undefined,
   ): Promise<{ cwd: string; rematerialized: boolean } | undefined> {
+    const path = record?.worktreePath ?? (record?.delegation?.role === 'worker' ? record.delegation.workspace.path : undefined);
+    const refusal = path && fallbackProjectWriteError(path);
+    if (refusal) { this.failWorkspace(runId, stepId, refusal); return undefined; }
     if (record?.delegation?.role === 'worker') {
       const cwd = await this.ownedContinuationWorkspace(runId, stepId, record, record.delegation);
       return cwd === undefined ? undefined : { cwd, rematerialized: false };
@@ -117,14 +122,18 @@ export class ContinuationSession {
       return await ownedContinuationWorkspace(this.context.store, this.context.repoRoot, this.context.dataDir, record, delegation);
     } catch (error) {
       const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
-      const finishedAt = new Date().toISOString();
-      this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-      this.host.move(runId, 'fail-start', { error: message, finishedAt });
-      this.context.store.appendEvent(runId, { type: 'lifecycle', message });
-      this.line.unmarkStarting(runId);
-      this.host.dropActive(runId);
+      this.failWorkspace(runId, stepId, message);
       return undefined;
     }
+  }
+
+  private failWorkspace(runId: string, stepId: string, message: string): void {
+    const finishedAt = new Date().toISOString();
+    this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
+    this.host.move(runId, 'fail-start', { error: message, finishedAt });
+    this.context.store.appendEvent(runId, { type: 'lifecycle', message });
+    this.line.unmarkStarting(runId);
+    this.host.dropActive(runId);
   }
 
   /** A Stop that arrived while the Continue resolved its workspace cancels the run before it
@@ -216,7 +225,7 @@ export class ContinuationSession {
     state.inputState.answerOpeningAsk(askSeq);
     // The human waits this answer answers; one the opening turn opens is its next question.
     const waits = askSeq === undefined ? []
-      : openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
+      : openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => WAIT_KINDS[wait.kind].userAnswers).map(wait => wait.id);
     return { askSeq, waits, ...(opening.answerSource ? { answerSource: opening.answerSource } : {}) };
   }
 
@@ -266,19 +275,21 @@ export class ContinuationSession {
     // continuation must run under the account that created it — not whatever the project has
     // been switched to since. The owning step is the one carrying this session id.
     const owningStep = atContinue.owningStep(record, sessionId);
-    // An owned worker's turn runs under the identity pinned for the step it extends (#452).
-    const toolsStep = atContinue.definitionStep(this.context.store, record, sessionId);
+    // Which step this Continue continues does not depend on whether it resumes that step's
+    // session: a fresh session after a backend switch or an unreported native id continues the
+    // same step (hearsay-tools/cezarion#2991). An owned worker's turn runs under the identity
+    // pinned for that step (#452).
+    const toolsStep = atContinue.definitionStep(this.context.store, record, atContinue.continuedSessionId(record, stepId, sessionId));
     const stepIdentity = this.host.workerStep(runId, atContinue.definitionId(toolsStep));
-    // The owning step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
+    // The continued step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
     // from the persisted `workflowDef` exactly as the first spawn did (`runAgentStep`).
     // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
     // (MCP servers, subagents) on Continue, restart recovery and the usage-limit auto-resume
     // — and dropping `bashAllowlist` WIDENED Bash from an allowlist to unrestricted
     // (`AgentRunSpec.toolGrant`, #430). Record steps share ids with `workflowDef.steps`;
-    // a synthetic `continue-N` owner and a fresh-session continuation (backend switch — no
-    // owning session) both extend the run's tail, so they resolve from the definition's last
-    // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
-    // keeps today's defaults.
+    // a synthetic `continue-N` that owns its session extends the run's tail, so it resolves
+    // from the definition's last agent step. A legacy record without `workflowDef` (#367), or
+    // a session no step owns, keeps today's defaults.
     const toolGrant = atContinue.toolGrant(stepIdentity, toolsStep, backend);
     const model = await continuationModel(this.context.store, this.context.repoRoot, runId, state, record, toolsStep, stepIdentity, backend, this.context.home);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }

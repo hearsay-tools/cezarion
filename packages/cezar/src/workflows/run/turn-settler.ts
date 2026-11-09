@@ -1,6 +1,7 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
+import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
-import { randomUUID } from 'node:crypto';
-import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, type HumanWaitEntry, type TimerWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
+import { TIMER_MIN_SECONDS, type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AskRequest } from '../../core/ask.ts';
@@ -441,12 +442,14 @@ export class TurnSettler {
     const open = openWaits(run);
     // The live-workers timer is a fallback, not another poll beside a wait that already supplies
     // its wake (hearsay-tools/cezarion#1268). Keep explicit ScheduleWakeup requests and existing timers.
-    if (via === 'monitoring-line' && open.some(wait => wait.kind !== 'human')) return;
-    if (open.some(wait => wait.kind === 'timer' && wait.via === via)) return;
+    if (open.some(wait => via === 'monitoring-line' && !WAIT_KINDS[wait.kind].userAnswers)) return;
+    if (WAIT_KINDS.timer.duplicateMonitoring(open, via)) return;
     const minutes = this.context.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
-      this.context.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
-      this.host.humanWaits.openHumanAlias(runId, state, 'monitoring-line');
+      if (WAIT_KINDS.timer.timersDisabled) {
+        this.context.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
+        this.host.humanWaits.openHumanAlias(runId, state, 'monitoring-line');
+      }
       return;
     }
     if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
@@ -460,14 +463,10 @@ export class TurnSettler {
       this.host.humanWaits.openHumanAlias(runId, state, 'budget');
       return;
     }
-    if (openWaits(run).length >= WAIT_LIMIT) return;
+    if (!waitCapacityAvailable(run)) return;
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
-    // `seconds` is the record's bound; the live-workers deadline is the interval itself (tests run it sub-minute).
-    const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + (delay === undefined ? minutes * 60_000 : delay * 1000)).toISOString(), phase: 'open', turnId: state.waitIdentity.ciTurnId ?? 'monitoring',
-      seconds: delay ?? Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))),
-      ...(via === 'monitoring-line' ? { note: 'Opened while workers run.' } : {}) };
+    const wait = WAIT_KINDS.timer.monitoringEntry(via, now, delay, minutes, state.waitIdentity.ciTurnId ?? 'monitoring');
     this.host.humanWaits.withdrawCezarHumanWaits(runId);
     try { this.context.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }

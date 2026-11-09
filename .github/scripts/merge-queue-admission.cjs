@@ -1,5 +1,5 @@
 'use strict';
-const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
+const { readQueueCodeRabbitAdmission } = require('./queue-coderabbit-admission.cjs');
 const { sanitize } = require('./failure-diagnostics.cjs');
 const { CI_PATH, VERIFY, REVIEW, validSha, positive, reader, readCiRuns, readCiJobs, successfulJobs, newest } = require('./queue-ci-proof.cjs');
 function errorMessage(error) {
@@ -156,7 +156,7 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   diagnostics.check = 'native protected jobs';
   if (!successfulJobs(await readCiJobs(read, run.id), [VERIFY, REVIEW])) throw new Error('Native CI/review gates missing');
   diagnostics.check = 'CodeRabbit admission';
-  const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin, now });
+  const admission = await readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin, now });
   if (!admission.admitted) throw new Error(`Unresolved or unsuccessful CodeRabbit admission: ${admission.reason}`);
   diagnostics.check = 'final native CI/review';
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });

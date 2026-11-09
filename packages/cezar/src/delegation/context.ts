@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from '../project-paths.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
@@ -324,6 +325,8 @@ async function discardPlacedAttachments(created: PlacedAttachment[], error: unkn
  */
 export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe | undefined }): Promise<void> {
   const { dataDir, workspace, context } = options;
+  const refusal = fallbackProjectWriteError(workspace.path);
+  if (refusal) throw refuse(refusal);
   const root = await realpath(workspace.path);
   const attached: string[] = [];
   const created: PlacedAttachment[] = [];

@@ -166,24 +166,15 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
   "start-and-stop": [
     "claude R92",
     "claude R96",
-    "codex R92",
-    "codex R96",
     "cursor R92",
     "cursor R96",
     "omp R92",
-    "omp R96",
-    "opencode R92",
-    "opencode R96",
-    "pi R92",
-    "pi R96"
+    "omp R96"
   ],
   "continue": [
     "claude R93",
-    "codex R93",
     "cursor R93",
-    "omp R93",
-    "opencode R93",
-    "pi R93"
+    "omp R93"
   ],
   "slash-install": [
     "claude R95",
@@ -195,16 +186,13 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
   ],
   "recovery": [
     "claude R94",
-    "codex R94",
     "cursor R94",
-    "omp R94",
-    "opencode R94",
-    "pi R94"
+    "omp R94"
   ]
 };
 
 export function describeSkillProvisionParity(part: ParityPart, collect?: ParityCollector): void {
-  const { describe, it } = partitionParity(part, PARTS, collect);
+  const { describe, it } = partitionParity(part, PARTS, collect, 'skill-provision');
 describe('harness parity — skill provisioning (#1408)', () => {
   expect(SKILL_PROVISION_CRITERIA.map((row) => row.id)).toEqual(['R92', 'R93', 'R94', 'R95', 'R96']);
 

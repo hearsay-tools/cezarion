@@ -1,3 +1,4 @@
+import { isFallbackProjectPath } from '../project-paths.ts';
 // Count-based worktree retention (#483). A busy cockpit leaves one full repo
 // checkout per finished task under `.ai/cezar/worktrees/<runId>`; nothing bounds
 // the total, so disk saturates. This module decides *which* finished worktrees
@@ -152,6 +153,11 @@ async function preserveWorkerResult(repoRoot: string, store: RetentionStore, run
   return evidence.diffSnapshot !== undefined || evidence.result.diff.state === 'available';
 }
 
+function readOnlyWorktree(repoRoot: string, store: RetentionStore, run: RunRecord): boolean {
+  return (store as Partial<RunStore>).isFallbackRun?.(run.id) === true ||
+    Boolean(run.worktreePath && isFallbackProjectPath(repoRoot, run.worktreePath));
+}
+
 export async function reclaimWorktrees(
   repoRoot: string,
   store: RetentionStore,
@@ -161,7 +167,11 @@ export async function reclaimWorktrees(
   const runs = store.listRunsWithWorktree();
   const byId = new Map(runs.map((r) => [r.id, r]));
   const reclaimed: string[] = [];
-  for (const id of selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId))) {
+  const selected = selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId));
+  const readonly = (id: string) => Boolean(byId.get(id) && readOnlyWorktree(repoRoot, store, byId.get(id)!));
+  const skipped = selected.filter(readonly).length;
+  if (skipped) console.info(`[cez] Worktree retention skipped ${skipped} read-only fallback item(s) under .ai/squawk/.`);
+  for (const id of selected.filter(id => !readonly(id))) {
     const run = byId.get(id);
     if (run && (await reclaimWorktree(repoRoot, store, run, opts))) reclaimed.push(id);
   }
@@ -183,17 +193,18 @@ export async function reclaimWorktree(
   run: RunRecord,
   opts: ReclaimOptions = {},
 ): Promise<string | null> {
+  if (readOnlyWorktree(repoRoot, store, run)) return null;
   const now = opts.now ?? (() => new Date().toISOString());
   // Branch kept. An owned worker's evidence (uncommitted diff included) is snapshotted first; any
   // other run's uncommitted work lives only in the directory, so a dirty one is left for later.
   const onlyClean = opts.requireClean === true || run.delegation?.role !== 'worker';
-  const execution = run.delegation?.role === 'worker' ? (store as Partial<RunStore>).readWorkerExecution?.(run.id) : undefined;
+  const real = store as Partial<RunStore>;
+  const execution = real.readWorkerExecution?.(run.id);
   const assertSafe = () => {
     // Startup has no manager claim. Terminal execution can still have a retained
     // autosave writer, so recheck its durable proof before every destructive step.
-    if (autosaveCleanupBlocker(join(repoRoot, '.ai/cezar'), run.id)) throw Error('Autosave cleanup is not confirmed');
+    if (autosaveCleanupBlocker(real.sourceDataDir?.(run.id) ?? join(repoRoot, '.ai/cezar'), run.id)) throw Error('Autosave cleanup is not confirmed');
     if (run.delegation?.role !== 'worker') return;
-    const real = store as Partial<RunStore>;
     // Structural test stores have no private execution machinery. Real stores must attest both
     // generation ownership and fresh resource holders, including after async evidence/preview.
     if (typeof real.workerResourcesSafe === 'function' && (!execution ||
@@ -208,7 +219,6 @@ export async function reclaimWorktree(
   // Claimed in the run database too, for the whole reclaim (#779, plan step 3): no other cezar
   // process writes this run or reclaims it meanwhile, and another process's run is left alone.
   // Structural test stores have no claims.
-  const real = store as Partial<RunStore>;
   let pinned = typeof real.pin !== 'function';
   try { pinned ||= real.pin!.call(store, run.id, 'cleanup') !== undefined; } catch { /* busy: not claimed */ }
   if (!pinned) { release(); return null; }

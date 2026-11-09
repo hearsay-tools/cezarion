@@ -273,6 +273,8 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     cancel: id => host.cancel(id), armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
     armWorkerDeadline: (id, wait, delay) => modules.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => host.disarmWait(id),
     resolveWait: (id, waitId, result, observed) => modules.waitRegistry.resolveWait(id, waitId, result, observed),
+    hasWorkerResolveRetry: id => modules.waitWatches.hasWorkerResolveRetry(id),
+    recordWorkerResolveRetry: id => modules.waitWatches.recordWorkerResolveRetry(id),
     retireSettledQuestions: id => modules.workerQuestions.retireSettledQuestions(id), closeRoutedQuestions: id => modules.workerQuestions.closeRoutedQuestions(id),
     reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
   });

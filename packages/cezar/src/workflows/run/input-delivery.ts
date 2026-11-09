@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
@@ -753,7 +754,7 @@ export class InputDelivery {
     const bundle = userAuthored && answeringAskSeq !== undefined && state.boundary.atTurnBoundary === state.liveSession.session
       ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id))) : undefined;
     // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
-    const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;
+    const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => !WAIT_KINDS[wait.kind].userAnswers)) : undefined;
     const deliverable = userAuthored ? [...attached, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
       ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])] : attached;
     return { blocks, expanded, deliverable, answeringAskSeq, bundle };

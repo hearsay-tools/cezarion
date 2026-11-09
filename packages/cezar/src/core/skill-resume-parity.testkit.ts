@@ -389,17 +389,10 @@ function assertContinuationSkill(
 }
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "generation-claude-codex": [
+  "generation": [
     "claude R100",
-    "codex R100"
-  ],
-  "generation-opencode": [
-    "opencode R100"
-  ],
-  "generation-pi-cursor-omp": [
     "cursor R100",
-    "omp R100",
-    "pi R100"
+    "omp R100"
   ],
   "live-continue": [
     "claude R53",
@@ -455,7 +448,7 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
 };
 
 export function describeSkillResumeParity(part: ParityPart, collect?: ParityCollector): void {
-  const { describe, it } = partitionParity(part, PARTS, collect);
+  const { describe, it } = partitionParity(part, PARTS, collect, 'skill-resume');
 describe('harness parity — skill system prompt on Continue (#790)', () => {
   expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R100', 'R53', 'R54', 'R55', 'R56', 'R57', 'R59']);
 

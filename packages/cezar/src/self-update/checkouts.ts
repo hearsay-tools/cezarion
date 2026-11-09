@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 /**
  * Finding cezar's OWN checkouts — the worktrees a developer might want the desktop app (or the
  * `cezar` launcher) to run instead of a published release. Nothing to configure: every
@@ -147,7 +148,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, ho
     if (!existsSync(root) || !cezarPackageRoot(root)) continue;
     const trees = await worktreesOf(root);
     // Task worktrees live under the main checkout, whose run store names them.
-    const dataDir = trees.length > 0 ? join(trees[0]!.path, '.ai', 'cezar') : null;
+    const dataDir = trees.length > 0 ? projectPaths(trees[0]!.path).write : null;
     for (const tree of trees) {
       const worktree = real(tree.path);
       if (seen.has(worktree)) continue;

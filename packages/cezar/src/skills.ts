@@ -47,6 +47,7 @@ export interface Skill {
    That test pins this list and says where to go. */
 export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.ai/cezar/skills', source: 'cezar' },
+  { dir: '.ai/squawk/skills', source: 'cezar' },
   { dir: '.ai/skills', source: 'ai' },
   { dir: '.agents/skills', source: 'agents' },
   { dir: '.claude/skills', source: 'agents' },
@@ -200,6 +201,11 @@ async function skillEntryPaths(
     }
   }
   return paths;
+}
+
+/** The path of a skill named `name` under `.ai/squawk/skills`, the fallback catalog; legacy wins it otherwise. */
+export async function fallbackSkillPath(repoRoot: string, name: string): Promise<string | undefined> {
+  return (await readMarkdownSkills(resolve(repoRoot, SKILL_DIRS[1]!.dir), 'cezar')).find(skill => skill.name === name)?.path;
 }
 
 async function readMarkdownSkills(dir: string, source: Skill['source']): Promise<Skill[]> {

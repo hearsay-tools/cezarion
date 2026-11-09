@@ -20,6 +20,7 @@ test('the project skill dirs the hint promises are the ones discovery actually s
     [
       // Named individually by the hint (`SKILL_PROJECT_DIRS`, same order).
       '.ai/cezar/skills',
+      '.ai/squawk/skills',
       '.ai/skills',
       '.agents/skills',
       // Per-agent mirrors of `.agents/skills` — the hint folds these into its
@@ -35,5 +36,5 @@ test('the project skill dirs the hint promises are the ones discovery actually s
 // The harness must replace every repo catalog that the served server can discover.
 
 test('the e2e fixture catalogs cover every project discovery directory', () => {
-  assert.deepEqual(PROJECT_CATALOGS, [...SKILL_DIRS.map(({ dir }) => dir), WORKFLOWS_DIR]);
+  assert.deepEqual(PROJECT_CATALOGS, [...SKILL_DIRS.map(({ dir }) => dir), WORKFLOWS_DIR, '.ai/squawk/workflows']);
 });

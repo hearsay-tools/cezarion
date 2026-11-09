@@ -42,6 +42,7 @@ describe('commitOutcome', () => {
   it('commits every outcome of a call and what it depends on in one transaction', () => {
     const wait = timer({ phase: WAIT_PHASE.resolved, resolvedAt: at });
     const message = input({ text: 'a message' });
+    store.commitWait(id, { ...wait, phase: WAIT_PHASE.open });
     store.commitWait(id, wait, input({ id: wait.id }));
     store.commitAgentInputs(id, [...store.getRun(id)!.agentInputs!, message]);
     const refusal = input({ purpose: 'completion-refusal' });
@@ -77,6 +78,7 @@ describe('commitOutcome', () => {
     const open = timer();
     store.commitWait(id, earlier);
     store.commitOutcome(id, { kind: 'cancelled', waitIds: [earlier.id] });
+    store.commitWait(id, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(id, resolved, input({ id: resolved.id }));
     store.commitWait(id, open);
     const receipt = store.commitOutcome(id, [{ kind: 'delivered', inputIds: [resolved.id], at }, { kind: 'cancelled', waitIds: [open.id] }]);

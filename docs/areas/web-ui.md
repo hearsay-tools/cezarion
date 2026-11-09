@@ -6,6 +6,13 @@
 
 `packages/web/src/app.tsx`, then `packages/web/src/routes.tsx`, `packages/web/src/api/`, and the affected component/route
 
+## Project-directory reads before P5
+
+Skill grouping and empty-state path lists include `.ai/squawk/skills/` after the
+legacy project directory. Missing-worktree previews recognize both managed tree
+names. Runtime reads use the server's winning run source; client API shapes and
+tracked `.ai/skills/`, `.ai/qa/` and `.ai/specs/` paths stay unchanged.
+
 ## Rules
 
 React 19 + Vite + Tailwind v4 + shadcn/ui; source lives in `packages/web/` (its own npm workspace, `@open-mercato/cezar-web`, with the React/Vite/Tailwind deps in ITS manifest, not the root's), build output in ignored `packages/cezar/web/dist/`. Anything the server and the cockpit BOTH speak — the v2 protocol types, the `/api/v1/p/:projectId` scope helpers, and (as it grows) the typed API client — lives in the third workspace `packages/api-client/` (`@open-mercato/cezar-api-client`), which stays Node-free (AGENTS.md § Repository layout). Keep one global SSE connection and patch the TanStack Query cache in place; authoritative refetch happens on reconnect/visibility. Preserve light/dark/system theming, mobile safe areas, keyboard access, and unit coverage. The legacy vanilla web app was deleted in R7; when `packages/cezar/web/dist` is missing the server answers every shell route with a built-in "run `npm run build:web`" hint page (`packages/cezar/src/server/static-ui.ts`).

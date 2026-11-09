@@ -10,6 +10,7 @@ import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } fr
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { withCompatibilityPackages } from '../packages/cezar/dist/release/compatibility.js';
 import { withPublicationPackage } from '../packages/cezar/dist/release/publication.js';
 import {
   buildInstallLines,
@@ -115,25 +116,31 @@ const publish = (dir, label) => {
 // A `private` manifest is stamped above but never published — part of the release without
 // being on the registry.
 const published = [];
-for (const key of order) {
-  if (!isPublishable(stamped[key])) {
-    console.log(`release-snapshot: ${stamped[key].name} is private — stamped, not published.`);
-    continue;
+withCompatibilityPackages(dirs.cezar, publication.cezar, compatibility => {
+  const targets = [
+    ...order.map(key => ({ key, dir: dirs[key], manifest: publication[key] })),
+    ...Object.entries(compatibility).map(([key, value]) => ({ key, ...value })),
+  ];
+  for (const { key, dir, manifest } of targets) {
+    if (!isPublishable(manifest)) {
+      console.log(`release-snapshot: ${manifest.name} is private — stamped, not published.`);
+      continue;
+    }
+    if (packOnly) {
+      const destination = path.join(repoRoot, 'snapshot-artifacts');
+      mkdirSync(destination, { recursive: true });
+      const args = ['pack', '--ignore-scripts', '--json', '--pack-destination', destination];
+      const output = npmExecpath
+        ? withPublicationPackage(dir, manifest, cwd => execFileSync(process.execPath, [npmExecpath, ...args], { cwd, encoding: 'utf8' }))
+        : withPublicationPackage(dir, manifest, cwd => execFileSync('npm', args, { cwd, encoding: 'utf8' }));
+      const [packed] = JSON.parse(output);
+      renameSync(path.join(destination, packed.filename), path.join(destination, `${key}.tgz`));
+    } else {
+      withPublicationPackage(dir, manifest, cwd => publish(cwd, manifest.name));
+    }
+    published.push(manifest.name);
   }
-  if (packOnly) {
-    const destination = path.join(repoRoot, 'snapshot-artifacts');
-    mkdirSync(destination, { recursive: true });
-    const args = ['pack', '--ignore-scripts', '--json', '--pack-destination', destination];
-    const output = npmExecpath
-      ? withPublicationPackage(dirs[key], publication[key], cwd => execFileSync(process.execPath, [npmExecpath, ...args], { cwd, encoding: 'utf8' }))
-      : withPublicationPackage(dirs[key], publication[key], cwd => execFileSync('npm', args, { cwd, encoding: 'utf8' }));
-    const [packed] = JSON.parse(output);
-    renameSync(path.join(destination, packed.filename), path.join(destination, `${key}.tgz`));
-  } else {
-    withPublicationPackage(dirs[key], publication[key], cwd => publish(cwd, publication[key].name));
-  }
-  published.push(publication[key].name);
-}
+});
 
 emitOutput({
   attempted: true,

@@ -13,57 +13,37 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
   DEFAULT_RUN_TIMEOUT_MS: 150,
 }));
 
+// T1, T2, T3, T5 and T6 test which deadline Cezar passes (`step.timeoutMs ?? 0`,
+// workflows/run/step-session.ts) and what a timed-out step does, and run on the shared runner set.
+// T7 is their seam row: each runner applies a set `spec.timeoutMs` in place of its own default.
+// T4 and T7 run on every runner (core/parity-classes.testkit.ts).
+// The family's class drops the cells a runner does not run before a part is chosen.
+const cells = (...rows: string[]) => RUNNER_IDS.flatMap(runner => rows.map(row => `${runner} ${row}`));
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "defaults": [
-    "claude T1",
-    "claude T6",
-    "codex T1",
-    "codex T6",
-    "cursor T1",
-    "cursor T6",
-    "omp T1",
-    "omp T6",
-    "opencode T1",
-    "opencode T6",
-    "pi T1",
-    "pi T6"
-  ],
-  "explicit-zero": [
-    "claude T2",
-    "codex T2",
-    "cursor T2",
-    "omp T2",
-    "opencode T2",
-    "pi T2"
-  ],
-  "authored-and-standalone": [
-    "claude T3",
-    "claude T4",
-    "claude T5",
-    "codex T3",
-    "codex T4",
-    "codex T5",
-    "cursor T3",
-    "cursor T4",
-    "cursor T5",
-    "omp T3",
-    "omp T4",
-    "omp T5",
-    "opencode T3",
-    "opencode T4",
-    "opencode T5",
-    "pi T3",
-    "pi T4",
-    "pi T5"
-  ]
+  defaults: cells('T1', 'T6'),
+  'explicit-zero': cells('T2', 'T7'),
+  'authored-and-standalone': cells('T3', 'T4', 'T5'),
 };
 
 export function describeWorkflowTimeoutParity(part: ParityPart, collect?: ParityCollector): void {
-  const { describe, it } = partitionParity(part, PARTS, collect);
+  const { describe, it } = partitionParity(part, PARTS, collect, 'workflow-timeout');
 describe('workflow wall-clock policy — #470', () => {
   for (const backend of RUNNER_IDS) {
     for (const criterion of WORKFLOW_TIMEOUT_CRITERIA) {
       it(`${backend} ${criterion.id} ${criterion.name}`, async () => {
+        if (criterion.id === 'T7') {
+          // The runner owns how it applies the deadline Cezar passes: zero means none, a longer limit
+          // outlives its own default (compressed to 150 ms above; every hold lasts 500 ms), and a
+          // shorter one ends the turn with a timed-out error.
+          for (const timeoutMs of [0, 15_000]) {
+            const observed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs } });
+            expect(observed.v1.filter(e => e.type === 'error'), `timeoutMs ${timeoutMs}`).toEqual([]);
+            expect(observed.v1.some(e => e.type === 'turn-end'), `timeoutMs ${timeoutMs}`).toBe(true);
+          }
+          const killed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs: 100 } });
+          expect(killed.v1.some(e => e.type === 'error' && /timed out/.test(e.message))).toBe(true);
+          return;
+        }
         if (criterion.id === 'T4') {
           const observed = await driveSeam(backend, criterion.scenario, { spec: { timeoutMs: undefined } });
           expect(observed.v1.some(e => e.type === 'error' && /timed out/.test(e.message))).toBe(true);

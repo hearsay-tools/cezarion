@@ -1,17 +1,19 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
+import { cancelWaits } from './wait-cancel.ts';
+import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { registrationIdentity, registrationReceipt, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
-import { hasWorkerDeadline, workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
+import { workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError, requireMessagingAllowed } from '../../delegation/policy.ts';
 import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
-import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget } from '../wait-scope.ts';
-import { identicalWorkerWait } from '../waits.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget, waitCapacityPolicyError } from '../wait-scope.ts';
 import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { AgentInput, WorkerWaitRequest } from '@open-mercato/cezar-contract/delegation';
-import { cezarAskRequestSchema, cezarWaitRequestSchema, WAIT_LIMIT, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { cezarAskRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { askErrorMessage, waitErrorMessage } from '../../ci-wait/errors.ts';
@@ -23,6 +25,10 @@ import { isSessionLeader } from '../../core/session-process.ts';
 import { probeProcessWait } from '../../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../../process-wait/exit-file.ts';
 import { processStartToken, recordedProcessLive } from '../../delegation/process-liveness.ts';
+
+function warnRegistrationRefused(code: WaitErrorCode | AskErrorCode): void {
+  console.warn(`[cez] wait registration refused: ${code}`);
+}
 
 /** CI identity stays live across registration and rotates at the existing turn boundaries. */
 export class WaitGroup {
@@ -99,16 +105,22 @@ export class WaitRegistry {
     const getRun = (id: string) => this.context.store.getRun(id);
     if (request.workerIds) assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds, getRun);
     else assertRequestWaitScope(run, run.delegation, request.requestIds ?? [], getRun);
-    const repeated = identicalWorkerWait(run.waits ?? [], request);
-    if (repeated && hasWorkerDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
-    if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+    const repeated = WAIT_KINDS.worker.duplicateWorker(run.waits ?? [], request);
+    if (repeated && WAIT_KINDS.worker.hasDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
+    try { assertWaitCapacity(run); }
+    catch (error) {
+      if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
+      throw error;
+    }
     const now = Date.now();
     const target = workerWaitTarget(request, getRun);
-    const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
-      turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
+    const entry = WAIT_KINDS.worker.entry(request, via, now, state.waitIdentity.ensureCiTurn(), target);
     this.host.withdrawCezarHumanWaits(runId);
-    this.context.store.commitWait(runId, entry, undefined, registrationReceipt(registration, entry));
+    try { this.context.store.commitWait(runId, entry, undefined, registrationReceipt(registration, entry)); }
+    catch (error) {
+      if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
+      throw error;
+    }
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
     this.host.reconcileWorkerWaits(familyOf(run));
     // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
@@ -121,16 +133,15 @@ export class WaitRegistry {
   /** The wait as the store now holds it, open or already delivered, with its deadline. */
   private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
     const latest = this.context.store.getRun(runId);
-    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && hasWorkerDeadline(wait));
+    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && WAIT_KINDS.worker.hasDeadline(wait));
   }
 
   /** Cezar waits on live workers or open requests without adding a deadline of its own. */
   registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry {
     const state = this.host.active(runId)!;
     const ids = workerIds.filter(id => { const worker = this.context.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
-    const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'cezar', via: 'completion', registeredAt: new Date().toISOString(),
-      turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', mode: 'all',
-      ...workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.context.store.getRun(id)) };
+    const entry = WAIT_KINDS.worker.completionEntry(state.waitIdentity.ensureCiTurn(),
+      workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.context.store.getRun(id)));
     this.context.store.commitWait(runId, entry);
     this.host.reconcileWorkerWaits(familyOf(this.context.store.getRun(runId)!));
     this.host.noticeParkedWorkers(runId);
@@ -179,8 +190,7 @@ export class WaitRegistry {
     if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || rootFinishRequested(this.context.store, runId) || historyDeletionPending(this.context.store, runId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a peer wait');
     }
-    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
-    this.host.disarmWait(waitId);
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return peerWaitOf(this.context.store.getRun(runId), waitId);
   }
 
@@ -205,7 +215,7 @@ export class WaitRegistry {
     const state = this.host.active(runId);
     const refuse = (code: WaitErrorCode | AskErrorCode): never => {
       // Fixed codes only: no tool arguments, credentials or provider diagnostics.
-      console.warn(`[cez] wait registration refused: ${code}`);
+      warnRegistrationRefused(code);
       throw Object.assign(new Error(code === 'autonomous_run' ? askErrorMessage(code) : waitErrorMessage(code)), { code });
     };
     const assertCanRegister = () => {
@@ -235,11 +245,11 @@ export class WaitRegistry {
     // a question asked in that turn is a new one, never the answered one returned
     // (hearsay-tools/cezarion#2397).
     const answering = active.liveSession.session?.open ? active.inputState.openingAnswerAskSeq : undefined;
-    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
-      (answering === undefined || wait.askSeq !== answering));
+    const open = WAIT_KINDS.human.duplicateAsk(openWaits(run), answering);
     if (open?.askSeq !== undefined) return open;
-    if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
-    const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
+    try { if (!open) assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
+    const base: HumanWaitEntry = open ?? WAIT_KINDS.human.entry(turnId);
     const { context: _replaced, ...kept } = base;
     return this.openWait(runId, active, { ...kept, ...card });
   }
@@ -263,12 +273,12 @@ export class WaitRegistry {
     const turnId = active.waitIdentity.ensureCiTurn();
     if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId, registration);
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
-    if (existing) return repeatRegistration(this.context.store, runId, existing, parsed.kind === 'timer' ? undefined : parsed.timeout_seconds, registration) as typeof existing;
+    if (existing) return repeatRegistration(this.context.store, runId, existing, WAIT_KINDS[parsed.kind].requestedTimeout(parsed), registration) as typeof existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
-    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    try { assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     if (parsed.kind === 'timer') {
-      if (this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-      if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+      this.checkAutomaticWaitAdmission('timer', runId, refuse);
       const now = Date.now();
       const wait = timerWaitEntry(parsed, via, turnId, now);
       return this.openWait(runId, active, wait, registration);
@@ -295,7 +305,8 @@ export class WaitRegistry {
       // The same PR may have registered while this lookup was in flight under another spelling.
       const repeated = identicalWait(this.context.store.getRun(runId)?.waits ?? [], parsed, turnId);
       if (repeated && repeated.kind !== 'process') return repeatRegistration(this.context.store, runId, repeated, parsed.timeout_seconds, registration) as PrWaitEntry | TimerWaitEntry;
-      if (openWaits(this.context.store.getRun(runId) ?? {}).length >= WAIT_LIMIT) refuse('capacity');
+      try { assertWaitCapacity(this.context.store.getRun(runId) ?? {}); }
+      catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
       const now = Date.now();
       const wait = prWaitEntry(identity, parsed, via, generation, turnId, now);
       return this.openWait(runId, active, wait, registration);
@@ -316,6 +327,13 @@ export class WaitRegistry {
         return refuse(delegationWaitRefusal(error, () => this.host.executionBlockedByRootFinish(run))); }
   }
 
+  /** The two automatic kinds share refusal rules, but keep each caller's error policy. */
+  private checkAutomaticWaitAdmission(kind: 'timer' | 'process', runId: string, refuse: (code: WaitErrorCode) => never): void {
+    const row = WAIT_KINDS[kind];
+    if (row.timersDisabled && this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
+    if (row.refusesSpentBudget && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+  }
+
   /**
    * A process wait (hearsay-tools/cezarion#1446, spec § Process wait decisions). Cezar refuses only
    * what it cannot watch to an end: another user's PID, its own, and an agent session's leader;
@@ -325,8 +343,7 @@ export class WaitRegistry {
    */
   private registerProcessWait(runId: string, active: ActiveRun, run: RunRecord, request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, registration?: RegistrationIdentity): ProcessWaitEntry {
     const refuse = (code: WaitErrorCode): never => { throw Object.assign(new Error(waitErrorMessage(code)), { code }); };
-    if (this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-    if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+    this.checkAutomaticWaitAdmission('process', runId, refuse);
     const roots = this.host.exitFileRoots(runId, run);
     let exitFile: string | undefined;
     if (request.exit_file !== undefined) {
@@ -341,7 +358,8 @@ export class WaitRegistry {
     const startToken = live ? processStartToken(request.pid) : undefined;
     const existing = identicalWait(run.waits ?? [], request, turnId, { ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }) });
     if (existing?.kind === 'process') return repeatRegistration(this.context.store, runId, existing, request.timeout_seconds, registration) as ProcessWaitEntry;
-    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
+    try { assertWaitCapacity(run); }
+    catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     const now = Date.now();
     const wait = processWaitEntry(request, via, turnId, now, startToken, exitFile);
     const opened = this.openWait(runId, active, wait, registration);
@@ -356,7 +374,13 @@ export class WaitRegistry {
   openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W, registration?: RegistrationIdentity): W {
     this.host.withdrawCezarHumanWaits(runId);
     try { this.context.store.commitWait(runId, wait, undefined, registrationReceipt(registration, wait)); }
-    catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
+    catch (error) {
+      if (error instanceof WaitCapacityError) {
+        warnRegistrationRefused('capacity');
+        throw Object.assign(new Error(waitErrorMessage('capacity')), { code: 'capacity' });
+      }
+      throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' });
+    }
     this.host.armWait(runId, wait);
     if (state.boundary.atTurnBoundary === state.liveSession.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
     // The store keeps the entry it was given; only its phase can have moved since.
@@ -377,9 +401,8 @@ export class WaitRegistry {
     const wait = this.context.store.getRun(runId)?.waits?.find(entry => entry.id === waitId);
     if (!wait) return { cancelled: false, code: 'not_found' };
     if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
-    if (wait.kind === 'human' && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
-    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
-    this.host.disarmWait(waitId);
+    if (WAIT_KINDS[wait.kind].cancellable === 'unshown' && 'askSeq' in wait && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return { cancelled: true };
   }
 

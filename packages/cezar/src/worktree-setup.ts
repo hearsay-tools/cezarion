@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from './project-paths.ts';
 import { productEnvEntries } from './core/product-env.ts';
 import {
   WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS,
@@ -88,6 +89,8 @@ export async function runWorktreeSetup(opts: {
   onCommandResult: (result: WorktreeSetupCommandResult) => void;
 }): Promise<WorktreeSetupOutcome> {
   const { plan, cwd, env, setInterrupt, isCancelled, onCommandResult } = opts;
+  const refusal = fallbackProjectWriteError(cwd);
+  if (refusal) return { status: 'invalid', issue: refusal };
   const started = Date.now();
   for (const [index, command] of plan.commands.entries()) {
     if (isCancelled()) return { status: 'stopped', durationMs: Date.now() - started };
