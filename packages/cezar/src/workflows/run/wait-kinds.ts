@@ -293,7 +293,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     canonicalize: () => {},
     repeatTimeout: wait => 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined,
     requestedTimeout: () => undefined,
-    duplicateAsk: (waits, answering) => waits.find((wait): wait is HumanWaitEntry => wait.phase === 'open' && wait.kind === 'human' && wait.source !== 'cezar' && (answering === undefined || wait.askSeq !== answering)),
+    duplicateAsk: (waits, answering) => WAIT_KINDS.human.selectOpen(waits).find(wait => wait.source !== 'cezar' && (answering === undefined || wait.askSeq !== answering)),
     answerKind: () => undefined,
     hasDeadline: () => false,
     requestKinds: [],
@@ -440,7 +440,7 @@ export function isMonitoringTimer(wait: Wait): boolean {
  *  and is replaced by the agent's own (hearsay-tools/cezarion#1234), so the agent is never told of
  *  it as one of its waits. */
 export function isCezarHumanWait(wait: Wait): boolean {
-  return wait.kind === 'human' && wait.source === 'cezar';
+  return WAIT_KINDS.human.is(wait) && wait.source === 'cezar';
 }
 
 function clip(text: string, max = SUMMARY_MAX): string {

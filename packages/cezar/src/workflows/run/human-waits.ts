@@ -45,7 +45,7 @@ export class HumanWaits {
   /** The open human wait nobody has shown the user yet (hearsay-tools/cezarion#1234): one this
    *  turn registered, or one a failure, close or crash caught before its turn end. */
   unsurfacedHumanWait(runId: string): HumanWaitEntry | undefined {
-    return openWaits(this.context.store.getRun(runId) ?? {}).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.askSeq === undefined);
+    return WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {})).find(wait => wait.askSeq === undefined);
   }
 
   /** The human wait this turn end raises: one nobody has seen yet. One registered while a question
@@ -63,7 +63,7 @@ export class HumanWaits {
     if (!run) return undefined;
     const source = WAIT_KINDS.human.aliasSource(via);
     if (source === 'agent') this.withdrawCezarHumanWaits(runId);
-    const open = openWaits(this.context.store.getRun(runId) ?? run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    const open = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? run))[0];
     if (open) return open;
     if (!waitCapacityAvailable(this.context.store.getRun(runId) ?? run)) return undefined;
     const wait = WAIT_KINDS.human.aliasEntry(source, via, state?.waitIdentity.ciTurnId ?? via, card ? askCardFields(card) : undefined);
@@ -76,7 +76,7 @@ export class HumanWaits {
    *  it. A card shown in place of the wait's own replaces it. A wait already shown is left alone. */
   markHumanWaitSurfaced(runId: string, wait: HumanWaitEntry, shownCard?: AskRequest): void {
     const askSeq = pendingHumanAskSeq(this.context.store, runId);
-    const latest = this.context.store.getRun(runId)?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
+    const latest = WAIT_KINDS.human.select(this.context.store.getRun(runId)?.waits ?? []).find(entry => entry.id === wait.id);
     if (askSeq === undefined || !latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
     const { questions: _questions, context: _context, ...kept } = latest;
     const card = shownCard ?? humanWaitCard(latest);
@@ -122,7 +122,7 @@ export class HumanWaits {
     const shown = this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}),
       message: note ?? (wait.via === 'no-wait' ? NO_WAIT_NOTE : wait.via === 'completion' ? 'completion blocked; waiting for you'
         : `automatic-wake budget spent (${this.maxAutoContinues}); waiting for you`) });
-    const latest = run?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
+    const latest = WAIT_KINDS.human.select(run?.waits ?? []).find(entry => entry.id === wait.id);
     if (!latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
     try { this.context.store.commitWait(runId, { ...latest, askSeq: shown.seq }); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
@@ -147,7 +147,7 @@ export class HumanWaits {
   /** Read fresh: a boundary the turn end re-enters (Cursor print's ready callback from
    *  `discardQueuedMessages`) may have shown the wait already, and its card stands. */
   humanWaitShown(runId: string, wait: HumanWaitEntry | undefined): boolean {
-    return !!wait && this.context.store.getRun(runId)?.waits?.some(entry => entry.id === wait.id && entry.kind === 'human' && entry.askSeq !== undefined) === true;
+    return !!wait && WAIT_KINDS.human.select(this.context.store.getRun(runId)?.waits ?? []).some(entry => entry.id === wait.id && entry.askSeq !== undefined) === true;
   }
 
   /** The turn end raised a card or the gate: record the human wait it shows. */
