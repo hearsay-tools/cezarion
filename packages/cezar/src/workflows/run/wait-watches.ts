@@ -32,6 +32,7 @@ export class WaitWatches {
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** Process waits' watches (hearsay-tools/cezarion#1446), by wait id. */
   private readonly processWatches = new Map<string, { runId: string; abort: AbortController }>();
+  private readonly workerResolveRetries = new Set<string>();
   private readonly processSupervisor = new ProcessWaitSupervisor();
   /** One timer per open timer wait, keyed by wait id. */
   readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
@@ -108,11 +109,15 @@ export class WaitWatches {
     arm(Math.max(0, firstDelay ?? Date.parse(wait.deadline!) - Date.now()));
   }
 
+  hasWorkerResolveRetry(waitId: string): boolean { return this.workerResolveRetries.has(waitId); }
+  recordWorkerResolveRetry(waitId: string): void { this.workerResolveRetries.add(waitId); }
+
   /** Stop everything that could still resolve this wait. */
   disarmWait(waitId: string): void {
     this.ciWatches.get(waitId)?.abort.abort(); this.ciWatches.delete(waitId);
     const timer = this.waitTimers.get(waitId); if (timer) clearTimeout(timer.timer); this.waitTimers.delete(waitId);
     const retry = this.ciRetries.get(waitId); if (retry) clearTimeout(retry.timer); this.ciRetries.delete(waitId);
+    this.workerResolveRetries.delete(waitId);
   }
 
   disarmProcessWatch(waitId: string): void {

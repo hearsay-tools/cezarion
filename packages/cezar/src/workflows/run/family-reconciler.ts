@@ -22,6 +22,8 @@ interface FamilyReconcilerHost {
   armWait(id: string, wait: Wait): void;
   armWorkerDeadline(id: string, wait: WorkerWaitEntry, delay?: number): void;
   disarmWait(id: string): void;
+  hasWorkerResolveRetry(id: string): boolean;
+  recordWorkerResolveRetry(id: string): void;
   resolveWait(id: string, waitId: string, result: undefined, observed: WorkerWaitEntry): void;
   retireSettledQuestions(id: string): void;
   closeRoutedQuestions(id: string): void;
@@ -47,14 +49,12 @@ export class FamilyReconciler {
     this.host.resolvePeerWaits(runsAwaitingPeer(run, () => this.context.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
 
-  private readonly workerResolveRetries = new Set<string>();
   private readonly requestDeadlineTimers = new Map<string, NodeJS.Timeout>();
   private reconcilingWorkers = false;
   private reconcilingFamily: string | undefined;
   private readonly pendingReconciliations = new Set<string | undefined>();
   recoveryFactsPending = false;
   constructor(private readonly context: RunModuleContext, private readonly host: FamilyReconcilerHost) {}
-  forgetRetry(waitId: string): void { this.workerResolveRetries.delete(waitId); }
   setRecoveryFactsPending(value: boolean): void { this.recoveryFactsPending = value; }
   dispose(): void {
     for (const timer of this.requestDeadlineTimers.values()) clearTimeout(timer);
@@ -285,9 +285,9 @@ export class FamilyReconciler {
         // second, since nothing else may touch this family again before the deadline.
         try { this.host.resolveWait(parent.id, entry.id, undefined, { ...next, result: { reason } }); }
         catch {
-          if (!this.workerResolveRetries.has(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
+          if (!this.host.hasWorkerResolveRetry(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
           this.host.disarmWait(entry.id);
-          this.workerResolveRetries.add(entry.id);
+          this.host.recordWorkerResolveRetry(entry.id);
           this.host.armWorkerDeadline(parent.id, entry, 1_000);
           continue;
         }
