@@ -35,7 +35,7 @@ describe('native worker entry reconciliation', () => {
   it('never times out a completion wait without a deadline', () => {
     const { deadline: _d, timeoutSeconds: _t, ...base } = wait;
     const completion = { ...base, source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion };
-    expect(reconcileWorkerEntry(completion, [], '9999-12-31T23:59:59.999Z').entry).toBe(completion);
+    expect(reconcileWorkerEntry(completion, [], '2027-09-06T12:00:00.000Z').entry).toBe(completion);
     expect(reconcileWorkerEntry(completion, [outcome('done')], now).reason).toBe('outcome');
   });
   it('ignores unrelated workers', () => {
@@ -58,6 +58,13 @@ describe('wait modes', () => {
     const complete = reconcileWorkerEntry(partial.entry, [{ ...outcome('failed'), workerId: secondId }], now);
     expect(complete.reason).toBe('outcome');
     expect(complete.entry.outcomes).toHaveLength(2);
+  });
+  it('keeps the same open entry when a later snapshot reports a different worker outcome', () => {
+    const partial = { ...all, outcomes: [outcome('review')] };
+    const result = reconcileWorkerEntry(partial, [outcome('done')], now);
+    expect(result).toEqual({ entry: partial });
+    expect(result.entry).toBe(partial);
+    expect(result.entry.outcomes).toEqual([outcome('review')]);
   });
   it('times out all-mode with partial outcomes', () => {
     const partial = reconcileWorkerEntry(all, [outcome('done')], now);
@@ -82,6 +89,14 @@ describe('request selections in the shared wait', () => {
     const failed = { requestId: other, status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now };
     expect(reconcileWorkerEntry(partial.entry, [], now, [reply, failed]))
       .toEqual({ entry: { ...selected, requestOutcomes: [reply, failed] }, reason: 'outcome' });
+  });
+  it('keeps the first request outcome and the same open entry on a repeated request', () => {
+    const reply = { requestId, status: 'replied' as const, observedAt: now };
+    const partial = { ...selected, requestOutcomes: [reply] };
+    const result = reconcileWorkerEntry(partial, [], now, [{ requestId, status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now }]);
+    expect(result).toEqual({ entry: partial });
+    expect(result.entry).toBe(partial);
+    expect(result.entry.requestOutcomes).toEqual([reply]);
   });
   it('request wait timeout keeps partial outcomes and ignores unrelated replies', () => {
     const partial = reconcileWorkerEntry(selected, [], wait.deadline, [{ requestId, status: 'replied', observedAt: now }, { requestId: randomUUID(), status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now }]);

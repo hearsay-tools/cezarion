@@ -71,8 +71,8 @@ export function ciWaitEntry(wait: CiWait): PrWaitEntry {
   };
 }
 
-/** A pending wait with no recorded reason settled on its observations, as `reconcileWorkerWait` infers
- *  it: satisfied by them is an outcome, anything else its deadline. */
+/** A pending legacy wait with no recorded reason settled on its stored observations:
+ *  satisfied by them is an outcome, anything else its deadline. */
 function inferredLegacyWaitReason(wait: WorkerWait): 'outcome' | 'timeout' | undefined {
   if (wait.phase !== 'wake-pending' || wait.reason !== undefined) return undefined;
   const satisfied = (ids: readonly string[], reported: readonly string[]) => wait.mode === 'all' ? ids.every((id) => reported.includes(id)) : reported.length > 0;
