@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { armRepoHandle } from './runs/arm-repo-handle.ts';
 import { RunStore } from './runs/store.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
-import { assertProjectAdmitted } from './server/cockpit-ownership.ts';
+import { admittedWrite } from './server/cockpit-ownership.ts';
 
 /**
  * CLI commands that write a project's data directory, kept apart from `index.ts` (which runs the
@@ -19,9 +19,8 @@ import { assertProjectAdmitted } from './server/cockpit-ownership.ts';
 export async function initCommand(repoRoot: string): Promise<void> {
   const workflowsDir = join(projectPaths(repoRoot).write, 'workflows');
   const skillsDir = join(projectPaths(repoRoot).write, 'skills');
-  assertProjectAdmitted(projectPaths(repoRoot).write);
-  mkdirSync(workflowsDir, { recursive: true });
-  mkdirSync(skillsDir, { recursive: true });
+  const dataDir = projectPaths(repoRoot).write;
+  admittedWrite(dataDir, () => { mkdirSync(workflowsDir, { recursive: true }); mkdirSync(skillsDir, { recursive: true }); });
 
   const examples: Array<{ path: string; fallback: () => Promise<string | undefined>; content: string }> = [
     {
@@ -65,11 +64,12 @@ description: House rules the agent should follow in this repo.
     } else if (fallback) {
       console.log(`  = ${fallback} (exists, left untouched)`);
     } else {
-      writeFileSync(example.path, example.content, 'utf8');
+      // The fallback lookup awaited: a fence may have been taken since the last check.
+      admittedWrite(dataDir, () => writeFileSync(example.path, example.content, 'utf8'));
       console.log(`  + ${example.path}`);
     }
   }
-  ensureDataGitignore(repoRoot);
+  admittedWrite(dataDir, () => ensureDataGitignore(repoRoot));
   console.log(commandText('\nDone. Start the cockpit with: npx cezarion'));
 }
 
@@ -78,10 +78,12 @@ description: House rules the agent should follow in this repo.
 export function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHandleSignal?: AbortSignal }): RunStore {
   noticeLegacyProject(repoRoot);
   const dataDir = projectPaths(repoRoot).write;
-  assertProjectAdmitted(dataDir);
   // First: an open that fails may already have created the database and the history backups.
-  ensureDataGitignore(repoRoot);
-  const store = RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });
+  // No await between the check and the open; later store writes pass the store's own backstop.
+  const store = admittedWrite(dataDir, () => {
+    ensureDataGitignore(repoRoot);
+    return RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });
+  });
   // Repo-scope the referenced tier (#945) — see `armRepoHandle`. Background, never awaited: a
   // `gh`-less or offline machine keeps working exactly as it did, just unscoped.
   armRepoHandle(store, repoRoot, opts?.repoHandleSignal);

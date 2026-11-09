@@ -126,7 +126,7 @@ async function boundedRead(path: string, limit: number, stored = false, prefixBy
   } finally { await file.close(); }
 }
 
-type Directory = { path: string; check: () => Promise<void>; close: () => Promise<void> };
+type Directory = { path: string; check: () => Promise<void>; close: () => Promise<void>; admit: () => void };
 /** Reject symlinks in every storage component. Linux operations stay anchored to open directory
  * descriptors; other platforms revalidate identity before/after use, not a same-user sandbox. */
 async function storageDirectory(path: string, create = false): Promise<Directory> {
@@ -153,7 +153,7 @@ async function storageDirectory(path: string, create = false): Promise<Directory
       if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     };
     await check();
-    return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close() };
+    return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close(), admit: admitted };
   } catch (error) { await file?.close(); throw error; }
 }
 
@@ -195,11 +195,14 @@ async function reclaimDeadLock(root: Directory): Promise<void> {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return; }
     // Only one reaper can claim this inode. Keep its marker through the rename, so another
     // observer of the old lock cannot remove a newly acquired lock (the stale-unlink race).
+    root.admit();
     await mkdir(join(pinned, '.reaping'), { mode: 0o700 });
     if (!sameFile(await lock.stat({ bigint: true }), await lstat(path, { bigint: true }))) return;
     await root.check();
     const retired = join(root.path, `.retired-lock-${randomUUID()}`);
+    root.admit();
     await rename(path, retired);
+    root.admit();
     await rm(retired, { recursive: true, force: true });
   } catch { /* Unknown owner, permission failure, or another reaper: fail closed and retry. */ }
   finally { await lock?.close(); }
@@ -207,8 +210,10 @@ async function reclaimDeadLock(root: Directory): Promise<void> {
 async function acquireLock(root: Directory): Promise<() => Promise<void>> {
   const candidate = join(root.path, `.lock-candidate-${randomUUID()}`);
   const path = join(root.path, '.publish.lock');
+  root.admit();
   await mkdir(candidate, { mode: 0o700 });
   try {
+    root.admit();
     await writeFile(join(candidate, 'owner.json'), JSON.stringify({ pid: process.pid, host: hostname() }), { flag: 'wx', mode: 0o600 });
     const identity = await lstat(candidate, { bigint: true });
     const deadline = performance.now() + 5000;
@@ -222,9 +227,10 @@ async function acquireLock(root: Directory): Promise<() => Promise<void>> {
           throw error;
         });
         if (!exists) {
+          root.admit();
           await rename(candidate, path);
           return async () => {
-            if (sameFile(identity, await lstat(path, { bigint: true }))) await rm(path, { recursive: true, force: true });
+            if (sameFile(identity, await lstat(path, { bigint: true }))) { root.admit(); await rm(path, { recursive: true, force: true }); }
           };
         }
       } catch (error) {
@@ -266,7 +272,7 @@ export async function publishArtifact(directory: string, runId: string, source: 
     // With the publication lock held, no cooperating writer can own a temporary entry.
     // Completed UUID entries are never evicted, even if their metadata is corrupt.
     for await (const id of entries(root.path)) {
-      if (/^\.pending-[0-9a-f-]{36}$/i.test(id)) await rm(join(root.path, id), { recursive: true, force: true });
+      if (/^\.pending-[0-9a-f-]{36}$/i.test(id)) { root.admit(); await rm(join(root.path, id), { recursive: true, force: true }); }
     }
     const bytes = await boundedRead(source, MAX_FILE_BYTES);
     // A same-size rewrite inside one timestamp tick leaves the stat snapshot above
@@ -278,18 +284,22 @@ export async function publishArtifact(directory: string, runId: string, source: 
     const metadata = publishedArtifactSchema.parse({ id: randomUUID(), runId, name: basename(source), sourcePath: resolve(source), createdAt: new Date().toISOString(), size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
     pending = join(root.path, `.pending-${metadata.id}`);
     await root.check();
+    root.admit();
     await mkdir(pending, { mode: 0o700 });
     staging = await open(pending, readFlags | constants.O_DIRECTORY);
     const pinned = process.platform === 'linux' ? `/proc/self/fd/${staging.fd}` : pending;
+    root.admit();
     await writeFile(join(pinned, 'content'), bytes, { mode: 0o600, flag: 'wx' });
+    root.admit();
     await writeFile(join(pinned, 'metadata.json'), JSON.stringify(metadata), { mode: 0o600, flag: 'wx' });
     if (!sameFile(await staging.stat({ bigint: true }), await lstat(pending, { bigint: true }))) throw new Error('Redirected artifact staging');
     await root.check();
+    root.admit();
     await rename(pending, join(root.path, metadata.id));
     await root.check();
     return metadata;
   } finally {
-    try { await staging?.close(); if (pending) await rm(pending, { recursive: true, force: true }); }
+    try { await staging?.close(); if (pending) { root.admit(); await rm(pending, { recursive: true, force: true }); } }
     finally { try { await release?.(); } finally { await root.close(); } }
   }
 }

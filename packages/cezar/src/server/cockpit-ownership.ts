@@ -169,6 +169,13 @@ export function projectWriteRefused(dataDir: string): boolean {
   return true;
 }
 
+/** A CLI write: the project's migration admission is checked right before `write` runs. A CLI
+ *  path runs each write that follows an await through it, not only its first one. */
+export function admittedWrite<T>(dataDir: string, write: () => T): T {
+  assertProjectAdmitted(dataDir);
+  return write();
+}
+
 /** A durable commit refused by the backstop writes nothing and throws, as on a closed store. */
 export function assertProjectWritable(dataDir: string): void {
   if (projectWriteRefused(dataDir)) assertProjectAdmitted(dataDir);
