@@ -1,3 +1,4 @@
+import { WaitEngine } from './wait-engine.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import { RunCancel } from './run-cancel.ts';
@@ -85,6 +86,7 @@ export interface RunModules {
   familyReconciler: FamilyReconciler;
   waitWatches: WaitWatches;
   waitRegistry: WaitRegistry;
+  waitEngine: WaitEngine;
   subagentWaits: SubagentWaits;
   humanWaits: HumanWaits;
   sessionHelperHost: sessionEvents.SessionHelperHost;
@@ -288,7 +290,14 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     subagentSessionLive: id => modules.subagentWaits.sessionLive(id),
     interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
   });
+  modules.waitEngine = new WaitEngine(context, {
+    withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
+    armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
+    isParked: id => modules.line.isParked(id),
+    parkOnWaits: (id, state) => modules.wakeAdmission.parkOnWaits(id, state),
+  });
   modules.waitRegistry = new WaitRegistry(context, {
+    waitEngine: modules.waitEngine,
     active: id => host.active.get(id), workerExecutionStopped: id => host.workerExecutionStopped(id),
     executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), ciSupervisor: () => host.ciSupervisor,
     isParked: id => modules.line.isParked(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),

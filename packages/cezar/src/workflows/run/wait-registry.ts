@@ -1,3 +1,4 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { assertWaitCapacity, waitCapacityAvailable, WaitCapacityError } from '../../runs/wait-capacity.ts';
@@ -44,6 +45,7 @@ Object.freeze(WaitGroup);
 export function createWaitGroup(): WaitGroup { return new WaitGroup(); }
 
 interface WaitRegistryHost {
+  waitEngine: WaitEngine;
   active(id: string): ActiveRun | undefined;
   workerExecutionStopped(id: string): boolean;
   executionBlockedByRootFinish(run: RunRecord): boolean;
@@ -181,7 +183,7 @@ export class WaitRegistry {
     }
     // A new peer wait is peer messaging (hearsay-tools/cezarion#2784); an open one keeps running.
     requireMessagingAllowed(this.context.store.getRun(runId)!);
-    return this.openWait(runId, state, entry, registration);
+    return this.host.waitEngine.open(runId, state, entry, registration);
   }
 
   /** `cez message cancel-wait` on a peer wait, through the list, as `cancelWorkerWait`; a settled one comes back as it is. */
@@ -252,7 +254,7 @@ export class WaitRegistry {
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     const base: HumanWaitEntry = open ?? WAIT_KINDS.human.entry(turnId);
     const { context: _replaced, ...kept } = base;
-    return this.openWait(runId, active, { ...kept, ...card });
+    return this.host.waitEngine.open(runId, active, { ...kept, ...card });
   }
 
   /**
@@ -282,7 +284,7 @@ export class WaitRegistry {
       this.checkAutomaticWaitAdmission('timer', runId, refuse);
       const now = Date.now();
       const wait = timerWaitEntry(parsed, via, turnId, now);
-      return this.openWait(runId, active, wait, registration);
+      return this.host.waitEngine.open(runId, active, wait, registration);
     }
     const key = `${runId}\n${normalizePrUrl(parsed.pr)}\n${parsed.until}\n${parsed.wake_on_conflict}`;
     const pending = this.ciRegistrations.get(key);
@@ -310,7 +312,7 @@ export class WaitRegistry {
       catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
       const now = Date.now();
       const wait = prWaitEntry(identity, parsed, via, generation, turnId, now);
-      return this.openWait(runId, active, wait, registration);
+      return this.host.waitEngine.open(runId, active, wait, registration);
     })();
     this.ciRegistrations.set(key, { runId, abort, promise });
     try { return await promise; }
@@ -363,29 +365,12 @@ export class WaitRegistry {
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     const now = Date.now();
     const wait = processWaitEntry(request, via, turnId, now, startToken, exitFile);
-    const opened = this.openWait(runId, active, wait, registration);
+    const opened = this.host.waitEngine.open(runId, active, wait, registration);
     if (!live) {
       this.host.disarmWait(wait.id);
       this.host.settleWait(runId, wait.id, probeProcessWait({ pid: wait.pid, deadline: wait.deadline, roots, ...(exitFile === undefined ? {} : { exitFile }) }, now));
     }
     return opened;
-  }
-
-  /** Commit, arm and (at a boundary) park on a newly registered wait. */
-  openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W, registration?: RegistrationIdentity): W {
-    this.host.withdrawCezarHumanWaits(runId);
-    try { this.context.store.commitWait(runId, wait, undefined, registrationReceipt(registration, wait)); }
-    catch (error) {
-      if (error instanceof WaitCapacityError) {
-        warnRegistrationRefused('capacity');
-        throw Object.assign(new Error(waitErrorMessage('capacity')), { code: 'capacity' });
-      }
-      throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' });
-    }
-    this.host.armWait(runId, wait);
-    if (state.boundary.atTurnBoundary === state.liveSession.session || this.host.isParked(runId)) this.host.parkOnWaits(runId, state);
-    // The store keeps the entry it was given; only its phase can have moved since.
-    return (this.context.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) as W | undefined) ?? wait;
   }
 
   /**
