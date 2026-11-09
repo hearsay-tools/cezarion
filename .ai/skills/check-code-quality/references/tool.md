@@ -56,6 +56,19 @@ Istanbul converter maps generated ranges back to their original source positions
 Node groups support TypeScript through `imports: ["tsx"]`; legacy Node setup
 imports remain available through `--node-import`.
 
+Vitest worker preloads capture selected sources before test modules load. Native
+modules loaded through `createRequire` use that archived code and its actual
+whole-script range, rather than a later Vite transform. Missing, stale or
+ambiguous native snapshots fail collection. This does not enable a second V8
+counter stream in workers; Vitest still owns their counters.
+
+For transformed code, Vite's generated named-import binding adapters can map
+to invalid positions on the first source line. The collector removes only
+top-level adapters whose generated AST and original named import prove the
+binding and module. It replaces that conversion text with whitespace, keeping
+all other offsets and function counters. Original source nodes and the metrics
+location checks remain intact.
+
 Transformed coverage requires an inline map with embedded source contents.
 Missing, stale or ambiguous code snapshots and maps cannot complete measurement.
 The collector does not guess source paths, use current files as generated code,

@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { preserveVitestSourceProvenance } from './vitest-provenance.mjs';
 
 const inspectorPreload = new URL('./inspector-preload.mjs', import.meta.url).href;
 
@@ -45,6 +46,10 @@ export function recordChildCoverage(vitest, directory) {
   for (const config of [vitest.config, ...vitest.projects.map(project => project.config)]) {
     const nodeOptions = config.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS ?? '';
     config.env = { ...config.env, NODE_V8_COVERAGE: directory, NODE_OPTIONS: `${nodeOptions} --import=${inspectorPreload}`.trim() };
+    const worker = new URL('./inspector-worker.mjs', import.meta.url);
+    worker.searchParams.set('raw', directory);
+    const preload = `--import=${worker.href}`;
+    config.execArgv = [...(config.execArgv ?? []).filter(argument => argument !== preload), preload];
   }
 }
 
@@ -96,6 +101,7 @@ async function main([request]) {
   });
   try {
     await requireExecutedSources(vitest);
+    preserveVitestSourceProvenance(vitest, processCoverage);
     includeTestFiles(vitest);
     recordChildCoverage(vitest, processCoverage);
     await runSelectedTests(vitest, tests);
