@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { GithubCiClient } from '../ci-wait/github.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -83,7 +83,7 @@ function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitRe
 describe('native PR merge wait parity', { timeout: 35_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => { resources.github = undefined; for (const probe of [...probes]) probe.resume(); vi.restoreAllMocks(); });
-  for (const runner of RUNNER_IDS) for (const mode of ['fresh', 'continued', 'recovered'] as const) {
+  for (const mode of ['fresh', 'continued', 'recovered'] as const) for (const runner of parityRunners('pr-merge-wait', mode === 'fresh' ? 'R97' : mode === 'continued' ? 'R98' : 'R99')) {
     const cell = mode === 'fresh' ? 'R97' : mode === 'continued' ? 'R98' : 'R99';
     it(`${runner} ${cell} delivers one committed merge observation in ${mode} mode`, async () => {
       process.env.CEZ_DRY_RUN = '0';

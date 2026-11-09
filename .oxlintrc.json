@@ -30,6 +30,7 @@
     "cez/raw-query-setter": "error",
     "cez/run-fact-reader": "error",
     "cez/run-history-reader": "error",
+    "cez/runner-fact-combination": "error",
     "cez/test-wait-discipline": "error",
     "cez/undocumented-env-name": "error",
     "cez/unit-wait-discipline": "error",

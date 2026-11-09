@@ -12,14 +12,58 @@ Shared code outside `packages/cezar/src/core/` reads a runner's declared facts (
 
 ## Runner regressions ship with shared coverage
 
-When fixing runner lifecycle, input delivery, Needs You, monitoring, ASK or
-completion behavior, add or extend an exhaustive `RUNNER_IDS` regression in the
-same PR. Use each runner's own native mock wire through `HARNESS_ADAPTERS`;
-a backend-only test or injected normalized event does not cover the other
-runners. Register new cells in the parity guard and give genuine wire gaps
-named executable exemptions. Prove the relevant regression fails without the
-fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer this
-coverage to a separate issue.
+A lifecycle, input delivery, Needs You, monitoring, ASK or completion fix ships
+with a parity row in the same PR, on the native mock wires through
+`HARNESS_ADAPTERS`. Prove that the row fails without the fix. Do not defer this
+coverage to a separate issue. Where the fix lives decides where its row runs
+(hearsay-tools/cezarion#2991):
+
+- **A fix inside a runner class** extends the seam contract suite
+  (`core/seam-contract.testkit.ts`) or that runner's own rows. These run on every
+  runner. Give a genuine wire gap a named executable exemption.
+- **A fix above the seam**, in Cezar's shared code, extends a shared row. A
+  shared row runs on the derived runner set: the smallest set that shows every
+  declared value of each turn-path fact (`inputDelivery.mode`, `.consumption`,
+  `.acknowledgement`, `.humanInputAtTurnEnd` and `systemPromptOnResume`).
+  Nobody picks these runners by hand.
+- **A new runner** declares its facts in `RUNNER_FACTS`. When it adds a value
+  that no member of the set has, the set takes it in.
+
+`core/parity-classes.testkit.ts` holds the one classification table. Each parity
+family is `every-runner`, `shared` or `no-session`, from a trace of its cells.
+A family whose cells branch on a runner's own code, or read a narrow fact (native
+ask, native subagents, the native timer tool, cumulative cost), is
+`every-runner`. A shared row also runs on every runner when its family lists it
+in `everyRunner`, when any runner is exempt from it, or when its cell title
+carries no row id and its kit passes no row key to `parityRunners`. A kit that
+passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the first runner of the
+set. R1 and U1 stay on every runner as smoke rows. When unsure, choose
+`every-runner` and say why in the table.
+
+Three guards hold the rule:
+
+1. `core/parity-classes.test.ts` fails when the derived set misses a declared
+   value of a turn-path fact.
+2. The `cez/runner-fact-combination` lint rule fails closed. It tracks no value:
+   it flags a function in `packages/cezar/src/workflows/`, nested callbacks
+   included, that touches any fact source (`.inputDelivery`, `.facts`,
+   `.systemPromptOnResume`, `RUNNER_FACTS`, `inputDeliveryOf`, or the
+   `InputDelivery` or `RunnerFacts` type) and reads two or more different fact
+   keys from any object. Renamed imports and a source touched at module level
+   count; its Limits list in `docs/sdlc/lint.md` names what it cannot see. The
+   keys come from the declared types. A real
+   combination needs a parity row that runs on every runner. Each reported
+   function goes in the rule's `COMBINATION_ROWS` with a reason; a real
+   combination also names its row as `<family> <row>`, and a false positive
+   (an unrelated object with a same-named key) names none.
+   `core/parity-classes.test.ts` fails an entry with no reason, or with a row
+   that is not registered in that family or does not run on every runner.
+3. `core/parity-classes.test.ts` fails when a parity test file belongs to no
+   classified family, or a family has no file. It also fails when a registered
+   row whose scenario runs runner code (`provider-error`, a native ask scenario,
+   native subagents) does not run on every runner. A scenario is `shared` only when
+   a seam contract row holds the runner's part of it on every runner, as S44 does
+   for `provider-error-controlled`.
 
 A per-runner parity file loads only its own adapter. It picks its runner with
 `useRunners(onlyRunner(...))`. The testkits it reaches import a kit's `-core` file, never
@@ -28,12 +72,22 @@ A per-runner parity file loads only its own adapter. It picks its runner with
 adapter for its workers, and an owned-workflows file the next runner for R14's mixed chain. `core/runner-closure.test.ts` enforces this
 (hearsay-tools/cezarion#2939).
 
-Keep each parity test file under about 300 s on an idle host, so that it stays
-inside Squeal's per-file cap (`runner.timeoutMs` in `squeal.config.json`) on a
-loaded host. When a parity suite grows past that, run its `RUNNER_IDS` cells
-from one file per runner, defined once in a `*-cells.testkit.ts`, and add a
-guard that every runner has its file. Split a runner's file again by row group
-when one runner alone is too slow.
+The binding limit on a parity test file is CI's per-file cap: `FILE_DURATION_LIMIT_MS`
+(60 s) in `.github/scripts/vitest-file-duration.mjs`. CI enforces it on every Vitest
+file when `VITEST_FILE_DURATION_CAP=1` (`.github/workflows/ci.yml`), with coverage on,
+which runs about 1.8 times slower than an idle local host. Keep each file at most
+about 25 s on an idle host. Measure a file the way CI does with
+`VITEST_FILE_DURATION_CAP=1 npx vitest run --project server --coverage <files>`.
+Squeal's per-file timeout (`runner.timeoutMs` in `squeal.config.json`) is a looser,
+secondary bound. When a parity suite grows past the cap, run its cells from one file per
+runner, defined once in a `*-cells.testkit.ts`, and add a guard that every runner
+with rows has its file. Split a runner's file again by row group when one runner
+alone is too slow. A runner that runs no row of a part has no file for it, so the
+file guards compute the expected files from the class table, never from
+`RUNNER_IDS` alone. Fold files that were split only for the cap once the derived
+set fits in fewer files, and measure each folded file against the CI cap first:
+`WAIT_FOLDS` in `workflows/waits-parity-cells.testkit.ts` groups the parts of a runner
+outside the shared set into files of about 8–21 s locally.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
 (hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,

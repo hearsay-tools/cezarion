@@ -88,17 +88,21 @@ type InputDelivery = {
   | { readonly mode: 'boundary'; readonly humanInputAtTurnEnd: 'always-held' }  // refused while busy
 );
 interface RunnerFacts {                  // core/runner-facts.ts, one row per runner id
+  readonly inputDelivery: InputDelivery;
+  readonly systemPromptOnResume: 'resent' | 'in-thread';
   readonly nativeAsk: 'answerable' | 'auto-skipped' | 'none';
   readonly nativeSubagents: 'reported' | 'unreported' | 'turn-held';
   readonly nativeTimerTool: string | null;
   readonly costReport: 'cumulative' | 'per-turn';
+  readonly sessionIdSource: 'launch' | 'native';
 }
 ```
 
 - **Declared facts, not runner ids** (hearsay-tools/cezarion#2991). Shared code outside
   `packages/cezar/src/core/` reads what a runner declares; it never compares runner ids to
-  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in three places: `systemPromptOnResume`,
-  `inputDelivery`, and its row of `RUNNER_FACTS` (`core/runner-facts.ts`). The table is keyed
+  decide what a runner can do. Identity choices, such as the default `claude` runner, stay. A runner declares its facts in its row of `RUNNER_FACTS`
+  (`core/runner-facts.ts`), which holds its `inputDelivery` and `systemPromptOnResume`
+  too; the class reads both from the row. The table is keyed
   by runner id because shared code often holds only a `RunnerId` before it builds the runner.
   Each runner class exposes its row as `facts`, and `core/runner-facts.test.ts` checks every
   runner `createRunner` builds against the table. Parity exemptions that follow a fact select
@@ -1490,8 +1494,8 @@ mock models Codex's MCP tool gate, so the Codex U1 row of `workflows/waits-parit
 wires carry no MCP tool approval request have named exemptions.
 
 **R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-final-recovery-parity.test.ts`,
-drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
-wire with a pending CI wait, on fresh and scheduler-owned continuation attempts.
+drive the shared runner set through its `HARNESS_ADAPTERS` native provider-error
+wire (the `provider-error-controlled` scenario, which S44 holds on every runner) with a pending CI wait, on fresh and scheduler-owned continuation attempts.
 The failed step retains its error, finish timestamp and `session.ended(error)`;
 the run stays `waiting` with its CI wait open until automatic recovery delivers
 the observation. Later successful settlement must leave that failed attempt intact.
@@ -1547,7 +1551,8 @@ rejection lifts, the answer delivers the result once. Claude is exempt from U12 
 neither delay nor reject that acknowledgement. Cursor is exempt from U13 only: Cursor print
 acknowledges on the first model work of the process it spawns, which U12 delays, but the
 print wire has no rejection of an admitted prompt. U14 fails every wait-wake continuation's
-opening prompt through each runner's native provider-error wire, with a resolved timer and no
+opening prompt through each runner's native provider-error wire (on the shared runner set; S44 holds
+that failure on every runner), with a resolved timer and no
 question: the same bound, a timer that resolves on the failed run stays resolved and wakes
 nothing (no queued continuation, admission retry or backoff is left), and Continue delivers both
 results once. A second U14 case closes every session cleanly at a turn end while the result is
@@ -1715,7 +1720,7 @@ before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
 **R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-starting-proof-parity.test.ts`,
-uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
+uses each shared-set backend's `HARNESS_ADAPTERS` native wire (S43 holds the process report on every runner) to persist a
 starting execution generation. A fully terminal modern root and worker have no
 live or deferred anchor; their plain history is nonempty and facts sidecars are
 missing. Immediate boot recovery must prepare the selected family off-loop,
@@ -1795,7 +1800,7 @@ the SIGKILL is sent. Cursor print reaches the same reap when it ends its group a
 win32 skips both rows. No wire exemptions.
 
 **R43** (hearsay-tools/cezarion#738), in `workflows/worker-reboot-{collect,destroy,reuse}-parity.test.ts` and
-`workflows/worker-location-evidence.test.ts`, drives every `RUNNER_IDS`
+`workflows/worker-location-evidence.test.ts`, drives each shared-set
 backend's `HARNESS_ADAPTERS` native wire through worker cancellation and a successful twin.
 Linux prior-boot controller evidence settles the old execution independently of resource cleanup.
 Both collect-first and destroy-first unblock parent Finish after collection. A real same-user
@@ -1821,7 +1826,7 @@ process exit, native wires, stores and Git remain real. Linux-only OS coverage e
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
 **R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-same-boot-crash-lock-parity.test.ts`,
-drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
+drives each shared-set backend through its native `HARNESS_ADAPTERS` wire,
 cancellation, and same-boot interrupted checkpoint recovery. A live recorded
 unreadable process still blocks settlement, and that partial collection cannot
 authorize parent Finish. Once the recorded incarnations exit (a reused PID does
@@ -1990,14 +1995,19 @@ are never retried (`opencode-serve-retry.test.ts`). The other runners speak over
 spawned process's stdio, with no listen phase, and carry named
 `scenario-unconstructible` exemptions; retrying their starts is out of scope.
 
-Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
+Workflow deadline rows **T1–T7** (hearsay-tools/cezarion#470) live in
 `core/workflow-timeout-parity.testkit.ts` and are registered in the shared parity
-guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
+guard. Each backend uses its own `HARNESS_ADAPTERS` native wire:
 non-final managed steps outlive the default runner deadline, explicit zero disables
 it, authored positive limits fail before trailing checks, and standalone sessions
 retain their default cap. Longer authored limits override that cap, while default
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
-manager, runners, transports and terminal signals remain real.
+manager, runners, transports and terminal signals remain real. Cezar passes
+`step.timeoutMs ?? 0` (`workflows/run/step-session.ts`), so T1, T2, T3, T5 and T6 test
+Cezar's deadline logic and run on the shared runner set (hearsay-tools/cezarion#2991). T7 is
+their seam row on every runner: through `driveSeam`, a `spec.timeoutMs` of zero and one longer
+than the default both outlive the default, and a shorter one ends the turn with a timed-out
+error. T4 (the default itself) also runs on every runner.
 
 Intermediate question rows **Q4–Q6 and Q8** (hearsay-tools/cezarion#427) live in
 `core/workflow-ask-cells.testkit.ts` and the shared parity guard. Every
@@ -2155,7 +2165,7 @@ unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the 
 and runs as a fresh turn after the `cezar_ask` park while the card is pending — the inverted
 H2 assertion does not pin that.
 
-**Seam contract rows S36–S42** (hearsay-tools/cezarion#2991) live in
+**Seam contract rows S36–S44** (hearsay-tools/cezarion#2991) live in
 `core/seam-contract.testkit.ts` and run from each runner's
 `harness-<runner>-contract-parity.test.ts`, on that runner's own native mock. They hold each
 runner to its declared facts, never to its id:
@@ -2184,6 +2194,21 @@ runner to its declared facts, never to its id:
   travels outside the conversation when the runner declares `resent`, and is prepended to
   the opening turn when it declares `in-thread`. Both kinds send it again on a resume; the
   value tells Continue whether the thread already holds the skill (R53/R55).
+- **S43** process report: every native process the mock starts (each mock appends its pid to
+  `CEZ_MOCK_PID_FILE`) is reported while it runs, the first as `pid` when `startSession`
+  returns and each later one through `onPidChange`, over an opening and a follow-up turn. The
+  worker process ledger records exactly these pids, so worker-reboot (R43) and worker-restart
+  (R47, R60) run on the shared runner set.
+- **S44** provider failure: the mock's failure control raises a provider error at a resumed
+  session's wake opening (`persistent`) and in a turn that runs until the test releases it
+  (`gated-once`). The runner emits a v1 `error` with a message before any v1 `turn-end`, and a v2
+  `session.error` or `turn.completed(error)` and never `end_turn`; after Cezar's interrupt (as
+  `recordSessionFault` does) the session ends. Rows that raise the same failure through the
+  control read Cezar's handling above it: their scenario is `provider-error-controlled`, classed
+  shared, and U9, U9h, U9w, U9p, U14, R18 and R72–R76 run on the shared runner set. U14m stays on
+  every runner: its Claude cell exits through Claude's own `unread` failure, and no failing
+  opening turn may read a steered message, which S44 does not hold. `provider-error` itself stays
+  `runner-code`.
 
 A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends
 these rows, which run on every runner. Shared code above the seam (`run.ts` reading the
@@ -2225,7 +2250,10 @@ latch keeps #48 closed; completion comes only from the `cezar_done` call, never 
 never replaced by the no-wait nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
-> or carry a declared exemption naming the wire limitation that prevents it.
+> or carry a declared exemption naming the wire limitation that prevents it. A row
+> that tests runner code runs on every backend. A row that tests Cezar's shared
+> logic above the seam runs on the derived runner set, which shows every declared
+> value of each turn-path fact (hearsay-tools/cezarion#2991).
 
 §6 pins what a mapper emits. This pins the rest of the contract in
 `agent-runner.ts`: session lifecycle, provider-failure surfacing, `sendMessage`,
@@ -2234,11 +2262,37 @@ hearsay-tools/cezarion#6, hearsay-tools/cezarion#46, hearsay-tools/cezarion#48, 
 shared contract covered, so the same class of bug shipped again on the next one.
 
 **Regression coverage belongs in the fixing PR.** A fix to runner lifecycle,
-input delivery, attention, asks or completion MUST add or extend a shared
-`RUNNER_IDS` case in this matrix, or an equivalent exhaustive adapter loop such
-as `workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
+input delivery, attention, asks or completion MUST add or extend a parity row in
+this matrix, or in an equivalent adapter loop such as
+`workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
 separate parity issue is not a prerequisite. Keep a focused backend test when it
-helps explain the wire, but it is not the shared regression proof.
+helps explain the wire, but it is not the shared regression proof. Where the fix
+lives decides where its row runs (hearsay-tools/cezarion#2991):
+
+- A fix inside a runner class extends the seam contract suite
+  (`core/seam-contract.testkit.ts`) or that runner's own rows. They run on every
+  runner.
+- A fix above the seam extends a shared row. It runs on the derived runner set:
+  the smallest set of runners that shows every declared value of
+  `inputDelivery.mode`, `.consumption`, `.acknowledgement`,
+  `.humanInputAtTurnEnd` and `systemPromptOnResume` (`SHARED_RUNNERS` in
+  `core/parity-classes.testkit.ts`, ties broken by `RUNNER_IDS` order).
+- A new runner declares its facts in `RUNNER_FACTS`. When it adds a value that no
+  member of the set has, the set takes it in.
+
+`core/parity-classes.testkit.ts` classes every parity family as `every-runner`,
+`shared` or `no-session`. A shared family names the rows that still run on every
+runner; a row any runner is exempt from, and a cell whose title has no row id and
+whose kit passes no row key to `parityRunners`, run on every runner too. A kit that
+passes a key (for example a mode name) runs that cell as a shared row. A `no-session` family runs once, on the set's first runner.
+R1 and U1 are smoke rows on every runner. The guards: `core/parity-classes.test.ts`
+fails when the set misses a declared value, or a parity file belongs to no
+family; `cez/runner-fact-combination` fails when one function in
+`packages/cezar/src/workflows/` touches a fact source and reads two different
+declared fact keys from any object, because one runner per value cannot show a
+combination. It tracks no value, so it over-approximates: a real combination
+needs a combination row on every runner, and a same-named key of an unrelated
+object needs an exception with its reason (`docs/sdlc/lint.md`).
 
 Drive each real runner through its own native mock frames. Register each new
 criterion in the total-coverage guard, and use a named, executable exemption only
@@ -2249,12 +2303,14 @@ that another runner constructs or attributes that event correctly.
 
 **Two tiers.** The seam tier drives each real runner class against that
 backend's own offline mock and asserts over the v1 and v2 streams plus the
-settled result. The run tier drives a real `RunManager` run in a temp git repo.
-The second tier is not redundant: `workflows/run/` (`human-waits.ts`, `turn-settler.ts`)
-emits `ask.requested` for every runner's `cezar_ask` card, while codex and opencode also emit it
-from the runner for a native ask (`codex-app-server-runner.ts`, `opencode-server-runner.ts`),
-and whether a provider failure fails the run or parks it is decided in the orchestrator either way. Provider
-failures, asks and park declarations are only uniform above the seam.
+settled result. It runs on every runner. The run tier drives a real `RunManager`
+run in a temp git repo. `workflows/run/` (`human-waits.ts`, `turn-settler.ts`) emits
+`ask.requested` for every runner's `cezar_ask` card, while codex and opencode also emit it
+from the runner for a native ask (`codex-app-server-runner.ts`, `opencode-server-runner.ts`).
+Whether a provider failure fails the run or parks it, and how a wait, an ask or a park
+settles, is decided in the orchestrator. A run tier row whose outcome depends on runner code
+(a provider error, a native ask on codex and opencode, a native wire recording) runs on every
+runner; the rest run on the derived runner set (`core/parity-classes.testkit.ts`).
 
 **Shared scenario names, per-backend spellings.** Every mock is already driven by
 `mock:<scenario>` markers found in the prompt text. The matrix names a scenario
@@ -2270,6 +2326,7 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close |
 | `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park |
 | `provider-error` | a runtime provider rejection in its own native error shape |
+| `provider-error-controlled` | the same prompt as `provider-error`; a row that names it raises the error through `CEZ_MOCK_FAILURE_CONTROL`, as S44 does |
 | `cezar-ask` | call `cezar_ask` with one question, then end the turn; the same tool call on every wire, fresh or resumed |
 | `cezar-wait` | call `cezar_wait` for a 60 s timer, then end the turn; a declared monitoring park on every wire |
 | `ask` | an ask: native where the wire has one (Codex, OpenCode), a `cezar_ask` call otherwise |
@@ -2853,8 +2910,10 @@ To be first-class:
    `inputDelivery` (§1) from a live probe of mid-turn input, including its
    `acknowledgement` and `humanInputAtTurnEnd`, and pass the §7 I1/I2
    rows or declare their exemption. Add the runner's row to `RUNNER_FACTS`
-   (`core/runner-facts.ts`, §1) and expose it as `facts`; the table's type fails to
-   compile until the row exists. Shared code reads these facts, so a new runner never
+   (`core/runner-facts.ts`, §1), with its `inputDelivery` and
+   `systemPromptOnResume`, and expose it as `facts`; the class reads both from its
+   row, and the table's type fails to compile until the row exists. A new value of
+   a turn-path fact brings the runner into the derived parity set (§7). Shared code reads these facts, so a new runner never
    needs a runner-id branch outside `packages/cezar/src/core/`.
 2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in

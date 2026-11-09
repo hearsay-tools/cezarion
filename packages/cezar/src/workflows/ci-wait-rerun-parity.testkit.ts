@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { GithubCiClient } from '../ci-wait/github.ts';
 import { manager, store, root, restart, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -29,7 +29,7 @@ const fixture=fileURLToPath(new URL('../ci-wait/fixtures/gh.mjs',import.meta.url
 const ciWaitOf=(id:string)=>store.getRun(id)?.waits?.find(wait=>wait.kind==='pr');
 const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind==='pr');
 
-export const GROUPS = { fresh: RUNNER_IDS, recovered: RUNNER_IDS };
+export const GROUPS = { fresh: parityRunners('ci-wait-rerun', 'R85'), recovered: parityRunners('ci-wait-rerun', 'R85') };
 export function registerGroup(group: keyof typeof GROUPS) {
 const recovered = group === 'recovered';
 describe('hidden CI reruns across native harnesses', {timeout:30_000},()=>{

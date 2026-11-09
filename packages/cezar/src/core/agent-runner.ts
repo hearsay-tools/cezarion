@@ -344,7 +344,7 @@ export interface AgentSession {
 }
 
 /**
- * How a runner admits input while a turn runs (#505). The fields shared by both modes; a
+ * How a runner admits input while a turn runs (hearsay-tools/cezarion#505). The fields shared by both modes; a
  * runner declares one of the `InputDelivery` variants.
  */
 interface InputDeliveryFacts {

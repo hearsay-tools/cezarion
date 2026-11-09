@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { GithubCiClient } from '../ci-wait/github.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -62,13 +62,14 @@ function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitRe
 
 // R81–R83 deliberately use the real metadata parser/supervisor. A synthetic
 // `conflicting` result would test storage but pass with the missing detector.
-export const GROUPS = { fresh: RUNNER_IDS, continued: RUNNER_IDS, recovered: RUNNER_IDS };
+export const CONFLICT_ROWS = { fresh: 'R81', continued: 'R82', recovered: 'R83' } as const;
+export const GROUPS = { fresh: parityRunners('ci-wait-conflict', 'R81'), continued: parityRunners('ci-wait-conflict', 'R82'), recovered: parityRunners('ci-wait-conflict', 'R83') };
 export function registerGroup(mode: keyof typeof GROUPS) {
 describe('native conflict observation durability and wake parity', { timeout: 35_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => { resources.github = undefined; vi.restoreAllMocks(); });
   for (const runner of GROUPS[mode]) {
-    const cell = mode === 'fresh' ? 'R81' : mode === 'continued' ? 'R82' : 'R83';
+    const cell = CONFLICT_ROWS[mode];
     it(`${runner} ${cell} delivers one committed conflict observation in ${mode} mode`, async () => {
       process.env.CEZ_DRY_RUN = '0';
       process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;

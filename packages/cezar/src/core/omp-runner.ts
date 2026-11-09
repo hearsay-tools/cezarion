@@ -234,12 +234,9 @@ export interface OmpRunnerOptions {
 export class OmpRunner implements AgentRunner {
   readonly backend = 'omp' as const;
   readonly specSupport = OMP_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'resent' as const;
+  readonly systemPromptOnResume = RUNNER_FACTS.omp.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.omp;
-  readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'never-held',
-    via: 'prompt with streamingBehavior steer; set_steering_mode all at session start; user message_start with the submitted text',
-  };
+  readonly inputDelivery: InputDelivery = RUNNER_FACTS.omp.inputDelivery;
   private readonly bin: string;
   private readonly timeoutMs: number;
   private readonly killGraceMs: number;

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it as registerTest, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { familyCells } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
@@ -192,6 +193,6 @@ export function registerResumeDiagnosticsGroup(group: keyof typeof resumeDiagnos
   describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1380)', () => {
     useWorkerWaitFixture();
     afterEach(() => vi.unstubAllEnvs());
-    for (const row of RESUME_DIAGNOSTICS_GROUPS[group]!) resumeDiagnosticsCells[row.family](row.runner);
+    for (const row of RESUME_DIAGNOSTICS_GROUPS[group]!) resumeDiagnosticsCells[row.family](row.runner, familyCells('resume-diagnostics', row.runner, registerTest));
   });
 }

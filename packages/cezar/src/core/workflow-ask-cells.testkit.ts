@@ -6,6 +6,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
+import { runsOn } from './parity-classes.testkit.ts';
 import { CEZAR_ASK_QUESTION, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { driveRun } from './workflow-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
@@ -47,7 +48,7 @@ export function describeWorkflowAsk(group: keyof typeof WORKFLOW_ASK_GROUPS, reg
   const { describe, it, afterEach } = registration;
 describe('intermediate workflow ASK parity — #427', () => {
   afterEach(() => vi.restoreAllMocks());
-  for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA.filter(row => { return (WORKFLOW_ASK_GROUPS[group] as readonly string[]).includes(row.id); })) {
+  for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA.filter(row => { return (WORKFLOW_ASK_GROUPS[group] as readonly string[]).includes(row.id) && runsOn('workflow-ask', row.id, backend); })) {
     it(`${backend} ${row.id} ${row.name} (fresh)`, async () => {
       let clock: ReturnType<typeof autoEndObservationClock> | undefined;
       const semaphore = new WorkspaceSemaphore({ home: testHome() });

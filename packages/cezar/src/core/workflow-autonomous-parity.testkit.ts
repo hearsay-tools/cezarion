@@ -56,109 +56,62 @@ async function waitForProgressing(cond: () => boolean, progress: () => unknown, 
 const nudges = (events: readonly Record<string, unknown>[]) => events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "budget-cursor-fresh": [
-    "cursor A5 fresh"
-  ],
-  "budget-cursor-continuation": [
-    "cursor A5 continuation"
-  ],
-  "refusal-cursor-fresh": [
-    "cursor A11 fresh"
-  ],
-  "refusal-cursor-continuation": [
-    "cursor A12 continuation"
-  ],
   "budget-fresh": [
     "claude A5 fresh",
-    "codex A5 fresh",
-    "omp A5 fresh",
-    "opencode A5 fresh",
-    "pi A5 fresh"
+    "cursor A5 fresh",
+    "omp A5 fresh"
   ],
   "budget-continuation": [
     "claude A5 continuation",
-    "codex A5 continuation",
-    "omp A5 continuation",
-    "opencode A5 continuation",
-    "pi A5 continuation"
+    "cursor A5 continuation",
+    "omp A5 continuation"
   ],
   "late-readiness-fresh": [
     "claude A11 fresh",
-    "codex A11 fresh",
-    "omp A11 fresh",
-    "opencode A11 fresh",
-    "pi A11 fresh"
+    "cursor A11 fresh",
+    "omp A11 fresh"
   ],
   "late-readiness-continuation": [
     "claude A12 continuation",
-    "codex A12 continuation",
-    "omp A12 continuation",
-    "opencode A12 continuation",
-    "pi A12 continuation"
+    "cursor A12 continuation",
+    "omp A12 continuation"
   ],
   "nudges": [
     "claude A1 fresh",
     "claude A2 continuation",
-    "codex A1 fresh",
-    "codex A2 continuation",
     "cursor A1 fresh",
     "cursor A2 continuation",
     "omp A1 fresh",
-    "omp A2 continuation",
-    "opencode A1 fresh",
-    "opencode A2 continuation",
-    "pi A1 fresh",
-    "pi A2 continuation"
+    "omp A2 continuation"
   ],
   "ask-refusal": [
     "claude A3 fresh",
     "claude A4 continuation",
-    "codex A3 fresh",
-    "codex A4 continuation",
     "cursor A3 fresh",
     "cursor A4 continuation",
     "omp A3 fresh",
-    "omp A4 continuation",
-    "opencode A3 fresh",
-    "opencode A4 continuation",
-    "pi A3 fresh",
-    "pi A4 continuation"
+    "omp A4 continuation"
   ],
   "unanswered-question": [
     "claude A10 fresh",
-    "codex A10 fresh",
     "cursor A10 fresh",
-    "omp A10 fresh",
-    "opencode A10 fresh",
-    "pi A10 fresh"
+    "omp A10 fresh"
   ],
   "non-autonomous": [
     "claude A6 continuation",
     "claude A6 fresh",
-    "codex A6 continuation",
-    "codex A6 fresh",
     "cursor A6 continuation",
     "cursor A6 fresh",
     "omp A6 continuation",
-    "omp A6 fresh",
-    "opencode A6 continuation",
-    "opencode A6 fresh",
-    "pi A6 continuation",
-    "pi A6 fresh"
+    "omp A6 fresh"
   ],
   "tool-parking": [
     "claude A7 fresh",
     "claude A8 fresh",
-    "codex A7 fresh",
-    "codex A8 fresh",
     "cursor A7 fresh",
     "cursor A8 fresh",
     "omp A7 fresh",
-    "omp A8 fresh",
-    "opencode A7 fresh",
-    "opencode A8 fresh",
-    "pi A7 fresh",
-    "pi A8 fresh"
+    "omp A8 fresh"
   ],
   "native-questions": [
     "claude A9",
@@ -185,7 +138,7 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
 };
 
 export function describeWorkflowAutonomousParity(part: ParityPart, collect?: ParityCollector): void {
-  const { describe, it } = partitionParity(part, PARTS, collect);
+  const { describe, it } = partitionParity(part, PARTS, collect, 'workflow-autonomous');
 describe('autonomous turn-end parity — #426', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of AUTONOMOUS_CRITERIA) {
