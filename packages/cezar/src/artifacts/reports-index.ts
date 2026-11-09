@@ -10,6 +10,7 @@ import { REPORTS_BACKFILL_KEY, type IndexedArtifact, type ReportRow, type Report
 import { parseStoredSummary } from '../runs/run-summary-page.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { artifactRunsRoot, scanArtifactsForIndex, checkArtifactContentForIndex } from './store.ts';
+import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
@@ -102,6 +103,9 @@ export class ReportsIndex {
   /** Settles once the scans queued so far end; a project migration fence drains it. */
   idle(): Promise<void> { return this.queue; }
   private serial(work: () => Promise<void>): Promise<void> {
+    // A project under a migration fence queues no new scan (watch ticks included), so the
+    // fence's captured `idle()` covers every scan; dirty rows are picked up after it ends.
+    if (projectAdmissionRefusal(this.dataDir)) return Promise.resolve();
     const next = this.queue.then(async () => { if (!this.closed) await work(); });
     this.queue = next.catch(() => undefined);
     return next;

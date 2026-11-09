@@ -895,8 +895,8 @@ export class RunStore extends EventEmitter {
 
   /** Every run whose family another process owns (`foreignClaimedRunIds`). */
   listForeignClaimedRunIds(): string[] { return foreignClaimedRunIds(this.db, this.owner); }
-  /** The runs of families another live store claims here (`liveForeignClaimedRunIds`). */
-  liveForeignClaimedRunIds(): string[] { return liveForeignClaimedRunIds(this.db, this.owner); }
+  /** Non-terminal rows in the database (both directories) and the runs of families another live store claims. */
+  persistedLiveRunIds(): { live: string[]; foreign: string[] } { return { live: this.db?.listLive().map((row) => row.id) ?? [], foreign: liveForeignClaimedRunIds(this.db, this.owner) }; }
 
   /**
    * Whether a held run anchors itself (and its family) in memory. Anything else held is a family

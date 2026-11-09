@@ -163,15 +163,24 @@ function liveState(run: RunRecord): string {
 
 /**
  * Every task of a project that is not terminal (`isLiveRecord`): queued, running, waiting on a
- * human, a usage-limit auto-resume, a timer, a PR or a worker. Plus the runs of every family
- * another live process (a headless `cez run`, another binary) claims in the same database.
+ * human, a usage-limit auto-resume, a timer, a PR or a worker, held by this store or persisted
+ * in either project directory. Plus the runs of every family another live process (a headless
+ * `cez run`, another binary) claims in the same database.
  * Admission, the fence's preflight and its drain share this one notion of live.
  */
-export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'liveForeignClaimedRunIds' | 'getRun'>): LiveProjectTask[] {
-  const own = store.listRuns().filter(isLiveRecord);
-  const ids = new Set(own.map((run) => run.id));
-  const foreign = store.liveForeignClaimedRunIds().filter((id) => !ids.has(id)).map((id) => store.getRun(id)).filter((run): run is RunRecord => run !== undefined);
-  return [...own, ...foreign].map((run) => ({ id: run.id, title: run.title, state: liveState(run) }));
+export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'>): LiveProjectTask[] {
+  const tasks = new Map(store.listRuns().filter(isLiveRecord).map((run) => [run.id, run]));
+  // Rows another process left live, whose owner may since have gone, are in the database only.
+  const { live, foreign } = store.persistedLiveRunIds();
+  for (const id of live) {
+    const run = tasks.has(id) ? undefined : store.getRun(id);
+    if (run && isLiveRecord(run)) tasks.set(id, run);
+  }
+  for (const id of foreign) {
+    const run = tasks.has(id) ? undefined : store.getRun(id);
+    if (run) tasks.set(id, run);
+  }
+  return [...tasks.values()].map((run) => ({ id: run.id, title: run.title, state: liveState(run) }));
 }
 
 /**

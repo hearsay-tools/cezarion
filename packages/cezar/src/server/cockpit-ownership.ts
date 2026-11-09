@@ -333,6 +333,7 @@ export class CockpitOwnership {
   }): Promise<ProjectMigrationFence> {
     const paths = migrationFencePaths(dataDir);
     if (!paths) throw new Error(`Not a project data directory: ${dataDir}`);
+    options.signal?.throwIfAborted();
     // The directory that exists, so resuming after the move never recreates the old name.
     const target = dataReadDirs(resolve(dataDir)).find(pathPresent) ?? dataDir;
     if (!this.owns(target)) await this.claimProject(target, true);
@@ -354,6 +355,7 @@ export class CockpitOwnership {
         await delay(50, undefined, { signal: options.signal });
       }
       if (options.settle) await withinDeadline(options.settle(), deadline, options.signal, () => new ProjectMigrationBusyError('drain-timeout', options.liveTasks(), project));
+      options.signal?.throwIfAborted();
       return fence;
     } catch (error) {
       fence.release();

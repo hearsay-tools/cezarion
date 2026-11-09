@@ -59,8 +59,9 @@ pid plus start-token liveness and token-checked release.
   not live.
 - **Live tasks (strict fence).** `projectLiveTasks(store)`: every non-terminal task
   (`isLiveRecord`: queued, running, waiting on a human, a usage-limit auto-resume, a
-  timer, a PR or a worker) plus the runs of families another live store claims in
-  `run_claims` (a headless `cez run`, another binary). Right after the claim, with no
+  timer, a PR or a worker), held by the store or persisted as live in either directory
+  (a row another process left behind), plus the runs of families another live store
+  claims in `run_claims` (a headless `cez run`, another binary). Right after the claim, with no
   wait in between, the fence refuses while any exists: it releases at once and throws
   `ProjectMigrationBusyError` with each task's id, title and state and the next step
   (finish or cancel each one). The preflight and the drain share this one notion of live.
@@ -82,7 +83,8 @@ pid plus start-token liveness and token-checked release.
   transcript-facts queue and settles its jobs, so no sidecar is written later. A late
   repo-handle result finds no database and writes nothing (lazy contexts also abort it).
   The reports index and history compression are drained before (`settle`); after close the
-  reports index starts no queued scan and checks `closed` before each write. Branch sweeps
+  reports index starts no queued scan and checks `closed` before each write. While a fence
+  is held the reports index queues no new scan, so the drained `idle()` covers every scan. Branch sweeps
   touch Git refs only.
 - **Journal.** The journal blocks admission whether its owner lives or not; only the
   fence holder passes. P4b2 removes it as its last step before `release()`. P4b3 adds

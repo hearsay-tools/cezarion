@@ -262,6 +262,48 @@ describe('the owning cockpit', () => {
     other.close();
   });
 
+  it('refuses a task another owner left live after the cockpit opened', async () => {
+    const { root, dataDir } = project();
+    // Another process (a headless `cez run`) owns a queued task while the cockpit opens.
+    const other = RunStore.open(dataDir, { keepLive: true });
+    const theirs = other.createRun({ title: 'left queued', workflow: 'w', task: 't', steps: [] }).id;
+    other.flush();
+    const cockpit = owner();
+    const ctx = await contextsFor(cockpit, { id: 'p', root }).context('p');
+    // That owner ends: its row is no longer claimed by a live process and this store never held it.
+    other.close();
+    const refusal = await fenceProjectContext(cockpit, ctx).catch((error: unknown) => error);
+    expect((refusal as ProjectMigrationBusyError).reason).toBe('live');
+    expect((refusal as ProjectMigrationBusyError).tasks).toEqual([{ id: theirs, title: 'left queued', state: 'queued' }]);
+    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+  });
+
+  it('honours an abort that came before the claim or during a settled wait', async () => {
+    const { dataDir } = project();
+    const cockpit = owner();
+    await cockpit.acquire(dataDir);
+    const aborted = AbortSignal.abort();
+    await expect(cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, signal: aborted })).rejects.toThrow();
+    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+    const late = new AbortController();
+    await expect(cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: async () => { late.abort(); }, signal: late.signal })).rejects.toThrow();
+    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+  });
+
+  it('queues no report scan while fenced, so the captured idle covers every scan', async () => {
+    const { dataDir, store } = cockpitStore();
+    const cockpit = owner();
+    await cockpit.acquire(dataDir);
+    const reports = store.reports; // built first: its constructor flushes once
+    const flush = vi.spyOn(store, 'flush');
+    const fence = await cockpit.fenceProject(dataDir, none);
+    await reports.backfill();
+    expect(flush).not.toHaveBeenCalled();
+    fence.release();
+    await reports.backfill();
+    expect(flush).toHaveBeenCalled();
+  });
+
   it('drains work in flight before it returns, and refuses new reads and starts meanwhile', async () => {
     const { dataDir, store, create } = cockpitStore();
     const cockpit = owner();
