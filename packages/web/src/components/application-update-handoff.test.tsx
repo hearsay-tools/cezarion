@@ -1,3 +1,4 @@
+import { measurementEnabled } from '../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -76,8 +77,16 @@ for (const scenario of ['connected', 'disconnected', 'failed-arm'] as const) it(
     }
   } finally {
     unmount?.(); socket?.close(); vi.unstubAllGlobals(); sessionStorage.clear()
-    child.kill('SIGTERM')
-    if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()))
-    await rm(root, { recursive: true, force: true })
+    try {
+      if (measurementEnabled()) {
+        child.send('quality:flush')
+        // bound: a coverage flush must acknowledge before cleanup terminates the child.
+        await waitFor(() => expect(events.some(e => e.event === 'quality:flushed')).toBe(true), { timeout: 5000 })
+      }
+    } finally {
+      child.kill('SIGTERM')
+      if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()))
+      await rm(root, { recursive: true, force: true })
+    }
   }
 }, 25_000)

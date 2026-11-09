@@ -1,4 +1,6 @@
 // Source-only child fixture. Run with tsx in a separate process from jsdom.
+import { takeCoverage } from 'node:v8';
+import { measurementEnabled } from '../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs';
 import { RunManager } from '../../src/workflows/run.ts';
 import { createRunner } from '../../src/core/runner-factory.ts';
 import { mkdir, writeFile, cp, readFile } from 'node:fs/promises';
@@ -42,7 +44,13 @@ server.prependListener('request', (req,res) => { if (req.url?.endsWith('/restart
   res.on('finish', () => process.send?.({event:'finish'}));
   res.on('close', () => process.send?.({event:'close'}));
 }});
-process.on('message', message => { if(message === 'arm') arm(); });
+process.on('message', message => {
+  if (message === 'arm') arm();
+  if (message === 'quality:flush' && measurementEnabled()) {
+    takeCoverage();
+    process.send?.({ event: 'quality:flushed' });
+  }
+});
 await once(server,'listening');
 const address = server.address();
 if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
