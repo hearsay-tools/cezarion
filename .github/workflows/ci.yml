@@ -721,8 +721,8 @@ jobs:
         shard: [ 1, 2, 3, 4 ]
     runs-on: ubuntu-24.04
     # Coverage now shares the required test run on PRs and dispatches. Keep the
-    # previous coverage job bound there; main and merge groups retain 15 minutes.
-    timeout-minutes: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 25 || 15 }}
+    # previous coverage job bound there; main and merge groups get 20 minutes.
+    timeout-minutes: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 25 || 20 }}
 
     permissions:
       contents: read

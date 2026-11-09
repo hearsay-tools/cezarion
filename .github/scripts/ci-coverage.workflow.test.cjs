@@ -47,7 +47,7 @@ test('the required shards run once, with coverage only on PRs and dispatches', (
     const expected = ['pull_request_target', 'workflow_dispatch'].includes(event);
     const command = runs[0].run.replace(/\$\{\{.*?\}\}/g, (raw) => raw.includes('matrix.shard') ? '1' : expression(raw, context(event)));
     assert.equal(command.trim(), `${SHARD_RUN.replace('${{ matrix.shard }}', '1')}${expected ? ' --coverage.enabled' : ''}`);
-    assert.equal(expression(jobs.vitest['timeout-minutes'], context(event)), expected ? 25 : 15);
+    assert.equal(expression(jobs.vitest['timeout-minutes'], context(event)), expected ? 25 : 20);
   }
 });
 
