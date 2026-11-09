@@ -92,7 +92,7 @@ async function main([request]) {
     maxWorkers: 2, passWithNoTests: false,
     // Vitest applies testTimeout to every project over the project's own value.
     ...(testTimeout ? { testTimeout } : {}),
-    coverage: { cleanOnRerun: true, enabled: true, provider: 'v8', include: files, reporter: ['json'], reportsDirectory: directory },
+    coverage: { allowExternal: true, cleanOnRerun: true, enabled: true, provider: 'v8', include: files, reporter: ['json'], reportsDirectory: directory },
   });
   try {
     await requireExecutedSources(vitest);

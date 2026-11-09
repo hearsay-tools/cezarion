@@ -207,3 +207,18 @@ test('Vitest rejects assigning one selected test to two projects before executin
 ] } };`);
   await assert.rejects(collect(f, ['source.mjs'], {runner:'vitest',imports:[],tests:['source.test.js'],projects:['one','two']}), /Duplicate Vitest test execution/);
 });
+
+test('Vitest collection cwd can sit below the selected imported source', async t => {
+  const f = fixture(t);
+  f.write('source.ts', typed);
+  mkdirSync(join(f.cwd, 'nested'));
+  f.write('nested/source.test.ts', `import { test, expect } from 'vitest';
+import { outer } from '../source.ts';
+test('external selected source', () => { expect(outer(2)(1)).toBe(2); expect(outer(2)(3)).toBe(3); });`);
+  f.write('nested/vitest.config.mjs', `export default { test: { include: ['source.test.ts'] } };`);
+  const { report } = await collect(f, [join(f.cwd, 'source.ts')], {runner:'vitest',cwd:join(f.cwd,'nested'),imports:[],tests:['source.test.ts']});
+  const entry = report[join(f.cwd, 'source.ts')];
+  assert.ok(entry, JSON.stringify(report));
+  assert.ok(Object.values(entry.f).includes(2));
+  assert.ok(Object.values(entry.f).includes(0));
+});
