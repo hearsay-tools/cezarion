@@ -1,6 +1,6 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
-import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
+import { assertWaitCapacity, waitCapacityAvailable, WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { registrationIdentity, registrationReceipt, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
@@ -137,7 +137,8 @@ export class WaitRegistry {
   }
 
   /** Cezar waits on live workers or open requests without adding a deadline of its own. */
-  registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry {
+  registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry | undefined {
+    if (!waitCapacityAvailable(this.context.store.getRun(runId) ?? {})) return;
     const state = this.host.active(runId)!;
     const ids = workerIds.filter(id => { const worker = this.context.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
     const entry = WAIT_KINDS.worker.completionEntry(state.waitIdentity.ensureCiTurn(),
