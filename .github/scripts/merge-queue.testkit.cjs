@@ -52,6 +52,6 @@ function fixture(fork = false) {
     else throw new Error(`unexpected ${route}`);
     return { data: structuredClone(data) };
   } };
-  return { s, github, run: () => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: s.group }) };
+  return { s, github, run: () => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: s.group, now: s.now ?? Date.now }) };
 }
 module.exports = { fixture, secondEntry, SHA, BASE, HEAD, MAIN };

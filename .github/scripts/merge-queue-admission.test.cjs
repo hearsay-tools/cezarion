@@ -159,7 +159,8 @@ test('trusted no-files cannot replace a skipped native review job', async () => 
 // Before the second execution appeared, historical green could admit the queue.
 test('queue refuses the successful review from before first ready (3050)', async () => {
   const h = fixture(); h.s.checks[0].started_at = '2026-11-08T22:34:53Z';
-  await assert.rejects(h.run, /provider review pending after first ready/);
+  h.s.now = () => Date.parse('2026-11-08T22:52:07Z');
+  await assert.rejects(h.run, /provider re-review settle window open/);
 });
 test('queue refuses the pending post-first-ready review (3050)', async () => {
   const h = fixture(); h.s.checks[0].status = 'in_progress'; h.s.checks[0].conclusion = null;
@@ -188,9 +189,10 @@ for (const [label, ready, started, reason] of [
   ['bad event timestamp', 'invalid', '2026-11-08T22:51:37Z', /timestamp unavailable/],
   ['missing start', '2026-11-08T22:51:04Z', undefined, /review start unavailable/],
   ['bad start', '2026-11-08T22:51:04Z', 'invalid', /review start unavailable/],
-  ['equal start', '2026-11-08T22:51:04Z', '2026-11-08T22:51:04Z', /pending after first ready/],
+  ['equal start', '2026-11-08T22:51:04Z', '2026-11-08T22:51:04Z', /settle window open/],
 ]) test(`queue first-ready evidence fails closed: ${label}`, async () => {
   const h = fixture(); h.s.firstReady = ready; h.s.checks[0].started_at = started;
+  h.s.now = () => Date.parse('2026-11-08T22:52:07Z');
   await assert.rejects(h.run, reason);
 });
 test('queue preserves trusted no-files skip without post-ready execution', async () => {

@@ -3,8 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { fixture, HEAD, SHA } = require('./merge-queue.testkit.cjs');
 const { readQueueCodeRabbitAdmission, FIRST_READY_QUERY } = require('./queue-coderabbit-admission.cjs');
-function read(h) {
-  return readQueueCodeRabbitAdmission({ github: h.github, owner: 'o', repo: 'r', pullNumber: 7, head: HEAD });
+function read(h, now = Date.now) {
+  return readQueueCodeRabbitAdmission({ github: h.github, owner: 'o', repo: 'r', pullNumber: 7, head: HEAD, now });
 }
 for (const [label, response] of [
   ['GraphQL errors', { errors: [{ message: 'unavailable' }] }],
@@ -48,4 +48,17 @@ test('trusted no-files admission needs no first-ready timeline API', async () =>
   h.s.checks[0].output = { title: 'No files to review' };
   h.s.onRead = (route, args) => { if (args.query === FIRST_READY_QUERY) throw new Error('timeline unavailable'); };
   assert.equal((await read(h)).admitted, true);
+});
+
+for (const elapsed of [0, 179999, 180000, 480000]) test(`no post-ready execution at ${elapsed} ms uses the settle window (3066)`, async () => {
+  const h = fixture(); h.s.firstReady = '2026-11-09T06:58:07Z';
+  h.s.checks[0].started_at = '2026-11-09T06:42:47Z';
+  const result = await read(h, () => Date.parse(h.s.firstReady) + elapsed);
+  assert.equal(result.admitted, elapsed >= 180000);
+  if (elapsed < 180000) assert.equal(result.reason, 'provider re-review settle window open, until 2026-11-09T07:01:07.000Z');
+});
+test('newest failed post-first-ready execution cannot use an older success after settle', async () => {
+  const h = fixture(); h.s.checks.push({ ...h.s.checks[0], id: 101, conclusion: 'failure' });
+  const result = await read(h);
+  assert.equal(result.admitted, false); assert.equal(result.reason, 'provider-failure');
 });

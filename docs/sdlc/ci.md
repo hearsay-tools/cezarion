@@ -796,16 +796,19 @@ and four browser jobs can reuse native PR suites for an unchanged queue entry
 built directly on `main`.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
 
-Before enqueueing, and again in queue admission, actual CodeRabbit review proof
-must come from the newest trusted check on the current PR head whose start is
-strictly after the PR's **first-ever** `ready_for_review` event. That execution
-must have completed successfully. A later ready transition does not reset the
-cutoff, and a review started on a later push can satisfy it. The shared reader is
-`.github/scripts/queue-coderabbit-admission.cjs`; `land-pr` uses the same order.
-A non-draft PR with no ready event was opened ready and uses existing
-current-head admission without a cutoff. Malformed or unreadable timeline proof
-blocks actual-review admission. Existing
-trusted no-files, release-stamps and upstream-ledger exceptions remain unchanged.
+Before enqueueing, and again in queue admission, use the newest trusted
+CodeRabbit check on the current PR head. If it started after the PR's
+**first-ever** `ready_for_review` event, it must complete successfully; pending
+or failed execution blocks admission. If no execution started after that event,
+refuse admission for the shared helper's `POST_READY_SETTLE_MS` (three-minute)
+window, then use existing current-head admission. CodeRabbit restarted after
+33–40 seconds in two observed cases but did not restart in another, and provides
+no signal that it will not re-review. A later ready transition does not reset
+the window. The shared reader is `.github/scripts/queue-coderabbit-admission.cjs`;
+`land-pr` uses the same order. A non-draft PR with no ready event was opened
+ready and uses current-head admission without a cutoff. Malformed or unreadable
+timeline proof blocks actual-review admission. Existing trusted no-files,
+release-stamps and upstream-ledger exceptions remain unchanged.
 Readiness still returns a PR to draft when a new same-head review is pending.
 See `.ai/specs/2026-11-09-post-first-ready-queue-review.md` and
 hearsay-tools/cezarion#3046 for the observed first-ready race.

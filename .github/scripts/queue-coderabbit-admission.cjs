@@ -1,6 +1,10 @@
 'use strict';
 const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
 const { reader } = require('./queue-ci-proof.cjs');
+// CodeRabbit restarted 33–40 s after first ready on hearsay-tools/cezarion#3050
+// and hearsay-tools/cezarion#3031, but not after 8+ min on hearsay-tools/cezarion#3066.
+// It provides no signal that a re-review will not start. Owner-approved settle bound.
+const POST_READY_SETTLE_MS = 180_000;
 // timelineItems is chronological. The first matching event is immutable and
 // applies across later ready flips and pushes; it is deliberately not the latest.
 const FIRST_READY_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
@@ -39,9 +43,18 @@ async function readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber, h
   // An open, non-draft PR with no ready event was opened ready. No ready
   // transition can trigger a re-review, so current-head admission is sufficient.
   if (!ready) return admission;
-  if (!Number.isFinite(timestamp(admission.providerStartedAt))) return blocked('provider review start unavailable');
-  if (timestamp(admission.providerStartedAt) <= timestamp(ready)) return blocked('provider review pending after first ready');
-  if (admission.providerState === 'pending') return blocked('provider review pending after first ready');
+  return settledReview(admission, ready, now());
+}
+function settledReview(admission, ready, now) {
+  const blocked = reason => ({ ...admission, admitted: false, reason });
+  const started = timestamp(admission.providerStartedAt);
+  if (!Number.isFinite(started)) return blocked('provider review start unavailable');
+  if (started > timestamp(ready)) {
+    return admission.providerState === 'pending' ? blocked('provider review pending after first ready') : admission;
+  }
+  const until = timestamp(ready) + POST_READY_SETTLE_MS;
+  if (now < until) return blocked(`provider re-review settle window open, until ${new Date(until).toISOString()}`);
   return admission;
 }
-module.exports = { readQueueCodeRabbitAdmission, FIRST_READY_QUERY };
+
+module.exports = { readQueueCodeRabbitAdmission, FIRST_READY_QUERY, POST_READY_SETTLE_MS };
