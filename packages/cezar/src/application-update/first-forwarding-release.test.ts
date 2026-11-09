@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { stopGroup } from '../detached-process.ts';
 import { productIdentity } from '../home/identity.ts';
@@ -302,7 +302,7 @@ for (const kind of ['global', 'npx'] as const) for (const forwarding of [false, 
       `${message}; free text from disk`, `${message} free text from disk`,
       message.replace(destination + '', join(f.root, 'foreign')),
       `${RECOVERY_FAILURE_MESSAGE} ${new PackageRecoveryError([{ source: join(f.root, 'foreign', 'previous'), destination }]).message}`,
-      `${RECOVERY_FAILURE_MESSAGE} ${new PackageRecoveryError([{ source: source.replace('/previous', '/../previous'), destination }]).message}`,
+      `${RECOVERY_FAILURE_MESSAGE} ${new PackageRecoveryError([{ source: `${work}${sep}..${sep}previous`, destination }]).message}`,
       `${message}; ${source} -> ${destination}`,
     ];
     for (const unsafe of messages) {
