@@ -2,6 +2,7 @@ import { checkWorkspaceResolution } from './scripts/check-workspace-resolution.m
 import { availableParallelism } from 'node:os'
 import { defaultMaxWorkers } from './.github/scripts/vitest-worker-count.cjs'
 import { defineConfig } from 'vitest/config'
+import type { BuiltinReporterOptions } from 'vitest/reporters'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
 import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vitest-coverage-tests.mjs'
 import FileDurationReporter from './.github/scripts/vitest-file-duration.mjs'
@@ -32,7 +33,9 @@ export default defineConfig({
     // list as before, and a `--reporter` on the command line replaces the list as it always did.
     reporters: [
       'default',
-      ...(process.env.GITHUB_ACTIONS === 'true' ? [['github-actions', { jobSummary: { title: 'Vitest Test Report' } }] as const] : []),
+      ...(process.env.GITHUB_ACTIONS === 'true' ? [
+        ['github-actions', { jobSummary: { enabled: true } }] satisfies [keyof BuiltinReporterOptions, object],
+      ] : []),
       ...(coverageRequested() ? [new KeepTestFilesInCoverage()] : []),
       // Only ci.yml's Vitest shard step opts in; local and Squeal runs stay unchanged.
       ...(process.env.VITEST_FILE_DURATION_CAP === '1' ? [new FileDurationReporter()] : []),

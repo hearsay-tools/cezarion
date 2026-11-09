@@ -37,7 +37,10 @@ writing build output. The web config resolves the server route types from local 
 so missing or stale declarations cannot select an older parent checkout. The
 nested-worktree regression runs with `npm run test:unit`. Packaged CLI tests import
 built modules; the build/package job checks them with `npm run typecheck:package`
-after the application build.
+after the application build. The root typecheck also compares tracked and untracked
+TypeScript files with the files reached by those invoked compiler configs. It fails
+when executable TypeScript falls outside both phases; it does not build or run the
+post-build package check.
 
 ### Local iteration versus final verification
 

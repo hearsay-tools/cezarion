@@ -1,8 +1,7 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -12,6 +11,22 @@ import { createQueryClient } from '@/api/query-client'
 import { queryKeys } from '@/api/queries'
 import { useApplicationUpdate } from './use-application-update'
 
+// This helper reads Node process state. Load it through Node, as the child does,
+// so Vite does not transform its builtin imports into synthetic binding adapters.
+const { measurementEnabled } = createRequire(import.meta.url)('../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs') as typeof import('../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs')
+
+async function flushCoverage(child: ChildProcess, events: Array<{ event: string }>, bodyFailed: boolean) {
+  if (!measurementEnabled() || !child.connected) return
+  try {
+    await new Promise<void>((resolve, reject) => child.send('quality:flush', error => error ? reject(error) : resolve()))
+    // bound: a coverage flush must acknowledge before cleanup terminates the child.
+    await waitFor(() => expect(events.some(e => e.event === 'quality:flushed')).toBe(true), { timeout: 5000 })
+  } catch (error) {
+    // Preserve the original assertion. A successful body still requires a flush.
+    if (!bodyFailed) throw error
+  }
+}
+
 // A separate Node process keeps the real service/server/WS stack out of jsdom.
 // Only npm preparation and helper arming are fixture seams; the hook, HTTP and
 // health publication are production code, with arming gated until reconciliation.
@@ -20,49 +35,8 @@ for (const scenario of ['connected', 'disconnected', 'failed-arm'] as const) it(
   const failedArm = scenario === 'failed-arm'
   const root = await mkdtemp('/tmp/cez-update-handoff-')
   const packageRoot = dirname(createRequire(import.meta.url).resolve('@wjarka/cezarion/package.json'))
-  const source = (path: string) => JSON.stringify(pathToFileURL(join(packageRoot, 'src', path)).href)
-  const script = join(root, 'server.mts')
-  await writeFile(script, `
-import { mkdir, writeFile, cp, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { once } from 'node:events';
-import { ApplicationUpdateService } from ${source('application-update/service.ts')};
-import { RunStore } from ${source('runs/store.ts')};
-import { startServer } from ${source('server/server.ts')};
-import { Home } from ${source('home/home.ts')};
-const root = ${JSON.stringify(root)};
-const home = Home.sandbox(join(root, 'home'));
-const original = join(root, 'prefix/lib/node_modules/@wjarka/cezarion');
-await mkdir(join(original, 'dist'), { recursive: true });
-await mkdir(join(original, 'web/dist'), { recursive: true });
-await writeFile(join(original, 'package.json'), JSON.stringify({name:'@wjarka/cezarion',version:'1.0.0',bin:{cez:'dist/index.js'},dependencies:{}}));
-await writeFile(join(original, 'dist/index.js'), '');
-await writeFile(join(original, 'web/dist/index.html'), '');
-let arm;
-const gate = new Promise(resolve => { arm = resolve });
-let handoffs = 0;
-const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original,'dist/index.js'),
-  npmPrefix: join(root,'prefix'), npmCache: join(root,'cache'), home: home.root, targetVersion: () => '2.0.0',
-  runNpm: async args => {
-    const target = join(args[args.indexOf('--prefix') + 1], 'node_modules/@wjarka/cezarion');
-    await cp(original, target, {recursive:true});
-    const pkg = JSON.parse(await readFile(join(target,'package.json'),'utf8')); pkg.version = '2.0.0';
-    await writeFile(join(target,'package.json'),JSON.stringify(pkg));
-  },
-  armRestart: async () => { await gate; if (${failedArm}) { process.send?.({event:'arm-failed'}); throw new Error('fixture arm failure'); } process.send?.({event:'armed'}); },
-  handoff: () => { process.send?.({event:'handoff', count: ++handoffs}); void server.shutdownForRestart(); },
-});
-await service.apply();
-const server = startServer({home, repoRoot:root, store:RunStore.open(join(root,'.ai/cezar')), manager:{}, version:'1.0.0', applicationUpdate:service},0);
-server.prependListener('request', (req,res) => { if (req.url.endsWith('/restart')) {
-  res.on('finish', () => process.send?.({event:'finish'}));
-  res.on('close', () => process.send?.({event:'close'}));
-}});
-process.on('message', message => { if(message === 'arm') arm(); });
-await once(server,'listening');
-process.send?.({event:'listening',port:server.address().port});
-`)
-  const child = spawn(process.execPath, ['--import', 'tsx', script], {
+  const script = join(packageRoot, 'test/fixtures/application-update-handoff.ts')
+  const child = spawn(process.execPath, ['--import', 'tsx', script, root, scenario], {
     cwd: packageRoot, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0' },
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   })
@@ -73,6 +47,7 @@ process.send?.({event:'listening',port:server.address().port});
   const { WebSocket } = createRequire(join(packageRoot, 'package.json'))('ws') as typeof import('ws')
   let socket: InstanceType<typeof WebSocket> | undefined
   let unmount: (() => void) | undefined
+  let bodyFailed = false
   try {
     await waitFor(() => { expect(child.exitCode, stderr).toBeNull(); expect(events.some(e => e.event === 'listening')).toBe(true) }, { timeout: 15_000 })
     const base = `http://127.0.0.1:${events.find(e => e.event === 'listening')!.port}`
@@ -116,10 +91,17 @@ process.send?.({event:'listening',port:server.address().port});
       await waitFor(() => expect(responseStatus).toBe(200))
       expect(events.findIndex(e => e.event === 'finish')).toBeLessThan(events.findIndex(e => e.event === 'handoff'))
     }
+  } catch (error) {
+    bodyFailed = true
+    throw error
   } finally {
     unmount?.(); socket?.close(); vi.unstubAllGlobals(); sessionStorage.clear()
-    child.kill('SIGTERM')
-    if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()))
-    await rm(root, { recursive: true, force: true })
+    try {
+      await flushCoverage(child, events, bodyFailed)
+    } finally {
+      child.kill('SIGTERM')
+      if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()))
+      await rm(root, { recursive: true, force: true })
+    }
   }
 }, 25_000)

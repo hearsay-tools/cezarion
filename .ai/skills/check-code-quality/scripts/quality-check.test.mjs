@@ -224,7 +224,7 @@ test('Vitest resolves in the target project and receives all files, tests and pr
   assert.equal(result.report.measurement.runner, 'vitest');
 });
 
-test('missing Vitest packages and transformed Node sources name the next step', async t => {
+test('missing Vitest packages name the next step and absent transformed sources remain incomplete', async t => {
   const f = fixture(t);
   fakeVitest(f);
   const missing = await invoke(f, ['--test', 'source.test.mjs']);
@@ -237,7 +237,8 @@ test('missing Vitest packages and transformed Node sources name the next step', 
   assert.match(provider.report.errors.join(' '), /@vitest\/coverage-v8 is not installed/);
   f.write('typed.ts', 'export function typed(x: string) { return x; }');
   const node = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs']);
-  assert.match(node.report.errors.join(' '), /not typed\.ts\. Use --runner vitest with the --project/);
+  assert.equal(node.report.status, 'incomplete');
+  assert.equal(node.report.summary.unavailable, 1);
 });
 
 // A real Vitest run in a project shaped like this repository: unit and browser projects with
@@ -358,6 +359,7 @@ test('coverage collection uses the default bound or the explicit timeout for bot
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   for (const runner of ['node', 'vitest']) {
     const f = runner === 'node' ? fixture(t) : vitestFixture(t);
+    if (runner === 'vitest') f.write('flow.e2e.ts', '');
     const args = ['--runner', runner, '--test', runner === 'node' ? 'source.test.mjs' : 'choose.test.js'];
     for (const timeout of [undefined, 900000, Number.MAX_SAFE_INTEGER]) {
       const result = await invoke(f, [...args, ...(timeout ? ['--coverage-timeout', String(timeout)] : [])]);
@@ -370,6 +372,7 @@ test('coverage collection uses the default bound or the explicit timeout for bot
 test('coverage collection timeout is incomplete, explains recovery and cleans up for both runners', async t => {
   for (const runner of ['node', 'vitest']) {
     const f = runner === 'node' ? fixture(t) : vitestFixture(t);
+    if (runner === 'vitest') f.write('flow.e2e.ts', '');
     const args = ['--runner', runner, '--test', runner === 'node' ? 'source.test.mjs' : 'choose.test.js'];
     let temporary;
     const result = await invoke(f, [...args, '--coverage-timeout', '1'], {
@@ -430,15 +433,16 @@ test('empty supported change set passes without running tests', async t => {
   assert.equal(result.report.summary.maxCrap, null);
 });
 
-test('Node conversion rejects missing reports and Node runner refuses transformed sources', async t => {
+test('Node conversion ignores metadata and missing transformed coverage stays incomplete', async t => {
   const f = fixture(t);
   const raw = join(f.cwd, 'reports');
   mkdirSync(raw);
+  writeFileSync(join(raw, 'quality-inputs.json'), JSON.stringify([join(f.cwd, 'source.mjs')]));
   await assert.rejects(convertNodeCoverage(raw, ['source.mjs'], f.cwd, join(raw, 'out.json')), /no V8 coverage/);
   f.write('typed.ts', 'export function typed(x: string) { return x; }');
   const result = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs']);
   assert.equal(result.code, 2);
-  assert.match(result.report.errors.join(' '), /untransformed JavaScript/);
+  assert.equal(result.report.summary.unavailable, 1);
 });
 
 test('report thresholds include CRAP equality, missing coverage and escaped paths', () => {
@@ -474,6 +478,7 @@ test('copied skill runs the complete Node coverage check outside this checkout',
 
 function curriedVitestFixture(t) {
   const f = vitestFixture(t);
+  f.git('checkout', '--', 'source.mjs');
   f.write('flow.e2e.ts', '');
   f.write('choose.test.js', '');
   f.write('curried.test.js', `import { expect, test } from 'vitest';

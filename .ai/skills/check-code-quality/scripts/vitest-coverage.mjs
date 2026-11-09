@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { preserveVitestSourceProvenance } from './vitest-provenance.mjs';
+
+const inspectorPreload = new URL('./inspector-preload.mjs', import.meta.url).href;
 
 /** Test files the collector accepts, including browser specs named `*.e2e.ts`. */
 export const testFilePattern = /\.(?:test|spec|e2e)\.[cm]?[jt]sx?$/i;
@@ -40,7 +44,44 @@ export function includeTestFiles(vitest) {
 // and write V8 coverage there, which coverage.mjs merges into Vitest's report.
 export function recordChildCoverage(vitest, directory) {
   for (const config of [vitest.config, ...vitest.projects.map(project => project.config)]) {
-    config.env = { ...config.env, NODE_V8_COVERAGE: directory };
+    const nodeOptions = config.env?.NODE_OPTIONS ?? process.env.NODE_OPTIONS ?? '';
+    config.env = { ...config.env, NODE_V8_COVERAGE: directory, NODE_OPTIONS: `${nodeOptions} --import=${inspectorPreload}`.trim() };
+    const worker = new URL('./inspector-worker.mjs', import.meta.url);
+    worker.searchParams.set('raw', directory);
+    const preload = `--import=${worker.href}`;
+    config.execArgv = [...(config.execArgv ?? []).filter(argument => argument !== preload), preload];
+  }
+}
+
+// A report must describe loaded code. Vitest normally invents zero-count coverage
+// for every selected file it did not load, which could hide a missing child map.
+export async function requireExecutedSources(vitest) {
+  await vitest.initCoverageProvider?.();
+  const provider = vitest.coverageProvider;
+  if (!provider) return; // API fixtures may supply their own complete report.
+  const generate = provider.generateCoverage.bind(provider);
+  provider.generateCoverage = options => generate({ ...options, allTestsRun: false });
+}
+
+function verifyTestFiles(tests, actual, label) {
+  const expected = new Set(tests.map(file => realpathSync(file)));
+  const seen = new Set();
+  for (const item of actual) {
+    const file = realpathSync(item.moduleId);
+    if (!expected.has(file)) throw new Error(`Unexpected Vitest test file ${label}: ${file}`);
+    if (seen.has(file)) throw new Error(`Duplicate Vitest test execution: ${file}. Select one project per test.`);
+    seen.add(file);
+  }
+  for (const file of expected) if (!seen.has(file)) throw new Error(`Selected Vitest test was not ${label}: ${file}`);
+}
+
+async function runSelectedTests(vitest, tests) {
+  if (vitest.getRelevantTestSpecifications) {
+    verifyTestFiles(tests, await vitest.getRelevantTestSpecifications(tests), 'selected by its projects');
+  }
+  const result = await vitest.start(tests);
+  if (result?.testModules) {
+    verifyTestFiles(tests, result.testModules.filter(module => module.state() === 'passed' || module.state() === 'failed'), 'executed');
   }
 }
 
@@ -56,12 +97,14 @@ async function main([request]) {
     maxWorkers: 2, passWithNoTests: false,
     // Vitest applies testTimeout to every project over the project's own value.
     ...(testTimeout ? { testTimeout } : {}),
-    coverage: { enabled: true, provider: 'v8', include: files, reporter: ['json'], reportsDirectory: directory },
+    coverage: { allowExternal: true, cleanOnRerun: true, enabled: true, provider: 'v8', include: files, reporter: ['json'], reportsDirectory: directory },
   });
   try {
+    await requireExecutedSources(vitest);
+    preserveVitestSourceProvenance(vitest, processCoverage);
     includeTestFiles(vitest);
     recordChildCoverage(vitest, processCoverage);
-    await vitest.start(tests);
+    await runSelectedTests(vitest, tests);
   } catch (error) {
     process.exitCode = 1;
     console.error(error);

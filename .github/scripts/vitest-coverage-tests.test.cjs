@@ -16,9 +16,9 @@ const moduleUrl = pathToFileURL(path.join(__dirname, 'vitest-coverage-tests.mjs'
 // One small test file keeps the real runs fast and their output stable.
 const SPEC = 'packages/contract/src/attention.test.ts';
 
-// The reporters list the root config resolved to before coverage settings existed.
+// Keep the configured reporters; coverage may only append its own reporter.
 const MAIN_LOCAL = [['default', {}]];
-const MAIN_ACTIONS = [['default', {}], ['github-actions', { jobSummary: { title: 'Vitest Test Report' } }]];
+const MAIN_ACTIONS = [['default', {}], ['github-actions', { jobSummary: { enabled: true } }]];
 
 function resolvedReporters({ env = {}, argv = [], overrides = {} }) {
   const code = `
