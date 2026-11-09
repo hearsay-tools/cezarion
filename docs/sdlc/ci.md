@@ -796,6 +796,18 @@ and four browser jobs can reuse native PR suites for an unchanged queue entry
 built directly on `main`.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
 
+Before enqueueing, and again in queue admission, actual CodeRabbit review proof
+must come from the newest trusted check on the current PR head whose start is
+strictly after the PR's **first-ever** `ready_for_review` event. That execution
+must have completed successfully. A later ready transition does not reset the
+cutoff, and a review started on a later push can satisfy it. The shared reader is
+`.github/scripts/queue-coderabbit-admission.cjs`; `land-pr` uses the same order.
+Missing or unreadable first-ready proof blocks actual-review admission. Existing
+trusted no-files, release-stamps and upstream-ledger exceptions remain unchanged.
+Readiness still returns a PR to draft when a new same-head review is pending.
+See `.ai/specs/2026-11-09-post-first-ready-queue-review.md` and
+hearsay-tools/cezarion#3046 for the observed first-ready race.
+
 ### Docs-only queue entries
 
 A merge group classifies its own diff, as native PR CI classifies a PR.

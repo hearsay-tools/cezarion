@@ -54,9 +54,18 @@ Each item must hold at the same current head:
    present. Follow the repo's CodeRabbit admission and reconciliation rules for new heads and finding replies.
 
    Before enqueueing, read live evidence in the order used by
-   [the shared admission reader](../../../.github/scripts/coderabbit-admission.cjs):
+   [the shared queue admission reader](../../../.github/scripts/queue-coderabbit-admission.cjs)
+   (`readQueueCodeRabbitAdmission`), which also uses the general admission reader:
 
-   - Read the PR and require its live head to equal the reviewed head `H`.
+   - Read the PR and require its live head to equal the reviewed head `H`
+     and `draft=false`. Read its **first-ever** `ready_for_review` event through
+     `timelineItems(first: 1, itemTypes: [READY_FOR_REVIEW_EVENT])`. For an actual
+     provider review, require a valid event and a check `started_at` strictly
+     after that event. A successful review from before first ready is insufficient:
+     return `awaiting-checks` until the post-first-ready review succeeds. Use the
+     first event across later ready flips and pushes. A later ready flip needs
+     no new review when the current head already has post-first-ready proof.
+     Preserve the trusted no-files, release-stamps and upstream-ledger exceptions.
    - List all CodeRabbit check runs on `H` (the commits check-runs API with
      `filter=all`, `check_name=CodeRabbit`, `app_id=347564`). Select the newest
      trusted execution: App ID `347564`, slug `coderabbitai`, name `CodeRabbit`,

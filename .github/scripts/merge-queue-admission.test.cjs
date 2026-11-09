@@ -154,3 +154,49 @@ test('trusted no-files cannot replace a skipped native review job', async () => 
   h.s.jobs[1].conclusion = 'skipped';
   await assert.rejects(h.run, /Native CI\/review gates missing/);
 });
+
+// hearsay-tools/cezarion#3050: green first review, then first ready at 22:51:04.
+// Before the second execution appeared, historical green could admit the queue.
+test('queue refuses the successful review from before first ready (3050)', async () => {
+  const h = fixture(); h.s.checks[0].started_at = '2026-11-08T22:34:53Z';
+  await assert.rejects(h.run, /provider review pending after first ready/);
+});
+test('queue refuses the pending post-first-ready review (3050)', async () => {
+  const h = fixture(); h.s.checks[0].status = 'in_progress'; h.s.checks[0].conclusion = null;
+  await assert.rejects(h.run, /provider review pending after first ready/);
+});
+test('queue admits completed post-first-ready review (3050)', async () => {
+  const h = fixture(); assert.equal((await h.run()).head, HEAD);
+});
+test('queue uses first ready across a later ready flip with no new review (3031)', async () => {
+  const h = fixture(); h.s.firstReady = '2026-11-08T14:34:34Z';
+  h.s.checks[0].started_at = '2026-11-08T14:35:14Z';
+  // At the second ready, 14:57:46, this same successful execution is enough.
+  assert.equal((await h.run()).head, HEAD);
+  assert.equal(h.s.calls.filter(route => route === 'POST /graphql').length, 4);
+});
+test('queue admits a new head reviewed at push after first ready (3050)', async () => {
+  const h = fixture(); h.s.checks[0].started_at = '2026-11-08T23:26:32Z';
+  // First ready remains 22:51:04, rather than the second ready at 23:43:51.
+  assert.equal((await h.run()).head, HEAD);
+});
+test('queue refuses a draft never marked ready', async () => {
+  const h = fixture(); h.s.firstReady = null; h.s.pr.draft = true;
+  await assert.rejects(h.run, /PR head is no longer eligible/);
+});
+for (const [label, ready, started, reason] of [
+  ['no event', null, '2026-11-08T22:51:37Z', /no first ready event/],
+  ['bad event timestamp', 'invalid', '2026-11-08T22:51:37Z', /timestamp unavailable/],
+  ['missing start', '2026-11-08T22:51:04Z', undefined, /review start unavailable/],
+  ['bad start', '2026-11-08T22:51:04Z', 'invalid', /review start unavailable/],
+  ['equal start', '2026-11-08T22:51:04Z', '2026-11-08T22:51:04Z', /pending after first ready/],
+]) test(`queue first-ready evidence fails closed: ${label}`, async () => {
+  const h = fixture(); h.s.firstReady = ready; h.s.checks[0].started_at = started;
+  await assert.rejects(h.run, reason);
+});
+test('queue preserves trusted no-files skip without post-ready execution', async () => {
+  const h = fixture(); h.s.checks[0].conclusion = 'skipped';
+  h.s.checks[0].output = { title: 'No files to review' };
+  h.s.checks[0].started_at = '2026-11-08T22:34:53Z';
+  assert.equal((await h.run()).head, HEAD);
+});

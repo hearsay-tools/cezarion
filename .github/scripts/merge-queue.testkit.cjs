@@ -7,6 +7,19 @@ function secondEntry(s) {
   s.first = { id: 'first', position: 1, headCommit: { oid: BASE }, baseCommit: { oid: MAIN }, pullRequest: { number: 6, headRefOid: 'e'.repeat(40) } };
   s.entries = [s.first, s.entry];
 }
+function graphqlResponse(s, args) {
+  if (args.query.includes('timelineItems(')) return { data: { repository: { pullRequest: {
+    timelineItems: { nodes: s.firstReady ? [{ createdAt: s.firstReady }] : [] },
+  } } } };
+  if (args.query.includes('mergeQueue(')) return { data: { repository: { mergeQueue: {
+    entries: { nodes: s.entries ?? [s.entry], pageInfo: { hasNextPage: false } },
+  } } } };
+  const firstPage = !!s.nextThreads && !args.variables.cursor;
+  return { data: { repository: { pullRequest: { reviewThreads: {
+    nodes: firstPage ? Array.from({ length: 100 }, (_, i) => ({ id: `first-${i}`, isResolved: true })) : s.threads,
+    pageInfo: { hasNextPage: firstPage, endCursor: s.nextThreads ? 'next' : null },
+  } } } } };
+}
 function fixture(fork = false) {
   const headRepo = fork ? 'fork/r' : 'o/r';
   const s = {
@@ -21,17 +34,15 @@ function fixture(fork = false) {
       repository: { full_name: 'o/r' }, head_repository: { full_name: headRepo }, head_sha: HEAD, head_branch: 'feature',
       status: 'completed', conclusion: 'success', pull_requests: [{ number: 7, head: { sha: HEAD }, base: { ref: 'main' } }] },
     jobs: ['Unit, build, E2E, and package', 'Automated Code Review'].map((name, i) => ({ id: i + 1, name, status: 'completed', conclusion: 'success' })),
-    checks: [{ id: 100, name: 'CodeRabbit', app: { id: 347564, slug: 'coderabbitai' }, head_sha: HEAD, status: 'completed', conclusion: 'success' }],
-    threads: [], calls: [],
+    checks: [{ id: 100, name: 'CodeRabbit', app: { id: 347564, slug: 'coderabbitai' }, head_sha: HEAD, started_at: '2026-11-08T22:51:37Z', status: 'completed', conclusion: 'success' }],
+    firstReady: '2026-11-08T22:51:04Z', threads: [], calls: [],
   };
   const github = { request: async (route, args) => {
     s.calls.push(route); s.onRead?.(route, args);
     if (s.fail) throw new Error('API unavailable');
     let data;
     if (route.endsWith('/rules/branches/{branch}')) data = s.rules;
-    else if (route === 'POST /graphql') data = args.query.includes('mergeQueue(')
-      ? { data: { repository: { mergeQueue: { entries: { nodes: s.entries ?? [s.entry], pageInfo: { hasNextPage: false } } } } } }
-      : { data: { repository: { pullRequest: { reviewThreads: { nodes: s.nextThreads && !args.variables.cursor ? Array.from({ length: 100 }, (_, i) => ({ id: `first-${i}`, isResolved: true })) : s.threads, pageInfo: { hasNextPage: args.variables.cursor ? false : !!s.nextThreads, endCursor: s.nextThreads ? 'next' : null } } } } } };
+    else if (route === 'POST /graphql') data = graphqlResponse(s, args);
     else if (route.endsWith('/commits/{ref}/check-runs')) data = { total_count: s.checks.length, check_runs: s.checks };
     else if (route.endsWith('/pulls/{pull_number}')) data = s.pr;
     else if (route.endsWith('/workflows/{workflow_id}')) data = { id: 3, path: '.github/workflows/ci.yml', state: 'active' };
