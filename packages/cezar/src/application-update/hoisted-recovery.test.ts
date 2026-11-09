@@ -141,11 +141,12 @@ it('checks ownership between restoring the alias and removing the hoisted packag
   const f = fixture(); await f.service.apply(); await f.service.restart();
   writeFileSync(join(f.outer, 'bin.js'), 'promoted alias');
   writeFileSync(join(f.original, 'dist/index.js'), 'promoted CLI');
+  // Ownership loss keeps private roots and prevents undo into the new owner's installation.
   await expect(restoreOriginal(f.plan(), async () => {
     if (existsSync(join(f.outer, 'bin.js')) && readFileSync(join(f.outer, 'bin.js'), 'utf8') === 'original alias') {
       throw new Error('update lock ownership changed');
     }
-  })).rejects.toThrow('ownership changed');
+  })).rejects.toThrow('Package recovery could not be reverted. Kept previous roots:');
   expect(readFileSync(join(f.original, 'dist/index.js'), 'utf8')).toBe('promoted CLI');
   expect(readFileSync(join(f.plan().recoveryPackage!, 'dist/index.js'), 'utf8')).toBe('original CLI');
 });

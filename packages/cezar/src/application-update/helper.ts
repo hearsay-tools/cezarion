@@ -1,4 +1,4 @@
-import { scopedRecoveryTarget, validateScopedRecovery, restorePackageTrees, validateRecoveryLayout, PackageRecoveryError } from './scoped-recovery.js';
+import { RECOVERY_FAILURE_MESSAGE, scopedRecoveryTarget, validateScopedRecovery, restorePackageTrees, validateRecoveryLayout, PackageRecoveryError } from './scoped-recovery.js';
 import { installedRuntime, installationModules, originalRuntimeName, hoistedRuntime, assertCanonicalPath } from './runtime-layout.js';
 import { type NpmLaunchPackage } from '../home/identity.js';
 import type { spawn } from 'node:child_process';
@@ -326,7 +326,7 @@ export async function runHelper(plan: HelperPlan, onArmed?: () => void): Promise
     },
     reportFailure: (rollbackFailed, recoveryDetail) => writeState(plan, {
       status: 'error', supported: true, targetVersion: plan.targetVersion,
-      message: rollbackFailed ? `Update and recovery failed. Reinstall cezarion manually.${recoveryDetail ? ` ${recoveryDetail}` : ''}` : 'Update failed; previous release was restored. Retry Update.',
+      message: rollbackFailed ? `${RECOVERY_FAILURE_MESSAGE}${recoveryDetail ? ` ${recoveryDetail}` : ''}` : 'Update failed; previous release was restored. Retry Update.',
     }, rollbackFailed ? manualRepairCommand(plan.installation, plan.oldVersion) : undefined),
   };
   await withDirectoryLock(join(dirname(plan.recordPath), 'operation.lock'), async (assertInstallationOwned, installationSignal) => {

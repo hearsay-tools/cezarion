@@ -13,6 +13,7 @@ import { discoverInstallation } from './discovery.ts';
 import { restoreOriginal, runHelper, type HelperPlan } from './helper.ts';
 import { modulesAt, oldInstallation } from './legacy-entry-paths.testkit.ts';
 import * as npmProcess from './npm-process.ts';
+import { PackageRecoveryError, RECOVERY_FAILURE_MESSAGE } from './scoped-recovery.ts';
 import { installedRuntime } from './runtime-layout.ts';
 import { ApplicationUpdateService, type RestartPlan } from './service.ts';
 
@@ -261,6 +262,7 @@ it('reports every kept copy through existing update status when commit and undo 
   expect(state.status).toBe('error');
   expect(state.message).toContain('Update and recovery failed');
   expect(state.message).toContain('Kept previous roots:');
+  expect(service.snapshot()).toEqual(state);
   let copies = 0;
   for (const path of [installed.outer, installed.runtime, installed.scoped]) {
     for (const entry of readdirSync(dirname(path)).filter(name => name.startsWith(`.${basename(path)}-recovery-`))) {
@@ -274,3 +276,37 @@ it('reports every kept copy through existing update status when commit and undo 
   expect(copies).toBe(2);
   expect(commits).toBe(2); expect(undos).toBe(1);
 });
+
+for (const kind of ['global', 'npx'] as const) for (const forwarding of [false, true]) {
+  it(`${kind} switch ${forwarding ? 'on' : 'off'} status reader preserves canonical kept-copy details and rejects disk text`, async () => {
+    const f = fixture(kind, true, false, forwarding);
+    const service = new ApplicationUpdateService(f.options);
+    await service.apply();
+    const record = JSON.parse(readFileSync(f.record(), 'utf8'));
+    const destination = kind === 'global' ? f.original.outer : join(f.modules, '..', forwarding ? 'promoted-only-entry' : 'node_modules');
+    const work = mkdtempSync(join(dirname(destination), `.${basename(destination)}-recovery-`));
+    const source = join(work, 'previous');
+    mkdirSync(source);
+    const detail = new PackageRecoveryError([{ source, destination }]).message;
+    const message = `${RECOVERY_FAILURE_MESSAGE} ${detail}`;
+    const state = { status: 'error', supported: true, targetVersion: '0.18.0', message };
+    writeFileSync(f.record(), JSON.stringify({ ...record, state }));
+    expect(service.snapshot()).toEqual(state);
+    expect(new ApplicationUpdateService(f.options).snapshot()).toEqual(state);
+    const messages = [
+      `${message}; free text from disk`, `${message} free text from disk`,
+      message.replace(destination + '', join(f.root, 'foreign')),
+      `${RECOVERY_FAILURE_MESSAGE} ${new PackageRecoveryError([{ source: join(f.root, 'foreign', 'previous'), destination }]).message}`,
+      `${RECOVERY_FAILURE_MESSAGE} ${new PackageRecoveryError([{ source: source.replace('/previous', '/../previous'), destination }]).message}`,
+      `${message}; ${source} -> ${destination}`,
+    ];
+    for (const unsafe of messages) {
+      writeFileSync(f.record(), JSON.stringify({ ...record, state: { ...state, message: unsafe } }));
+      expect(new ApplicationUpdateService(f.options).snapshot().message).toBe('Update state needs retry.');
+    }
+    const foreign = join(f.root, 'foreign-copy'); mkdirSync(foreign);
+    rmSync(source, { recursive: true }); symlinkSync(foreign, source, process.platform === 'win32' ? 'junction' : 'dir');
+    writeFileSync(f.record(), JSON.stringify({ ...record, state }));
+    expect(service.snapshot().message).toBe('Update state needs retry.');
+  });
+}

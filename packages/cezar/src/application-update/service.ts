@@ -1,4 +1,4 @@
-import { scopedRecoveryTarget, validateScopedRecovery, validateRecoveryLayout } from './scoped-recovery.ts';
+import { validRecoveryMessage, scopedRecoveryTarget, validateScopedRecovery, validateRecoveryLayout } from './scoped-recovery.ts';
 import { installedRuntime, originalRuntimeName, hoistedRuntime } from './runtime-layout.ts';
 import { npmPackageIdentity, productIdentity } from '../home/identity.ts';
 import { createHash } from 'node:crypto';
@@ -177,7 +177,9 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
 
   private recordStateInvalid(loaded: RecordShape): boolean {
     return loaded.state.supported !== true
-      || (loaded.state.message !== undefined && !SAFE_MESSAGES.has(loaded.state.message))
+      || (loaded.state.message !== undefined && !SAFE_MESSAGES.has(loaded.state.message)
+        && !(loaded.state.status === 'error' && this.installation.kind !== 'unsupported'
+          && validRecoveryMessage(loaded.state.message, this.installation, join(this.dir, 'recovery'))))
       || (loaded.state.targetVersion !== undefined && !VERSION_RE.test(loaded.state.targetVersion));
   }
 

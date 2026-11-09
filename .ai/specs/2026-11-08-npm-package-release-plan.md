@@ -157,3 +157,12 @@ reports recovery failure, and lists each retained path with its canonical target
 in the existing application-update status message. A person must finish that
 recovery by hand. The canonical roots can be mixed until then. This accepted D28
 limitation does not add a persistent transaction journal or a new status surface.
+
+
+Recovery checks ownership before every installed-root mutation, including undo.
+Once ownership is lost, it stops mutations, keeps private copies and throws their
+path report. A stale helper cannot write update status after it loses ownership;
+it leaves disk state to the current owner. If a compound failure removes the
+runtime, a new service instance cannot discover that installation. The existing
+service instance can read the validated recovery report. These accepted limits
+keep recovery fail closed without adding another recovery protocol.
