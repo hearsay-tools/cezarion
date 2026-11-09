@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { randomUUID } from 'node:crypto';
 import { cezarWaitRequestSchema, waitErrorCodeSchema, type CezarWaitRequestInput, type Wait, type WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
 import type { CezarToolHandlers, WaitRegistration } from '../../ci-wait/controller.ts';
@@ -7,7 +8,7 @@ import type { ToolHost } from './cezar-tools.ts';
 import { registrationIdentity, replayRegistration } from './wait-registration.ts';
 
 function accepted(host: ToolHost, runId: string, wait: Wait, receipt: WaitRegistrationReceipt | undefined, operationId: string, replayed: boolean): WaitRegistration {
-  if (wait.kind === 'human' || wait.kind === 'subagent' || wait.deadline === undefined) throw new Error('invalid registration receipt');
+  if (WAIT_KINDS[wait.kind].answerKind(wait) === undefined || !('deadline' in wait) || wait.deadline === undefined) throw new Error('invalid registration receipt');
   const run = host.store.getRun(runId);
   const current = [...run?.waits ?? [], ...run?.lastWaits ?? []].find(row => row.id === wait.id);
   return { answer: { ok: true, effect: replayed || receipt?.deduplicated ? 'unchanged' : 'applied', operation_id: operationId,

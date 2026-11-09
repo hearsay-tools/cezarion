@@ -4,7 +4,7 @@ import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.
 import { registrationIdentity, registrationReceipt, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
-import { hasWorkerDeadline, workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
+import { workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError, requireMessagingAllowed } from '../../delegation/policy.ts';
 import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget, waitCapacityPolicyError } from '../wait-scope.ts';
@@ -107,7 +107,7 @@ export class WaitRegistry {
     if (request.workerIds) assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds, getRun);
     else assertRequestWaitScope(run, run.delegation, request.requestIds ?? [], getRun);
     const repeated = identicalWorkerWait(run.waits ?? [], request);
-    if (repeated && hasWorkerDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
+    if (repeated && WAIT_KINDS.worker.hasDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
     try { assertWaitCapacity(run); }
     catch (error) {
       if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
@@ -136,7 +136,7 @@ export class WaitRegistry {
   /** The wait as the store now holds it, open or already delivered, with its deadline. */
   private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
     const latest = this.context.store.getRun(runId);
-    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && hasWorkerDeadline(wait));
+    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && WAIT_KINDS.worker.hasDeadline(wait));
   }
 
   /** Cezar waits on live workers or open requests without adding a deadline of its own. */
