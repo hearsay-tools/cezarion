@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -7,8 +8,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { processStartToken } from '../detached-process.ts';
 import { probeProcessWait } from '../process-wait/supervisor.ts';
 import { runJobCommand } from './cli.ts';
-import { jobStartCommand } from './command.ts';
-import { jobPaths, jobStatus, startJob, superviseJob } from './job.ts';
+import { jobStartCommand, ownCommand } from './command.ts';
+import { claimJob, jobPaths, jobStatus, startJob, superviseJob } from './job.ts';
 
 const run = promisify(execFile);
 const dirs: string[] = [];
@@ -59,7 +60,6 @@ it.runIf(posix)('a second start of a running name refuses and names its PID; a n
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   expect(await runJobCommand(['start', 'bench', '--dir', dir, '--', ...node('')], {})).toBe(1);
   expect(JSON.parse(String(error.mock.calls[0]?.[0])).error).toContain(`already running as PID ${first.pid}`);
-  expect(existsSync(jobPaths(dir, 'bench').lock)).toBe(false);
   writeFileSync(gate, '');
   await written(first.exitFile);
   const second = await startJob({ name: 'bench', dir, command: node('process.exit(3)') });
@@ -84,7 +84,6 @@ it('the supervisor records itself, writes the output and the exit code, and leav
   const before = process.listenerCount('SIGTERM');
   expect(await superviseJob(dir, 'inline', node("console.log('ran');process.exit(4)"))).toBe(4);
   const paths = jobPaths(dir, 'inline');
-  expect(JSON.parse(readFileSync(paths.record, 'utf8'))).toMatchObject({ name: 'inline', pid: process.pid });
   expect(readFileSync(paths.log, 'utf8')).toBe('ran\n');
   expect(readFileSync(paths.exitFile, 'utf8')).toBe('4\n');
   expect(process.listenerCount('SIGTERM')).toBe(before);
@@ -94,45 +93,73 @@ it('the supervisor records itself, writes the output and the exit code, and leav
   expect(await superviseJob(dir, 'absent', [join(dir, 'no-such-binary')])).toBe(127);
 });
 
+const dead = (name: string) => ({ name, pid: 2 ** 22 + 7, start: 'boot:1', command: ['x'], startedAt: new Date().toISOString() });
+const self = (name: string) => ({ name, pid: process.pid, start: processStartToken(process.pid)!, command: ['x'], startedAt: new Date().toISOString() });
+
 it('status reads a record whose supervisor is gone and left no exit file as exited without a code', () => {
   const dir = scratch();
-  writeFileSync(jobPaths(dir, 'lost').record, JSON.stringify({ name: 'lost', pid: 2 ** 22 + 7, start: 'boot:1', command: ['x'], startedAt: new Date().toISOString() }));
+  expect(claimJob(jobPaths(dir, 'lost'), dead('lost'))).toEqual({ claimed: true, replaced: false });
   const status = jobStatus(dir, 'lost');
   expect(status).toMatchObject({ state: 'exited' });
   expect(status).not.toHaveProperty('exitCode');
 });
 
-it('refuses a start while a live start holds the name, however old its lock, and takes over only a dead holder\'s lock', async () => {
+it.runIf(posix)('a claim is refused while the holder runs, and taken from a holder that is gone or has written its exit file', () => {
   const dir = scratch();
-  const { lock } = jobPaths(dir, 'held');
-  const live = JSON.stringify({ pid: process.pid, start: processStartToken(process.pid), token: 'live-holder' });
-  writeFileSync(lock, live);
-  utimesSync(lock, new Date(0), new Date(0));
-  await expect(startJob({ name: 'held', dir, command: node('') })).rejects.toThrow('Another start of this job holds');
-  expect(readFileSync(lock, 'utf8')).toBe(live);
-  // A lock that names no holder proves nothing, so it stays.
-  writeFileSync(lock, '');
-  await expect(startJob({ name: 'held', dir, command: node('') })).rejects.toThrow('Another start of this job holds');
-  writeFileSync(lock, JSON.stringify({ pid: 2 ** 22 + 7, start: 'boot:1', token: 'dead-holder' }));
-  const job = await startJob({ name: 'held', dir, command: node('') });
-  pids.push(job.pid);
-  await written(job.exitFile);
-  expect(existsSync(lock)).toBe(false);
-  expect(readdirSync(dir).filter(name => name.includes('.job.lock'))).toEqual([]);
+  const paths = jobPaths(dir, 'claim');
+  expect(claimJob(paths, self('claim'))).toEqual({ claimed: true, replaced: false });
+  expect(claimJob(paths, dead('claim'))).toEqual({ claimed: false, pid: process.pid });
+  expect(jobStatus(dir, 'claim')).toMatchObject({ state: 'running', pid: process.pid });
+  // The holder wrote its exit file: it is done, though its process still ends.
+  writeFileSync(paths.exitFile, '0\n');
+  expect(claimJob(paths, dead('claim'))).toEqual({ claimed: true, replaced: true });
+  expect(existsSync(paths.exitFile)).toBe(false);
+  expect(claimJob(paths, self('claim'))).toEqual({ claimed: true, replaced: true });
+});
+
+it.runIf(posix)('of several starts of one name at once, exactly one runs the command', async () => {
+  const dir = scratch();
+  const gate = join(dir, 'gate');
+  const marks = join(dir, 'marks');
+  const script = `const fs=require('fs');fs.appendFileSync(${JSON.stringify(marks)},'x');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(gate)})){clearInterval(t)}},20)`;
+  const results = await Promise.allSettled(Array.from({ length: 4 }, () => startJob({ name: 'race', dir, command: node(script) })));
+  const started = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+  for (const job of started) pids.push(job.pid);
+  expect(started).toHaveLength(1);
+  const refusals = results.flatMap(result => result.status === 'rejected' ? [String(result.reason)] : []);
+  expect(refusals).toEqual(Array.from({ length: 3 }, () => expect.stringContaining(`already running as PID ${started[0]!.pid}`)));
+  writeFileSync(gate, '');
+  await written(started[0]!.exitFile);
+  expect(readFileSync(marks, 'utf8')).toBe('x');
+}, 60_000);
+
+it.runIf(posix)('a supervisor whose starter has ended still claims the name and runs the command', async () => {
+  const dir = scratch();
+  // The starter here is `sh`, which ends at once and never listens: the supervisor has no one to tell.
+  const [bin, ...prefix] = ownCommand();
+  await run('sh', ['-c', '"$@" > /dev/null 2>&1 &', 'sh', 'setsid', bin!, ...prefix, 'job', '__supervise', dir, 'orphan', '--', ...node('process.exit(8)')]);
+  const paths = jobPaths(dir, 'orphan');
+  await written(paths.exitFile);
+  const status = jobStatus(dir, 'orphan');
+  pids.push(status.pid);
+  expect(status).toMatchObject({ state: 'exited', exitCode: 8 });
 }, 30_000);
 
-it.runIf(posix)('a record that is not a job record never counts as absent: start and status refuse, and nothing is replaced', async () => {
+it.runIf(posix)('a record file that is not a record never counts as absent: start and status refuse, and nothing is replaced', async () => {
   const dir = scratch();
   const paths = jobPaths(dir, 'damaged');
   writeFileSync(paths.log, 'earlier output\n');
-  for (const damaged of ['{"name":"damaged","pid":', '{"pid":"12"}', 'null']) {
-    writeFileSync(paths.record, damaged);
-    await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('is not a job record');
-    expect(() => jobStatus(dir, 'damaged')).toThrow('is not a job record');
-  }
+  writeFileSync(paths.record, 'this is not a database, and it is long enough to be read as one: '.repeat(4));
+  await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('cannot be used');
+  expect(() => jobStatus(dir, 'damaged')).toThrow('cannot be used');
+  rmSync(paths.record);
+  const db = new DatabaseSync(paths.record);
+  db.exec("CREATE TABLE job (id INTEGER PRIMARY KEY, record TEXT NOT NULL); INSERT INTO job VALUES (1, '{\"pid\":\"12\"}')");
+  db.close();
+  await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('it holds no job record');
+  expect(() => jobStatus(dir, 'damaged')).toThrow('it holds no job record');
   expect(readFileSync(paths.log, 'utf8')).toBe('earlier output\n');
-  expect(existsSync(paths.lock)).toBe(false);
-});
+}, 30_000);
 
 it('answers usage errors as JSON on stderr with exit 1, and help with exit 0', async () => {
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});

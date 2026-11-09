@@ -48,7 +48,7 @@ System-package installs keep a working old app and a manual move notice.
 `cez job start|status` is an additive task command (hearsay-tools/cezarion#3097). Success
 prints one JSON object to stdout and exits 0; a refusal or usage error prints
 `{ "error": "<text>" }` to stderr and exits 1; help exits 0. Its `<name>.log`,
-`<name>.exit` and `<name>.job.json` files are scratch state in `$TMPDIR` or `--dir`:
+`<name>.exit` and `<name>.job.db` files are scratch state in `$TMPDIR` or `--dir`:
 deleting them loses only the record of that job. The `cezar_wait` description now names
 this command in place of the `sh -c '( … ) & echo $!'` recipe. A process wait on a PID
 obtained another way still works. Its wake text for a PID that was already gone at

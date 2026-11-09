@@ -1506,12 +1506,13 @@ depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longe
 | Command cannot be run | The spawn error | The log names the reason and the exit file holds 127. |
 | Supervisor gets SIGTERM or SIGINT | The signal's sender | The supervisor passes it to the command and then records the command's exit as above. |
 | Supervisor gets SIGKILL, or the host reboots | The kernel | No exit file. The command keeps running until it ends or is stopped by hand. `status` answers `exited` without a code once the supervisor is gone, and a process wait reports `exited, code unknown`. |
-| Starter interrupted (SIGINT or SIGKILL) before the supervisor starts | The interrupt | No job. Its lock names a dead holder, so the next start takes it over. |
-| Starter interrupted after the supervisor starts | Nothing stops the job | The supervisor writes its own record and runs the command. The starter printed no PID: `status` gives it. The lock names a dead holder and the next start takes it over, then refuses because the record's supervisor runs. |
+| Starter interrupted (SIGINT or SIGKILL) before the supervisor starts | The interrupt | No job and no record: the starter writes nothing. |
+| Starter interrupted after the supervisor starts | Nothing stops the job | The supervisor claims the name and runs the command without a starter. No PID was printed: `status` gives it. A retry is refused and names the PID. |
+| Several starts of one name at once | Nothing | One supervisor claims the name. The others exit without running the command, and their starts are refused with the claimant's PID. |
+| Supervisor ends inside its claim | The kernel | The transaction rolls back, so the earlier record stands. The operating system drops the file lock. |
 | Record deleted while the job runs | Nothing stops the job | `status` answers that no job has that name. A start of the name runs a second job beside the first and both write the same log: the record is the only handle. |
-| Record unreadable, or not a job record (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
+| Record unreadable, not a database, or without a job record (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
 | Record names a PID that another process has reused | Nothing | With a start identity the job reads as ended. Without one (Windows) the name reads as running until that process ends. |
-| Lock that names no holder | Nothing | Every start of the name refuses and names the lock file to delete. |
 
 No command signals a job. The start identity cases (unreadable, reused, zombie) are held by the
 tests of `detached-process.ts` and `delegation/process-liveness.ts`.
@@ -1527,17 +1528,18 @@ starts nothing itself.
   `<dir>/<name>.exit` by a rename, so a reader never sees a half-written file. `<dir>` defaults
   to `$TMPDIR`. A command that cannot run exits 127; a signalled command exits 128 plus the signal.
 - It prints one JSON object: `name`, `pid` (the supervisor's), `log`, `exitFile`, `replaced`.
-- `<dir>/<name>.job.json` records the supervisor's PID and start identity. A start while that
-  process runs exits 1 and names the PID. A start after it ended removes the old exit file,
-  replaces the log and answers `replaced: true`: a stale exit file would resolve the next wait at
-  once. Without a start identity (Windows) a live PID counts as running.
+- The supervisor, not its starter, claims the name: it is the process that lives as long as the
+  job. The claim is one SQLite write transaction on `<dir>/<name>.job.db`, which records the
+  supervisor's PID and start identity. The database serializes claimants and the operating system
+  drops a dead claimant's file lock, so no claim is taken over by age. A supervisor that finds the
+  recorded one running tells its starter and exits; the start exits 1 and names that PID. A
+  supervisor that finds it ended removes the old exit file, replaces the log and answers
+  `replaced: true`: a stale exit file would resolve the next wait at once. Without a start
+  identity (Windows) a live PID counts as running.
 - `cez job status <name> [--dir <dir>]` answers `state: "running"` or `"exited"`, with `exitCode`
   when the exit file holds one. A later session finds a job by its name this way.
 - There is no `cez job stop`: ending a job belongs to process ownership
   (hearsay-tools/cezarion#2180).
-- One start at a time per name: `<dir>/<name>.job.lock` is linked into place whole and names its
-  holder's PID and start identity. Another start takes it over only from a holder that is proven
-  gone; a slow start keeps it, whatever its age. A lock that names no holder is never taken over.
 - No store, contract or schema change. The new wake text is derived from fields the wait already
   holds: no `startToken`, and a result observed at the registration instant.
 

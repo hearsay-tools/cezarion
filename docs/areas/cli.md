@@ -39,8 +39,8 @@ Inside a task they now resolve the default home because the cockpit's
 
 `cez job start <name> -- <command>` runs a command under a supervisor that leads its own session,
 so it outlives the shell call, the turn and the agent session on every runner
-(hearsay-tools/cezarion#3097). `jobs/job.ts` owns the supervisor, the lock by name and the
-`<name>.log`, `<name>.exit` and `<name>.job.json` files; they live in `$TMPDIR` unless `--dir`
+(hearsay-tools/cezarion#3097). `jobs/job.ts` owns the supervisor, its claim of the name and the
+`<name>.log`, `<name>.exit` and `<name>.job.db` files; they live in `$TMPDIR` unless `--dir`
 names another directory. Every answer is one JSON object. The rules are in
 [the unified waits spec](../../.ai/specs/2026-10-17-unified-waits.md#the-job-command-2026-11-10).
 
