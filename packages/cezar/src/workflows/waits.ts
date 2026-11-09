@@ -1,4 +1,4 @@
-import { isCezarHumanWait, summary } from './run/wait-kinds.ts';
+import { isCezarHumanWait } from './run/wait-kinds.ts';
 import { WAIT_KINDS } from './run/wait-kinds.ts';
 import { type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
@@ -71,8 +71,8 @@ export function chargesBudgetMessage(input: Pick<AgentInput, 'conversation'>): b
  *  Cezar's own deadline-less worker wait is not the agent's to list (hearsay-tools/cezarion#1301). */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
   return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && (WAIT_KINDS[wait.kind].deadline === 'none' || WAIT_KINDS[wait.kind].hasDeadline(wait))).map((wait): OpenWait => WAIT_KINDS[wait.kind].deadline === 'none'
-    ? { wait_id: wait.id, kind: wait.kind as 'human', summary: summary(wait) }
-    : { wait_id: wait.id, kind: wait.kind as Exclude<Wait['kind'], 'human'>, deadline: ('deadline' in wait ? wait.deadline : undefined)!, summary: summary(wait) });
+    ? { wait_id: wait.id, kind: wait.kind as 'human', summary: WAIT_KINDS[wait.kind].summary(wait) }
+    : { wait_id: wait.id, kind: wait.kind as Exclude<Wait['kind'], 'human'>, deadline: ('deadline' in wait ? wait.deadline : undefined)!, summary: WAIT_KINDS[wait.kind].summary(wait) });
 }
 
 export { identicalWait } from './run/wait-kinds.ts';
