@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFailureControl } from '../../scripts/mock-failure-control.mjs';
+import { createDeliveryControl } from '../../scripts/mock-delivery-control.mjs';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { driveSeam, HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
 
@@ -37,6 +38,41 @@ function expectSuccess(observation: Awaited<ReturnType<typeof run>>) {
   expect(observation.v1.filter(event => event.type === 'error')).toEqual([]);
   expect(observation.v1.some(event => event.type === 'turn-end')).toBe(true);
 }
+
+describe.each(['opencode', 'codex', 'omp', 'pi'] as const)('%s native failure steering', runner => {
+  it.each([true, false])('reads steering only after provider recovery (failing: %s)', async failing => {
+    const opening = 'deliver fixture result';
+    const control = fixture({ mode: 'persistent', opening, failure: 'provider' });
+    if (!failing) control.lift();
+    const delivery = createDeliveryControl(join(control.path, '..'), { kind: 'hold-response', match: opening });
+    const consumed: string[] = [];
+    const observation = await driveSeam(runner, 'baseline', {
+      spec: { userPrompt: opening, env: { CEZ_MOCK_FAILURE_CONTROL: control.path,
+        CEZ_MOCK_DELIVERY_CONTROL: delivery.path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' } },
+      sessionOptions: { onAgentInputConsumed: ids => consumed.push(...ids) },
+      whileOpen: async (session, { v1 }) => {
+        try {
+          await waitFor(delivery.held);
+          let acknowledgement: false | Promise<void> = false;
+          await waitFor(() => {
+            acknowledgement = session.sendAgentMessage([{ type: 'text', text: 'queued worker progress' }], ['unread-progress']);
+            return acknowledgement !== false;
+          });
+          if (acknowledgement) await acknowledgement;
+        } finally { delivery.release(); }
+        await waitFor(() => consumed.length > 0 || (v1.some(event => event.type === 'error') && v1.some(event => event.type === 'turn-end')));
+      },
+    });
+    if (failing) {
+      expectFailure(observation);
+      expect(consumed).toEqual([]);
+      expect(observation.v1.filter(event => event.type === 'text').map(event => event.text).join('')).not.toContain('queued worker progress');
+    } else {
+      expectSuccess(observation);
+      expect(consumed).toEqual(['unread-progress']);
+    }
+  });
+});
 
 describe.each(RUNNER_IDS)('%s native failure control', runner => {
   it('holds the native failure until release and consumes it once across subprocesses', async () => {

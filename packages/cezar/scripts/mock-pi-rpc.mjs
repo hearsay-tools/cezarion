@@ -40,6 +40,9 @@ const scenarioContext = {
 };
 const deferredStart = message => scenarioFor(message, scenarioContext)?.name === 'deferred-turn-start';
 const sendNow = (value) => {
+  // Held frames can reach this path after a steer was admitted. A provider error
+  // must not replay that unread input as a successful turn at settlement.
+  if (value?.type === 'message_end' && value.message?.stopReason === 'error' && activeTurn) activeTurn.steers = [];
   if (value?.type === 'turn_start' && !activeTurn) {
     activeTurn = { steers: [], late: false };
     write(value);

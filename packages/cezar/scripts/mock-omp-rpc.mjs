@@ -421,6 +421,8 @@ const beforeNativeFailure = new Set(['busy-progress', 'no-progress', 'cezar-ask'
   'subagent-after-park', 'steer-late', 'hold-cezar-done', 'hold-cezar-ask', 'cezar-done']);
 
 function providerError() {
+  // The provider failed before any queued steer could reach the model.
+  activeTurn.steers = [];
   const error = { message: 'Not Found', provider: 'anthropic', model: 'claude-mock', retryable: false };
   assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Not Found' } });
   endTurn({ status: 'error', error });
