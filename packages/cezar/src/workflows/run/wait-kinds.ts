@@ -167,7 +167,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
   ] },
   worker: {
     resolve: (latest, _result, observed, resolvedAt) => ({ ...observed ?? latest as WorkerWaitEntry, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }),
-    inputId: wait => (wait as WorkerWaitEntry).wakeInputId ?? wait.id,
+    inputId: wait => { return (wait as WorkerWaitEntry).wakeInputId ?? wait.id; },
     watch: 'worker', entry: workerWaitBuilder,
     completionEntry: completionWaitEntry,
     duplicate: () => false,
