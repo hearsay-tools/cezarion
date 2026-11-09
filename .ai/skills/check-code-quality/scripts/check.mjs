@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { scanChanges, thresholds } from './changed-functions.mjs';
 import { collectCoverage } from './coverage.mjs';
+import { assertUniqueTests, parseCollections } from './collections.mjs';
 import { testFilePattern } from './vitest-coverage.mjs';
 import { finishReport, markdownReport, measureFile } from './quality-report.mjs';
 
@@ -17,6 +18,7 @@ Scan changed JS/TS functions, collect coverage once, measure and report.
   --test <path>         Relevant test file (*.test, *.spec, *.e2e); repeatable, run once as a group
   --project <name>      Vitest project; repeatable
   --node-import <path>  Node test setup module; repeatable
+  --collection <JSON|path> Explicit Node/Vitest test group; repeatable, replaces runner/test flags
   --test-timeout <ms>   Per-test timeout for the coverage run; replaces the project's own
   --coverage-timeout <ms> Collection timeout (default: 600000 ms)
   --output <path.md>    Save Markdown and a sibling .json report
@@ -37,7 +39,7 @@ function localFile(file, cwd) {
 function validateRunner(values, runner) {
   if (!['node', 'vitest'].includes(runner)) throw new Error('Choose --runner node or vitest.');
   if ((values.runner || values.project || values['node-import'] || values['test-timeout'] !== undefined
-    || values['coverage-timeout'] !== undefined) && !values.test) {
+    || values['coverage-timeout'] !== undefined) && !values.test && !values.collection) {
     throw new Error('Runner options require --test.');
   }
   if (values['test-timeout'] !== undefined && !/^[1-9]\d*$/.test(values['test-timeout'])) {
@@ -57,21 +59,27 @@ function parseInput(args, cwd) {
     base: { type: 'string' }, coverage: { type: 'string' }, runner: { type: 'string' },
     test: { type: 'string', multiple: true }, project: { type: 'string', multiple: true },
     'node-import': { type: 'string', multiple: true }, 'test-timeout': { type: 'string' },
+    collection: { type: 'string', multiple: true },
     'coverage-timeout': { type: 'string' }, output: { type: 'string' },
     json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) return values;
   if (!values.base?.trim() || positionals.length) throw new Error('Supply --base <PR-target-ref>.');
   if (values.coverage && values.test) throw new Error('Use --coverage or --test, not both.');
+  if (values.collection && ['coverage', 'runner', 'test', 'project', 'node-import'].some(key => values[key] !== undefined)) {
+    throw new Error('Use --collection separately from --coverage, --runner, --test, --project and --node-import.');
+  }
   const runner = values.runner ?? 'vitest';
   validateRunner(values, runner);
   if (values.output && !values.output.endsWith('.md')) throw new Error('--output must end in .md.');
   const tests = (values.test ?? []).map(file => localFile(file, cwd));
   if (tests.some(file => !testFilePattern.test(file))) throw new Error('--test must name a test file (*.test, *.spec or *.e2e).');
   const imports = (values['node-import'] ?? []).map(file => localFile(file, cwd));
+  const collections = values.collection && parseCollections(values.collection, cwd);
+  assertUniqueTests([{ tests }]);
   const testTimeout = values['test-timeout'] && Number(values['test-timeout']);
   const coverageTimeout = Number(values['coverage-timeout'] ?? 600_000);
-  return { ...values, runner, tests, imports, testTimeout, coverageTimeout, projects: values.project ?? [] };
+  return { ...values, runner, tests, imports, collections, testTimeout, coverageTimeout, projects: values.project ?? [] };
 }
 
 function verifySnapshot(scan, cwd) {
@@ -80,6 +88,10 @@ function verifySnapshot(scan, cwd) {
     || JSON.stringify(current.deletedFiles) !== JSON.stringify(scan.deletedFiles)) {
     throw new Error('Changed source set or HEAD changed during measurement. Run the check again.');
   }
+}
+
+function hasTestSelection(options) {
+  return options.tests.length || options.collections?.length;
 }
 
 function saveReport(report, options, cwd, stdout) {
@@ -107,14 +119,14 @@ export async function runCheck(args, { cwd = process.cwd(), stdout = process.std
     if (scan.files.length) {
       let coverage = options.coverage && localFile(options.coverage, cwd);
       measurement = coverage ? { runner: 'istanbul', path: coverage } : null;
-      if (options.tests.length) {
+      if (hasTestSelection(options)) {
         temporary = mkdtempSync(join(tmpdir(), 'code-quality-'));
         const result = await collect({ ...options, cwd, stderr, files: scan.files.map(file => file.file) }, temporary);
         coverage = result.path;
         const { path, ...provenance } = result;
         measurement = provenance;
       }
-      if (!coverage) throw new Error('Supply --test for fresh coverage or --coverage for a current Istanbul report.');
+      if (!coverage) throw new Error('Supply --test or --collection for fresh coverage or --coverage for a current Istanbul report.');
       verifySnapshot(scan, cwd);
       for (const file of scan.files) files.push(await measure(file, coverage, cwd));
       verifySnapshot(scan, cwd);

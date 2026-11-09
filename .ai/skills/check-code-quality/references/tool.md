@@ -48,27 +48,34 @@ The Vitest collector also measures Node child processes that the selected tests
 start, such as a runner mock that a test runs as the runner's native binary. It
 adds `NODE_V8_COVERAGE` to each project's `test.env`. Vitest copies that
 environment into its workers after they start, so the workers record nothing,
-and every Node process a test spawns inherits the variable. The collector
-converts that process coverage for changed untransformed JavaScript
-(`.js`, `.mjs`, `.cjs`) and adds it to Vitest's report. Counters at the same
-source location are summed, so the report keeps one entry per file. These
-child processes are not measured:
+and every Node process a test spawns inherits the variable. The collector captures generated code with a local, in-process inspector session.
+It opens no network listener. It archives selected code and inline source maps
+under the temporary raw directory before a child can remove emitted files.
+Mapped source contents must exactly match the current selected files. The existing
+Istanbul converter maps generated ranges back to their original source positions.
+Node groups support TypeScript through `imports: ["tsx"]`; legacy Node setup
+imports remain available through `--node-import`.
 
-- Processes of a non-Node binary, and the Node processes they start without the
-  inherited environment.
-- A spawn with an explicit environment that leaves out `NODE_V8_COVERAGE`.
-- Transformed sources in a child, such as TypeScript run through `tsx`: their
-  offsets do not match the file on disk.
-- A process that a signal ends without a handler, such as `SIGKILL` or an
-  unhandled `SIGTERM`. Node writes process coverage only when the process exits.
-- A copy of a changed file at another path: only the changed file's own path is
-  matched.
+Transformed coverage requires an inline map with embedded source contents.
+Missing, stale or ambiguous code snapshots and maps cannot complete measurement.
+The collector does not guess source paths, use current files as generated code,
+or supply zero counts for missing functions. Native Node type stripping without
+an inline map is incomplete; use the existing tsx loader instead.
 
-For Node,
-the skill bundles the V8 merger and Istanbul converter; no Vitest dependency is
-needed. Node collection supports untransformed JavaScript. For transformed
-TypeScript/JSX or another runner, collect Istanbul coverage through that runner
-and supply `--coverage`. The tool downloads no test dependencies.
+These child processes remain outside measurement:
+
+- Non-Node processes, and children that discard `NODE_V8_COVERAGE`.
+- Transformed children that clear loader options without explicitly archiving
+  their generated code through `source-snapshots.mjs` before cleanup.
+- Processes ended by a signal before coverage is flushed. The collector adds
+  no signal handlers. A controlled fixture can call `node:v8`'s `takeCoverage()`
+  and acknowledge an explicit IPC flush request before its test sends a signal.
+
+The helper `recordGeneratedSource(url, code)` synchronously archives selected
+sources only when both `NODE_V8_COVERAGE` and `raw/quality-inputs.json` exist.
+The manifest is an array of selected absolute source paths.
+`measurementEnabled()` reports that same condition; ordinary fixtures stay
+map-free. The helper has no runtime dependency beyond Node.
 
 ```sh
 node <skill>/scripts/check.mjs --base origin/main --runner vitest \
@@ -98,6 +105,41 @@ removes, produces exit 2 and names the missing file; passing source scores alone
 cannot complete that check.
 An external Istanbul report has an mtime check but no source-provenance proof;
 collect fresh coverage when its provenance is uncertain.
+
+### Explicit collection groups
+
+Use repeatable `--collection` arguments when the changed files need different
+runners, loaders or working directories. Each argument is a JSON object or a
+path to a JSON manifest containing one object. The strict shape is:
+
+```json
+{"runner":"node","tests":["test/unit/example.test.ts"],"imports":["tsx"],"cwd":"packages/cezar"}
+```
+
+`runner` (`node` or `vitest`) and the nonempty `tests` array are required.
+`imports`, `projects` and `cwd` are optional. Unknown fields are errors.
+`imports` accepts Node setup files or installed modules such as `tsx`; it is
+valid only for Node. `projects` selects Vitest project names and is valid only
+for Vitest. Both optional arrays may be empty. All array entries must be
+nonempty strings.
+
+`cwd` defaults to the command's working directory and resolves relative to it.
+Test and setup-file paths resolve from the group's `cwd`. A manifest path
+resolves from the command's working directory; its location does not change
+these path rules. Every test must name an existing test file. Assign each real
+test file to exactly one group; duplicate paths and symlink aliases are errors.
+
+```sh
+node <skill>/scripts/check.mjs --base origin/main \
+  --collection '{"runner":"node","tests":["test/unit/example.test.ts"],"imports":["tsx"],"cwd":"packages/cezar"}' \
+  --collection '{"runner":"vitest","tests":["packages/web/src/example.test.tsx"],"projects":["web"]}' \
+  --output quality.md
+```
+
+Groups run once each. Their Istanbul reports merge before the check measures
+the complete changed-function inventory. The global `--test-timeout` and
+`--coverage-timeout` flags apply to each group. Do not combine `--collection`
+with `--coverage`, `--runner`, `--test`, `--project` or `--node-import`.
 
 ## Individual measurements
 
