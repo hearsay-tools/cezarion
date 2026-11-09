@@ -16,6 +16,7 @@ import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { publishArtifact } from '../artifacts/store.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { defaultCliDeps, main, type CliDeps } from '../cli-dispatch.ts';
+import { initCommand, openStore } from '../project-commands.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { seedRuns, setRunStatus } from '../runs/run-store.testkit.ts';
@@ -366,8 +367,7 @@ describe('admission sweep', () => {
    * Every admission point reachable in one process, against two fenced projects: `owned` is fenced
    * by its owning cockpit (built context, boot project of the app), `cold` by a CLI that took the
    * ownership lock itself. Each probe answers whether the point refused or skipped; an admitted
-   * point fails the sweep. `versions` (self-update/checkouts.test.ts) and the write-site re-checks
-   * in index.ts, which runs the CLI on import, are pinned elsewhere.
+   * point fails the sweep. `versions` is pinned in self-update/checkouts.test.ts.
    */
   it('refuses or skips at every reachable admission point while a fence is held, and admits after release', async () => {
     const owned = project(), cold = project(), free = project();
@@ -438,6 +438,8 @@ describe('admission sweep', () => {
       'finite run-event read': async () => { const result = await finiteRead(); return result?.type === 'error' && result.status === 409; },
       'automation store lookup': async () => { return automations.store(coldId!, cold.root) === undefined; },
       'artifact storage write': () => { const task = randomUUID(); return publishArtifact(join(cold.dataDir, 'runs', `${task}-artifacts`), task, join(cold.root, 'missing.txt')).then(() => false, (error) => error instanceof ProjectMigrationFencedError && !existsSync(join(cold.dataDir, 'runs'))); },
+      'init write site': () => { return initCommand(cold.root).then(() => false, (error) => error instanceof ProjectMigrationFencedError && !existsSync(join(cold.dataDir, 'workflows'))); },
+      'headless store open': async () => { try { openStore(cold.root).close(); return false; } catch (error) { return error instanceof ProjectMigrationFencedError && !existsSync(join(cold.dataDir, '.gitignore')); } },
       'cli run': () => { return cli(['run', 'task']); },
       'cli init': () => { return cli(['init']); },
       'cli single-project listing': () => { return cli(['projects'], { SINGLE_PROJECT: '1' }); },

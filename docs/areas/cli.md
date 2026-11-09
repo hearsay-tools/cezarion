@@ -25,7 +25,8 @@ Every CLI operation that touches project data checks the migration fence
 one-line `ProjectMigrationFencedError` message. `serve` checks in its ownership claim
 before the listener and before any directory is created. `run`, `init` and a
 single-project `projects` listing check in `cli-dispatch.ts` (`admitProjectCommand`);
-`init` and the headless store open re-check right before their first write.
+`init` and the headless store open (`project-commands.ts`) re-check right before their
+first write.
 `artifact publish` checks the data directory of `CEZ_ARTIFACTS_DIR`; `versions` skips
 the run lookup of a fenced project. `task`, `automation`, `webhook`, `worker`,
 `message`, `discover` and `remote-settings` reach the project only through the

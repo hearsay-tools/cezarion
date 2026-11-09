@@ -5120,7 +5120,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;
     },
-    withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, async () => {
+    withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, function admittedStore() {
       if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
       return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));

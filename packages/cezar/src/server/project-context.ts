@@ -111,7 +111,7 @@ function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promi
   const keep = host
     ? (runId: string, what: number | 'browser') => (what === 'browser' ? host.ownsBrowser(runId) : host.ownsServer(runId, what))
     : undefined;
-  return withProjectAdmission(dataDir, async () => {
+  return withProjectAdmission(dataDir, function sweep() {
     return sweepPreviewLeftovers(dataDir, { keep }).catch(() => 0);
   }, () => 0);
 }
@@ -270,32 +270,35 @@ export class ProjectContexts {
     const generation = this.generation, epoch = this.epochs.get(projectId) ?? 0;
     let active = true;
     const current = () => active && generation === this.generation && epoch === (this.epochs.get(projectId) ?? 0);
+    const finish = () => { active = false; };
     const built = this.peek(projectId);
     if (built) {
-      return withProjectAdmission(built.dataDir, async () => {
-        try { return await work(built.store, current); }
-        finally { active = false; }
+      return withProjectAdmission(built.dataDir, function builtMaintenance() {
+        return work(built.store, current).finally(finish);
       }, () => undefined);
     }
     if (this.building.has(projectId) || this.maintenance.has(projectId)) return undefined;
-    const lease = (async () => {
-      const project = (await this.deps.listProjects()).find(project => project.id === projectId);
-      if (!project || project.status === 'missing' || !current()) return undefined;
-      noticeLegacyProject(project.root);
-      const dataDir = projectPaths(project.root).write;
-      if (ownedByAnotherCockpit(dataDir)) return undefined;
-      return withProjectAdmission(dataDir, async () => {
-        try { return await this.maintainColdStore(project.root, dataDir, work, current); }
-        finally { active = false; }
-      }, () => undefined);
-    })();
+    const lease = this.coldMaintenance(projectId, work, current, finish);
     this.maintenance.set(projectId, lease);
     try { return await lease; }
     finally { if (this.maintenance.get(projectId) === lease) this.maintenance.delete(projectId); }
   }
 
-  /** The cold half of `withMaintenanceStore`: a temporary claim and a maintenance-mode store. */
-  private async maintainColdStore<T>(root: string, dataDir: string, work: (store: RunStore, current: () => boolean) => Promise<T>, current: () => boolean): Promise<T | undefined> {
+  /** The cold half of `withMaintenanceStore`, admitted for its whole length. */
+  private async coldMaintenance<T>(projectId: string, work: (store: RunStore, current: () => boolean) => Promise<T>, current: () => boolean, finish: () => void): Promise<T | undefined> {
+    const project = (await this.deps.listProjects()).find(project => project.id === projectId);
+    if (!project || project.status === 'missing' || !current()) return undefined;
+    noticeLegacyProject(project.root);
+    const dataDir = projectPaths(project.root).write;
+    if (ownedByAnotherCockpit(dataDir)) return undefined;
+    const maintain = this.maintainColdStore.bind(this);
+    return withProjectAdmission(dataDir, function coldMaintenanceStore() {
+      return maintain(project.root, dataDir, work, current, finish);
+    }, () => undefined);
+  }
+
+  /** A temporary claim and a maintenance-mode store over a project no context holds. */
+  private async maintainColdStore<T>(root: string, dataDir: string, work: (store: RunStore, current: () => boolean) => Promise<T>, current: () => boolean, finish: () => void): Promise<T | undefined> {
     // Skip empty projects, but let the established fenced importer discover legacy-only
     // history. Maintenance mode never normalizes live rows or recovers a manager.
     const reader = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
@@ -315,6 +318,7 @@ export class ProjectContexts {
       store = RunStore.open(dataDir, { keepLive: true, maintenance: true });
       return await work(store, current);
     } finally {
+      finish();
       if (store) { await store.historyIdle(); store.close(); }
       temporaryOwnership.releaseAll();
     }
@@ -477,9 +481,7 @@ export class ProjectContexts {
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
     // Admitted until recovery ends, so a migration fence drains this build before it moves anything.
-    return withProjectAdmission(dataDir, async () => {
-      return this.open(project, dataDir, stale);
-    }, (error) => { throw error; });
+    return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
   }
 
   private async open(project: ProjectContextSource, dataDir: string, stale: () => boolean): Promise<ProjectContext> {
