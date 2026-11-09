@@ -336,7 +336,7 @@ export interface RunClaim {
 /** A row a fenced write found other than its writer last saw it. */
 export interface RunRowConflict {
   id: string;
-  reason: 'changed' | 'created' | 'deleted' | 'claim-lost';
+  reason: 'changed' | 'created' | 'deleted' | 'claim-lost' | 'fallback';
   /** The row as it stands, or undefined when another writer deleted it. */
   current: RunRow | undefined;
 }

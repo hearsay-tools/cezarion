@@ -37,13 +37,18 @@ run-file writes throw `RunWriteRefusedError` (ownership `fallback`), and
 archive on merge, completion actions, retention and compression already skip
 families they may not write, so they skip these too and never copy them.
 
-`RunDatabase` is the backstop for the rows themselves: `transaction()` throws
-`FallbackWriteRefusedError` for an upsert of a row whose winning copy is a fallback
-row and for a delete of an ID with any `.ai/squawk/` copy (rule A), and
-`takeClaims()` never takes a claim on a family with a fallback member. The store
-refuses first, so this error means a caller bypassed the store. The database check
-is per row, not per family, so a fallback member that another process adds to a
-family this process already holds cannot stall the save of its legacy rows. The
+`RunDatabase` is the backstop for the rows themselves: `transaction()` refuses an
+upsert of a row whose winning copy is a fallback row and a delete of an ID with any
+`.ai/squawk/` copy (rule A), and `takeClaims()` never takes a claim on a family with
+a fallback member. The store refuses first, so a refusal means a caller bypassed the
+store or another process added a fallback copy after this one queued its change.
+Before the legacy database exists the refusal is `FallbackWriteRefusedError`, so it
+cannot create one. Inside the transaction, after the fence, each refused row is a
+`RunConflictError` conflict with reason `fallback`: the store settles that row like
+any conflict (quarantine, one log line, evidence in `run_conflicts`) and commits the
+rest of its batch, so a refused change is never retried and never stalls a save. The
+check is per row, not per family, so a fallback member another process adds to a
+family this process holds does not block its legacy rows. The
 one exception is the `adoptFallback` intent, set only by `RunStore.adoptFallbackFamily`,
 which the `adoptFallbackControl` middleware calls before `requireRunControl` for an explicit run control (not `read`, `unread`
 or `DELETE /runs/:id`). Adoption copies the whole family's records and run files into

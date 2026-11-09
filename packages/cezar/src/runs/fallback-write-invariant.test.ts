@@ -15,7 +15,7 @@ import { RunManager } from '../workflows/run.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { ProjectRunConnection } from './project-run-connection.ts';
 import { reclaimWorktrees } from './retention.ts';
-import { RUNS_DB_FILE, RunDatabase, RunDatabaseBusyError } from './run-database.ts';
+import { RUNS_DB_FILE, RunConflictError, RunDatabase, RunDatabaseBusyError } from './run-database.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { readPersistedRuns, seedRuns, setRunStatus } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
@@ -119,7 +119,7 @@ it('boot, recovery, reconcilers and background sweeps never copy or change a fal
   split(fixture.fallbackIds, fixture.worktreePath);
   const before = fallbackBytes();
   // Any refusal by the database guard, or a claim it had to drop, is a store-layer bypass: the test fails on it.
-  const writable = vi.spyOn(ProjectRunConnection.prototype, 'assertWritable');
+  const refused = vi.spyOn(ProjectRunConnection.prototype as unknown as { refusedRows: () => string[] }, 'refusedRows');
   const claimable = vi.spyOn(ProjectRunConnection.prototype, 'claimable');
   const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
@@ -165,7 +165,7 @@ it('boot, recovery, reconcilers and background sweeps never copy or change a fal
   expect(primaryIds().filter(id => fixture.fallbackIds.has(id))).toEqual([]);
   expect(fallbackBytes()).toEqual(before);
   expect(existsSync(fixture.worktreePath)).toBe(true);
-  expect(writable.mock.results.filter(result => result.type === 'throw')).toEqual([]);
+  expect(refused.mock.results.filter(result => result.type !== 'return' || result.value.length > 0)).toEqual([]);
   expect(claimable.mock.calls.filter(([take], index) => claimable.mock.results[index]?.value.length !== take.length)).toEqual([]);
   expect(info.mock.calls.flat().join('\n')).not.toMatch(/Refused an automatic write/);
 });
@@ -179,8 +179,12 @@ it('the database guard refuses a fallback row write loudly, never claims its fam
     const db = (store as unknown as { db: RunDatabase }).db;
     const row = db.get(fixture.mixed.workerId)!;
     const upsert = { ...row, data: row.data.replace('historical worker', 'bypass') };
-    expect(() => db.transaction({ upserts: [upsert], deletes: [] })).toThrow(/Refused an automatic write/);
-    expect(() => db.transaction({ upserts: [], deletes: [fixture.fallbackSettled.parentId] })).toThrow(/Refused an automatic write/);
+    const fallbackConflict = (run: () => unknown) => {
+      try { run(); } catch (error) { return error instanceof RunConflictError ? error.conflicts.map(conflict => conflict.reason) : error; }
+      return 'committed';
+    };
+    expect(fallbackConflict(() => db.transaction({ upserts: [upsert], deletes: [] }))).toEqual(['fallback']);
+    expect(fallbackConflict(() => db.transaction({ upserts: [], deletes: [fixture.fallbackSettled.parentId] }))).toEqual(['fallback']);
     const owner = { session: 's', pid: process.pid, startToken: null };
     expect(db.takeClaims(owner, [{ family: fixture.fallbackLive.parentId, expect: null }, { family: fixture.mixed.parentId, expect: null }])).toEqual(new Map());
     expect(db.getClaim(fixture.mixed.parentId)).toBeUndefined();
@@ -235,4 +239,35 @@ it('maps a busy legacy database to RunDatabaseBusyError for projected claims and
     store.flush();
     expect(readPersistedRuns(primary).find(run => run.id === fixture.legacy.parentId)?.title).toBe('deferred');
   } finally { if (lock.isTransaction) lock.exec('ROLLBACK'); lock.close(); store.close(); }
+});
+
+it('settles a queued change refused by a new fallback copy per row, and the rest of the save commits', () => {
+  const fixture = buildFixture();
+  split(fixture.fallbackIds, fixture.worktreePath);
+  let store = RunStore.open(primary, { keepLive: true });
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    const doomed = store.createRun({ title: 'legacy only', task: 'd', workflow: 'quick-task', steps: [] });
+    setRunStatus(store, doomed.id, RUN_STATUS.done);
+    store.flush();
+    const row = (store as unknown as { db: RunDatabase }).db.get(doomed.id)!;
+    expect(store.deleteRun(doomed.id)).toBe(true);
+    store.updateRun(fixture.legacy.parentId, { title: 'unrelated' });
+    // Before the debounced save, the migrating binary writes the same ID under .ai/squawk/.
+    const source = RunDatabase.open(join(fallback, RUNS_DB_FILE));
+    try { source.transaction({ upserts: [{ ...row }], deletes: [] }); } finally { source.close(); }
+    const before = fallbackBytes();
+    store.flush();
+    expect(readPersistedRuns(primary).find(run => run.id === fixture.legacy.parentId)?.title).toBe('unrelated');
+    expect(primaryIds()).toContain(doomed.id);
+    expect(store.getRun(doomed.id)?.title).toBe('legacy only');
+    expect(error.mock.calls.flat().join('\n')).not.toMatch(/failed to save/);
+    // The refused delete is settled, not retried: later saves and shutdown commit other updates.
+    store.updateRun(fixture.legacy.parentId, { title: 'after' });
+    store.close();
+    expect(error.mock.calls.flat().join('\n')).not.toMatch(/failed to save/);
+    store = RunStore.open(primary, { keepLive: true });
+    expect(store.getRun(fixture.legacy.parentId)?.title).toBe('after');
+    expect(fallbackBytes()).toEqual(before);
+  } finally { store.close(); }
 });

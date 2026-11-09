@@ -6,8 +6,8 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { pathPresent } from '../project-paths.ts';
-import type { RunRowInput } from './run-database.ts';
-import { toRunBindings } from './run-database-row.ts';
+import { RunConflictError, type RunRowInput } from './run-database.ts';
+import { toRunBindings, toRunRow } from './run-database-row.ts';
 
 type RunChanges = { upserts: readonly RunRowInput[]; deletes: readonly string[]; adoptFallback?: readonly string[]; fence?: { owner: { session: string } } };
 
@@ -108,10 +108,14 @@ export class ProjectRunConnection {
   }
 
   assertWritable(changes: RunChanges, adopted: ReadonlySet<string>): void {
-    for (const row of changes.upserts) {
-      if (!adopted.has(row.parentRunId ?? row.id) && this.isFallback(row.id)) throw new FallbackWriteRefusedError(row.id, this.source);
-    }
-    for (const id of changes.deletes) if (this.hasFallback(id)) throw new FallbackWriteRefusedError(id, this.source);
+    const refused = this.refusedRows(changes, adopted);
+    if (refused.length) throw new FallbackWriteRefusedError(refused[0]!, this.source);
+  }
+
+  /** Every row the guard refuses: an upsert of a fallback-selected row, a delete of an ID with any fallback copy. */
+  private refusedRows(changes: RunChanges, adopted: ReadonlySet<string>): string[] {
+    return [...changes.upserts.filter(row => !adopted.has(row.parentRunId ?? row.id) && this.isFallback(row.id)).map(row => row.id),
+      ...changes.deletes.filter(id => this.hasFallback(id))];
   }
 
   private configure(db: DatabaseSync): void {
@@ -202,8 +206,14 @@ export class ProjectRunConnection {
           .run(...columns.map(key => row[key] as string | number | null));
       }
     }
-    // Re-checked inside the transaction: the fallback source may have changed since `beforeWrite`.
-    this.assertWritable(changes, new Set());
+    // Inside the transaction, after the fence: another process may have added a fallback copy since the
+    // writer queued this change. Each refused row is a conflict, so the store settles it per row and
+    // commits the rest of its batch instead of retrying the refused change forever.
+    const refused = this.refusedRows(changes, new Set());
+    if (refused.length) throw new RunConflictError(refused.map(id => {
+      const row = this.current.prepare('SELECT * FROM project_runs WHERE id = ?').get(id);
+      return { id, reason: 'fallback' as const, current: row ? toRunRow(row) : undefined };
+    }));
   }
 
   commitFiles(): void { this.copied = []; }
