@@ -18,6 +18,8 @@ import { connectedProviderAuth } from './provider-auth.testkit.ts';
 import { createApp } from './server.ts';
 import { sendAgentReport } from '../runs/webhook.ts';
 import { commitAccepted } from '../delegation/conversations.ts';
+import { delegationFailure } from '../delegation/routes.ts';
+import { RunWriteRefusedError } from '../runs/store.ts';
 
 /** `requireRunControl` is the one explicit write that adopts a family read from `.ai/squawk/`. */
 let root: string, primary: string, fallback: string, store: RunStore, manager: RunManager, app: Hono;
@@ -111,4 +113,9 @@ it('refuses other explicit writes cleanly: a webhook report still answers, a mes
   expect(() => commitAccepted(store, family.parentId, { ...state, messages: [...state.messages, message] }, undefined, false))
     .toThrow(refusal);
   expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
+  // Any other delegation write (reply, conversation) answers the same 409 shape with that reason.
+  let refused: unknown;
+  try { store.commitConversation(family.parentId, state); } catch (error) { refused = error; }
+  expect(refused).toBeInstanceOf(RunWriteRefusedError);
+  expect(delegationFailure(refused)).toEqual({ status: 409, body: { code: 'incompatible_state', error: expect.stringMatching(refusal) } });
 });
