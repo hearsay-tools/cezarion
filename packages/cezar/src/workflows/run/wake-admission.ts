@@ -10,7 +10,7 @@ import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import { parseUsageLimit } from '../../core/usage-limit.ts';
 import { sessionlessWakePrompt } from '../run-scheduling.ts';
 import { atTaskHead } from './launch-read-resolver.ts';
-import { chargesBudgetMessage, isMonitoringTimer, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
+import { chargesBudgetMessage, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunExitId, ExitCall, RunPatch } from '../../runs/run-exits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
@@ -61,9 +61,7 @@ export class WakeAdmission {
     if (!waits.length) return;
     cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waits.map(wait => wait.id));
     for (const wait of waits) {
-      this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer' || wait.kind === 'subagent'
-        ? `automatic ${wait.kind} wake-up cap reached (${this.maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`
-        : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${this.maxAutoContinues}); timer ${wait.id} cancelled` });
+      this.context.store.appendEvent(runId, { type: 'note', message: WAIT_KINDS[wait.kind].capNote(wait, this.maxAutoContinues) });
     }
   }
 

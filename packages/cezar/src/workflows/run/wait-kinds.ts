@@ -29,6 +29,9 @@ const PR_UNTIL_TEXT = {
 const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
 
 export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
+  capNote: (wait: Wait, maxAutoContinues: number) => string;
+  deliveryLabel: (wait: Wait) => readonly { priority: number; text: string }[];
+  sessionlessPrompt: { priority: number; text: string };
   summary: (wait: Wait) => string;
   resultText: (wait: Wait, workerStatus: (workerId: string) => string) => string;
   footerItem: (wait: Wait) => string;
@@ -88,6 +91,9 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
 
 export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
   pr: {
+    capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
+    deliveryLabel: () => [],
+    sessionlessPrompt: { priority: 0, text: 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.' },
     untilText: PR_UNTIL_TEXT,
     summary: wait => { const pr = wait as PrWaitEntry; return clip(`${WAIT_KINDS.pr.untilText[pr.until].summary} ${pr.repository}#${pr.prNumber}`); },
     resultText: wait => { const pr = wait as PrWaitEntry; return WAIT_KINDS.pr.untilText[pr.until].resultText(pr); },
@@ -111,6 +117,9 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline (1 to 7,200 s, default 1,800) or a fatal gh error', firedBy: 'watcher' },
   ] },
   timer: {
+    capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
+    deliveryLabel: wait => [{ priority: WAIT_KINDS.timer.monitoring(wait) ? 0 : 1, text: WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer' }],
+    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
     monitoring: wait => wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup'),
     monitoringNudge: MONITORING_WAKE_NUDGE,
     summary: wait => { const timer = wait as TimerWaitEntry; return clip(timer.note === undefined ? 'timer' : `timer: ${timer.note}`); },
@@ -141,6 +150,9 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline (60 to 7,200 s)', firedBy: 'timer' },
   ] },
   process: {
+    capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
+    deliveryLabel: () => [{ priority: 2, text: 'process' }],
+    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
     summary: wait => { const process = wait as ProcessWaitEntry; return clip(process.note === undefined ? `process ${process.pid}` : `process ${process.pid}: ${process.note}`); },
     resultText: wait => processWaitResultText(wait as ProcessWaitEntry),
     footerItem: wait => { const process = wait as ProcessWaitEntry; return `process wait ${process.id} on PID ${process.pid}${process.note === undefined ? '' : ` (${process.note})`}, deadline ${process.deadline}`; },
@@ -162,6 +174,9 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
   ] },
   subagent: {
+    capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
+    deliveryLabel: () => [],
+    sessionlessPrompt: { priority: 2, text: 'Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so Cezar can deliver it.' },
     summary: wait => clip(`subagent wait on ${subagentPhrase(wait as SubagentWaitEntry)}`),
     resultText: wait => subagentWaitResultText(wait as SubagentWaitEntry),
     footerItem: wait => { const subagent = wait as SubagentWaitEntry; return `subagent wait ${subagent.id} on ${subagentPhrase(subagent)}, deadline ${subagent.deadline}`; },
@@ -186,6 +201,9 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'a restart or a lost session: the children stopped', firedBy: 'recovery' },
   ] },
   peer: {
+    capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
+    deliveryLabel: () => [{ priority: 3, text: 'peer' }],
+    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
     summary: wait => clip(`peer wait on ${peerTargetPhrase(wait as PeerWaitEntry)}`),
     resultText: wait => peerWaitResultText(wait as PeerWaitEntry),
     footerItem: wait => { const peer = wait as PeerWaitEntry; return `peer wait ${peer.id} on ${peerTargetPhrase(peer)}, deadline ${peer.deadline}`; },
@@ -210,6 +228,9 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline (1 to 1,800 s, default 600)', firedBy: 'timer' },
   ] },
   worker: {
+    capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
+    deliveryLabel: () => [],
+    sessionlessPrompt: { priority: 1, text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.' },
     summary: wait => { const worker = wait as WorkerWaitEntry; return clip(`${worker.requestIds ? 'request' : 'worker'} wait on ${workerTargetPhrase(worker)}`); },
     resultText: (wait, workerStatus) => workerWaitResultText(wait as WorkerWaitEntry, workerStatus),
     // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
@@ -236,6 +257,9 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline of an agent wait; Cezar\'s completion wait has none', firedBy: 'timer' },
   ] },
   human: {
+    capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
+    deliveryLabel: () => [],
+    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
     summary: wait => { const first = (wait as HumanWaitEntry).questions?.[0]?.question; return first === undefined ? 'human question' : clip(`human: ${first}`); },
     // The user's own message is a human wait's result; this text is never its delivery.
     resultText: wait => `Human wait ${wait.id} ended.`,
@@ -506,12 +530,12 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
 
 /** Fixed opening turn; the queued results themselves are delivered after its turn end. */
 export function sessionlessWakePrompt(resolved: ReturnType<typeof resolvedWaits>): string {
-  return resolved.some(wait => wait.kind === 'pr')
-    ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
-    : resolved.some(wait => wait.kind === 'worker')
-      ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
-      : resolved.some(wait => wait.kind === 'subagent')
-        ? 'Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so Cezar can deliver it.'
-      : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
-        : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
+  const prompts = resolved.map(wait => WAIT_KINDS[wait.kind].sessionlessPrompt);
+  return prompts.sort((a, b) => a.priority - b.priority)[0]?.text
+    ?? 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
+}
+
+/** The first budgeted wait label, with monitoring timers ahead of ordinary timers, processes and peers. */
+export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
+  return waits.flatMap(wait => WAIT_KINDS[wait.kind].deliveryLabel(wait)).sort((a, b) => a.priority - b.priority)[0]?.text;
 }

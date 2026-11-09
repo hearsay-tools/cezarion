@@ -1,6 +1,6 @@
 import { isCezarHumanWait } from './run/wait-kinds.ts';
 import { WAIT_KINDS } from './run/wait-kinds.ts';
-import { type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
+import { type ProcessWaitResult, type PeerWaitResult, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { AgentInput, CiWait, OpenWait, PrWaitEntry, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
