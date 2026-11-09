@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { isCurrentProcess, processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
-import type { RunDatabase } from './run-database.ts';
+import type { RunDatabase, RunRow } from './run-database.ts';
+import type { RunRecord } from './store.ts';
 
 /**
  * Claim owners carry store session, PID and process start identity. Only a proven dead owner can
@@ -57,4 +58,14 @@ export function liveForeignClaimedRunIds(db: RunDatabase | null, owner: ClaimOwn
   if (!db || !owner) return [];
   const live = new Set(db.listClaims(true).filter((claim) => claim.session !== owner.session && claimOwnerLive(claim)).map((claim) => claim.family));
   return [...live].flatMap((family) => [family, ...db.listIdsByParent(family)]);
+}
+
+/** The `run_claims` family of a run: a worker's parent, else the run itself (`parent_run_id ?? id`). */
+export function familyKey(run: Pick<RunRecord, 'id' | 'delegation'>): string {
+  return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
+}
+
+/** The same family, off a stored row's columns. */
+export function rowFamily(row: Pick<RunRow, 'id' | 'parentRunId'>): string {
+  return row.parentRunId ?? row.id;
 }

@@ -145,6 +145,35 @@ export function assertProjectAdmitted(dataDir: string): void {
   if (refusal) throw refusal;
 }
 
+/** Fences of this process still draining: the writes of the work being drained land. */
+const draining = new Set<string>();
+/** Fences whose skipped writes have been logged, so each is logged once. */
+const writeSkipsLogged = new Set<string>();
+
+/**
+ * The write backstop under every store write, claim and save: true while a fence refuses this
+ * project and the caller holds no lease or hold, unless the fence is this process's own and still
+ * draining. A skipped write is logged once per fence. Dormant cost: two `lstat` calls.
+ */
+export function projectWriteRefused(dataDir: string): boolean {
+  const refusal = projectAdmissionRefusal(dataDir);
+  const lock = refusal && migrationFencePaths(dataDir)?.lock;
+  if (!refusal || !lock || draining.has(lock)) {
+    if (lock) writeSkipsLogged.delete(lock);
+    return false;
+  }
+  if (!writeSkipsLogged.has(lock)) {
+    writeSkipsLogged.add(lock);
+    console.warn(`[cez] A write to ${dataDir} was skipped: ${refusal.message}`);
+  }
+  return true;
+}
+
+/** A durable commit refused by the backstop writes nothing and throws, as on a closed store. */
+export function assertProjectWritable(dataDir: string): void {
+  if (projectWriteRefused(dataDir)) assertProjectAdmitted(dataDir);
+}
+
 /** Operations admitted per fence path in this process; a fence drains them to zero. */
 const admitted = new Map<string, number>();
 /** The open leases of the current async call chain: an operation admitted before a fence
@@ -340,6 +369,7 @@ export class CockpitOwnership {
     const owner: Owner = { ...newOwner(), ...(this.url ? { url: this.url } : {}) };
     if (!claim(paths.lock, owner)) throw projectAdmissionRefusal(dataDir) ?? new ProjectMigrationFencedError('migrating', paths.lock);
     this.fences.set(paths.lock, owner);
+    draining.add(paths.lock);
     const fence = { ...paths, release: () => {
       if (this.fences.get(paths.lock) !== owner) return;
       this.fences.delete(paths.lock);
@@ -360,6 +390,8 @@ export class CockpitOwnership {
     } catch (error) {
       fence.release();
       throw error;
+    } finally {
+      draining.delete(paths.lock);
     }
   }
 

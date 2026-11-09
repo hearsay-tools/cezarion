@@ -48,6 +48,16 @@ pid plus start-token liveness and token-checked release.
   search, the activity snapshot, socket upgrades and live feeds, `RunManager.startRun`
   and `continueRun`, the artifact writer before each write. CLI points are in
   [the CLI area](cli.md#project-migration-fence).
+- **Write backstop.** Under every store write, claim and save, `projectWriteRefused` refuses
+  while a fence holds the project and the caller has no lease or hold, except in the
+  holder's own process while its drain runs (the work being drained lands, and the holder
+  flushes the store inside the drain). A refused save is skipped and its rows stay dirty
+  until the fence ends; a refused claim leaves the family unclaimed, so a new task or a
+  repair (a late repo-handle result) writes nothing; a durable commit writes nothing and
+  throws, as on a closed store. Each fence logs its first skipped write once. The holder's
+  own rewrites (P4b2) run inside `holdProjectWork`. Read-only paths skip while fenced:
+  health answers the last config it read (`healthConfig`), the activity publisher stops
+  its foreign-claim check.
 - **Automatic jobs.** A refusal inside an automatic job is a skip that writes nothing into
   the fenced project: an automation fire becomes `AutomationProjectUnavailableError`
   (nothing reserved, advanced, logged or counted; the timer retries at its floor), and the

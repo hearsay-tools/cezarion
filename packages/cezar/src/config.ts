@@ -1,4 +1,5 @@
-import { readDataPath, readProjectPath } from './project-paths.ts';
+import { projectPaths, readDataPath, readProjectPath } from './project-paths.ts';
+import { projectAdmissionRefusal } from './server/cockpit-ownership.ts';
 import type { Home } from './home/home.ts';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -169,6 +170,23 @@ export async function loadConfig(repoRoot: string, home: Home): Promise<CezConfi
     // A missing file or malformed JSON degrades to the default.
   }
   return parseLeniently(withMachineDefaults(raw, machine));
+}
+
+/** The last config each health read saw, by repo root. */
+const healthConfigs = new Map<string, CezConfig>();
+
+/**
+ * The project config health shows: read as `loadConfig` reads it, except while a migration fence
+ * holds the project. Then the last value read (the defaults before any) stands in and the project
+ * is not read.
+ */
+export async function healthConfig(repoRoot: string, home: Home): Promise<CezConfig> {
+  if (projectAdmissionRefusal(projectPaths(repoRoot).write)) {
+    return healthConfigs.get(repoRoot) ?? parseLeniently(withMachineDefaults({}, (await loadWorkspaceConfig(home.workspaceConfig)).agentDefaults));
+  }
+  const config = await loadConfig(repoRoot, home);
+  healthConfigs.set(repoRoot, config);
+  return config;
 }
 
 /** Most bad values one file can hold before the parse gives up and answers the defaults. */

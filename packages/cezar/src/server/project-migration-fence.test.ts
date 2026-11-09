@@ -1,8 +1,8 @@
 import { Home } from '../home/home.ts';
 import { testHome, useTestHome } from '../home/test-home.testkit.ts';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +27,7 @@ import { closeClaimSession, openClaimSession } from '../runs/run-claims.ts';
 import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
+import { healthConfig } from '../config.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
 import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -208,6 +209,61 @@ describe('one migration owner', () => {
     const contexts = contextsFor(undefined, { id: 'fenced', root }, { id: 'free', root: free.root });
     await fenced(contexts.context('fenced'));
     expect((await contexts.context('free')).dataDir).toBe(free.dataDir);
+  });
+});
+
+describe('the write backstop', () => {
+  it('skips every write of an open store while another process fences its project, then writes after', async () => {
+    const { dataDir } = project();
+    const id = randomUUID();
+    seedRuns(dataDir, [makeRunRecord({ id, title: 'referenced', status: RUN_STATUS.done, referencedPullRequestUrl: 'https://github.com/other/elsewhere/pull/3' })]);
+    // A headless `cez run` opened its store before another process took the fence.
+    const store = RunStore.open(dataDir, { retryBusy: true });
+    disposers.push(() => store.close());
+    const early = store.createRun({ title: 'before', workflow: 'w', task: 't', steps: [] });
+    store.flush();
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const startToken = processStartToken(other.pid!);
+      writeFileSync(migrationFencePaths(dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
+      const stored = () => {
+        const db = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE))!;
+        try { return { referenced: db.get(id)?.data.includes('other/elsewhere'), claims: db.listClaims().length, title: db.get(early.id)?.data.match(/"title":"(\w+)"/)?.[1] }; }
+        finally { db.close(); }
+      };
+      // The delayed repository discovery repairs the foreign reference: nothing reaches the project.
+      store.setRepoHandle({ owner: 'acme', name: 'demo' });
+      // A family claimed before the fence: its debounced save is skipped and kept.
+      store.updateRun(early.id, { title: 'during' });
+      store.flush();
+      // A new family cannot be claimed: the start is refused and writes nothing.
+      expect(() => store.createRun({ title: 'late', workflow: 'w', task: 't', steps: [] })).toThrow();
+      expect(stored()).toEqual({ referenced: true, claims: 1, title: 'before' });
+      expect(warn.mock.calls.filter(([line]) => String(line).includes('was skipped'))).toHaveLength(1);
+      const exited = once(other, 'exit');
+      other.kill('SIGKILL');
+      await exited;
+      store.flush();
+      expect(stored().title).toBe('during');
+    } finally {
+      warn.mockRestore();
+      if (other.exitCode === null && other.signalCode === null) other.kill('SIGKILL');
+    }
+  });
+});
+
+describe('health while fenced', () => {
+  it('answers the last config read without reading the project', async () => {
+    const { root, dataDir } = project();
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ maxParallel: 3 }));
+    expect((await healthConfig(root, testHome())).maxParallel).toBe(3);
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ maxParallel: 5 }));
+    const fence = await owner().fenceProject(dataDir, none);
+    expect((await healthConfig(root, testHome())).maxParallel).toBe(3);
+    fence.release();
+    expect((await healthConfig(root, testHome())).maxParallel).toBe(5);
   });
 });
 

@@ -83,7 +83,8 @@ import { archiveStoreFamily } from './archive-family.ts';
 import { claimStoreFamilies } from './claim-families.ts';
 import { createStoreOwnedRun } from './owned-run-create.ts';
 import { commitStoreWorkerResult } from './worker-result-commit.ts';
-import { claimOwnerLive, closeClaimSession, foreignClaimedRunIds, liveForeignClaimedRunIds, openClaimSession, type ClaimOwner } from './run-claims.ts';
+import { claimOwnerLive, closeClaimSession, familyKey, foreignClaimedRunIds, liveForeignClaimedRunIds, openClaimSession, rowFamily, type ClaimOwner } from './run-claims.ts';
+import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
 export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
@@ -439,16 +440,6 @@ export class RunWriteRefusedError extends Error {
         : `${RUN_IN_USE_ELSEWHERE}: ${runId}`);
     this.name = 'RunWriteRefusedError';
   }
-}
-
-/** The `run_claims` family of a run: a worker's parent, else the run itself (`parent_run_id ?? id`). */
-function familyKey(run: Pick<RunRecord, 'id' | 'delegation'>): string {
-  return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
-}
-
-/** The same family, off a stored row's columns. */
-function rowFamily(row: Pick<RunRow, 'id' | 'parentRunId'>): string {
-  return row.parentRunId ?? row.id;
 }
 
 /** Make `target` hold exactly `source`'s fields, keeping the object every holder references. */
@@ -816,7 +807,7 @@ export class RunStore extends EventEmitter {
 
   /** Make sure this store claims each of `families`; `claimStoreFamilies` takes the free ones. */
   private claimFamilies(families: Iterable<string>, opts: { allowLive?: boolean; wait?: boolean } = {}): Set<string> {
-    return claimStoreFamilies({
+    return projectWriteRefused(this.dataDir) ? new Set() : claimStoreFamilies({
       claimed: this.claimed,
       pendingClaims: this.pendingClaims,
       db: this.db,
@@ -3217,7 +3208,7 @@ export class RunStore extends EventEmitter {
 
   /** The single database write, so a test can fail it the way a full disk would. */
   private writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit {
-    const transaction = (changes: RunDatabaseChanges) => this.db!.transaction(changes);
+    const transaction = (changes: RunDatabaseChanges) => { assertProjectWritable(this.dataDir); return this.db!.transaction(changes); };
     return this.persistence ? this.persistence(changes, transaction) : transaction(changes);
   }
 
@@ -3377,7 +3368,7 @@ export class RunStore extends EventEmitter {
 
   /** Write what is pending, then (unless closing) let every run whose write settled leave memory. */
   private saveNow(evict = true): void {
-    if (!this.db) return;
+    if (!this.db || projectWriteRefused(this.dataDir)) return;
     // A second attempt only after a conflict excluded its rows: the unrelated rest goes out at once.
     for (let attempt = 0; attempt < 2 && (this.dirty.size > 0 || this.deleted.size > 0); attempt++) {
       const quarantined = this.quarantined.size;

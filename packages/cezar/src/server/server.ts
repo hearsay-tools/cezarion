@@ -208,7 +208,7 @@ import {
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
-import { loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
+import { healthConfig, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
@@ -1069,7 +1069,7 @@ export function createApp(deps: ServerDeps) {
     const [checks, repo, config, workspace] = await Promise.all([
       readBackendChecks(),
       getRepoInfo(bootRoot),
-      loadConfig(bootRoot, deps.home),
+      healthConfig(bootRoot, deps.home),
       workspaceSummary(),
     ]);
     // Additive fields only below — the pre-forge shape is the most

@@ -31,7 +31,7 @@ export function createActivitySources({ bootContext, contexts, workspaceProjects
       name,
       ...(failure
         ? { unavailable: workspaceProjects.projectFailure(failure, project.id) }
-        : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId), ci: ciOf?.(project) } }),
+        : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId), ci: ciOf?.(project), dataDir: projectPaths(project.root).write } }),
     };
   };
   /** The registry, or undefined when it cannot be read. */

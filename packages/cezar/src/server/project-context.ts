@@ -195,7 +195,8 @@ export async function fenceProjectContext(ownership: CockpitOwnership, project: 
     inFlight: () => project.store.listRuns().length + project.manager.pendingWork(),
     // History compression and a reports scan write run files and the database; both end within
     // the bound. The rest of the store's own work ends when the holder closes the store.
-    settle: () => Promise.all([project.store.historyIdle(), project.store.reports.idle()]),
+    // The last debounced save lands while the drain still admits it.
+    settle: async () => { await Promise.all([project.store.historyIdle(), project.store.reports.idle()]); project.store.flush(); },
     signal,
   });
   return fence;
