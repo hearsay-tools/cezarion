@@ -5,8 +5,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const PROJECT_CATALOGS = [
-  '.ai/cezar/skills', '.ai/skills', '.agents/skills', '.claude/skills',
-  '.codex/skills', '.cursor/skills', '.opencode/skills', '.ai/cezar/workflows',
+  '.ai/cezar/skills', '.ai/squawk/skills', '.ai/skills', '.agents/skills', '.claude/skills',
+  '.codex/skills', '.cursor/skills', '.opencode/skills', '.ai/cezar/workflows', '.ai/squawk/workflows',
 ];
 const fixtures = fileURLToPath(new URL('../../packages/web/e2e/fixtures/catalogs/', import.meta.url));
 

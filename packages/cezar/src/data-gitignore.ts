@@ -52,6 +52,12 @@ export function ensureDataGitignore(repoRoot: string): void {
       const glue = current && !current.endsWith('\n') ? '\n' : '';
       writeFileSync(path, `${current}${glue}${missing.join('\n')}\n`, 'utf8');
     }
+    // A sibling ignore file covers fallback runtime state without creating that tree.
+    const sharedPath = join(repoRoot, '.ai', '.gitignore');
+    const shared = existsSync(sharedPath) ? readFileSync(sharedPath, 'utf8') : '';
+    const sharedRules = [...wanted.map(rule => `/squawk/${rule}`), '/squawk-migration.json'];
+    const absent = sharedRules.filter(rule => !shared.split('\n').includes(rule));
+    if (absent.length) writeFileSync(sharedPath, `${shared}${shared && !shared.endsWith('\n') ? '\n' : ''}${absent.join('\n')}\n`, 'utf8');
   } catch {
     // non-fatal
   }

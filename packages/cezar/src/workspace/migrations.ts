@@ -1,7 +1,7 @@
+import { readProjectPath } from '../project-paths.ts';
 import type { Home } from '../home/home.ts';
 import { readFile } from 'node:fs/promises';
 import { readHomeFile } from '../home/store.ts';
-import { join } from 'node:path';
 import { workspaceUiStateSchema } from '@open-mercato/cezar-contract/workspace';
 import { readUiState } from '../ui-state.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
@@ -51,7 +51,7 @@ function asObject(value: unknown): Record<string, unknown> | null {
 async function readRepoResourceKeys(
   repoRoot: string,
 ): Promise<{ maxParallel?: number; memoryLimitMb?: number }> {
-  const raw = await readRawObject(join(repoRoot, '.ai/cezar', 'config.json'));
+  const raw = await readRawObject(readProjectPath(repoRoot, 'config.json'));
   const out: { maxParallel?: number; memoryLimitMb?: number } = {};
   const maxParallel = raw?.maxParallel;
   if (typeof maxParallel === 'number' && Number.isInteger(maxParallel) && maxParallel >= 1 && maxParallel <= 16) {

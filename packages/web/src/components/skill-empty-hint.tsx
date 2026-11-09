@@ -18,7 +18,7 @@
  *  minus the per-agent mirrors (`.claude/skills` & co.), which the copy folds into one "agent
  *  mirrors like …" mention rather than listing five times. Pinned by
  *  `test/unit/skill-dirs.test.ts`; keep the two in step. */
-const SKILL_PROJECT_DIRS = ['.ai/cezar/skills/', '.ai/skills/', '.agents/skills/'] as const
+const SKILL_PROJECT_DIRS = ['.ai/cezar/skills/', '.ai/squawk/skills/', '.ai/skills/', '.agents/skills/'] as const
 
 function Path({ children }: { children: string }) {
   return <span className="font-mono">{children}</span>

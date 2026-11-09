@@ -1,5 +1,6 @@
+import { projectPaths } from '../project-paths.ts';
 import { readdir, readFile } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { extname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
   QUICK_TASK_WORKFLOW,
@@ -24,39 +25,45 @@ export interface WorkflowLoadIssue {
 export async function loadWorkflows(
   repoRoot: string,
 ): Promise<{ workflows: WorkflowDef[]; issues: WorkflowLoadIssue[] }> {
-  const dir = resolve(repoRoot, WORKFLOWS_DIR);
+  const dirs = projectPaths(repoRoot).reads.map(root => join(root, 'workflows'));
+  const seen = new Set<string>();
   const issues: WorkflowLoadIssue[] = [];
   const fromFiles: WorkflowDef[] = [];
 
-  let entries: string[] = [];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    // no workflows dir — built-ins only
-  }
-
-  for (const entry of entries) {
-    const ext = extname(entry).toLowerCase();
-    if (ext !== '.yaml' && ext !== '.yml') continue;
-    const path = join(dir, entry);
+  for (const dir of dirs) {
+    let entries: string[] = [];
     try {
-      const raw = await readFile(path, 'utf8');
-      const parsed = workflowFileSchema.safeParse(parseYaml(raw));
-      if (!parsed.success) {
-        issues.push({ path, message: parsed.error.issues.map((i) => i.message).join('; ') });
-        continue;
+      entries = await readdir(dir);
+    } catch {
+      // no workflows dir — built-ins only
+    }
+
+    for (const entry of entries) {
+      const ext = extname(entry).toLowerCase();
+      if (ext !== '.yaml' && ext !== '.yml') continue;
+      const path = join(dir, entry);
+      try {
+        const raw = await readFile(path, 'utf8');
+        const parsed = workflowFileSchema.safeParse(parseYaml(raw));
+        if (!parsed.success) {
+          issues.push({ path, message: parsed.error.issues.map((i) => i.message).join('; ') });
+          continue;
+        }
+        // `skills:` shorthand files become plain agent steps here (spec 012).
+        const normalized = normalizeWorkflowDoc(parsed.data);
+        // Steps referenced by onFail.retry must exist and come earlier; ids unique.
+        const issue = stepsIssue(normalized.steps);
+        if (issue) {
+          issues.push({ path, message: issue });
+          continue;
+        }
+        if (!seen.has(normalized.name)) {
+          seen.add(normalized.name);
+          fromFiles.push({ ...normalized, source: 'file', path });
+        }
+      } catch (err) {
+        issues.push({ path, message: err instanceof Error ? err.message : String(err) });
       }
-      // `skills:` shorthand files become plain agent steps here (spec 012).
-      const normalized = normalizeWorkflowDoc(parsed.data);
-      // Steps referenced by onFail.retry must exist and come earlier; ids unique.
-      const issue = stepsIssue(normalized.steps);
-      if (issue) {
-        issues.push({ path, message: issue });
-        continue;
-      }
-      fromFiles.push({ ...normalized, source: 'file', path });
-    } catch (err) {
-      issues.push({ path, message: err instanceof Error ? err.message : String(err) });
     }
   }
 

@@ -213,7 +213,7 @@ function matchSkillPath(line: string): SkillPathHit | null {
   }
   const cmd = /(?:^|\/)commands\/([^/]+)\.md$/.exec(line);
   if (cmd) return { name: cmd[1] as string, kind: 'command' };
-  if (/(?:^|\/)\.ai\/(?:cezar\/)?skills\/.+\.md$/.test(line)) return { name: null, kind: 'markdown' };
+  if (/(?:^|\/)\.ai\/(?:(?:cezar|squawk)\/)?skills\/.+\.md$/.test(line)) return { name: null, kind: 'markdown' };
   return null;
 }
 

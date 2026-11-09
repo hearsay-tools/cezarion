@@ -31,6 +31,7 @@ type Entry = { skill: Skill; key: string }
 /** The folder chains that only hold skills, removed before a path names a directory group. */
 const CONTAINERS: readonly (readonly string[])[] = [
   ['.ai', 'cezar', 'skills'],
+  ['.ai', 'squawk', 'skills'],
   ['.ai', 'skills'],
   ['.claude', 'skills'],
   ['.agents', 'skills'],

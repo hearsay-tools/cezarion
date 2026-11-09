@@ -1,3 +1,4 @@
+import { readProjectPath } from './project-paths.ts';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -40,7 +41,7 @@ export async function readUiState(repoRoot: string): Promise<UiState> {
 /** The project's own file. Writes merge from this. */
 export async function readProjectUiState(repoRoot: string): Promise<UiState> {
   try {
-    return parseUiState(await readFile(uiStatePath(repoRoot), 'utf8'));
+    return parseUiState(await readFile(readProjectPath(repoRoot, 'ui-state.json'), 'utf8'));
   } catch {
     return {}; // Missing or unreadable: an empty preference bag.
   }
@@ -52,7 +53,7 @@ export async function readProjectUiState(repoRoot: string): Promise<UiState> {
  */
 export function readProjectUiStateSync(repoRoot: string): UiState {
   try {
-    return parseUiState(readFileSync(uiStatePath(repoRoot), 'utf8'));
+    return parseUiState(readFileSync(readProjectPath(repoRoot, 'ui-state.json'), 'utf8'));
   } catch {
     return {};
   }
