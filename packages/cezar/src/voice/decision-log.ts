@@ -71,6 +71,16 @@ function readLogTail(path: string): string[] {
  * so the server hands it what just happened ("yes" after a proposal needs that). The first `load`
  * for a project seeds it from that project's decision log, so a restart does not empty it.
  */
+type ParsedLogLine = { type?: unknown; decisionId: string; sentence?: unknown; decision?: unknown; outcome?: unknown };
+
+/** One log line as replay reads it, or undefined when it is not an object with a decision ID. */
+function parseLogLine(line: string): ParsedLogLine | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return undefined; }
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  return typeof (parsed as { decisionId?: unknown }).decisionId === 'string' ? parsed as ParsedLogLine : undefined;
+}
+
 export class RecentVoiceActions {
   private readonly byProject = new Map<string, RecentEntry[]>();
   private readonly loaded = new Set<string>();
@@ -99,24 +109,22 @@ export class RecentVoiceActions {
       current.forEach(entry => seen.add(entry.key));
       return current;
     });
-    for (const { line } of entries.reverse().flat()) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (parsed === null || typeof parsed !== 'object') continue;
-      const entry = parsed as { type?: unknown; decisionId?: unknown; sentence?: unknown; decision?: unknown; outcome?: unknown };
-      if (typeof entry.decisionId !== 'string') continue;
-      if (entry.type === 'decision' && typeof entry.sentence === 'string') {
-        // Only the action is replayed, so a line written by another version still seeds what it can.
-        const action = (entry.decision as { action?: unknown } | null)?.action;
-        if (typeof action === 'string') this.record(projectId, entry.decisionId, entry.sentence, action);
-      } else if (entry.type === 'outcome') {
-        const outcome = voiceOutcomeSchema.safeParse(entry.outcome);
-        if (outcome.success) this.settle(projectId, entry.decisionId, outcome.data);
-      }
+    // Decisions from both files first, then outcomes: a fallback outcome may belong to the legacy copy
+    // of its decision, which loads after the fallback lines, and must not be lost before it exists.
+    const lines = entries.reverse().flat().map(({ line }) => parseLogLine(line));
+    for (const type of ['decision', 'outcome'] as const) {
+      for (const entry of lines) if (entry?.type === type) this.replay(projectId, entry);
+    }
+  }
+
+  private replay(projectId: string, entry: ParsedLogLine): void {
+    if (entry.type === 'decision' && typeof entry.sentence === 'string') {
+      // Only the action is replayed, so a line written by another version still seeds what it can.
+      const action = (entry.decision as { action?: unknown } | null)?.action;
+      if (typeof action === 'string') this.record(projectId, entry.decisionId, entry.sentence, action);
+    } else if (entry.type === 'outcome') {
+      const outcome = voiceOutcomeSchema.safeParse(entry.outcome);
+      if (outcome.success) this.settle(projectId, entry.decisionId, outcome.data);
     }
   }
 

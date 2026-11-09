@@ -108,6 +108,20 @@ describe('RecentVoiceActions.load (seeded from the log, spec "from the decision 
     expect(recent.last('p', 10).map((e) => e.sentence)).toEqual(['first', 'second']);
   });
 
+  it('keeps a fallback outcome for a decision the legacy log also holds, and the legacy decision wins', () => {
+    const project = mkdtempSync(join(tmpdir(), 'cez-voice-project-'));
+    try {
+      const legacy = join(project, '.ai', 'cezar');
+      const fallback = join(project, '.ai', 'squawk');
+      appendVoiceLog(legacy, decision('d1', 'legacy sentence'));
+      appendVoiceLog(fallback, decision('d1', 'fallback sentence'));
+      appendVoiceLog(fallback, outcome('d1', 'executed'));
+      const recent = new RecentVoiceActions();
+      recent.load('p', legacy);
+      expect(recent.last('p')).toEqual([{ sentence: 'legacy sentence', action: 'open', outcome: 'executed' }]);
+    } finally { rmSync(project, { recursive: true, force: true }); }
+  });
+
   it('seeds nothing from a missing file and never throws', () => {
     const recent = new RecentVoiceActions();
     expect(() => recent.load('p', join(dataDir, 'nowhere'))).not.toThrow();
