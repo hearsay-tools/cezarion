@@ -77,12 +77,19 @@ export function nativeCoverageSource(url, functions, raw) {
   const directory = join(raw, 'sources');
   const snapshots = existsSync(directory) ? readdirSync(directory).filter(file => file.endsWith('.json'))
     .map(file => JSON.parse(readFileSync(join(directory, file), 'utf8'))) : [];
-  const root = functions.find(fn => fn.ranges?.[0]?.startOffset === 0)?.ranges[0];
-  const matching = snapshots.filter(snapshot => snapshot.url === url && snapshot.code.length === root?.endOffset);
+  const root = functions.find(fn => fn.functionName === '' && fn.ranges?.[0]?.startOffset === 0)?.ranges[0];
+  // Modules loaded before precise coverage starts have function-only ranges.
+  // Keep every snapshot candidate in that case so conflicting captures still fail.
+  const matching = snapshots.filter(snapshot => snapshot.url === url
+    && (!root || snapshot.code.length === root.endOffset));
   const unique = new Map(matching.map(snapshot => [JSON.stringify([snapshot.code, snapshot.error]), snapshot]));
   if (unique.size !== 1) throw new Error(`${unique.size ? 'Ambiguous' : 'Missing'} native generated source snapshot: ${url}`);
   const snapshot = [...unique.values()][0];
   if (snapshot.error) throw new Error(`${snapshot.error}: ${url}`);
+  if (functions.some(fn => fn.ranges.some(range => range.startOffset < 0
+    || range.endOffset < range.startOffset || range.endOffset > snapshot.code.length))) {
+    throw new Error(`Coverage offsets exceed native source snapshot: ${url}`);
+  }
   let map = inlineSourceMap(snapshot.code);
   if (map) {
     map = resolveSourceMap(map, url);

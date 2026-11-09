@@ -107,6 +107,19 @@ test('jsdom createRequire native imports retain nested function counters through
   assertMeasurements(report.functions);
 });
 
+test('native modules loaded before precise coverage retain function-only counters', async t => {
+  const { cwd } = fixture(t, true);
+  writeFileSync(join(cwd, 'vitest.config.mjs'), `export default { test: {
+    include: ['source.test.js'], environment: 'jsdom', execArgv: ['--import', './source.mjs'],
+  } };`);
+  let output = '', log = '';
+  const status = await runMetrics(['source.mjs', '--test', 'source.test.js', '--json'], {
+    cwd, stdout: { write: value => { output += value; } }, stderr: { write: value => { log += value; } },
+  });
+  assert.equal(status, 0, log + output);
+  assertMeasurements(JSON.parse(output).functions);
+});
+
 test('native provenance rejects stale, ambiguous and missing snapshots from actual Node execution', t => {
   const { cwd } = fixture(t);
   const sourcePath = join(cwd, 'source.mjs');
@@ -131,18 +144,24 @@ test('native provenance rejects stale, ambiguous and missing snapshots from actu
     .find(script => script.url === url);
   assert.ok(coverage, 'the real process must report the selected script');
   assert.deepEqual(nativeCoverageSource(url, coverage.functions, raw), { code: source, map: undefined });
+  const functionOnly = coverage.functions.filter(fn => fn.ranges[0].startOffset !== 0);
+  assert.ok(functionOnly.length > 0);
+  assert.equal(nativeCoverageSource(url, functionOnly, raw).code, source);
 
   writeFileSync(sourcePath, changed);
   assert.throws(() => nativeCoverageSource(url, coverage.functions, raw), /stale native source snapshot/);
+  assert.throws(() => nativeCoverageSource(url, functionOnly, raw), /stale native source snapshot/);
   writeFileSync(sourcePath, source);
   assert.equal(nativeCoverageSource(url, coverage.functions, raw).code, source);
 
   writeFileSync(sourcePath, changed);
   execute();
   assert.throws(() => nativeCoverageSource(url, coverage.functions, raw), /Ambiguous native generated source snapshot/);
+  assert.throws(() => nativeCoverageSource(url, functionOnly, raw), /Ambiguous native generated source snapshot/);
 
   rmSync(join(raw, 'sources'), { recursive: true });
   assert.throws(() => nativeCoverageSource(url, coverage.functions, raw), /Missing native generated source snapshot/);
+  assert.throws(() => nativeCoverageSource(url, functionOnly, raw), /Missing native generated source snapshot/);
 });
 
 test('identical generated code cannot erase a stale-at-capture source map after original source restoration', t => {
