@@ -36,6 +36,7 @@ function statOrMissing(file) {
 }
 /** Probe access without opening/truncating the result; compare inode identities for aliases. */
 function validateOutput(out, inputs) {
+  if (out.endsWith(path.sep)) throw new Error('--out must name a regular file');
   const dest = statOrMissing(out);
   if (dest && !dest.isFile()) throw new Error('--out must name a regular file');
   for (const input of inputs) {

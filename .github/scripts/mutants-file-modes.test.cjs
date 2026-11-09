@@ -79,6 +79,7 @@ test('output validation does not truncate files and refuses aliases to inputs', 
   assert.throws(() => validateOutput(dir, []), /file/);
   assert.throws(() => validateOutput(path.join(dir, 'missing', 'out'), []));
   const out = path.join(dir, 'new.json');
+  assert.throws(() => validateOutput(out + '/', []), /file/);
   validateOutput(out, []);
   assert.equal(fs.existsSync(out), false);
 });
