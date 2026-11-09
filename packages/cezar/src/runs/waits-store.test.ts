@@ -520,6 +520,18 @@ describe('upgrade-on-read of agent worker waits', () => {
     }
   });
 
+  it('infers a wake-pending legacy reason from stored outcomes without reading the clock', () => {
+    for (const reason of ['outcome', 'timeout'] as const) {
+      const row = () => rootRow({ wait: legacyWait({ phase: 'wake-pending', wakeId: WAKE_ID, outcomes: reason === 'outcome' ? [outcome] : [] }) },
+        { agentInputs: [wakeInput(WAKE_ID)] });
+      const first = parseOne(row());
+      expect(first.waits).toEqual([expect.objectContaining({ id: WAIT_ID, phase: WAIT_PHASE.resolved, result: { reason }, wakeInputId: WAKE_ID })]);
+      vi.setSystemTime(NOW + 3 * 3_600_000);
+      expect(parseOne(row())).toEqual(first);
+      vi.setSystemTime(NOW);
+    }
+  });
+
   it('upgraded wake-pending keeps its queued input', () => {
     const run = parseOne(rootRow(
       { wait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAIT_ID, outcomes: [outcome] }), lastWait: legacyWait({ phase: 'wake-pending', reason: 'outcome', wakeId: WAIT_ID, outcomes: [outcome] }) },
