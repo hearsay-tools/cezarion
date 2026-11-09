@@ -3992,7 +3992,7 @@ export function createApp(deps: ServerDeps) {
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      if (run.delegation?.role === 'worker' || !store.canDeleteRun(id, 'worktree')) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
+      if (!store.canDeleteRun(id, 'worktree') || run.delegation?.role === 'worker') return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
       const release = manager.claimForPublish(id);
       if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
       try {
