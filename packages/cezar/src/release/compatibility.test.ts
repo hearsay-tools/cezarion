@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { productIdentity } from '../home/identity.ts';
-import { compatibilityManifests, withCompatibilityPackages } from './compatibility.ts';
+import { COMPATIBILITY_ENTRIES, compatibilityManifests, withCompatibilityPackages } from './compatibility.ts';
 
 it('does not read or allocate a compatibility tree with the switch off', () => {
   expect(compatibilityManifests({ name: 'ignored', version: '1.2.3' }, false)).toEqual({});
@@ -24,10 +24,11 @@ it.each([false, true])('cleans both pack trees after callback failure %s; preser
       expect(Object.values(packages).map(p => p.manifest.name)).toEqual([productIdentity(false).npmPackage, productIdentity(false).npmAlias]);
       for (const { dir, manifest } of Object.values(packages)) {
         paths.push(dir);
-        expect(manifest.dependencies).toEqual({ [runtime.name]: runtime.version });
+        expect(manifest.dependencies).toEqual({ [runtime.name]: runtime.version,
+          ...(manifest.name === productIdentity(false).npmAlias ? { [productIdentity(false).npmPackage]: runtime.version } : {}) });
         expect(manifest.bin).toMatchObject({ cezarion: 'dist/index.js', cez: 'dist/index.js' });
         expect(readFileSync(join(dir, 'web/dist/assets/app.js'), 'utf8')).toBe('real built asset');
-        expect(readFileSync(join(dir, 'dist/index.js'), 'utf8')).toBe(`#!/usr/bin/env node\nimport ${JSON.stringify(runtime.name)};\n`);
+        for (const entry of COMPATIBILITY_ENTRIES) expect(readFileSync(join(dir, entry), 'utf8')).toBe(`#!/usr/bin/env node\nimport ${JSON.stringify(runtime.name)};\n`);
       }
       if (fail) throw new Error('pack failed');
     }, true);

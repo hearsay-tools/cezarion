@@ -11,7 +11,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { releasePackages, packChecks, cleanupTags } = require('../.github/scripts/release-packages.cjs');
 const { releaseBumpFilePattern, releaseBumpPaths } = require('../.github/scripts/release-bump-pr.cjs');
-const { compatibilityEntry } = require('../packages/cezar/src/release/compatibility.ts');
+const { compatibilityEntry, COMPATIBILITY_ENTRIES } = require('../packages/cezar/src/release/compatibility.ts');
 const { validateArchives } = require('../.github/scripts/pr-snapshot.cjs');
 
 function fixture(rebrand) {
@@ -106,7 +106,8 @@ for (const rebrand of [false, true]) for (const [name, channel] of Object.entrie
       assert.deepEqual(calls[1].pkg.dependencies, { [calls[0].pkg.name]: range });
       assert.equal(calls[0].pkg.version, channel.version);
       if (rebrand) for (const call of calls.slice(2)) {
-        assert.deepEqual(call.pkg.dependencies, { [calls[0].pkg.name]: channel.version });
+        assert.deepEqual(call.pkg.dependencies, { [calls[0].pkg.name]: channel.version,
+          ...(call.pkg.name === 'cezarion' ? { '@wjarka/cezarion': channel.version } : {}) });
         assert.deepEqual(call.pkg.bin, { cezarion: 'dist/index.js', cez: 'dist/index.js', hsq: 'dist/hsq.js' });
       }
       assert.equal(readFileSync(inactive, 'utf8'), before);
@@ -174,13 +175,16 @@ for (const rebrand of [false, true]) {
       const version = '1.2.3-pr7.9';
       const artifacts = join(dir, 'archives');
       mkdirSync(artifacts);
-      const pack = (key, pkg, entry) => {
+      const pack = (key, pkg, entry, missing) => {
         const folder = join(dir, key);
+        rmSync(folder, { recursive: true, force: true });
         mkdirSync(join(folder, 'package'), { recursive: true });
         writeFileSync(join(folder, 'package/package.json'), JSON.stringify(pkg));
         if (key.startsWith('legacy')) {
           mkdirSync(join(folder, 'package/dist'), { recursive: true });
-          for (const file of ['index.js', 'hsq.js']) writeFileSync(join(folder, 'package/dist', file), entry ?? compatibilityEntry());
+          for (const file of COMPATIBILITY_ENTRIES) {
+            if (file !== missing) writeFileSync(join(folder, 'package', file), entry ?? compatibilityEntry());
+          }
         }
         execFileSync('tar', ['-czf', join(artifacts, `${key}.tgz`), '-C', folder, 'package']);
       };
@@ -188,7 +192,7 @@ for (const rebrand of [false, true]) {
       pack('alias', { name: manifests.alias.name, version, dependencies: { [manifests.cezar.name]: version } });
       for (const key of ['legacyScoped', 'legacyAlias']) {
         if (manifests[key]) {
-          const pkg = { ...manifests[key], version, dependencies: { [manifests.cezar.name]: version } };
+          const pkg = { ...manifests[key], version, dependencies: Object.fromEntries(Object.keys(manifests[key].dependencies).map(name => [name, version])) };
           pack(key, pkg);
         }
       }
@@ -201,6 +205,12 @@ for (const rebrand of [false, true]) {
         pack('legacyScoped', pkg, 'console.error("second notice");');
         assert.throws(() => validateArchives(options), /Invalid forwarding entry/);
         pack('legacyScoped', pkg);
+        const alias = { ...manifests.legacyAlias, version, dependencies: Object.fromEntries(Object.keys(manifests.legacyAlias.dependencies).map(name => [name, version])) };
+        pack('legacyAlias', { ...alias, dependencies: { [manifests.cezar.name]: version } });
+        assert.throws(() => validateArchives(options), /Invalid forwarding manifest/);
+        pack('legacyAlias', alias, undefined, 'bin.js');
+        assert.throws(() => validateArchives(options), /Command failed/);
+        pack('legacyAlias', alias);
       }
       const inactive = releasePackages(root, !rebrand).publication;
       pack('cezar', { name: inactive.cezar.name, version });

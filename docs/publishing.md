@@ -508,12 +508,23 @@ supported stable, dev, nightly and PR version `V`, publish this set in order:
 
 1. `@hearsay-tools/squawk@V`, then `hsq@V`.
 2. `@wjarka/cezarion@V`, then `cezarion@V`. Each old manifest depends exactly on
-   `@hearsay-tools/squawk@V`, including stable releases.
+   `@hearsay-tools/squawk@V`, including stable releases. The old alias also pins `@wjarka/cezarion@V` exactly,
+   because shipped alias updaters validate that package during preparation and promotion.
 
 The old packages are generated in temporary release directories. They do not
 rename workspaces or change checked-in alias files. Their old bins still target
 `dist/index.js` so shipped update validators accept them. The shim imports the
-new public entry and prints nothing. The new dispatcher prints one old-command
+new public entry and prints nothing. Each tree also retains `bin.js`,
+`cezarion.js`, `cez.js`, `hsq.js`, `dist/cezarion.js` and `dist/cez.js` for saved
+launch paths. Alias releases from v0.11.0 through v0.17.0 used `bin.js`; P3b
+added the three named alias entries. Scoped releases used `dist/index.js`, then
+added `dist/hsq.js`. The two named scoped entries appeared in an intermediate
+P3b revision and remain available too.
+
+The alias's extra direct runtime pin keeps the canonical nested or hoisted
+runtime layout that the new updater backs up and restores. npm can deduplicate
+the old scoped wrapper's matching runtime dependency. No saved launch path or
+update record changes. The new dispatcher prints one old-command
 notice on stderr; JSON stdout stays parseable.
 
 Exact matching versions keep installed copies updating: the updater reinstalls

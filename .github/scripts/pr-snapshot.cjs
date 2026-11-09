@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { pickPullRequestRun } = require('./fetch-ci-results.cjs');
-const { compatibilityEntry } = require('../../packages/cezar/src/release/compatibility.ts');
+const { compatibilityEntry, COMPATIBILITY_ENTRIES } = require('../../packages/cezar/src/release/compatibility.ts');
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const successful = job => job?.status === 'completed' && job.conclusion === 'success';
 
@@ -80,12 +80,12 @@ async function resolveSnapshot({ github, owner, repo, trigger }) {
   return { pr: pull.number, head: run.head_sha, runId: run.id, runNumber: run.run_number, attempt: run.run_attempt, artifactId: artifact.id };
 }
 
-function validateForwardingArchive(pkg, expected, runtime, file, options) {
+function validateForwardingArchive(pkg, expected, file, options) {
   const same = (left, right) => JSON.stringify(Object.entries(left || {}).sort()) === JSON.stringify(Object.entries(right || {}).sort());
   if (pkg.type !== 'module' || !same(pkg.bin, expected.bin) || !same(pkg.exports, expected.exports)
-    || !same(pkg.dependencies, { [runtime]: pkg.version })) throw new Error('Invalid forwarding manifest');
-  for (const entry of ['index.js', 'hsq.js']) {
-    const bytes = execFileSync('tar', ['--ignore-zeros', '-xOzf', file, `package/dist/${entry}`], options);
+    || !same(pkg.dependencies, Object.fromEntries(Object.keys(expected.dependencies).map(name => [name, pkg.version])))) throw new Error('Invalid forwarding manifest');
+  for (const entry of COMPATIBILITY_ENTRIES) {
+    const bytes = execFileSync('tar', ['--ignore-zeros', '-xOzf', file, `package/${entry}`], options);
     if (bytes !== compatibilityEntry()) throw new Error('Invalid forwarding entry');
   }
 }
@@ -116,7 +116,7 @@ function validateArchives({ artifacts, manifests, plan }) {
         typeof pkg.version !== 'string' || !pkg.version.endsWith(suffix) ||
         !/^\d+\.\d+\.\d+$/.test(pkg.version.slice(0, -suffix.length))) throw new Error('Unexpected snapshot package identity');
     if (pkg.publishConfig && Object.entries(pkg.publishConfig).some(([k, v]) => k !== 'access' || v !== 'public')) throw new Error('Unsafe publishConfig');
-    if (key === 'legacyScoped' || key === 'legacyAlias') validateForwardingArchive(pkg, manifests[key], manifests.cezar.name, file, options);
+    if (key === 'legacyScoped' || key === 'legacyAlias') validateForwardingArchive(pkg, manifests[key], file, options);
     return { key, file, pkg };
   });
   const version = entries[0]?.pkg.version;

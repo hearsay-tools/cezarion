@@ -111,7 +111,18 @@ outer name, launch path and reproducible rollback without changing record schema
 
 Both forwarding trees exist only in a disposable release directory. Old bins
 point to `dist/index.js`; `hsq` points to `dist/hsq.js`. Both import the public new
-package entry without printing. The dispatcher owns the single stderr notice.
+package entry without printing. The alias also pins the old scoped package at
+the same exact version. Shipped alias updaters require that scoped tree during
+preparation and promotion. Keeping the direct runtime pin preserves the new
+updater's existing canonical runtime and recovery paths; npm deduplicates the
+matching runtime dependency.
+
+Both trees retain all recorded entry files: `bin.js`, `cezarion.js`, `cez.js`,
+`hsq.js`, `dist/index.js`, `dist/hsq.js`, `dist/cezarion.js` and `dist/cez.js`.
+Decision D26 recognizes historical `bin.js` as the old alias only when its
+parent directory exactly matches that alias. Both path separators work. Other
+`bin.js` paths remain unrecognized. The dispatcher owns the single stderr
+notice; shims preserve argv and launch paths.
 Real built web assets keep the frozen v0.17.0 update validator working. Switch off
 creates no forwarding trees or targets and retains the frozen release snapshots.
 

@@ -9,6 +9,10 @@ export function compatibilityEntry(): string {
   return `#!/usr/bin/env node\nimport ${JSON.stringify(productIdentity(true).npmPackage)};\n`;
 }
 
+/** Every recorded entry survives promotion, including the original single-bin alias. */
+export const COMPATIBILITY_ENTRIES = ['dist/index.js', 'dist/hsq.js', 'dist/cez.js', 'dist/cezarion.js',
+  'bin.js', 'cezarion.js', 'cez.js', 'hsq.js'] as const;
+
 /** Matching old-name releases retain deterministic updates during the deprecation window. */
 export function compatibilityManifests(runtime: ManifestLike, rebrand = productIdentity().rebrand): Record<string, ManifestLike> {
   if (!rebrand || runtime.private === true) return {};
@@ -20,11 +24,14 @@ export function compatibilityManifests(runtime: ManifestLike, rebrand = productI
     dependencies: { [active.npmPackage]: runtime.version },
     bin: { cezarion: 'dist/index.js', cez: 'dist/index.js', hsq: 'dist/hsq.js' },
     exports: { '.': './dist/index.js', './app-type': './dist/server/app-type.js', './package.json': './package.json' },
-    files: ['dist', 'web/dist'],
+    files: ['dist', 'web/dist', 'bin.js', 'cezarion.js', 'cez.js', 'hsq.js'],
   };
   return {
     legacyScoped: { ...shared, name: old.npmPackage },
-    legacyAlias: { ...shared, name: old.npmAlias },
+    // Shipped alias updaters validate the old scoped dependency. Keep the direct
+    // runtime edge too, so the new updater retains its canonical runtime paths.
+    legacyAlias: { ...shared, name: old.npmAlias,
+      dependencies: { [active.npmPackage]: runtime.version, [old.npmPackage]: runtime.version } },
   };
 }
 
@@ -41,8 +48,8 @@ export function withCompatibilityPackages<T>(source: string, runtime: ManifestLi
       mkdirSync(join(dir, 'dist'), { recursive: true });
       // Both old scoped validators and managed installs require the real built cockpit.
       cpSync(join(source, 'web/dist'), join(dir, 'web/dist'), { recursive: true });
-      for (const entry of ['index.js', 'hsq.js']) {
-        writeFileSync(join(dir, 'dist', entry), compatibilityEntry(), { mode: 0o755 });
+      for (const entry of COMPATIBILITY_ENTRIES) {
+        writeFileSync(join(dir, entry), compatibilityEntry(), { mode: 0o755 });
       }
       mkdirSync(join(dir, 'dist/server'), { recursive: true });
       const appType = `${JSON.stringify(`${productIdentity(true).npmPackage}/app-type`)};\n`;
