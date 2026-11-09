@@ -16,6 +16,8 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
 import { createApp } from './server.ts';
+import { sendAgentReport } from '../runs/webhook.ts';
+import { commitAccepted } from '../delegation/conversations.ts';
 
 /** `requireRunControl` is the one explicit write that adopts a family read from `.ai/squawk/`. */
 let root: string, primary: string, fallback: string, store: RunStore, manager: RunManager, app: Hono;
@@ -95,4 +97,18 @@ it('refuses a control while a live process of the migrating binary owns the fall
     expect(await response.json()).toEqual({ error: expect.stringContaining('in use by another process') });
     expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
   } finally { db.close(); closeClaimSession(owner.session); }
+});
+
+it('refuses other explicit writes cleanly: a webhook report still answers, a message names .ai/squawk', async () => {
+  const family = seedFamily(false, false);
+  start();
+  const report = await sendAgentReport({ projectId: 'p', webhook: { id: 'w', name: 'W', url: 'https://bot.example/hook' },
+    input: { runId: family.parentId, message: 'm' }, store, dryRun: true });
+  expect(report.ok).toBe(true);
+  const root = store.getRun(family.parentId)!;
+  const state = root.delegation?.role === 'root' ? root.delegation.conversation! : { messages: [], outcomes: [] };
+  const message = { ...state.messages[0]!, id: crypto.randomUUID() };
+  expect(() => commitAccepted(store, family.parentId, { ...state, messages: [...state.messages, message] }, undefined, false))
+    .toThrow(refusal);
+  expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
 });

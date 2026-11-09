@@ -425,7 +425,8 @@ export async function sendAgentReport(options: AgentReportOptions): Promise<Agen
         ...(result.status === undefined ? {} : { status: result.status }),
         ...(result.ok ? {} : { error: (result.error ?? 'delivery failed').slice(0, 500) }),
       }));
-  if (run && options.store) {
+  // A run read from `.ai/squawk/` stays unchanged: the report was delivered, its transcript note is skipped.
+  if (run && options.store && options.store.runOwnership(run.id) !== 'fallback') {
     options.store.appendEvent(run.id, {
       type: 'webhook.report',
       webhookId: webhook.id,
