@@ -86,6 +86,17 @@ describe('project run sources', () => {
     expect(searchRunIndexFromDisk(root('cezar'), 'wrong fallback', { limit: 10 }).runs).toEqual([]);
   });
 
+  it('keeps fallback runs in every cold read while the legacy runs.db has not imported runs.json yet', () => {
+    const legacy = record('legacy json');
+    const fallback = record('fallback only', { branch: 'cez/fallback', worktreePath: '/fallback/worktree' });
+    seed('cezar', [legacy], true);
+    RunDatabase.open(join(root('cezar'), 'runs.db')).close();
+    seed('squawk', [fallback]);
+    expect(new Set(readRunIndexFromDisk(root('cezar')).runs.map(item => item.id))).toEqual(new Set([legacy.id, fallback.id]));
+    expect(searchRunIndexFromDisk(root('cezar'), 'fallback', { limit: 10 }).runs.map(item => item.id)).toEqual([fallback.id]);
+    expect(findColdRunByCheckout(root('cezar'), { worktreePaths: ['/fallback/worktree'], branch: null })?.id).toBe(fallback.id);
+  });
+
   it('refuses automatic writes to a fallback family, then copies it on explicit adoption and appends under legacy', () => {
     const run = record('fallback');
     const source = seed('squawk', [run]);
