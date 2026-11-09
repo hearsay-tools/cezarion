@@ -1,3 +1,4 @@
+import { cancelWaits } from './wait-cancel.ts';
 import { holdsOwedResults } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunModuleContext } from './types.ts';
@@ -207,7 +208,7 @@ export class FamilyReconciler {
     if (['queued', 'running', 'waiting'].includes(parent.status)) return false;
     if (recovering) return true;
     const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
-    if (stale.length) { this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.host.disarmWait(id); }
+    if (stale.length) cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, stale);
     this.host.closeRoutedQuestions(parent.id);
     for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
       if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
@@ -278,8 +279,7 @@ export class FamilyReconciler {
       }
       const { entry: next, reason } = reconcileWorkerEntry(selected, outcomes, now, requests);
       if (reason && destroyed(next)) {
-        this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: [entry.id] });
-        this.host.disarmWait(entry.id);
+        cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, [entry.id]);
       } else if (reason) {
         // The deadline stays armed until the resolution is durable. A failed write is retried in a
         // second, since nothing else may touch this family again before the deadline.

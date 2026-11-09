@@ -1,3 +1,4 @@
+import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
@@ -57,9 +58,8 @@ export class WakeAdmission {
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
     if (!waits.length) return;
-    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: waits.map(wait => wait.id) });
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waits.map(wait => wait.id));
     for (const wait of waits) {
-      this.host.disarmWait(wait.id);
       this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer' || wait.kind === 'subagent'
         ? `automatic ${wait.kind} wake-up cap reached (${this.maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`
         : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${this.maxAutoContinues}); timer ${wait.id} cancelled` });

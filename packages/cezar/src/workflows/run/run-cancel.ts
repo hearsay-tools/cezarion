@@ -1,3 +1,4 @@
+import { cancelWaits } from './wait-cancel.ts';
 import type { WorkerStopResult, WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { hasWorkerDeadline, workerWaitEntryToLegacy, isUsageLimitHold, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
@@ -126,10 +127,9 @@ export class RunCancel {
     if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || this.host.rootFinishRequested(parentId) || this.host.historyDeletionPending(parentId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
-    const { settled } = this.context.store.commitOutcome(parentId, { kind: 'cancelled', waitIds: [waitId] });
+    const settled = cancelWaits(this.context.store, id => this.host.disarmWait(id), parentId, [waitId]);
     const cancelled = settled.find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait));
     if (!cancelled) throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
-    this.host.disarmWait(waitId);
     return workerWaitEntryToLegacy(cancelled);
   }
 }

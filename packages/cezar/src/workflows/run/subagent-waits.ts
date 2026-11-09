@@ -1,3 +1,4 @@
+import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
 import { randomUUID } from 'node:crypto';
@@ -230,13 +231,7 @@ export class SubagentWaits {
 
   private supersede(runId: string, waitIds: readonly string[]): void {
     this.clearGrace(runId);
-    try { this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds, superseded: true }); }
-    catch (error) {
-      // The waits stay open on disk, so they keep their armed deadlines.
-      console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
-    for (const id of waitIds) this.host.disarmWait(id);
+    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waitIds, { onCommitFailure: 'skip', superseded: true });
   }
 
   /** The run left the live registry: its session, and the children it held, are gone. An open

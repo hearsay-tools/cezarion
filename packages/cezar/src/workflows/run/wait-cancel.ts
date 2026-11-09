@@ -13,7 +13,7 @@ export function cancelWaits(
 ): Wait[] {
   let settled: Wait[];
   try {
-    ({ settled } = store.commitOutcome(runId, { kind: 'cancelled', waitIds: ids, superseded: opts.superseded }));
+    ({ settled } = store.commitOutcome(runId, { kind: 'cancelled', waitIds: ids, ...(opts.superseded ? { superseded: true } : {}) }));
   } catch (error) {
     if (opts.onCommitFailure !== 'skip') throw error;
     console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`);
