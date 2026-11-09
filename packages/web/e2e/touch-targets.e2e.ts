@@ -480,7 +480,7 @@ function traceSidebarClick(row: string, width: number): (failed: boolean) => voi
       const chip = currentRow?.querySelector('[data-slot="pr-chip"]');
       const rect = chip?.getBoundingClientRect();
       const centre = rect ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;
-      return { time: performance.now(), row: box(currentRow), chip: box(chip), target: describe(chip), centre,
+      return { time: performance.now(), row: box(currentRow), chip: box(chip), chipTarget: describe(chip), centre,
         centreHit: centre ? describe(document.elementFromPoint(centre.x, centre.y)) : null,
         sameRow: currentRow === originalRow, sameChip: chip === originalChip,
         url: location.href, viewport: { width: innerWidth, height: innerHeight } };
