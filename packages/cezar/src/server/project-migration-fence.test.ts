@@ -23,6 +23,8 @@ import { initCommand, openStore } from '../project-commands.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { seedRuns, setRunStatus } from '../runs/run-store.testkit.ts';
+import { closeClaimSession, openClaimSession } from '../runs/run-claims.ts';
+import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
@@ -276,6 +278,31 @@ describe('the owning cockpit', () => {
     expect((refusal as ProjectMigrationBusyError).reason).toBe('live');
     expect((refusal as ProjectMigrationBusyError).tasks).toEqual([{ id: theirs, title: 'left queued', state: 'queued' }]);
     expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+  });
+
+  it('refuses a family whose fallback claim is live while a stale legacy claim shadows it', async () => {
+    const { root, dataDir, legacy } = project();
+    const id = randomUUID();
+    const record = makeRunRecord({ id, title: 'finalizing elsewhere', status: RUN_STATUS.done });
+    seedRuns(dataDir, [record]);
+    seedRuns(legacy, [record]);
+    const child = spawnSync(process.execPath, ['-e', ''], { timeout: 5_000 });
+    const claim = (directory: string, owner: { session: string; pid: number; startToken: string | null }) => {
+      const db = RunDatabase.open(join(directory, RUNS_DB_FILE));
+      try { db.takeClaims(owner, [{ family: id, expect: null }]); } finally { db.close(); }
+    };
+    claim(dataDir, { session: randomUUID(), pid: child.pid!, startToken: null });
+    // The binary that migrated the project still finishes that family in `.ai/squawk/`.
+    const fallbackOwner = openClaimSession();
+    claim(legacy, fallbackOwner);
+    try {
+      const cockpit = owner();
+      const ctx = await contextsFor(cockpit, { id: 'p', root }).context('p');
+      const refusal = await fenceProjectContext(cockpit, ctx).catch((error: unknown) => error);
+      expect((refusal as ProjectMigrationBusyError).reason).toBe('live');
+      expect((refusal as ProjectMigrationBusyError).tasks).toEqual([{ id, title: 'finalizing elsewhere', state: 'done' }]);
+      expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+    } finally { closeClaimSession(fallbackOwner.session); }
   });
 
   it('honours an abort that came before the claim or during a settled wait', async () => {

@@ -61,7 +61,8 @@ pid plus start-token liveness and token-checked release.
   (`isLiveRecord`: queued, running, waiting on a human, a usage-limit auto-resume, a
   timer, a PR or a worker), held by the store or persisted as live in either directory
   (a row another process left behind), plus the runs of families another live store
-  claims in `run_claims` (a headless `cez run`, another binary). Right after the claim, with no
+  claims in `run_claims` (a headless `cez run`, another binary), read from both physical
+  claim tables so a stale legacy claim never hides a live fallback one. Right after the claim, with no
   wait in between, the fence refuses while any exists: it releases at once and throws
   `ProjectMigrationBusyError` with each task's id, title and state and the next step
   (finish or cancel each one). The preflight and the drain share this one notion of live.

@@ -974,8 +974,8 @@ export class RunDatabase {
     return new Map(this.run(() => this.statements.getClaims.all(JSON.stringify(families))).map((row) => [row.family as string, toRunClaim(row)]));
   }
 
-  listClaims(): RunClaim[] {
-    return this.run(() => this.statements.listClaims.all()).map(toRunClaim);
+  listClaims(physical = false): RunClaim[] {
+    return this.run(() => physical && this.project ? this.project.physicalClaims(CLAIM_COLUMNS) : this.statements.listClaims.all()).map(toRunClaim);
   }
 
   /**

@@ -44,15 +44,17 @@ export function claimOwnerLive(claim: ClaimOwner): boolean {
  *  A dead owner's claim on a family with nothing live is no claim (see `RunStore.runOwnership`). */
 export function foreignClaimedRunIds(db: RunDatabase | null, owner: ClaimOwner | undefined): string[] {
   if (!db || !owner) return [];
-  const kept = new Set(db.listClaims().filter((claim) => claim.session !== owner.session &&
+  // Both physical claim tables: a stale legacy claim must not hide a live fallback owner.
+  const kept = new Set(db.listClaims(true).filter((claim) => claim.session !== owner.session &&
     (claimOwnerLive(claim) || db.familyHasLive(claim.family))).map((claim) => claim.family));
   return kept.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => kept.has(row.family)).map((row) => row.id);
 }
 
 /** The runs of every family a live store other than `owner` claims: a headless `cez run`, another
- *  binary, or a second store of this process. A project migration fence refuses while any exists. */
+ *  binary, or a second store of this process. Both physical claim tables count, so a stale legacy
+ *  claim never hides a live fallback one. A project migration fence refuses while any exists. */
 export function liveForeignClaimedRunIds(db: RunDatabase | null, owner: ClaimOwner | undefined): string[] {
   if (!db || !owner) return [];
-  const live = new Set(db.listClaims().filter((claim) => claim.session !== owner.session && claimOwnerLive(claim)).map((claim) => claim.family));
-  return live.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => live.has(row.family)).map((row) => row.id);
+  const live = new Set(db.listClaims(true).filter((claim) => claim.session !== owner.session && claimOwnerLive(claim)).map((claim) => claim.family));
+  return [...live].flatMap((family) => [family, ...db.listIdsByParent(family)]);
 }
