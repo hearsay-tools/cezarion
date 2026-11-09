@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { continuationNextStep, waitingWorkflowStepIndex, ciWorkflowResumeStepIndex } from './workflow-position.ts';
 import type { QueuedInput } from './queued-input.ts';
@@ -216,7 +217,7 @@ export class ContinuationSession {
     state.inputState.answerOpeningAsk(askSeq);
     // The human waits this answer answers; one the opening turn opens is its next question.
     const waits = askSeq === undefined ? []
-      : openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
+      : openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => WAIT_KINDS[wait.kind].userAnswers).map(wait => wait.id);
     return { askSeq, waits, ...(opening.answerSource ? { answerSource: opening.answerSource } : {}) };
   }
 

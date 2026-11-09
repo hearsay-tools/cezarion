@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './run/wait-kinds.ts';
 import { randomUUID } from 'node:crypto';
 import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type CezarWaitRequest, type WaitVia, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
@@ -66,8 +67,8 @@ export function isMonitoringTimer(wait: Wait): boolean {
 export function chargesBudget(wait: Wait): boolean {
   // A subagent wait spends a wake only at its safety deadline: its children ending is an external
   // event, like CI (hearsay-tools/cezarion#2431).
-  if (wait.kind === 'subagent') return wait.result?.reason === 'timeout';
-  return wait.kind === 'timer' || wait.kind === 'process' || wait.kind === 'peer';
+  const charge = WAIT_KINDS[wait.kind].chargesWake;
+  return charge === 'timeout' ? 'result' in wait && !!wait.result && 'reason' in wait.result && wait.result.reason === 'timeout' : charge;
 }
 
 /**
@@ -275,8 +276,8 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map(describeWait);
-  const asked = open.some((wait) => wait.kind === 'human');
-  const cancellable = open.some((wait) => wait.kind !== 'human');
+  const asked = open.some((wait) => WAIT_KINDS[wait.kind].userAnswers);
+  const cancellable = open.some((wait) => !WAIT_KINDS[wait.kind].userAnswers);
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
     : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer, process or subagent wait or timer you no longer need."
     : "The user's reply answers it.";
@@ -285,7 +286,7 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
 
 /** An open or resolved PR wait: it holds conversation input for its own wake (#476). */
 export function hasPrWait(run: Pick<RunRecord, 'waits'>): boolean {
-  return (run.waits ?? []).some((wait) => wait.kind === 'pr' && (wait.phase === 'open' || wait.phase === 'resolved'));
+  return (run.waits ?? []).some((wait) => WAIT_KINDS[wait.kind].holdsConversationInput && (wait.phase === 'open' || wait.phase === 'resolved'));
 }
 
 export function timerWaitEntry(parsed: Extract<CezarWaitRequest, { kind: 'timer' }>, via: WaitVia, turnId: string, now: number) {

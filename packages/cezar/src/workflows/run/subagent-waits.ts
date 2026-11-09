@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
@@ -223,8 +224,7 @@ export class SubagentWaits {
   supersedeOnRunnerResume(runId: string): void {
     if (this.host.isAdmitted(runId)) return;
     const run = this.context.store.getRun(runId);
-    const ids = (run?.waits ?? []).filter(wait => (wait.kind === 'subagent' && (wait.phase === 'open' || wait.phase === 'resolved')) ||
-      (wait.kind === 'timer' && wait.phase === 'open')).map(wait => wait.id);
+    const ids = (run?.waits ?? []).filter(wait => WAIT_KINDS[wait.kind].runnerResumeCancels.includes(wait.phase)).map(wait => wait.id);
     if (ids.length) this.supersede(runId, ids);
     else this.clearGrace(runId);
   }
