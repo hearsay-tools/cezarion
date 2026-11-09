@@ -118,9 +118,6 @@ export class WaitWatches {
     const timer = this.waitTimers.get(waitId); if (timer) clearTimeout(timer.timer); this.waitTimers.delete(waitId);
     const retry = this.ciRetries.get(waitId); if (retry) clearTimeout(retry.timer); this.ciRetries.delete(waitId);
     this.workerResolveRetries.delete(waitId);
-  }
-
-  disarmProcessWatch(waitId: string): void {
     this.processWatches.get(waitId)?.abort.abort(); this.processWatches.delete(waitId);
   }
 
