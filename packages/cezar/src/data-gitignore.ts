@@ -45,20 +45,23 @@ export function ensureDataGitignore(repoRoot: string): void {
     'automation-state.reclaim*/',
   ];
   try {
-    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
-    const lines = current.split('\n');
-    const missing = wanted.filter((w) => !lines.includes(w));
-    if (missing.length > 0) {
-      const glue = current && !current.endsWith('\n') ? '\n' : '';
-      writeFileSync(path, `${current}${glue}${missing.join('\n')}\n`, 'utf8');
+    const fallbackOnly = existsSync(join(repoRoot, '.ai/squawk')) && !existsSync(join(repoRoot, '.ai/cezar'));
+    if (!fallbackOnly) {
+      mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+      const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
+      const lines = current.split('\n');
+      const missing = wanted.filter((w) => !lines.includes(w));
+      if (missing.length > 0) {
+        const glue = current && !current.endsWith('\n') ? '\n' : '';
+        writeFileSync(path, `${current}${glue}${missing.join('\n')}\n`, 'utf8');
+      }
     }
     // Shared Git excludes also cover linked worktrees without adding a tracked input.
     const common = execFileSync('git', ['-C', repoRoot, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     const sharedPath = join(resolve(repoRoot, common), 'info', 'exclude');
     mkdirSync(join(resolve(repoRoot, common), 'info'), { recursive: true });
     const shared = existsSync(sharedPath) ? readFileSync(sharedPath, 'utf8') : '';
-    const sharedRules = [...wanted.map(rule => `/.ai/squawk/${rule}`), '/.ai/squawk-migration.json'];
+    const sharedRules = [...['cezar', 'squawk'].flatMap(name => wanted.map(rule => `/.ai/${name}/${rule}`)), '/.ai/squawk-migration.json'];
     const absent = sharedRules.filter(rule => !shared.split('\n').includes(rule));
     if (absent.length) writeFileSync(sharedPath, `${shared}${shared && !shared.endsWith('\n') ? '\n' : ''}${absent.join('\n')}\n`, 'utf8');
   } catch {

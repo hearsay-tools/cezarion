@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError, projectPaths } from '../project-paths.ts';
 import type { Home } from '../home/home.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './run/launch-read-resolver.ts';
 import { composeRunModules, type RunModules } from './run/compose.ts';
@@ -41,7 +42,6 @@ import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import type { WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
-import { join } from 'node:path';
 import { onUsage, type ProcessUsage } from '../core/process-usage.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import type { RunnerFactory, RunnerId } from '../core/agent-runner.ts';
@@ -166,7 +166,7 @@ export class RunManager {
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;
-    this.#dataDir = join(repoRoot, '.ai/cezar');
+    this.#dataDir = projectPaths(repoRoot).write;
     this.#preview = options.preview;
     this.#cezarPort = options.cezarPort;
     /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
@@ -581,6 +581,10 @@ export class RunManager {
     deferForCapacity = false,
     conversation?: Parameters<RunStore['commitWorkerContinuation']>[4],
   ): { ok: boolean; error?: string } {
+    const record = this.#store.getRun(runId);
+    const workspace = record?.worktreePath ?? (record?.delegation?.role === 'worker' ? record.delegation.workspace.path : undefined);
+    const fallback = workspace && fallbackProjectWriteError(workspace);
+    if (fallback) return { ok: false, error: fallback };
     // Another process's run (#779, plan step 3) is its owner's to continue.
     const refusal = this.#store.writeRefusal(runId);
     if (refusal) return { ok: false, error: refusal };

@@ -25,6 +25,17 @@ describe('PreviewHost', () => {
     return env;
   };
 
+  it('refuses a preview server start in a fallback worktree without spawning a server', async () => {
+    const { host, ctx, devServers } = make();
+    ctx.worktreePath = '/repo/.ai/squawk/worktrees/task';
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    expect(devServers).toEqual([]);
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-exited', logTail: expect.stringMatching(/\.ai\/squawk.*binary that migrated/) });
+    await host.close();
+  });
+
   it('a hidden viewer resuming cannot reclaim a preview another tab explicitly opened', async () => {
     const { host, ctx } = make();
     const a = fakeViewer(), b = fakeViewer(), restored = fakeViewer();

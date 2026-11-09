@@ -1,5 +1,6 @@
+import type { RunClaim } from './run-database.ts';
 import type { StatementSync } from 'node:sqlite';
-import type { RunRow, RunRowInput } from './run-database.ts';
+import type { RunDatabaseChanges, RunRow, RunRowInput } from './run-database.ts';
 
 type SqlRow = Record<string, unknown>;
 export function toRunRow(row: SqlRow): RunRow {
@@ -51,4 +52,25 @@ export function toRunBindings(row: RunRowInput, revision: number) {
     data: row.data,
     summary: row.summary,
   };
+}
+
+export function toRunClaim(row: Record<string, unknown>): RunClaim {
+  return {
+    family: row.family as string,
+    session: row.session as string,
+    pid: row.pid as number,
+    startToken: row.start_token as string | null,
+    generation: row.generation as number,
+  };
+}
+
+export function validateChanges(changes: RunDatabaseChanges): void {
+  const upserted = new Set<string>();
+  for (const row of changes.upserts) {
+    if (upserted.has(row.id)) throw new TypeError(`run ${row.id} is upserted twice in one transaction`);
+    upserted.add(row.id);
+  }
+  for (const id of changes.deletes) {
+    if (upserted.has(id)) throw new TypeError(`run ${id} is both upserted and deleted in one transaction`);
+  }
 }

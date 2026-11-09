@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from '../project-paths.ts';
 import { productName } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { randomBytes } from 'node:crypto';
@@ -214,6 +215,8 @@ export class PreviewHost implements PreviewHostLike {
     const entry = this.entries.get(runId);
     const server = entry && this.registration(entry, port);
     if (!entry || entry.released || !server || live(entry.servers.get(port))) return;
+    const refusal = fallbackProjectWriteError(entry.ctx.worktreePath);
+    if (refusal) return this.tell(entry, { t: 'state', stage: 'server-exited', server, exitCode: null, logTail: refusal });
     const previous = entry.servers.get(port);
     if (owned(previous) && this.stopping.has(previous)) return;
     if (this.heldByOther(entry, server)) return;

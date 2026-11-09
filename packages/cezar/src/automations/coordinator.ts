@@ -1,5 +1,5 @@
+import { projectPaths, readProjectPath } from '../project-paths.ts';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { AutomationStore } from './store.ts';
 
 export interface AutomationProjectSource {
@@ -52,7 +52,7 @@ export class AutomationCoordinator {
       // a project whose definitions file appeared since the last refresh is opened here.
       const existing = this.stores.get(project.id);
       if (existing) this.reloadQuietly(existing);
-      else if (existsSync(join(project.root, '.ai/cezar/automations.json'))) this.store(project.id, project.root);
+      else if (existsSync(readProjectPath(project.root, 'automations.json'))) this.store(project.id, project.root);
     }
   }
 
@@ -88,7 +88,7 @@ export class AutomationCoordinator {
     if (existing) return existing;
     const projectRoot = root ?? this.roots.get(projectId);
     if (!projectRoot) return undefined;
-    const store = AutomationStore.open(join(projectRoot, '.ai/cezar'), { warn: this.options.warn });
+    const store = AutomationStore.open(projectPaths(projectRoot).write, { warn: this.options.warn });
     this.stores.set(projectId, store);
     this.roots.set(projectId, projectRoot);
     return store;

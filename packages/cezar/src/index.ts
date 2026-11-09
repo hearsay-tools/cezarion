@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { noticeLegacyProject, projectPaths } from './project-paths.ts';
 import { commandText } from './home/command.ts';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -88,8 +89,8 @@ async function runCommand(
 // ---- init --------------------------------------------------------------------
 
 function initCommand(repoRoot: string): void {
-  const workflowsDir = join(repoRoot, '.ai/cezar', 'workflows');
-  const skillsDir = join(repoRoot, '.ai/cezar', 'skills');
+  const workflowsDir = join(projectPaths(repoRoot).write, 'workflows');
+  const skillsDir = join(projectPaths(repoRoot).write, 'skills');
   mkdirSync(workflowsDir, { recursive: true });
   mkdirSync(skillsDir, { recursive: true });
 
@@ -142,7 +143,8 @@ description: House rules the agent should follow in this repo.
 /** The project's run store, at the start of a process: a busy database is waited out
  *  (`retryBusy`), and a store that cannot open throws its `RunStoreOpenError`. */
 function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHandleSignal?: AbortSignal }): RunStore {
-  const dataDir = join(repoRoot, '.ai/cezar');
+  noticeLegacyProject(repoRoot);
+  const dataDir = projectPaths(repoRoot).write;
   // First: an open that fails may already have created the database and the history backups.
   ensureDataGitignore(repoRoot);
   const store = RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });
@@ -163,7 +165,7 @@ function openBootStore(repoRoot: string): RunStore {
   } catch (error) {
     if (!(error instanceof RunStoreOpenError)) throw error;
     console.error(`\n  ✗ ${error.message}\n`);
-    return RunStore.unavailable(join(repoRoot, '.ai/cezar'), error);
+    return RunStore.unavailable(projectPaths(repoRoot).write, error);
   }
 }
 

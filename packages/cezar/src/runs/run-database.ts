@@ -1,6 +1,7 @@
+import { ProjectRunConnection } from './project-run-connection.ts';
 import { MERGE_WAIT_MIGRATION, RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
 export { RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
-import { toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
+import { validateChanges, toRunClaim, toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
 import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
@@ -499,32 +500,12 @@ type SqlRow = Record<string, unknown>;
 
 
 
-function validateChanges(changes: RunDatabaseChanges): void {
-  const upserted = new Set<string>();
-  for (const row of changes.upserts) {
-    if (upserted.has(row.id)) throw new TypeError(`run ${row.id} is upserted twice in one transaction`);
-    upserted.add(row.id);
-  }
-  for (const id of changes.deletes) {
-    if (upserted.has(id)) throw new TypeError(`run ${id} is both upserted and deleted in one transaction`);
-  }
-}
-
 /** `meta` key of the database-wide commit sequence every upsert stamps as its row's revision. */
 const COMMIT_SEQ_KEY = 'commit-seq';
 /** `meta` key of the sequence every claim acquisition takes its generation from. */
 const CLAIM_GENERATION_KEY = 'claim-generation';
 const CLAIM_COLUMNS = 'family, session, pid, start_token, generation';
 
-function toRunClaim(row: SqlRow): RunClaim {
-  return {
-    family: row.family as string,
-    session: row.session as string,
-    pid: row.pid as number,
-    startToken: row.start_token as string | null,
-    generation: row.generation as number,
-  };
-}
 
 export class RunDatabase {
   private readonly db: DatabaseSync;
@@ -568,7 +549,7 @@ export class RunDatabase {
     listConflicts: StatementSync;
   };
 
-  private constructor(db: DatabaseSync, path: string) {
+  private constructor(db: DatabaseSync, path: string, private readonly project?: ProjectRunConnection) {
     this.db = db;
     this.path = path;
     this.statements = {
@@ -682,6 +663,17 @@ export class RunDatabase {
       throw toRunDatabaseError(error, path);
     }
   }
+
+  /** Add a read-only source without changing any primary table or saved format. */
+  static withProjectSource(primary: RunDatabase, target: string, source: string, jsonRows?: readonly RunRowInput[], readOnly = false): RunDatabase {
+    const projection = new ProjectRunConnection(primary.db, target, source,
+      () => (readOnly ? RunDatabase.openReadOnly(target)! : RunDatabase.open(target)).db, jsonRows);
+    return new RunDatabase(projection.connection, target, projection);
+  }
+
+  isFallback(id: string): boolean { return this.project?.isFallback(id) ?? false; }
+  get hasProjectSource(): boolean { return this.project !== undefined; }
+  hasFallback(id: string): boolean { return this.project?.hasFallback(id) ?? false; }
 
   get(id: string): RunRow | undefined {
     const row = this.run(() => this.statements.get.get(id));
@@ -880,6 +872,7 @@ export class RunDatabase {
    */
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
+    if (changes.upserts.length || changes.deletes.length) this.project?.writable();
     const revisions = new Map<string, number>();
     const seqs = new Map<string, number>();
     let claims = new Map<string, number>();
@@ -893,6 +886,7 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
+        this.project?.preserveFamilies(changes.upserts.map(row => row.parentRunId ?? row.id));
         for (const id of changes.deletes) {
           this.reports.deleteRun(id);
           this.statements.delete.run(id);
@@ -911,8 +905,10 @@ export class RunDatabase {
         writeMetadata(this.statements, changes.meta ?? {});
         writeMetadata(this.statements, changes.beforeCommit?.() ?? {});
         this.db.exec('COMMIT');
+        this.project?.commitFiles();
       } catch (error) {
         rollback(this.db);
+        this.project?.rollbackFiles();
         throw error;
       }
     });
@@ -994,6 +990,7 @@ export class RunDatabase {
   ): Map<string, number> {
     const taken = new Map<string, number>();
     if (take.length === 0) return taken;
+    this.project?.writable();
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');
       try {
@@ -1090,6 +1087,7 @@ export class RunDatabase {
     }
   }
 }
+
 
 /** Connections to a damaged database that could not be closed safely (`closeLeavingFiles`). */
 const leftOpen: DatabaseSync[] = [];

@@ -50,7 +50,7 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
         project: basename(project.root),
         ...(openRun ? { openTask: { title: openRun.titleSummary ?? openRun.title, status: openRun.status } } : {}),
       };
-      const ask = openRun ? readPendingHumanAsk(project.dataDir, openRun) : undefined;
+      const ask = openRun ? readPendingHumanAsk(project.store.sourceDataDir(openRun.id), openRun) : undefined;
       const decisionId = deps.uuid?.() ?? randomUUID();
       deps.recent.load(project.id, project.dataDir);
       const recent = deps.recent.last(project.id);

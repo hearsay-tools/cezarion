@@ -1,5 +1,6 @@
+import { REBRAND_SWITCH } from './home/switch.ts';
 import { lstatSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, isAbsolute, relative, resolve } from 'node:path';
 
 /** P4 reads both names immediately. P5 alone changes the write destination. */
 export function projectPaths(repoRoot: string) {
@@ -37,3 +38,23 @@ export function readProjectPath(repoRoot: string, ...parts: string[]): string {
 
 /** Recognize either managed worktree name without changing Git-based repo discovery. */
 export const MANAGED_WORKTREE = /(?:^|\/)\.ai\/(?:cezar|squawk)\/worktrees\//;
+
+/** Guard every destructive path, including rows already copied to the legacy database. */
+export function isFallbackProjectPath(repoRoot: string, path: string): boolean {
+  const inside = relative(resolve(repoRoot, '.ai', 'squawk'), resolve(path));
+  return inside === '' || (inside !== '..' && !inside.startsWith('../') && !inside.startsWith('..\\')) && !isAbsolute(inside);
+}
+
+/** Existing fallback checkouts and state stay read only after a downgrade. */
+export function fallbackProjectWriteError(path: string): string | undefined {
+  return /(?:^|[\\/])\.ai[\\/]squawk(?:[\\/]|$)/.test(path)
+    ? `Cannot write read-only project data in ${path}. Use the binary that migrated the project.` : undefined;
+}
+
+const noticedProjects = new Set<string>();
+/** Internal release seam; dual reads themselves do not depend on this flag. */
+export function noticeLegacyProject(repoRoot: string, options: { releaseEnabled?: boolean; warn?: (message: string) => void } = {}): void {
+  if (!(options.releaseEnabled ?? REBRAND_SWITCH) || noticedProjects.has(repoRoot) || !pathPresent(projectPaths(repoRoot).write)) return;
+  noticedProjects.add(repoRoot);
+  (options.warn ?? console.warn)(`[cez] Legacy project directory ${projectPaths(repoRoot).write} is still in use; both project directories remain readable.`);
+}

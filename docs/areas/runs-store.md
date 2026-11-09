@@ -6,6 +6,42 @@
 
 `packages/cezar/src/runs/store.ts`
 
+## Two project directories before P5
+
+`project-paths.ts` supplies ordered read roots: `.ai/cezar/`, then `.ai/squawk/`.
+Writes stay in `.ai/cezar/`, in both release-switch states. Run IDs form a union;
+the legacy record wins a duplicate. History, artifacts, handoffs, transcript facts,
+worker results and cleanup proofs follow that record's source. Never select each
+sidecar independently. Cold indexes use the same selection without opening a manager.
+
+Fallback SQLite opens read-only. It never migrates schemas, imports `runs.json`,
+recovers runs or changes records. Normal WAL coordination may create or update
+`runs.db-wal` and `runs.db-shm`; these SQLite sidecars are the sole fallback-write
+exception. An unknown/newer schema or a locked/unreadable fallback source produces
+one warning and no fallback runs. It does not fail boot. A damaged legacy database
+keeps its existing failure contract; fallback cannot conceal it.
+
+When only fallback runs exist, the legacy connection stays in memory. Reads,
+report-cache backfill and boot create no empty legacy `runs.db`. An explicit
+family write preserves only that family's records and sidecars in the existing
+primary transaction after ownership checks. It leaves fallback records and
+evidence unchanged. No boot copy, whole-tree copy, move or symlink occurs.
+
+| Operation | Fallback or duplicate item |
+| --- | --- |
+| Read a run ID | Legacy record first; all evidence follows its source |
+| Explicit write to a family | Preserve missing family records/evidence under legacy; keep ownership fences |
+| Explicit logical delete of run, workflow or automation | Refuse whenever its ID/name also exists under `.ai/squawk/`, even if legacy wins |
+| Refusal message | Name the `.ai/squawk/` path; tell the user to use the binary that migrated the project |
+| Automatic record retention | Skip fallback and duplicate IDs; report one count per sweep |
+| Automatic worktree/orphan cleanup | Skip fallback-only resources; report one count per sweep |
+| Writes in a fallback worktree | Refuse agent launch/Continue, setup, preview commands and Git writes; autosave/cleanup skip with a count; diff, files and result collection remain readable |
+| Byte cleanup of a legacy-only resource | Existing ownership and cleanup rules still apply |
+| Legacy-only project | Existing reads, writes, imports, recovery and deletion |
+
+No tombstone or new setting is added. Legacy-directory notices start only with
+the release switch. Project migration and path rewriting belong to P4b/P5.
+
 ## Rules
 
 One embedded SQLite file per project, `.ai/cezar/runs.db` (`node:sqlite`, WAL; Node 24.21.0 is the floor, verified by build/package CI), plus one append-only NDJSON event file per run.

@@ -25,7 +25,16 @@ export interface WorkflowLoadIssue {
 export async function loadWorkflows(
   repoRoot: string,
 ): Promise<{ workflows: WorkflowDef[]; issues: WorkflowLoadIssue[] }> {
-  const dirs = projectPaths(repoRoot).reads.map(root => join(root, 'workflows'));
+  return loadWorkflowDirs(projectPaths(repoRoot).reads.map(root => join(root, 'workflows')));
+}
+
+/** Inspect the fallback separately so deleting a legacy duplicate cannot reveal it. */
+export async function fallbackWorkflowPath(repoRoot: string, name: string): Promise<string | undefined> {
+  const { workflows } = await loadWorkflowDirs([join(projectPaths(repoRoot).reads[1]!, 'workflows')]);
+  return workflows.find(workflow => workflow.source === 'file' && workflow.name === name)?.path;
+}
+
+async function loadWorkflowDirs(dirs: readonly string[]): Promise<{ workflows: WorkflowDef[]; issues: WorkflowLoadIssue[] }> {
   const issues: WorkflowLoadIssue[] = [];
   const fromFiles: WorkflowDef[] = [];
 

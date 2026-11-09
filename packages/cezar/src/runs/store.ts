@@ -1,3 +1,6 @@
+import { legacyIndexRows } from './legacy-run-rows.ts';
+import { dataReadDirs } from '../project-paths.ts';
+import { addRunSource, fallbackRunSource, validWorkerResultPath, fallbackRunDeleteError, workerResultsDirectory } from './project-run-sources.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
@@ -322,35 +325,6 @@ export function __setLegacyImportHookForTests(hook?: { beforeTransaction?: () =>
   legacyImportHook = hook;
 }
 
-/** `runs.json`'s records as rows, and how many of its entries were left out. Each row's `data` is
- *  the record's own JSON as `runs.json` held it, so nothing this cezar's schema does not know is lost
- *  (raw-record.ts); its summary and columns come from the parsed record, which is what decoding that
- *  JSON gives back. An entry that does not parse is skipped and costs that entry only, as an
- *  unreadable row does once it is in the database. Undefined when the file is not a JSON array. */
-function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number; total: number } | undefined {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(bytes.toString('utf8'));
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(raw)) return undefined;
-  // A hand-edited index may repeat an id; the last one won when it loaded into a map, so it still does.
-  const rows = new Map<string, RunRowInput>();
-  let skipped = 0;
-  for (const entry of raw as unknown[]) {
-    // `parseRunRecords`' salvage rewrites top-level keys: the stored JSON is taken from a copy.
-    const stored = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? { ...entry } : entry;
-    const parsed = parseRunRecords([entry]);
-    if (!parsed.success) {
-      skipped += 1;
-      continue;
-    }
-    const run = parsed.data[0]!;
-    rows.set(run.id, encodeRunRow(run, JSON.stringify(stored)));
-  }
-  return { rows: [...rows.values()], skipped, total: raw.length };
-}
 
 /**
  * Import legacy rows and the completion marker atomically, once. Recheck live-writer evidence
@@ -360,7 +334,7 @@ function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number;
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   assertNoLegacyCockpit(dataDir);
   const snapshot = readLegacyIndex(join(dataDir, LEGACY_INDEX_FILE));
-  const parsed = snapshot ? legacyIndexRows(snapshot.bytes) : undefined;
+  const parsed = snapshot ? legacyIndexRows(snapshot.bytes, parseRunRecords) : undefined;
   const rows = parsed?.rows ?? [];
   const skipped = parsed?.skipped ?? 0;
   const source = !snapshot ? 'none' : parsed ? LEGACY_INDEX_FILE : `${LEGACY_INDEX_FILE} (unparseable)`;
@@ -642,6 +616,11 @@ export class RunStore extends EventEmitter {
   private readonly facts: TranscriptFactsIndex;
   private readonly liveItems = new LiveItemSnapshots();
 
+  private fallbackFacts: TranscriptFactsIndex | undefined;
+  private factsFor(id: string): TranscriptFactsIndex {
+    return this.isFallbackRun(id) ? this.fallbackFacts ??= new TranscriptFactsIndex(this.sourceDataDir(id), true) : this.facts;
+  }
+
   /** Capture both sources on the same synchronous sequence boundary before history IO. */
   liveReadSnapshot(runId: string) {
     return { events: this.liveItems.read(runId), throughSeq: this.seqs.get(runId) ?? Infinity };
@@ -688,13 +667,17 @@ export class RunStore extends EventEmitter {
     }
   }
   private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean, persist?: RunStorePersistence): RunStore {
-    mkdirSync(join(dataDir, 'runs'), { recursive: true });
+    const source = fallbackRunSource(dataDir, bytes => legacyIndexRows(bytes, parseRunRecords)?.rows);
+    const deferred = source && !existsSync(path) && !existsSync(join(dataDir, LEGACY_INDEX_FILE));
+    if (!deferred) mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
     store.keepLive = keepLive;
     store.persistence = persist;
-    const db = RunDatabase.open(path);
+    let db = RunDatabase.open(deferred ? ':memory:' : path);
     try {
-      if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
+      if (deferred) db.transaction({ upserts: [], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'none' } });
+      else if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
+      if (source) db = addRunSource(db, dataDir, source);
       store.db = db;
       store.owner = openClaimSession();
       if (!maintenance) {
@@ -736,6 +719,11 @@ export class RunStore extends EventEmitter {
    *  not absent. */
   get unavailable(): RunStoreOpenError | undefined { return this.openFailure; }
 
+  /** Every sidecar for a run follows the winning record, never file-by-file fallback. */
+  sourceDataDir(id: string): string { return this.isFallbackRun(id) ? dataReadDirs(this.dataDir)[1]! : this.dataDir; }
+  isFallbackRun(id: string): boolean { return this.db?.isFallback(id) ?? false; }
+  hasFallbackRun(id: string): boolean { return this.db?.hasFallback(id) ?? false; }
+  fallbackDeleteError(id: string): string | undefined { return fallbackRunDeleteError(this.dataDir, this.hasFallbackRun(id), this.peek(id)?.worktreePath); }
   /**
    * Open-time load: the live rows, the finished rows a load normalization repairs, then the
    * delegation families of the live ones. A row that does not parse is skipped and left in the
@@ -757,14 +745,14 @@ export class RunStore extends EventEmitter {
       }
       return decoded;
     };
-    const live = this.db!.listLive();
+    const live = this.db!.listLive().filter(row => !this.isFallbackRun(row.id));
     const owned = this.claimFamilies(live.map(rowFamily), { allowLive: true, wait: true });
     for (const row of live) {
       if (!owned.has(rowFamily(row))) continue;
       const decoded = decode(row);
       if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive }, row);
     }
-    const heal = this.db!.listWhere(LEGACY_REFERENCE_HEAL_SQL).filter((row) => !this.held.has(row.id));
+    const heal = this.db!.listWhere(LEGACY_REFERENCE_HEAL_SQL).filter((row) => !this.held.has(row.id) && !this.isFallbackRun(row.id));
     const healable = this.claimFamilies(heal.map(rowFamily));
     for (const row of heal) {
       if (!healable.has(rowFamily(row))) continue;
@@ -778,7 +766,7 @@ export class RunStore extends EventEmitter {
         if (needsIssueCheck) this.dirty.add(row.id);
       }
     }
-    const stale = this.db!.listWhere(AUTOMATION_ORIGIN_HEAL_SQL).filter((row) => !this.held.has(row.id));
+    const stale = this.db!.listWhere(AUTOMATION_ORIGIN_HEAL_SQL).filter((row) => !this.held.has(row.id) && !this.isFallbackRun(row.id));
     const restamp = this.claimFamilies(stale.map(rowFamily));
     for (const row of stale) {
       if (!restamp.has(rowFamily(row))) continue;
@@ -995,8 +983,13 @@ export class RunStore extends EventEmitter {
     if (held) return held;
     const family = this.db && !this.deleted.has(id) ? this.db.familyOf(id) : undefined;
     if (family === undefined || !this.claimFamilies([family]).has(family)) return undefined;
-    const run = this.coldReads.claimed(id, this.coldBase.get(id), () => this.db?.revisionOf(id)) ?? this.loadCold(id);
+    let run = this.coldReads.claimed(id, this.coldBase.get(id), () => this.db?.revisionOf(id)) ?? this.loadCold(id);
     if (!run) return undefined;
+    if (this.isFallbackRun(id)) {
+      this.persist(new Map([[id, run]]));
+      this.coldReads.forget(id);
+      run = this.loadCold(id)!;
+    }
     this.holdDecoded(run);
     this.scheduleSave();
     return run;
@@ -1006,7 +999,9 @@ export class RunStore extends EventEmitter {
    *  store may not write (another process's, or quarantined), so the write changes nothing. */
   private record(id: string): RunRecord | undefined {
     if (this.quarantined.has(id)) return undefined;
-    return this.held.get(id) ?? this.hold(id);
+    const held = this.held.get(id);
+    if (held && this.isFallbackRun(id)) this.persist(new Map([[id, held]]));
+    return held ?? this.hold(id);
   }
 
   /** The current record for reading: the held object, the held copy of a run whose family is in
@@ -1091,7 +1086,7 @@ export class RunStore extends EventEmitter {
     const own = `${handle.owner}/${handle.name}`.toLowerCase();
     const foreign = (url: string | undefined) => url !== undefined && refUrlRepo(url) !== own;
     const stored = this.db?.listWhere(REFERENCED_RUN_RULE.sql).filter((row) => {
-      if (this.held.has(row.id) || this.deleted.has(row.id)) return false;
+      if (this.held.has(row.id) || this.deleted.has(row.id) || this.isFallbackRun(row.id)) return false;
       const summary = parseStoredSummary(row.summary);
       return !summary || foreign(summary.referencedPullRequestUrl) || foreign(summary.referencedIssueUrl);
     }) ?? [];
@@ -1895,13 +1890,7 @@ export class RunStore extends EventEmitter {
     this.commitIndex(staged);
   }
 
-  private workerResultsDir(parentId: string): string {
-    z.uuid().parse(parentId);
-    const dir = join(this.dataDir, 'runs', `${parentId}-worker-results`);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (realpathSync(dir) !== resolve(dir) || !lstatSync(dir).isDirectory()) throw new Error('worker result storage redirected');
-    return dir;
-  }
+  private workerResultsDir(parentId: string, write = false): string { return workerResultsDirectory(write ? this.dataDir : this.sourceDataDir(parentId), parentId, write); }
 
   workerResultSnapshotPath(parentId: string, workerId: string, snapshotId: string): string {
     return join(this.dataDir, 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
@@ -1918,7 +1907,10 @@ export class RunStore extends EventEmitter {
       let raw: string;
       try { const info = fstatSync(fd); if (!info.isFile() || info.size > 3_145_728) return undefined; raw = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
       const file = workerResultFileSchema.parse(JSON.parse(raw));
-      if (file.result.diff.state === 'available' && file.result.diff.path !== path) return undefined;
+      if (file.result.diff.state === 'available') {
+        if (!validWorkerResultPath(this.dataDir, this.hasFallbackRun(parentId), parentId, path, file.result.diff.path)) return undefined;
+        file.result.diff.path = path;
+      }
       if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.workspace.ownerRunId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
         (file.result.diff.state === 'available' && (file.result.diff.snapshotId !== reference.snapshotId || file.diffSnapshot === undefined))) return undefined;
       return file;
@@ -1934,6 +1926,7 @@ export class RunStore extends EventEmitter {
 
   /** Publish a pointer only after its redacted immutable snapshot reaches disk. */
   commitWorkerResult(parentId: string, value: WorkerCollectedResult, diffSnapshot?: string, opts: { ignoreCleanup?: boolean } = {}): WorkerCollectedResult {
+    if (this.isFallbackRun(parentId) && !this.record(parentId)) throw new Error(RUN_IN_USE_ELSEWHERE);
     return commitStoreWorkerResult({
       redactResult: (result) => this.redact({ type: 'worker-result', seq: 0, ts: result.observedAt, result }).result,
       peek: (id) => this.peek(id),
@@ -1941,7 +1934,7 @@ export class RunStore extends EventEmitter {
       readWorkerResult: (id, workerId) => this.readWorkerResult(id, workerId),
       redactText: (text) => this.redactText(text),
       workerResultSnapshotPath: (id, workerId, snapshotId) => this.workerResultSnapshotPath(id, workerId, snapshotId),
-      workerResultsDir: (id) => this.workerResultsDir(id),
+      workerResultsDir: (id) => this.workerResultsDir(id, true),
       commitDelegation: (patches) => this.commitDelegation(patches),
     }, parentId, value, diffSnapshot, opts);
   }
@@ -2010,7 +2003,7 @@ export class RunStore extends EventEmitter {
   private completionArchiveBlocker(root: RunRecord): string | undefined {
     const family = [root, ...this.listWorkersOf(root.id)];
     for (const run of family) {
-      const facts = this.facts.peek(run.id);
+      const facts = this.factsFor(run.id).peek(run.id);
       if (!facts || !['done', 'review', 'failed', 'cancelled'].includes(run.status) || run.waits?.some(wait => wait.phase === 'open') ||
         run.hasPendingPermission || facts.pendingAsk !== undefined)
         return 'Task or worker work still needs attention. Open the task or archive manually.';
@@ -2227,7 +2220,7 @@ export class RunStore extends EventEmitter {
       decodeRunRow,
       decodeCold: (row) => this.decodeCold(row),
       writeRefusal: (memberId) => this.writeRefusal(memberId),
-      factsPeek: (memberId) => this.facts.peek(memberId),
+      factsPeek: (memberId) => this.factsFor(memberId).peek(memberId),
       readWorkerExecution: (memberId) => this.readWorkerExecution(memberId),
     }, id, isActive);
   }
@@ -2256,7 +2249,7 @@ export class RunStore extends EventEmitter {
   async prepareArchiveOnMerge(id: string): Promise<void> {
     const ids = [id, ...(this.db?.listIdsByParent(id) ?? [])];
     if (ids.length > 1025) return;
-    for (const memberId of ids) await this.facts.ready(memberId);
+    for (const memberId of ids) await this.factsFor(memberId).ready(memberId);
   }
 
   archiveOnMergeSnapshot(id: string, repoBase?: string, isActive: (id: string) => boolean = () => false): ArchiveOnMergeSnapshot | undefined {
@@ -2344,6 +2337,7 @@ export class RunStore extends EventEmitter {
    * (not merely `pendingClaims`). Two processes never both write a run (#779, #818 B1).
    */
   private isHistoryCompressEligible(id: string): boolean {
+    if (this.isFallbackRun(id)) return false;
     if (this.deleted.has(id)) return false;
     try {
       const run = this.held.get(id) ?? this.peek(id);
@@ -2365,7 +2359,7 @@ export class RunStore extends EventEmitter {
     try {
       const ids = new Set<string>();
       for (const key of this.db?.listKeysWhere('archived = 1 AND live = 0') ?? []) {
-        if (!this.deleted.has(key.id)) ids.add(key.id);
+        if (!this.deleted.has(key.id) && !this.isFallbackRun(key.id)) ids.add(key.id);
       }
       for (const run of this.held.values()) {
         if (run.archived && !isLiveStatus(run.status) && !this.deleted.has(run.id)) ids.add(run.id);
@@ -2653,13 +2647,13 @@ export class RunStore extends EventEmitter {
   /** The run's indexed transcript facts (#880): a read-only view, never a transcript read once
    *  the run's index is loaded. An unreadable transcript answers as empty, as readEvents does. */
   transcriptFacts(runId: string): Readonly<TranscriptFacts> {
-    return this.facts.get(runId) ?? emptyFacts();
+    return this.factsFor(runId).get(runId) ?? emptyFacts();
   }
 
   /** The run's transcript facts when they are known: undefined when the transcript exists but its
    *  facts are not current or cannot be read, so a caller can tell "no ask" from "no evidence". */
   knownTranscriptFacts(runId: string): Readonly<TranscriptFacts> | undefined {
-    return this.facts.peek(runId);
+    return this.factsFor(runId).peek(runId);
   }
 
   hasProjection(runId: string, projectionId: string): boolean {
@@ -2695,7 +2689,7 @@ export class RunStore extends EventEmitter {
     for (const id of new Set(runIds)) {
       // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
       await new Promise<void>(resolve => setImmediate(resolve));
-      await this.facts.ready(id);
+      await this.factsFor(id).ready(id);
     }
   }
 
@@ -2743,7 +2737,7 @@ export class RunStore extends EventEmitter {
   /** `readEvents` off the event loop (async read and async brotli), for collection paths. */
   async readEventsAsync(runId: string): Promise<RunEvent[]> {
     try {
-      const raw = await readHistoryTextAsync(this.dataDir, runId);
+      const raw = await readHistoryTextAsync(this.sourceDataDir(runId), runId);
       return raw === undefined ? [] : parseEvents(raw);
     } catch {
       return [];
@@ -2752,7 +2746,7 @@ export class RunStore extends EventEmitter {
 
   readEvents(runId: string): RunEvent[] {
     try {
-      const raw = readHistoryText(this.dataDir, runId);
+      const raw = readHistoryText(this.sourceDataDir(runId), runId);
       if (raw === undefined) return [];
       return parseEvents(raw);
     } catch {
@@ -2761,8 +2755,8 @@ export class RunStore extends EventEmitter {
   }
 
   /** Private process-generation evidence; never part of run JSON or SSE. */
-  private identityPath(id: string): string {
-    return this.executionPath(id).replace(/\.execution\.json$/, '.identity.json');
+  private identityPath(id: string, write = false): string {
+    return this.executionPath(id, write).replace(/\.execution\.json$/, '.identity.json');
   }
 
   readWorkerIdentity(id: string): WorkerExecutionIdentity | undefined {
@@ -2779,14 +2773,14 @@ export class RunStore extends EventEmitter {
 
   private writeWorkerIdentity(id: string, identity: WorkerExecutionIdentity): void {
     // Immutable acceptance evidence. An orphan from failed index publication cannot be adopted.
-    const fd = openSync(this.identityPath(id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    const fd = openSync(this.identityPath(id, true), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { writeFileSync(fd, JSON.stringify(identity)); fsyncSync(fd); } finally { closeSync(fd); }
   }
 
-  private executionPath(id: string): string {
+  private executionPath(id: string, write = false): string {
     z.string().uuid().parse(id);
-    const dir = join(this.dataDir, 'runs');
-    mkdirSync(dir, { recursive: true });
+    const dir = join(write ? this.dataDir : this.sourceDataDir(id), 'runs');
+    if (write) mkdirSync(dir, { recursive: true });
     if (lstatSync(dir).isSymbolicLink() || realpathSync(dir) !== resolve(dir)) throw new Error('Unsafe execution directory');
     return join(dir, `${id}.execution.json`);
   }
@@ -2805,7 +2799,7 @@ export class RunStore extends EventEmitter {
   }
 
   private writeWorkerExecution(id: string, proof: WorkerExecution, fresh = false): void {
-    const path = this.executionPath(id);
+    const path = this.executionPath(id, true);
     try {
       const existing = lstatSync(path);
       if (fresh || !existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe execution checkpoint');
@@ -2886,8 +2880,8 @@ export class RunStore extends EventEmitter {
   }
 
   /** Private process record (#469): which processes a generation spawned, never part of run JSON or SSE. */
-  private processesPath(id: string): string {
-    return this.executionPath(id).replace(/\.execution\.json$/, '.processes.json');
+  private processesPath(id: string, write = false): string {
+    return this.executionPath(id, write).replace(/\.execution\.json$/, '.processes.json');
   }
 
   /** Tri-state: only ENOENT is `absent` (legacy, scan-only). A present record that is unreadable,
@@ -2906,7 +2900,7 @@ export class RunStore extends EventEmitter {
   }
 
   private writeWorkerProcesses(id: string, record: WorkerProcessRecord): void {
-    const path = this.processesPath(id);
+    const path = this.processesPath(id, true);
     try {
       const existing = lstatSync(path);
       if (!existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe process record');
@@ -2989,6 +2983,7 @@ export class RunStore extends EventEmitter {
   }
 
   canDeleteRun(id: string): boolean {
+    if (this.fallbackDeleteError(id)) return false;
     if (autosaveCleanupBlocker(this.dataDir, id)) return false;
     const run = this.peek(id);
     if (run?.delegation?.role === 'invalid') return false;
@@ -3075,6 +3070,8 @@ export class RunStore extends EventEmitter {
   }
 
   deleteRun(id: string): boolean {
+    const refusal = this.fallbackDeleteError(id);
+    if (refusal) throw new Error(refusal);
     if (!this.canDeleteRun(id)) return false;
     const run = this.peek(id);
     if (run && this.db && (this.quarantined.has(id) || !this.claimFamilies([familyKey(run)]).size)) return false;
@@ -3121,18 +3118,18 @@ export class RunStore extends EventEmitter {
   }
 
   private eventsPath(runId: string): string {
-    return historyPaths(this.dataDir, runId).plain;
+    return historyPaths(this.sourceDataDir(runId), runId).plain;
   }
 
   /** Same location `handoffPath()` in handoff.ts produces — inlined to keep
    *  the store free of upward imports. */
   private handoffPath(runId: string): string {
-    return join(this.dataDir, 'runs', `${runId}.handoff.md`);
+    return join(this.sourceDataDir(runId), 'runs', `${runId}.handoff.md`);
   }
 
   /** Agent screenshots persisted by the run manager (see persistImage). */
   private imagesDir(runId: string): string {
-    return join(this.dataDir, 'runs', `${runId}-images`);
+    return join(this.sourceDataDir(runId), 'runs', `${runId}-images`);
   }
 
   private touch(run: RunRecord): void {
@@ -3196,9 +3193,11 @@ export class RunStore extends EventEmitter {
       const run = this.held.get(id);
       // Retention must not archive a live task between turns, a pinned run, or a delegation
       // family whose history is promised until explicit deletion.
-      return run && RETENTION_RUN_RULE.matches(run) ? [id] : [];
+      return run && !this.hasFallbackRun(id) && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
-    const cold = overflow.filter((id) => !this.held.has(id));
+    const skipped = overflow.filter(id => this.hasFallbackRun(id)).length;
+    if (skipped) console.info(`[cez] Retention skipped ${skipped} read-only fallback run(s) under .ai/squawk/.`);
+    const cold = overflow.filter((id) => !this.held.has(id) && !this.hasFallbackRun(id));
     if (cold.length > 0) {
       // Another process's runs are its own to keep or archive (#779, plan step 3).
       const rows = this.db!.listWhere(RETENTION_RUN_RULE.sql, [JSON.stringify(cold)]);
@@ -3416,6 +3415,7 @@ export class RunStore extends EventEmitter {
     // Demand-bound feeds stop before storage disappears during project removal/shutdown.
     this.emit('closed');
     this.compressor.stop();
+    this.fallbackFacts?.stop();
     this.facts.stop();
     this.facts.flush();
     if (this.saveTimer) {

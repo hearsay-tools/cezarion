@@ -1,6 +1,6 @@
+import { projectPaths } from '../project-paths.ts';
 import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import type { WorkerDestroy, WorkerDestroyResult } from '@open-mercato/cezar-contract/delegation';
 import type { RunRecord } from '../runs/store.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
@@ -37,6 +37,8 @@ export class WorkerCleanup {
   }
 
   request(workerId: string, check: () => RunRecord): Promise<WorkerDestroyResult> {
+    const refusal = this.project.store.fallbackDeleteError(workerId);
+    if (refusal) return Promise.reject(new DelegationPolicyError('incompatible_state', refusal));
     return this.destroySerialized(this.project, workerId, check);
   }
 
@@ -75,7 +77,7 @@ export class WorkerCleanup {
    * resumes where it was; the fast cadence is the floor, and a little over the cap the ceiling, so
    * a clock that jumped cannot park a destroy for days (hearsay-tools/cezarion#879). */
   private scheduleDestroyRetry(project: DelegationProject, workerId: string): void {
-    if (this.projects.get(project.id) !== project) return;
+    if (this.projects.get(project.id) !== project || project.store.isFallbackRun(workerId)) return;
     const run = project.store.getRun(workerId);
     if (run?.delegation?.role !== 'worker' || !run.delegation.destroy || run.delegation.destroy.phase === 'complete') return;
     let timers = this.destroyRetryTimers.get(project.id);
@@ -113,7 +115,7 @@ export class WorkerCleanup {
       };
       check();
       const seen = this.destroyObservations.get(project.id)?.get(workerId);
-      const dataDir = join(project.root, '.ai/cezar');
+      const dataDir = projectPaths(project.root).write;
       const unchanged = !!seen && holdersStillHold({ store: project.store, dataDir, workerId, holders: seen.holders }) &&
         seen.key === observeDestroy({ store: project.store, dataDir, commonDir: await this.commonDir(project), workerId });
       // One automatic full attempt at a time per project: attempts that coincide (every pending destroy after a
@@ -175,7 +177,7 @@ export class WorkerCleanup {
     // What this attempt decided on (hearsay-tools/cezarion#879): a later tick that would see the same skips its
     // work. Retaken where the attempt decides (after termination, at each holder proof), so its own writes up
     // to there (stopping the worker, the removal's checkpoint) are not a change, and anything later is.
-    const observe = () => observeDestroy({ store: project.store, dataDir: join(project.root, '.ai/cezar'), commonDir, workerId });
+    const observe = () => observeDestroy({ store: project.store, dataDir: project.store.sourceDataDir(workerId), commonDir, workerId });
     let key = observe();
     const workspace = worker.delegation.workspace;
     const requestedAt = worker.delegation.destroy?.requestedAt ?? new Date().toISOString();

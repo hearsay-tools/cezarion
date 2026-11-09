@@ -1,3 +1,4 @@
+import { dataReadDirs } from '../project-paths.ts';
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { voiceOutcomeSchema, type VoiceDecision, type VoiceOutcome } from '@open-mercato/cezar-contract/voice';
@@ -81,13 +82,24 @@ export class RecentVoiceActions {
   load(projectId: string, dataDir: string): void {
     if (this.loaded.has(projectId)) return;
     this.loaded.add(projectId);
-    let lines: string[];
-    try {
-      lines = readLogTail(join(dataDir, 'voice', 'decisions.ndjson'));
-    } catch {
-      return;
-    }
-    for (const line of lines) {
+    const seen = new Set<string>();
+    const sources = dataReadDirs(dataDir).map(directory => {
+      try { return readLogTail(join(directory, 'voice', 'decisions.ndjson')); }
+      catch { return []; }
+    });
+    const entries = sources.map(lines => {
+      const current: Array<{ line: string; key: string }> = [];
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line) as VoiceLogLine;
+          const key = `${entry.decisionId}:${entry.type}`;
+          if (!seen.has(key)) current.push({ line, key });
+        } catch { /* The existing per-line reader salvages valid lines only. */ }
+      }
+      current.forEach(entry => seen.add(entry.key));
+      return current;
+    });
+    for (const { line } of entries.reverse().flat()) {
       let parsed: unknown;
       try {
         parsed = JSON.parse(line);

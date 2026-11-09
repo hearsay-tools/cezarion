@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from '../../project-paths.ts';
 import { productEnv } from '../../core/product-env.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { execFile } from 'node:child_process';
@@ -22,6 +23,9 @@ export async function createDraftPr(input: DraftPrInput): Promise<DraftPrOutcome
   if (!worktree || !branch) {
     return { ok: false, error: 'this task has no worktree/branch to publish' };
   }
+
+  const refusal = fallbackProjectWriteError(worktree);
+  if (refusal) return { ok: false, error: refusal };
 
   // Final autosave: the branch must hold everything before it leaves the box.
   // This is the LAST flush — unlike the turn-end and run-finalize ones there is

@@ -1,3 +1,4 @@
+import { readDataPath } from '../project-paths.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -9,8 +10,9 @@ import { join } from 'node:path';
 export function ensureLaunchKey(dataDir: string): string {
   const path = join(dataDir, 'launch-key');
   try {
-    if (existsSync(path)) {
-      const existing = readFileSync(path, 'utf8').trim();
+    const selected = readDataPath(dataDir, 'launch-key');
+    if (existsSync(selected)) {
+      const existing = readFileSync(selected, 'utf8').trim();
       if (existing) return existing;
     }
   } catch {

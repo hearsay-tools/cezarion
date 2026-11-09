@@ -1,3 +1,5 @@
+import { dataReadDirs, readDataPath } from '../project-paths.ts';
+import { mergeProjectAutomationFiles, mergeProjectAutomationLog } from './project-files.ts';
 import {
   closeSync,
   existsSync,
@@ -238,11 +240,13 @@ export class AutomationStore {
   }
 
   delete(id: string): boolean {
+    this.assertLegacyDelete(id);
     return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => this.deleteLocked(id));
   }
 
   private deleteLocked(id: string): boolean {
     this.refreshDefinitions();
+    this.assertLegacyDelete(id);
     if (!this.definitions.delete(id)) return false;
     this.definitionsFile.tombstones = {
       ...this.definitionsFile.tombstones,
@@ -250,6 +254,15 @@ export class AutomationStore {
     };
     this.persistDefinitions();
     return true;
+  }
+
+  private assertLegacyDelete(id: string): void {
+    const fallback = dataReadDirs(this.dataDir)[1];
+    if (!fallback || !existsSync(join(fallback, DEFINITIONS))) return;
+    const source = this.readJsonAt(fallback, DEFINITIONS, automationDefinitionsFileSchema);
+    if (!source || source.automations.some(raw => { const parsed = automationDefinitionSchema.safeParse(raw); return parsed.success && parsed.data.id === id; })) {
+      throw new Error(`Cannot delete read-only project data in ${join(fallback, DEFINITIONS)}. Use the binary that migrated the project.`);
+    }
   }
 
   /**
@@ -281,18 +294,18 @@ export class AutomationStore {
 
   /** Whether this project carries the optional definitions file at all. */
   hasDefinitionsFile(): boolean {
-    return existsSync(join(this.dataDir, DEFINITIONS));
+    return existsSync(readDataPath(this.dataDir, DEFINITIONS));
   }
 
   private signature(): string {
-    return [DEFINITIONS, STATE].map((filename) => {
+    return dataReadDirs(this.dataDir).flatMap(directory => [DEFINITIONS, STATE].map((filename) => {
       try {
-        const stat = statSync(join(this.dataDir, filename));
+        const stat = statSync(join(directory, filename));
         return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
       } catch {
         return '-';
       }
-    }).join('|');
+    })).join('|');
   }
 
   /** A crashed writer can leave runtime and committed definition revisions inconsistent.
@@ -617,7 +630,6 @@ export class AutomationStore {
   }
 
   private load(): void {
-    mkdirSync(this.dataDir, { recursive: true });
     this.seen = this.signature();
     this.loadDefinitions();
     this.stateFile = this.readJson(STATE, automationStateFileSchema, {
@@ -681,8 +693,22 @@ export class AutomationStore {
     schema: { safeParse(value: unknown): { success: boolean; data?: T } },
     fallback: T,
   ): T {
-    const path = join(this.dataDir, filename);
-    if (!existsSync(path)) return fallback;
+    const values: T[] = [];
+    for (const directory of dataReadDirs(this.dataDir)) {
+      if (!existsSync(join(directory, filename))) continue;
+      const value = this.readJsonAt(directory, filename, schema);
+      if (value === undefined) {
+        if (values.length) continue;
+        return fallback;
+      }
+      values.push(value);
+    }
+    return values.length ? mergeProjectAutomationFiles(filename, values) : fallback;
+  }
+
+  private readJsonAt<T>(directory: string, filename: string,
+    schema: { safeParse(value: unknown): { success: boolean; data?: T } }): T | undefined {
+    const path = join(directory, filename);
     try {
       const parsed = schema.safeParse(JSON.parse(readFileSync(path, 'utf8')));
       if (parsed.success) return parsed.data as T;
@@ -690,14 +716,19 @@ export class AutomationStore {
       // Warn once below.
     }
     this.warnOnce(filename, `Ignored corrupt automation state in ${filename}.`);
-    return fallback;
+    return undefined;
   }
 
   private readNdjson<T>(
     filename: string,
     schema: { safeParse(value: unknown): { success: boolean; data?: T } },
   ): T[] {
-    const path = join(this.dataDir, filename);
+    return mergeProjectAutomationLog(filename, dataReadDirs(this.dataDir).map(directory => this.readNdjsonAt(directory, filename, schema)));
+  }
+
+  private readNdjsonAt<T>(directory: string, filename: string,
+    schema: { safeParse(value: unknown): { success: boolean; data?: T } }): T[] {
+    const path = join(directory, filename);
     if (!existsSync(path)) return [];
     const rows: T[] = [];
     for (const line of readFileSync(path, 'utf8').split('\n')) {

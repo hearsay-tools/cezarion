@@ -1,4 +1,5 @@
 import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
+import { projectPaths } from '../project-paths.ts';
 import type { Home } from '../home/home.ts';
 import { assertReplyDirection, sendRequestContext, sendAdmission, sendMessage, sendInput, type ConversationPair } from './conversation-send.ts';
 import { discoverTasks } from './task-discovery.ts';
@@ -7,7 +8,6 @@ import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commi
   orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
 export { rootDelegation } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
-import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -617,7 +617,7 @@ export class DelegationService {
       const baselineSha = await resolveWorkerBaseline(project.root, settings.cwd, request.baseline);
       const workspace = await planOwnedWorkspace(project.root, randomUUID(), baselineSha);
       const prepared = request.context === undefined ? undefined : await prepareWorkerContext({
-        repoRoot: project.root, dataDir: join(project.root, '.ai/cezar'), parentId: parent.id, workspace,
+        repoRoot: project.root, dataDir: projectPaths(project.root).write, parentId: parent.id, workspace,
         parentCwd: settings.cwd, context: request.context, containsSecret: text => project.store.containsSessionSecret(text),
       });
       return acceptSpawnedWorker({
@@ -679,7 +679,7 @@ export class DelegationService {
     if (!worker) {
       const retained = project.store.readDeletedWorkerResult(caller.runId, workerId);
       authorizeRetainedResult(caller, parent, project.id, workerId, retained);
-      const evidence = await revalidateRetainedWorkerResult(project.root, retained!);
+      const evidence = await revalidateRetainedWorkerResult(project.root, retained!, project.store.sourceDataDir(caller.runId));
       authorizeRetainedResult(caller, project.store.getRun(caller.runId), project.id, workerId, project.store.readDeletedWorkerResult(caller.runId, workerId));
       return project.store.commitWorkerResult(caller.runId, evidence, project.store.readWorkerResultDiff(caller.runId, workerId));
     }
@@ -688,7 +688,7 @@ export class DelegationService {
     if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion?.phase === 'pending')) {
       const retained = project.store.readWorkerResult(parent.id, workerId);
       if (!retained || !project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history deletion evidence is unavailable');
-      const evidence = await revalidateRetainedWorkerResult(project.root, retained);
+      const evidence = await revalidateRetainedWorkerResult(project.root, retained, project.store.sourceDataDir(parent.id));
       if (!project.store.canDeleteRun(workerId)) throw new DelegationPolicyError('incompatible_state', 'Worker history changed during collection');
       return project.store.commitWorkerResult(parent.id, evidence, project.store.readWorkerResultDiff(parent.id, workerId));
     }

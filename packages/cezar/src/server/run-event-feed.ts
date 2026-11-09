@@ -123,7 +123,7 @@ export async function readFiniteRunFeed(
     if (runId === demand.runId) snapshot.throughSeq = Math.min(snapshot.throughSeq, event.seq - 1);
   };
   context.store.on('event', bound);
-  try { return await readRunEventBatch(context.dataDir, demand, signal, LIVE_BYTE_LIMIT, snapshot); }
+  try { return await readRunEventBatch(context.store.sourceDataDir(demand.runId), demand, signal, LIVE_BYTE_LIMIT, snapshot); }
   finally { context.store.off('event', bound); }
 }
 
@@ -172,7 +172,7 @@ export async function subscribeRunFeed(
   try {
     let cursor = demand.cursor;
     do {
-      const batch = await readRunEventBatch(context.dataDir, { ...demand, ...(cursor ? { cursor } : {}), afterSeq: maxSeq }, controller.signal, byteLimit);
+      const batch = await readRunEventBatch(context.store.sourceDataDir(demand.runId), { ...demand, ...(cursor ? { cursor } : {}), afterSeq: maxSeq }, controller.signal, byteLimit);
       for (const event of batch.events) {
         controller.signal.throwIfAborted();
         if (event.seq <= maxSeq) continue;

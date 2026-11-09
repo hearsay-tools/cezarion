@@ -6,6 +6,17 @@
 
 `packages/cezar/src/index.ts`
 
+## Two project directories before P5
+
+Project entry points use `projectPaths`: `.ai/cezar/` is the write root and the first
+read root; `.ai/squawk/` is the fallback. Dual reads work with the release switch
+off. `init`, generated task paths, task state and config writes stay legacy.
+Singleton config/context files use whole-file presence precedence. Reads never
+create a fallback directory or an empty legacy run store that hides its data.
+Git excludes cover both runtime trees and `.ai/squawk-migration.json`; tracked
+workflows, skills and `context.yaml` keep their existing committable paths.
+Only the release switch enables the legacy-directory notice; boot does not migrate.
+
 ## Rules
 
 Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. Headless `run` treats `review` as a terminal success status (exit 0). `serve` boots in a fixed order: bind the listener, open the boot store and build its `RunManager`, `recover()` the boot project, then `startServer`. So anything a recovered run needs (its cockpit address, for one) must reach the boot manager at construction, not from `startServer`. `init` never overwrites existing files. Keep `.ai/cezar/.gitignore` maintenance (`ensureDataGitignore`) in sync with any new state file.
