@@ -1,4 +1,4 @@
-import { RECOVERY_FAILURE_MESSAGE, scopedRecoveryTarget, validateScopedRecovery, restorePackageTrees, validateRecoveryLayout, PackageRecoveryError } from './scoped-recovery.js';
+import { canonicalRecoverySlot, RECOVERY_FAILURE_MESSAGE, scopedRecoveryTarget, validateScopedRecovery, restorePackageTrees, validateRecoveryLayout, PackageRecoveryError } from './scoped-recovery.js';
 import { installedRuntime, installationModules, originalRuntimeName, hoistedRuntime, assertCanonicalPath } from './runtime-layout.js';
 import { type NpmLaunchPackage } from '../home/identity.js';
 import type { spawn } from 'node:child_process';
@@ -273,25 +273,27 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
       throw new Error('invalid hoisted package recovery');
     }
   }
-  validateRecoveryLayout(installation, plan.recovery, plan.recoveryPackage, plan.oldVersion);
-  const scoped = scopedRecoveryTarget(installation, plan.recovery);
+  const recovery = canonicalRecoverySlot(plan.recovery);
+  const runtimeBackup = plan.recoveryPackage ? canonicalRecoverySlot(plan.recoveryPackage) : undefined;
+  validateRecoveryLayout(installation, recovery, runtimeBackup, plan.oldVersion);
+  const scoped = scopedRecoveryTarget(installation, recovery);
   if (scoped) validateScopedRecovery(scoped.source, plan.oldVersion);
   if (installation.kind === 'npx') {
     // Keep the held lock in place; commit all other root entries as one recoverable batch.
-    const saved = await readdir(plan.recovery);
+    const saved = await readdir(recovery);
     const entries = new Set([...saved, ...await readdir(installation.installRoot)]);
     const trees = [...entries].filter(name => name !== 'concurrency.lock').map(name => ({
-      source: saved.includes(name) ? join(plan.recovery, name) : undefined,
+      source: saved.includes(name) ? join(recovery, name) : undefined,
       destination: join(installation.installRoot, name),
     }));
     await restorePackageTrees(trees, assertOwned);
   } else {
-    const trees = [{ source: plan.recovery, destination: installation.outerRoot }];
-    if (hoisted) trees.push({ source: plan.recoveryPackage!, destination: installation.packageRoot });
+    const trees = [{ source: recovery, destination: installation.outerRoot }];
+    if (hoisted) trees.push({ source: runtimeBackup!, destination: installation.packageRoot });
     if (scoped) trees.push(scoped);
     await restorePackageTrees(trees, assertOwned);
     if (plan.binLinks) {
-      const outerManifest = JSON.parse(await readFile(join(plan.recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
+      const outerManifest = JSON.parse(await readFile(join(recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
       await restoreGlobalBins(installation.prefix, Object.keys(outerManifest.bin ?? {}),
         windowsGlobalLayout(installation.prefix, installation.outerRoot, installation.outerPackage), plan.binLinks, assertOwned);
     }

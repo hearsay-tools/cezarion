@@ -56,7 +56,7 @@ function copy(source: string, destination: string): void {
   cpSync(source, destination, { recursive: true });
 }
 
-function fixture(kind: 'global' | 'npx', alias: boolean, nested = false, forwarding = false) {
+function fixture(kind: 'global' | 'npx', alias: boolean, nested = false, forwarding = false, linkedHome = false) {
   const root = mkdtempSync(join(tmpdir(), 'first-forwarding-')); roots.push(root);
   const prefix = join(root, 'prefix'), cache = join(root, 'cache');
   const consumer = kind === 'global' ? prefix : join(cache, '_npx', 'first123');
@@ -108,9 +108,14 @@ function fixture(kind: 'global' | 'npx', alias: boolean, nested = false, forward
     expect(args.at(-1)).toBe(`${outerPackage}@0.18.0`);
     install(join(args[args.indexOf('--prefix') + 1]!, 'node_modules'));
   });
+  const home = join(root, 'home');
+  if (linkedHome) {
+    const target = join(root, 'actual-home'); mkdirSync(target);
+    symlinkSync(target, home, process.platform === 'win32' ? 'junction' : 'dir');
+  }
   // No rebrand override: this is the actual switch-off build, not an emulated switch-on caller.
   const options = { rebrand: forwarding ? true : undefined, packageRoot: original.packageRoot, launchEntry: original.launchEntries[0]!, npmPrefix: prefix, npmCache: cache,
-    home: join(root, 'home'), targetVersion: () => '0.18.0', runNpm, armRestart: async (plan: RestartPlan) => { restart = plan; } };
+    home, targetVersion: () => '0.18.0', runNpm, armRestart: async (plan: RestartPlan) => { restart = plan; } };
   const record = () => join(options.home, 'application-updates', readdirSync(join(options.home, 'application-updates'))[0]!, 'state.json');
   const plan = (port: number): HelperPlan => ({ ...restart!, oldPid: 2147483647, nodeExecutable: process.execPath, nodeArgs: [], cliArgs: [],
     cwd: root, repoRoot: root, host: '127.0.0.1', port, npmBin: 'fixture-only' });
@@ -124,10 +129,10 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
-for (const kind of ['global', 'npx'] as const) for (const alias of [false, true]) for (const nested of [false, true]) for (const forwarding of [false, true]) {
+for (const kind of ['global', 'npx'] as const) for (const alias of [false, true]) for (const nested of [false, true]) for (const forwarding of [false, true]) for (const linkedHome of [false, true]) {
   // bound: the real helper starts one tiny listener child and proves its IPC and HTTP health before returning.
-  it.each([false, true])(`${forwarding ? 'switch-on forwarding' : 'switch-off old'} ${kind} ${alias ? 'alias' : 'scoped'} to first ${nested ? 'nested' : 'hoisted'} forwarding release; promotion fails=%s`, async fail => {
-    const f = fixture(kind, alias, nested, forwarding);
+  it.each([false, true])(`${linkedHome ? 'symlinked-home' : 'ordinary-home'} ${forwarding ? 'switch-on forwarding' : 'switch-off old'} ${kind} ${alias ? 'alias' : 'scoped'} to first ${nested ? 'nested' : 'hoisted'} forwarding release; promotion fails=%s`, async fail => {
+    const f = fixture(kind, alias, nested, forwarding, linkedHome);
     const service = new ApplicationUpdateService(f.options);
     expect(service.snapshot().supported).toBe(true);
     expect((await service.apply()).status).toBe('ready');
@@ -209,7 +214,7 @@ for (const kind of ['global', 'npx'] as const) for (const alias of [false, true]
 
 for (const kind of ['global', 'npx'] as const) for (const nested of [false, true]) {
   it.each(['missing', 'version', 'pin', 'foreign', 'nested-runtime'])(`${kind} ${nested ? 'nested' : 'hoisted'} alias recovery rejects a %s scoped wrapper before touching any installed package`, async fault => {
-    const f = fixture(kind, true, nested, true);
+    const f = fixture(kind, true, nested, true, true);
     const service = new ApplicationUpdateService(f.options);
     await service.apply(); await service.restart();
     const plan = f.plan(12345);
@@ -242,7 +247,7 @@ for (const kind of ['global', 'npx'] as const) for (const nested of [false, true
 }
 
 it('reports every kept copy through existing update status when commit and undo both fail', async () => {
-  const f = fixture('global', true, false, true);
+  const f = fixture('global', true, false, true, true);
   const service = new ApplicationUpdateService(f.options);
   await service.apply(); await service.restart();
   const plan = f.plan(12345);
@@ -308,5 +313,22 @@ for (const kind of ['global', 'npx'] as const) for (const forwarding of [false, 
     rmSync(source, { recursive: true }); symlinkSync(foreign, source, process.platform === 'win32' ? 'junction' : 'dir');
     writeFileSync(f.record(), JSON.stringify({ ...record, state }));
     expect(service.snapshot().message).toBe('Update state needs retry.');
+  });
+}
+
+for (const kind of ['global', 'npx'] as const) for (const forwarding of [false, true]) {
+  it(`symlinked-home ${kind} switch ${forwarding ? 'on' : 'off'} rejects a recovery-slot symlink before changing installed roots`, async () => {
+    const f = fixture(kind, true, false, forwarding, true);
+    const service = new ApplicationUpdateService(f.options);
+    await service.apply(); await service.restart();
+    const plan = f.plan(12345), foreign = join(f.root, 'foreign-recovery');
+    copy(plan.recovery, foreign); rmSync(plan.recovery, { recursive: true });
+    symlinkSync(foreign, plan.recovery, process.platform === 'win32' ? 'junction' : 'dir');
+    const before = [...f.originalManifests].map(([path]) => readFileSync(join(path, 'package.json'), 'utf8'));
+    await expect(restoreOriginal(plan)).rejects.toThrow('unowned package path');
+    expect([...f.originalManifests].map(([path]) => readFileSync(join(path, 'package.json'), 'utf8'))).toEqual(before);
+    const record = JSON.parse(readFileSync(f.record(), 'utf8'));
+    writeFileSync(f.record(), JSON.stringify({ ...record, state: { status: 'ready', supported: true, targetVersion: '0.18.0' }, claimId: undefined, ownerPid: undefined }));
+    expect(new ApplicationUpdateService(f.options).snapshot().message).toBe('Prepared update is missing. Retry Update.');
   });
 }

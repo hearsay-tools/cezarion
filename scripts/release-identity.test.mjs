@@ -231,24 +231,27 @@ for (const rebrand of [false, true]) {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   test(`CI packs and cleanup use the selected identity with switch ${rebrand}`, () => {
-    const calls = [];
-    packChecks({ rebrand, execute: (cmd, args, options) => calls.push({ cmd, args, options, bytes: readFileSync(join(options.cwd, 'package.json'), 'utf8') }) });
-    assert.equal(calls.length, rebrand ? 4 : 2);
-    assert.equal(calls[0].cmd, 'npm');
-    assert.deepEqual(calls[0].args, rebrand ? ['pack', '--dry-run', '--ignore-scripts'] : ['pack', '--dry-run', '--ignore-scripts', '-w', '@wjarka/cezarion']);
-    if (rebrand) assert.equal(JSON.parse(calls[0].bytes).name, '@hearsay-tools/squawk');
-    else assert.equal(calls[0].bytes, readFileSync(join(root, 'package.json'), 'utf8'));
-    assert.deepEqual(calls[1].args, ['pack', '--dry-run', '--ignore-scripts']);
-    assert.equal(relative(root, calls[1].options.cwd), rebrand ? 'alias-hsq' : 'alias-cezarion');
-    const packages = releasePackages(root, rebrand);
-    assert.equal(packages.dirs.alias, rebrand ? 'alias-hsq' : 'alias-cezarion');
-    assert.equal(releaseBumpFilePattern(rebrand).test(`${packages.dirs.alias}/package.json`), true);
-    assert.equal(releaseBumpFilePattern(!rebrand).test(`${packages.dirs.alias}/package.json`), false);
-    assert.deepEqual(releaseBumpPaths(rebrand), ['packages/*/package.json', `${packages.dirs.alias}/package.json`, 'pnpm-lock.yaml']);
-    const cleanup = [];
-    const names = cleanupTags({ rebrand, tag: 'pr-7', execute: (cmd, args) => cleanup.push({ cmd, args }) });
-    assert.deepEqual(names, [rebrand ? '@hearsay-tools/squawk' : '@wjarka/cezarion', '@open-mercato/cezar-api-client', rebrand ? 'hsq' : 'cezarion', ...(rebrand ? ['@wjarka/cezarion', 'cezarion'] : [])]);
-    assert.deepEqual(cleanup.map(c => c.args), names.map(pkg => ['dist-tag', 'rm', pkg, 'pr-7']));
-    assert.deepEqual(cleanupTags({ rebrand, tag: 'pr-7', dryRun: true, execute: () => assert.fail('dry cleanup executed npm') }), names);
+    const dir = fixture(rebrand);
+    try {
+      const calls = [];
+      packChecks({ root: dir, rebrand, execute: (cmd, args, options) => calls.push({ cmd, args, options, bytes: readFileSync(join(options.cwd, 'package.json'), 'utf8') }) });
+      assert.equal(calls.length, rebrand ? 4 : 2);
+      assert.equal(calls[0].cmd, 'npm');
+      assert.deepEqual(calls[0].args, rebrand ? ['pack', '--dry-run', '--ignore-scripts'] : ['pack', '--dry-run', '--ignore-scripts', '-w', '@wjarka/cezarion']);
+      if (rebrand) assert.equal(JSON.parse(calls[0].bytes).name, '@hearsay-tools/squawk');
+      else assert.equal(calls[0].bytes, readFileSync(join(dir, 'package.json'), 'utf8'));
+      assert.deepEqual(calls[1].args, ['pack', '--dry-run', '--ignore-scripts']);
+      assert.equal(relative(dir, calls[1].options.cwd), rebrand ? 'alias-hsq' : 'alias-cezarion');
+      const packages = releasePackages(dir, rebrand);
+      assert.equal(packages.dirs.alias, rebrand ? 'alias-hsq' : 'alias-cezarion');
+      assert.equal(releaseBumpFilePattern(rebrand).test(`${packages.dirs.alias}/package.json`), true);
+      assert.equal(releaseBumpFilePattern(!rebrand).test(`${packages.dirs.alias}/package.json`), false);
+      assert.deepEqual(releaseBumpPaths(rebrand), ['packages/*/package.json', `${packages.dirs.alias}/package.json`, 'pnpm-lock.yaml']);
+      const cleanup = [];
+      const names = cleanupTags({ root: dir, rebrand, tag: 'pr-7', execute: (cmd, args) => cleanup.push({ cmd, args }) });
+      assert.deepEqual(names, [rebrand ? '@hearsay-tools/squawk' : '@wjarka/cezarion', '@open-mercato/cezar-api-client', rebrand ? 'hsq' : 'cezarion', ...(rebrand ? ['@wjarka/cezarion', 'cezarion'] : [])]);
+      assert.deepEqual(cleanup.map(c => c.args), names.map(pkg => ['dist-tag', 'rm', pkg, 'pr-7']));
+      assert.deepEqual(cleanupTags({ root: dir, rebrand, tag: 'pr-7', dryRun: true, execute: () => assert.fail('dry cleanup executed npm') }), names);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }

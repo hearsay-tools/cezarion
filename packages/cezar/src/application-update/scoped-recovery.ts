@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { cp, mkdtemp, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { productIdentity, type NpmLaunchPackage } from '../home/identity.js';
@@ -6,6 +6,14 @@ import { assertCanonicalPath, installationModules, originalRuntimeName, hoistedR
 
 type AliasInstallation = { kind: 'global' | 'npx'; installRoot: string; packageRoot: string; outerRoot: string; outerPackage: NpmLaunchPackage };
 export type RecoveryTree = { source: string | undefined; destination: string };
+
+/** Resolve the private directory through a symlinked home, but never a link in a backup tree. */
+export function canonicalRecoverySlot(path: string): string {
+  if (!['recovery', 'recovery-package', 'recovery-scoped-package'].includes(basename(path))) throw new Error('invalid recovery slot');
+  const canonical = join(realpathSync(dirname(path)), basename(path));
+  assertCanonicalPath(canonical);
+  return canonical;
+}
 
 export function validateScopedRecovery(path: string, version: string): void {
   assertCanonicalPath(path);
@@ -22,6 +30,7 @@ export function validateScopedRecovery(path: string, version: string): void {
 /** The saved alias layout owns this fixed slot; records cannot choose its source or destination. */
 export function scopedRecoveryTarget(installation: AliasInstallation, recovery: string): (RecoveryTree & { source: string; version: string }) | undefined {
   if (installation.kind !== 'global' || installation.outerPackage !== productIdentity(false).npmAlias) return;
+  recovery = canonicalRecoverySlot(recovery);
   const pkg = JSON.parse(readFileSync(join(recovery, 'package.json'), 'utf8'));
   if (pkg.dependencies?.[productIdentity(true).npmPackage] === undefined) return;
   if (pkg.name !== installation.outerPackage || typeof pkg.version !== 'string'
@@ -42,6 +51,8 @@ function validateBackupRuntime(path: string, name: string, version: string): voi
 
 /** Validate every saved package before any installed root is removed or replaced. */
 export function validateRecoveryLayout(installation: AliasInstallation, recovery: string, runtimeBackup: string | undefined, version: string): void {
+  recovery = canonicalRecoverySlot(recovery);
+  if (runtimeBackup) runtimeBackup = canonicalRecoverySlot(runtimeBackup);
   const sourceRoot = installation.kind === 'npx' ? installation.installRoot : installation.outerRoot;
   const runtime = installation.kind === 'global' && hoistedRuntime(installation) ? runtimeBackup!
     : join(recovery, relative(sourceRoot, installation.packageRoot));
@@ -99,7 +110,7 @@ export function validRecoveryMessage(message: string, installation: AliasInstall
   const prefix = `${RECOVERY_FAILURE_MESSAGE} ${KEPT_ROOTS_PREFIX}`;
   if (!message.startsWith(prefix)) return false;
   try {
-    assertCanonicalPath(recovery);
+    recovery = canonicalRecoverySlot(recovery);
     const destinations = new Set(recoveryDestinations(installation, recovery));
     return message.slice(prefix.length).split('; ').every(entry => validKeptRoot(entry, destinations));
   } catch { return false; }
