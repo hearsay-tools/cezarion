@@ -8,22 +8,69 @@ Singleton files use whole-file presence precedence, even when the first file is
 damaged. Catalogs use names; runs use IDs. A run's sidecars follow its record,
 including when a duplicate sidecar is absent in the winning directory.
 
-The coordinator approved per-family copy-on-write on 2026-11-09. A family with any
-member read from `.ai/squawk/` has run ownership `fallback`: every automatic path
-meets the same refusal as a foreign family and skips it. Only an explicit run control
-(the `adoptFallbackControl` middleware before `requireRunControl`) adopts the family, which copies its records and sidecars into
-the legacy directory inside one transaction. `RunDatabase` refuses any write of a
-fallback row and any claim on such a family, so a bypass fails loudly. Boot and reads do not copy fallback
-state or create an empty legacy database. Neither tree is
-moved or symlinked. The fallback tree stays logically read only. Normal read-only SQLite WAL coordination
-may change only `runs.db-wal` and `runs.db-shm`. An unreadable or unsupported
-fallback database contributes no runs and one warning; it never fails boot.
+## Run-store write boundary
+
+The family (`parent_run_id ?? id`) is the unit. A family with any member whose
+winning row is under `.ai/squawk/` has run ownership `fallback`, a legacy root with
+fallback workers included. The store never claims or holds such a family:
+`record()` answers undefined, `assertWritable`, `appendEvent` and run-file writes
+throw `RunWriteRefusedError` (ownership `fallback`), and `writeRefusal` returns the
+`.ai/squawk/` refusal. Boot, recovery, reconcilers, archive on merge, completion
+actions, retention and compression skip it as they skip a foreign family, so no
+automatic path copies, settles or archives it.
+
+`RunDatabase` is the row-level backstop. `transaction()` refuses an upsert of a row
+whose winning copy is a fallback row and a delete of an ID with any fallback copy
+(rule A); `takeClaims()` never claims a family with a fallback member. Before the
+legacy database exists the refusal is `FallbackWriteRefusedError`, so it cannot
+create one. Inside the transaction, after the fence, each refused row is a
+`RunConflictError` conflict with reason `fallback`, which the store settles per row
+while the rest of its batch commits. Projected primary writes run inside the
+database error mapping, so a held lock is `RunDatabaseBusyError`.
+
+Per-family copy-on-write (approved 2026-11-09) happens only through explicit
+adoption. `RunStore.adoptFallbackFamily` is the one caller that sets the
+`adoptFallback` intent. The `adoptFallbackControl` middleware calls it before
+`requireRunControl` only when the router matched a handler for the request's
+mutating method, after the `/api/*` Origin guard, and never for `read`, `unread` or
+`DELETE /runs/:id`. Adoption copies the whole family's records and run files into
+`.ai/cezar/` in one transaction and refuses a family that a live process claims
+under either directory. Every other explicit write to such a family is refused with
+the `.ai/squawk/` message.
+
+The read projection rewrites every `runs` and `run_claims` table reference, nested
+reads inside writes included, and keeps a `DELETE` target on the primary table. A
+read-only (cold) projection never switches its primary to disk. Boot and reads do
+not copy fallback state or create an empty legacy database. Neither tree is moved
+or symlinked. The fallback tree stays logically read only. Normal read-only SQLite
+WAL coordination may change only `runs.db-wal` and `runs.db-shm`. An unreadable or
+unsupported fallback database contributes no runs and one warning; it never fails
+boot. `runs/fallback-write-invariant.test.ts` proves the boundary over a mixed
+fixture without naming the paths that could break it.
 
 The planner chose no tombstones. Automatic retention and worktree cleanup skip
 fallback-only items and duplicate logical records and log one count per sweep. An explicit destructive operation
 refuses with the fallback path and asks the user to use the binary that migrated
 the project. This preserves the source bytes and prevents deleted runs returning
-from fallback on the next read.
+from fallback on the next read. An explicit logical delete of a run, workflow or
+automation fails whenever the same ID or name exists under `.ai/squawk/`, even when
+legacy wins; automatic record retention skips such items with the same count line.
+
+Other approved rules:
+
+- Fallback reads follow the existing cold-read contract: detached records, deep-frozen
+  under Vitest only. There is no production freeze.
+- Merged append-only streams (automation log rows, automation receipts, voice
+  decisions and outcomes) deduplicate with legacy precedence, then replay in recorded
+  time (`mergeAppendOnly`). Merged automation log pages number the rows 1..n in that
+  order as a positive cursor, only when a fallback log exists. Stored logs and the
+  HTTP cursor contract are unchanged; compaction rewrites legacy rows only.
+- `.ai/squawk/` ignore rules go to Git's `info/exclude` under the common directory,
+  never to a new tracked file. The repo `.gitignore` only mirrors existing
+  `.ai/cezar/` rules.
+- Every product write into a worktree under `.ai/squawk/worktrees/` is refused when
+  explicit and skipped with a count when automatic; reads of that worktree stay
+  allowed.
 
 | Case | Read | Write / cleanup |
 | --- | --- | --- |
