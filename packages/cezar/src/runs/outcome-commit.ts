@@ -169,7 +169,7 @@ const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
     const next = settle(run, waits.map((wait): Wait => {
       const row = WAIT_KINDS[wait.kind];
       return 'supersededResult' in row && outcome.superseded
-        ? { ...wait, phase: 'cancelled', cancelledAt, result: row.supersededResult } as Wait
+        ? { ...wait, phase: 'cancelled', cancelledAt, result: { ...row.supersededResult } } as Wait
         : { ...wait, phase: 'cancelled', cancelledAt };
     }), out);
     return { run: { ...next, ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}) }, changed: true };
