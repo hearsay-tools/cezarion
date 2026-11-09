@@ -34,7 +34,7 @@ export default defineConfig({
     reporters: [
       'default',
       ...(process.env.GITHUB_ACTIONS === 'true' ? [
-        ['github-actions', { jobSummary: { enabled: true } }] satisfies ['github-actions', BuiltinReporterOptions['github-actions']],
+        ['github-actions', { jobSummary: { enabled: true } }] satisfies [keyof BuiltinReporterOptions, object],
       ] : []),
       ...(coverageRequested() ? [new KeepTestFilesInCoverage()] : []),
       // Only ci.yml's Vitest shard step opts in; local and Squeal runs stay unchanged.
