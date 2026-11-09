@@ -80,7 +80,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     expect(store.isFallbackRun(a.workerId)).toBe(true);
   });
 
-  it('recovers a live legacy root without holding, copying, or settling its running fallback worker', async () => {
+  it('leaves a mixed legacy/fallback family untouched at boot until an explicit control adopts it', async () => {
     manager.dispose();
     setRunStatus(store, a.parentId, RUN_STATUS.running);
     setRunStatus(store, a.workerId, RUN_STATUS.running);
@@ -97,21 +97,34 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     writeFileSync(history, '{"seq":1,"type":"text","text":"fallback evidence"}\n');
     const databaseBytes = readFileSync(join(fallback, RUNS_DB_FILE));
     const historyBytes = readFileSync(history);
+    const rootRow = () => {
+      const db = new DatabaseSync(join(primary, RUNS_DB_FILE), { readOnly: true });
+      try { return db.prepare('SELECT data, revision FROM runs WHERE id = ?').get(a.parentId); } finally { db.close(); }
+    };
+    const rootBefore = rootRow();
     store = RunStore.open(primary, { keepLive: true });
     manager = new RunManager(store, root, { createRunner, home: testHome() });
     vi.spyOn(manager, 'continueRun').mockReturnValue({ ok: false, error: 'fixture stops agent launch' });
     expect(store.listWorkersOf(a.parentId).map(run => run.id)).toContain(a.workerId);
-    expect(store.listRuns().map(run => run.id)).not.toContain(a.workerId);
     await manager.recover();
     store.flush();
-    expect(store.readEvents(a.parentId).some(event => event.type === 'lifecycle' && String(event.message).includes('cezar restarted'))).toBe(true);
-    expect(store.getRun(a.parentId)?.status).not.toBe(RUN_STATUS.running);
-    expect(store.listRuns().map(run => run.id)).not.toContain(a.workerId);
-    expect(store.isFallbackRun(a.workerId)).toBe(true);
+    // Automatic recovery treats the whole family as read only: both runs keep their stored status.
+    expect(store.runOwnership(a.parentId)).toBe('fallback');
+    expect(store.getRun(a.parentId)?.status).toBe(RUN_STATUS.running);
     expect(store.getRun(a.workerId)?.status).toBe(RUN_STATUS.running);
+    expect(store.listRuns().map(run => run.id)).toEqual([]);
+    expect(rootRow()).toEqual(rootBefore);
     const db = new DatabaseSync(join(primary, RUNS_DB_FILE), { readOnly: true });
     try { expect(db.prepare('SELECT id FROM runs WHERE id = ?').get(a.workerId)).toBeUndefined(); }
     finally { db.close(); }
+    expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(databaseBytes);
+    expect(readFileSync(history)).toEqual(historyBytes);
+    // An explicit control adopts the family, then the existing orphan adoption recovers it.
+    expect(store.adoptFallbackFamily(a.parentId)).toBe(true);
+    expect(await manager.adoptOrphanedRun(a.parentId, { stop: true })).toBe(true);
+    store.flush();
+    expect(store.isFallbackRun(a.workerId)).toBe(false);
+    expect(store.getRun(a.parentId)?.status).not.toBe(RUN_STATUS.running);
     expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(databaseBytes);
     expect(readFileSync(history)).toEqual(historyBytes);
   });

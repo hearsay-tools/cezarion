@@ -3128,12 +3128,18 @@ export function createApp(deps: ServerDeps) {
   /**
    * Gate every run control by family ownership: refuse foreign or quarantined writers with 409;
    * adopt proven dead owners without resuming agents. Reads remain available. Stop carries its
-   * cancellation through adoption.
+   * cancellation through adoption. This gate is the only explicit-write path that copies a family
+   * read from `.ai/squawk/` into this store; view state and record deletion never adopt.
    */
   const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
     const id = c.req.param('id');
     if (c.req.method === 'GET' || c.req.method === 'HEAD' || id === undefined) return next();
     const { store, manager } = c.get('project');
+    const viewOrDelete = /\/(?:read|unread)$/.test(c.req.path) || (c.req.method === 'DELETE' && c.req.path.endsWith(`/runs/${id}`));
+    if (!viewOrDelete && store.runOwnership(id) === 'fallback') {
+      try { store.adoptFallbackFamily(id); }
+      catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 409); }
+    }
     if (store.runOwnership(id) === 'orphaned') {
       const stop = c.req.method === 'POST' && c.req.path.endsWith('/cancel');
       if (await manager.adoptOrphanedRun(id, { stop }) && stop && store.getRun(id)?.status === 'cancelled') c.set('stoppedOnAdoption', true);

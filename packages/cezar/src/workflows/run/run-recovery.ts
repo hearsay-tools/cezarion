@@ -161,7 +161,7 @@ export class RunRecovery {
     const orphanWorkerIds: string[] = [];
     const orphanFactIds = new Set<string>();
     for (const id of workerIds) {
-      if (this.context.store.isFallbackRun(id) || this.context.store.readWorkerExecution(id)?.phase !== 'starting' || this.context.store.writeRefusal(id)) continue;
+      if (this.context.store.readWorkerExecution(id)?.phase !== 'starting' || this.context.store.writeRefusal(id)) continue;
       const run = this.context.store.getRun(id);
       if (run?.delegation?.role !== 'worker' || !inScope(run)) continue;
       orphanWorkerIds.push(id);

@@ -9,6 +9,15 @@ import { pathPresent } from '../project-paths.ts';
 import type { RunRowInput } from './run-database.ts';
 import { toRunBindings } from './run-database-row.ts';
 
+/** A write reached a run family that is still read only under `.ai/squawk/`. The store refuses such
+ *  writes first, so this error means a caller bypassed it. */
+export class FallbackWriteRefusedError extends Error {
+  constructor(readonly runId: string, source: string) {
+    super(`Refused an automatic write to read-only run ${runId} from ${dirname(source)}. Use the binary that migrated the project.`);
+    this.name = 'FallbackWriteRefusedError';
+  }
+}
+
 /** A read projection over two stores. All writes still address main's real tables.
  * Prepared handles follow a deferred connection when an explicit write opens disk.
  * Normal one-directory connections never use this adapter. */
@@ -64,6 +73,29 @@ export class ProjectRunConnection {
   hasFallback(id: string): boolean {
     this.refresh();
     return Boolean(this.current.prepare(`SELECT 1 FROM ${this.sourceTable} WHERE id = ?`).get(id));
+  }
+
+  /** A family is read only while any member's winning row is a fallback row. */
+  familyHasFallback(family: string): boolean {
+    this.refresh();
+    return Boolean(this.current.prepare(`SELECT 1 FROM ${this.sourceTable} source WHERE (source.id = ? OR source.parent_run_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM main.runs legacy WHERE legacy.id = source.id) LIMIT 1`).get(family, family));
+  }
+
+  /** Refuse a write that reaches a fallback family without the explicit adoption intent. */
+  assertWritable(changes: { upserts: readonly RunRowInput[]; deletes: readonly string[] }, adopted: ReadonlySet<string>): void {
+    for (const row of changes.upserts) {
+      const family = row.parentRunId ?? row.id;
+      if (!adopted.has(family) && (this.isFallback(row.id) || this.familyHasFallback(family))) throw new FallbackWriteRefusedError(row.id, this.source);
+    }
+    for (const id of changes.deletes) {
+      const family = this.current.prepare('SELECT coalesce(parent_run_id, id) AS family FROM project_runs WHERE id = ?').get(id)?.family as string | undefined;
+      if (this.hasFallback(id) || this.familyHasFallback(family ?? id)) throw new FallbackWriteRefusedError(id, this.source);
+    }
+  }
+
+  assertClaimable(families: Iterable<string>): void {
+    for (const family of families) if (this.familyHasFallback(family)) throw new FallbackWriteRefusedError(family, this.source);
   }
 
   private configure(db: DatabaseSync): void {
@@ -122,13 +154,20 @@ export class ProjectRunConnection {
     } });
   }
 
-  /** Inside the primary transaction, after its ownership and row fences passed. */
-  preserveFamilies(families: Iterable<string>): void {
-    for (const family of new Set(families)) {
+  /** A live process of the migrating binary still owns the family: adoption must wait for it. */
+  assertAdoptable(families: Iterable<string>): void {
+    for (const family of families) {
       const sourceClaim = this.attached ? this.current.prepare('SELECT session, pid, start_token AS startToken FROM project_fallback.run_claims WHERE family = ?').get(family) : undefined;
       if (sourceClaim && claimOwnerLive({ session: String(sourceClaim.session), pid: Number(sourceClaim.pid), startToken: sourceClaim.startToken === null ? null : String(sourceClaim.startToken) })) {
         throw new Error(`Fallback family is in use by another process: ${dirname(this.source)}`);
       }
+    }
+  }
+
+  /** Explicit adoption only: inside the primary transaction, after its ownership and row fences passed. */
+  preserveFamilies(families: Iterable<string>): void {
+    this.assertAdoptable(families);
+    for (const family of new Set(families)) {
       const rows = this.current.prepare(`SELECT * FROM project_runs WHERE id = ? OR parent_run_id = ?`).all(family, family);
       for (const row of rows) {
         const id = row.id as string;

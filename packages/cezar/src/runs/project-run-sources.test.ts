@@ -86,7 +86,7 @@ describe('project run sources', () => {
     expect(searchRunIndexFromDisk(root('cezar'), 'wrong fallback', { limit: 10 }).runs).toEqual([]);
   });
 
-  it('copies a family only on an explicit write, then appends under legacy without changing fallback bytes', () => {
+  it('refuses automatic writes to a fallback family, then copies it on explicit adoption and appends under legacy', () => {
     const run = record('fallback');
     const source = seed('squawk', [run]);
     const history = join(source, 'runs', `${run.id}.ndjson`);
@@ -95,6 +95,11 @@ describe('project run sources', () => {
     writeFileSync(join(source, 'runs', `${run.id}.handoff.md`), '# preserved');
     const store = open();
     expect(existsSync(root('cezar'))).toBe(false);
+    expect(() => store.appendEvent(run.id, { type: 'text', text: 'automatic' })).toThrow(/\.ai\/squawk.*binary that migrated/);
+    expect(store.updateRun(run.id, { title: 'automatic' })).toBeUndefined();
+    expect(store.writeRefusal(run.id)).toMatch(/\.ai\/squawk/);
+    expect(existsSync(root('cezar'))).toBe(false);
+    expect(store.adoptFallbackFamily(run.id)).toBe(true);
     store.appendEvent(run.id, { type: 'text', text: 'new' });
     store.updateRun(run.id, { title: 'changed' });
     store.flush();
@@ -145,7 +150,7 @@ describe('project run sources', () => {
     const store = open();
     expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(store.listRuns()).toEqual([]);
-    expect(store.runOwnership(run.id)).toBe('orphaned');
+    expect(store.runOwnership(run.id)).toBe('fallback');
     expect(existsSync(root('cezar'))).toBe(false);
   });
 
@@ -187,8 +192,9 @@ describe('project run sources', () => {
       db.takeClaims(owner, [{ family: run.id, expect: null }]);
       const store = open();
       expect(store.getRun(run.id)?.title).toBe('foreign');
-      expect(store.runOwnership(run.id)).toBe('foreign');
+      expect(store.runOwnership(run.id)).toBe('fallback');
       expect(store.updateRun(run.id, { title: 'unsafe' })).toBeUndefined();
+      expect(() => store.adoptFallbackFamily(run.id)).toThrow('in use by another process');
       expect(store.getRun(run.id)?.title).toBe('foreign');
       expect(existsSync(root('cezar'))).toBe(false);
       expect(db.get(run.id)?.data).toContain('foreign');
@@ -259,6 +265,7 @@ describe('project run sources', () => {
     writeFileSync(path, bytes);
     const store = open();
     expect(store.readWorkerResultDiff(parentId, workerId)).toBe('retained patch');
+    expect(store.adoptFallbackFamily(workerId)).toBe(true);
     store.updateRun(workerId, { title: 'explicit write' });
     store.flush();
     expect(store.sourceDataDir(parentId)).toBe(root('cezar'));
@@ -277,10 +284,11 @@ describe('project run sources', () => {
     writeFileSync(join(root('cezar'), 'runs', name, 'result.json'), different ? 'other evidence' : 'source evidence');
     const store = open();
     if (different) {
-      expect(() => store.updateRun(run.id, { title: 'changed' })).toThrow('sidecar already exists');
+      expect(() => store.adoptFallbackFamily(run.id)).toThrow('sidecar already exists');
       expect(store.isFallbackRun(run.id)).toBe(true);
       expect(readFileSync(join(root('cezar'), 'runs', name, 'result.json'), 'utf8')).toBe('other evidence');
     } else {
+      store.adoptFallbackFamily(run.id);
       store.updateRun(run.id, { title: 'changed' });
       store.flush();
       expect(store.isFallbackRun(run.id)).toBe(false);
@@ -311,6 +319,8 @@ describe('project run sources', () => {
     seed('squawk', [parent]);
     const store = open();
     expect(store.listRuns()).toEqual([]);
+    expect(store.adoptFamily(parent.id, { stop: true })).toBeUndefined();
+    expect(store.adoptFallbackFamily(parent.id)).toBe(true);
     expect(store.adoptFamily(parent.id, { stop: true })).toBe(parent.id);
     store.flush();
     expect(store.isFallbackRun(parent.id)).toBe(false);
@@ -337,13 +347,14 @@ describe('project run sources', () => {
     const store = open();
     const transaction = RunDatabase.prototype.transaction;
     vi.spyOn(RunDatabase.prototype, 'transaction').mockImplementation(function (this: RunDatabase, changes) {
-      return transaction.call(this, changes.upserts.length ? { ...changes, beforeCommit: () => { throw new Error('injected failure'); } } : changes);
+      return transaction.call(this, changes.adoptFallback?.length ? { ...changes, beforeCommit: () => { throw new Error('injected failure'); } } : changes);
     });
-    expect(() => store.updateRun(run.id, { title: 'changed' })).toThrow('injected failure');
+    expect(() => store.adoptFallbackFamily(run.id)).toThrow('injected failure');
     expect(store.isFallbackRun(run.id)).toBe(true);
     expect(existsSync(join(root('cezar'), 'runs', `${run.id}.ndjson`))).toBe(false);
     expect(readFileSync(history, 'utf8')).toContain('original');
     vi.restoreAllMocks();
+    store.adoptFallbackFamily(run.id);
     store.updateRun(run.id, { title: 'retry' });
     store.flush();
     expect(store.getRun(run.id)?.title).toBe('retry');

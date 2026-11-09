@@ -3,7 +3,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit'
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
-import type { RunRecord } from '../runs/store.ts';
+import { RunWriteRefusedError, type RunRecord } from '../runs/store.ts';
 import { reconcileConversationState } from './conversations.ts';
 const now = '2026-09-08T20:00:00.000Z';
 /** The store's `getRun` over a fixed set of runs. */
@@ -55,13 +55,15 @@ describe('conversation settlement', () => {
   });
 
 
-  it('keeps fallback participants out of automatic conversation projections', async () => {
+  it('skips a participant the store refuses as fallback and projects the others', async () => {
     const { projectConversationEvents } = await import('./conversations.ts');
     const { root, worker } = records();
     const projected: string[] = [];
-    const store = { isFallbackRun: (id: string) => id === worker.id,
-      getRun: lookupOf([root, worker]), hasProjection: () => false,
-      appendEvent: (id: string) => { projected.push(id); } } as unknown as import('../runs/store.ts').RunStore;
+    const store = { getRun: lookupOf([root, worker]), hasProjection: () => false,
+      appendEvent: (id: string) => {
+        if (id === worker.id) throw new RunWriteRefusedError(id, 'fallback', 'read only under .ai/squawk/');
+        projected.push(id);
+      } } as unknown as import('../runs/store.ts').RunStore;
     projectConversationEvents(store, root);
     expect(projected).toEqual([root.id]);
   });
@@ -73,7 +75,7 @@ describe('conversation settlement', () => {
     const eventsOf = (id: string) => { if (!byRun.has(id)) byRun.set(id, []); return byRun.get(id)!; };
     worker.agentInputs = [{ id: request.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: root.id, text: request.text, createdAt: now,
       deliveredAt: '2026-09-08T20:00:01.000Z', consumedAt: '2026-09-08T20:00:05.000Z' }];
-    const store = { isFallbackRun: () => false, getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
+    const store = { getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
       hasProjection: (id: string, projectionId: string) => eventsOf(id).some(event => event.projectionId === projectionId),
       appendEvent: (id: string, event: Record<string, unknown>) => { eventsOf(id).push(event); } } as unknown as import('../runs/store.ts').RunStore;
     projectConversationEvents(store, root); projectConversationEvents(store, root);

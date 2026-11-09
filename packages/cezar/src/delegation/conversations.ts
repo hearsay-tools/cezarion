@@ -67,9 +67,14 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
   const outcomes = new Map(state.outcomes.map(outcome => [outcome.requestId, outcome]));
   for (const message of state.messages) {
     for (const runId of [message.senderRunId, message.recipientRunId]) {
-      if (store.isFallbackRun(runId) || !store.getRun(runId)) continue;
-      projectDelivery(store, runId, message);
-      projectOutcome(store, runId, outcomes.get(message.id));
+      if (!store.getRun(runId)) continue;
+      try {
+        projectDelivery(store, runId, message);
+        projectOutcome(store, runId, outcomes.get(message.id));
+      } catch (error) {
+        // A peer read from `.ai/squawk/` stays unchanged; its own binary projects its transcript.
+        if (!(error instanceof RunWriteRefusedError && error.ownership === 'fallback')) throw error;
+      }
     }
   }
 }

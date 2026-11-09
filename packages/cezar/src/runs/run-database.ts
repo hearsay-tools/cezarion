@@ -295,6 +295,9 @@ export interface RunDatabaseChanges {
    *  back. The last moment a caller can still refuse what it wrote. What it returns is more
    *  private metadata, written in the same commit. */
   beforeCommit?: () => Readonly<Record<string, string>> | void;
+  /** Explicit user adoption only (`RunStore.adoptFallbackFamily`): copy these fallback families into
+   *  this database first. Without it, a write to a family with a fallback member throws. */
+  adoptFallback?: readonly string[];
 }
 
 /** A family a fenced write touches: held at `generation`, or to `take` in that same transaction if
@@ -674,6 +677,7 @@ export class RunDatabase {
   isFallback(id: string): boolean { return this.project?.isFallback(id) ?? false; }
   get hasProjectSource(): boolean { return this.project !== undefined; }
   hasFallback(id: string): boolean { return this.project?.hasFallback(id) ?? false; }
+  familyHasFallback(family: string): boolean { return this.project?.familyHasFallback(family) ?? false; }
 
   get(id: string): RunRow | undefined {
     const row = this.run(() => this.statements.get.get(id));
@@ -872,7 +876,11 @@ export class RunDatabase {
    */
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
-    if (changes.upserts.length || changes.deletes.length) this.project?.writable();
+    const adopted = new Set(changes.adoptFallback ?? []);
+    // Checked before `writable()`, so a refused write cannot create the legacy database either.
+    this.project?.assertWritable(changes, adopted);
+    this.project?.assertAdoptable(adopted);
+    if (changes.upserts.length || changes.deletes.length || adopted.size) this.project?.writable();
     const revisions = new Map<string, number>();
     const seqs = new Map<string, number>();
     let claims = new Map<string, number>();
@@ -886,7 +894,8 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
-        this.project?.preserveFamilies(changes.upserts.filter(row => this.isFallback(row.id)).map(row => row.parentRunId ?? row.id));
+        this.project?.preserveFamilies(adopted);
+        this.project?.assertWritable(changes, new Set());
         for (const id of changes.deletes) {
           this.reports.deleteRun(id);
           this.statements.delete.run(id);
@@ -990,6 +999,7 @@ export class RunDatabase {
   ): Map<string, number> {
     const taken = new Map<string, number>();
     if (take.length === 0) return taken;
+    this.project?.assertClaimable(take.map(({ family }) => family));
     this.project?.writable();
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');

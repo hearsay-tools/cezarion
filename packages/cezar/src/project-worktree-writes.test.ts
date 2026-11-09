@@ -24,7 +24,7 @@ afterEach(() => { vi.restoreAllMocks(); rmSync(root, { recursive: true, force: t
 const refusal = /\.ai\/squawk.*binary that migrated/;
 const git = (...args: string[]) => execFileSync('git', ['-C', worktree, ...args], { encoding: 'utf8' }).trim();
 
-it('refuses Continue before claiming or copying a fallback family; record-only edits still work', () => {
+it('refuses Continue before claiming or copying a fallback family; record-only edits work after explicit adoption', () => {
   const source = join(root, '.ai/squawk');
   const run = makeRunRecord({ status: RUN_STATUS.done, worktreePath: worktree });
   seedRuns(source, [run]);
@@ -35,6 +35,8 @@ it('refuses Continue before claiming or copying a fallback family; record-only e
     expect(manager.continueRun(run.id)).toEqual({ ok: false, error: expect.stringMatching(refusal) });
     expect(createRunner).not.toHaveBeenCalled();
     expect(existsSync(join(root, '.ai/cezar/runs.db'))).toBe(false);
+    expect(store.updateRun(run.id, { title: 'automatic edit' })).toBeUndefined();
+    expect(store.adoptFallbackFamily(run.id)).toBe(true);
     store.updateRun(run.id, { title: 'record-only edit' });
     store.flush();
     expect(store.getRun(run.id)?.title).toBe('record-only edit');
