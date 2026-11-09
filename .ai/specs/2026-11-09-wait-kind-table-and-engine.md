@@ -12,9 +12,10 @@ Paths are under `packages/cezar/src/` unless they name a package. `run/` means
 ## Problem
 
 A run's waits share one list, but each kind's rules are spread over many files. A new kind
-touched 10 to 30 non-test files under `packages/cezar/src` (process: 10, hearsay-tools/cezarion#1522;
-peer and request: 14, hearsay-tools/cezarion#2033; native subagents: 30,
-hearsay-tools/cezarion#2449). At the baseline:
+touched 8 to 22 files under `packages/cezar/src`, counting neither tests (`*.test.*`) nor
+testkits (`*.testkit.*`) nor fixtures (process: 8, hearsay-tools/cezarion#1522; peer and
+request: 12, hearsay-tools/cezarion#2033; native subagents: 22, hearsay-tools/cezarion#2449).
+At the baseline:
 
 - **28 production files in `packages/cezar/src` branch on a wait's kind** (a `kind === '<kind>'`
   test or an entry literal; a grep with the false positives removed). Three more in
@@ -30,8 +31,10 @@ hearsay-tools/cezarion#2449). At the baseline:
   Only the facade's `#disarmWait` (`workflows/run.ts:355`) calls all three. Every module reaches
   it through its host (`run.ts:200`, `run/compose.ts:274-305`), so no live path skips a watch
   today; the rule is held by wiring, not by one function.
-- **Cancel is written 12 ways** (Table C): seven sites commit, then disarm; two catch a failed
-  commit and skip the disarm; three commit and never disarm, because nothing was armed.
+- **Eleven sites write a `cancelled` outcome, under five policies** (Table C, groups C1-C5): six
+  commit, then disarm, and a failed commit throws before the disarm; one disarms only after a
+  successful commit and logs a failed one; one disarms even when the commit fails; two commit
+  and never disarm, because nothing is armed; one logs a failed commit and never disarms.
 - **12 per-kind rules have more than one copy** (Table D).
 - **Worker waits round-trip through the old engine.** `reconcileWorkerEntry`
   (`delegation/wait.ts:71-79`) converts a list entry to the schema-3 `WorkerWait`
@@ -58,7 +61,11 @@ hearsay-tools/cezarion#2449). At the baseline:
 2. **One wait engine behind RunManager.** `run/wait-engine.ts` executes the rows. It is a module
    under ADR 0053: it never imports `run.ts`, it calls back through a host, and the facade keeps
    its public methods. Operations:
-   - `open`: compare the limit once, withdraw Cezar's human waits, commit, arm the watch, park;
+   - `open`: compare the limit through the one capacity function, withdraw Cezar's human waits,
+     commit, arm the watch, park. The paths differ today in which of these steps they run, in
+     what order, and how they fail (Table E). `open` takes these as per-path options, so 3.1
+     changes no path. A path that compares the limit twice today (the PR wait, before and after
+     its lookup) still compares it twice;
    - `resolve`: budget check, commit the result with its input, queue the wake;
    - `rearm`: arm every open wait of a recovered run;
    - `cancel` and `cancelAll`: commit, then disarm every watch kind;
@@ -69,13 +76,18 @@ hearsay-tools/cezarion#2449). At the baseline:
    stay outside the engine and call it.
 3. **The store checks wait-phase transitions under the ADR 0056 rule.** An undeclared transition
    is written and recorded as a violation. Production logs one warning. The test setup fails the
-   test after it ran (`vitest.setup.ts:177-178` does this for run exits today). Nothing throws in
-   the write path. `WAIT_PHASES` in `run-states.ts` is the declared set.
+   test after it ran (`packages/cezar/vitest.setup.ts:177-178` does this for run exits today).
+   Nothing throws in the write path. `WAIT_PHASES` in `run-states.ts` is the declared set. It
+   declares the transitions the code writes today and lacks at the baseline: open → delivered
+   (an answered human wait, `runs/outcome-commit.ts:156-161`), open → open (a human wait shown,
+   `run/human-waits.ts:81`, `:125`; a subagent refresh, `run/subagent-waits.ts:185`; a worker
+   entry's observations, `run/family-reconciler.ts:296`) and resolved → resolved (a restored
+   worker wake input, `run/wake-admission.ts:293`).
 4. **Unchanged:** the contract package (wire schemas and attention facts stay there; it is
    Node-free, and the clone gate refuses a cross-package clone), the web package, the CLI
    worker-wait output shape (`workerWaitEntryToLegacy`, `packages/contract/src/waits.ts:680`,
    stays as a boundary view under `BACKWARD_COMPATIBILITY.md`), and every error code and message.
-   Only P4 changes what an agent sees.
+   Only slice 4.2 changes behavior.
 
 ## Slices
 
@@ -90,29 +102,29 @@ because its cancel function calls the 1.1 disarm. Hot files: `run/wait-registry.
 `:281-282`, 1.4 at `:279`). The second pull request on a hot file rebases on the first.
 P2 starts when P1 has merged; its slices run in order, because each edits `run/wait-kinds.ts`.
 P3.1 to P3.3 run in order (`run/wait-engine.ts`). P3.4 touches only the store and can run beside
-P2 and P3.1 to P3.3 once 1.2 has merged. P3.5 runs last. P4.1 and P4.2 need 1.2 and edit
-`run/wait-registry.ts`: they land before 3.1 starts or rebase onto it.
+P2 and P3.1 to P3.3 once 1.2 has merged. P3.5 runs last. P4.2 needs 1.2 and edits
+`run/wait-registry.ts`: it lands before 3.1 starts or rebases onto it.
 
 | Slice | Change | Files and regions at the baseline | Removes | Behavior change | Needs merged | Acceptance check |
 |---|---|---|---|---|---|---|
 | P0 | This spec, ADR 0061, glossary entries, pointers in ADR 0021 and the unified-waits spec | docs only | — | none | — | `node .github/scripts/check-citations.cjs` |
 | 1.1 | One function stops every watch kind of a wait: CI watch, timer, CI retry, process watch and the worker resolve retry. The worker retry set moves from `FamilyReconciler` into `WaitWatches`. `RunManager.#disarmWait` calls the one function | `run.ts:355`; `run/wait-watches.ts:112-120`; `run/family-reconciler.ts:57`, `:288-290` | the three-call composite in the facade; `disarmProcessWatch` and `forgetRetry` as separate entry points | none | — | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/worker-wait packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/run/boundary-family-reconciliation.test.ts`; `npm run test:parity` |
-| 1.2 | One capacity check, `assertWaitCapacity(run, waitId?)` in `runs/wait-capacity.ts`, and one typed `WaitCapacityError`. All 9 sites call it. Each site maps the error to today's shape (Table B, column *After 1.2*); the store backstop throws it | `run/wait-registry.ts:104`, `:241`, `:268`, `:298`, `:344`; `workflows/wait-scope.ts:60`; `run/human-waits.ts:65`; `run/turn-settler.ts:463`; `runs/wait-registration-write.ts:17` | 9 `>= WAIT_LIMIT` compares | none | — | `npm test -- packages/cezar/src/workflows/ci-wait-list-registration.test.ts packages/cezar/src/workflows/worker-waits.test.ts packages/cezar/src/workflows/wait-scope.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/delegation/service.test.ts packages/cezar/src/workflows/run/turn-boundary-worker-order.test.ts`; `npm run test:parity` |
+| 1.2 | One capacity function, `assertWaitCapacity(run, waitId?)` in `runs/wait-capacity.ts`, and one typed `WaitCapacityError`. Each of the 9 sites calls it where it compares today. The PR path keeps both compares: before its lookup (`:268`, an early refusal) and after it (`:298`, a registration that filled the list during the lookup). Each site maps the error to today's shape (Table B, column *After 1.2*). The store backstop throws it. Two callers of the backstop map it too: `openWait` to `capacity` with the `registrationGate` warning, and the worker list wait to site 1's `DelegationPolicyError`. Neither mapping is reachable at the baseline, because each path compares the limit in the same synchronous stretch before its commit, so the slice stays behavior-neutral | `run/wait-registry.ts:104`, `:241`, `:268`, `:298`, `:344`; `workflows/wait-scope.ts:60`; `run/human-waits.ts:65`; `run/turn-settler.ts:463`; `runs/wait-registration-write.ts:17` | 9 hand-written `>= WAIT_LIMIT` compares (the 9 call sites stay) | none | — | `npm test -- packages/cezar/src/workflows/ci-wait-list-registration.test.ts packages/cezar/src/workflows/worker-waits.test.ts packages/cezar/src/workflows/wait-scope.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/delegation/service.test.ts packages/cezar/src/workflows/run/turn-boundary-worker-order.test.ts`; `npm run test:parity` |
 | 1.3 | One cancel function, `cancelWaits(runId, ids, opts)` in `run/wait-cancel.ts`: commit `cancelled`, then call the 1.1 disarm for each id; returns the settled waits. `opts.onCommitFailure` is `throw` (default) or `skip` (log `[cez] wait cancellation failed: <message>`, disarm nothing). `opts.superseded` passes through. The 7 commit-then-disarm sites call it (Table C). `cancelOpenWaits` keeps its own policy: it disarms even when the commit fails | `run/wait-registry.ts:182-183`, `:381-382`; `run/run-cancel.ts:129-132`; `run/family-reconciler.ts:210`, `:281-282`; `run/wake-admission.ts:60-62`; `run/subagent-waits.ts:231-240` | 7 hand-written commit-then-disarm pairs | none (see the `run-cancel.ts:131` note in Table C) | 1.1 | `npm test -- packages/cezar/src/workflows/worker-waits packages/cezar/src/workflows/peer-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
 | 1.4 | Reconcile a `worker` entry natively: revision match, `any`/`all`/`one` mode, first observations kept, request outcomes, the deadline (`timeout`) and no deadline for the completion wait. The cases of `delegation/wait.test.ts` move to the native function with the same inputs and expected results | `delegation/wait.ts:1-79`; `run/family-reconciler.ts:10`, `:279`; `delegation/wait.test.ts`; the comment at `runs/legacy-waits.ts:74` | `reconcileWorkerWait`, `reconcileRequestWait`, `legacyWorkerWait`, `observedWorkerEntry`, the `NEVER` sentinel | none | — | `npm test -- packages/cezar/src/delegation/wait.test.ts packages/cezar/src/workflows/worker-wait packages/cezar/src/workflows/request-completion.test.ts`; `npm run test:parity` |
 | 2.1 | Rows gain budget charge, keeps slot, cancellable and `timers_disabled`. The readers read the row. `WAIT_KINDS` moves into the rows; `run-states.ts` imports and re-exports it | `workflows/waits.ts:66-71`, `:278-282`; `run/wake-admission.ts:409-427`; `run/wait-registry.ts:269-271`, `:328-329`, `:380`; `workflows/run-states.ts:261-299` | Table D rows 1-4 | none | P1 | `npm test -- packages/cezar/src/workflows/run-states.test.ts packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
 | 2.2 | Rows gain registration facts: answer kind, deadline rule, duplicate check with its defaults, entry builder | `workflows/waits.ts:38-41`, `:119-123`, `:132-161`, `:291-311`; `run/wait-registration.ts:12`, `:16`; `run/wait-registration-tool.ts:10`; `workflows/wait-scope.ts:58-64`, `:100-102`; `run/wait-registry.ts:107-109`, `:124`, `:131-133`, `:242`; `run/turn-settler.ts:467-470`; `run/subagent-waits.ts:173-174`; `run/human-waits.ts:66-67`; `run/run-recovery.ts:264`; `run/run-cancel.ts:119-121`; `delegation/service.ts:670` | Table D rows 6-8, 11, 12 | none | 2.1 | `npm test -- packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/ci-wait-registration.test.ts packages/cezar/src/workflows/wait-scope.test.ts packages/cezar/src/workflows/worker-waits.test.ts`; `npm run test:parity` |
 | 2.3 | Rows gain the watch and the default resolve result. `armWait` dispatches through the row | `run/wait-watches.ts:48-79`; `workflows/waits.ts:315-328` | the `armWait` kind chain; the `settledWaitEntry` kind chain; Table D row 9 | none | 2.2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
 | 2.4 | Rows gain their text: summary, result text, footer item, cap note and delivery label. Every string stays byte-identical | `workflows/waits.ts:98-109`, `:177-192`, `:260-269`, `:281`; `run/wake-admission.ts:63-65`; `run/input-delivery.ts:586` | Table D rows 5 and 10 (text) | none | 2.3 | `npm test -- packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
-| 3.1 | `WaitEngine.open` serves all 9 registration paths: `cezar_wait` (pr, timer, process, worker, request, peer), `cez worker wait`, the completion wait, `cez message wait --peer`, `cezar_ask`, the Cezar human alias, the monitoring timer, the subagent wait and the recovered ask. Each path keeps its refusal shape and its failure policy (Table B) | `run/wait-registry.ts:79-138`, `:163-173`, `:228-245`, `:253-364`; `run/human-waits.ts:59-71`; `run/turn-settler.ts:436-475`; `run/subagent-waits.ts:172-178`; `run/run-recovery.ts:257-270`; `run/compose.ts:278-305` | `openWait` and the open code in 4 other modules | none | P2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/run/turn-settler.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
+| 3.1 | `WaitEngine.open` serves all 9 registration paths: `cezar_wait` (pr, timer, process, worker, request, peer), `cez worker wait`, the completion wait, `cez message wait --peer`, `cezar_ask`, the Cezar human alias, the monitoring timer, the subagent wait and the recovered ask. Each path keeps its refusal shape (Table B) and its open steps, their order and its failure policy (Table E), passed to `open` as per-path options | `run/wait-registry.ts:79-138`, `:163-173`, `:228-245`, `:253-364`; `run/human-waits.ts:59-71`; `run/turn-settler.ts:436-475`; `run/subagent-waits.ts:172-178`; `run/run-recovery.ts:257-270`; `run/compose.ts:278-305` | `openWait` and the open code in 4 other modules | none | P2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/run/turn-settler.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
 | 3.2 | `resolve` (with the CI and worker retries and the budget cap), `rearm` and `dispose` move into the engine | `run/wait-registry.ts:186-200`, `:390-409`; `run/wait-watches.ts:165-176`; `run/run-recovery.ts:222`, `:229`, `:337-340`, `:414-424`; `workflows/run.ts:260-269` | resolve and re-arm code outside the engine | none | 3.1 | `npm test -- packages/cezar/src/workflows/waits-wake.test.ts packages/cezar/src/workflows/worker-reboot packages/cezar/src/workflows/worker-restart`; `npm run test:parity` |
 | 3.3 | `cancel`, `cancelAll` and `forgetRun` move into the engine. Every row of Table C calls one of them. `WaitRegistry` keeps only request validation (scope, gate, replay, refusals) | `run/wait-cancel.ts`; `run/wake-admission.ts:347-375`; `run/human-waits.ts:132-137`; `run/step-loop.ts:411-416`; `run/family-reconciler.ts:266`; `run/wait-registry.ts` | `cancelOpenWaits`, `disarmRunWaits` and `run/wait-cancel.ts` outside the engine | none | 3.2 | `npm test -- packages/cezar/src/workflows/waits-wake.test.ts packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/run-settlement.test.ts`; `npm run test:parity` |
-| 3.4 | The store checks each wait write against `WAIT_PHASES` (Decision 3). A new entry must be `open`; a known entry may move only along a declared transition; an id found in `lastWaits` is a settled wait and records a violation. The slice also declares the transitions the code writes today and `WAIT_PHASES` lacks (§ Open decisions) | `runs/wait-registration-write.ts:11-22`; `runs/outcome-commit.ts:118-172`; `runs/store.ts:1773-1800`; `workflows/run-states.ts:302-313`; `vitest.setup.ts:177-178` | the unchecked upsert | tests only: an undeclared transition writes, then fails the test | 1.2 | `npm test -- packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/runs/outcome-commit.test.ts packages/cezar/src/workflows/run-states.test.ts`; `npm run test:parity` |
+| 3.4 | The store checks each wait write against `WAIT_PHASES` (Decision 3). A new entry must be `open`; a known entry may move only along a declared transition; an id found in `lastWaits` is a settled wait and records a violation. `WAIT_PHASES` first declares the transitions the code writes today (Decision 3). The slice deletes `RunStore.commitCiWait` (`runs/store.ts:1798-1800`): no production code calls it, and it creates a new `resolved` entry. Its test callers migrate: `runs/ci-wait-store.test.ts:32-65` and `:97` call `commitWait` with a `pr` entry, and the cases that create a resolved entry (`:43-52`, `:54-65`) commit it `open` first, then `resolved`; `workflows/autonomous-nudge-guards.test.ts:136` seeds its `ci-wait` case with `commitWait` and an open `pr` entry | `runs/wait-registration-write.ts:11-22`; `runs/outcome-commit.ts:118-172`; `runs/store.ts:1773-1800`; `workflows/run-states.ts:302-313`; `packages/cezar/vitest.setup.ts:177-178`; `runs/ci-wait-store.test.ts`; `workflows/autonomous-nudge-guards.test.ts:136-139` | the unchecked upsert; `commitCiWait` | tests only: an undeclared transition writes, then fails the test | 1.2 | `npm test -- packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/runs/outcome-commit.test.ts packages/cezar/src/runs/ci-wait-store.test.ts packages/cezar/src/workflows/autonomous-nudge-guards.test.ts packages/cezar/src/workflows/run-states.test.ts`; `npm run test:parity` |
 | 3.5 | A lint rule: no wait-kind literal in production code outside an allow-list: the engine, the table, the watch adapters, the legacy-waits upgrade, the boundary views, `packages/contract` and `packages/web` | new rule in `lint/` or `.ai/ast-grep/rules/` | — | none | 3.3 | `npm run lint`; the rule's own test |
-| 4.1 | The store backstop's limit refusal reaches the agent as `capacity`, not `persistence` | `run/wait-registry.ts:358-359` (in the engine after 3.1) | — | yes: the code and message an agent sees. A red test first | 1.2 | the new red test; `npm run test:parity` |
 | 4.2 | `registerCompletionWait` handles the limit refusal instead of throwing out of the turn end | `run/wait-registry.ts:128-138`; its caller in `run/turn-settler.ts` | — | yes: a full wait list no longer throws out of the turn end. A red test first | 1.2 | the new red test; `npm run test:parity` |
 
-**Exit on integrated `main`:** the limit is compared in one function; every cancel goes through
+**Exit on integrated `main`:** one function compares the limit, called at each site that compares
+today (the PR path twice, before and after its lookup); every cancel goes through
 the engine; the kind-literal rule passes with about 8 production files of `packages/cezar` on its
 allow-list (28 at the baseline); the inbound legacy round trip is deleted;
 `npm run test:parity` and CI pass.
@@ -162,7 +174,7 @@ and the lifecycle research. The engine keeps each one:
 
 | Operation | Order | Today |
 |---|---|---|
-| open | withdraw Cezar's human waits → commit (with the registration receipt) → arm → park when the run is at a boundary or parked. A watch never resolves a wait that is not on disk | `run/wait-registry.ts:356-364` |
+| open | each registration path runs the steps Table E lists for it, in today's order. The common order is compare the limit → withdraw Cezar's human waits → commit (with the registration receipt when there is one) → arm → park when the run is at a boundary or parked. The human alias and the recovered ask withdraw first. A path that commits and arms commits first, so a watch never resolves a wait that is not on disk | `run/wait-registry.ts:356-364`; Table E |
 | resolve | the wait is still open → budget check on the resolved entry → commit the result with its input → queue the wake; a failed queue arms the admission retry | `run/wait-registry.ts:390-409` |
 | park | human wait first, then clear the idle timer, then publish the intent; `releaseSlot` last | `run/wake-admission.ts:169` onward |
 | finish | cancel open waits first, then persist the root finish request | `run/run-finish.ts:170-173` |
@@ -212,26 +224,62 @@ peer wait needs messaging on (`run/wait-registry.ts:171`); the process wait's PI
 | 1 | `run/wait-registry.ts:104` | worker and request list wait | `DelegationPolicyError('capacity_limit', 'This run already has 16 open waits; cancel one first')`, no warn | CLI `cez worker wait`, `cez message wait --request`: `capacity_limit` with that message. `cezar_wait`: `delegationWaitRefusal` maps it to `capacity` (`wait-scope.ts:115`), message 60 | the site maps `WaitCapacityError` to the same `DelegationPolicyError` |
 | 2 | `workflows/wait-scope.ts:60` | peer wait (`peerWaitEntry`) | same `DelegationPolicyError`, no warn | CLI `cez message wait --peer`: `capacity_limit`. `cezar_wait`: `capacity`, message 60 | as row 1 |
 | 3 | `run/wait-registry.ts:241` | `cezar_ask` | `Error{code:'capacity'}` through `registrationGate`; warn | `capacity`, message 77 (`run/cezar-tools.ts:59` maps by code) | the site maps to the same coded error and warn |
-| 4 | `run/wait-registry.ts:268` | timer and PR, before the lookup | as row 3 | `capacity`, message 60 (`run/wait-registration-tool.ts` maps by code) | as row 3 |
-| 5 | `run/wait-registry.ts:298` | PR, after the lookup | as row 3 | as row 4 | as row 3 |
+| 4 | `run/wait-registry.ts:268` | timer and PR, before the lookup: an early refusal | as row 3 | `capacity`, message 60 (`run/wait-registration-tool.ts` maps by code) | as row 3; the compare stays |
+| 5 | `run/wait-registry.ts:298` | PR, after the lookup: a registration that filled the list during the lookup | as row 3 | as row 4 | as row 3; the compare stays, so the PR path compares twice |
 | 6 | `run/wait-registry.ts:344` | process wait | `Error{code:'capacity'}` through a local `refuse`; no warn | as row 4 | the coded error, no warn |
 | 7 | `run/human-waits.ts:65` | `openHumanAlias` | silent: returns the open human wait, or undefined | nothing | stays silent |
 | 8 | `run/turn-settler.ts:463` | monitoring and `ScheduleWakeup` timer | silent `return` | nothing | stays silent |
 | 9 | `runs/wait-registration-write.ts:17` | store backstop on every `commitWait` of a new open entry | plain `Error('open wait limit reached (16)')` | depends on the caller, below | throws `WaitCapacityError` with the same message |
 
-Callers that reach row 9 and what they do with it today; 1.2 keeps each:
+Callers that reach row 9. "Unreachable" means the path compares the limit in the same
+synchronous stretch before its commit, so the backstop cannot refuse once that compare passed:
 
-| Caller | Pre-check | On the backstop's refusal |
-|---|---|---|
-| `openWait` (`run/wait-registry.ts:358-359`): rows 2-6 | yes, in the same synchronous stretch | code `persistence` (P4.1 changes this) |
-| worker list wait (`run/wait-registry.ts:111`) | yes (row 1) | the error escapes: `cezar_wait` answers `outcome_unknown` |
-| `registerCompletionWait` (`:134`) | none | the error escapes the turn end (P4.2 changes this) |
-| subagent wait (`run/subagent-waits.ts:175-176`) | none | logged; the turn end falls back to the timer alias |
-| recovered ask (`run/run-recovery.ts:263-268`) | none | logged; returns false |
-| human alias (`run/human-waits.ts:68-69`) | row 7 | logged; returns undefined |
-| monitoring timer (`run/turn-settler.ts:472-473`) | row 8 | logged; returns |
+| Caller | Pre-check | On the backstop's refusal today | After 1.2 |
+|---|---|---|---|
+| `openWait` (`run/wait-registry.ts:358-359`): rows 2-6 | yes, in the same synchronous stretch | code `persistence`; unreachable | maps `WaitCapacityError` to code `capacity` with the `registrationGate` warning; other errors keep `persistence` |
+| worker list wait (`run/wait-registry.ts:111`) | yes (row 1) | the error escapes: `cezar_wait` answers `outcome_unknown`; unreachable | maps `WaitCapacityError` to row 1's `DelegationPolicyError` |
+| `registerCompletionWait` (`:134`) | none | the error escapes the turn end | unchanged; 4.2 changes this |
+| subagent wait (`run/subagent-waits.ts:175-176`) | none | logged; the turn end falls back to the timer alias | unchanged; the log text keeps the message |
+| recovered ask (`run/run-recovery.ts:263-268`) | none | logged; returns false | unchanged |
+| human alias (`run/human-waits.ts:68-69`) | row 7 | logged; returns undefined | unchanged |
+| monitoring timer (`run/turn-settler.ts:472-473`) | row 8 | logged; returns | unchanged |
+
+### Table E: the steps each registration path runs to open a wait
+
+Opening is not one sequence today. Each path below runs its own subset of the steps, in its own
+order, with its own failure policy. `open` takes these as per-path options; 3.1 keeps every cell.
+*Compare* is the limit compare (Table B). *Withdraw* cancels Cezar's open human waits
+(`run/human-waits.ts:132-137`). *Receipt* is the `cezar_wait` registration receipt
+(`operation_id`). *Park now* parks when the run is at a turn boundary or parked
+(`run/wait-registry.ts:117`, `:361`).
+
+| # | Path | Compare | Withdraw | Commit | Arm | Park | Commit failure |
+|---|---|---|---|---|---|---|---|
+| 1 | `cezar_wait` kinds `pr`, `timer`, `process` (`run/wait-registry.ts:253-353` → `openWait` `:356-364`) | yes (`:268` and `:298` for a PR, before and after its lookup; `:344` for a process) | yes, after the compare (`:357`) | with receipt (`:358`) | yes (`:360`); a process whose PID is gone is disarmed and resolved at once (`:348-351`) | now | code `persistence` (`:359`) |
+| 2 | worker and request list wait: `cez worker wait`, `cez message wait --request`, `cezar_wait` kinds `worker`, `request` (`:92-119`) | yes, after a family reconcile (`:94`, `:104`) | yes, after the compare (`:110`) | with receipt (`:111`) | through the family reconcile, which arms or resolves it (`:113`) | now, if the wait is still listed (`:117`) | throws to the caller |
+| 3 | completion wait (`:128-138`) | no | no | no receipt (`:134`) | through the family reconcile (`:135`) | left to turn settlement (`run/turn-settler.ts:321-322`) | throws out of the turn end |
+| 4 | peer wait: `cez message wait --peer`, `cezar_wait` kind `peer` (`:163-173`) | yes, in `peerWaitEntry` (`workflows/wait-scope.ts:60`) | yes, in `openWait` | with receipt | yes; resolves at once when the peer already wrote or settled | now | code `persistence` |
+| 5 | `cezar_ask` (`:228-245`) | only when no agent question is open (`:241`) | yes, in `openWait` | no receipt | nothing to arm | now | code `persistence` |
+| 6 | Cezar human alias (`run/human-waits.ts:59-71`) | yes, after the withdraw (`:65`) | only for an alias that is the agent's (`via` not `budget`, `no-wait` or `completion`), before the compare (`:62-63`) | no receipt (`:68`) | nothing to arm | left to the caller (`parkForUser`) | logged; returns undefined |
+| 7 | monitoring and `ScheduleWakeup` timer (`run/turn-settler.ts:436-475`) | yes (`:463`) | yes, after the compare (`:471`) | no receipt (`:472`) | yes (`:474`) | left to turn settlement | logged; returns |
+| 8 | subagent wait (`run/subagent-waits.ts:172-178`) | no | no | no receipt (`:175`) | yes (`:177`) | left to turn settlement | logged; the turn end falls back to the timer alias |
+| 9 | recovered ask (`run/run-recovery.ts:257-270`) | no | yes, first (`:261`) | no receipt (`:264`) | nothing to arm | through recovery (`parkRecoveredRun`, `:305`) | logged; returns false |
 
 ### Table C: cancel paths
+
+Eleven sites write a `cancelled` outcome through `RunStore.commitOutcome`. They fall into five
+disjoint policy groups:
+
+- **C1, commit then disarm; a failed commit throws before the disarm** (6): rows 1, 2, 3, 10, 11
+  and 13.
+- **C2, disarm only after a successful commit; a failed commit is logged** (1): row 14.
+- **C3, disarm even when the commit fails; a failed commit is logged** (1): `cancelOpenWaits`
+  (`run/wake-admission.ts:356`), reached by rows 4-8.
+- **C4, commit only; a failed commit throws; nothing is armed** (2): rows 12 and 16.
+- **C5, commit only; a failed commit is logged; nothing is armed** (1): row 15.
+
+Slice 1.3 serves C1 and C2, the seven commit-then-disarm sites. Row 9 writes nothing: the row
+is gone.
 
 | # | Path | Site | Today | Engine call (3.3) |
 |---|---|---|---|---|
@@ -295,18 +343,6 @@ The code wins. This spec changes none of them; a row records what the code does.
 
 ## Open decisions
 
-- **Undeclared transitions the code writes today (3.4).** `WAIT_PHASES` (`run-states.ts:302-313`)
-  declares open → resolved, open → cancelled, resolved → delivered and resolved → cancelled. The
-  code also writes open → delivered (an answered human wait, `runs/outcome-commit.ts:156-161`)
-  and same-phase writes: open → open (a human wait shown, `run/human-waits.ts:81`, `:125`; a
-  subagent refresh, `run/subagent-waits.ts:185`; a worker entry's observations,
-  `run/family-reconciler.ts:296`) and resolved → resolved (a restored worker wake input,
-  `run/wake-admission.ts:293`). Recommendation: 3.4 declares them, so the check records only new
-  transitions.
-- **P4.1 has no production path at the baseline.** Every `openWait` caller compares the limit in
-  the same synchronous stretch before the commit, so the store backstop cannot refuse after the
-  pre-check passed. P4.1's red test needs a store that refuses, or P4.1 becomes the `openWait` row
-  of 1.2's mapping. The owner decides.
 - **Refusing an undeclared wait-phase transition in production** (ADR 0056): after the 3.4
   warnings have run on the dev channel.
 

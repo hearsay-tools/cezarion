@@ -7,17 +7,20 @@ the run's slot, whether its wake costs budget, whether the agent can cancel it, 
 built, what watches it, its default result and its text. The table type requires a row for every
 kind, so a new kind fails typecheck until its row exists.
 
-One **wait engine** executes the rows. It opens a wait (one limit check, withdraw Cezar's human
-waits, commit, arm, park), resolves it (budget check, commit with its input, queue the wake),
+One **wait engine** executes the rows. It opens a wait: it compares the open-wait limit through
+one function, withdraws Cezar's human waits, commits, arms and parks. Each registration path keeps
+the steps it runs today, their order and its failure policy, as options of the open operation.
+The engine resolves a wait (budget check, commit with its input, queue the wake),
 re-arms it after a restart, cancels it (commit, then disarm every watch kind) and forgets a
 deleted run's watches. In `packages/cezar`, only the engine, the table, the watch adapters, the
 read-time upgrade of old rows and the boundary views branch on a wait's kind; other code asks the
 engine.
 
 Before this record, each kind's rules were spread over the files that use them. A new kind
-touched 10 to 30 non-test files (hearsay-tools/cezarion#1522, hearsay-tools/cezarion#2033,
-hearsay-tools/cezarion#2449). The open-wait limit was compared at nine sites with four refusal
-shapes, and cancel was written twelve ways. `WAIT_KINDS` in `workflows/run-states.ts` already
+touched 8 to 22 files, counting neither tests, testkits nor fixtures
+(hearsay-tools/cezarion#1522, hearsay-tools/cezarion#2033, hearsay-tools/cezarion#2449). The
+open-wait limit was compared at nine sites with four refusal shapes. Eleven sites wrote a
+`cancelled` outcome under five disarm policies. `WAIT_KINDS` in `workflows/run-states.ts` already
 listed some rules per kind, but nothing executed it.
 
 ## Consequences
@@ -34,7 +37,7 @@ a warning, and the test setup fails the test. Nothing throws in the write path.
 The contract package keeps the wire schemas and the attention facts: it stays Node-free and
 shares no code with the table. The web package does not change. The CLI keeps the legacy
 `WorkerWait` answer shape as a boundary view (`BACKWARD_COMPATIBILITY.md`). Every refusal code and
-message stays as it was. The spec's P4 slices change two refusals, each in its own pull request.
+message stays as it was. One P4 slice changes one refusal, in its own pull request.
 
 ADR 0021 still holds: waits are durable, an outcome commits with what it depends on, and
 `RunManager` owns waits at its public surface. ADR 0053 and ADR 0056 still hold.

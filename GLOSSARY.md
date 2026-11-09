@@ -101,8 +101,8 @@ _Avoid_: wait type, `request` or `merge` as a kind
 ## Wait engine
 
 The run module that executes the wait-kind rows: it opens, resolves, re-arms
-and cancels waits. Opening checks the open-wait limit once, then commits, arms
-and parks. Cancelling commits, then disarms every watch the wait holds. Wake
+and cancels waits. Opening checks the open-wait limit through one function, then
+commits, arms and parks, with the steps each registration path runs. Cancelling commits, then disarms every watch the wait holds. Wake
 admission and the wake budget call the engine; they are not part of it. In the
 service, only the engine, the table, the watch adapters, the boundary views and
 the read-time upgrade of old rows branch on a wait's kind.
