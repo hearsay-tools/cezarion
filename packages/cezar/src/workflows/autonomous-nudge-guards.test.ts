@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession, AgentEvent, AgentRunResult } from '../core/agent-runner.ts';
-import { RunStore } from '../runs/store.ts';
+import { ciWaitEntry, RunStore } from '../runs/store.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -133,10 +133,10 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'worker-wait': store.commitWait(id, { kind: WAIT_KIND.worker, id: randomUUID(), source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: new Date().toISOString(),
         deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: WAIT_PHASE.open, turnId: 'turn', mode: 'all',
         workerIds: [randomUUID()], revisions: [], outcomes: [] }); break;
-      case 'ci-wait': store.commitCiWait(id, {
+      case 'ci-wait': store.commitWait(id, ciWaitEntry({
         id: randomUUID(), prUrl: 'https://github.com/acme/repo/pull/1', repository: 'acme/repo', prNumber: 1, headSha: 'a'.repeat(40),
         generation: 'generation', turnId: 'turn', timeoutSeconds: 60, until: 'checks' as const, wakeOnConflict: true, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered',
-      }); break;
+      })); break;
       case 'root-finish': blocked.mockReturnValue(true); store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]); break;
     }
   }

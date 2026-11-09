@@ -3,7 +3,7 @@ import { AttachmentWriter } from './run/attachment-writer.ts';
 import { QueuedInput } from './run/queued-input.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { TrackedWork } from './run/tracked-work.ts';
-import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
+import { seedWaits, setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { runnerHook, run, GIT_ID, waitForProduct, TURN_TEXT, setupMonitoringFixture, FINISHED_RUN_STATUSES } from './run-fixture.testkit.ts';
 import { beginUsageInvocation, recordUsageUiEvent } from './run/usage-accounting.ts';
 import { createActiveRun } from './active-run.ts';
@@ -1203,7 +1203,7 @@ describe('RunManager waiting recovery', () => {
     fixture.currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
     fixture.manager.dispose();
-    fixture.store.updateRun(record.id, { waits: undefined });
+    seedWaits(fixture.store, record.id, { waits: undefined });
     const ask = fixture.store.appendEvent(record.id, { type: 'ask.requested', requestId: 'legacy-question',
       questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
@@ -1222,7 +1222,7 @@ describe('RunManager waiting recovery', () => {
     fixture.manager.dispose();
     const cezar = { id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'],
       registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'no-wait' };
-    fixture.store.updateRun(record.id, { waits: [cezar] });
+    seedWaits(fixture.store, record.id, { waits: [cezar] });
     const ask = fixture.store.appendEvent(record.id, { type: 'ask.requested', requestId: 'crashed-question',
       questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
@@ -1243,7 +1243,7 @@ describe('RunManager waiting recovery', () => {
     fixture.store.appendEvent(record.id, { type: 'human-input-delivered', askSeq: ask.seq });
     const legacy = { id: '00000000-0000-4000-8000-0000000000aa', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA['ask-line'],
       registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'legacy' };
-    fixture.store.updateRun(record.id, { waits: [legacy] });
+    seedWaits(fixture.store, record.id, { waits: [legacy] });
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();
     expect(fixture.store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? []).toEqual([]);
@@ -1258,7 +1258,7 @@ describe('RunManager waiting recovery', () => {
     fixture.manager.dispose();
     const legacy = { id: '00000000-0000-4000-8000-0000000000ab', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA['ask-line'],
       registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'legacy' };
-    fixture.store.updateRun(record.id, { waits: [legacy] });
+    seedWaits(fixture.store, record.id, { waits: [legacy] });
     const unreadable = vi.spyOn(fixture.store, 'knownTranscriptFacts').mockImplementation(() => undefined);
     fixture.manager = createFixtureManager(fixture.store, fixture.repoRoot);
     await fixture.manager.recover();

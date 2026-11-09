@@ -1,4 +1,4 @@
-import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { seedWaits, setRunStatus } from '../runs/run-store.testkit.ts';
 import {
   RUN_STATUS,
   WAIT_KIND,
@@ -36,8 +36,12 @@ describe('cez task watching', () => {
   // run parks, so no poll reads a `waiting` run without it.
   const parkOn = (id: string, wait: Wait, over: Partial<RunRecord> = {}) => {
     harness.store.commitWait(id, wait);
+    const { waits, lastWaits, ...extras } = over;
+    if ('waits' in over || 'lastWaits' in over) seedWaits(harness.store, id, {
+      ...('waits' in over ? { waits } : {}), ...('lastWaits' in over ? { lastWaits } : {}),
+    });
     {
-      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, ...over };
+      const { status: fixtureStatus, ...fixtureExtras }: NonNullable<Parameters<typeof setRunStatus>[3]> & { status: Parameters<typeof setRunStatus>[2] } = { status: RUN_STATUS.waiting, ...extras };
       setRunStatus(harness.store, id, fixtureStatus, fixtureExtras);
     }
   };

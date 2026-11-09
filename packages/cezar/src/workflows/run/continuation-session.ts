@@ -46,12 +46,12 @@ import { existsSync } from 'node:fs';
 import type { RunRecord, StepState } from '../../runs/store.ts';
 import { rematerializeReclaimedWorktree } from '../../runs/retention.ts';
 import { ownedContinuationWorkspace } from './run-workspace.ts';
-import type { RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId, RunPatch } from '../../runs/run-exits.ts';
 import type { RunLine } from './run-line.ts';
 import type { RunModuleContext, WorkerDelegationRecord } from './types.ts';
 
 export interface ContinuationSessionHost {
-  move(runId: string, exit: RunExitId, patch?: Partial<RunRecord>): void;
+  move(runId: string, exit: RunExitId, patch?: RunPatch): void;
   dropActive(runId: string): void;
   repositoryRootLockDisabled(): boolean;
   beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void;

@@ -1,3 +1,4 @@
+import { seedWaits } from '../../runs/run-store.testkit.ts';
 import type { RunLine } from './run-line.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeHumanWait, makeTimerWait, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -35,7 +36,7 @@ it('last native child clears its held park before the release adapter runs', () 
 
 it('wait park records the child hold before durable park then pool admission wake and release', () => {
   const f = boundaryOrderFixture();
-  f.store.updateRun(f.run.id, { waits: [makeTimerWait()] });
+  seedWaits(f.store, f.run.id, { waits: [makeTimerWait()] });
   type Host = ConstructorParameters<typeof WakeAdmission>[1];
   const admission = new WakeAdmission(f.context, unused<Host>('wake host', {
     line: f.line, move: (...args) => { f.log.push('move'); return f.store.move(...args); },
@@ -48,7 +49,7 @@ it('wait park records the child hold before durable park then pool admission wak
 it('an existing human question refreshes its fact before surfacing and routing the alias', () => {
   const f = boundaryOrderFixture();
   f.store.appendEvent(f.run.id, { type: 'ask.requested', requestId: 'question', questions: [{ header: 'Choice', question: 'Next?' }] });
-  const wait = makeHumanWait({ source: WAIT_SOURCE.agent, askSeq: undefined }); f.store.updateRun(f.run.id, { waits: [wait] });
+  const wait = makeHumanWait({ source: WAIT_SOURCE.agent, askSeq: undefined }); seedWaits(f.store, f.run.id, { waits: [wait] });
   const mark = f.humanWaits.markHumanWaitSurfaced.bind(f.humanWaits);
   vi.spyOn(f.humanWaits, 'markHumanWaitSurfaced').mockImplementation((...args) => { f.log.push('surface'); mark(...args); });
   f.log.length = 0; f.humanWaits.surfaceHumanWait(f.run.id, f.state, wait);
