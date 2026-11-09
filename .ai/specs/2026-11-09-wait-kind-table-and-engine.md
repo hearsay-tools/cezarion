@@ -18,8 +18,9 @@ request: 12, hearsay-tools/cezarion#2033; native subagents: 22, hearsay-tools/ce
 At the baseline:
 
 - **28 production files in `packages/cezar/src` branch on a wait's kind** (a `kind === '<kind>'`
-  test or an entry literal; a grep with the false positives removed). Three more in
-  `packages/contract` and eight in `packages/web` stay out of scope.
+  test, a `case` label or an entry literal). Table F lists each file and the slice that removes
+  its branch, or its allow-list entry. Three more in `packages/contract` and eight in
+  `packages/web` stay out of scope.
 - **One per-kind table exists, and nothing executes it.** `WAIT_KINDS` (`workflows/run-states.ts:271-299`)
   holds deadline, keeps-slot, resolves and cancels per kind. Only `run-states.test.ts:48` reads it.
   `WAIT_PHASES` (`run-states.ts:302-313`) has no reader at all.
@@ -101,6 +102,8 @@ because its cancel function calls the 1.1 disarm. Hot files: `run/wait-registry.
 1.3, different regions) and `run/family-reconciler.ts` (1.1 at `:57`, 1.3 at `:210` and
 `:281-282`, 1.4 at `:279`). The second pull request on a hot file rebases on the first.
 P2 starts when P1 has merged; its slices run in order, because each edits `run/wait-kinds.ts`.
+2.5 touches many files (Table F); it lands before 3.1 starts, so 3.1 moves code that already
+reads the rows.
 P3.1 to P3.3 run in order (`run/wait-engine.ts`). P3.4 touches only the store and can run beside
 P2 and P3.1 to P3.3 once 1.2 has merged. P3.5 runs last. P4.2 needs 1.2 and edits
 `run/wait-registry.ts`: it lands before 3.1 starts or rebases onto it.
@@ -112,21 +115,22 @@ P2 and P3.1 to P3.3 once 1.2 has merged. P3.5 runs last. P4.2 needs 1.2 and edit
 | 1.2 | One capacity function, `assertWaitCapacity(run, waitId?)` in `runs/wait-capacity.ts`, and one typed `WaitCapacityError`. Each of the 9 sites calls it where it compares today. The PR path keeps both compares: before its lookup (`:268`, an early refusal) and after it (`:298`, a registration that filled the list during the lookup). Each site maps the error to today's shape (Table B, column *After 1.2*). The store backstop throws it. Two callers of the backstop map it too: `openWait` to `capacity` with the `registrationGate` warning, and the worker list wait to site 1's `DelegationPolicyError`. Neither mapping is reachable at the baseline, because each path compares the limit in the same synchronous stretch before its commit, so the slice stays behavior-neutral | `run/wait-registry.ts:104`, `:241`, `:268`, `:298`, `:344`; `workflows/wait-scope.ts:60`; `run/human-waits.ts:65`; `run/turn-settler.ts:463`; `runs/wait-registration-write.ts:17` | 9 hand-written `>= WAIT_LIMIT` compares (the 9 call sites stay) | none | — | `npm test -- packages/cezar/src/workflows/ci-wait-list-registration.test.ts packages/cezar/src/workflows/worker-waits.test.ts packages/cezar/src/workflows/wait-scope.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/delegation/service.test.ts packages/cezar/src/workflows/run/turn-boundary-worker-order.test.ts`; `npm run test:parity` |
 | 1.3 | One cancel function, `cancelWaits(runId, ids, opts)` in `run/wait-cancel.ts`: commit `cancelled`, then call the 1.1 disarm for each id; returns the settled waits. `opts.onCommitFailure` is `throw` (default) or `skip` (log `[cez] wait cancellation failed: <message>`, disarm nothing). `opts.superseded` passes through. The 7 commit-then-disarm sites call it (Table C). `cancelOpenWaits` keeps its own policy: it disarms even when the commit fails | `run/wait-registry.ts:182-183`, `:381-382`; `run/run-cancel.ts:129-132`; `run/family-reconciler.ts:210`, `:281-282`; `run/wake-admission.ts:60-62`; `run/subagent-waits.ts:231-240` | 7 hand-written commit-then-disarm pairs | none (see the `run-cancel.ts:131` note in Table C) | 1.1 | `npm test -- packages/cezar/src/workflows/worker-waits packages/cezar/src/workflows/peer-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
 | 1.4 | Reconcile a `worker` entry natively: revision match, `any`/`all`/`one` mode, first observations kept, request outcomes, the deadline (`timeout`) and no deadline for the completion wait. The cases of `delegation/wait.test.ts` move to the native function with the same inputs and expected results | `delegation/wait.ts:1-79`; `run/family-reconciler.ts:10`, `:279`; `delegation/wait.test.ts`; the comment at `runs/legacy-waits.ts:74` | `reconcileWorkerWait`, `reconcileRequestWait`, `legacyWorkerWait`, `observedWorkerEntry`, the `NEVER` sentinel | none | — | `npm test -- packages/cezar/src/delegation/wait.test.ts packages/cezar/src/workflows/worker-wait packages/cezar/src/workflows/request-completion.test.ts`; `npm run test:parity` |
-| 2.1 | Rows gain budget charge, keeps slot, cancellable and `timers_disabled`. The readers read the row. `WAIT_KINDS` moves into the rows; `run-states.ts` imports and re-exports it | `workflows/waits.ts:66-71`, `:278-282`; `run/wake-admission.ts:409-427`; `run/wait-registry.ts:269-271`, `:328-329`, `:380`; `workflows/run-states.ts:261-299` | Table D rows 1-4 | none | P1 | `npm test -- packages/cezar/src/workflows/run-states.test.ts packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
-| 2.2 | Rows gain registration facts: answer kind, deadline rule, duplicate check with its defaults, entry builder | `workflows/waits.ts:38-41`, `:119-123`, `:132-161`, `:291-311`; `run/wait-registration.ts:12`, `:16`; `run/wait-registration-tool.ts:10`; `workflows/wait-scope.ts:58-64`, `:100-102`; `run/wait-registry.ts:107-109`, `:124`, `:131-133`, `:242`; `run/turn-settler.ts:467-470`; `run/subagent-waits.ts:173-174`; `run/human-waits.ts:66-67`; `run/run-recovery.ts:264`; `run/run-cancel.ts:119-121`; `delegation/service.ts:670` | Table D rows 6-8, 11, 12 | none | 2.1 | `npm test -- packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/ci-wait-registration.test.ts packages/cezar/src/workflows/wait-scope.test.ts packages/cezar/src/workflows/worker-waits.test.ts`; `npm run test:parity` |
-| 2.3 | Rows gain the watch and the default resolve result. `armWait` dispatches through the row | `run/wait-watches.ts:48-79`; `workflows/waits.ts:315-328` | the `armWait` kind chain; the `settledWaitEntry` kind chain; Table D row 9 | none | 2.2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
-| 2.4 | Rows gain their text: summary, result text, footer item, cap note and delivery label. Every string stays byte-identical | `workflows/waits.ts:98-109`, `:177-192`, `:260-269`, `:281`; `run/wake-admission.ts:63-65`; `run/input-delivery.ts:586` | Table D rows 5 and 10 (text) | none | 2.3 | `npm test -- packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
+| 2.1 | Rows gain budget charge, keeps slot, cancellable and `timers_disabled`, and four flags the Table F readers ask: `userAnswers` (the user's answer settles it: `human`), `holdsConversationInput` (`pr`, open or resolved), `runnerResumeCancels` (the phases a runner resume cancels: `subagent` open or resolved, `timer` open) and `holdsSession` (`subagent`: any open one keeps the session and a slot). The readers read the row, including every Table F branch marked 2.1. The row facts stay plain data with no `run/` module import, so `runs/` files can read them (`runs/outcome-commit.ts` already imports `workflows/waits.ts`); 2.3 binds the watches in the engine. `WAIT_KINDS` moves into the rows; `run-states.ts` imports and re-exports it | `workflows/waits.ts:66-71`, `:278-282`; `run/wake-admission.ts:409-427`; `run/wait-registry.ts:269-271`, `:328-329`, `:380`; `workflows/run-states.ts:261-299` | Table D rows 1-4 | none | P1 | `npm test -- packages/cezar/src/workflows/run-states.test.ts packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
+| 2.2 | Rows gain registration facts: answer kind, deadline rule, duplicate check with its defaults (and the timeout field a repeat compares), entry builder, and the request kinds the row registers (`worker` registers `worker` and `request`). The Table F branches marked 2.2 read them | `workflows/waits.ts:38-41`, `:119-123`, `:132-161`, `:291-311`; `run/wait-registration.ts:12`, `:16`; `run/wait-registration-tool.ts:10`; `workflows/wait-scope.ts:58-64`, `:100-102`; `run/wait-registry.ts:107-109`, `:124`, `:131-133`, `:242`; `run/turn-settler.ts:467-470`; `run/subagent-waits.ts:173-174`; `run/human-waits.ts:66-67`; `run/run-recovery.ts:264`; `run/run-cancel.ts:119-121`; `delegation/service.ts:670` | Table D rows 6-8, 11, 12 | none | 2.1 | `npm test -- packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/ci-wait-registration.test.ts packages/cezar/src/workflows/wait-scope.test.ts packages/cezar/src/workflows/worker-waits.test.ts`; `npm run test:parity` |
+| 2.3 | Rows gain the watch, the default resolve result, the result of a superseded cancel and the input id that delivers the result (`wakeInputId` for an upgraded worker wait). `armWait` dispatches through the row. The Table F branches marked 2.3 read them | `run/wait-watches.ts:48-79`; `workflows/waits.ts:315-328` | the `armWait` kind chain; the `settledWaitEntry` kind chain; Table D row 9 | none | 2.2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
+| 2.4 | Rows gain their text: summary, result text, footer item, cap note, delivery label, monitoring-timer nudge, and the sessionless wake prompt with its priority (pr, worker, subagent, then the timer text). Every string stays byte-identical. The Table F branches marked 2.4 read them | `workflows/waits.ts:98-109`, `:177-192`, `:260-269`, `:281`; `run/wake-admission.ts:63-65`; `run/input-delivery.ts:586` | Table D rows 5 and 10 (text) | none | 2.3 | `npm test -- packages/cezar/src/workflows/waits.test.ts packages/cezar/src/workflows/waits-wake.test.ts`; `npm run test:parity` |
+| 2.5 | Each row gains a typed selector (`WAIT_KINDS.<kind>.select(waits)`, and `selectOpen`) that returns that kind's entries. Every Table F branch marked 2.5 calls it instead of comparing `kind` with a literal: one kind's typed entries come from its row | the Table F rows marked 2.5: `delegation/park-notice.ts:28`; `voice/pending-ask.ts:42`; `run/completion-gate.ts:50`; `run/family-reconciler.ts:209`, `:255`; `run/human-waits.ts:46`, `:64`, `:77`, `:123`, `:148`; `run/run-cancel.ts:119`, `:121`, `:130`; `run/run-finish.ts:233`; `run/run-recovery.ts:259`, `:262`, `:277`; `run/subagent-waits.ts:90`; `run/wait-registry.ts:124`, `:189`, `:238`; `run/wake-admission.ts:172`, `:291`; `run/wake-ledger.ts:84`; `workflows/wait-scope.ts:69`, `:94`; `workflows/waits.ts:86` | the Table F branches marked 2.5 | none | 2.4 | `npm test -- packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/worker-waits.test.ts packages/cezar/src/workflows/peer-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/voice`; `npm run test:parity` |
 | 3.1 | `WaitEngine.open` serves all 9 registration paths: `cezar_wait` (pr, timer, process, worker, request, peer), `cez worker wait`, the completion wait, `cez message wait --peer`, `cezar_ask`, the Cezar human alias, the monitoring timer, the subagent wait and the recovered ask. Each path keeps its refusal shape (Table B) and its open steps, their order and its failure policy (Table E), passed to `open` as per-path options | `run/wait-registry.ts:79-138`, `:163-173`, `:228-245`, `:253-364`; `run/human-waits.ts:59-71`; `run/turn-settler.ts:436-475`; `run/subagent-waits.ts:172-178`; `run/run-recovery.ts:257-270`; `run/compose.ts:278-305` | `openWait` and the open code in 4 other modules | none | P2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/run/turn-settler.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
 | 3.2 | `resolve` (with the CI and worker retries and the budget cap), `rearm` and `dispose` move into the engine | `run/wait-registry.ts:186-200`, `:390-409`; `run/wait-watches.ts:165-176`; `run/run-recovery.ts:222`, `:229`, `:337-340`, `:414-424`; `workflows/run.ts:260-269` | resolve and re-arm code outside the engine | none | 3.1 | `npm test -- packages/cezar/src/workflows/waits-wake.test.ts packages/cezar/src/workflows/worker-reboot packages/cezar/src/workflows/worker-restart`; `npm run test:parity` |
 | 3.3 | `cancel`, `cancelAll` and `forgetRun` move into the engine. Every row of Table C calls one of them. `WaitRegistry` keeps only request validation (scope, gate, replay, refusals) | `run/wait-cancel.ts`; `run/wake-admission.ts:347-375`; `run/human-waits.ts:132-137`; `run/step-loop.ts:411-416`; `run/family-reconciler.ts:266`; `run/wait-registry.ts` | `cancelOpenWaits`, `disarmRunWaits` and `run/wait-cancel.ts` outside the engine | none | 3.2 | `npm test -- packages/cezar/src/workflows/waits-wake.test.ts packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/run-settlement.test.ts`; `npm run test:parity` |
-| 3.4 | The store checks each wait write against `WAIT_PHASES` (Decision 3). A new entry must be `open`; a known entry may move only along a declared transition; an id found in `lastWaits` is a settled wait and records a violation. `WAIT_PHASES` first declares the transitions the code writes today (Decision 3). The slice deletes `RunStore.commitCiWait` (`runs/store.ts:1798-1800`): no production code calls it, and it creates a new `resolved` entry. Its test callers migrate: `runs/ci-wait-store.test.ts:32-65` and `:97` call `commitWait` with a `pr` entry, and the cases that create a resolved entry (`:43-52`, `:54-65`) commit it `open` first, then `resolved`; `workflows/autonomous-nudge-guards.test.ts:136` seeds its `ci-wait` case with `commitWait` and an open `pr` entry | `runs/wait-registration-write.ts:11-22`; `runs/outcome-commit.ts:118-172`; `runs/store.ts:1773-1800`; `workflows/run-states.ts:302-313`; `packages/cezar/vitest.setup.ts:177-178`; `runs/ci-wait-store.test.ts`; `workflows/autonomous-nudge-guards.test.ts:136-139` | the unchecked upsert; `commitCiWait` | tests only: an undeclared transition writes, then fails the test | 1.2 | `npm test -- packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/runs/outcome-commit.test.ts packages/cezar/src/runs/ci-wait-store.test.ts packages/cezar/src/workflows/autonomous-nudge-guards.test.ts packages/cezar/src/workflows/run-states.test.ts`; `npm run test:parity` |
-| 3.5 | A lint rule: no wait-kind literal in production code outside an allow-list: the engine, the table, the watch adapters, the legacy-waits upgrade, the boundary views, `packages/contract` and `packages/web` | new rule in `lint/` or `.ai/ast-grep/rules/` | — | none | 3.3 | `npm run lint`; the rule's own test |
+| 3.4 | The store checks each wait write against `WAIT_PHASES` (Decision 3). A new entry must be `open`; a known entry may move only along a declared transition; an id found in `lastWaits` is a settled wait and records a violation. `WAIT_PHASES` first declares the transitions the code writes today (Decision 3). The slice deletes `RunStore.commitCiWait` (`runs/store.ts:1798-1800`): no production code calls it, and it creates a new `resolved` entry. Its test callers migrate: `runs/ci-wait-store.test.ts:32-65` and `:97` call `commitWait` with a `pr` entry, and the cases that create a resolved entry (`:43-52`, `:54-65`) commit it `open` first, then `resolved`; `workflows/autonomous-nudge-guards.test.ts:136` seeds its `ci-wait` case with `commitWait` and an open `pr` entry. The check covers both production write paths of `waits` and `lastWaits`: `commitWait` and `commitOutcome`. No other production code writes them (§ Table G); `waits` and `lastWaits` leave `RunPatch`, so `updateRun` cannot write them unchecked. Test fixtures migrate by one rule (Table G): a fixture that needs a wait already past `open` seeds it with `seedWaits(store, runId, { waits, lastWaits })` in `runs/run-store.testkit.ts`, which writes through the unchecked update path as `setRunStatus` does (ADR 0056) and is guarded against production imports; a fixture whose test is about the commit itself commits the entry `open` first, then moves it along a declared transition | `runs/wait-registration-write.ts:11-22`; `runs/outcome-commit.ts:118-172`; `runs/store.ts:1773-1800`; `workflows/run-states.ts:302-313`; `packages/cezar/vitest.setup.ts:177-178`; `runs/ci-wait-store.test.ts`; `workflows/autonomous-nudge-guards.test.ts:136-139`; `runs/run-store.testkit.ts`; every fixture in Table G | the unchecked upsert; `commitCiWait`; `waits` and `lastWaits` in `RunPatch` | tests only: an undeclared transition writes, then fails the test | 1.2 | `npm test -- packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/runs/outcome-commit.test.ts packages/cezar/src/runs/ci-wait-store.test.ts packages/cezar/src/workflows/autonomous-nudge-guards.test.ts packages/cezar/src/workflows/run-states.test.ts` and every file in Table G; the Table G scan finds no new non-open entry outside `seedWaits`; `npm run test:parity` |
+| 3.5 | A lint rule over production files of `packages/cezar/src`: no `kind` compared (`===`, `!==`) with one of the seven stored kind names or `ci`, no `case` label with one, and no object property `kind` with one, outside the allow-list. The rule is syntactic, like the repository's other rules, so the allow-list names each file with its reason (Table F): the engine, the table, the watch adapters, the read-time upgrade, the two boundary views, and two files whose `kind` is not a wait kind. `packages/contract` and `packages/web` are outside its scope | new rule in `lint/` or `.ai/ast-grep/rules/` | — | none | 3.3, and every slice that Table F names | `npm run lint`; the rule's own test |
 | 4.2 | `registerCompletionWait` handles the limit refusal instead of throwing out of the turn end | `run/wait-registry.ts:128-138`; its caller in `run/turn-settler.ts` | — | yes: a full wait list no longer throws out of the turn end. A red test first | 1.2 | the new red test; `npm run test:parity` |
 
 **Exit on integrated `main`:** one function compares the limit, called at each site that compares
 today (the PR path twice, before and after its lookup); every cancel goes through
-the engine; the kind-literal rule passes with about 8 production files of `packages/cezar` on its
-allow-list (28 at the baseline); the inbound legacy round trip is deleted;
+the engine; the kind-literal rule passes with the 8 files of Table F's allow-list (28 files branch
+on a wait's kind at the baseline); the inbound legacy round trip is deleted;
 `npm run test:parity` and CI pass.
 
 ### Guards each slice keeps green
@@ -207,11 +211,12 @@ does not apply. The tables below are the case tables for this change.
 | Text | `waits.ts:99`, `:178-181`, `:261` | `:108`, `:183` (monitoring), `:190-191`, `:268` | `:106`, `:187`, `:213-221`, `:266` | `:100-103`, `:185`, `:262` | `:104`, `:186`, `:199-209`, `:264` | `:105`, `:188`, `:225-231`, `:265` | `:107`, `:189`, `:235-246`, `:267` |
 | Resolves, cancels, `humanOnly` (documentation) | `run-states.ts:272-275` | `:276-278` | `:279-281` | `:296-298` | `:292-295` | `:287-291` | `:282-286` |
 
-Kind-specific facts that stay outside the row, because they belong to one kind's mechanism:
-the PR wait holds conversation input for its own wake (`hasPrWait`, `waits.ts:287-289`, read at
-`run/input-delivery.ts:672`); the upgraded worker wait's `wakeInputId` (`waits.ts:165-167`); the
-peer wait needs messaging on (`run/wait-registry.ts:171`); the process wait's PID checks
-(`:337-339`).
+Two more facts become row fields: the PR wait holds conversation input for its own wake
+(`hasPrWait`, `waits.ts:287-289`, read at `run/input-delivery.ts:672`; flag
+`holdsConversationInput`, 2.1), and the upgraded worker wait delivers through its `wakeInputId`
+(`waits.ts:165-167`; input id, 2.3). Two checks stay in their kind's registration code, because
+they compare no kind: the peer wait needs messaging on (`run/wait-registry.ts:171`), and the
+process wait checks its PID (`:337-339`).
 
 ### Table B: the limit sites
 
@@ -322,6 +327,164 @@ their wait; they never cancel it.
 | 10 | Monitoring timers | `isMonitoringTimer` (`workflows/waits.ts:57-59`); `run/turn-settler.ts:444-445`; `run/subagent-waits.ts:225-226`; `run/wake-admission.ts:65`; `run/input-delivery.ts:586` | 2.4 (text), 3.1 (open rule) |
 | 11 | Worker wait with a deadline against the completion wait | `run/wait-registry.ts:103`, `:124`; `run/run-cancel.ts:119-121`; `delegation/service.ts:670`; inlined in `workflows/waits.ts:120` | 2.2 |
 | 12 | Entry building | `workflows/waits.ts:291-311`; `workflows/wait-scope.ts:62-64`; `run/wait-registry.ts:107-109`, `:131-133`, `:242`; `run/turn-settler.ts:467-470`; `run/subagent-waits.ts:173-174`; `run/human-waits.ts:66-67`; `run/run-recovery.ts:264`. The upgrade builders in `runs/legacy-waits.ts` stay | 2.2 |
+
+### Table F: every file that branches on a wait kind
+
+Each file that the 3.5 rule matches at the baseline gets one disposition: the slice that removes
+its branch and the row field, selector or engine operation that replaces it, or its allow-list
+entry with the reason. 3.5 lands only when every row below is done. Search: the 3.5 rule's
+pattern over production files of `packages/cezar/src` (a `kind` compared with `===` or `!==`, a
+`case` label, or an object property `kind`, with one of `pr`, `timer`, `process`, `human`,
+`worker`, `peer`, `subagent`, `ci`), tests and testkits excluded.
+
+| # | File | Branches at the baseline | Disposition |
+|---|---|---|---|
+| 1 | `activity/wait.ts` | `:37-77` (`case` labels and `kind` literals) | allow-list: boundary view. It builds the contract's `ActivityWait` wire kinds from `WaitingOn` |
+| 2 | `delegation/park-notice.ts` | `:28` worker; `:60` human | `:28` 2.5 worker selector; `:60` 2.1 `userAnswers` |
+| 3 | `delegation/service.ts` | `:670` worker; `:733-734` worker and request; `:739` peer | allow-list: CLI boundary. It routes `cez worker cancel-wait` and `cez message cancel-wait` by stored kind and answers in each kind's CLI shape (`BACKWARD_COMPATIBILITY.md`) |
+| 4 | `runs/archive-family.ts` | `:129` human | 2.1 `userAnswers`: an open wait the user answers blocks the automatic archive |
+| 5 | `runs/legacy-waits.ts` | `:25`, `:67`, `:120`, `:135`, `:171`, `:235`, `:242`, `:249` | allow-list: the read-time upgrade of schema-3 rows and `ci` entries |
+| 6 | `runs/outcome-commit.ts` | `:157` human; `:168` subagent | `:157` 2.1 `userAnswers` (the `answered` handler settles the open waits the user answers); `:168` 2.3 superseded-cancel result |
+| 7 | `voice/pending-ask.ts` | `:42` human | 2.5 human selector |
+| 8 | `workflows/run-scheduling.ts` | `:46-50` pr, worker, subagent | 2.4 sessionless wake prompt and its priority |
+| 9 | `run/completion-gate.ts` | `:50` worker | 2.5 worker selector |
+| 10 | `run/continuation-session.ts` | `:219` human | 2.1 `userAnswers` |
+| 11 | `run/family-reconciler.ts` | `:209`, `:255` worker | 2.5 worker selector |
+| 12 | `run/human-waits.ts` | `:46`, `:64`, `:77`, `:123`, `:148` human; `:66` entry | 2.5 human selector; `:66` 2.2 entry builder |
+| 13 | `run/input-batch.ts` | `:12` human | 2.1 `userAnswers` |
+| 14 | `run/input-delivery.ts` | `:756` human | 2.1 `userAnswers` |
+| 15 | `run/run-cancel.ts` | `:119`, `:121`, `:130` worker | 2.5 worker selector, with 2.2's deadline rule |
+| 16 | `run/run-finish.ts` | `:233` human | 2.5 human selector |
+| 17 | `run/run-recovery.ts` | `:259`, `:262`, `:277` human; `:264` entry | 2.5 human selector; `:264` 2.2 entry builder |
+| 18 | `run/step-loop.ts` | `:413` human | 2.1 `userAnswers`: a step deadline expires the waits the user answers |
+| 19 | `run/subagent-waits.ts` | `:90` subagent; `:173` entry; `:225-226` subagent and timer | `:90` 2.5 subagent selector; `:173` 2.2 entry builder; `:225-226` 2.1 `runnerResumeCancels` |
+| 20 | `run/turn-settler.ts` | `:444` human; `:445` timer; `:467` entry | `:444` 2.1 `userAnswers`; `:445` 2.2 duplicate check; `:467` 2.2 entry builder |
+| 21 | `run/wait-registration-tool.ts` | `:10` human, subagent | 2.2 answer kind |
+| 22 | `run/wait-registration.ts` | `:12` pr; `:16` worker, request; `:30` timer | 2.2 duplicate defaults and the timeout field a repeat compares |
+| 23 | `run/wait-registry.ts` | `:107`, `:131`, `:242` entries; `:124` worker; `:189` peer; `:238` human; `:264`, `:266`, `:269`, `:297`, `:312`, `:343` request dispatch; `:380` human | entries 2.2; `:124`, `:189`, `:238` 2.5 selectors; the request dispatch 3.1 (`open` dispatches through the row's registration facts); `:380` 2.1 `cancellable` |
+| 24 | `run/wait-watches.ts` | `:50-60` | allow-list: watch adapters. After 2.3 `armWait` dispatches through the row; each adapter serves one kind |
+| 25 | `run/wake-admission.ts` | `:63` process, peer, subagent; `:172` human; `:291` worker; `:410` subagent | `:63` 2.4 cap note; `:172`, `:291` 2.5 selectors; `:410` 2.1 `holdsSession` |
+| 26 | `run/wake-ledger.ts` | `:84` human | 2.5 human selector |
+| 27 | `workflows/wait-scope.ts` | `:62` entry; `:69`, `:94` peer; `:98-106` request kinds | `:62` 2.2 entry builder; `:69`, `:94` 2.5 peer selector; `:98-106` 2.2 request kinds per row |
+| 28 | `workflows/waits.ts` | `:38-40`, `:58`, `:69-70`, `:86`, `:99-107`, `:120`, `:136-160`, `:166`, `:178-189`, `:261-267`, `:278-279`, `:288`, `:291-306`, `:316-324` | 2.1 `:69-70` budget, `:278-279` `userAnswers` and `cancellable`, `:288` `holdsConversationInput`; 2.2 `:38-40` answer kind, `:120` deadline rule, `:136-160` duplicates, `:291-306` builders; 2.3 `:166` input id, `:316-324` results; 2.4 `:58` monitoring timer, `:99-107`, `:178-189`, `:261-267` text; 2.5 `:86` human selector |
+| 29 | `server/forge/github.ts` | many | allow-list: not a wait kind. Its `kind` is a GitHub item kind (`pr` or `issue`) |
+| 30 | `subcommands.ts` | `:31` | allow-list: not a wait kind. Its `case 'worker'` is a CLI subcommand |
+| 31 | `run/wait-engine.ts`, `run/wait-kinds.ts` | new | allow-list: the engine and the table |
+
+The allow-list at the end of the epic holds 8 files: rows 1, 3, 5, 24, 29, 30 and the two files
+of row 31.
+
+### Table G: test fixtures 3.4 migrates
+
+3.4 checks every write of `waits` and `lastWaits`. A grep finds no production write outside
+`commitWait`, `commitOutcome` and the read-time upgrade:
+`grep -rnE "\b(waits|lastWaits)\s*:" packages/cezar/src --include=*.ts` with tests, testkits,
+`runs/outcome-commit.ts`, `runs/wait-registration-write.ts` and `runs/legacy-waits.ts` left out
+finds only reads and parameter names.
+
+Test fixtures do write non-open entries. The scan below lists every test and testkit call to
+`commitWait`, `commitCiWait`, `updateRun`, `setRunStatus`, `createRun` or
+`registeredWaitRecord` whose arguments hold a wait with a phase other than `open`, resolving
+helper functions and constants across all test and testkit files up to three levels. Run it from
+the repository root: `node scan.mjs "$PWD"`. At the baseline it lists 82 calls in 37 files. The
+list is a superset: a call that moves a known entry along a declared transition, or that matched
+a helper of the same name, needs no change. The 3.4 pull request runs each file and migrates
+every call the check fails, by the one rule in its row: `seedWaits` for a wait that must already
+be past `open`, else commit `open` first.
+
+| File | Lines |
+|---|---|
+| `delegation/conversation-service.test.ts` | `:358` |
+| `delegation/destruction-results.test.ts` | `:268` |
+| `delegation/service.testkit.ts` | `:53` |
+| `runs/ci-wait-store.test.ts` | `:37, :47, :48, :55, :97` |
+| `runs/outcome-commit.test.ts` | `:45, :67, :78, :80, :81, :126` |
+| `runs/store-claims.test.ts` | `:86` |
+| `runs/store-resume-time.test.ts` | `:66, :116` |
+| `runs/store.test.ts` | `:448` |
+| `runs/waits-store.test.ts` | `:226, :228, :229, :242, :244, :245, :246, :253, :262, :263, :264, :278, :287, :288, :289, :306, :324, :351, :352, :363, :364, :388, :643, :644` |
+| `runs/webhook.test.ts` | `:127, :143, :165, :180, :252` |
+| `server/activity-routes.test.ts` | `:186, :209` |
+| `server/runs-index-api.test.ts` | `:407` |
+| `task-cli/cli.test.ts` | `:509, :580, :1051` |
+| `task-cli/status-question.test.ts` | `:49` |
+| `task-cli/watch.test.ts` | `:38` |
+| `workflows/auto-resume.test.ts` | `:778` |
+| `workflows/autonomous-nudge-guards.test.ts` | `:133, :136` |
+| `workflows/completion-gate-entry.test.ts` | `:144` |
+| `workflows/peer-waits.test.ts` | `:251` |
+| `workflows/run-settlement.test.ts` | `:178` |
+| `workflows/run.test.ts` | `:1206, :1225, :1246, :1261` |
+| `workflows/run/boundary-family-reconciliation.test.ts` | `:19` |
+| `workflows/run/turn-boundary-adapter-order.test.ts` | `:38, :51` |
+| `workflows/run/turn-boundary-worker-order.test.ts` | `:60, :63` |
+| `workflows/run/turn-nudges-decisions.test.ts` | `:213` |
+| `workflows/subagent-waits.test.ts` | `:413, :456` |
+| `workflows/waits-parity-cells.testkit.ts` | `:2110` |
+| `workflows/waits-subagents-parity-cells.testkit.ts` | `:110` |
+| `workflows/worker-destroy-orphaned-generation.test.ts` | `:319` |
+| `workflows/worker-parent-attention.testkit.ts` | `:204` |
+| `workflows/worker-wait-core.testkit.ts` | `:374` |
+| `workflows/worker-wait-disposal.test.ts` | `:67, :68` |
+| `workflows/worker-wait-settlement.test.ts` | `:57` |
+| `workflows/worker-wait-terminal-ordering.test.ts` | `:125` |
+
+<details><summary><code>scan.mjs</code></summary>
+
+```js
+// Usage: node scan.mjs <repo-root>
+// Lists test and testkit call sites that write a wait entry whose phase is not `open` through
+// the store: commitWait, commitCiWait, updateRun, setRunStatus, createRun and
+// registeredWaitRecord. The argument text is read with identifiers resolved one level to their
+// initializer in the same file. Parser: @babel/parser with the typescript plugin.
+import { createRequire } from 'node:module';
+import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+const root = process.argv[2];
+const pnpm = `${root}/node_modules/.pnpm`;
+const dir = readdirSync(pnpm).find(d => d.startsWith('@babel+parser@7'));
+const { parse } = createRequire(`${pnpm}/${dir}/node_modules/@babel/parser/package.json`)('@babel/parser');
+const files = execFileSync('git', ['-C', root, 'ls-files', '--', 'packages/cezar/src/**/*.test.ts', 'packages/cezar/src/**/*.testkit.ts'], { encoding: 'utf8' }).split('\n').filter(Boolean);
+const CALLS = new Set(['commitWait', 'commitCiWait', 'updateRun', 'setRunStatus', 'createRun', 'registeredWaitRecord']);
+const NON_OPEN = /phase:\s*(?:'(?:resolved|delivered|cancelled|wake-pending|delivering)'|WAIT_PHASE\.(?:resolved|delivered|cancelled))/;
+const walk = (n, f) => { if (!n || typeof n.type !== 'string') return; f(n); for (const k in n) { const v = n[k]; if (k === 'loc' || k === 'start' || k === 'end') continue; if (Array.isArray(v)) v.forEach(c => walk(c, f)); else if (v && typeof v.type === 'string') walk(v, f); } };
+// Helper bodies by name across every test and testkit file: a fixture often builds its entry in a
+// helper (`resolvedTimer()`) or imports it from a testkit.
+const helpers = new Map();
+const parsed = new Map();
+for (const rel of files) {
+  const text = readFileSync(`${root}/${rel}`, 'utf8');
+  const ast = parse(text, { sourceType: 'module', plugins: ['typescript'], errorRecovery: true });
+  parsed.set(rel, { text, ast });
+  walk(ast.program, n => {
+    const add = (name, node) => helpers.set(name, (helpers.get(name) ?? '') + ' ' + text.slice(node.start, node.end));
+    if (n.type === 'FunctionDeclaration' && n.id) add(n.id.name, n);
+    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) add(n.id.name, n.init);
+  });
+}
+const expand = (text, depth, seen = new Set()) => depth === 0 ? text : text + ' ' + [...text.matchAll(/\b[A-Za-z_$][\w$]*\b/g)]
+  .map(m => m[0]).filter(name => helpers.has(name) && !seen.has(name) && seen.add(name)).map(name => expand(helpers.get(name), depth - 1, seen)).join(' ');
+for (const rel of files) {
+  const { text, ast: parsedAst } = parsed.get(rel);
+  if (!/commitWait|commitCiWait|updateRun|setRunStatus|createRun|registeredWaitRecord/.test(text)) continue;
+  const ast = parsedAst;
+  const src = (n) => text.slice(n.start, n.end);
+  const inits = new Map();
+  walk(ast.program, n => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) inits.set(n.id.name, src(n.init)); });
+  walk(ast.program, n => {
+    if (n.type !== 'CallExpression') return;
+    const c = n.callee;
+    const name = c.type === 'MemberExpression' && c.property.type === 'Identifier' ? c.property.name : c.type === 'Identifier' ? c.name : '';
+    if (!CALLS.has(name)) return;
+    const args = n.arguments.map(src).join(' ');
+    const expanded = expand(args, 3);
+    const writesWaits = ['commitWait', 'commitCiWait', 'registeredWaitRecord'].includes(name) || /\b(waits|lastWaits)\b/.test(args);
+    if (writesWaits && NON_OPEN.test(expanded)) console.log(`${rel}:${n.loc.start.line}\t${name}`);
+  });
+}
+```
+
+</details>
 
 ## Older specs that disagree with the code
 
