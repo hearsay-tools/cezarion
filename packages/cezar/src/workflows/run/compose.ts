@@ -291,6 +291,8 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
   });
   modules.waitEngine = new WaitEngine(context, {
+    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
+    noticeParkedWorkers: id => modules.workerQuestions.noticeParkedWorkers(id),
     withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
     armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
     isParked: id => modules.line.isParked(id),
@@ -311,12 +313,13 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => modules.retries.retryWaitAdmission(id),
   }, MAX_AUTO_CONTINUES);
   modules.subagentWaits = new SubagentWaits(context, {
+    waitEngine: modules.waitEngine,
     active: host.active, isParked: id => modules.line.isParked(id), isAdmitted: id => modules.line.isAdmitted(id),
     settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result),
     armWait: (id, wait) => modules.waitWatches.armWait(id, wait), disarmWait: id => host.disarmWait(id),
     releaseHeldPark: (id, state) => { modules.wakeAdmission.leaveMonitoringPool(id); modules.turnSettler.armIdleTimer(id, state); },
   }, host.subagentWaitMs().graceMs, host.subagentWaitMs().deadlineMs);
-  modules.humanWaits = new HumanWaits(context, { routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
+  modules.humanWaits = new HumanWaits(context, { waitEngine: modules.waitEngine, routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
   modules.sessionHelperHost = {
     active: host.active, line: modules.line, humanWaits: modules.humanWaits, inputReceiptHost: modules.inputReceiptHost,
     move: (...args) => host.move(...args),
@@ -418,7 +421,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   );
   modules.recovery = new RunRecovery(context, modules.familyReconciler,
     modules.workerQuestions, modules.autoResumeScheduler, {
-      workerScratchCleanup: modules.workerScratchCleanup, humanWaits: modules.humanWaits,
+      waitEngine: modules.waitEngine, workerScratchCleanup: modules.workerScratchCleanup, humanWaits: modules.humanWaits,
       waitWatches: modules.waitWatches, inboxClaims: modules.inboxClaims, orphans: modules.orphans,
       isActive: (...args) => host.isActive(...args),
       workerExecutionStopped: (...args) => host.workerExecutionStopped(...args),
@@ -513,6 +516,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     historyDeletionPending: id => host.historyDeletionPending(id),
   }, modules.line, modules.attachments, modules.turnBookkeeper, modules.queuedInput, modules.continuationAcceptance, modules.workerExecutions);
   modules.turnSettler = new TurnSettler(context, {
+    waitEngine: modules.waitEngine,
     humanWaits: modules.humanWaits, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
     workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost, subagentWaits: modules.subagentWaits,
     move: (...args) => host.move(...args), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),

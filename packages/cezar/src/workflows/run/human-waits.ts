@@ -1,5 +1,5 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
@@ -14,6 +14,7 @@ import { askCardFields, humanWaitCard } from './turn-markers.ts';
 import type { RunModuleContext } from './types.ts';
 
 export interface HumanWaitsHost {
+  waitEngine: WaitEngine;
   routeWorkerQuestion(runId: string): void;
 }
 
@@ -62,14 +63,13 @@ export class HumanWaits {
     const run = this.context.store.getRun(runId);
     if (!run) return undefined;
     const source = WAIT_KINDS.human.aliasSource(via);
-    if (source === 'agent') this.withdrawCezarHumanWaits(runId);
-    const open = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? run))[0];
-    if (open) return open;
-    if (!waitCapacityAvailable(this.context.store.getRun(runId) ?? run)) return undefined;
-    const wait = WAIT_KINDS.human.aliasEntry(source, via, state?.waitIdentity.ciTurnId ?? via, card ? askCardFields(card) : undefined);
-    try { this.context.store.commitWait(runId, wait); }
-    catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return undefined; }
-    return wait;
+    return this.host.waitEngine.open(runId, state,
+      () => WAIT_KINDS.human.aliasEntry(source, via, state?.waitIdentity.ciTurnId ?? via, card ? askCardFields(card) : undefined), {
+        withdraw: source === 'agent' ? 'first' : 'none',
+        existing: () => WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? run))[0],
+        compare: 'silent', onCommitFailure: { log: '[cez] human wait checkpoint failed' },
+        arm: 'none', park: 'none', return: 'built',
+      }).wait;
   }
 
   /** Record which question a human wait is shown as: the pending card or gate, whose answer settles

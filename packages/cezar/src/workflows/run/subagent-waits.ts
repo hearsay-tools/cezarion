@@ -1,3 +1,4 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -47,6 +48,7 @@ const INTERRUPT_RETRY_MS = 60_000;
 type ChildEvent = { id: string; status: SubagentStatus; background: boolean };
 
 interface SubagentWaitsHost {
+  waitEngine: WaitEngine;
   active: ReadonlyMap<string, ActiveRun>;
   isParked(id: string): boolean;
   isAdmitted(id: string): boolean;
@@ -172,9 +174,10 @@ export class SubagentWaits {
    *  alias it would have opened before. */
   private openSubagentWait(runId: string, state: ActiveRun): void {
     const wait = WAIT_KINDS.subagent.entry(state.waitIdentity.ciTurnId ?? 'subagents', this.deadline(), this.children(state));
-    try { this.context.store.commitWait(runId, wait); }
-    catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
-    this.host.armWait(runId, wait);
+    this.host.waitEngine.open(runId, state, wait, {
+      withdraw: 'none', onCommitFailure: { log: '[cez] subagent wait checkpoint failed' },
+      arm: 'watch', park: 'none', return: 'none',
+    });
   }
 
   /** Save the children and move the deadline, then re-arm it. False when the checkpoint failed:

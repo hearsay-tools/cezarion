@@ -1,3 +1,4 @@
+import { WaitEngine } from './wait-engine.ts';
 import type { RunLine } from './run-line.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,7 +41,7 @@ export function traceBoundary(log: string[], observe?: (state: ActiveRun, event:
 
 interface BoundaryOrderFixture {
   root: string; run: RunRecord; store: RunStore; log: string[]; state: ActiveRun; wire: AgentSession;
-  active: Map<string, ActiveRun>; context: RunModuleContext; humanWaits: HumanWaits; questions: WorkerQuestions;
+  active: Map<string, ActiveRun>; context: RunModuleContext; waitEngine: WaitEngine; humanWaits: HumanWaits; questions: WorkerQuestions;
   questionHost: ConstructorParameters<typeof WorkerQuestions>[1]; host: ConstructorParameters<typeof TurnSettler>[1];
   line: RunLine; settler: TurnSettler;
 }
@@ -64,7 +65,10 @@ export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
   vi.spyOn(store, 'flush').mockImplementation(() => { log.push('flush'); flush(); });
   const context = unused<RunModuleContext>('context', { store, repoRoot: root, dataDir: join(root, '.ai/cezar'), disposed: () => false,
     semaphore: unused<WorkspaceSemaphore>('semaphore', { monitoringWakeIntervalMinutes: () => 1, memoryLimitMb: () => 1 }) });
-  const humanWaits = new HumanWaits(context, { routeWorkerQuestion: call('route', undefined) }, 40);
+  const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
+    withdrawCezarHumanWaits: id => humanWaits.withdrawCezarHumanWaits(id),
+  }));
+  const humanWaits = new HumanWaits(context, { waitEngine, routeWorkerQuestion: call('route', undefined) }, 40);
   type QuestionHost = ConstructorParameters<typeof WorkerQuestions>[1];
   const questionHost = unused<QuestionHost>('workerQuestions', {
     active: id => active.get(id), deliverConversationInput: call('parent-input', undefined), openHumanAlias: (...args) => { log.push('alias'); return humanWaits.openHumanAlias(...args); },
@@ -77,7 +81,7 @@ export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
   const line = unused<RunLine>('line', { park: call('line-park', undefined), isParked: () => false,
     inPool: () => false, joinPool: call('join', undefined) });
   const host = unused<Host>('settler', {
-    humanWaits, line, workerQuestions: questions,
+    waitEngine, humanWaits, line, workerQuestions: questions,
     completionGateHost: unused<Host['completionGateHost']>('completionGate', { parentCompletionBlockers: () => [] }),
     subagentWaits: unused<Host['subagentWaits']>('subagents', { holdsLiveSubagents: () => false, atTurnEnd: call('subagents', undefined) }),
     move: (id, exit, patch, details) => { log.push('move'); return store.move(id, exit, patch, details); },
@@ -92,5 +96,5 @@ export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
     clearIdleTimer(state); store.flush(); await store.factsWarmIdle(); store.close(); rmSync(root, { recursive: true, force: true });
   });
   log.length = 0;
-  return { root, run, store, log, state, wire, active, context, humanWaits, questions, questionHost, host, line, settler };
+  return { root, run, store, log, state, wire, active, context, waitEngine, humanWaits, questions, questionHost, host, line, settler };
 }
