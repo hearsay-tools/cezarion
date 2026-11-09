@@ -49,7 +49,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
 } & {
   pr: {};
   process: {};
-  subagent: {};
+  subagent: { supersededResult: { reason: 'superseded' } };
   worker: {
     completionEntry: typeof completionWaitEntry;
     duplicateWorker: typeof identicalWorkerWait;
@@ -126,6 +126,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
   ] },
   subagent: {
+    supersededResult: { reason: 'superseded' },
     resolve: (latest, result, _observed, resolvedAt) => ({ ...latest as SubagentWaitEntry, phase: 'resolved', resolvedAt, result: (result as SubagentWaitResult | undefined) ?? { reason: 'timeout' } }),
     inputId: wait => wait.id,
     watch: 'subagent', entry: subagentWaitEntry,

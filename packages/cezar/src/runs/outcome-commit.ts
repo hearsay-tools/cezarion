@@ -166,8 +166,12 @@ const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
     if (!waits.length) return unchanged(run);
     const cancelledAt = new Date().toISOString();
     const inputs = new Set(waits.map(waitInputId));
-    const next = settle(run, waits.map((wait): Wait => wait.kind === 'subagent' && outcome.superseded
-      ? { ...wait, phase: 'cancelled', cancelledAt, result: { reason: 'superseded' } } : { ...wait, phase: 'cancelled', cancelledAt }), out);
+    const next = settle(run, waits.map((wait): Wait => {
+      const row = WAIT_KINDS[wait.kind];
+      return 'supersededResult' in row && outcome.superseded
+        ? { ...wait, phase: 'cancelled', cancelledAt, result: row.supersededResult } as Wait
+        : { ...wait, phase: 'cancelled', cancelledAt };
+    }), out);
     return { run: { ...next, ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}) }, changed: true };
   },
   'message-delivered'(run, outcome) {
