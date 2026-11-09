@@ -264,10 +264,13 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
 /** The phases a wait entry moves through. Their writes go through RunStore.commitOutcome (hearsay-tools/cezarion#1805). */
 export const WAIT_PHASES: { readonly [P in WaitPhase]: readonly { to: WaitPhase; firedBy: readonly FiredBy[] }[] } = {
   open: [
+    { to: 'open', firedBy: ['agent', 'human', 'engine', 'runner', 'worker'] },
+    { to: 'delivered', firedBy: ['human'] },
     { to: 'resolved', firedBy: ['watcher', 'timer', 'worker', 'peer', 'human', 'parent', 'runner', 'recovery'] },
     { to: 'cancelled', firedBy: ['agent', 'human', 'engine', 'runner'] },
   ],
   resolved: [
+    { to: 'resolved', firedBy: ['recovery'] },
     { to: 'delivered', firedBy: ['runner'] },
     { to: 'cancelled', firedBy: ['human', 'engine'] },
   ],

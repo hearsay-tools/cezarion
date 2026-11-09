@@ -238,7 +238,9 @@ export function throwRunExitViolations(): void {
   if (taken.length) throw new Error(taken.join('\n'));
 }
 
-function violate(message: string): void {
+/** Report run-exit and wait-phase violations without interrupting the write.
+ * Strict mode records them for the test setup; production warns once per violation. */
+export function reportStoreViolation(message: string): void {
   if (strict) violations.push(message);
   else console.warn(message);
 }
@@ -246,7 +248,7 @@ function violate(message: string): void {
 function checkFrom(exit: RunExitId, from: RunStatus | undefined): void {
   const spec = RUN_EXITS[exit];
   if (from === undefined || from === spec.to || (spec.from as readonly RunStatus[]).includes(from)) return;
-  violate(`undeclared run transition: exit ${exit} from ${from} (declare it in runs/run-exits.ts)`);
+  reportStoreViolation(`undeclared run transition: exit ${exit} from ${from} (declare it in runs/run-exits.ts)`);
 }
 
 /** The fields a write that applies `exit` writes: `extras`, the steps it settles and the exit's
