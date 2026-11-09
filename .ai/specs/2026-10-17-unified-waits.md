@@ -1497,6 +1497,25 @@ process wait reported as ended while they ran. Two causes, both reproduced on th
 OpenCode, Pi, Cursor and omp were not probed. `cez job start` does not read `$!` and does not
 depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longer applies.
 
+**Process exits** (the supervisor and the command it runs):
+
+| Case | What stops it | Behavior at shipped defaults |
+| --- | --- | --- |
+| Normal stop | The command exits | The supervisor writes `<name>.exit` with the code and exits with it. Nothing else stops it: not the shell call, the turn, the session, Stop or Finish. |
+| Command ended by a signal | The signal | The exit file holds 128 plus the signal number. |
+| Command cannot be run | The spawn error | The log names the reason and the exit file holds 127. |
+| Supervisor gets SIGTERM or SIGINT | The signal's sender | The supervisor passes it to the command and then records the command's exit as above. |
+| Supervisor gets SIGKILL, or the host reboots | The kernel | No exit file. The command keeps running until it ends or is stopped by hand. `status` answers `exited` without a code once the supervisor is gone, and a process wait reports `exited, code unknown`. |
+| Starter interrupted (SIGINT or SIGKILL) before the supervisor starts | The interrupt | No job. Its lock names a dead holder, so the next start takes it over. |
+| Starter interrupted after the supervisor starts | Nothing stops the job | The supervisor writes its own record and runs the command. The starter printed no PID: `status` gives it. The lock names a dead holder and the next start takes it over, then refuses because the record's supervisor runs. |
+| Record deleted while the job runs | Nothing stops the job | `status` answers that no job has that name. A start of the name runs a second job beside the first and both write the same log: the record is the only handle. |
+| Record unreadable, or not a job record (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
+| Record names a PID that another process has reused | Nothing | With a start identity the job reads as ended. Without one (Windows) the name reads as running until that process ends. |
+| Lock that names no holder | Nothing | Every start of the name refuses and names the lock file to delete. |
+
+No command signals a job. The start identity cases (unreadable, reused, zombie) are held by the
+tests of `detached-process.ts` and `delegation/process-liveness.ts`.
+
 `cez job start <name> [--dir <dir>] -- <command> [args...]` is a task command. The agent runs it
 in its own shell, so the runner's sandbox and approvals still govern the command, and Cezar still
 starts nothing itself.
@@ -1516,6 +1535,9 @@ starts nothing itself.
   when the exit file holds one. A later session finds a job by its name this way.
 - There is no `cez job stop`: ending a job belongs to process ownership
   (hearsay-tools/cezarion#2180).
+- One start at a time per name: `<dir>/<name>.job.lock` is linked into place whole and names its
+  holder's PID and start identity. Another start takes it over only from a holder that is proven
+  gone; a slow start keeps it, whatever its age. A lock that names no holder is never taken over.
 - No store, contract or schema change. The new wake text is derived from fields the wait already
   holds: no `startToken`, and a result observed at the registration instant.
 

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { recordedProcessLive } from '../delegation/process-liveness.ts';
@@ -16,8 +17,6 @@ import { ownCommand } from './command.ts';
  */
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-/** A start that died between taking the lock and releasing it holds it no longer than this. */
-const START_LOCK_STALE_MS = 30_000;
 /** How long a start waits for its supervisor to record itself before it gives up. */
 const READY_TIMEOUT_MS = 30_000;
 
@@ -38,11 +37,22 @@ export function jobPaths(dir: string, name: string): JobPaths {
   return { log: join(dir, `${name}.log`), exitFile: join(dir, `${name}.exit`), record: join(dir, `${name}.job.json`), lock: join(dir, `${name}.job.lock`) };
 }
 
+/** The record, `undefined` when there is none, or a refusal: a record that cannot be read or is
+ *  not one may belong to a supervisor that still runs, so it never counts as absent. */
 function readRecord(paths: JobPaths): JobRecord | undefined {
-  try {
-    const value = JSON.parse(readFileSync(paths.record, 'utf8')) as Partial<JobRecord>;
-    return Number.isSafeInteger(value.pid) && typeof value.name === 'string' && Array.isArray(value.command) ? value as JobRecord : undefined;
-  } catch { return undefined; }
+  let text: string;
+  try { text = readFileSync(paths.record, 'utf8'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new JobError(`Cannot read the job record ${paths.record}: ${(error as Error).message}`);
+  }
+  let value: Partial<JobRecord> | null = null;
+  try { value = JSON.parse(text) as Partial<JobRecord> | null; } catch { /* not JSON: refused below */ }
+  const pid = value?.pid;
+  if (!value || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 2 || typeof value.name !== 'string' || !Array.isArray(value.command) || (value.start !== undefined && typeof value.start !== 'string')) {
+    throw new JobError(`The job record ${paths.record} is not a job record. Check that no process of this job runs, then delete it or choose another name.`);
+  }
+  return value as JobRecord;
 }
 
 /** The first line of the exit file as an integer, when the supervisor has written it. */
@@ -68,36 +78,59 @@ export function jobStatus(dir: string, name: string): JobStatus {
   return running(record) ? { ...base, state: 'running' } : { ...base, state: 'exited' };
 }
 
-/** One start at a time per name: `mkdir` is atomic, and a lock a dead start left is taken over. */
-function takeStartLock(paths: JobPaths, now: () => number): void {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try { mkdirSync(paths.lock); return; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      let age: number;
-      try { age = now() - statSync(paths.lock).mtimeMs; } catch { continue; }
-      if (age < START_LOCK_STALE_MS) break;
-      try { rmdirSync(paths.lock); } catch { /* another start took it over first */ }
-    }
-  }
-  throw new JobError(`Another start of this job is in progress in ${paths.lock}. Run the status command, then retry.`);
+interface StartLock { pid: number; start?: string; token: string }
+
+function readStartLock(paths: JobPaths): StartLock | undefined {
+  try {
+    const value = JSON.parse(readFileSync(paths.lock, 'utf8')) as Partial<StartLock>;
+    return typeof value.pid === 'number' && Number.isSafeInteger(value.pid) && typeof value.token === 'string' ? value as StartLock : undefined;
+  } catch { return undefined; }
 }
 
-export interface StartOptions { name: string; dir: string; command: string[]; cwd?: string; env?: NodeJS.ProcessEnv; now?: () => number }
+/**
+ * One start at a time per name. The lock file is linked into place whole, so it always names its
+ * holder, and it is taken over only from a holder that is proven gone: a start that is merely slow
+ * keeps it. A lock that names no holder is never taken over.
+ */
+function takeStartLock(paths: JobPaths): string {
+  const token = randomUUID();
+  const start = processStartToken(process.pid);
+  const mine = `${paths.lock}.${token}`;
+  writeFileSync(mine, JSON.stringify({ pid: process.pid, ...(start === undefined ? {} : { start }), token } satisfies StartLock));
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try { linkSync(mine, paths.lock); return token; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      const holder = readStartLock(paths);
+      if (!holder || recordedProcessLive({ pid: holder.pid, ...(holder.start === undefined ? {} : { startToken: holder.start }) })) break;
+      // Remove only the dead holder's lock: another start may have taken it over since the read.
+      if (readStartLock(paths)?.token === holder.token) rmSync(paths.lock, { force: true });
+    }
+    throw new JobError(`Another start of this job holds ${paths.lock}. Run the status command, then retry. If no start runs, delete that file.`);
+  } finally { rmSync(mine, { force: true }); }
+}
+
+/** Whether this start still holds the lock: a takeover that raced a dead holder's removal can displace it. */
+function holdsStartLock(paths: JobPaths, token: string): boolean {
+  return readStartLock(paths)?.token === token;
+}
+
+export interface StartOptions { name: string; dir: string; command: string[]; cwd?: string; env?: NodeJS.ProcessEnv }
 export interface StartedJob { name: string; pid: number; log: string; exitFile: string; replaced: boolean }
 
 /** Starts the supervisor and answers once it has recorded itself. Refuses while the name runs. */
 export async function startJob(options: StartOptions): Promise<StartedJob> {
-  const { name, dir, command, now = Date.now } = options;
+  const { name, dir, command } = options;
   if (command.length === 0) throw new JobError('Give the command to run after "--".');
   mkdirSync(dir, { recursive: true });
   const paths = jobPaths(dir, name);
-  takeStartLock(paths, now);
+  const lock = takeStartLock(paths);
   try {
     const previous = readRecord(paths);
     if (previous && running(previous) && readExit(paths) === undefined) {
       throw new JobError(`Job ${JSON.stringify(name)} is already running as PID ${previous.pid}. Wait for that PID, or choose another name.`);
     }
+    if (!holdsStartLock(paths, lock)) throw new JobError(`Another start of this job took over ${paths.lock}. Run the status command, then retry.`);
     // An exit file that stays would resolve the next process wait at once with the old code.
     rmSync(paths.exitFile, { force: true });
     const [bin, ...prefix] = ownCommand();
@@ -109,7 +142,7 @@ export async function startJob(options: StartOptions): Promise<StartedJob> {
     child.unref();
     return { name, pid: child.pid!, log: paths.log, exitFile: paths.exitFile, replaced: previous !== undefined };
   } finally {
-    try { rmdirSync(paths.lock); } catch { /* taken over after the stale bound */ }
+    if (holdsStartLock(paths, lock)) rmSync(paths.lock, { force: true });
   }
 }
 
