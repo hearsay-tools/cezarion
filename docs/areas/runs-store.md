@@ -22,9 +22,11 @@ one warning and no fallback runs. It does not fail boot. A damaged legacy databa
 keeps its existing failure contract; fallback cannot conceal it.
 
 When only fallback runs exist, the legacy connection stays in memory. Reads,
-report-cache backfill and boot create no empty legacy `runs.db`. An explicit
+report-cache backfill and boot create no empty legacy `runs.db`. Fallback reads
+never enter the held family set, including workers of a live legacy root. An explicit
 family write preserves only that family's records and sidecars in the existing
-primary transaction after ownership checks. It leaves fallback records and
+primary transaction after ownership checks. Writing a legacy row does not copy
+untouched fallback relatives. It leaves fallback records and
 evidence unchanged. A retry accepts byte-identical sidecars left by an interrupted
 copy; a differing destination still refuses the write. No boot copy, whole-tree copy, move or symlink occurs.
 

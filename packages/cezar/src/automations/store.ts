@@ -424,7 +424,7 @@ export class AutomationStore {
 
   logs(options: { automationId?: string | undefined; result?: AutomationLogRecord['result'] | undefined; event?: AutomationLogRecord['event']; since?: string | undefined; cursor?: number | undefined; limit?: number | undefined } = {}): AutomationLogRecord[] {
     const limit = Math.min(Math.max(options.limit ?? 100, 1), 100);
-    return this.readNdjson(LOG, automationLogRecordSchema)
+    return this.readNdjson(LOG, automationLogRecordSchema, true)
       .filter((row) => !options.automationId || row.automationId === options.automationId)
       .filter((row) => !options.result || row.result === options.result)
       .filter((row) => !options.event || row.event === options.event)
@@ -435,9 +435,10 @@ export class AutomationStore {
   }
 
   async compact(): Promise<void> {
+    if (!existsSync(this.dataDir)) return;
     const cutoff = this.now().getTime() - RETENTION_MS;
     const issues = new Set<string>();
-    const latest = [...this.latestReceipts().values()].filter((row) => {
+    const latest = [...new Map(this.readNdjsonAt(this.dataDir, RECEIPTS, automationReceiptSchema).map(row => [row.receiptKey, row])).values()].filter((row) => {
       // Event history expires; the first reservation of an issue must not. Keep one
       // durable issue reservation so a new label months later cannot launch it again.
       const issue = row.status !== 'released' && row.candidate?.event.startsWith('issue.')
@@ -449,7 +450,7 @@ export class AutomationStore {
     });
     this.rewriteNdjson(RECEIPTS, latest);
     await this.withLogLease(() => {
-      const logs = this.readNdjson(LOG, automationLogRecordSchema);
+      const logs = this.readNdjsonAt(this.dataDir, LOG, automationLogRecordSchema);
       // Failed durable reservations need a visible Retry task even after the bounded
       // activity history rolls over. Keep their latest entry, repairing legacy gaps.
       const retryLogs = new Map<string, AutomationLogRecord>();
@@ -722,8 +723,9 @@ export class AutomationStore {
   private readNdjson<T>(
     filename: string,
     schema: { safeParse(value: unknown): { success: boolean; data?: T } },
+    page = false,
   ): T[] {
-    return mergeProjectAutomationLog(filename, dataReadDirs(this.dataDir).map(directory => this.readNdjsonAt(directory, filename, schema)));
+    return mergeProjectAutomationLog(filename, dataReadDirs(this.dataDir).map(directory => this.readNdjsonAt(directory, filename, schema)), page);
   }
 
   private readNdjsonAt<T>(directory: string, filename: string,

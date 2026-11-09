@@ -55,6 +55,17 @@ describe('conversation settlement', () => {
   });
 
 
+  it('keeps fallback participants out of automatic conversation projections', async () => {
+    const { projectConversationEvents } = await import('./conversations.ts');
+    const { root, worker } = records();
+    const projected: string[] = [];
+    const store = { isFallbackRun: (id: string) => id === worker.id,
+      getRun: lookupOf([root, worker]), hasProjection: () => false,
+      appendEvent: (id: string) => { projected.push(id); } } as unknown as import('../runs/store.ts').RunStore;
+    projectConversationEvents(store, root);
+    expect(projected).toEqual([root.id]);
+  });
+
   it('projects a consumed message once, above its delivered projection (#505)', async () => {
     const { projectConversationEvents } = await import('./conversations.ts');
     const { root, worker, request } = records();
@@ -62,7 +73,7 @@ describe('conversation settlement', () => {
     const eventsOf = (id: string) => { if (!byRun.has(id)) byRun.set(id, []); return byRun.get(id)!; };
     worker.agentInputs = [{ id: request.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: root.id, text: request.text, createdAt: now,
       deliveredAt: '2026-09-08T20:00:01.000Z', consumedAt: '2026-09-08T20:00:05.000Z' }];
-    const store = { getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
+    const store = { isFallbackRun: () => false, getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
       hasProjection: (id: string, projectionId: string) => eventsOf(id).some(event => event.projectionId === projectionId),
       appendEvent: (id: string, event: Record<string, unknown>) => { eventsOf(id).push(event); } } as unknown as import('../runs/store.ts').RunStore;
     projectConversationEvents(store, root); projectConversationEvents(store, root);

@@ -297,11 +297,27 @@ describe('project run sources', () => {
     seed('cezar', [parent]);
     seed('squawk', [worker]);
     const store = open();
+    expect(store.getRun(worker.id)?.title).toBe('fallback worker');
+    expect(store.listWorkersOf(parent.id).map(run => run.id)).toContain(worker.id);
     expect(store.listRuns().map(run => run.id)).not.toContain(worker.id);
     expect(store.getRun(worker.id)?.status).toBe(RUN_STATUS.running);
     store.flush();
     const db = RunDatabase.open(join(root('cezar'), 'runs.db'));
     try { expect(db.has(worker.id)).toBe(false); } finally { db.close(); }
+  });
+
+  it('preserves a fallback family before an explicit adoption makes its records mutable', () => {
+    const parent = record('orphan', { status: RUN_STATUS.running });
+    seed('squawk', [parent]);
+    const store = open();
+    expect(store.listRuns()).toEqual([]);
+    expect(store.adoptFamily(parent.id, { stop: true })).toBe(parent.id);
+    store.flush();
+    expect(store.isFallbackRun(parent.id)).toBe(false);
+    expect(store.getRun(parent.id)?.status).toBe(RUN_STATUS.cancelled);
+    const source = RunDatabase.openReadOnly(join(root('squawk'), 'runs.db'))!;
+    try { expect(JSON.parse(source.get(parent.id)!.data).status).toBe(RUN_STATUS.running); }
+    finally { source.close(); }
   });
 
   it('creates new state only under legacy when neither directory exists', () => {

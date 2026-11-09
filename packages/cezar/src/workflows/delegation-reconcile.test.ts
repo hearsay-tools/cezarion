@@ -8,12 +8,12 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { TrackedWork } from './run/tracked-work.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { RunStore } from '../runs/store.ts';
@@ -78,6 +78,42 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     expect(existsSync(join(root, '.ai/cezar/runs.db'))).toBe(false);
     expect(store.isFallbackRun(a.parentId)).toBe(true);
     expect(store.isFallbackRun(a.workerId)).toBe(true);
+  });
+
+  it('recovers a live legacy root without holding, copying, or settling its running fallback worker', async () => {
+    manager.dispose();
+    setRunStatus(store, a.parentId, RUN_STATUS.running);
+    setRunStatus(store, a.workerId, RUN_STATUS.running);
+    store.close();
+    const primary = join(root, '.ai/cezar');
+    const fallback = join(root, '.ai/squawk');
+    const records = readPersistedRuns(primary);
+    const worker = records.find(run => run.id === a.workerId)!;
+    seedRuns(primary, records.filter(run => run.id !== a.workerId));
+    seedRuns(fallback, [worker]);
+    const history = join(fallback, 'runs', `${a.workerId}.ndjson`);
+    // Seed evidence through the public history layout, without opening a fallback store.
+    mkdirSync(join(fallback, 'runs'), { recursive: true });
+    writeFileSync(history, '{"seq":1,"type":"text","text":"fallback evidence"}\n');
+    const databaseBytes = readFileSync(join(fallback, RUNS_DB_FILE));
+    const historyBytes = readFileSync(history);
+    store = RunStore.open(primary, { keepLive: true });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
+    vi.spyOn(manager, 'continueRun').mockReturnValue({ ok: false, error: 'fixture stops agent launch' });
+    expect(store.listWorkersOf(a.parentId).map(run => run.id)).toContain(a.workerId);
+    expect(store.listRuns().map(run => run.id)).not.toContain(a.workerId);
+    await manager.recover();
+    store.flush();
+    expect(store.readEvents(a.parentId).some(event => event.type === 'lifecycle' && String(event.message).includes('cezar restarted'))).toBe(true);
+    expect(store.getRun(a.parentId)?.status).not.toBe(RUN_STATUS.running);
+    expect(store.listRuns().map(run => run.id)).not.toContain(a.workerId);
+    expect(store.isFallbackRun(a.workerId)).toBe(true);
+    expect(store.getRun(a.workerId)?.status).toBe(RUN_STATUS.running);
+    const db = new DatabaseSync(join(primary, RUNS_DB_FILE), { readOnly: true });
+    try { expect(db.prepare('SELECT id FROM runs WHERE id = ?').get(a.workerId)).toBeUndefined(); }
+    finally { db.close(); }
+    expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(databaseBytes);
+    expect(readFileSync(history)).toEqual(historyBytes);
   });
 
   it.each(['boot', 'adopt'] as const)('%s recovery awaits cold family facts before projections', async mode => {

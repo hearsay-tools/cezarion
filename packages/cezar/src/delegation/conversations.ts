@@ -67,7 +67,7 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
   const outcomes = new Map(state.outcomes.map(outcome => [outcome.requestId, outcome]));
   for (const message of state.messages) {
     for (const runId of [message.senderRunId, message.recipientRunId]) {
-      if (!store.getRun(runId)) continue;
+      if (store.isFallbackRun(runId) || !store.getRun(runId)) continue;
       projectDelivery(store, runId, message);
       projectOutcome(store, runId, outcomes.get(message.id));
     }

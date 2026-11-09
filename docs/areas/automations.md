@@ -12,8 +12,10 @@ On by default; only exact `CEZ_AUTOMATIONS=0` opts out, and the gate middleware 
 
 ## Project directory log reads
 
-Legacy log rows keep their sequence values. Fallback log sequences occupy a stable
-negative domain so a cursor can reach both stores even when their original sequence
-ranges overlap. Duplicate automation/sequence keys still prefer legacy. Compaction
-keeps the projected sequence values, so reading fallback again does not duplicate
-copied log rows. Receipts keep their existing identity and append order.
+With both log sources present, page reads use positive cursor domains: legacy
+sequence `n` becomes `2n`, and fallback `n` becomes `2n-1`. Pages sort by that
+cursor after duplicate automation/sequence keys prefer legacy. Appending legacy
+entries keeps existing cursors stable. Legacy-only pages keep their sequences.
+The projection is read-only: appends and compaction retain original positive
+legacy sequences. Compaction rewrites legacy receipts and logs only. Fallback
+records remain readable from their source and are never copied by compaction.

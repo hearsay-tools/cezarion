@@ -25,21 +25,20 @@ export function mergeProjectAutomationFiles<T>(filename: string, files: readonly
   return result as T;
 }
 
-/** Keep each source's append order; only an earlier directory suppresses a logical key. */
-export function mergeProjectAutomationLog<T>(filename: string, sources: readonly T[][]): T[] {
+/** Keep raw identities for deduplication. Only page reads project two positive sequence domains. */
+export function mergeProjectAutomationLog<T>(filename: string, sources: readonly T[][], page = false): T[] {
   const seen = new Set<unknown>();
   const kept: T[][] = [];
-  for (const [index, source] of sources.entries()) {
-    // Fallback has an independent sequence domain. Stable negative values keep
-    // pagination and copied/compacted rows distinct from positive legacy sequences.
-    const rows = index > 0 && filename === 'automation-log.ndjson'
-      ? source.map(row => ({ ...row, seq: Number((row as Record<string, unknown>).seq) - Number.MAX_SAFE_INTEGER })) : source;
+  const project = page && filename === 'automation-log.ndjson' && sources.slice(1).some(rows => rows.length > 0);
+  for (const [index, rows] of sources.entries()) {
     const key = (row: T) => {
       const record = row as Record<string, unknown>;
       return filename === 'automation-receipts.ndjson' ? `${record.receiptId}:${record.status}:${record.updatedAt}` : `${record.automationId}:${record.seq}`;
     };
-    kept.push(rows.filter((row, index) => !seen.has(key(source[index]!)) && !seen.has(key(row))));
+    const missing = rows.filter(row => !seen.has(key(row)));
+    kept.push(project ? missing.map(row => ({ ...row, seq: Number((row as Record<string, unknown>).seq) * 2 - (index > 0 ? 1 : 0) })) : missing);
     rows.forEach(row => seen.add(key(row)));
   }
-  return kept.reverse().flat();
+  const merged = kept.reverse().flat();
+  return project ? merged.sort((a, b) => Number((a as Record<string, unknown>).seq) - Number((b as Record<string, unknown>).seq)) : merged;
 }

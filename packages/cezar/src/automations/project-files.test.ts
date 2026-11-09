@@ -52,27 +52,47 @@ describe('project automation sources', () => {
     expect(readFileSync(join(root('squawk'), 'automations.json'))).toEqual(source);
   });
 
-  it('paginates independent log sequences without losing fallback rows, including after compaction', async () => {
+  it('keeps positive cursors stable across legacy appends and compacts legacy rows only', async () => {
     seed('cezar', ['legacy']); seed('squawk', ['fallback']);
     const log = (automationId: string) => Array.from({ length: 100 }, (_, index) => JSON.stringify({
-      automationId, revision: 1, seq: index + 1, ts: new Date().toISOString(), event: 'pull_request.opened', result: 'skipped', reason: 'fixture',
+      automationId, revision: 1, seq: index + 1, ts: new Date().toISOString(), result: 'skipped', reason: `${automationId}-${index + 1}`,
     })).join('\n') + '\n';
     const fallbackBytes = log('fallback');
     writeFileSync(join(root('cezar'), 'automation-log.ndjson'), log('legacy'));
     writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes);
+    const receipt = { receiptKey: 'fallback:event', receiptId: 'source-receipt', automationId: 'fallback', eventId: 'event', revision: 1, status: 'reserved', observedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    writeFileSync(join(root('squawk'), 'automation-receipts.ndjson'), JSON.stringify(receipt) + '\n');
     const store = open();
     const first = store.logs({ limit: 100 });
-    expect(first.map(row => row.automationId)).toEqual(Array(100).fill('legacy'));
+    expect(first.every(row => Number.isInteger(row.seq) && row.seq > 0)).toBe(true);
+    await store.appendLog({ automationId: 'legacy', revision: 1, result: 'skipped', reason: 'new entry' });
     const second = store.logs({ cursor: first.at(-1)!.seq, limit: 100 });
-    expect(second.map(row => row.automationId)).toEqual(Array(100).fill('fallback'));
-    expect(new Set([...first, ...second].map(row => row.seq)).size).toBe(200);
-    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes + log('legacy'));
-    expect(store.logs({ cursor: 1, limit: 100 })).toEqual(second);
-    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes);
+    const all = [...first, ...second];
+    expect(new Set(all.map(row => row.seq)).size).toBe(200);
+    expect(new Set(all.map(row => row.reason)).size).toBe(200);
+    expect(all.some(row => row.reason === 'new entry')).toBe(false);
     expect(store.logs({ cursor: second.at(-1)!.seq })).toEqual([]);
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes + log('legacy'));
+    expect(store.logs({ cursor: first.at(-1)!.seq, limit: 100 })).toEqual(second);
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes);
     await store.compact();
-    expect(open().logs({ cursor: 1, limit: 100 })).toEqual(second);
+    expect(open().logs({ cursor: first.at(-1)!.seq, limit: 100 })).toEqual(second);
+    const persisted = readFileSync(join(root('cezar'), 'automation-log.ndjson'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(persisted).toHaveLength(101);
+    expect(readFileSync(join(root('cezar'), 'automation-receipts.ndjson'), 'utf8')).toBe('');
+    expect(open().receipts().map(row => row.receiptId)).toEqual(['source-receipt']);
+    expect(persisted.every(row => row.automationId === 'legacy' && Number.isInteger(row.seq) && row.seq > 0)).toBe(true);
     expect(readFileSync(join(root('squawk'), 'automation-log.ndjson'), 'utf8')).toBe(fallbackBytes);
+  });
+
+  it('skips compaction when only fallback files exist', async () => {
+    seed('squawk', ['fallback']);
+    const bytes = JSON.stringify({ automationId: 'fallback', revision: 1, seq: 1, ts: new Date().toISOString(), result: 'skipped' }) + '\n';
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), bytes);
+    await open().compact();
+    expect(existsSync(root('cezar'))).toBe(false);
+    expect(open().logs()).toHaveLength(1);
+    expect(readFileSync(join(root('squawk'), 'automation-log.ndjson'), 'utf8')).toBe(bytes);
   });
 
   it('preserves fallback runtime state and receipt transitions when writing legacy files', () => {

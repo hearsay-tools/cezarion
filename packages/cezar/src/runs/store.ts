@@ -809,7 +809,7 @@ export class RunStore extends EventEmitter {
   private holdFamily(rootId: string, decode: (row: RunRow) => DecodedRun | undefined = (row) => decodeRunRow(row.data), settle = false, stopId?: string): void {
     const rows = [this.db!.get(rootId), ...this.db!.listByParent(rootId)];
     for (const row of rows) {
-      if (!row || this.held.has(row.id) || this.deleted.has(row.id)) continue;
+      if (!row || this.held.has(row.id) || this.deleted.has(row.id) || this.isFallbackRun(row.id)) continue;
       const decoded = decode(row);
       if (decoded) this.adoptLoadedRun(decoded, { keepLive: this.keepLive, settle, stop: row.id === stopId }, row);
     }
@@ -871,13 +871,13 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Claim an orphaned family and settle its live rows before a control acts. Stop cancels its
-   * target. Return the root id, or undefined for a live owner or missing run; adoption never
-   * resumes work.
+   * Claim and preserve an orphaned family before a control, then settle its live rows.
+   * Stop cancels its target. Return the root id, or undefined for a live owner or missing run.
    */
   adoptFamily(id: string, opts: { stop?: boolean } = {}): string | undefined {
     const family = this.db?.familyOf(id);
     if (family === undefined || !this.claimFamilies([family], { allowLive: true, wait: true }).has(family)) return undefined;
+    if (this.isFallbackRun(id)) this.persist(new Map([[id, this.loadCold(id)!]]));
     this.holdFamily(family, undefined, true, opts.stop ? id : undefined);
     this.exitEvents.writeLoaded();
     return family;
@@ -964,8 +964,9 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Hold a run just decoded from its row: the object every later read and write shares. */
+  /** Hold a legacy row. Fallback reads stay detached until an explicit write preserves them. */
   private holdDecoded(run: RunRecord): RunRecord {
+    if (this.isFallbackRun(run.id)) return process.env.VITEST ? deepFreeze(run) : run;
     const read = this.coldBase.get(run.id);
     this.held.set(run.id, run);
     if (read) this.base.set(run.id, storedRow(read));
@@ -973,10 +974,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Bring a run into memory and return the held object: the record a write changes in place.
-   * It leaves again at the first sweep after its write settles, unless something anchors it.
-   * Its family is claimed first, then the row is read, so the version held is the claimed one;
-   * undefined while another process owns it (see `claimFamilies`).
+   * Hold a claimed legacy run for a write; leave after settlement unless anchored.
+   * Take the family claim before reading its row. Return undefined for a live foreign owner.
+   * Preserve a fallback family before holding its mutable record.
    */
   private hold(id: string): RunRecord | undefined {
     const held = this.held.get(id);
@@ -1004,8 +1004,7 @@ export class RunStore extends EventEmitter {
     return held ?? this.hold(id);
   }
 
-  /** The current record for reading: the held object, the held copy of a run whose family is in
-   *  memory, or else a fresh copy nobody holds. */
+  /** Read held legacy family members, or a detached cold record. */
   private peek(id: string): RunRecord | undefined {
     const held = this.held.get(id);
     if (held) return held;
@@ -3364,6 +3363,7 @@ export class RunStore extends EventEmitter {
       }
       const decoded = conflict.current ? decodeRunRow(conflict.current.data) : undefined;
       const current = decoded?.run;
+      if (this.isFallbackRun(conflict.id)) this.held.delete(conflict.id);
       const held = this.held.get(conflict.id);
       if (current && conflict.current) {
         // The other writer's record as it stands, normalized only as a live owner's run would be.

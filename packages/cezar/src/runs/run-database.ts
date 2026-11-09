@@ -886,7 +886,7 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
-        this.project?.preserveFamilies(changes.upserts.map(row => row.parentRunId ?? row.id));
+        this.project?.preserveFamilies(changes.upserts.filter(row => this.isFallback(row.id)).map(row => row.parentRunId ?? row.id));
         for (const id of changes.deletes) {
           this.reports.deleteRun(id);
           this.statements.delete.run(id);
