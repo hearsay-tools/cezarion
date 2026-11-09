@@ -37,11 +37,15 @@ run-file writes throw `RunWriteRefusedError` (ownership `fallback`), and
 archive on merge, completion actions, retention and compression already skip
 families they may not write, so they skip these too and never copy them.
 
-`RunDatabase` enforces the same rule: `transaction()` and `takeClaims()` throw
-`FallbackWriteRefusedError` for any upsert, delete or claim in such a family. The
-store refuses first, so this error means a caller bypassed the store. The one
-exception is the `adoptFallback` intent, set only by `RunStore.adoptFallbackFamily`,
-which `requireRunControl` calls for an explicit run control (not `read`, `unread`
+`RunDatabase` is the backstop for the rows themselves: `transaction()` throws
+`FallbackWriteRefusedError` for an upsert of a row whose winning copy is a fallback
+row and for a delete of an ID with any `.ai/squawk/` copy (rule A), and
+`takeClaims()` never takes a claim on a family with a fallback member. The store
+refuses first, so this error means a caller bypassed the store. The database check
+is per row, not per family, so a fallback member that another process adds to a
+family this process already holds cannot stall the save of its legacy rows. The
+one exception is the `adoptFallback` intent, set only by `RunStore.adoptFallbackFamily`,
+which the `adoptFallbackControl` middleware calls before `requireRunControl` for an explicit run control (not `read`, `unread`
 or `DELETE /runs/:id`). Adoption copies the whole family's records and run files into
 `.ai/cezar/` inside one transaction, refuses a family a live process of the migrating
 binary claims, and leaves every fallback byte unchanged. A retry accepts
@@ -53,7 +57,7 @@ boot copy, whole-tree copy, move or symlink occurs.
 | --- | --- |
 | Read a run ID | Legacy record first; all evidence follows its source |
 | Automatic write to a family with a fallback member | Refused as `fallback` ownership; the caller skips it |
-| Explicit run control (`requireRunControl`) | Adopt: copy the whole family's records and run files under legacy, then write |
+| Explicit run control (`adoptFallbackControl`, then `requireRunControl`) | Adopt: copy the whole family's records and run files under legacy, then write |
 | Other explicit write to such a family | Refuse with the refusal message |
 | Explicit logical delete of run, workflow or automation | Refuse whenever its ID/name also exists under `.ai/squawk/`, even if legacy wins |
 | Refusal message | Name the `.ai/squawk/` path; tell the user to use the binary that migrated the project |

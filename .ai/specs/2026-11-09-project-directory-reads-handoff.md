@@ -11,8 +11,8 @@ The coordinator approved a redesign (reply to request `6c0c1be0-154a-43a2-80bd-1
 Round 3 B1 and B2 are closed by one boundary, not by call-site patches: a family with
 any fallback member has run ownership `fallback`, which every automatic path already
 skips as it skips a foreign family, and `RunDatabase` throws `FallbackWriteRefusedError`
-for any write or claim in such a family without the `adoptFallback` intent. Only
-`requireRunControl` sets it, through `RunStore.adoptFallbackFamily`. The implicit copy on
+for any write of a fallback row without the `adoptFallback` intent and never claims such
+a family. Only the run-control gate sets the intent, through `RunStore.adoptFallbackFamily`. The implicit copy on
 `hold`/`record`/`adoptFamily` and the per-site filters are gone.
 `runs/fallback-write-invariant.test.ts` drives boot, recovery, reconcilers and background
 sweeps over a mixed fixture and fails on any fallback copy, byte change or guard refusal;

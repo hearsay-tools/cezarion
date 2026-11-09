@@ -989,8 +989,8 @@ export class RunDatabase {
     take: ReadonlyArray<{ family: string; expect: { session: string; generation: number } | null }>,
   ): Map<string, number> {
     const taken = new Map<string, number>();
+    take = this.project?.claimable(take) ?? take;
     if (take.length === 0) return taken;
-    this.project?.beforeClaim(take.map(({ family }) => family));
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');
       try {

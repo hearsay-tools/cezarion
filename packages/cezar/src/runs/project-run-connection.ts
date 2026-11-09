@@ -9,7 +9,9 @@ import { pathPresent } from '../project-paths.ts';
 import type { RunRowInput } from './run-database.ts';
 import { toRunBindings } from './run-database-row.ts';
 
-/** A write reached a run family that is still read only under `.ai/squawk/`. The store refuses such
+type RunChanges = { upserts: readonly RunRowInput[]; deletes: readonly string[]; adoptFallback?: readonly string[] };
+
+/** A write reached a run that is still read only under `.ai/squawk/`. The store refuses such
  *  writes first, so this error means a caller bypassed it. */
 export class FallbackWriteRefusedError extends Error {
   constructor(readonly runId: string, source: string) {
@@ -82,34 +84,33 @@ export class ProjectRunConnection {
       AND NOT EXISTS (SELECT 1 FROM main.runs legacy WHERE legacy.id = source.id) LIMIT 1`).get(family, family));
   }
 
-  /** Refuse before `writable()`, so a refused write cannot create the legacy database either. */
-  beforeWrite(changes: { upserts: readonly RunRowInput[]; deletes: readonly string[]; adoptFallback?: readonly string[] }): ReadonlySet<string> {
+  /**
+   * The database half of the fallback rule: no upsert of a row whose winning copy is a fallback row,
+   * and no delete of an ID that has any fallback copy (rule A), unless the transaction adopts its
+   * family. Family policy (mixed families, claims, held runs) stays in the store; this guard only
+   * catches a store bypass. Checked here only while no legacy database exists, so a refused write
+   * cannot create one; otherwise inside the transaction, after the fence (`preserveFamilies`).
+   */
+  beforeWrite(changes: RunChanges): ReadonlySet<string> {
     const adopted = new Set(changes.adoptFallback ?? []);
-    this.assertWritable(changes, adopted);
     this.assertAdoptable(adopted);
+    if (this.deferred) this.assertWritable(changes, adopted);
     if (changes.upserts.length || changes.deletes.length || adopted.size) this.writable();
     return adopted;
   }
 
-  beforeClaim(families: readonly string[]): void {
-    this.assertClaimable(families);
-    this.writable();
+  /** A family with a fallback member is never claimed here; adoption copies it first. */
+  claimable<T extends { family: string }>(take: readonly T[]): readonly T[] {
+    const kept = take.filter(({ family }) => !this.familyHasFallback(family));
+    if (kept.length) this.writable();
+    return kept;
   }
 
-  /** Refuse a write that reaches a fallback family without the explicit adoption intent. */
-  assertWritable(changes: { upserts: readonly RunRowInput[]; deletes: readonly string[] }, adopted: ReadonlySet<string>): void {
+  assertWritable(changes: RunChanges, adopted: ReadonlySet<string>): void {
     for (const row of changes.upserts) {
-      const family = row.parentRunId ?? row.id;
-      if (!adopted.has(family) && (this.isFallback(row.id) || this.familyHasFallback(family))) throw new FallbackWriteRefusedError(row.id, this.source);
+      if (!adopted.has(row.parentRunId ?? row.id) && this.isFallback(row.id)) throw new FallbackWriteRefusedError(row.id, this.source);
     }
-    for (const id of changes.deletes) {
-      const family = this.current.prepare('SELECT coalesce(parent_run_id, id) AS family FROM project_runs WHERE id = ?').get(id)?.family as string | undefined;
-      if (this.hasFallback(id) || this.familyHasFallback(family ?? id)) throw new FallbackWriteRefusedError(id, this.source);
-    }
-  }
-
-  assertClaimable(families: Iterable<string>): void {
-    for (const family of families) if (this.familyHasFallback(family)) throw new FallbackWriteRefusedError(family, this.source);
+    for (const id of changes.deletes) if (this.hasFallback(id)) throw new FallbackWriteRefusedError(id, this.source);
   }
 
   private configure(db: DatabaseSync): void {
@@ -179,7 +180,7 @@ export class ProjectRunConnection {
   }
 
   /** Explicit adoption only: inside the primary transaction, after its ownership and row fences passed. */
-  preserveFamilies(families: ReadonlySet<string>, changes: { upserts: readonly RunRowInput[]; deletes: readonly string[] }): void {
+  preserveFamilies(families: ReadonlySet<string>, changes: RunChanges): void {
     this.assertAdoptable(families);
     for (const family of families) {
       const rows = this.current.prepare(`SELECT * FROM project_runs WHERE id = ? OR parent_run_id = ?`).all(family, family);

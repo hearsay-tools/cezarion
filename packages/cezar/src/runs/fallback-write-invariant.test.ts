@@ -117,9 +117,9 @@ it('boot, recovery, reconcilers and background sweeps never copy or change a fal
   const fixture = buildFixture();
   split(fixture.fallbackIds, fixture.worktreePath);
   const before = fallbackBytes();
-  // Any refusal by the database guard is a store-layer bypass: the test fails on it.
+  // Any refusal by the database guard, or a claim it had to drop, is a store-layer bypass: the test fails on it.
   const writable = vi.spyOn(ProjectRunConnection.prototype, 'assertWritable');
-  const claimable = vi.spyOn(ProjectRunConnection.prototype, 'assertClaimable');
+  const claimable = vi.spyOn(ProjectRunConnection.prototype, 'claimable');
   const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
   const store = RunStore.open(primary, { keepLive: true });
@@ -164,11 +164,12 @@ it('boot, recovery, reconcilers and background sweeps never copy or change a fal
   expect(primaryIds().filter(id => fixture.fallbackIds.has(id))).toEqual([]);
   expect(fallbackBytes()).toEqual(before);
   expect(existsSync(fixture.worktreePath)).toBe(true);
-  expect([...writable.mock.results, ...claimable.mock.results].filter(result => result.type === 'throw')).toEqual([]);
+  expect(writable.mock.results.filter(result => result.type === 'throw')).toEqual([]);
+  expect(claimable.mock.calls.filter(([take], index) => claimable.mock.results[index]?.value.length !== take.length)).toEqual([]);
   expect(info.mock.calls.flat().join('\n')).not.toMatch(/Refused an automatic write/);
 });
 
-it('the database guard refuses an unauthorized fallback write loudly and allows only the adoption intent', () => {
+it('the database guard refuses a fallback row write loudly, never claims its family, and allows only the adoption intent', () => {
   const fixture = buildFixture();
   split(fixture.fallbackIds, fixture.worktreePath);
   const before = fallbackBytes();
@@ -179,10 +180,11 @@ it('the database guard refuses an unauthorized fallback write loudly and allows 
     const upsert = { ...row, data: row.data.replace('historical worker', 'bypass') };
     expect(() => db.transaction({ upserts: [upsert], deletes: [] })).toThrow(/Refused an automatic write/);
     expect(() => db.transaction({ upserts: [], deletes: [fixture.fallbackSettled.parentId] })).toThrow(/Refused an automatic write/);
-    const legacyRoot = db.get(fixture.mixed.parentId)!;
-    expect(() => db.transaction({ upserts: [legacyRoot], deletes: [] })).toThrow(/Refused an automatic write/);
-    expect(() => db.takeClaims({ session: 's', pid: process.pid, startToken: null }, [{ family: fixture.fallbackLive.parentId, expect: null }]))
-      .toThrow(/Refused an automatic write/);
+    const owner = { session: 's', pid: process.pid, startToken: null };
+    expect(db.takeClaims(owner, [{ family: fixture.fallbackLive.parentId, expect: null }, { family: fixture.mixed.parentId, expect: null }])).toEqual(new Map());
+    expect(db.getClaim(fixture.mixed.parentId)).toBeUndefined();
+    // A legacy row of a mixed family is the store's policy to refuse; the database copies nothing for it.
+    db.transaction({ upserts: [db.get(fixture.mixed.parentId)!], deletes: [] });
     expect(primaryIds().filter(id => fixture.fallbackIds.has(id))).toEqual([]);
     // The adoption intent copies the whole family first, so the same write then commits.
     db.transaction({ upserts: [upsert], deletes: [], adoptFallback: [fixture.mixed.parentId] });
@@ -190,4 +192,27 @@ it('the database guard refuses an unauthorized fallback write loudly and allows 
     expect(store.isFallbackRun(fixture.mixed.workerId)).toBe(false);
   } finally { store.close(); }
   expect(fallbackBytes()).toEqual(before);
+});
+
+it('keeps saving a held legacy family when another process adds a fallback member to it', () => {
+  const fixture = buildFixture();
+  split(fixture.fallbackIds, fixture.worktreePath);
+  const store = RunStore.open(primary, { keepLive: true });
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    expect(store.updateRun(fixture.legacy.parentId, { title: 'held' })?.title).toBe('held');
+    // The migrating binary, running beside this one, writes a new worker into the held family.
+    const late = { ...readPersistedRuns(fallback).find(run => run.id === fixture.fallbackSettled.workerId), id: randomUUID(),
+      delegation: { ...readPersistedRuns(fallback).find(run => run.id === fixture.fallbackSettled.workerId).delegation, parentRunId: fixture.legacy.parentId } };
+    const source = RunDatabase.open(join(fallback, RUNS_DB_FILE));
+    try { source.transaction({ upserts: [{ ...source.get(fixture.fallbackSettled.workerId)!, id: late.id, parentRunId: fixture.legacy.parentId, data: JSON.stringify(late) }], deletes: [] }); }
+    finally { source.close(); }
+    const before = fallbackBytes();
+    store.updateRun(fixture.legacy.parentId, { title: 'still saved' });
+    store.flush();
+    expect(error.mock.calls.flat().join('\n')).not.toMatch(/failed to save/);
+    expect(readPersistedRuns(primary).find(run => run.id === fixture.legacy.parentId)?.title).toBe('still saved');
+    expect(primaryIds()).not.toContain(late.id);
+    expect(fallbackBytes()).toEqual(before);
+  } finally { store.close(); }
 });

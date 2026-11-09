@@ -11,9 +11,9 @@ including when a duplicate sidecar is absent in the winning directory.
 The coordinator approved per-family copy-on-write on 2026-11-09. A family with any
 member read from `.ai/squawk/` has run ownership `fallback`: every automatic path
 meets the same refusal as a foreign family and skips it. Only an explicit run control
-(`requireRunControl`) adopts the family, which copies its records and sidecars into
-the legacy directory inside one transaction. `RunDatabase` refuses any other write or
-claim in such a family, so a bypass fails loudly. Boot and reads do not copy fallback
+(the `adoptFallbackControl` middleware before `requireRunControl`) adopts the family, which copies its records and sidecars into
+the legacy directory inside one transaction. `RunDatabase` refuses any write of a
+fallback row and any claim on such a family, so a bypass fails loudly. Boot and reads do not copy fallback
 state or create an empty legacy database. Neither tree is
 moved or symlinked. The fallback tree stays logically read only. Normal read-only SQLite WAL coordination
 may change only `runs.db-wal` and `runs.db-shm`. An unreadable or unsupported
