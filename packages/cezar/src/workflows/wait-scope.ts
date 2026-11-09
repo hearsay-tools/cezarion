@@ -48,6 +48,11 @@ export function workerWaitTarget(request: { workerIds?: string[]; requestIds?: s
   }) };
 }
 
+/** The CLI's capacity refusal, shared by worker, request and peer waits. */
+export function waitCapacityPolicyError(): DelegationPolicyError {
+  return new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+}
+
 /**
  * A new `peer` wait (spec 2026-10-27-task-communication-protocol § 7), or the open one the same
  * peers repeat. Every name must pass the relationship resolver as a peer (`peerPair`), else
@@ -60,7 +65,7 @@ export function peerWaitEntry(run: RunRecord, request: { peerIds: string[]; time
   if (repeated) return repeated;
   try { assertWaitCapacity(run); }
   catch (error) {
-    if (error instanceof WaitCapacityError) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+    if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
     throw error;
   }
   const now = Date.now();

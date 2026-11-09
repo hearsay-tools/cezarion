@@ -5,14 +5,14 @@ import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato
 import { hasWorkerDeadline, workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError, requireMessagingAllowed } from '../../delegation/policy.ts';
 import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
-import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget } from '../wait-scope.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget, waitCapacityPolicyError } from '../wait-scope.ts';
 import { identicalWorkerWait } from '../waits.ts';
 import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { AgentInput, WorkerWaitRequest } from '@open-mercato/cezar-contract/delegation';
-import { cezarAskRequestSchema, cezarWaitRequestSchema, WAIT_LIMIT, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { cezarAskRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { askErrorMessage, waitErrorMessage } from '../../ci-wait/errors.ts';
@@ -24,6 +24,10 @@ import { isSessionLeader } from '../../core/session-process.ts';
 import { probeProcessWait } from '../../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../../process-wait/exit-file.ts';
 import { processStartToken, recordedProcessLive } from '../../delegation/process-liveness.ts';
+
+function warnRegistrationRefused(code: WaitErrorCode | AskErrorCode): void {
+  console.warn(`[cez] wait registration refused: ${code}`);
+}
 
 /** CI identity stays live across registration and rotates at the existing turn boundaries. */
 export class WaitGroup {
@@ -104,7 +108,7 @@ export class WaitRegistry {
     if (repeated && hasWorkerDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
     try { assertWaitCapacity(run); }
     catch (error) {
-      if (error instanceof WaitCapacityError) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+      if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
       throw error;
     }
     const now = Date.now();
@@ -115,7 +119,7 @@ export class WaitRegistry {
     this.host.withdrawCezarHumanWaits(runId);
     try { this.context.store.commitWait(runId, entry, undefined, registrationReceipt(registration, entry)); }
     catch (error) {
-      if (error instanceof WaitCapacityError) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+      if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
       throw error;
     }
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
@@ -214,7 +218,7 @@ export class WaitRegistry {
     const state = this.host.active(runId);
     const refuse = (code: WaitErrorCode | AskErrorCode): never => {
       // Fixed codes only: no tool arguments, credentials or provider diagnostics.
-      console.warn(`[cez] wait registration refused: ${code}`);
+      warnRegistrationRefused(code);
       throw Object.assign(new Error(code === 'autonomous_run' ? askErrorMessage(code) : waitErrorMessage(code)), { code });
     };
     const assertCanRegister = () => {
@@ -371,7 +375,7 @@ export class WaitRegistry {
     try { this.context.store.commitWait(runId, wait, undefined, registrationReceipt(registration, wait)); }
     catch (error) {
       if (error instanceof WaitCapacityError) {
-        console.warn('[cez] wait registration refused: capacity');
+        warnRegistrationRefused('capacity');
         throw Object.assign(new Error(waitErrorMessage('capacity')), { code: 'capacity' });
       }
       throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' });

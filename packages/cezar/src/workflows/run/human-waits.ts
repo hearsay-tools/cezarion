@@ -1,4 +1,4 @@
-import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
+import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
@@ -64,8 +64,7 @@ export class HumanWaits {
     if (source === 'agent') this.withdrawCezarHumanWaits(runId);
     const open = openWaits(this.context.store.getRun(runId) ?? run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (open) return open;
-    try { assertWaitCapacity(this.context.store.getRun(runId) ?? run); }
-    catch (error) { if (error instanceof WaitCapacityError) return open; throw error; }
+    if (!waitCapacityAvailable(this.context.store.getRun(runId) ?? run)) return undefined;
     const wait: HumanWaitEntry = { id: randomUUID(), kind: 'human', source, via,
       registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.waitIdentity.ciTurnId ?? via, ...(card ? askCardFields(card) : {}) };
     try { this.context.store.commitWait(runId, wait); }
