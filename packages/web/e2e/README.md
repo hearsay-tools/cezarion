@@ -54,7 +54,8 @@ and the state read are the same one. Use `waitForStable` when that first truth c
 again inside one CLI round-trip — the hold is what `#409` could not see. The suite build
 (`.ai/scripts/build-e2e.sh`, into the ignored `.ai/qa/build/cezar`, never the production
 `packages/cezar/dist`) sets `VITE_CEZ_E2E=1` so `useNow` and every `refetchInterval` stay off, and the cockpit
-exposes `window.__cezIdle` (false while a query, SSE reconcile, or WS topic is in flight). `hoverVisiblePoint` in `contrast.ts` is the worked
+exposes `window.__cezIdle` (false while a query is fetching or its results await
+React subscriber delivery, or while an SSE reconcile or WS topic is in flight). `hoverVisiblePoint` in `contrast.ts` is the worked
 example: scroll, hit-test and the point come from one polled expression, and the pointer
 moves to that point. Its predecessor polled a predicate and then recomputed the point in a
 second `eval`, and any layout shift between the two failed as `no visible hover point`.
