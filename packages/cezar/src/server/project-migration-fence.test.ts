@@ -17,7 +17,9 @@ import { publishArtifact } from '../artifacts/store.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { createDelegationRoutes } from '../delegation/routes.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
-import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
+import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
+import type { GithubAutomationDefinition } from '../automations/types.ts';
+import { hostname } from 'node:os';
 import { defaultCliDeps, main, type CliDeps } from '../cli-dispatch.ts';
 import { initCommand, openStore } from '../project-commands.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -250,6 +252,55 @@ describe('the write backstop', () => {
       warn.mockRestore();
       if (other.exitCode === null && other.signalCode === null) other.kill('SIGKILL');
     }
+  });
+});
+
+describe('the write backstop over automation and artifact files', () => {
+  it('drops the writes of a poll that was waiting on the network when another owner took the fence', async () => {
+    const { dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+      filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'issues') as GithubAutomationDefinition;
+    let resume!: () => void;
+    const network = new Promise<void>((resolve) => { resume = resolve; });
+    let parked!: () => void;
+    const polling = new Promise<void>((resolve) => { parked = resolve; });
+    const poller = { poll: async () => { parked(); await network; return { candidates: [], truncated: false, pages: 1 }; }, matchesCurrentLabels: async () => true };
+    // A cockpit that does not own the project polls it (no lease of the owner's process).
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: poller as never }, launch: vi.fn() });
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const check = scheduler.check(definition).catch((error: unknown) => error);
+      await polling;
+      const before = files();
+      const fence = await owner().fenceProject(dataDir, none);
+      resume();
+      await check;
+      expect(files()).toEqual(before);
+      expect(warn.mock.calls.some(([line]) => String(line).includes('was skipped'))).toBe(true);
+      fence.release();
+      store.setState(definition.id, (current) => ({ ...current, lastSuccessAt: '2026-11-10T00:00:00.000Z' }));
+      expect(files()).not.toEqual(before);
+    } finally { warn.mockRestore(); }
+  });
+
+  it('leaves the publication lock candidate in place when the fence comes while the lock is awaited', async () => {
+    const { root, dataDir } = project();
+    const task = randomUUID();
+    const directory = join(dataDir, 'runs', `${task}-artifacts`);
+    mkdirSync(join(directory, '.publish.lock'), { recursive: true });
+    // A live publisher holds the lock, so this one waits in its retry loop.
+    writeFileSync(join(directory, '.publish.lock', 'owner.json'), JSON.stringify({ pid: process.pid, host: hostname() }));
+    writeFileSync(join(root, 'report.html'), '<p>report</p>');
+    const publishing = publishArtifact(directory, task, join(root, 'report.html')).then(() => undefined, (error: unknown) => error);
+    // bound: hang guard while the publisher creates its lock candidate.
+    await vi.waitFor(() => expect(readdirSync(directory).some((name) => name.startsWith('.lock-candidate-'))).toBe(true), { timeout: 5_000 });
+    const fence = await owner().fenceProject(dataDir, none);
+    expect(await publishing).toBeInstanceOf(ProjectMigrationFencedError);
+    expect(readdirSync(directory).filter((name) => name.startsWith('.lock-candidate-'))).toHaveLength(1);
+    expect(readFileSync(join(directory, '.publish.lock', 'owner.json'), 'utf8')).toContain(String(process.pid));
+    fence.release();
   });
 });
 

@@ -1,5 +1,5 @@
 import { projectPaths, readDataPath, readProjectPath } from './project-paths.ts';
-import { projectAdmissionRefusal } from './server/cockpit-ownership.ts';
+import { assertProjectWritable, projectAdmissionRefusal } from './server/cockpit-ownership.ts';
 import type { Home } from './home/home.ts';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -293,6 +293,7 @@ export function updateConfigFile<T>(
   const next = previous.catch(() => undefined).then(async () => {
     const outcome = change(await readRawConfig(dataDir));
     if ('refuse' in outcome) return outcome.refuse;
+    assertProjectWritable(dataDir);
     await mkdir(dataDir, { recursive: true });
     const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
     try {

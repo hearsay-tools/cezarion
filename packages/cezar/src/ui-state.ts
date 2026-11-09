@@ -1,4 +1,5 @@
-import { readProjectPath } from './project-paths.ts';
+import { projectPaths, readProjectPath } from './project-paths.ts';
+import { assertProjectWritable } from './server/cockpit-ownership.ts';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -65,6 +66,7 @@ export function readProjectUiStateSync(repoRoot: string): UiState {
  * a partial write it would read as `{}` and so as an empty team-skill off-list (#1494).
  */
 export async function writeProjectUiState(repoRoot: string, state: UiState): Promise<void> {
+  assertProjectWritable(projectPaths(repoRoot).write);
   const file = uiStatePath(repoRoot);
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {

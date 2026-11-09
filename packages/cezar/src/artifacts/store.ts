@@ -6,7 +6,7 @@ import { hostname } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { publishedArtifactSchema, type PublishedArtifact } from '@open-mercato/cezar-contract/artifacts';
-import { assertProjectAdmitted } from '../server/cockpit-ownership.ts';
+import { assertProjectAdmitted, projectWriteRefused } from '../server/cockpit-ownership.ts';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_METADATA_BYTES = 32 * 1024;
@@ -126,7 +126,7 @@ async function boundedRead(path: string, limit: number, stored = false, prefixBy
   } finally { await file.close(); }
 }
 
-type Directory = { path: string; check: () => Promise<void>; close: () => Promise<void>; admit: () => void };
+type Directory = { path: string; check: () => Promise<void>; close: () => Promise<void>; admit: () => void; writable: () => boolean };
 /** Reject symlinks in every storage component. Linux operations stay anchored to open directory
  * descriptors; other platforms revalidate identity before/after use, not a same-user sandbox. */
 async function storageDirectory(path: string, create = false): Promise<Directory> {
@@ -153,7 +153,8 @@ async function storageDirectory(path: string, create = false): Promise<Directory
       if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     };
     await check();
-    return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close(), admit: admitted };
+    return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close(), admit: admitted,
+      writable: () => !create || !projectWriteRefused(dirname(dirname(absolute))) };
   } catch (error) { await file?.close(); throw error; }
 }
 
@@ -230,7 +231,7 @@ async function acquireLock(root: Directory): Promise<() => Promise<void>> {
           root.admit();
           await rename(candidate, path);
           return async () => {
-            if (sameFile(identity, await lstat(path, { bigint: true }))) { root.admit(); await rm(path, { recursive: true, force: true }); }
+            if (root.writable() && sameFile(identity, await lstat(path, { bigint: true }))) await rm(path, { recursive: true, force: true });
           };
         }
       } catch (error) {
@@ -240,7 +241,7 @@ async function acquireLock(root: Directory): Promise<() => Promise<void>> {
       await reclaimDeadLock(root);
       await delay(20);
     }
-  } finally { await rm(candidate, { recursive: true, force: true }); }
+  } finally { if (root.writable()) await rm(candidate, { recursive: true, force: true }); }
 }
 async function checkCapacity(root: Directory, incomingBytes: number): Promise<void> {
   let count = 0;
@@ -299,7 +300,7 @@ export async function publishArtifact(directory: string, runId: string, source: 
     await root.check();
     return metadata;
   } finally {
-    try { await staging?.close(); if (pending) { root.admit(); await rm(pending, { recursive: true, force: true }); } }
+    try { await staging?.close(); if (pending && root.writable()) await rm(pending, { recursive: true, force: true }); }
     finally { try { await release?.(); } finally { await root.close(); } }
   }
 }

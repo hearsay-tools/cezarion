@@ -54,7 +54,11 @@ pid plus start-token liveness and token-checked release.
   flushes the store inside the drain). A refused save is skipped and its rows stay dirty
   until the fence ends; a refused claim leaves the family unclaimed, so a new task or a
   repair (a late repo-handle result) writes nothing; a durable commit writes nothing and
-  throws, as on a closed store. Each fence logs its first skipped write once. The holder's
+  throws, as on a closed store. The same check guards the automation store (state,
+  receipts, logs, locks, compaction: writes skip, no lock directory is recreated, a held
+  lock is left in place), the artifact writer (cleanup in `finally` included), the data
+  `.gitignore` and the voice log (skipped), and config updates, project ui-state and the
+  launch key (they throw, nothing written). Each fence logs its first skipped write once. The holder's
   own rewrites (P4b2) run inside `holdProjectWork`. Read-only paths skip while fenced:
   health answers the last config it read (`healthConfig`), the activity publisher stops
   its foreign-claim check.
