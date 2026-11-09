@@ -449,8 +449,8 @@ exit code or reruns tests. Local coverage failures remain fatal. Upload and merg
 The merge job stays outside `verify.needs` and the merge-queue roster.
 
 Coverage now adds time to the required test jobs. PR and dispatch shards have a 25-minute
-hang bound, matching the former separate coverage jobs; main and merge groups retain their
-15-minute bound. Removing the duplicate matrix saves three dependency installs, server builds
+hang bound, matching the former separate coverage jobs; main and merge groups have a
+20-minute bound. Removing the duplicate matrix saves three dependency installs, server builds
 and test executions. It does not promise a shorter time to the required test verdict.
 
 `.github/scripts/ci-coverage.workflow.test.cjs` pins the event selection, single test run,
