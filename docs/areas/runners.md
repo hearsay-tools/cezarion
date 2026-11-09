@@ -72,15 +72,22 @@ A per-runner parity file loads only its own adapter. It picks its runner with
 adapter for its workers, and an owned-workflows file the next runner for R14's mixed chain. `core/runner-closure.test.ts` enforces this
 (hearsay-tools/cezarion#2939).
 
-Keep each parity test file under about 300 s on an idle host, so that it stays
-inside Squeal's per-file cap (`runner.timeoutMs` in `squeal.config.json`) on a
-loaded host. When a parity suite grows past that, run its cells from one file per
+The binding limit on a parity test file is CI's per-file cap: `FILE_DURATION_LIMIT_MS`
+(60 s) in `.github/scripts/vitest-file-duration.mjs`. CI enforces it on every Vitest
+file when `VITEST_FILE_DURATION_CAP=1` (`.github/workflows/ci.yml`), with coverage on,
+which runs about 1.8 times slower than an idle local host. Keep each file at most
+about 25 s on an idle host. Measure a file the way CI does with
+`VITEST_FILE_DURATION_CAP=1 npx vitest run --project server --coverage <files>`.
+Squeal's per-file timeout (`runner.timeoutMs` in `squeal.config.json`) is a looser,
+secondary bound. When a parity suite grows past the cap, run its cells from one file per
 runner, defined once in a `*-cells.testkit.ts`, and add a guard that every runner
 with rows has its file. Split a runner's file again by row group when one runner
 alone is too slow. A runner that runs no row of a part has no file for it, so the
 file guards compute the expected files from the class table, never from
 `RUNNER_IDS` alone. Fold files that were split only for the cap once the derived
-set fits in one.
+set fits in fewer files, and measure each folded file against the CI cap first:
+`WAIT_FOLDS` in `workflows/waits-parity-cells.testkit.ts` groups the parts of a runner
+outside the shared set into files of about 8–21 s locally.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
 (hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
