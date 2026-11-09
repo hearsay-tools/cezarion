@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { makeWorkerWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makeWorkerWait, RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_SOURCE, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { seedWaits } from '../../runs/run-store.testkit.ts';
 import { unused } from '../fixture-cleanup.testkit.ts';
 import * as rules from '../turn-end.ts';
@@ -42,7 +42,7 @@ it('a full wait list silently refuses the completion wait before commit or recon
 it('below capacity the completion wait commits before reconcile and notice', () => {
   const f = fixture(15);
   const entry = f.registry.registerCompletionWait(f.run.id, [f.worker.id]);
-  expect(entry).toMatchObject({ kind: 'worker', via: 'completion', source: 'cezar', phase: 'open' });
+  expect(entry).toMatchObject({ kind: WAIT_KIND.worker, via: WAIT_VIA.completion, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open });
   expect(f.store.getRun(f.run.id)?.waits).toHaveLength(16);
   expect(f.commit).toHaveBeenCalledWith(f.run.id, entry);
   expect(f.reconcileWorkerWaits).toHaveBeenCalledWith(f.run.id);
