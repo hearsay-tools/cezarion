@@ -9,3 +9,11 @@
 ## Rules
 
 On by default; only exact `CEZ_AUTOMATIONS=0` opts out, and the gate middleware then answers `409`. Restart after changing the flag. New definitions remain paused; existing enabled definitions resume unless opted out. Two kinds: `github` polls, `schedule` fires on the clock and needs no remote. A schedule fire takes the hearsay-tools/cezarion#651 store lease, reserves one receipt per occurrence (`<id>:schedule:<iso>`), launches an ordinary task, and never advances `nextRunAt` on a lost lease. At most one catch-up inside 24 h, auto-pause after 3 consecutive launch failures. `setState` is a read-modify-write against a fresh disk read. No `task.dispatch`. Stage 2 (hearsay-tools/cezarion#774): `cez automation` (`automations/automation-cli.ts`) reaches the cockpit through `CEZ_COCKPIT_URL`/`CEZ_PROJECT_ID`, which the boot manager receives at construction (`serve` binds its listener before it recovers, so recovered runs carry it) and every other project's manager receives from `startServer` via `RunManager.setCockpitAddress`; it never starts a server or probes ports on its own. The prompt part and the built-in `create-cezarion-automation` skill share ONE gate (`CEZ_AUTOMATIONS !== '0'` AND an address): add any new skill lookup through `RunManager.builtinSkills()` and any new session construction site through `automationsPart()`. Templates, calendars and stats are stage 3.
+
+## Project directory log reads
+
+Legacy log rows keep their sequence values. Fallback log sequences occupy a stable
+negative domain so a cursor can reach both stores even when their original sequence
+ranges overlap. Duplicate automation/sequence keys still prefer legacy. Compaction
+keeps the projected sequence values, so reading fallback again does not duplicate
+copied log rows. Receipts keep their existing identity and append order.

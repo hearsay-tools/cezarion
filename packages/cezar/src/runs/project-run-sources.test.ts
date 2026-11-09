@@ -188,7 +188,8 @@ describe('project run sources', () => {
       const store = open();
       expect(store.getRun(run.id)?.title).toBe('foreign');
       expect(store.runOwnership(run.id)).toBe('foreign');
-      expect(() => store.updateRun(run.id, { title: 'unsafe' })).toThrow();
+      expect(store.updateRun(run.id, { title: 'unsafe' })).toBeUndefined();
+      expect(store.getRun(run.id)?.title).toBe('foreign');
       expect(existsSync(root('cezar'))).toBe(false);
       expect(db.get(run.id)?.data).toContain('foreign');
     } finally { db.close(); closeClaimSession(owner.session); }
@@ -264,6 +265,43 @@ describe('project run sources', () => {
     expect(store.readWorkerResultDiff(parentId, workerId)).toBe('retained patch');
     expect(store.readWorkerResult(parentId, workerId)?.diff).toMatchObject({ path: join(root('cezar'), 'runs', `${parentId}-worker-results`, `${workerId}.${snapshotId}.json`) });
     expect(readFileSync(path, 'utf8')).toBe(bytes);
+  });
+
+  it.each([false, true])('recovers crash-left sidecars only when their bytes match (different=%s)', different => {
+    const run = record('fallback');
+    const source = seed('squawk', [run]);
+    const name = `${run.id}-worker-results`;
+    mkdirSync(join(source, 'runs', name));
+    writeFileSync(join(source, 'runs', name, 'result.json'), 'source evidence');
+    mkdirSync(join(root('cezar'), 'runs', name), { recursive: true });
+    writeFileSync(join(root('cezar'), 'runs', name, 'result.json'), different ? 'other evidence' : 'source evidence');
+    const store = open();
+    if (different) {
+      expect(() => store.updateRun(run.id, { title: 'changed' })).toThrow('sidecar already exists');
+      expect(store.isFallbackRun(run.id)).toBe(true);
+      expect(readFileSync(join(root('cezar'), 'runs', name, 'result.json'), 'utf8')).toBe('other evidence');
+    } else {
+      store.updateRun(run.id, { title: 'changed' });
+      store.flush();
+      expect(store.isFallbackRun(run.id)).toBe(false);
+      expect(store.getRun(run.id)?.title).toBe('changed');
+      expect(readFileSync(join(root('cezar'), 'runs', name, 'result.json'), 'utf8')).toBe('source evidence');
+    }
+    expect(readFileSync(join(source, 'runs', name, 'result.json'), 'utf8')).toBe('source evidence');
+  });
+
+  it('does not load or normalize fallback members of an anchored legacy family at boot', () => {
+    const parent = record('legacy', { status: RUN_STATUS.waiting });
+    const workerId = randomUUID();
+    const worker = record('fallback worker', { id: workerId, status: RUN_STATUS.running, delegation: { role: 'worker', parentRunId: parent.id, permissions: [], workspace: { ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated', path: '/checkout', branch: 'shared', baselineSha: 'a'.repeat(40) } } });
+    seed('cezar', [parent]);
+    seed('squawk', [worker]);
+    const store = open();
+    expect(store.listRuns().map(run => run.id)).not.toContain(worker.id);
+    expect(store.getRun(worker.id)?.status).toBe(RUN_STATUS.running);
+    store.flush();
+    const db = RunDatabase.open(join(root('cezar'), 'runs.db'));
+    try { expect(db.has(worker.id)).toBe(false); } finally { db.close(); }
   });
 
   it('creates new state only under legacy when neither directory exists', () => {

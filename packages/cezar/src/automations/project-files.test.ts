@@ -52,6 +52,29 @@ describe('project automation sources', () => {
     expect(readFileSync(join(root('squawk'), 'automations.json'))).toEqual(source);
   });
 
+  it('paginates independent log sequences without losing fallback rows, including after compaction', async () => {
+    seed('cezar', ['legacy']); seed('squawk', ['fallback']);
+    const log = (automationId: string) => Array.from({ length: 100 }, (_, index) => JSON.stringify({
+      automationId, revision: 1, seq: index + 1, ts: new Date().toISOString(), event: 'pull_request.opened', result: 'skipped', reason: 'fixture',
+    })).join('\n') + '\n';
+    const fallbackBytes = log('fallback');
+    writeFileSync(join(root('cezar'), 'automation-log.ndjson'), log('legacy'));
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes);
+    const store = open();
+    const first = store.logs({ limit: 100 });
+    expect(first.map(row => row.automationId)).toEqual(Array(100).fill('legacy'));
+    const second = store.logs({ cursor: first.at(-1)!.seq, limit: 100 });
+    expect(second.map(row => row.automationId)).toEqual(Array(100).fill('fallback'));
+    expect(new Set([...first, ...second].map(row => row.seq)).size).toBe(200);
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes + log('legacy'));
+    expect(store.logs({ cursor: 1, limit: 100 })).toEqual(second);
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), fallbackBytes);
+    expect(store.logs({ cursor: second.at(-1)!.seq })).toEqual([]);
+    await store.compact();
+    expect(open().logs({ cursor: 1, limit: 100 })).toEqual(second);
+    expect(readFileSync(join(root('squawk'), 'automation-log.ndjson'), 'utf8')).toBe(fallbackBytes);
+  });
+
   it('preserves fallback runtime state and receipt transitions when writing legacy files', () => {
     seed('squawk', ['one']);
     writeFileSync(join(root('squawk'), 'automation-state.json'), JSON.stringify({ version: 1, states: { one: { revision: 1 }, untouched: { revision: 4 } } }));

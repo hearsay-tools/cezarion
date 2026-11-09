@@ -738,8 +738,8 @@ export class RunStore extends EventEmitter {
   private loadHeldRows(): void {
     let unreadable = 0;
     const decode = (row: RunRow): DecodedRun | undefined => {
-      const decoded = decodeRunRow(row.data);
-      if (!decoded) {
+      const decoded = this.isFallbackRun(row.id) ? undefined : decodeRunRow(row.data);
+      if (!decoded && !this.isFallbackRun(row.id)) {
         unreadable++;
         this.unreadable.add(row.id);
       }

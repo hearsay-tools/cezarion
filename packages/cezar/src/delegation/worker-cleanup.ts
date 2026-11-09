@@ -37,7 +37,7 @@ export class WorkerCleanup {
   }
 
   request(workerId: string, check: () => RunRecord): Promise<WorkerDestroyResult> {
-    const refusal = this.project.store.fallbackDeleteError(workerId);
+    const refusal = this.project.store.fallbackDeleteError(workerId, 'worktree');
     if (refusal) return Promise.reject(new DelegationPolicyError('incompatible_state', refusal));
     return this.destroySerialized(this.project, workerId, check);
   }

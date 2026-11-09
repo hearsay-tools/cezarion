@@ -8,7 +8,7 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { TrackedWork } from './run/tracked-work.ts';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -59,6 +59,25 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     // pass over live families would skip them.
     await manager.recover();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
+  });
+
+  it('leaves fallback conversation families readable and unchanged during boot recovery', async () => {
+    manager.dispose(); store.close();
+    renameSync(join(root, '.ai/cezar'), join(root, '.ai/squawk'));
+    store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+    manager = new RunManager(store, root, { createRunner, home: testHome() });
+    const writes = vi.spyOn(store, 'commitConversation');
+    const prepare = vi.spyOn(store, 'prepareRecoveryFacts');
+    const before = store.readEvents(a.parentId);
+    await manager.recover();
+    store.flush();
+    expect(store.getRun(a.parentId)).toBeDefined();
+    expect(store.readEvents(a.parentId)).toEqual(before);
+    expect(writes).not.toHaveBeenCalled();
+    expect(prepare.mock.calls).not.toContainEqual([a.parentId]);
+    expect(existsSync(join(root, '.ai/cezar/runs.db'))).toBe(false);
+    expect(store.isFallbackRun(a.parentId)).toBe(true);
+    expect(store.isFallbackRun(a.workerId)).toBe(true);
   });
 
   it.each(['boot', 'adopt'] as const)('%s recovery awaits cold family facts before projections', async mode => {

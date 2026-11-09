@@ -25,7 +25,8 @@ When only fallback runs exist, the legacy connection stays in memory. Reads,
 report-cache backfill and boot create no empty legacy `runs.db`. An explicit
 family write preserves only that family's records and sidecars in the existing
 primary transaction after ownership checks. It leaves fallback records and
-evidence unchanged. No boot copy, whole-tree copy, move or symlink occurs.
+evidence unchanged. A retry accepts byte-identical sidecars left by an interrupted
+copy; a differing destination still refuses the write. No boot copy, whole-tree copy, move or symlink occurs.
 
 | Operation | Fallback or duplicate item |
 | --- | --- |

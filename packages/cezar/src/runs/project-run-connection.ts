@@ -1,7 +1,7 @@
 import { RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
 import { claimOwnerLive } from './run-claims.ts';
 import { warnFallbackRunSource } from './project-run-sources.ts';
-import { cpSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
@@ -21,9 +21,9 @@ export class ProjectRunConnection {
   private sourceTable = 'project_json';
 
   constructor(initial: DatabaseSync, readonly target: string, readonly source: string,
-    private readonly openDisk: () => DatabaseSync, private readonly jsonRows?: readonly RunRowInput[]) {
+    private readonly openDisk: () => DatabaseSync, private readonly jsonRows: readonly RunRowInput[] | undefined, deferred: boolean) {
     this.current = initial;
-    this.deferred = !pathPresent(target);
+    this.deferred = deferred;
     this.configure(initial);
     this.connection = new Proxy(initial, { get: (_target, key) => {
       if (key === 'prepare') return (sql: string) => this.prepare(sql);
@@ -111,7 +111,7 @@ export class ProjectRunConnection {
 
   private prepare(sql: string): StatementSync {
     const read = /^\s*(?:SELECT|WITH)\b/i.test(sql);
-    const projected = read ? sql.replace(/\bruns\b/g, 'project_runs').replace(/\brun_claims\b/g, 'project_claims') : sql;
+    const projected = read ? projectReadTables(sql) : sql;
     let owner = this.current;
     let statement = owner.prepare(projected);
     return new Proxy(statement, { get: (_target, key) => {
@@ -160,9 +160,33 @@ export class ProjectRunConnection {
       const path = join(source, name);
       if (lstatSync(path).isSymbolicLink()) throw new Error(`Cannot preserve redirected fallback run file: ${path}`);
       const destination = join(target, name);
-      if (pathPresent(destination)) throw new Error(`Legacy run sidecar already exists without its record: ${destination}`);
+      if (pathPresent(destination)) {
+        if (sameRunFiles(path, destination)) continue;
+        throw new Error(`Legacy run sidecar already exists without its record: ${destination}`);
+      }
       this.copied.push(destination);
       cpSync(path, destination, { recursive: true, force: false, errorOnExist: true, dereference: false });
     }
   }
+}
+
+/** Match only table references. Quoted text and comments are opaque to the projection. */
+function projectReadTables(sql: string): string {
+  return sql.replace(/('(?:''|[^'])*'|"(?:""|[^"])*"|`[^`]*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\/)|\b(FROM|JOIN)(\s+)(runs|run_claims)\b/gi,
+    (match, quoted: string | undefined, keyword: string, space: string, table: string, offset: number) => {
+      if (quoted) return match;
+      const next = /^\s+(?:AS\s+)?([a-z_]\w*|"|`|\[)/i.exec(sql.slice(offset + match.length))?.[1];
+      const aliased = next && !/^(WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|GROUP|ORDER|LIMIT|UNION|INTERSECT|EXCEPT|ON|USING|NOT|INDEXED)$/i.test(next);
+      return `${keyword}${space}${table.toLowerCase() === 'runs' ? 'project_runs' : 'project_claims'}${aliased ? '' : ` AS ${table}`}`;
+    });
+}
+
+/** A previous process may have copied a sidecar before its SQLite transaction committed. */
+function sameRunFiles(source: string, target: string): boolean {
+  const from = lstatSync(source), to = lstatSync(target);
+  if (from.isFile() && to.isFile()) return readFileSync(source).equals(readFileSync(target));
+  if (!from.isDirectory() || !to.isDirectory()) return false;
+  const names = readdirSync(source).sort(), existing = readdirSync(target).sort();
+  return names.length === existing.length && names.every((name, index) =>
+    name === existing[index] && sameRunFiles(join(source, name), join(target, name)));
 }

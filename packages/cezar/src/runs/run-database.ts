@@ -599,8 +599,8 @@ export class RunDatabase {
           start_token = excluded.start_token, generation = excluded.generation`),
       releaseClaims: db.prepare('DELETE FROM run_claims WHERE session = ? AND family IN (SELECT value FROM json_each(?))'),
       releaseSessionClaims: db.prepare('DELETE FROM run_claims WHERE session = ?'),
-      listForeignClaimedIds: db.prepare(`SELECT runs.id AS id, run_claims.family AS family FROM run_claims JOIN runs
-        ON runs.id = run_claims.family OR runs.parent_run_id = run_claims.family WHERE run_claims.session <> ?`),
+      listForeignClaimedIds: db.prepare(`SELECT r.id AS id, c.family AS family FROM run_claims c JOIN runs r
+        ON r.id = c.family OR r.parent_run_id = c.family WHERE c.session <> ?`),
       insertConflict: db.prepare(`INSERT INTO run_conflicts (run_id, detected_at, session, reason, base_revision, base_data,
           local_data, local_deleted, current_revision, current_data)
         VALUES (:runId, :detectedAt, :session, :reason, :baseRevision, :baseData, :localData, :localDeleted,
@@ -667,7 +667,7 @@ export class RunDatabase {
   /** Add a read-only source without changing any primary table or saved format. */
   static withProjectSource(primary: RunDatabase, target: string, source: string, jsonRows?: readonly RunRowInput[], readOnly = false): RunDatabase {
     const projection = new ProjectRunConnection(primary.db, target, source,
-      () => (readOnly ? RunDatabase.openReadOnly(target)! : RunDatabase.open(target)).db, jsonRows);
+      () => { return (readOnly ? RunDatabase.openReadOnly(target)! : RunDatabase.open(target)).db; }, jsonRows, primary.path === ':memory:');
     return new RunDatabase(projection.connection, target, projection);
   }
 

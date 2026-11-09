@@ -29,12 +29,16 @@ export function mergeProjectAutomationFiles<T>(filename: string, files: readonly
 export function mergeProjectAutomationLog<T>(filename: string, sources: readonly T[][]): T[] {
   const seen = new Set<unknown>();
   const kept: T[][] = [];
-  for (const rows of sources) {
+  for (const [index, source] of sources.entries()) {
+    // Fallback has an independent sequence domain. Stable negative values keep
+    // pagination and copied/compacted rows distinct from positive legacy sequences.
+    const rows = index > 0 && filename === 'automation-log.ndjson'
+      ? source.map(row => ({ ...row, seq: Number((row as Record<string, unknown>).seq) - Number.MAX_SAFE_INTEGER })) : source;
     const key = (row: T) => {
       const record = row as Record<string, unknown>;
       return filename === 'automation-receipts.ndjson' ? `${record.receiptId}:${record.status}:${record.updatedAt}` : `${record.automationId}:${record.seq}`;
     };
-    kept.push(rows.filter(row => !seen.has(key(row))));
+    kept.push(rows.filter((row, index) => !seen.has(key(source[index]!)) && !seen.has(key(row))));
     rows.forEach(row => seen.add(key(row)));
   }
   return kept.reverse().flat();

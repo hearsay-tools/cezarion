@@ -107,7 +107,7 @@ export class FamilyReconciler {
    *  `parent_run_id` query). Workers cannot delegate, so this never recurses. */
   familyMembers(rootId: string): RunRecord[] {
     const root = this.context.store.getRun(rootId);
-    return [...(root ? [root] : []), ...this.context.store.listWorkersOf(rootId)];
+    return [...(root ? [root] : []), ...this.context.store.listWorkersOf(rootId)].filter(run => !this.context.store.isFallbackRun(run.id));
   }
 
   /** Every member of every family with a live member, each once: the families the store holds
@@ -131,7 +131,7 @@ export class FamilyReconciler {
    */
   async reconcileRecoveryWorkerFamilies(): Promise<void> {
     for (const rootId of this.context.store.listConversationRootIds()) {
-      if (this.context.store.writeRefusal(rootId)) continue;
+      if (this.context.store.isFallbackRun(rootId) || this.context.store.writeRefusal(rootId)) continue;
       this.recoveryFactsPending = true;
       await this.context.store.prepareRecoveryFacts(rootId);
       if (this.context.disposed()) return;
@@ -142,7 +142,7 @@ export class FamilyReconciler {
 
   reconcileAllWorkerFamilies(): void {
     // Another process's families are its own to repair (#779, plan step 3).
-    for (const rootId of this.context.store.listConversationRootIds()) if (!this.context.store.writeRefusal(rootId)) this.host.reconcileWorkerWaits(rootId);
+    for (const rootId of this.context.store.listConversationRootIds()) if (!this.context.store.isFallbackRun(rootId) && !this.context.store.writeRefusal(rootId)) this.host.reconcileWorkerWaits(rootId);
     this.host.reconcileWorkerWaits();
   }
 
