@@ -141,3 +141,18 @@ it('keeps the diff of a fallback run readable, from its worktree under .ai/squaw
   expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
   expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(before);
 });
+
+it('refuses to adopt a family whose legacy root another live process claims, and copies nothing', async () => {
+  const family = seedFamily(true, false);
+  const owner = openClaimSession();
+  const other = RunDatabase.open(join(primary, RUNS_DB_FILE));
+  try {
+    other.takeClaims(owner, [{ family: family.parentId, expect: null }]);
+    start();
+    const response = await post(`${family.parentId}/pin`, { pinned: true });
+    expect(response.status).toBe(409);
+    expect(primaryIds()).not.toContain(family.workerId);
+    expect(existsSync(join(primary, 'runs', `${family.workerId}.ndjson`))).toBe(false);
+    expect(store.isFallbackRun(family.workerId)).toBe(true);
+  } finally { other.close(); closeClaimSession(owner.session); }
+});

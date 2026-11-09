@@ -31,4 +31,3 @@ export function legacyIndexRows(bytes: Buffer, parse: typeof parseRunRecords): {
   }
   return { rows: [...rows.values()], skipped, total: raw.length };
 }
-

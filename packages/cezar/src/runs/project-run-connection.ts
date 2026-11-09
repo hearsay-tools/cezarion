@@ -9,7 +9,7 @@ import { pathPresent } from '../project-paths.ts';
 import type { RunRowInput } from './run-database.ts';
 import { toRunBindings } from './run-database-row.ts';
 
-type RunChanges = { upserts: readonly RunRowInput[]; deletes: readonly string[]; adoptFallback?: readonly string[] };
+type RunChanges = { upserts: readonly RunRowInput[]; deletes: readonly string[]; adoptFallback?: readonly string[]; fence?: { owner: { session: string } } };
 
 /** A write reached a run that is still read only under `.ai/squawk/`. The store refuses such
  *  writes first, so this error means a caller bypassed it. */
@@ -48,9 +48,10 @@ export class ProjectRunConnection {
     if (this.deferred) {
       mkdirSync(dirname(this.target), { recursive: true });
       this.switchToDisk();
+      // A legacy database this process just created has nothing to import; an existing one keeps its marker.
+      this.current.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('import-complete', 'project-write')").run();
     }
     mkdirSync(join(dirname(this.target), 'runs'), { recursive: true });
-    this.current.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('import-complete', 'project-write')").run();
   }
 
   private switchToDisk(): void {
@@ -93,7 +94,7 @@ export class ProjectRunConnection {
    */
   beforeWrite(changes: RunChanges): ReadonlySet<string> {
     const adopted = new Set(changes.adoptFallback ?? []);
-    this.assertAdoptable(adopted);
+    this.assertAdoptable(adopted, changes.fence?.owner.session);
     if (this.deferred) this.assertWritable(changes, adopted);
     if (changes.upserts.length || changes.deletes.length || adopted.size) this.writable();
     return adopted;
@@ -169,9 +170,14 @@ export class ProjectRunConnection {
     } });
   }
 
-  /** A live process of the migrating binary still owns the family: adoption must wait for it. */
-  assertAdoptable(families: Iterable<string>): void {
+  /** A live process still owns the family, under either directory: adoption must wait for it.
+   *  `session` is the adopter's own claim session, which may already hold the legacy claim. */
+  assertAdoptable(families: Iterable<string>, session?: string): void {
     for (const family of families) {
+      const legacy = this.current.prepare('SELECT session, pid, start_token AS startToken FROM main.run_claims WHERE family = ?').get(family);
+      if (legacy && legacy.session !== session && claimOwnerLive({ session: String(legacy.session), pid: Number(legacy.pid), startToken: legacy.startToken === null ? null : String(legacy.startToken) })) {
+        throw new Error(`Run family ${family} is in use by another process: ${dirname(this.target)}`);
+      }
       const sourceClaim = this.attached ? this.current.prepare('SELECT session, pid, start_token AS startToken FROM project_fallback.run_claims WHERE family = ?').get(family) : undefined;
       if (sourceClaim && claimOwnerLive({ session: String(sourceClaim.session), pid: Number(sourceClaim.pid), startToken: sourceClaim.startToken === null ? null : String(sourceClaim.startToken) })) {
         throw new Error(`Fallback family is in use by another process: ${dirname(this.source)}`);
@@ -181,7 +187,7 @@ export class ProjectRunConnection {
 
   /** Explicit adoption only: inside the primary transaction, after its ownership and row fences passed. */
   preserveFamilies(families: ReadonlySet<string>, changes: RunChanges): void {
-    this.assertAdoptable(families);
+    this.assertAdoptable(families, changes.fence?.owner.session);
     for (const family of families) {
       const rows = this.current.prepare(`SELECT * FROM project_runs WHERE id = ? OR parent_run_id = ?`).all(family, family);
       for (const row of rows) {

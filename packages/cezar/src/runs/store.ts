@@ -885,7 +885,7 @@ export class RunStore extends EventEmitter {
 
   /** Explicit controls only (`requireRunControl`): copy a `.ai/squawk/` family in so it can be written. */
   adoptFallbackFamily(id: string): boolean {
-    const members = copyFallbackFamily(this.db, id);
+    const members = copyFallbackFamily(this.db, id, this.owner);
     for (const member of members) this.coldReads.forget(member);
     return members.length > 0;
   }

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { dataReadDirs, fallbackProjectWriteError, isFallbackProjectPath, pathPresent } from '../project-paths.ts';
-import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunRowInput } from './run-database.ts';
+import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunRowInput, type RunWriteFence } from './run-database.ts';
 
 export interface ProjectRunSource {
   directory: string;
@@ -45,11 +45,12 @@ function readFallbackSource(directory: string, database: string, parse: (bytes: 
   return { directory, database, jsonRows };
 }
 
-/** Copy the family of `id` in with the explicit adoption intent. Returns its member IDs, or none. */
-export function copyFallbackFamily(db: RunDatabase | null, id: string): string[] {
+/** Copy the family of `id` in with the explicit adoption intent. Returns its member IDs, or none.
+ *  The empty fence names the adopter, so a live legacy claim of another process refuses it. */
+export function copyFallbackFamily(db: RunDatabase | null, id: string, owner?: RunWriteFence['owner']): string[] {
   const family = db?.familyOf(id);
   if (!db || family === undefined || !db.familyHasFallback(family)) return [];
-  db.transaction({ upserts: [], deletes: [], adoptFallback: [family] });
+  db.transaction({ upserts: [], deletes: [], adoptFallback: [family], ...(owner ? { fence: { owner, claims: new Map(), rows: new Map() } } : {}) });
   return [family, ...db.listIdsByParent(family)];
 }
 

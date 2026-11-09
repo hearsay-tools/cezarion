@@ -872,7 +872,7 @@ export class RunDatabase {
    */
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
-    const adopted = this.project?.beforeWrite(changes) ?? new Set<string>();
+    const adopted = this.run(() => this.project?.beforeWrite(changes)) ?? new Set<string>();
     const revisions = new Map<string, number>();
     const seqs = new Map<string, number>();
     let claims = new Map<string, number>();
@@ -989,7 +989,7 @@ export class RunDatabase {
     take: ReadonlyArray<{ family: string; expect: { session: string; generation: number } | null }>,
   ): Map<string, number> {
     const taken = new Map<string, number>();
-    take = this.project?.claimable(take) ?? take;
+    take = this.run(() => this.project?.claimable(take)) ?? take;
     if (take.length === 0) return taken;
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');

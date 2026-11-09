@@ -15,7 +15,8 @@ import { RunManager } from '../workflows/run.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { ProjectRunConnection } from './project-run-connection.ts';
 import { reclaimWorktrees } from './retention.ts';
-import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
+import { RUNS_DB_FILE, RunDatabase, RunDatabaseBusyError } from './run-database.ts';
+import { DatabaseSync } from 'node:sqlite';
 import { readPersistedRuns, seedRuns, setRunStatus } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
 
@@ -215,4 +216,23 @@ it('keeps saving a held legacy family when another process adds a fallback membe
     expect(primaryIds()).not.toContain(late.id);
     expect(fallbackBytes()).toEqual(before);
   } finally { store.close(); }
+});
+
+it('maps a busy legacy database to RunDatabaseBusyError for projected claims and writes, and the store defers', () => {
+  const fixture = buildFixture();
+  split(fixture.fallbackIds, fixture.worktreePath);
+  const store = RunStore.open(primary, { keepLive: true });
+  const lock = new DatabaseSync(join(primary, RUNS_DB_FILE));
+  try {
+    const db = (store as unknown as { db: RunDatabase }).db;
+    lock.exec('BEGIN IMMEDIATE');
+    const owner = { session: 'other', pid: process.pid, startToken: null };
+    expect(() => db.takeClaims(owner, [{ family: fixture.legacy.parentId, expect: null }])).toThrow(RunDatabaseBusyError);
+    expect(() => db.transaction({ upserts: [db.get(fixture.legacy.parentId)!], deletes: [] })).toThrow(RunDatabaseBusyError);
+    // The store's existing contract: a busy claim is deferred to the write, which retries on the next save.
+    expect(store.updateRun(fixture.legacy.parentId, { title: 'deferred' })?.title).toBe('deferred');
+    lock.exec('ROLLBACK');
+    store.flush();
+    expect(readPersistedRuns(primary).find(run => run.id === fixture.legacy.parentId)?.title).toBe('deferred');
+  } finally { if (lock.isTransaction) lock.exec('ROLLBACK'); lock.close(); store.close(); }
 });
