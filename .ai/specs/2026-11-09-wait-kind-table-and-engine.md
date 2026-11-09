@@ -393,7 +393,7 @@ file with `@babel/parser` (typescript plugin) and resolves helper functions and 
 all test and testkit files up to three levels. Command, from the repository root:
 `node .ai/qa/wait-engine/scan-non-open-waits.mjs "$PWD"`. The script is a planning aid and is
 not committed; the 3.4a worker runs a scan of its own on its baseline. At `721c19b00` the scan
-lists 82 calls in 37 files. The list is a superset: a call that moves a known entry along a
+lists 82 calls in 34 files. The list is a superset: a call that moves a known entry along a
 declared transition, or that matched a helper of the same name, needs no change. The 3.4a pull
 request migrates every call that 3.4b's check would fail, by the one rule in its row.
 
