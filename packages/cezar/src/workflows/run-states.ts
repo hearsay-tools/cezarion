@@ -12,9 +12,10 @@
 import type { RunRecord, RunStatus, Wait, WaitPhase } from '@open-mercato/cezar-contract';
 import { computeWaitingOn } from '@open-mercato/cezar-contract/waits';
 import { WAIT_KINDS as WAIT_KIND_ROWS, type WaitKindSpec } from './run/wait-kinds.ts';
+import type { RunExitId } from '../runs/run-exits.ts';
+
 export type { WaitKindSpec } from './run/wait-kinds.ts';
 export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindSpec } = WAIT_KIND_ROWS;
-import type { RunExitId } from '../runs/run-exits.ts';
 
 /** Who or what fires a trigger. `peer` is another root task of the project (hearsay-tools/cezarion#1995). */
 export type FiredBy = 'human' | 'parent' | 'agent' | 'runner' | 'timer' | 'scheduler' | 'watcher'

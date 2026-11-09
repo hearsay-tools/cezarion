@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { assertWaitCapacity, WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { registrationIdentity, registrationReceipt, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
@@ -282,8 +283,8 @@ export class WaitRegistry {
     try { assertWaitCapacity(run); }
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
     if (parsed.kind === 'timer') {
-      if (this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-      if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+      if (WAIT_KINDS.timer.timersDisabled && this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
+      if (WAIT_KINDS.timer.refusesSpentBudget && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
       const now = Date.now();
       const wait = timerWaitEntry(parsed, via, turnId, now);
       return this.openWait(runId, active, wait, registration);
@@ -341,8 +342,8 @@ export class WaitRegistry {
    */
   private registerProcessWait(runId: string, active: ActiveRun, run: RunRecord, request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, registration?: RegistrationIdentity): ProcessWaitEntry {
     const refuse = (code: WaitErrorCode): never => { throw Object.assign(new Error(waitErrorMessage(code)), { code }); };
-    if (this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-    if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
+    if (WAIT_KINDS.process.timersDisabled && this.context.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
+    if (WAIT_KINDS.process.refusesSpentBudget && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) refuse('wake_budget_spent');
     const roots = this.host.exitFileRoots(runId, run);
     let exitFile: string | undefined;
     if (request.exit_file !== undefined) {
@@ -400,7 +401,7 @@ export class WaitRegistry {
     const wait = this.context.store.getRun(runId)?.waits?.find(entry => entry.id === waitId);
     if (!wait) return { cancelled: false, code: 'not_found' };
     if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
-    if (wait.kind === 'human' && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
+    if (WAIT_KINDS[wait.kind].cancellable === 'unshown' && 'askSeq' in wait && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
     cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return { cancelled: true };
   }

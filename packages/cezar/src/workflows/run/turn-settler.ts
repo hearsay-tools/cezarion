@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
@@ -446,8 +447,10 @@ export class TurnSettler {
     if (open.some(wait => wait.kind === 'timer' && wait.via === via)) return;
     const minutes = this.context.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
-      this.context.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
-      this.host.humanWaits.openHumanAlias(runId, state, 'monitoring-line');
+      if (WAIT_KINDS.timer.timersDisabled) {
+        this.context.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
+        this.host.humanWaits.openHumanAlias(runId, state, 'monitoring-line');
+      }
       return;
     }
     if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {

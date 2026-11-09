@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './run/wait-kinds.ts';
 import { randomUUID } from 'node:crypto';
 import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type CezarWaitRequest, type WaitVia, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
@@ -66,8 +67,8 @@ export function isMonitoringTimer(wait: Wait): boolean {
 export function chargesBudget(wait: Wait): boolean {
   // A subagent wait spends a wake only at its safety deadline: its children ending is an external
   // event, like CI (hearsay-tools/cezarion#2431).
-  if (wait.kind === 'subagent') return wait.result?.reason === 'timeout';
-  return wait.kind === 'timer' || wait.kind === 'process' || wait.kind === 'peer';
+  const charge = WAIT_KINDS[wait.kind].chargesWake;
+  return charge === 'timeout' ? 'result' in wait && !!wait.result && 'reason' in wait.result && wait.result.reason === 'timeout' : charge;
 }
 
 /**
