@@ -104,8 +104,11 @@ because its cancel function calls the 1.1 disarm. Hot files: `run/wait-registry.
 P2 starts when P1 has merged; its slices run in order, because each edits `run/wait-kinds.ts`.
 2.5 touches many files (Table F); it lands before 3.1 starts, so 3.1 moves code that already
 reads the rows.
-P3.1 to P3.3 run in order (`run/wait-engine.ts`). P3.4 touches only the store and can run beside
-P2 and P3.1 to P3.3 once 1.2 has merged. P3.5 runs last. P4.2 needs 1.2 and edits
+P3.1 to P3.3 run in order (`run/wait-engine.ts`). 3.4a needs no merged slice: it touches the
+store's patch type, a testkit and test fixtures, so it can run beside P1, P2 and P3.1 to P3.3.
+Its fixtures overlap test files that other slices edit (Table G); the second pull request on a
+file rebases on the first. 3.4b needs 3.4a and 1.2 (both edit the store's wait write). P3.5 runs
+last. P4.2 needs 1.2 and edits
 `run/wait-registry.ts`: it lands before 3.1 starts or rebases onto it.
 
 | Slice | Change | Files and regions at the baseline | Removes | Behavior change | Needs merged | Acceptance check |
@@ -123,7 +126,8 @@ P2 and P3.1 to P3.3 once 1.2 has merged. P3.5 runs last. P4.2 needs 1.2 and edit
 | 3.1 | `WaitEngine.open` serves all 9 registration paths: `cezar_wait` (pr, timer, process, worker, request, peer), `cez worker wait`, the completion wait, `cez message wait --peer`, `cezar_ask`, the Cezar human alias, the monitoring timer, the subagent wait and the recovered ask. Each path keeps its refusal shape (Table B) and its open steps, their order and its failure policy (Table E), passed to `open` as per-path options | `run/wait-registry.ts:79-138`, `:163-173`, `:228-245`, `:253-364`; `run/human-waits.ts:59-71`; `run/turn-settler.ts:436-475`; `run/subagent-waits.ts:172-178`; `run/run-recovery.ts:257-270`; `run/compose.ts:278-305` | `openWait` and the open code in 4 other modules | none | P2 | `npm test -- packages/cezar/src/workflows/ci-wait packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/subagent-waits.test.ts packages/cezar/src/workflows/run/turn-settler.test.ts packages/cezar/src/workflows/peer-waits.test.ts`; `npm run test:parity` |
 | 3.2 | `resolve` (with the CI and worker retries and the budget cap), `rearm` and `dispose` move into the engine | `run/wait-registry.ts:186-200`, `:390-409`; `run/wait-watches.ts:165-176`; `run/run-recovery.ts:222`, `:229`, `:337-340`, `:414-424`; `workflows/run.ts:260-269` | resolve and re-arm code outside the engine | none | 3.1 | `npm test -- packages/cezar/src/workflows/waits-wake.test.ts packages/cezar/src/workflows/worker-reboot packages/cezar/src/workflows/worker-restart`; `npm run test:parity` |
 | 3.3 | `cancel`, `cancelAll` and `forgetRun` move into the engine. Every row of Table C calls one of them. `WaitRegistry` keeps only request validation (scope, gate, replay, refusals) | `run/wait-cancel.ts`; `run/wake-admission.ts:347-375`; `run/human-waits.ts:132-137`; `run/step-loop.ts:411-416`; `run/family-reconciler.ts:266`; `run/wait-registry.ts` | `cancelOpenWaits`, `disarmRunWaits` and `run/wait-cancel.ts` outside the engine | none | 3.2 | `npm test -- packages/cezar/src/workflows/waits-wake.test.ts packages/cezar/src/workflows/human-waits.test.ts packages/cezar/src/workflows/run-settlement.test.ts`; `npm run test:parity` |
-| 3.4 | The store checks each wait write against `WAIT_PHASES` (Decision 3). A new entry must be `open`; a known entry may move only along a declared transition; an id found in `lastWaits` is a settled wait and records a violation. `WAIT_PHASES` first declares the transitions the code writes today (Decision 3). The slice deletes `RunStore.commitCiWait` (`runs/store.ts:1798-1800`): no production code calls it, and it creates a new `resolved` entry. Its test callers migrate: `runs/ci-wait-store.test.ts:32-65` and `:97` call `commitWait` with a `pr` entry, and the cases that create a resolved entry (`:43-52`, `:54-65`) commit it `open` first, then `resolved`; `workflows/autonomous-nudge-guards.test.ts:136` seeds its `ci-wait` case with `commitWait` and an open `pr` entry. The check covers both production write paths of `waits` and `lastWaits`: `commitWait` and `commitOutcome`. No other production code writes them (§ Table G); `waits` and `lastWaits` leave `RunPatch`, so `updateRun` cannot write them unchecked. Test fixtures migrate by one rule (Table G): a fixture that needs a wait already past `open` seeds it with `seedWaits(store, runId, { waits, lastWaits })` in `runs/run-store.testkit.ts`, which writes through the unchecked update path as `setRunStatus` does (ADR 0056) and is guarded against production imports; a fixture whose test is about the commit itself commits the entry `open` first, then moves it along a declared transition | `runs/wait-registration-write.ts:11-22`; `runs/outcome-commit.ts:118-172`; `runs/store.ts:1773-1800`; `workflows/run-states.ts:302-313`; `packages/cezar/vitest.setup.ts:177-178`; `runs/ci-wait-store.test.ts`; `workflows/autonomous-nudge-guards.test.ts:136-139`; `runs/run-store.testkit.ts`; every fixture in Table G | the unchecked upsert; `commitCiWait`; `waits` and `lastWaits` in `RunPatch` | tests only: an undeclared transition writes, then fails the test | 1.2 | `npm test -- packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/runs/outcome-commit.test.ts packages/cezar/src/runs/ci-wait-store.test.ts packages/cezar/src/workflows/autonomous-nudge-guards.test.ts packages/cezar/src/workflows/run-states.test.ts` and every file in Table G; the Table G scan finds no new non-open entry outside `seedWaits`; `npm run test:parity` |
+| 3.4a | Prepare the fixtures for the phase check. Add `seedWaits(store, runId, { waits, lastWaits })` to `runs/run-store.testkit.ts`: it writes through the unchecked update path, as `setRunStatus` does (ADR 0056), and the import guard keeps it out of production. Migrate the Table G fixtures by one rule: a fixture that needs a wait already past `open` seeds it with `seedWaits`; a fixture whose test is about the commit itself commits the entry `open` first, then moves it along a transition 3.4b declares. Delete `RunStore.commitCiWait` (`runs/store.ts:1798-1800`): no production code calls it, and it creates a new `resolved` entry. Its test callers migrate: `runs/ci-wait-store.test.ts:32-65` and `:97` call `commitWait` with a `pr` entry, and the cases that create a resolved entry (`:43-52`, `:54-65`) commit it `open` first, then `resolved`; `workflows/autonomous-nudge-guards.test.ts:136` seeds its `ci-wait` case with `commitWait` and an open `pr` entry. Remove `waits` and `lastWaits` from `RunPatch` (`runs/run-exits.ts:23`): no production code writes them through `updateRun` (§ Table G), so after this slice only `commitWait`, `commitOutcome` and `seedWaits` write them. The worker finds the calls to migrate by its own scan (§ Table G), and by running the 3.4b check locally without committing it | `runs/run-store.testkit.ts`; `runs/run-exits.ts:23`; `runs/store.ts:1798-1800`; `runs/ci-wait-store.test.ts`; `workflows/autonomous-nudge-guards.test.ts:133-139`; every fixture in Table G | `commitCiWait`; `waits` and `lastWaits` in `RunPatch`; new non-open entries in test fixtures outside `seedWaits` | none | none | `npm test -- packages/cezar/src/runs/ci-wait-store.test.ts packages/cezar/src/workflows/autonomous-nudge-guards.test.ts` and every file in Table G; `npm run typecheck`; `npm run lint` (the import guard) |
+| 3.4b | The store checks each wait write against `WAIT_PHASES` (Decision 3), with the ADR 0056 rule: an undeclared transition is written and recorded as a violation; production logs a warning; the test setup fails the test in `afterEach`. A new entry must be `open`; a known entry may move only along a declared transition; an id found in `lastWaits` is a settled wait and records a violation. The check covers both production write paths of `waits` and `lastWaits`: `commitWait` and `commitOutcome`. `WAIT_PHASES` first declares the transitions the code writes today (Decision 3) | `runs/wait-registration-write.ts:11-22`; `runs/outcome-commit.ts:118-172`; `runs/store.ts:1773-1797`; `workflows/run-states.ts:302-313`; `packages/cezar/vitest.setup.ts:177-178` | the unchecked upsert | tests only: an undeclared transition writes, then fails the test | 3.4a, 1.2 | `npm test -- packages/cezar/src/runs/waits-store.test.ts packages/cezar/src/runs/outcome-commit.test.ts packages/cezar/src/workflows/run-states.test.ts` and every file in Table G; `npm run test:parity` |
 | 3.5 | A lint rule over production files of `packages/cezar/src`: no `kind` compared (`===`, `!==`) with one of the seven stored kind names or `ci`, no `case` label with one, and no object property `kind` with one, outside the allow-list. The rule is syntactic, like the repository's other rules, so the allow-list names each file with its reason (Table F): the engine, the table, the watch adapters, the read-time upgrade, the two boundary views, and two files whose `kind` is not a wait kind. `packages/contract` and `packages/web` are outside its scope | new rule in `lint/` or `.ai/ast-grep/rules/` | — | none | 3.3, and every slice that Table F names | `npm run lint`; the rule's own test |
 | 4.2 | `registerCompletionWait` handles the limit refusal instead of throwing out of the turn end | `run/wait-registry.ts:128-138`; its caller in `run/turn-settler.ts` | — | yes: a full wait list no longer throws out of the turn end. A red test first | 1.2 | the new red test; `npm run test:parity` |
 
@@ -374,23 +378,24 @@ pattern over production files of `packages/cezar/src` (a `kind` compared with `=
 The allow-list at the end of the epic holds 8 files: rows 1, 3, 5, 24, 29, 30 and the two files
 of row 31.
 
-### Table G: test fixtures 3.4 migrates
+### Table G: test fixtures 3.4a migrates
 
-3.4 checks every write of `waits` and `lastWaits`. A grep finds no production write outside
+3.4b checks every write of `waits` and `lastWaits`. A grep finds no production write outside
 `commitWait`, `commitOutcome` and the read-time upgrade:
 `grep -rnE "\b(waits|lastWaits)\s*:" packages/cezar/src --include=*.ts` with tests, testkits,
 `runs/outcome-commit.ts`, `runs/wait-registration-write.ts` and `runs/legacy-waits.ts` left out
 finds only reads and parameter names.
 
-Test fixtures do write non-open entries. The scan below lists every test and testkit call to
+Test fixtures do write non-open entries. A scan lists every test and testkit call to
 `commitWait`, `commitCiWait`, `updateRun`, `setRunStatus`, `createRun` or
-`registeredWaitRecord` whose arguments hold a wait with a phase other than `open`, resolving
-helper functions and constants across all test and testkit files up to three levels. Run it from
-the repository root: `node scan.mjs "$PWD"`. At the baseline it lists 82 calls in 37 files. The
-list is a superset: a call that moves a known entry along a declared transition, or that matched
-a helper of the same name, needs no change. The 3.4 pull request runs each file and migrates
-every call the check fails, by the one rule in its row: `seedWaits` for a wait that must already
-be past `open`, else commit `open` first.
+`registeredWaitRecord` whose arguments hold a wait with a phase other than `open`. It parses each
+file with `@babel/parser` (typescript plugin) and resolves helper functions and constants across
+all test and testkit files up to three levels. Command, from the repository root:
+`node .ai/qa/wait-engine/scan-non-open-waits.mjs "$PWD"`. The script is a planning aid and is
+not committed; the 3.4a worker runs a scan of its own on its baseline. At `721c19b00` the scan
+lists 82 calls in 37 files. The list is a superset: a call that moves a known entry along a
+declared transition, or that matched a helper of the same name, needs no change. The 3.4a pull
+request migrates every call that 3.4b's check would fail, by the one rule in its row.
 
 | File | Lines |
 |---|---|
@@ -429,63 +434,6 @@ be past `open`, else commit `open` first.
 | `workflows/worker-wait-settlement.test.ts` | `:57` |
 | `workflows/worker-wait-terminal-ordering.test.ts` | `:125` |
 
-<details><summary><code>scan.mjs</code></summary>
-
-```js
-// Usage: node scan.mjs <repo-root>
-// Lists test and testkit call sites that write a wait entry whose phase is not `open` through
-// the store: commitWait, commitCiWait, updateRun, setRunStatus, createRun and
-// registeredWaitRecord. The argument text is read with identifiers resolved one level to their
-// initializer in the same file. Parser: @babel/parser with the typescript plugin.
-import { createRequire } from 'node:module';
-import { readFileSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-const root = process.argv[2];
-const pnpm = `${root}/node_modules/.pnpm`;
-const dir = readdirSync(pnpm).find(d => d.startsWith('@babel+parser@7'));
-const { parse } = createRequire(`${pnpm}/${dir}/node_modules/@babel/parser/package.json`)('@babel/parser');
-const files = execFileSync('git', ['-C', root, 'ls-files', '--', 'packages/cezar/src/**/*.test.ts', 'packages/cezar/src/**/*.testkit.ts'], { encoding: 'utf8' }).split('\n').filter(Boolean);
-const CALLS = new Set(['commitWait', 'commitCiWait', 'updateRun', 'setRunStatus', 'createRun', 'registeredWaitRecord']);
-const NON_OPEN = /phase:\s*(?:'(?:resolved|delivered|cancelled|wake-pending|delivering)'|WAIT_PHASE\.(?:resolved|delivered|cancelled))/;
-const walk = (n, f) => { if (!n || typeof n.type !== 'string') return; f(n); for (const k in n) { const v = n[k]; if (k === 'loc' || k === 'start' || k === 'end') continue; if (Array.isArray(v)) v.forEach(c => walk(c, f)); else if (v && typeof v.type === 'string') walk(v, f); } };
-// Helper bodies by name across every test and testkit file: a fixture often builds its entry in a
-// helper (`resolvedTimer()`) or imports it from a testkit.
-const helpers = new Map();
-const parsed = new Map();
-for (const rel of files) {
-  const text = readFileSync(`${root}/${rel}`, 'utf8');
-  const ast = parse(text, { sourceType: 'module', plugins: ['typescript'], errorRecovery: true });
-  parsed.set(rel, { text, ast });
-  walk(ast.program, n => {
-    const add = (name, node) => helpers.set(name, (helpers.get(name) ?? '') + ' ' + text.slice(node.start, node.end));
-    if (n.type === 'FunctionDeclaration' && n.id) add(n.id.name, n);
-    if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) add(n.id.name, n.init);
-  });
-}
-const expand = (text, depth, seen = new Set()) => depth === 0 ? text : text + ' ' + [...text.matchAll(/\b[A-Za-z_$][\w$]*\b/g)]
-  .map(m => m[0]).filter(name => helpers.has(name) && !seen.has(name) && seen.add(name)).map(name => expand(helpers.get(name), depth - 1, seen)).join(' ');
-for (const rel of files) {
-  const { text, ast: parsedAst } = parsed.get(rel);
-  if (!/commitWait|commitCiWait|updateRun|setRunStatus|createRun|registeredWaitRecord/.test(text)) continue;
-  const ast = parsedAst;
-  const src = (n) => text.slice(n.start, n.end);
-  const inits = new Map();
-  walk(ast.program, n => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) inits.set(n.id.name, src(n.init)); });
-  walk(ast.program, n => {
-    if (n.type !== 'CallExpression') return;
-    const c = n.callee;
-    const name = c.type === 'MemberExpression' && c.property.type === 'Identifier' ? c.property.name : c.type === 'Identifier' ? c.name : '';
-    if (!CALLS.has(name)) return;
-    const args = n.arguments.map(src).join(' ');
-    const expanded = expand(args, 3);
-    const writesWaits = ['commitWait', 'commitCiWait', 'registeredWaitRecord'].includes(name) || /\b(waits|lastWaits)\b/.test(args);
-    if (writesWaits && NON_OPEN.test(expanded)) console.log(`${rel}:${n.loc.start.line}\t${name}`);
-  });
-}
-```
-
-</details>
-
 ## Older specs that disagree with the code
 
 [The unified-waits spec](2026-10-17-unified-waits.md) says three things the code does not do.
@@ -506,7 +454,7 @@ The code wins. This spec changes none of them; a row records what the code does.
 
 ## Open decisions
 
-- **Refusing an undeclared wait-phase transition in production** (ADR 0056): after the 3.4
+- **Refusing an undeclared wait-phase transition in production** (ADR 0056): after the 3.4b
   warnings have run on the dev channel.
 
 ## Coordination
