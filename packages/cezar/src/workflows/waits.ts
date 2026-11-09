@@ -126,7 +126,7 @@ export const identicalPeerWait = WAIT_KINDS.peer.duplicatePeer;
 /** The agent input that delivers a resolved wait's result: the wait's own id, or for an upgraded
  *  worker wait whose wake was already queued, that input (`wakeInputId`). */
 export function waitInputId(wait: Wait): string {
-  return wait.kind === 'worker' ? wait.wakeInputId ?? wait.id : wait.id;
+  return WAIT_KINDS[wait.kind].inputId(wait);
 }
 
 /** The CI watcher still speaks the schema-3 `CiWait`; an open entry is a parked one to it. */
@@ -258,16 +258,5 @@ export const processWaitEntry = WAIT_KINDS.process.entry;
 export type WaitResult = CiWaitResult | ProcessWaitResult | PeerWaitResult | SubagentWaitResult;
 
 export function settledWaitEntry(latest: Wait, result: WaitResult | undefined, observed: WorkerWaitEntry | undefined, resolvedAt: string): Wait {
-  const settled: Wait = latest.kind === 'pr'
-      ? { ...latest, phase: 'resolved', resolvedAt, result: (result as CiWaitResult | undefined) ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
-      : latest.kind === 'process'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as ProcessWaitResult | undefined) ?? { outcome: 'deadline', observedAt: resolvedAt } }
-      : latest.kind === 'worker'
-        ? { ...observed ?? latest, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }
-      : latest.kind === 'peer'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as PeerWaitResult | undefined) ?? { reason: 'timeout' } }
-      : latest.kind === 'subagent'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as SubagentWaitResult | undefined) ?? { reason: 'timeout' } }
-        : { ...latest, phase: 'resolved', resolvedAt };
-  return settled;
+  return WAIT_KINDS[latest.kind].resolve(latest, result, observed, resolvedAt);
 }
