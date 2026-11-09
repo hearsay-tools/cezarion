@@ -13,6 +13,7 @@ import type { SelfUpdateDevelopment, SelfUpdateJob, SelfUpdateStatus, UpdateChan
 import type { Home } from '../home/home.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { installFromLocal, installFromRegistry } from './installer.ts';
+import { activateManaged, writeLaunchers } from './launcher.ts';
 import { buildCheckout, discoverCheckouts } from './checkouts.ts';
 import { activate, detectInstallKind, findInstalled, linkCheckout, listInstalled, packageRootOf, type InstalledEntry, type InstallKind } from './layout.ts';
 import { CEZAR_REPO, fetchOpenPulls, OpenPullsCache, type OpenPulls } from './pulls.ts';
@@ -23,6 +24,7 @@ const LOG_CAP = 200;
 
 export interface SelfUpdateDeps {
   home: Home;
+  rebrand?: boolean | undefined;
   pkgName: string;
   version: string;
   /** The running entry file (`process.argv[1]`). */
@@ -63,7 +65,7 @@ export class SelfUpdateService {
     this.env = deps.env ?? process.env;
     this.home = deps.home;
     this.installKind = detectInstallKind(deps.entry, this.env, this.home);
-    this.registry = deps.registry ?? new RegistryCache(deps.pkgName);
+    this.registry = deps.registry ?? new RegistryCache(productIdentity(deps.rebrand).rebrand ? productIdentity(deps.rebrand).npmPackage : deps.pkgName);
     this.pulls = new OpenPullsCache(deps.pulls ?? (() => fetchOpenPulls(CEZAR_REPO, { env: this.env })));
   }
 
@@ -99,7 +101,7 @@ export class SelfUpdateService {
     const doc = await this.statusDocument(opts.refresh);
     const channel = await this.channel();
     const trim = !!(opts.registryOnly || this.deps.trimPaths?.());
-    const installed = listInstalled(this.env, this.home).filter(entry => !trim || entry.source === 'registry');
+    const installed = listInstalled(this.env, this.home, this.deps.rebrand).filter(entry => !trim || entry.source === 'registry');
     const installedIds = new Set(installed.map((entry) => entry.id));
     const stable = doc?.distTags.latest ?? null;
     const nightly = doc?.distTags.nightly ?? null;
@@ -162,7 +164,7 @@ export class SelfUpdateService {
       this.pulls.get(opts.refresh),
       opts.refresh ? this.registry.refresh() : this.registry.get(),
     ]);
-    const installedIds = new Set(listInstalled(this.env, this.home).map((entry) => entry.id));
+    const installedIds = new Set(listInstalled(this.env, this.home, this.deps.rebrand).map((entry) => entry.id));
     const publishedAt = (version: string) => doc?.versions.find((entry) => entry.version === version)?.publishedAt ?? null;
     const prByBranch = new Map(pulls.items.map((pull) => [pull.branch, pull.number]));
     return {
@@ -232,7 +234,7 @@ export class SelfUpdateService {
   }
 
   private registryTargetRefusal(target: string, doc = this.registry.current()): string | null {
-    const installed = findInstalled(target, this.env, this.home);
+    const installed = findInstalled(target, this.env, this.home, this.deps.rebrand);
     if (!doc?.versions.some(entry => entry.version === target) ||
         (installed && (installed.source !== 'registry' || installed.id !== target || installed.version !== target))) {
       return `Hosted updates require a published registry version; switch local builds on the host with \`${productIdentity().command} use <id>\`.`;
@@ -284,12 +286,12 @@ export class SelfUpdateService {
     };
     void (async () => {
       try {
-        const installed = findInstalled(target, this.env, this.home);
+        const installed = findInstalled(target, this.env, this.home, this.deps.rebrand);
         // A linked checkout goes through discovery too: it may need a rebuild before it runs.
         const linked = !registryOnly && (!installed || installed.source === 'link') ? await this.linkDiscovered(target, log) : null;
-        const id = linked ?? installed?.id ?? (await installFromRegistry(target, { onLog: log, env: this.env, home: this.home })).id;
+        const id = linked ?? installed?.id ?? (await installFromRegistry(target, { onLog: log, env: this.env, home: this.home, rebrand: this.deps.rebrand })).id;
         if (installed && !linked) log(`${id} is already installed`);
-        activate(id, this.env, this.home);
+        activateManaged(id, this.env, this.home, this.deps.rebrand);
         log(`activated ${id}`);
         job.status = 'restarting';
         job.finishedAt = new Date().toISOString();
@@ -325,8 +327,11 @@ export class SelfUpdateService {
   /** `cezar install` from a checkout or the npx cache: pack the running package into the managed
    *  layout and activate it. Headless — the CLI prints the log. */
   async installSelf(onLog: (line: string) => void): Promise<{ id: string; entry: string }> {
-    const result = await installFromLocal(packageRootOf(this.deps.entry), { onLog, env: this.env, home: this.home });
-    activate(result.id, this.env, this.home);
+    // A local reinstall can replace the tree already selected by current. Refresh
+    // before installing too, so a failed write cannot strand the active local build.
+    if (productIdentity(this.deps.rebrand).rebrand) writeLaunchers(this.env, this.home, this.deps.rebrand);
+    const result = await installFromLocal(packageRootOf(this.deps.entry), { onLog, env: this.env, home: this.home, rebrand: this.deps.rebrand });
+    activate(result.id, this.env, this.home, this.deps.rebrand);
     return result;
   }
 }

@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { WAIT_KINDS, registersThroughDelegation } from './run/wait-kinds.ts';
+import { assertWaitCapacity, WaitCapacityError } from '../runs/wait-capacity.ts';
 import type { AgentInput, CezarWaitRequest, PeerWaitEntry, PeerWaitResult, RunRecord, Wait, WaitErrorCode } from '@open-mercato/cezar-contract';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { peerPair } from '../delegation/conversations.ts';
@@ -47,6 +48,11 @@ export function workerWaitTarget(request: { workerIds?: string[]; requestIds?: s
   }) };
 }
 
+/** The CLI's capacity refusal, shared by worker, request and peer waits. */
+export function waitCapacityPolicyError(): DelegationPolicyError {
+  return new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+}
+
 /**
  * A new `peer` wait (spec 2026-10-27-task-communication-protocol § 7), or the open one the same
  * peers repeat. Every name must pass the relationship resolver as a peer (`peerPair`), else
@@ -57,11 +63,12 @@ export function peerWaitEntry(run: RunRecord, request: { peerIds: string[]; time
   for (const id of request.peerIds) if (!peerPair(run, getRun(id), false)) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
   const repeated = identicalPeerWait(run.waits ?? [], request.peerIds);
   if (repeated) return repeated;
-  if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
-  const now = Date.now();
-  return { id: randomUUID(), kind: 'peer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-    deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
-    turnId: turnId(), phase: 'open', peerIds: request.peerIds };
+  try { assertWaitCapacity(run); }
+  catch (error) {
+    if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
+    throw error;
+  }
+  return WAIT_KINDS.peer.entry(request, via, turnId);
 }
 
 /** The run's peer wait `waitId`, open or settled, for `cez message cancel-wait`. */
@@ -98,13 +105,12 @@ export function runsAwaitingPeer(peer: RunRecord | string, runs: () => readonly 
 type DelegationWait = Extract<CezarWaitRequest, { kind: 'worker' | 'request' | 'peer' }>;
 /** The `cezar_wait` kinds the delegation registration serves, under the tool's own codes. */
 export function isDelegationWait(request: CezarWaitRequest): request is DelegationWait {
-  return request.kind === 'worker' || request.kind === 'request' || request.kind === 'peer';
+  return registersThroughDelegation(request.kind);
 }
 
 /** `cezar_wait` kinds `worker` and `request` as the worker entry's target (hearsay-tools/cezarion#1995). */
 export function workerListTarget(request: Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>) {
-  return { ...(request.kind === 'worker' ? { workerIds: request.worker_ids } : { requestIds: request.request_ids }),
-    ...(request.mode === undefined ? {} : { mode: request.mode }), timeoutSeconds: request.timeout_seconds };
+  return WAIT_KINDS.worker.workerListTarget(request);
 }
 
 /** A delegation wait's refusal under `cezar_wait`'s own codes. Anything but a policy refusal is

@@ -1,8 +1,8 @@
+import { projectPaths } from '../project-paths.ts';
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { ApiRun, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
 import { pendingAskOf, type PendingAsk } from '@open-mercato/cezar-contract/pending-ask';
@@ -267,7 +267,7 @@ export class TaskWebhook {
     const seq = (this.seqs.get(seqKey) ?? 0) + 1;
     this.seqs.set(seqKey, seq);
     const url = threadUrl(this.options.origin(), projectId, run.id);
-    const question = asksQuestion(run) ? await pendingQuestion(this.options.dataDir, run.id) : undefined;
+    const question = asksQuestion(run) ? await pendingQuestion(this.store.sourceDataDir(run.id), run.id) : undefined;
     return {
       event: pending.event,
       deliveryId: randomUUID(),
@@ -425,7 +425,8 @@ export async function sendAgentReport(options: AgentReportOptions): Promise<Agen
         ...(result.status === undefined ? {} : { status: result.status }),
         ...(result.ok ? {} : { error: (result.error ?? 'delivery failed').slice(0, 500) }),
       }));
-  if (run && options.store) {
+  // A run read from `.ai/squawk/` stays unchanged: the report was delivered, its transcript note is skipped.
+  if (run && options.store && options.store.runOwnership(run.id) !== 'fallback') {
     options.store.appendEvent(run.id, {
       type: 'webhook.report',
       webhookId: webhook.id,
@@ -474,7 +475,7 @@ export class TaskWebhooks {
       resolveProject: () => registryWebhooks(project.id, project.root, this.options.home),
       origin: () => this.origin,
       ready: () => this.ready,
-      dataDir: join(project.root, '.ai/cezar'),
+      dataDir: projectPaths(project.root).write,
       fetch: this.options.fetch,
     });
     this.hooks.set(project.store, hook);

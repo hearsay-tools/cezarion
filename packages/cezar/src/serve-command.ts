@@ -1,5 +1,5 @@
+import { projectPaths } from './project-paths.ts';
 import { productName } from './home/display.ts';
-import { join } from 'node:path';
 import { once } from 'node:events';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
@@ -52,7 +52,7 @@ export async function serveCommand(
 ): Promise<void> {
   const ownership = new deps.CockpitOwnership();
   deps.process.once('exit', () => ownership.releaseAll());
-  await ownership.acquire(join(repoRoot, '.ai/cezar'));
+  await ownership.acquire(projectPaths(repoRoot).write);
   // Hold the real listener before workspace writes, recovery or background resources.
   // A probe followed by a later bind would allow another cwd to win in between.
   const listener = await deps.acquireServeListener(preferredPort, bindHost);

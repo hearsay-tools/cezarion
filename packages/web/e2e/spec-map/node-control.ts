@@ -63,7 +63,16 @@ export async function endNodeCapture(root: string, spec: string): Promise<void> 
   const directory = join(root, 'processes')
   for (const file of readdirSync(directory).filter(file => file.endsWith('.json'))) {
     const manifest = JSON.parse(readFileSync(join(directory, file), 'utf8')) as Manifest
-    if (!manifest.spec || !existsSync(manifest.socket)) continue
+    if (!manifest.spec) continue
+    if (!existsSync(manifest.socket)) {
+      if (manifest.spec !== spec) continue
+      const hasCoverage = manifest.coverageDirectory && existsSync(manifest.coverageDirectory)
+        && readdirSync(manifest.coverageDirectory).some(name => name.startsWith(`coverage-${manifest.pid}-`))
+      if (!hasCoverage) {
+        throw new Error(`Node coverage missing for terminated process ${manifest.pid} (${manifest.spec}) in ${manifest.coverageDirectory}`)
+      }
+      continue
+    }
     try { await command(manifest.socket, 'flush', spec) }
     catch (error) {
       // A persisted final flush acknowledges capture even if exit closed IPC before its reply.

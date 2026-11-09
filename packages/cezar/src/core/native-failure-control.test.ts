@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFailureControl } from '../../scripts/mock-failure-control.mjs';
+import { createDeliveryControl } from '../../scripts/mock-delivery-control.mjs';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { driveSeam, HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
 
@@ -36,6 +37,66 @@ function expectFailure(observation: Awaited<ReturnType<typeof run>>) {
 function expectSuccess(observation: Awaited<ReturnType<typeof run>>) {
   expect(observation.v1.filter(event => event.type === 'error')).toEqual([]);
   expect(observation.v1.some(event => event.type === 'turn-end')).toBe(true);
+}
+
+describe.each(['opencode', 'codex', 'omp', 'pi'] as const)('%s native failure steering', runner => {
+  it.each([true, false])('preserves native steering and provider failure (failing: %s)', async failing => {
+    const opening = 'deliver fixture result';
+    const control = fixture({ mode: 'persistent', opening, failure: 'provider' });
+    if (!failing) control.lift();
+    const delivery = createDeliveryControl(join(control.path, '..'), { kind: 'hold-response', match: opening });
+    const wire = join(control.path, '..', 'wire.ndjson');
+    const consumed: string[] = [];
+    const observation = await driveSeam(runner, 'baseline', {
+      spec: { userPrompt: opening, env: { CEZ_MOCK_FAILURE_CONTROL: control.path,
+        CEZ_MOCK_DELIVERY_CONTROL: delivery.path, CEZ_MOCK_WIRE_FILE: wire,
+        CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' } },
+      sessionOptions: { onAgentInputConsumed: ids => consumed.push(...ids) },
+      whileOpen: async (session, { v1 }) => {
+        try {
+          await waitFor(delivery.held);
+          let acknowledgement: false | Promise<void> = false;
+          await waitFor(() => {
+            acknowledgement = session.sendAgentMessage([{ type: 'text', text: 'queued worker progress' }], ['unread-progress']);
+            return acknowledgement !== false;
+          });
+          if (acknowledgement) await acknowledgement;
+        } finally { delivery.release(); }
+        await waitFor(() => v1.some(event => event.type === 'turn-end') && (!failing || v1.some(event => event.type === 'error')));
+      },
+    });
+    if (failing) {
+      expectFailure(observation);
+      // Pi and OMP drain steering into another model call even after a provider error.
+      expect(consumed).toEqual(runner === 'pi' || runner === 'omp' ? ['unread-progress'] : []);
+      expect(observation.v1.filter(event => event.type === 'text').map(event => event.text).join('')).not.toContain('queued worker progress');
+      if (runner === 'pi' || runner === 'omp') expectFailedDrain(wire, runner);
+    } else {
+      expectSuccess(observation);
+      expect(consumed).toEqual(['unread-progress']);
+    }
+  });
+});
+
+/** Native error follows the drained user message; OMP also owes every admitted prompt a result. */
+function expectFailedDrain(path: string, runner: 'pi' | 'omp') {
+  const records = readFileSync(path, 'utf8').trim().split('\n').map(line => {
+    return JSON.parse(line) as { channel: string; data: string };
+  });
+  const frames = records.filter(row => row.channel === 'stdout').map(row => {
+    return JSON.parse(row.data) as {
+      type: string; id?: string; status?: string;
+      message?: { role?: string; content?: { text?: string }[]; stopReason?: string };
+    };
+  });
+  const drained = frames.findIndex(frame => frame.type === 'message_end' && frame.message?.role === 'user' && frame.message.content?.some(part => part.text === 'queued worker progress'));
+  expect(drained).toBeGreaterThan(-1);
+  expect(frames.slice(drained + 1).some(frame => frame.type === 'message_end' && frame.message?.stopReason === 'error')).toBe(true);
+  if (runner === 'omp') {
+    const results = frames.filter(frame => frame.type === 'prompt_result');
+    expect(results.map(frame => frame.status)).toEqual(['error', 'error']);
+    expect(new Set(results.map(frame => frame.id)).size).toBe(2);
+  }
 }
 
 describe.each(RUNNER_IDS)('%s native failure control', runner => {

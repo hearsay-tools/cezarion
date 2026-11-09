@@ -217,10 +217,12 @@ export function continuationDefSteps(store: RunStore, record: RunRecord | undefi
 }
 
 /**
- * The definition step a continuation extends: the one owning the resumed session, else the
- * chain's last agent step — a synthetic `continue-N` owner and a fresh-session continuation
- * both extend the run's tail. Shared by `continueRun` (which identity to hold the override
- * against) and `runContinuation` (which tools, model, effort and account the turn gets).
+ * The definition step a continuation extends: the one owning the continued session, else the
+ * chain's last agent step — a synthetic `continue-N` owner and a run with no recorded session
+ * extend the run's tail. Callers pass the continued session, never only the resumable one, so a
+ * Continue that opens a fresh session keeps its step (hearsay-tools/cezarion#2991). Shared by
+ * `continueRun` (which identity to hold the override against) and `runContinuation` (which
+ * tools, model, effort and account the turn gets).
  */
 export function continuationDefStep(store: RunStore, record: RunRecord | undefined, sessionId: string | undefined): WorkflowStepDef | undefined {
   const defSteps = continuationDefSteps(store, record);

@@ -33,6 +33,7 @@ export class ReportsIndex {
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
   private started = false;
+  private projectBackfilled = false;
   private live = new Set<string>();
   private runsRoot?: string;
   private changes: ReportsWatch;
@@ -46,7 +47,7 @@ export class ReportsIndex {
 
   private root(): string { return this.runsRoot ??= artifactRunsRoot(this.dataDir); }
   private async storage<T>(runId: string, read: (directory: string) => Promise<T>) {
-    try { return await read(join(this.root(), `${runId}-artifacts`)); }
+    try { return await read(join(this.store.isFallbackRun(runId) ? artifactRunsRoot(this.store.sourceDataDir(runId)) : this.root(), `${runId}-artifacts`)); }
     catch (error) { return { state: 'indeterminate' as const, error }; }
   }
 
@@ -106,12 +107,15 @@ export class ReportsIndex {
   backfill(): Promise<void> {
     return this.serial(async () => {
       this.store.flush();
-      if (this.db.getMeta(REPORTS_BACKFILL_KEY)) return;
+      if (this.db.getMeta(REPORTS_BACKFILL_KEY) && (!this.db.hasProjectSource || this.projectBackfilled)) return;
       let complete = true;
       for (const id of this.db.listIds()) {
         if (this.supportedRun(id) && !await this.indexRun(id)) complete = false;
       }
-      if (!this.closed && complete) this.db.transaction({ upserts: [], deletes: [], meta: { [REPORTS_BACKFILL_KEY]: new Date().toISOString() } });
+      if (!this.closed && complete) {
+        this.db.transaction({ upserts: [], deletes: [], meta: { [REPORTS_BACKFILL_KEY]: new Date().toISOString() } });
+        this.projectBackfilled = true;
+      }
     });
   }
   private supportedRun(id: string): boolean {

@@ -1,3 +1,6 @@
+import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
+import { deleteSavedWorkflow } from './workflow-files.ts';
+import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
 import { productIdentity } from '../home/identity.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
@@ -84,7 +87,7 @@ import {
 } from '../automations/types.ts';
 import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
 import type { Next } from 'hono';
@@ -185,7 +188,7 @@ import {
 } from '@open-mercato/cezar-contract/events';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract/artifacts';
-import { artifactDirectory, listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/store.ts';
+import { listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../workflows/run.ts';
 import type { PastedContent } from '../workflows/run/types.ts';
@@ -687,7 +690,7 @@ export function createApp(deps: ServerDeps) {
   // handler body would silently pin it to the boot project, which the rename
   // turns into a compile error instead.
   const bootRoot = deps.repoRoot;
-  const bootDataDir = join(bootRoot, '.ai/cezar');
+  const bootDataDir = projectPaths(bootRoot).write;
   // The host-wide services and the provider closures built on them live in `./server-deps.ts`.
   const { modelCatalog, providerAuth, workspaceConfig, openTerminal, openFile, openApp } =
     resolveServerDeps(deps, bootRoot);
@@ -2823,28 +2826,11 @@ export function createApp(deps: ServerDeps) {
       return c.json({ path, name: parsed.data.name }, 201);
     })
 
-    // Delete a saved workflow (spec 012 follow-up): file workflows only —
-    // built-ins have no file and always come back.
+    // Delete saved workflows only; built-ins always remain (spec 012).
     .delete('/workflows/:name', async (c) => {
-      const { root: repoRoot } = c.get('project');
-      const name = c.req.param('name');
-      const { workflows } = await loadWorkflows(repoRoot);
-      const wf = workflows.find((w) => w.name === name);
-      if (!wf) return c.json({ error: `unknown workflow: ${name}` }, 404);
-      if (wf.source !== 'file' || !wf.path) {
-        return c.json({ error: 'built-in workflows cannot be deleted' }, 400);
-      }
-      const dir = resolve(repoRoot, WORKFLOWS_DIR);
-      const target = resolve(wf.path);
-      if (!target.startsWith(dir + sep)) {
-        return c.json({ error: 'refusing to delete a file outside the workflows dir' }, 400);
-      }
-      try {
-        await unlink(target);
-      } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-      return c.json({ ok: true, path: target });
+      const result = await deleteSavedWorkflow(c.get('project').root, c.req.param('name'));
+      if ('error' in result) return c.json({ error: result.error }, result.status);
+      return c.json({ ok: true, path: result.path });
     })
 
     // Import support for the builder (spec 012): parse + validate a pasted
@@ -3142,7 +3128,7 @@ export function createApp(deps: ServerDeps) {
   /**
    * Gate every run control by family ownership: refuse foreign or quarantined writers with 409;
    * adopt proven dead owners without resuming agents. Reads remain available. Stop carries its
-   * cancellation through adoption.
+   * cancellation through adoption. `adoptFallbackControl` runs first for a `.ai/squawk/` family.
    */
   const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
     const id = c.req.param('id');
@@ -3164,8 +3150,8 @@ export function createApp(deps: ServerDeps) {
   const delegationService = deps.delegation?.service ?? new DelegationService();
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
-    .use('/runs/:id', requireRunControl)
-    .use('/runs/:id/*', requireRunControl)
+    .use('/runs/:id', adoptFallbackControl, requireRunControl)
+    .use('/runs/:id/*', adoptFallbackControl, requireRunControl)
     // Legacy (older clients): every full record. The cockpit and `cez task` read `/run-summaries`.
     .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
     // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored
@@ -3353,12 +3339,12 @@ export function createApp(deps: ServerDeps) {
       paramZodValidator(runIdParamSchema),
       queryZodValidator(runHistoryQuerySchema),
       async (c) => {
-        const { store, dataDir } = c.get('project');
+        const { store } = c.get('project');
         const { id } = c.req.valid('param');
         if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
         try {
           return c.json(
-            await readRunHistoryPage(dataDir, id, c.req.valid('query').cursor),
+            await readRunHistoryPage(store.sourceDataDir(id), id, c.req.valid('query').cursor),
           );
         } catch (error) {
           if (error instanceof HistoryCursorError) return c.json({ error: error.message }, error.status);
@@ -3371,10 +3357,10 @@ export function createApp(deps: ServerDeps) {
       '/runs/:id/history-context',
       paramZodValidator(runIdParamSchema),
       async (c) => {
-        const { store, dataDir } = c.get('project');
+        const { store } = c.get('project');
         const { id } = c.req.valid('param');
         if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-        return c.json(await deriveRunContextEvents(dataDir, id));
+        return c.json(await deriveRunContextEvents(store.sourceDataDir(id), id));
       },
     )
 
@@ -3641,10 +3627,11 @@ export function createApp(deps: ServerDeps) {
       const blocked = await providerActionError([backend]);
       if (blocked) return c.json({ error: blocked }, 409);
       const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
+      const refusal = fallbackProjectWriteError(cwd);
+      if (refusal) return c.json({ error: refusal }, 409);
       const command = resumeCommand(backend, sessionId);
       // Fails closed on an id we do not recognise — see resumeCommand (#431).
       if (!command) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
-      // The account that OWNS this session, not the project's current one (spec 2026-07-29).
       const account = await handoffEnv(backend, sessionStep?.profileId);
       if ('error' in account) return c.json({ error: account.error }, 409);
       const fallback = handoffFallbackCommand(cwd, command, account.env);
@@ -3692,23 +3679,22 @@ export function createApp(deps: ServerDeps) {
       return openRunApp(c, target, dir, openApp);
     })
 
-    // Handoff journal (spec 007): the per-task handoff.md as markdown, with cezar's records from the
-    // run store (hearsay-tools/cezarion#1809). 404 only when the task is unknown; no file returns ''.
+    // Handoff journal plus stored records (hearsay-tools/cezarion#1809): unknown task is 404; no file is ''.
     .get('/runs/:id/handoff', (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
-      return c.text(renderHandoffRecords(readHandoff(dataDir, run.id), run.handoffRecords), 200, {
+      return c.text(renderHandoffRecords(readHandoff(store.sourceDataDir(run.id), run.id), run.handoffRecords), 200, {
         'content-type': 'text/markdown; charset=utf-8',
       });
     })
 
     .get('/runs/:id/images/:file', paramZodValidator(attachmentFileParamSchema), (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
       const file = c.req.valid('param').file;
-      const path = resolveAttachmentPath(dataDir, run.id, file);
+      const path = resolveAttachmentPath(store.sourceDataDir(run.id), run.id, file);
       if (!path) return c.json({ error: 'not found' }, 404);
       const ext = file.split('.').pop() ?? '';
       const image = IMAGE_TYPES[ext];
@@ -3734,10 +3720,10 @@ export function createApp(deps: ServerDeps) {
 
     // Task diff (spec 006): what this run changed — its worktree vs its base.
     .get('/runs/:id/diff', async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
       if (blocker) return c.json({ error: blocker }, 409);
       if (!run.worktreePath || !existsSync(run.worktreePath)) {
         return c.text('(no worktree — this task ran directly in the repo working tree)');
@@ -3746,10 +3732,10 @@ export function createApp(deps: ServerDeps) {
     })
 
     .get('/runs/:id/changes', async (c) => {
-      const { root: repoRoot, dataDir, store } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
       if (blocker) return c.json({ error: blocker }, 409);
       const workingDirectory = workingDirectoryOf(run, repoRoot);
       if (!workingDirectory) return c.json({ error: NO_WORKTREE }, 409);
@@ -3789,11 +3775,11 @@ export function createApp(deps: ServerDeps) {
     })
 
     .get('/runs/:id/file-link', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), queryZodValidator(fileLinkQuerySchema), async (c) => {
-      const { root, dataDir, store } = c.get('project');
+      const { root, store } = c.get('project');
       const run = store.getRun(c.req.valid('param').id);
       if (!run) return c.json({ error: 'not found' }, 404);
       const query = c.req.valid('query');
-      const loaded = await loadFileLink({ dataDir, runId: run.id, projectRoot: root, workingDirectory: run.worktreePath ?? root, path: query.path });
+      const loaded = await loadFileLink({ dataDir: store.sourceDataDir(run.id), runId: run.id, projectRoot: root, workingDirectory: run.worktreePath ?? root, path: query.path });
       if (query.raw === '1') {
         if (!loaded.imageBytes || loaded.preview.type !== 'file') return c.json({ error: 'Only bounded raster images can be served inline.' }, 409);
         return c.body(new Uint8Array(loaded.imageBytes).buffer, 200, {
@@ -3804,32 +3790,32 @@ export function createApp(deps: ServerDeps) {
       return c.json(loaded.preview);
     })
     .get('/runs/:id/artifacts', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const id = c.req.valid('param').id;
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      return c.json({ artifacts: await listArtifacts(artifactDirectory(dataDir, id), id) });
+      return c.json({ artifacts: await listArtifacts(runArtifactDirectory(store, id), id) });
     })
     .get('/runs/:id/artifacts/:artifactId', paramZodValidator(artifactParamsSchema), async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
+      const entry = await readArtifact(runArtifactDirectory(store, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.json(artifactPreview(entry.metadata, entry.bytes));
     })
     .get('/runs/:id/artifacts/:artifactId/metadata', paramZodValidator(artifactParamsSchema), async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const artifact = await readArtifactMetadata(artifactDirectory(dataDir, id), id, artifactId);
+      const artifact = await readArtifactMetadata(runArtifactDirectory(store, id), id, artifactId);
       if (!artifact) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.json({ artifact });
     })
     .get('/runs/:id/artifacts/:artifactId/download', paramZodValidator(artifactParamsSchema), async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
+      const entry = await readArtifact(runArtifactDirectory(store, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.body(new Uint8Array(entry.bytes).buffer, 200, {
         'content-type': 'application/octet-stream', 'x-content-type-options': 'nosniff',
@@ -3838,10 +3824,10 @@ export function createApp(deps: ServerDeps) {
       });
     })
     .get('/runs/:id/artifacts/:artifactId/image', paramZodValidator(artifactParamsSchema), async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
+      const entry = await readArtifact(runArtifactDirectory(store, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       const mime = rasterMime(entry.metadata.name);
       if (!mime) return c.json({ error: 'Only raster images can be served inline.' }, 409);
@@ -3921,10 +3907,10 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs/:id/git/commit', jsonZodValidator(gitCommitSchema), async (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
       if (blocker) return c.json({ error: blocker }, 409);
       const worktree = worktreeOf(run);
       if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
@@ -3935,10 +3921,10 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs/:id/git/push', async (c) => {
-      const { root: repoRoot, dataDir, store } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(dataDir, run.id);
+      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
       if (blocker) return c.json({ error: blocker }, 409);
       const worktree = worktreeOf(run);
       if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
@@ -3959,10 +3945,12 @@ export function createApp(deps: ServerDeps) {
     // badge. Failures come back as 409 with a `manual` merge command the GUI
     // shows next to the toast. CEZ_DRY_RUN=1 fakes the URL (no push, no gh).
     .post('/runs/:id/pr', async (c) => {
-      const { root: repoRoot, dataDir, store, manager } = c.get('project');
+      const { root: repoRoot, store, manager } = c.get('project');
       const id = c.req.param('id');
       const held = store.getRun(id);
       if (!held) return c.json({ error: 'not found' }, 404);
+      const refusal = held.worktreePath && fallbackProjectWriteError(held.worktreePath);
+      if (refusal) return c.json({ error: refusal }, 409);
       if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
       // A hold is live: done would drop its resume (S7 B13). Don’t resume (DELETE …/auto-resume) settles it failed.
       if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR' }, 409);
@@ -3980,7 +3968,7 @@ export function createApp(deps: ServerDeps) {
         const outcome = await resolveForgeRoot(repoRoot, deps.forgeFactory).createPR({
           repoRoot,
           run,
-          handoffText: readHandoff(dataDir, id),
+          handoffText: readHandoff(store.sourceDataDir(id), id),
         });
         if (!outcome.ok) {
           return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
@@ -3998,13 +3986,13 @@ export function createApp(deps: ServerDeps) {
 
     // Archived tasks keep their worktree for inspection; this is the explicit
     // "🧹 Remove worktree" cleanup (spec 006).
-    .post('/runs/:id/remove-worktree', async (c) => {
+    .post('/runs/:id/remove-worktree', protectFallbackRun('worktree'), async (c) => {
       const { root: repoRoot, store, manager } = c.get('project');
       const id = c.req.param('id');
       const run = store.getRun(id);
       if (!run) return c.json({ error: 'not found' }, 404);
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      if (run.delegation?.role === 'worker' || !store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
+      if (!store.canDeleteRun(id, 'worktree') || run.delegation?.role === 'worker') return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
       const release = manager.claimForPublish(id);
       if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
       try {
@@ -4014,7 +4002,7 @@ export function createApp(deps: ServerDeps) {
       } finally { release(); }
     })
 
-    .delete('/runs/:id', async (c) => {
+    .delete('/runs/:id', protectFallbackRun('record'), async (c) => {
       const { root: repoRoot, store, manager } = c.get('project');
       const id = c.req.param('id');
       if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
@@ -4149,6 +4137,8 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store, manager } = c.get('project');
       const run = store.getRun(c.req.valid('param').runId);
       if (!run) return c.json({ error: 'not found' }, 404);
+      const refused = store.fallbackDeleteError(run.id, 'worktree') ?? store.writeRefusal(run.id);
+      if (refused) return c.json({ error: refused }, 409);
       // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
       const release = manager.claimWorktreeReclaim(run.id);
       if (!release) {
@@ -4181,7 +4171,7 @@ export function createApp(deps: ServerDeps) {
       const query = c.req.valid('query');
       if (query.cursor) {
         try {
-          await validateLiveCursor(dataDir, id, query.cursor);
+          await validateLiveCursor(store.sourceDataDir(id), id, query.cursor);
         } catch (error) {
           if (error instanceof HistoryCursorError) return c.json({ error: error.message }, error.status);
           throw error;
@@ -4931,7 +4921,7 @@ export function createApp(deps: ServerDeps) {
       const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
       // A cold project's repository identity only: asking for an owned one starts a discovery
       // nothing reads.
-      return { project, store: owned?.store, dataDir: join(project.root, '.ai/cezar'), handle: owned ? undefined : coldRepoHandles.get(project.root) };
+      return { project, store: owned?.store, dataDir: projectPaths(project.root).write, handle: owned ? undefined : coldRepoHandles.get(project.root) };
     });
   };
 
@@ -5351,8 +5341,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   };
   if (server.listening) startBackgroundServices();
   else server.once('listening', startBackgroundServices);
-  // The boot store's preview leftovers and run deletions; lazy projects arm theirs at build.
-  armPreview(deps.store, join(deps.repoRoot, '.ai/cezar'), deps.previewHost);
+  armPreview(deps.store, projectPaths(deps.repoRoot).write, deps.previewHost);
   const previewSockets = createPreviewSockets({
     host: deps.previewHost, cockpitOrigin: () => cockpitOrigin,
     verify: (req) => verifyWsUpgrade(req, deps.bindHost),

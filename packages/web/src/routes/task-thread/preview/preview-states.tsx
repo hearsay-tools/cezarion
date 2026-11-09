@@ -480,7 +480,7 @@ function Loading({ step, url }: { step: (typeof STEPS)[number]; url: string | un
 // ---- gone -------------------------------------------------------------------------------------
 
 function WorktreeRemoved({ state, actions, worktree }: StageProps<'worktree-removed'> & { worktree?: string | undefined }) {
-  const where = worktree ? /\.ai\/cezar\/worktrees\/[^/]+/.exec(worktree)?.[0] : undefined
+  const where = worktree ? /\.ai\/(?:cezar|squawk)\/worktrees\/[^/]+/.exec(worktree)?.[0] : undefined
   const label = state.server?.label
   return (
     <Shell state={state.stage} icon={<FolderXIcon />} title="This task's worktree is gone">

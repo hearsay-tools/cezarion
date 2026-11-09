@@ -6,6 +6,16 @@
 
 `packages/cezar/src/handoff.ts`, then its reader `packages/cezar/src/server/forge/github.ts`
 
+## Two project directories before P5
+
+A handoff read follows its run record's winning directory, legacy first by run ID.
+Do not fall back to a different handoff merely because the winning run has no file.
+`handoffPath` remains an explicit-directory helper: read callers supply
+`store.sourceDataDir(runId)`; writers supply the legacy root. A family's first
+explicit legacy write preserves its fallback handoff with its other evidence.
+Fallback handoff bytes stay unchanged. Logical deletion refuses if the run also
+exists in fallback; no tombstone is written.
+
 ## Rules
 
 A per-task journal at `.ai/cezar/runs/<runId>.handoff.md` (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `HSQ_HANDOFF_FILE` (`CEZ_HANDOFF_FILE` fallback) and the `handoffInstructions` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`.

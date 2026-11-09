@@ -6,6 +6,14 @@
 
 `packages/cezar/src/server/project-context.ts`, then `packages/cezar/src/server/server.ts`, `packages/web/src/routes.tsx`
 
+## Two project directories before P5
+
+Context `dataDir` remains the legacy write root from `projectPaths`. `RunStore`
+and cold indexes merge the read roots internally. History, artifacts, handoffs,
+attachments and cleanup checks use `store.sourceDataDir(runId)`. Inspect fallback
+cockpit ownership before claiming legacy state; never reclaim a fallback claim.
+Maintenance can read fallback history without recovery or a shadow legacy database.
+
 ## Rules
 
 One `{store, manager, dataDir, launchKey}` context per registered project, built on first touch or by the background warm-up after listen (`warmAll`, off with `HSQ_PROJECT_WARMUP=0` (`CEZ_PROJECT_WARMUP` fallback), hearsay-tools/cezarion#667), disposed on removal; a `missing` root is never instantiated (unknown id → 404, gone root → 409). Every project route is registered **once** in a chained family builder and mounted under both `/api/v1/<path>` (bound to the boot project) and `/api/v1/p/:projectId/<path>` — `route-parity.test.ts` walks the exported route manifest and asserts `/api/v1/x`, `/api/v1/p/<boot>/x` and `/api/v1/p/default/x` answer byte-identically, so a new scoped route without its alias fails the suite. `default` is the reserved boot alias and is never an allocated slug. Workspace-level routes (`/projects`, `/workspace/*`, `/fs/browse`) are single-mount and never scope-prefixed. The cockpit mirrors the split: every view lives under `/p/:projectId/`, flat legacy PAGE paths redirect to the boot project, and global settings sit outside the scope at `/settings/global`. Add each route to its family's chain ([the HTTP API](http-api.md)); `versioned-surface.test.ts` fails on any route outside `/api/v1`.

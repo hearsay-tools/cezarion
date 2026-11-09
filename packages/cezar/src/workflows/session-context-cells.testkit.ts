@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { runsOn } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
@@ -84,7 +85,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
     suite.afterEach(() => vi.unstubAllEnvs());
 
     for (const runner of RUNNER_IDS) {
-      if (rows.includes('R120')) suite.it(`${runner} R120 opens a fresh step with the whole handoff and parent rules, then refreshes them on Continue`, async () => {
+      if (rows.includes('R120') && runsOn('session-context', 'R120', runner)) suite.it(`${runner} R120 opens a fresh step with the whole handoff and parent rules, then refreshes them on Continue`, async () => {
         const messages = native(runner);
         projectContext();
         const task = HARNESS_ADAPTERS[runner].scenarios['cezar-done']!;
@@ -127,7 +128,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         expect(contextLines(run.id)).toHaveLength(2);
       }, 60_000);
 
-      if (rows.includes('R121')) suite.it(`${runner} R121 never injects into a live message`, async () => {
+      if (rows.includes('R121') && runsOn('session-context', 'R121', runner)) suite.it(`${runner} R121 never injects into a live message`, async () => {
         const messages = native(runner);
         projectContext();
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner, worktree: false });
@@ -141,7 +142,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         expect(contextLines(run.id)).toHaveLength(1);
       }, 60_000);
 
-      if (rows.includes('R122')) suite.it(`${runner} R122 injects into a check retry`, async () => {
+      if (rows.includes('R122') && runsOn('session-context', 'R122', runner)) suite.it(`${runner} R122 injects into a check retry`, async () => {
         const messages = native(runner);
         projectContext();
         const workflow: WorkflowDef = { name: 'retry-1584', source: 'built-in', steps: [
@@ -157,7 +158,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         expect(contextLines(run.id)).toHaveLength(2);
       }, 60_000);
 
-      if (rows.includes('R123')) suite.it(`${runner} R123 injects into restart recovery with no live session`, async () => {
+      if (rows.includes('R123') && runsOn('session-context', 'R123', runner)) suite.it(`${runner} R123 injects into restart recovery with no live session`, async () => {
         const messages = native(runner);
         projectContext();
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['cezar-done']!, runner, worktree: false });
@@ -176,7 +177,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         expect(recovered).toContain('cezar process restarted');
       }, 60_000);
 
-      if (rows.includes('R124')) suite.it(`${runner} R124 renders an owned worker's own handoff and worker rules, never the parent's`, async () => {
+      if (rows.includes('R124') && runsOn('session-context', 'R124', runner)) suite.it(`${runner} R124 renders an owned worker's own handoff and worker rules, never the parent's`, async () => {
         const messages = native(runner);
         projectContext();
         const parent = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });

@@ -1,0 +1,26 @@
+// Frozen from hearsay-tools/cezarion v0.17.0 application-update/helper.ts.
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import type { HelperPlan } from '../../src/application-update/helper.ts';
+function scopedPath(plan: HelperPlan): string {
+  if (plan.installation.outerPackage === '@wjarka/cezarion') return plan.installation.packageRoot;
+  const nested = join(plan.installation.outerRoot, 'node_modules/@wjarka/cezarion');
+  if (existsSync(nested)) return nested;
+  const modules = plan.installation.kind === 'npx' ? join(plan.installation.installRoot, 'node_modules')
+    : dirname(plan.installation.outerRoot);
+  return join(modules, '@wjarka/cezarion');
+}
+
+function validateOriginal(plan: HelperPlan, expected: string): void {
+  const pkg = JSON.parse(readFileSync(join(scopedPath(plan), 'package.json'), 'utf8')) as { name?: string; version?: string; bin?: Record<string, string> };
+  if (pkg.name !== '@wjarka/cezarion' || pkg.version !== expected || !existsSync(join(scopedPath(plan), 'dist/index.js')) || !existsSync(join(scopedPath(plan), 'web/dist/index.html'))) {
+    throw new Error('promoted installation did not validate');
+  }
+  if (!existsSync(plan.installation.launchEntry)) throw new Error('original launch entry missing');
+  if (plan.installation.kind === 'npx') {
+    const root = JSON.parse(readFileSync(join(plan.installation.installRoot, 'package.json'), 'utf8')) as { _npx?: { packages?: string[] } };
+    if (root._npx?.packages?.[0] !== plan.installation.request || root._npx.packages.length !== 1) throw new Error('npx request metadata changed');
+  }
+}
+
+export { scopedPath, validateOriginal };

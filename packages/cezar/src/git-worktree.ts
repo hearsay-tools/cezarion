@@ -1,3 +1,4 @@
+import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from './project-paths.ts';
 import { inspectGeneration } from './delegation/process-liveness.ts';
 import { execFile } from 'node:child_process';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
@@ -11,14 +12,7 @@ import { copyGitIndex } from './git-index-copy.ts';
 import { isSafeGitRef } from './git-refs.ts';
 import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
-/**
- * Git worktree per task (spec 006). Each run gets its own branch
- * `cez/<id8>` checked out into `.ai/cezar/worktrees/<runId>` so agents never
- * touch the user's working tree. Pattern ported from github-janitor's
- * `git.ts` (createWorktree / autosaveCommit), minus the bare clone — we're
- * already inside a working copy. Everything degrades: helpers never throw
- * except `createWorktree`, whose failure the caller turns into a note.
- */
+/** One worktree per task (spec 006). Only createWorktree throws; its caller reports failure. */
 
 /** Repo-relative home of all task worktrees (gitignored via .ai/cezar/.gitignore). */
 export const WORKTREES_DIR = '.ai/cezar/worktrees';
@@ -306,7 +300,7 @@ async function collectOwnedReceipts(receipts: string, sets: OwnedCleanupSets): P
     if (!parsed.success) return true;
     const workspace = parsed.data;
     if (workspace.branch !== branchFor(workspace.ownerRunId) ||
-        !workspace.path.endsWith(join(WORKTREES_DIR, workspace.ownerRunId)) ||
+        !['cezar', 'squawk'].some(name => workspace.path.endsWith(join('.ai', name, 'worktrees', workspace.ownerRunId))) ||
         entry.replace(/(?:\.cleanup)?\.json$/, '') !== workspace.resourceId) return true;
     sets.paths.add(workspace.path); sets.branches.add(workspace.branch);
   }
@@ -426,6 +420,7 @@ async function removeWorktreeLocked(
   repoRoot: string, worktreePath: string, branch: string | undefined,
   opts: RemoveWorktreeOptions | undefined, git: WorktreeGit,
 ): Promise<void> {
+  if (isFallbackProjectPath(repoRoot, worktreePath)) return;
   const beforeRemove = async () => runBeforeWorktreeRemove(opts, protection, worktreePath);
   const protection = await ownedCleanupProtection(repoRoot);
   // Directory-only retention (#575) may reclaim a finished owned-worker checkout
@@ -695,6 +690,10 @@ async function publishAutosaveCommit(
  * merge, and a blind `git add -A` would do it again.
  */
 export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveCommitOptions = {}): Promise<AutosaveResult> {
+  if (fallbackProjectWriteError(dir)) {
+    console.info('[cez] Autosave skipped 1 read-only fallback worktree under .ai/squawk/.');
+    return 'skipped';
+  }
   let key = resolve(dir);
   try { key = realpathSync(dir); } catch { /* Missing/unreadable dir fails through Git. */ }
   const previous = autosaves.get(key);
@@ -850,7 +849,11 @@ async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) =
       break;
     } catch { /* Not writable: try the next location. */ }
   }
-  if (!scratch) return read((args) => git(worktreePath, args));
+  if (!scratch) {
+    const refusal = fallbackProjectWriteError(worktreePath);
+    if (refusal) throw new Error(refusal);
+    return read((args) => git(worktreePath, args));
+  }
   try {
     const index = join(scratch, 'index');
     const env = { ...process.env, GIT_INDEX_FILE: index };
@@ -982,8 +985,11 @@ async function pruneOrphansLocked(repoRoot: string, validIds: ReadonlySet<string
   try {
     entries = await readdir(join(repoRoot, WORKTREES_DIR), { withFileTypes: true });
   } catch {
-    return []; // no worktrees dir yet
+    entries = []; // Fallback paths still need the read-only cleanup count.
   }
+  const fallbackEntries = await readdir(join(projectPaths(repoRoot).reads[1]!, 'worktrees'), { withFileTypes: true }).catch(() => []);
+  const skipped = fallbackEntries.filter(entry => entry.isDirectory() && !validIds.has(entry.name)).length;
+  if (skipped) console.info(`[cez] Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under .ai/squawk/.`);
   const removed: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || validIds.has(entry.name) || protection.paths.has(worktreePathFor(repoRoot, entry.name))) continue;

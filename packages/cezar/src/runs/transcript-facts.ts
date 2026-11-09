@@ -26,7 +26,7 @@ export class TranscriptFactsIndex {
 
   private readonly queue: TranscriptFactsQueue<Entry | undefined>;
 
-  constructor(private readonly dataDir: string) {
+  constructor(private readonly dataDir: string, private readonly readOnly = false) {
     this.queue = new TranscriptFactsQueue(
       dataDir,
       (id, loaded, serialized) => this.accept(id, loaded, serialized),
@@ -167,6 +167,7 @@ export class TranscriptFactsIndex {
   }
 
   private persist(runId: string, entry: Entry, serialized?: string): void {
+    if (this.readOnly) { entry.written = entry.facts.bytes; return; }
     const path = historyPaths(this.dataDir, runId).facts;
     const tmp = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     try {

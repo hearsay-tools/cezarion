@@ -1,8 +1,9 @@
+import { MANAGED_WORKTREE } from '../project-paths.ts';
 import type { Home } from '../home/home.ts';
 import { defined } from '../core/defined.ts';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
 import type { ProjectWebhook, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { projectWebhooks, redactWebhook } from './webhooks.ts';
@@ -89,8 +90,7 @@ async function normalizeRoot(root: string): Promise<string> {
 
 /** True when `path` sits inside a cezar task worktree (`…/.ai/cezar/worktrees/…`). */
 function isInsideTaskWorktree(path: string): boolean {
-  const marker = `${sep}.ai${sep}cezar${sep}worktrees${sep}`;
-  return `${path}${sep}`.includes(marker);
+  return MANAGED_WORKTREE.test(`${path.replaceAll('\\', '/')}/`);
 }
 
 /**

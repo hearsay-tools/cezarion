@@ -1,3 +1,4 @@
+import { productIdentity } from './home/identity.ts';
 import { isNewerVersion } from '@open-mercato/cezar-contract/version';
 
 /**
@@ -11,9 +12,10 @@ import { isNewerVersion } from '@open-mercato/cezar-contract/version';
 const REGISTRY_TIMEOUT_MS = 3_000;
 
 /** Newest published version when it's newer than `current`, else null. */
-export async function checkForUpdate(pkgName: string, current: string): Promise<string | null> {
+export async function checkForUpdate(pkgName: string, current: string, rebrand = productIdentity().rebrand): Promise<string | null> {
   try {
-    const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`, {
+    const registryPackage = rebrand ? productIdentity(rebrand).npmPackage : pkgName;
+    const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(registryPackage)}/latest`, {
       signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
     });
     if (!res.ok) return null;

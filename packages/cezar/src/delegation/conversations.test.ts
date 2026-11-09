@@ -3,7 +3,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit'
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
-import type { RunRecord } from '../runs/store.ts';
+import { RunWriteRefusedError, type RunRecord } from '../runs/store.ts';
 import { reconcileConversationState } from './conversations.ts';
 const now = '2026-09-08T20:00:00.000Z';
 /** The store's `getRun` over a fixed set of runs. */
@@ -54,6 +54,19 @@ describe('conversation settlement', () => {
     expect(reconcileConversationState(root, lookupOf([root]), now, () => false)?.outcomes).toEqual([{ requestId: request.id, status: 'destroyed', observedAt: now }]);
   });
 
+
+  it('skips a participant the store refuses as fallback and projects the others', async () => {
+    const { projectConversationEvents } = await import('./conversations.ts');
+    const { root, worker } = records();
+    const projected: string[] = [];
+    const store = { getRun: lookupOf([root, worker]), hasProjection: () => false,
+      appendEvent: (id: string) => {
+        if (id === worker.id) throw new RunWriteRefusedError(id, 'fallback', 'read only under .ai/squawk/');
+        projected.push(id);
+      } } as unknown as import('../runs/store.ts').RunStore;
+    projectConversationEvents(store, root);
+    expect(projected).toEqual([root.id]);
+  });
 
   it('projects a consumed message once, above its delivered projection (#505)', async () => {
     const { projectConversationEvents } = await import('./conversations.ts');

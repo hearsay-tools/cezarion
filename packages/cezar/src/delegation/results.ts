@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -33,7 +34,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   const { lastExecutionOutcome, settled } = executionOutcome(store, run);
   const head = await readWorkerHead(repoRoot, run, previous, workspaceRemoved);
   const { diff, diffSnapshot } = await readWorkerDiff(repoRoot, store, run, delegation, { destroyed, workspaceRemoved });
-  const artifacts = await listWorkerArtifacts(repoRoot, run, delegation, allEvents);
+  const artifacts = await listWorkerArtifacts(store.sourceDataDir(run.id), run, delegation, allEvents);
   return { result: {
     workerId: run.id, parentRunId: delegation.parentRunId, revision: workerRevision(run), observedAt: new Date().toISOString(),
     status: run.status, outcome: destroyed ? 'destroyed' : lastExecutionOutcome, lastExecutionOutcome,
@@ -102,8 +103,7 @@ async function readWorkerDiff(repoRoot: string, store: RunStore, run: RunRecord,
 }
 
 /** Published artifacts, newest first, then image and parent-attachment descriptors; at most 32. */
-async function listWorkerArtifacts(repoRoot: string, run: RunRecord, delegation: WorkerDelegation, allEvents: RunEvent[]): Promise<WorkerCollectedResult['artifacts']> {
-  const dataDir = join(repoRoot, '.ai/cezar');
+async function listWorkerArtifacts(dataDir: string, run: RunRecord, delegation: WorkerDelegation, allEvents: RunEvent[]): Promise<WorkerCollectedResult['artifacts']> {
   const ids = new Set<string>();
   for (const event of allEvents) {
     if (event.type !== 'image' || typeof event.url !== 'string') continue;
@@ -124,8 +124,7 @@ async function listWorkerArtifacts(repoRoot: string, run: RunRecord, delegation:
 }
 
 /** History deletion retains observation bytes, not attachment files or live Git refs. */
-export async function revalidateRetainedWorkerResult(repoRoot: string, previous: WorkerCollectedResult): Promise<WorkerCollectedResult> {
-  const dataDir = join(repoRoot, '.ai/cezar');
+export async function revalidateRetainedWorkerResult(repoRoot: string, previous: WorkerCollectedResult, dataDir = projectPaths(repoRoot).write): Promise<WorkerCollectedResult> {
   return { ...previous, observedAt: new Date().toISOString(),
     head: previous.head.state === 'available' ? { state: 'unavailable', reason: 'unverified', sha: previous.head.sha } : previous.head,
     diff: previous.diff.state === 'available' ? { ...previous.diff, snapshotId: randomUUID() } : previous.diff,

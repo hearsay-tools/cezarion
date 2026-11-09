@@ -6,7 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CiWaitResult, Wait } from '@open-mercato/cezar-contract';
-import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { type RunnerId } from '../core/agent-runner.ts';
+import { CI_FAILURE_GROUPS, ciFailureRowId, type CiFailureGroup, type CiFailureRow } from './ci-wait-failure-rows.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { supportsProfiles } from '../core/agent-profiles.ts';
 import { acceptedWorkerIdentitySchema, workerWorkflowHash } from '../delegation/execution-identity.ts';
@@ -68,27 +69,6 @@ async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
   return run;
 }
 
-type CiFailureRow =
-  | { family: 'final'; runner: RunnerId; mode: 'fresh' | 'continued' }
-  | { family: 'nonfinal'; runner: RunnerId; outcome: 'passed' | 'failed' | 'restarted' | 'source-retry' }
-  | { family: 'restart'; runner: RunnerId; boundary: 'CI acknowledgement' | 'queued tail' };
-const otherRunners = RUNNER_IDS.filter(runner => runner !== 'cursor' && runner !== 'opencode');
-const modelAndServerRunners = RUNNER_IDS.filter(runner => runner === 'cursor' || runner === 'opencode');
-export const CI_FAILURE_GROUPS = {
-  'final-recovery': RUNNER_IDS.flatMap(runner => { return (['fresh', 'continued'] as const).map(mode => ({ family: 'final', runner, mode } as const)); }),
-  'nonfinal-passed': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'passed' } as const)),
-  'nonfinal-failed': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'failed' } as const)),
-  'nonfinal-restarted': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'restarted' } as const)),
-  'nonfinal-source-retry': RUNNER_IDS.map(runner => ({ family: 'nonfinal', runner, outcome: 'source-retry' } as const)),
-  'restart-acknowledgement-cursor-opencode': modelAndServerRunners.map(runner => ({ family: 'restart', runner, boundary: 'CI acknowledgement' } as const)),
-  'restart-acknowledgement-claude-codex-pi-omp': otherRunners.map(runner => ({ family: 'restart', runner, boundary: 'CI acknowledgement' } as const)),
-  'restart-queued-tail-cursor-opencode': modelAndServerRunners.map(runner => ({ family: 'restart', runner, boundary: 'queued tail' } as const)),
-  'restart-queued-tail-claude-codex-pi-omp': otherRunners.map(runner => ({ family: 'restart', runner, boundary: 'queued tail' } as const)),
-};
-export type CiFailureGroup = keyof typeof CI_FAILURE_GROUPS;
-export function ciFailureRowKey(row: CiFailureRow): string {
-  return [row.runner, row.family, row.family === 'final' ? row.mode : row.family === 'nonfinal' ? row.outcome : row.boundary].join(':');
-}
 export function registerCiFailureGroup(group: CiFailureGroup): void {
  describe('CI wait failure history through every native runner (hearsay-tools/cezarion#994)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
@@ -97,14 +77,14 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
    if (row.family === 'final') {
     const { runner, mode } = row;
 
-    const cell = mode === 'fresh' ? 'R72' : 'R73';
+    const cell = ciFailureRowId(row);
     it(`${runner} ${cell} preserves a failed CI attempt through automatic recovery and final success`, async () => {
       const settle = github();
       const wire = gatedProviderFailure(root, runner);
       // A failure that owes the CI result retries after the wake backoff (hearsay-tools/cezarion#1233);
       // the cell is about the failure history, so the retry need not wait out production cadence.
       const adapter = HARNESS_ADAPTERS[runner];
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: adapter.scenarios[mode === 'fresh' ? 'provider-error' : 'baseline']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: adapter.scenarios[mode === 'fresh' ? 'provider-error-controlled' : 'baseline']! });
       let wait: Wait;
       if (mode === 'fresh') {
         await until(wire.held);
@@ -157,7 +137,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
    if (row.family === 'nonfinal') {
     const { runner, outcome } = row;
 
-    const cell = outcome === 'source-retry' ? 'R76' : 'R74';
+    const cell = ciFailureRowId(row);
     it(`${runner} ${cell} resumes a failed nonfinal CI agent with ${outcome} checks and preserves failure history`, async () => {
       const settle = github();
       const wire = gatedProviderFailure(root, runner);
@@ -166,7 +146,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
         ? 'node -e "process.exit(1)"'
         : 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'check-retried\')){fs.writeFileSync(\'check-retried\',\'\');process.exit(1)}"';
       const run = manager.startRun({ name: 'ci-failure-chain', source: 'built-in', steps: [
-        { id: 'first', prompt: adapter.scenarios['provider-error']! },
+        { id: 'first', prompt: adapter.scenarios['provider-error-controlled']! },
         { id: 'later', prompt: adapter.scenarios['cezar-done']! },
         { id: 'check', command, onFail: { retry: outcome === 'source-retry' ? 'first' : 'later', max: 1 } },
       ] }, { runner, task: 'Recover CI and run the remaining workflow', worktree: false });
@@ -226,7 +206,7 @@ export function registerCiFailureGroup(group: CiFailureGroup): void {
       const wire = gatedProviderFailure(root, runner);
       const adapter = HARNESS_ADAPTERS[runner];
       const run = await ownedChain(runner, { name: 'owned-ci-chain', source: 'built-in', steps: [
-        { id: 'first', prompt: adapter.scenarios['provider-error']!, runner, agentProfile: 'default' },
+        { id: 'first', prompt: adapter.scenarios['provider-error-controlled']!, runner, agentProfile: 'default' },
         { id: 'later', prompt: adapter.scenarios['cezar-done']!, runner, agentProfile: 'default' },
         { id: 'check', command: 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'check-retried\')){fs.writeFileSync(\'check-retried\',\'\');process.exit(1)}"', onFail: { retry: 'later', max: 1 } },
       ] });

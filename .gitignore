@@ -20,7 +20,11 @@ dist/
 # Cezar's run data stays out; a shared session-context rule file may be committed (#1584).
 /.ai/cezar/*
 !/.ai/cezar/context.yaml
+/.ai/squawk/*
+!/.ai/squawk/context.yaml
+/.ai/squawk-migration.json
 /*/**/.ai/cezar/
+/*/**/.ai/squawk/
 
 # locally installed agent skills (per-machine installs, not repo content)
 .agents/

@@ -1,14 +1,27 @@
 {
-  // Typecheck-only view of the TypeScript probes under `.ai/scripts`, with the server's options.
-  // They import server internals, but CI never runs them, so this is their only check
-  // (hearsay-tools/cezarion#1702). It lives here, not under `.ai/scripts`, because pnpm installs
+  // No-emit tooling view: probes, benchmarks, compile-time proofs and Node test
+  // configuration. These may be loaded as scripts rather than imported by tests
+  // (hearsay-tools/cezarion#1702, hearsay-tools/cezarion#3098). It lives here because pnpm installs
   // `@types/node` in this package's node_modules, and `types: ["node"]` resolves from this file's
   // directory. Never emits.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": "../.."
+    // Infer the exported shapes of imported JS tooling instead of maintaining
+    // parallel declaration stubs. JavaScript checking itself stays out of scope.
+    "allowJs": true,
+    "checkJs": false,
+    "rootDir": "../..",
+    "target": "ES2024"
   },
-  "include": ["../../.ai/scripts/**/*.ts"],
+  "include": [
+    "scripts/**/*.ts",
+    "../../.ai/scripts/**/*.ts",
+    "../../.ai/ast-grep/fixtures/**/*.compile.ts",
+    "vitest.setup.ts",
+    "../../vitest*.ts",
+    "../api-client/vitest.config.ts",
+    "../contract/vitest.config.ts"
+  ],
   "exclude": []
 }

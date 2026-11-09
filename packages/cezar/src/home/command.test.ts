@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { cliCommand, commandText, invokedCommand, oldCommandNotice } from './command.ts';
+import { productIdentity } from './identity.ts';
+
+it.each([false, true])('recognizes only the historical alias bin.js with rebrand=%s', rebrand => {
+  const alias = productIdentity(false).npmAlias;
+  for (const modules of ['/prefix/lib/node_modules', '/cache/_npx/abc123/node_modules',
+    'C:/npm/node_modules', 'C:/cache/_npx/abc123/node_modules']) {
+    for (const separator of ['/', '\\']) {
+      const entry = `${modules}/${alias}/bin.js`.replaceAll('/', separator);
+      expect(invokedCommand(entry)).toBe(alias);
+      expect(cliCommand(entry, rebrand)).toBe(rebrand ? alias : 'cez');
+      expect(oldCommandNotice(entry, rebrand)).toBe(rebrand ? `[${alias}] '${alias}' is deprecated; use 'hsq' instead.` : undefined);
+      for (const parent of ['foreign', `${alias}-x`]) {
+        const foreign = `${modules}/${parent}/bin.js`.replaceAll('/', separator);
+        expect(invokedCommand(foreign)).toBeUndefined();
+        expect(oldCommandNotice(foreign, rebrand)).toBeUndefined();
+      }
+    }
+  }
+});
 
 describe('invoked binary identity', () => {
   it.each(['cez', 'cezarion', 'hsq'] as const)('recognizes %s through npm and managed entry paths', name => {

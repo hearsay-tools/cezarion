@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 /**
  * The managed install layout (PoC of the self-update design):
  *
@@ -29,7 +30,8 @@ import { z } from 'zod';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { prepareAuthorizedHomeWrite } from '../home/store.ts';
 
-export const PACKAGE_NAME = '@wjarka/cezarion';
+// Source checkouts keep this name in both switch states (decision D17).
+export const PACKAGE_NAME = productIdentity(false).npmPackage;
 export const CURRENT_LINK = 'current';
 const MANIFEST_FILE = '.cezar-install.json';
 
@@ -60,14 +62,22 @@ export function versionDir(id: string, env: NodeJS.ProcessEnv = process.env, hom
   return join(versionsDir(env, home), assertSafeId(id));
 }
 
+/** Resolve a managed tree without changing its manifest or rewriting an older install. */
+export function managedEntry(root: string, rebrand = productIdentity().rebrand): string {
+  const legacy = join(root, 'node_modules', PACKAGE_NAME, 'dist', 'index.js');
+  if (!rebrand) return legacy;
+  const active = join(root, 'node_modules', productIdentity(true).npmPackage, 'dist', 'index.js');
+  return existsSync(active) || !existsSync(legacy) ? active : legacy;
+}
+
 /** The entry file inside one installed version's tree. */
-export function versionEntry(id: string, env: NodeJS.ProcessEnv = process.env, home: Home): string {
-  return join(versionDir(id, env, home), 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+export function versionEntry(id: string, env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand): string {
+  return managedEntry(versionDir(id, env, home), rebrand);
 }
 
 /** The entry the launcher execs: through `current`, so a swap never edits the launcher. */
-export function currentEntry(env: NodeJS.ProcessEnv = process.env, home: Home): string {
-  return join(versionsDir(env, home), CURRENT_LINK, 'node_modules', ...PACKAGE_NAME.split('/'), 'dist', 'index.js');
+export function currentEntry(env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand): string {
+  return managedEntry(join(versionsDir(env, home), CURRENT_LINK), rebrand);
 }
 
 const manifestSchema = z
@@ -124,16 +134,16 @@ function listEntries(env: NodeJS.ProcessEnv, keep: (id: string, manifest: Instal
 }
 
 /** Every complete install under `versions/` (a manifest AND an entry file), newest first. */
-export function listInstalled(env: NodeJS.ProcessEnv = process.env, home: Home): InstalledEntry[] {
-  return listEntries(env, (id) => existsSync(versionEntry(id, env, home)), home)
+export function listInstalled(env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand): InstalledEntry[] {
+  return listEntries(env, (id) => existsSync(versionEntry(id, env, home, rebrand)), home)
     .sort((a, b) => b.installedAt.localeCompare(a.installedAt));
 }
 
 /** Resolve an apply target to an installed entry: an exact id (`0.11.1+local`) first, else a
  *  REGISTRY install of that version — a local build never stands in for the published release
  *  it was cut from, or `cezar update` on a checkout would only ever re-activate the checkout. */
-export function findInstalled(target: string, env: NodeJS.ProcessEnv = process.env, home: Home): InstalledEntry | undefined {
-  const installed = listInstalled(env, home);
+export function findInstalled(target: string, env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand): InstalledEntry | undefined {
+  const installed = listInstalled(env, home, rebrand);
   return installed.find((entry) => entry.id === target) ?? installed.find((entry) => entry.source === 'registry' && entry.version === target);
 }
 
@@ -176,8 +186,8 @@ function removeLink(link: string): void {
   }
 }
 
-export function activate(id: string, env: NodeJS.ProcessEnv = process.env, home: Home): void {
-  if (!existsSync(versionEntry(id, env, home))) throw new Error(`version ${id} is not installed`);
+export function activate(id: string, env: NodeJS.ProcessEnv = process.env, home: Home, rebrand = productIdentity().rebrand): void {
+  if (!existsSync(versionEntry(id, env, home, rebrand))) throw new Error(`version ${id} is not installed`);
   const dir = versionsDir(env, home);
   assertCezarHomeWriteIsSandboxed(dir, env);
   prepareAuthorizedHomeWrite(home);

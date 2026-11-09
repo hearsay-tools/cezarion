@@ -1,6 +1,7 @@
+import { MANAGED_WORKTREE } from '../project-paths.ts';
 import type { Home } from '../home/home.ts';
 import { realpathSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { DEFAULT_MONITORING_WAKE_MINUTES, loadWorkspaceConfig } from './config.ts';
 
 /**
@@ -50,8 +51,7 @@ function normalizeRootSync(root: string): string {
  *  intentionally suppresses those worktrees, so the owner root is the only
  *  registry key their manager can inherit a project ceiling from. */
 function taskWorktreeOwnerRoot(root: string): string | undefined {
-  const marker = `${sep}.ai${sep}cezar${sep}worktrees${sep}`;
-  const markerAt = `${root}${sep}`.indexOf(marker);
+  const markerAt = `${root.replaceAll('\\', '/')}/`.search(MANAGED_WORKTREE);
   return markerAt === -1 ? undefined : root.slice(0, markerAt);
 }
 

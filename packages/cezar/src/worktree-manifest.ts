@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from './project-paths.ts';
 import { productName } from './home/display.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes, type Hash } from 'node:crypto';
@@ -575,6 +576,8 @@ export function withWorktreeFiles<T>(
   fallback: T,
   pass: (files: WorktreeFiles) => Promise<T>,
 ): Promise<T> {
+  const refusal = fallbackProjectWriteError(worktree);
+  if (refusal) return Promise.reject(new Error(refusal));
   return serialized(worktree, async () => {
     const gitDir = await gitDirOf(worktree);
     const root = await realpath(worktree).catch(() => null);

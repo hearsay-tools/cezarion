@@ -1,8 +1,11 @@
-import type { QueryClient } from '@tanstack/react-query'
+import { notifyManager, type QueryClient } from '@tanstack/react-query'
 
 declare global {
   interface Window {
-    /** Read-only: false while a tracked query, SSE reconcile, or WS topic is in flight (#415). */
+    /**
+     * Read-only: false while query results await subscriber delivery, a query fetch,
+     * SSE reconcile, or WS topic is in flight (hearsay-tools/cezarion#3053).
+     */
     readonly __cezIdle?: boolean
     /**
      * Read-only: true once this document's workspace stream has passed its attachment barrier —
@@ -46,14 +49,31 @@ export function setWorkspaceLive(attached: boolean): void {
   Object.defineProperty(window, '__cezLive', { configurable: true, enumerable: false, get: () => live })
 }
 
-/** Subscribe the product QueryClient so `__cezIdle` tracks in-flight fetches. */
+/** Keep queries busy through fetch settlement and delivery to React subscribers. */
 export function attachQueryIdle(client: QueryClient): () => void {
-  publish()
+  let revision = 0
+  let attached = true
+  setIdleSource('queries', client.isFetching() > 0)
   const sync = (): void => {
-    setIdleSource('queries', client.isFetching() > 0)
+    const current = ++revision
+    setIdleSource('queries', true)
+    if (client.isFetching() > 0) return
+    // Query observers enqueue batchCalls before the cache event. Drain that batch
+    // first, then publish on the next notification turn so React can commit it.
+    notifyManager.schedule(() => {
+      notifyManager.schedule(() => {
+        if (attached && current === revision && client.isFetching() === 0) {
+          setIdleSource('queries', false)
+        }
+      })
+    })
   }
-  sync()
-  return client.getQueryCache().subscribe(sync)
+  const unsubscribe = client.getQueryCache().subscribe(sync)
+  return () => {
+    attached = false
+    unsubscribe()
+    setIdleSource('queries', false)
+  }
 }
 
 /** Mark SSE reconciliation busy until the invalidations settle. */

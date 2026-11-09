@@ -1,3 +1,4 @@
+import { emitProbe } from '../fixtures/emit-probe.ts';
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
@@ -11,7 +12,8 @@ const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 test('installed Cursor runner uses the bundled print mock, refuses legacy ACP resumes and fails an unqualified build headless', { timeout: 120_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'cez-cursor-package-'));
+  const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cez-cursor-package-'));
+  assert.ok(!root.startsWith(resolve(packageRoot, '../..') + '/'));
   try {
     const packDir = join(root, 'pack');
     const consumer = join(root, 'consumer');
@@ -28,31 +30,13 @@ test('installed Cursor runner uses the bundled print mock, refuses legacy ACP re
       join(packDir, record.filename)], { cwd: consumer, maxBuffer: 10 * 1024 * 1024 });
     const installed = join(consumer, 'node_modules', '@wjarka', 'cezarion');
     const smoke = join(consumer, 'cursor-smoke.mjs');
+    await emitProbe(new URL('../fixtures/installed-cursor-probe.ts', import.meta.url), join(consumer, 'cursor-probe.mjs'));
     await writeFile(smoke, `
-import assert from 'node:assert/strict';
+import { probe } from './cursor-probe.mjs';
 import { createRunner } from ${JSON.stringify(pathToFileURL(join(installed, 'dist/core/runner-factory.js')).href)};
-process.env.CEZ_DRY_RUN = '1';
-delete process.env.CEZ_CURSOR_BIN;
-for (const transport of [undefined, 'cursor-acp']) {
-  const events = [];
-  const runner = createRunner('cursor', transport ? { sessionTransport: transport } : {});
-  const result = await runner.run({ cwd: process.cwd(), userPrompt: 'mock:cezar-done', toolGrant: { kind: 'unset' }, timeoutMs: 10_000 }, event => events.push(event));
-  assert.equal(events.find(event => event.type === 'session')?.sessionTransport, 'cursor-print');
-  // mock:cezar-done answers 'Done.' after its cezar_done call; a bare runner has no tool controller,
-  // so the turn text is the reply the print transport carried, not a completion.
-  assert.match(result.text, /^Done\\./);
-  assert.equal(events.some(event => event.type === 'error'), false);
-}
-for (const transport of [undefined, 'cursor-acp']) {
-  const events = [];
-  const runner = createRunner('cursor', transport ? { sessionTransport: transport } : {});
-  await runner.run({ cwd: process.cwd(), userPrompt: 'mock:cezar-done', toolGrant: { kind: 'unset' }, timeoutMs: 10_000,
-    resume: true, sessionId: 'legacy-acp-session' }, event => events.push(event));
-  assert.equal(events.some(event => event.type === 'session'), false);
-  assert.match(events.find(event => event.type === 'error')?.message ?? '', /started on the ACP transport.*cannot resume/);
-}
+await probe({ createRunner });
 `, 'utf8');
-    const run = await execFile(process.execPath, [smoke], { cwd: consumer, timeout: 30_000 });
+    const run = await execFile(process.execPath, [smoke], { cwd: consumer, env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '' }, timeout: 30_000 });
     assert.equal(run.stderr, '');
 
     // An unqualified Cursor build fails `cez run` before inference, naming the fix

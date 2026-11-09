@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -65,8 +66,8 @@ export function accountMigrationPolicy(account: MigrationAccount): 'copy' | 'kee
 /** Read-only query: do not open RunStore, recover runs, or claim a family's execution. */
 export function accountInUse(home: Home, id: string): boolean {
   const config = loadWorkspaceConfigSync(home.workspaceConfig, undefined, path => readFileSync(path, 'utf8'));
-  return config.projects.some(project => {
-    const path = join(project.root, '.ai', 'cezar', 'runs.db');
+  return config.projects.some(project => projectPaths(project.root).reads.some(directory => {
+    const path = join(directory, 'runs.db');
     if (!existsSync(path)) return false;
     let db: DatabaseSync | undefined;
     try {
@@ -83,7 +84,7 @@ export function accountInUse(home: Home, id: string): boolean {
       });
     } catch { return true; } // Unreadable live-session evidence cannot authorize moving credentials.
     finally { db?.close(); }
-  });
+  }));
 }
 
 /** Coordinator-approved step-7 mechanism: pending HomeStore stays absolutely read-only. */

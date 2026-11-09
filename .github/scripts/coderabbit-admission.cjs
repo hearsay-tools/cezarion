@@ -88,7 +88,7 @@ function admissionResult(check, exception, threads, head) {
   const state = exception ? 'exception' : providerState(check);
   const accepted = ['exception', 'success', 'no-files'].includes(state);
   return { admitted: Boolean(accepted && openThreads === 0), head, checkId: check?.id ?? null, exception,
-    providerState: state, action: providerAction(state, openThreads),
+    providerStartedAt: check?.started_at ?? null, providerState: state, action: providerAction(state, openThreads),
     reason: openThreads ? 'unresolved-threads' : accepted ? 'admitted' : `provider-${state}` };
 }
 async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,

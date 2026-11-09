@@ -22,6 +22,24 @@ export async function afterParityPark(prompt) {
   while (!existsSync(gate)) await sleep(10);
 }
 
+/**
+ * A steering window: the steer-tool hold, and the tail after a turn's last model call (steer-late,
+ * hold). With CEZ_MOCK_STEER_GATE set, the window stays open until that file exists, so a test
+ * decides when the turn moves on instead of a timer (hearsay-tools/cezarion#2991). Unset, the
+ * window keeps its native hold or its timer.
+ */
+function steerWindow(ms, nativeHold) {
+  const gate = process.env.CEZ_MOCK_STEER_GATE;
+  if (!gate) return nativeHold ? nativeHold() : sleep(ms);
+  return (async () => {
+    const deadline = Date.now() + 15_000;
+    while (!existsSync(gate)) {
+      if (Date.now() > deadline) throw new Error('CEZ_MOCK_STEER_GATE was not created');
+      await sleep(10);
+    }
+  })();
+}
+
 /** Await only a pending operation: consecutive synchronous steps stay in one tick. */
 export function play(scenario, encoder) {
   const steps = scenario.steps[Symbol.iterator]();
@@ -38,7 +56,8 @@ export function play(scenario, encoder) {
 function perform(step, encoder) {
   if (step.kind === 'effect') return step.run();
   if (step.kind === 'sleep') return sleep(step.ms);
-  if (step.kind === 'hold') return encoder.hold ? encoder.hold(step) : sleep(step.ms);
+  if (step.kind === 'hold') return steerWindow(step.ms, encoder.hold && (() => encoder.hold(step)));
+  if (step.kind === 'window') return steerWindow(step.ms);
   if (step.kind === 'release') return waitForRelease(step.fallbackMs, step.suffix);
   if (step.kind === 'park') return afterParityPark(step.prompt);
   if (step.kind === 'stall') return stall(step.prompt, { closeInput: encoder.closeInput });
@@ -61,7 +80,7 @@ function sendParts(step, encoder) {
 }
 
 const held = (reply, fallbackMs = 400) => [open(), { kind: 'release', fallbackMs }, text(reply), end()];
-const hold = gated => [open(), gated ? { kind: 'release', fallbackMs: 250 } : { kind: 'sleep', ms: 250 }, text(`parity ${gated ? 'hold-gated' : 'hold'}: content after the pause`), { kind: 'sleep', ms: 250 }, end()];
+const hold = gated => [open(), gated ? { kind: 'release', fallbackMs: 250 } : { kind: 'sleep', ms: 250 }, text(`parity ${gated ? 'hold-gated' : 'hold'}: content after the pause`), { kind: 'window', ms: 250 }, end()];
 
 function* busy(prompt, context) {
   yield* progress(prompt);
@@ -241,7 +260,7 @@ function beforeFailureScenario(prompt, context) {
     if (matches(name)) return scenario(name, [open(), text(() => context[method](prompt)), end()], { beforeFailure: true });
   }
   if (matches('steer-tool')) return scenario('steer-tool', steerTool(context), { beforeFailure: true });
-  if (matches('steer-late')) return scenario('steer-late', [open(), text('late window: final message already sent'), { kind: 'readSteers', late: true }, { kind: 'sleep', ms: 300 }, end()], { beforeFailure: true });
+  if (matches('steer-late')) return scenario('steer-late', [open(), text('late window: final message already sent'), { kind: 'readSteers', late: true }, { kind: 'window', ms: 300 }, end()], { beforeFailure: true });
   if (matches('multi-pr-refs')) return scenario('multi-pr-refs', multiPr(prompt, context), { beforeFailure: true });
   if (matches('turn-messages:')) return scenario('turn-messages', turnMessages(prompt), { beforeFailure: true });
   if (matches('agent-echo')) return scenario('agent-echo', [open(), text(prompt), end()], { beforeFailure: true });

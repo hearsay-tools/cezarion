@@ -11,11 +11,14 @@ import { isLoopbackHostHeader } from '../server/capabilities.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
 import type { DelegationService } from './service.ts';
 import { DelegationPolicyError } from './policy.ts';
+import { RunWriteRefusedError } from '../runs/store.ts';
 
 type Env = { Variables: { caller: Caller } };
 export function delegationFailure(error: unknown) {
-  const known = error instanceof DelegationPolicyError ? error : error instanceof WaitDeadlineConflict
-    ? new DelegationPolicyError('incompatible_state', error.message) : error instanceof ZodError
+  // A run read from `.ai/squawk/` names that path and the binary that migrated the project.
+  const fallback = error instanceof RunWriteRefusedError && error.ownership === 'fallback';
+  const known = error instanceof DelegationPolicyError ? error : error instanceof WaitDeadlineConflict || fallback
+    ? new DelegationPolicyError('incompatible_state', (error as Error).message) : error instanceof ZodError
     ? new DelegationPolicyError('invalid_input', 'Invalid delegation input')
     : new DelegationPolicyError('incompatible_state', 'Delegation operation could not be completed');
   const status = known.code === 'unauthenticated' ? 401 : known.code === 'denied_scope' ? 403

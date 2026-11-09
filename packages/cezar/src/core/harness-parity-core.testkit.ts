@@ -128,6 +128,7 @@ export const SCENARIOS = [
   'no-progress-leftover',
   'busy-progress',
   'provider-error',
+  'provider-error-controlled',
   'provider-unavailable',
   'post-success-refusal',
   'ask',
@@ -196,6 +197,7 @@ export const WORKFLOW_TIMEOUT_CRITERIA = [
   { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
   { id: 'T5', scenario: 'hold-cezar-done', name: 'an authored longer limit replaces the runner default' },
   { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
+  { id: 'T7', scenario: 'hold', name: 'a set spec.timeoutMs replaces the runner default deadline' },
 ] as const;
 
 export const NO_PROGRESS_CRITERIA = [
@@ -401,7 +403,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       // Claude's mock has carried an auth-rejection branch since #430.
-      'provider-error': 'mock:auth-error',
+      'provider-error': 'mock:auth-error', 'provider-error-controlled': 'mock:auth-error',
       'provider-unavailable': 'mock:auth-error',
       'post-success-refusal': 'mock:model-refusal:always',
       ask: 'mock:cezar-ask',
@@ -457,7 +459,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
-      'provider-error': 'mock:provider-error',
+      'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
       'provider-unavailable': 'mock:stream-retry',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
@@ -517,7 +519,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-single': 'mock:crash-stderr-single',
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'provider-error': 'mock:provider-error',
+      'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
@@ -551,7 +553,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
-      'crash-stderr-single': 'mock:crash-stderr-single', 'cezar-done': 'mock:cezar-done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress', 'provider-error': 'mock:provider-error',
+      'crash-stderr-single': 'mock:crash-stderr-single', 'cezar-done': 'mock:cezar-done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress', 'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:cezar-ask',
@@ -584,7 +586,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-single': 'mock:crash-stderr-single',
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'provider-error': 'mock:provider-error',
+      'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:cezar-ask',
@@ -633,7 +635,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-single': 'mock:crash-stderr-single',
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'provider-error': 'mock:provider-error',
+      'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:cezar-ask',
@@ -907,6 +909,13 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U20h', backend: 'opencode', kind: 'capability-absent',
     reason: 'OpenCode runs one prompt per turn: a human prompt waits for the busy turn to go idle, and a refusal acknowledged without a turn never goes idle, so the human message the cell sends after the bound is never posted.',
   },
+  // S40/S41 (hearsay-tools/cezarion#2991): Cursor print reads a prompt only when its process starts,
+  // so its mock has no mid-turn read point to time a message against. runner-facts.test.ts ties
+  // these ids to the declared boundary delivery.
+  ...(['S40', 'S41'] as const).map(criterion => ({
+    criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
+    reason: 'Cursor print has no input channel into a running print process: every mid-turn message waits for the next process (boundary delivery, always-held), which S38 and S39 hold on its wire.',
+  })),
   // D1 (hearsay-tools/cezarion#2279): a governed session keeps native subagents, and cezar adds a
   // control only where a runner's cross-session tool is separate from subagent messaging. Each
   // reason was checked against the installed CLI on 2026-10-30.
@@ -998,6 +1007,9 @@ export interface DriveSeamOptions {
     observed: { v1: readonly AgentEvent[]; v2: readonly UiEvent[] },
   ) => Promise<void>;
   readonly timeoutMs?: number;
+  /** Called with each event right after it is recorded, so a row can read session state at the
+   *  event's position in the merged stream (hearsay-tools/cezarion#2991). */
+  readonly onEvent?: (event: { readonly v1: AgentEvent } | { readonly v2: UiEvent }) => void;
 }
 
 /**
@@ -1050,8 +1062,8 @@ export async function driveSeam(
         },
         ...opts.spec,
       },
-      (event) => v1.push(event),
-      { ...opts.sessionOptions, onUiEvent: (event) => v2.push(event),
+      (event) => { v1.push(event); opts.onEvent?.({ v1: event }); },
+      { ...opts.sessionOptions, onUiEvent: (event) => { v2.push(event); opts.onEvent?.({ v2: event }); },
         onPidChange: (nextPid) => { pid = nextPid; opts.sessionOptions?.onPidChange?.(nextPid); } },
     );
     let failure: Error | undefined;

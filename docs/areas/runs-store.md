@@ -6,6 +6,76 @@
 
 `packages/cezar/src/runs/store.ts`
 
+## Two project directories before P5
+
+`project-paths.ts` supplies ordered read roots: `.ai/cezar/`, then `.ai/squawk/`.
+Writes stay in `.ai/cezar/`, in both release-switch states. Run IDs form a union;
+the legacy record wins a duplicate. History, artifacts, handoffs, transcript facts,
+worker results and cleanup proofs follow that record's source. Never select each
+sidecar independently. Cold indexes use the same selection without opening a manager.
+
+Fallback SQLite opens read-only. It never migrates schemas, imports `runs.json`,
+recovers runs or changes records. Normal WAL coordination may create or update
+`runs.db-wal` and `runs.db-shm`; these SQLite sidecars are the sole fallback-write
+exception. An unknown/newer schema or a locked/unreadable fallback source produces
+one warning and no fallback runs. It does not fail boot. A damaged legacy database
+keeps its existing failure contract; fallback cannot conceal it.
+
+When only fallback runs exist, the legacy connection stays in memory. Reads,
+report-cache backfill and boot create no empty legacy `runs.db`. Fallback reads
+follow the cold-read contract: detached records are deep-frozen only under Vitest;
+callers write through store methods.
+
+### Fallback families are read only until an explicit control adopts them
+
+The family (`parent_run_id ?? id`) is the unit. A family with any member whose
+winning row is under `.ai/squawk/` has run ownership `fallback`, a legacy root with
+fallback workers included. The store treats it like `foreign`: it never claims or
+holds the family, `record()` answers undefined, `assertWritable`, `appendEvent` and
+run-file writes throw `RunWriteRefusedError` (ownership `fallback`), and
+`writeRefusal` returns the `.ai/squawk/` refusal. Boot, recovery, reconcilers,
+archive on merge, completion actions, retention and compression already skip
+families they may not write, so they skip these too and never copy them.
+
+`RunDatabase` is the backstop for the rows themselves: `transaction()` refuses an
+upsert of a row whose winning copy is a fallback row and a delete of an ID with any
+`.ai/squawk/` copy (rule A), and `takeClaims()` never takes a claim on a family with
+a fallback member. The store refuses first, so a refusal means a caller bypassed the
+store or another process added a fallback copy after this one queued its change.
+Before the legacy database exists the refusal is `FallbackWriteRefusedError`, so it
+cannot create one. Inside the transaction, after the fence, each refused row is a
+`RunConflictError` conflict with reason `fallback`: the store settles that row like
+any conflict (quarantine, one log line, evidence in `run_conflicts`) and commits the
+rest of its batch, so a refused change is never retried and never stalls a save. The
+check is per row, not per family, so a fallback member another process adds to a
+family this process holds does not block its legacy rows. The
+one exception is the `adoptFallback` intent, set only by `RunStore.adoptFallbackFamily`,
+which the `adoptFallbackControl` middleware calls before `requireRunControl` only when the router matched a control
+handler for the request's mutating method, after the Origin guard (never a preflight, a read, an unknown path, `read`, `unread`
+or `DELETE /runs/:id`). Adoption copies the whole family's records and run files into
+`.ai/cezar/` inside one transaction, refuses a family a live process of the migrating
+binary claims, and leaves every fallback byte unchanged. A retry accepts
+byte-identical files left by an interrupted copy; a differing destination refuses.
+Every other explicit write to a fallback family fails with the refusal message. No
+boot copy, whole-tree copy, move or symlink occurs.
+
+| Operation | Fallback or duplicate item |
+| --- | --- |
+| Read a run ID | Legacy record first; all evidence follows its source |
+| Automatic write to a family with a fallback member | Refused as `fallback` ownership; the caller skips it |
+| Explicit run control (`adoptFallbackControl`, then `requireRunControl`) | Adopt: copy the whole family's records and run files under legacy, then write |
+| Other explicit write to such a family | Refuse with the refusal message |
+| Explicit logical delete of run, workflow or automation | Refuse whenever its ID/name also exists under `.ai/squawk/`, even if legacy wins |
+| Refusal message | Name the `.ai/squawk/` path; tell the user to use the binary that migrated the project |
+| Automatic record retention | Skip fallback and duplicate IDs; report one count per sweep |
+| Automatic worktree/orphan cleanup | Skip fallback-only resources; report one count per sweep |
+| Writes in a fallback worktree | Refuse agent launch/Continue, setup, preview commands and Git writes; autosave/cleanup skip with a count; diff, files and result collection remain readable |
+| Byte cleanup of a legacy-only resource | Existing ownership and cleanup rules still apply |
+| Legacy-only project | Existing reads, writes, imports, recovery and deletion |
+
+No tombstone or new setting is added. Legacy-directory notices start only with
+the release switch. Project migration and path rewriting belong to P4b/P5.
+
 ## Rules
 
 One embedded SQLite file per project, `.ai/cezar/runs.db` (`node:sqlite`, WAL; Node 24.21.0 is the floor, verified by build/package CI), plus one append-only NDJSON event file per run.

@@ -3,7 +3,9 @@ import { REBRAND_SWITCH } from './switch.ts';
 
 /** npm's Windows wrappers pass the old bin target, index.js, rather than their name. */
 export function invokedCommand(entry: string | undefined = process.argv[1]): BinaryName | undefined {
-  const basename = entry?.split(/[\\/]/).pop();
+  const parts = entry?.split(/[\\/]/);
+  const basename = parts?.at(-1);
+  if (basename === 'bin.js' && parts?.at(-2) === productIdentity(false).npmAlias) return productIdentity(false).npmAlias;
   if (basename === 'index.js') return productIdentity(false).command;
   const name = basename?.replace(/\.(?:js|cmd|exe)$/i, '');
   return BINARY_NAMES.find(binary => binary === name);

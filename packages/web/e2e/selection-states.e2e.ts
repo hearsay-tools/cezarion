@@ -396,6 +396,8 @@ describe('selection and control states (#171)', () => {
         expect(originalBounds.height).toBeGreaterThanOrEqual(44)
       }
       const source = 'button[data-slot="source-pill"]'
+      // Sources load independently of the model providers.
+      browser.waitForFunction(`document.querySelector('${source}')?.disabled === false`)
       expect(style(source).border).toBe('solid')
       expect((colorSample(contrastSampleExpression(source)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       const enabledStyle = style(model)

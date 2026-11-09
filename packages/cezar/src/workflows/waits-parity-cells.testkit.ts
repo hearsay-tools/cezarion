@@ -17,6 +17,7 @@ import { RUNNER_IDS, type AgentSession, type RunnerFactory, type RunnerId } from
 import { runnersUnderTest, useRunners } from '../core/runners-under-test.testkit.ts';
 import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
+import { familyCells, SHARED_RUNNERS } from '../core/parity-classes.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { CiToolController, ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
@@ -591,12 +592,47 @@ export const WAIT_PARITY_FAMILIES = {
   cursorEntriesNoWait: { runner: 'cursor', part: 'entries', family: 'no-wait' },
   cursorEntriesCompletion: { runner: 'cursor', part: 'entries', family: 'completion' },
   cursorEntriesTimer: { runner: 'cursor', part: 'entries', family: 'timer' },
-  opencodeEntriesRefusals: { runner: 'opencode', part: 'entries', family: 'refusals' },
-  opencodeEntriesNoWait: { runner: 'opencode', part: 'entries', family: 'no-wait' },
-  opencodeEntriesCompletion: { runner: 'opencode', part: 'entries', family: 'completion' },
-  opencodeEntriesTimer: { runner: 'opencode', part: 'entries', family: 'timer' },
 } as const;
 type WaitParityFamily = typeof WAIT_PARITY_FAMILIES[keyof typeof WAIT_PARITY_FAMILIES];
+
+/**
+ * A runner outside the shared set runs only the rows that run on every runner, a few per part
+ * (hearsay-tools/cezarion#2991). Its parts fold into the groups below, one file each: fewer per-file
+ * setups, while each file stays well under CI's per-file cap (`FILE_DURATION_LIMIT_MS` in
+ * `.github/scripts/vitest-file-duration.mjs`, 60 s with coverage on; about 25 s locally at most). Every
+ * part is in one group; `entries`, the slowest, splits by row family as cursor's cap split does. The
+ * guard computes the folded runners from the class table and their files from these groups.
+ */
+export const FOLDED_WAIT_RUNNERS: readonly RunnerId[] = RUNNER_IDS.filter(runner => !SHARED_RUNNERS.includes(runner));
+type WaitFoldGroup = { readonly parts: readonly WaitParityPart[]; readonly families?: readonly WaitParityFamily['family'][] };
+export const WAIT_FOLDS = {
+  base: { parts: ['registration', 'input', 'delivery', 'asks', 'done', 'answers', 'process'] },
+  workers: { parts: ['mixed', 'recovery', 'conversations', 'refusal', 'completion', 'completion-replies', 'closed'] },
+  'entries-refusals': { parts: ['entries'], families: ['refusals', 'no-wait'] },
+  'entries-nudges': { parts: ['entries'], families: ['completion', 'timer'] },
+} as const satisfies Record<string, WaitFoldGroup>;
+export type WaitFold = keyof typeof WAIT_FOLDS;
+export const foldedWaitFile = (runner: RunnerId, fold: WaitFold): string => `waits-${runner}-every-runner-${fold}-parity.test.ts`;
+const folded = (runner: RunnerId): boolean => FOLDED_WAIT_RUNNERS.includes(runner);
+
+/** Register a folded runner's cells of one group, each row only where its class runs it. */
+function foldCells(runner: RunnerId, fold: WaitFold, register: typeof registerTest): void {
+  const group: WaitFoldGroup = WAIT_FOLDS[fold];
+  const classed = familyCells('waits', runner, register);
+  for (const part of group.parts) {
+    const families = group.families;
+    WAIT_PARITY_CELLS[part]([runner], families === undefined ? classed : ((title: string, body: () => Promise<void>) => {
+      if (families.includes(rowFamily(part, title))) classed(title, body);
+    }) as typeof registerTest);
+  }
+}
+
+/** The titles a folded runner's group registers. */
+function foldTitles(runner: RunnerId, fold: WaitFold): string[] {
+  const titles: string[] = [];
+  foldCells(runner, fold, ((title: string) => { titles.push(title); }) as typeof registerTest);
+  return titles;
+}
 
 /** Register a strict catalog reference, so the coverage scanner can prove every leaf call. */
 export function describeWaitParityFamily(scope: WaitParityFamily): void {
@@ -628,8 +664,18 @@ function splitPart(runner: RunnerId, part: WaitParityPart): boolean {
   return Object.values(WAIT_PARITY_FAMILIES).some(scope => scope.runner === runner && scope.part === part);
 }
 
+/** Whether a runner runs any cell of a part, after the wait family's class (hearsay-tools/cezarion#2991)
+ *  drops the shared rows outside the derived runner set. A part with none has no file. */
+export function partRuns(runner: RunnerId, part: WaitParityPart): boolean {
+  let any = false;
+  WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, (() => { any = true; }) as unknown as typeof registerTest));
+  return any;
+}
+
 function expectPartLeaf(runner: RunnerId, part: WaitParityPart): void {
   if (splitPart(runner, part)) return; // Full-title family coverage is checked separately below.
+  if (folded(runner)) return; // Its one file is checked below.
+  if (!partRuns(runner, part)) return;
   const file = WAIT_PARITY_FILES[part](runner);
   const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
   expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
@@ -659,7 +705,8 @@ function expectWaitParityFamilies(): void {
   }
 }
 
-export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart; family?: WaitParityFamily['family'] } | 'once'): void {
+type WaitScope = { runner: RunnerId; part: WaitParityPart; family?: WaitParityFamily['family'] } | { runner: RunnerId; part: 'every-runner'; fold: WaitFold };
+export function describeWaitParity(scope: WaitScope | 'once'): void {
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
   useRunners(boundaryRunners(withClaudeWorkers(runnersUnderTest())));
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
@@ -675,12 +722,27 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it('runs every runner\'s cells from its own file', () => {
         const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
           /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
+        const parts = Object.keys(WAIT_PARITY_FILES) as WaitParityPart[];
         expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => {
-          return (Object.keys(WAIT_PARITY_FILES) as WaitParityPart[])
-            .filter(part => !splitPart(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
+          if (folded(runner)) return (Object.keys(WAIT_FOLDS) as WaitFold[]).filter(fold => foldTitles(runner, fold).length > 0).map(fold => foldedWaitFile(runner, fold));
+          return parts.filter(part => !splitPart(runner, part) && partRuns(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
         }).sort());
-        for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
-          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
+        for (const runner of RUNNER_IDS) for (const [part, file] of Object.entries(WAIT_PARITY_FILES) as Array<[WaitParityPart, (runner: RunnerId) => string]>) {
+          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(!folded(runner) && (partRuns(runner, part) || splitPart(runner, part)));
+        }
+        for (const runner of FOLDED_WAIT_RUNNERS) {
+          // A folded runner splits no part by WAIT_PARITY_FAMILIES, its groups register each of its
+          // cells exactly once, and each group with cells runs from its own file.
+          expect(parts.filter(part => splitPart(runner, part)), runner).toEqual([]);
+          const all: string[] = [];
+          for (const part of parts) WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, ((title: string) => { all.push(title); }) as typeof registerTest));
+          const grouped = (Object.keys(WAIT_FOLDS) as WaitFold[]).flatMap(fold => foldTitles(runner, fold));
+          expect(grouped.slice().sort(), `${runner}: each cell in exactly one group`).toEqual(all.slice().sort());
+          for (const fold of Object.keys(WAIT_FOLDS) as WaitFold[]) {
+            if (foldTitles(runner, fold).length === 0) continue;
+            const source = readFileSync(new URL(`./${foldedWaitFile(runner, fold)}`, import.meta.url), 'utf8');
+            expect(source.match(/describeWaitParity\([^;]+\)/g), foldedWaitFile(runner, fold)).toEqual([`describeWaitParity({ runner: '${runner}', part: 'every-runner', fold: '${fold}' })`]);
+          }
         }
       });
 
@@ -709,8 +771,11 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       singleRunnerCells();
     }
 
+    // Each row runs on the runners its class names (core/parity-classes.testkit.ts).
+    if (scope !== 'once' && scope.part === 'every-runner') { foldCells(scope.runner, scope.fold, registerTest); return; }
+    const register = scope === 'once' ? registerTest : familyCells('waits', scope.runner, registerTest);
     for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) WAIT_PARITY_CELLS[part](runnersFor(part),
-      scope !== 'once' && scope.family ? familyTest(scope as WaitParityFamily, registerTest) : registerTest);
+      scope !== 'once' && scope.family ? familyTest(scope as WaitParityFamily, register) : register);
   });
 }
 
@@ -1426,7 +1491,7 @@ function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
       it(`${runner} U9 provider failure with a ${kind} wait open leaves the run recoverable and the next wake delivers`, async () => {
         const external = github();
         const wire = gatedProviderFailure(root, runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
         await until(wire.held);
         const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
         const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
@@ -1543,7 +1608,7 @@ function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest):
 
     it(`${runner} U9h provider failure with a human wait open leaves the run recoverable`, async () => {
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       await until(wire.held);
       const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
@@ -2249,7 +2314,7 @@ function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTe
   for (const runner of runners) {
     it(`${runner} U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       await until(wire.held);
       const w = await worker(run.id);
@@ -2610,7 +2675,7 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} R18 Finish followed by a provider error retires its intent before restart`, async () => {
       const peer = await parentOn(runner);
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
       await until(wire.held);
       const request = seedCompletionRequest(run.id, peer.id);
@@ -3671,7 +3736,7 @@ function processCells(runners: RunnerId[], it: typeof registerTest = registerTes
     it(`${runner} U9p provider failure with a process wait open leaves the run recoverable and the next result delivers`, async () => {
       const external = processes();
       const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       await until(wire.held);
       const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.process, pid: sleeper(), timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);

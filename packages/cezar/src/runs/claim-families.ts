@@ -12,7 +12,7 @@ const ADOPT_CLAIM_ATTEMPTS = 10;
 
 type ClaimExpect = { session: string; generation: number } | null;
 type ClaimTake = { family: string; expect: ClaimExpect };
-type ClaimDb = Pick<RunDatabase, 'getClaims' | 'familyHasLive' | 'takeClaims'>;
+type ClaimDb = Pick<RunDatabase, 'getClaims' | 'familyHasLive' | 'takeClaims'> & Partial<Pick<RunDatabase, 'familyHasFallback'>>;
 
 /** The maps and database a store uses to take family claims. */
 export interface FamilyClaimState {
@@ -61,7 +61,7 @@ function partitionClaimedFamilies(
 }
 
 function familiesToTake(
-  db: Pick<RunDatabase, 'getClaims' | 'familyHasLive'>,
+  db: Omit<ClaimDb, 'takeClaims'>,
   wanted: readonly string[],
   allowLive?: boolean,
 ): ClaimTake[] {
@@ -70,6 +70,8 @@ function familiesToTake(
   for (const family of wanted) {
     const claim = claims.get(family);
     if (claim && claimOwnerLive(claim)) continue;
+    // A family read from `.ai/squawk/` is never claimed: only explicit adoption makes it writable.
+    if (db.familyHasFallback?.(family)) continue;
     if (!allowLive && db.familyHasLive(family)) continue;
     take.push({ family, expect: claim ? { session: claim.session, generation: claim.generation } : null });
   }

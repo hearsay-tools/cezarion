@@ -20,7 +20,7 @@ import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 
 /** The fields a write that applies a run exit patches beside it: never the status, which the exit
  *  writes (`RunStore.move`). */
-export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status'>> & { status?: never };
+export type RunPatch = Partial<Omit<RunRecord, 'id' | 'steps' | 'status' | 'waits' | 'lastWaits'>> & { status?: never; waits?: never; lastWaits?: never };
 
 /** What a caller names beside an exit's extras: the step the exit settles apart from the others,
  *  and the text of the lifecycle event the exit writes, when the caller's says more. */

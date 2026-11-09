@@ -108,14 +108,9 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
 export class CodexAppServerRunner implements AgentRunner {
   readonly backend = 'codex' as const;
   readonly specSupport = CODEX_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'in-thread' as const;
+  readonly systemPromptOnResume = RUNNER_FACTS.codex.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.codex;
-  readonly inputDelivery: InputDelivery = {
-    mode: 'steer', consumption: 'observable', acknowledgement: 'response', humanInputAtTurnEnd: 'held-when-late',
-    // The userMessage item marks the input entering the thread's history (probe 2026-09-24:
-    // 0.8 s and 26.7 s after the steer, both before the tool ended); the next model call reads it.
-    via: 'turn/steer with clientUserMessageId; item/started userMessage clientId once in the thread history',
-  };
+  readonly inputDelivery: InputDelivery = RUNNER_FACTS.codex.inputDelivery;
 
   private readonly bin: string;
   private readonly timeoutMs: number;

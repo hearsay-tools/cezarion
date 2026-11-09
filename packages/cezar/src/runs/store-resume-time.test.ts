@@ -1,3 +1,4 @@
+import { seedWaits } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,7 +64,8 @@ describe('a commit that leaves waiting', () => {
     hold(id);
     const wait = resolvedTimer();
     const input: AgentInput = { id: wait.id, parentRunId: id, source: 'lifecycle', text: 'wake', createdAt: new Date().toISOString() };
-    store.commitWait(id, wait, input);
+    seedWaits(store, id, { waits: [wait] });
+    store.commitAgentInputs(id, [input]);
     store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() }, { exit: 'resume' });
     expect(committed(id)).toMatchObject({ status: RUN_STATUS.running, autoResumeAttempts: 2 });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
@@ -113,6 +115,7 @@ describe('a commit that stays waiting', () => {
     const { id } = store.createRun({ title: 'held', task: 'held', workflow: 'quick-task', steps: [] });
     hold(id);
     const wait = resolvedTimer();
+    store.commitWait(id, { ...wait, phase: WAIT_PHASE.open });
     store.commitWait(id, wait);
     expect(committed(id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: AT, autoResumeAttempts: 2 });
     expect(store.getRun(id)?.autoResumeAt).toBe(AT);

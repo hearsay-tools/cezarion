@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process');
 const { readFileSync } = require('node:fs');
 const { resolve, join } = require('node:path');
 const { releaseManifestDirs, publicationManifests } = require('../../packages/cezar/src/release/manifests.ts');
+const { compatibilityManifests, withCompatibilityPackages } = require('../../packages/cezar/src/release/compatibility.ts');
 const { withPublicationPackage } = require('../../packages/cezar/src/release/publication.ts');
 
 const repoRoot = resolve(__dirname, '../..');
@@ -16,7 +17,8 @@ function releasePackages(root = repoRoot, rebrand) {
   const dirs = releaseManifestDirs(identity.rebrand);
   const source = Object.fromEntries(Object.entries(dirs).map(([key, dir]) =>
     [key, JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8'))]));
-  const publication = publicationManifests(source, identity.rebrand);
+  const active = publicationManifests(source, identity.rebrand);
+  const publication = { ...active, ...compatibilityManifests(active.cezar, identity.rebrand) };
   return { dirs, source, publication };
 }
 
@@ -30,13 +32,16 @@ function packChecks({ root = repoRoot, rebrand, execute = execFileSync } = {}) {
       cwd => execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd }));
   }
   execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd: join(root, dirs.alias) });
+  withCompatibilityPackages(join(root, dirs.cezar), publication.cezar, packages => {
+    for (const { dir } of Object.values(packages)) execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd: dir });
+  }, publication.legacyScoped !== undefined);
 }
 
 function cleanupTags({ root = repoRoot, rebrand, tag, dryRun = false, execute = execFileSync } = {}) {
   if (!/^pr-[1-9]\d*$/.test(tag || '')) throw new Error('Expected a PR dist-tag');
   const { publication } = releasePackages(root, rebrand);
   // Preserve the historical client cleanup, including when it is private.
-  const names = ['cezar', 'apiClient', 'alias'].map(key => publication[key].name);
+  const names = ['cezar', 'apiClient', 'alias', ...Object.keys(publication).filter(key => key.startsWith('legacy'))].map(key => publication[key].name);
   for (const name of names) {
     if (dryRun) continue;
     try { execute('npm', ['dist-tag', 'rm', name, tag], { cwd: root, stdio: 'inherit' }); }

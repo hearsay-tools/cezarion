@@ -51,17 +51,12 @@ export interface CursorPrintRunnerOptions {
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
 }
 
-/** Cursor's input delivery: every Cursor session runs on print (hearsay-tools/cezarion#1267). */
-export const CURSOR_PRINT_INPUT_DELIVERY: InputDelivery = {
-  mode: 'boundary', consumption: 'unobservable', acknowledgement: 'model-work', humanInputAtTurnEnd: 'always-held', via: 'next exact-resume print process',
-};
-
 export class CursorPrintRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
-  readonly systemPromptOnResume = 'in-thread' as const;
+  readonly systemPromptOnResume = RUNNER_FACTS.cursor.systemPromptOnResume;
   readonly facts = RUNNER_FACTS.cursor;
-  readonly inputDelivery = CURSOR_PRINT_INPUT_DELIVERY;
+  readonly inputDelivery: InputDelivery = RUNNER_FACTS.cursor.inputDelivery;
   private lastSession?: AgentSession;
   constructor(private readonly options: CursorPrintRunnerOptions = {}) {}
   async interrupt(): Promise<void> { this.lastSession?.interrupt(); }
@@ -103,6 +98,8 @@ class CursorPrintSession implements AgentSession {
   private isOpen = true;
   private closing = false;
   private finished = false;
+  /** A held follow-up between its rejected process and the retry that relaunches it. */
+  private heldAcrossRetry = false;
   private busy = false;
   private nativeId?: string | undefined;
   private sessionEventEmitted = false;
@@ -390,7 +387,13 @@ class CursorPrintSession implements AgentSession {
     // unrelated provider error forbids replay. Logical timeout and queued input remain owned.
     if (!this.closing && !this.errorReported && !spawnError && exitCode === 1 && signal === null &&
       !active.initSeen && !active.modelWorkSeen && !active.resultSeen && active.modelRejection && !active.modelRetry) {
-      this.emit({ type: 'note', message: 'Retrying Cursor model admission once with the same selection before inference.' });
+      // The retry carries the same follow-up, so it stays held while a consumer handles the note.
+      this.heldAcrossRetry = active.heldHuman;
+      try {
+        this.emit({ type: 'note', message: 'Retrying Cursor model admission once with the same selection before inference.' });
+      } finally {
+        this.heldAcrossRetry = false;
+      }
       // A consumer can stop the session while handling the note.
       if (!this.closing && this.isOpen) {
         this.launchTurn(active.args, active.prompt, active.receipt, true, active.env, active.heldHuman);
@@ -451,7 +454,9 @@ class CursorPrintSession implements AgentSession {
   sendMessage(content: ContentBlock[]): boolean {
     if (!this.isOpen || this.closing) return false;
     if (this.busy) this.queue.push(content);
-    else this.beginTurn(content);
+    // Held from here until its process emits init, like a queued follow-up: the spawn is not a
+    // release (hearsay-tools/cezarion#2991).
+    else this.beginTurn(content, undefined, true);
     return true;
   }
   sendAgentMessage(content: ContentBlock[], _inputIds?: readonly string[]): false | Promise<void> {
@@ -469,7 +474,7 @@ class CursorPrintSession implements AgentSession {
   }
   /** A follow-up stays held from sendMessage until the print process carrying it opens
    *  its turn; the spawn-to-init gap is not a turn boundary (hearsay-tools/cezarion#1112). */
-  private launchingHuman(): boolean { return !!this.active?.heldHuman && !this.active.initSeen; }
+  private launchingHuman(): boolean { return this.heldAcrossRetry || (!!this.active?.heldHuman && !this.active.initSeen); }
   holdsHumanInput(): boolean { return this.queue.length > 0 || this.launchingHuman(); }
   heldHumanInputCount(): number { return this.queue.length + (this.launchingHuman() ? 1 : 0); }
   end(): void {

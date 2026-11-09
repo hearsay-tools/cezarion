@@ -22,6 +22,8 @@ import {
 } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
+import { RunDatabase, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
+import { encodeRunRow } from '../runs/run-row.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
@@ -62,6 +64,24 @@ describe('verified destruction retains results through explicit history deletion
     f.store.appendEvent(workerId, { type: 'image', url: `/api/v1/runs/${workerId}/images/worker-context-0.input` });
     return { workerId, workspace, generation, files };
   }
+  it('destroys legacy resources while keeping a duplicate fallback record untouched', async () => {
+    const { workerId, workspace } = await completed();
+    const directory = join(f.root, '.ai/squawk');
+    mkdirSync(directory, { recursive: true });
+    const db = RunDatabase.open(join(directory, 'runs.db'));
+    db.transaction({ upserts: [encodeRunRow(f.store.getRun(workerId)!)], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'fixture' } });
+    db.close();
+    const bytes = readFileSync(join(directory, 'runs.db'));
+    // The source was added after this fixture's store opened. Report its duplicate
+    // presence through the ordinary query while keeping the live manager attached.
+    vi.spyOn(f.store, 'hasFallbackRun').mockImplementation(id => id === workerId);
+    expect(f.store.fallbackDeleteError(workerId)).toContain('.ai/squawk');
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete' });
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(f.store.getRun(workerId)).toBeDefined();
+    expect(readFileSync(join(directory, 'runs.db'))).toEqual(bytes);
+  });
+
   it('leaves worktree and branch intact when the parent result checkpoint fails', async () => {
     const { workerId, workspace } = await completed();
     vi.spyOn(f.store, 'commitWorkerResult').mockImplementation(() => { throw Error('snapshot disk failure'); });

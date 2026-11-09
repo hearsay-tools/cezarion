@@ -37,7 +37,10 @@ writing build output. The web config resolves the server route types from local 
 so missing or stale declarations cannot select an older parent checkout. The
 nested-worktree regression runs with `npm run test:unit`. Packaged CLI tests import
 built modules; the build/package job checks them with `npm run typecheck:package`
-after the application build.
+after the application build. The root typecheck also compares tracked and untracked
+TypeScript files with the files reached by those invoked compiler configs. It fails
+when executable TypeScript falls outside both phases; it does not build or run the
+post-build package check.
 
 ### Local iteration versus final verification
 
@@ -449,8 +452,8 @@ exit code or reruns tests. Local coverage failures remain fatal. Upload and merg
 The merge job stays outside `verify.needs` and the merge-queue roster.
 
 Coverage now adds time to the required test jobs. PR and dispatch shards have a 25-minute
-hang bound, matching the former separate coverage jobs; main and merge groups retain their
-15-minute bound. Removing the duplicate matrix saves three dependency installs, server builds
+hang bound, matching the former separate coverage jobs; main and merge groups have a
+20-minute bound. Removing the duplicate matrix saves three dependency installs, server builds
 and test executions. It does not promise a shorter time to the required test verdict.
 
 `.github/scripts/ci-coverage.workflow.test.cjs` pins the event selection, single test run,
@@ -795,6 +798,23 @@ Node tests and packaged CLI tests always run on that commit. The four Vitest
 and four browser jobs can reuse native PR suites for an unchanged queue entry
 built directly on `main`.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
+
+Before enqueueing, and again in queue admission, use the newest trusted
+CodeRabbit check on the current PR head. If it started after the PR's
+**first-ever** `ready_for_review` event, it must complete successfully; pending
+or failed execution blocks admission. If no execution started after that event,
+refuse admission for the shared helper's `POST_READY_SETTLE_MS` (three-minute)
+window, then use existing current-head admission. CodeRabbit restarted after
+33–40 seconds in two observed cases but did not restart in another, and provides
+no signal that it will not re-review. A later ready transition does not reset
+the window. The shared reader is `.github/scripts/queue-coderabbit-admission.cjs`;
+`land-pr` uses the same order. A non-draft PR with no ready event was opened
+ready and uses current-head admission without a cutoff. Malformed or unreadable
+timeline proof blocks actual-review admission. Existing trusted no-files,
+release-stamps and upstream-ledger exceptions remain unchanged.
+Readiness still returns a PR to draft when a new same-head review is pending.
+See `.ai/specs/2026-11-09-post-first-ready-queue-review.md` and
+hearsay-tools/cezarion#3046 for the observed first-ready race.
 
 ### Docs-only queue entries
 

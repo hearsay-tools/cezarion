@@ -1,5 +1,6 @@
+import { projectPaths } from '../project-paths.ts';
 import { readdir, readFile } from 'node:fs/promises';
-import { extname, join, resolve } from 'node:path';
+import { extname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
   QUICK_TASK_WORKFLOW,
@@ -24,39 +25,53 @@ export interface WorkflowLoadIssue {
 export async function loadWorkflows(
   repoRoot: string,
 ): Promise<{ workflows: WorkflowDef[]; issues: WorkflowLoadIssue[] }> {
-  const dir = resolve(repoRoot, WORKFLOWS_DIR);
+  return loadWorkflowDirs(projectPaths(repoRoot).reads.map(root => join(root, 'workflows')));
+}
+
+/** Inspect the fallback separately so deleting a legacy duplicate cannot reveal it. */
+export async function fallbackWorkflowPath(repoRoot: string, name: string): Promise<string | undefined> {
+  const { workflows } = await loadWorkflowDirs([join(projectPaths(repoRoot).reads[1]!, 'workflows')]);
+  return workflows.find(workflow => workflow.source === 'file' && workflow.name === name)?.path;
+}
+
+async function loadWorkflowDirs(dirs: readonly string[]): Promise<{ workflows: WorkflowDef[]; issues: WorkflowLoadIssue[] }> {
   const issues: WorkflowLoadIssue[] = [];
   const fromFiles: WorkflowDef[] = [];
 
-  let entries: string[] = [];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    // no workflows dir — built-ins only
-  }
-
-  for (const entry of entries) {
-    const ext = extname(entry).toLowerCase();
-    if (ext !== '.yaml' && ext !== '.yml') continue;
-    const path = join(dir, entry);
+  for (const dir of dirs) {
+    const earlierNames = new Set(fromFiles.map(workflow => workflow.name));
+    let entries: string[] = [];
     try {
-      const raw = await readFile(path, 'utf8');
-      const parsed = workflowFileSchema.safeParse(parseYaml(raw));
-      if (!parsed.success) {
-        issues.push({ path, message: parsed.error.issues.map((i) => i.message).join('; ') });
-        continue;
+      entries = await readdir(dir);
+    } catch {
+      // no workflows dir — built-ins only
+    }
+
+    for (const entry of entries) {
+      const ext = extname(entry).toLowerCase();
+      if (ext !== '.yaml' && ext !== '.yml') continue;
+      const path = join(dir, entry);
+      try {
+        const raw = await readFile(path, 'utf8');
+        const parsed = workflowFileSchema.safeParse(parseYaml(raw));
+        if (!parsed.success) {
+          issues.push({ path, message: parsed.error.issues.map((i) => i.message).join('; ') });
+          continue;
+        }
+        // `skills:` shorthand files become plain agent steps here (spec 012).
+        const normalized = normalizeWorkflowDoc(parsed.data);
+        // Steps referenced by onFail.retry must exist and come earlier; ids unique.
+        const issue = stepsIssue(normalized.steps);
+        if (issue) {
+          issues.push({ path, message: issue });
+          continue;
+        }
+        if (!earlierNames.has(normalized.name)) {
+          fromFiles.push({ ...normalized, source: 'file', path });
+        }
+      } catch (err) {
+        issues.push({ path, message: err instanceof Error ? err.message : String(err) });
       }
-      // `skills:` shorthand files become plain agent steps here (spec 012).
-      const normalized = normalizeWorkflowDoc(parsed.data);
-      // Steps referenced by onFail.retry must exist and come earlier; ids unique.
-      const issue = stepsIssue(normalized.steps);
-      if (issue) {
-        issues.push({ path, message: issue });
-        continue;
-      }
-      fromFiles.push({ ...normalized, source: 'file', path });
-    } catch (err) {
-      issues.push({ path, message: err instanceof Error ? err.message : String(err) });
     }
   }
 

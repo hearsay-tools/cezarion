@@ -80,7 +80,7 @@ Caw, Covey, Flock, Hatch, Nest.
 
 | Surface | Now | After | Old name during the deprecation window |
 | --- | --- | --- | --- |
-| npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/squawk`, unscoped alias `hsq` | last `cezarion` release depends on the new package and prints a notice; then `npm deprecate` |
+| npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/squawk`, unscoped alias `hsq` | matching old scoped and `cezarion` forwarding releases pin the new package exactly during the window; the dispatcher prints one notice; the last pair ships at window end, then `npm deprecate` (planner X4) |
 | CLI binary | `cezarion`, `cez` | `hsq` | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
 | Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `HSQ_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
 | Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; opt-in `hsq migrate-project` after the window (P4, P5) |

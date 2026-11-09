@@ -25,7 +25,7 @@ export type CliDeps = typeof defaultCliDeps & {
   serveCommand: (home: Home, root: string, port: number, open: boolean, bindHost: string | undefined, restartExact: boolean) => Promise<void>;
   serverCommand: typeof serverCommand;
   runCommand: (home: Home, root: string, task: string, workflow: string | undefined, model: string | undefined, access: TaskAccess) => Promise<void>;
-  initCommand: (root: string) => void;
+  initCommand: (root: string) => void | Promise<void>;
   initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
 };
 
@@ -163,7 +163,7 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
       return;
     case 'init':
       home();
-      deps.initCommand(repoRoot);
+      await deps.initCommand(repoRoot);
       return;
     case 'projects': {
       // Registry-only (no server, no HTTP) — see workspace/projects-cli.ts.

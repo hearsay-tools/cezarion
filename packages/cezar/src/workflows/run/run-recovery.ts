@@ -1,5 +1,5 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { atContinue } from './launch-read-resolver.ts';
-import { randomUUID } from 'node:crypto';
 import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
@@ -261,7 +261,7 @@ export class RunRecovery {
     this.host.humanWaits.withdrawCezarHumanWaits(runId);
     if (openWaits(this.context.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
     try {
-      this.context.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
+      this.context.store.commitWait(runId, WAIT_KINDS.human.recoveredEntry(askSeq));
       return true;
     } catch (error) {
       console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);

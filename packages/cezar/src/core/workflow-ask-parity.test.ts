@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
+import { runsOn } from './parity-classes.testkit.ts';
 import { WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { describeWorkflowAsk, WORKFLOW_ASK_GROUPS } from './workflow-ask-cells.testkit.ts';
 
@@ -27,6 +28,7 @@ describe('workflow ask family registration', () => {
     }
     expect(new Set(names).size).toBe(names.length);
     for (const runner of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA) {
+      if (!runsOn('workflow-ask', row.id, runner)) { expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toEqual([]); continue; }
       expect(names.filter(name => name.startsWith(`${runner} ${row.id} `))).toHaveLength(1);
     }
   });

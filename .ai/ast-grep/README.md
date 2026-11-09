@@ -6,6 +6,13 @@ not text: it sees an `ActiveRun` literal whatever order its fields take, which t
 scans over `blank()` and a clone detector miss. It knows no types and resolves no imports, so it
 matches names (`state`, `active`), and a rule says in a comment what it leaves out.
 
+Ast-grep rules match syntax shapes, not data flow. Local normalization and lexical
+patterns cover only the forms a rule declares; they do not provide general binding or
+type resolution. For a new safety guard, follow [New safety guards](../../docs/sdlc/lint.md#new-safety-guards):
+prefer a compiler/language boundary, otherwise ban named syntax with a reasoned annotation
+escape. State static scope first; track values only when the rule's issue asks for it.
+Review rule-coverage findings against that scope.
+
 `npm run lint` scans the repository with every rule and fails a match beyond the baseline, in CI's
 required Lint step and, through the bridge tests `packages/cezar/src/lint/lint-ast-grep-{1,2}.test.ts`, in Squeal.
 The failure carries the rule's `message`, which names the owner to use instead.
