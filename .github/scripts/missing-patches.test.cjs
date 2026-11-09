@@ -119,7 +119,7 @@ test('PR check rejects missing patches without error annotations and detects rev
   } }, core, cwd })).length, 1);
 });
 
-test('PR check accepts the real binary fixture across different base and head commits', async t => {
+test('PR check accepts the real binary fixture before the PR ref exists across different base and head commits', async t => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'missing-patches-binary-'));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' });
@@ -136,7 +136,7 @@ test('PR check accepts the real binary fixture across different base and head co
   const head = git('rev-parse', 'HEAD').trim();
   assert.notEqual(base, head);
   git('remote', 'add', 'origin', cwd);
-  git('update-ref', 'refs/pull/1/head', head);
+  assert.throws(() => git('show-ref', '--verify', 'refs/pull/1/head'), /not a valid ref/);
   const pr = { number: 1, base: { sha: base, ref: 'main' }, head: { sha: head }, changed_files: 1 };
   const context = { sha: base, eventName: 'pull_request_target', repo: { owner: 'test', repo: 'repo' }, payload: { pull_request: pr } };
   const github = { rest: { pulls: { get: async () => ({ data: pr }), listFiles: () => {} } },
