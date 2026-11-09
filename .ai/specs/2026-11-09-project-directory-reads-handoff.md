@@ -5,6 +5,20 @@ The coordinator is `253e7706-aeaf-4498-8dd0-9ee43cbaf491`; this worker is
 `fbe890d6-d78e-4695-baf6-c346b08c8b7c`, branch `cez/fbe890d6`.
 Nothing was pushed. No PR was opened, marked ready, queued or merged.
 
+## Resolution (worker e8111a86)
+
+The coordinator approved a redesign (reply to request `6c0c1be0-154a-43a2-80bd-1b07b551bce3`).
+Round 3 B1 and B2 are closed by one boundary, not by call-site patches: a family with
+any fallback member has run ownership `fallback`, which every automatic path already
+skips as it skips a foreign family, and `RunDatabase` throws `FallbackWriteRefusedError`
+for any write or claim in such a family without the `adoptFallback` intent. Only
+`requireRunControl` sets it, through `RunStore.adoptFallbackFamily`. The implicit copy on
+`hold`/`record`/`adoptFamily` and the per-site filters are gone.
+`runs/fallback-write-invariant.test.ts` drives boot, recovery, reconcilers and background
+sweeps over a mixed fixture and fails on any fallback copy, byte change or guard refusal;
+it fails against the round-3 source. The sections below describe the state before the
+redesign.
+
 ## Status and transfer boundary
 
 **The run-store mechanism is not accepted. Round 3 B1 and B2 remain open.**

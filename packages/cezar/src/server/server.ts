@@ -1,4 +1,4 @@
-import { protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
+import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from '../project-paths.ts';
 import { productIdentity } from '../home/identity.ts';
@@ -3128,18 +3128,12 @@ export function createApp(deps: ServerDeps) {
   /**
    * Gate every run control by family ownership: refuse foreign or quarantined writers with 409;
    * adopt proven dead owners without resuming agents. Reads remain available. Stop carries its
-   * cancellation through adoption. This gate is the only explicit-write path that copies a family
-   * read from `.ai/squawk/` into this store; view state and record deletion never adopt.
+   * cancellation through adoption. `adoptFallbackControl` runs first for a `.ai/squawk/` family.
    */
   const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
     const id = c.req.param('id');
     if (c.req.method === 'GET' || c.req.method === 'HEAD' || id === undefined) return next();
     const { store, manager } = c.get('project');
-    const viewOrDelete = /\/(?:read|unread)$/.test(c.req.path) || (c.req.method === 'DELETE' && c.req.path.endsWith(`/runs/${id}`));
-    if (!viewOrDelete && store.runOwnership(id) === 'fallback') {
-      try { store.adoptFallbackFamily(id); }
-      catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 409); }
-    }
     if (store.runOwnership(id) === 'orphaned') {
       const stop = c.req.method === 'POST' && c.req.path.endsWith('/cancel');
       if (await manager.adoptOrphanedRun(id, { stop }) && stop && store.getRun(id)?.status === 'cancelled') c.set('stoppedOnAdoption', true);
@@ -3156,8 +3150,8 @@ export function createApp(deps: ServerDeps) {
   const delegationService = deps.delegation?.service ?? new DelegationService();
   delegationService.setDiscovery({ models: modelCatalog, providers: providerStatus });
   const runsRoutes = new Hono<ProjectApiEnv>()
-    .use('/runs/:id', requireRunControl)
-    .use('/runs/:id/*', requireRunControl)
+    .use('/runs/:id', adoptFallbackControl, requireRunControl)
+    .use('/runs/:id/*', adoptFallbackControl, requireRunControl)
     // Legacy (older clients): every full record. The cockpit and `cez task` read `/run-summaries`.
     .get('/runs', (c) => c.json(c.get('project').store.listAllRunsForLegacyRoute().map(run => withUsage(run))))
     // The slim list (#817): the same runs in the same order as `GET /runs`, from the stored

@@ -41,7 +41,7 @@ export class ProjectRunConnection {
     } });
   }
 
-  /** Called only by a run write or explicit family claim, never a query/cache read. */
+  /** Called only before a run write or a family claim, never a query/cache read. */
   writable(): void {
     if (this.deferred) {
       mkdirSync(dirname(this.target), { recursive: true });
@@ -80,6 +80,20 @@ export class ProjectRunConnection {
     this.refresh();
     return Boolean(this.current.prepare(`SELECT 1 FROM ${this.sourceTable} source WHERE (source.id = ? OR source.parent_run_id = ?)
       AND NOT EXISTS (SELECT 1 FROM main.runs legacy WHERE legacy.id = source.id) LIMIT 1`).get(family, family));
+  }
+
+  /** Refuse before `writable()`, so a refused write cannot create the legacy database either. */
+  beforeWrite(changes: { upserts: readonly RunRowInput[]; deletes: readonly string[]; adoptFallback?: readonly string[] }): ReadonlySet<string> {
+    const adopted = new Set(changes.adoptFallback ?? []);
+    this.assertWritable(changes, adopted);
+    this.assertAdoptable(adopted);
+    if (changes.upserts.length || changes.deletes.length || adopted.size) this.writable();
+    return adopted;
+  }
+
+  beforeClaim(families: readonly string[]): void {
+    this.assertClaimable(families);
+    this.writable();
   }
 
   /** Refuse a write that reaches a fallback family without the explicit adoption intent. */
@@ -165,9 +179,9 @@ export class ProjectRunConnection {
   }
 
   /** Explicit adoption only: inside the primary transaction, after its ownership and row fences passed. */
-  preserveFamilies(families: Iterable<string>): void {
+  preserveFamilies(families: ReadonlySet<string>, changes: { upserts: readonly RunRowInput[]; deletes: readonly string[] }): void {
     this.assertAdoptable(families);
-    for (const family of new Set(families)) {
+    for (const family of families) {
       const rows = this.current.prepare(`SELECT * FROM project_runs WHERE id = ? OR parent_run_id = ?`).all(family, family);
       for (const row of rows) {
         const id = row.id as string;
@@ -181,6 +195,8 @@ export class ProjectRunConnection {
           .run(...columns.map(key => row[key] as string | number | null));
       }
     }
+    // Re-checked inside the transaction: the fallback source may have changed since `beforeWrite`.
+    this.assertWritable(changes, new Set());
   }
 
   commitFiles(): void { this.copied = []; }

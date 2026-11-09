@@ -295,8 +295,7 @@ export interface RunDatabaseChanges {
    *  back. The last moment a caller can still refuse what it wrote. What it returns is more
    *  private metadata, written in the same commit. */
   beforeCommit?: () => Readonly<Record<string, string>> | void;
-  /** Explicit user adoption only (`RunStore.adoptFallbackFamily`): copy these fallback families into
-   *  this database first. Without it, a write to a family with a fallback member throws. */
+  /** Explicit adoption only (`RunStore.adoptFallbackFamily`): fallback families to copy in first. */
   adoptFallback?: readonly string[];
 }
 
@@ -501,14 +500,11 @@ export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 
 type SqlRow = Record<string, unknown>;
 
-
-
 /** `meta` key of the database-wide commit sequence every upsert stamps as its row's revision. */
 const COMMIT_SEQ_KEY = 'commit-seq';
 /** `meta` key of the sequence every claim acquisition takes its generation from. */
 const CLAIM_GENERATION_KEY = 'claim-generation';
 const CLAIM_COLUMNS = 'family, session, pid, start_token, generation';
-
 
 export class RunDatabase {
   private readonly db: DatabaseSync;
@@ -876,11 +872,7 @@ export class RunDatabase {
    */
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
-    const adopted = new Set(changes.adoptFallback ?? []);
-    // Checked before `writable()`, so a refused write cannot create the legacy database either.
-    this.project?.assertWritable(changes, adopted);
-    this.project?.assertAdoptable(adopted);
-    if (changes.upserts.length || changes.deletes.length || adopted.size) this.project?.writable();
+    const adopted = this.project?.beforeWrite(changes) ?? new Set<string>();
     const revisions = new Map<string, number>();
     const seqs = new Map<string, number>();
     let claims = new Map<string, number>();
@@ -894,8 +886,7 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
-        this.project?.preserveFamilies(adopted);
-        this.project?.assertWritable(changes, new Set());
+        this.project?.preserveFamilies(adopted, changes);
         for (const id of changes.deletes) {
           this.reports.deleteRun(id);
           this.statements.delete.run(id);
@@ -999,8 +990,7 @@ export class RunDatabase {
   ): Map<string, number> {
     const taken = new Map<string, number>();
     if (take.length === 0) return taken;
-    this.project?.assertClaimable(take.map(({ family }) => family));
-    this.project?.writable();
+    this.project?.beforeClaim(take.map(({ family }) => family));
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');
       try {
@@ -1097,7 +1087,6 @@ export class RunDatabase {
     }
   }
 }
-
 
 /** Connections to a damaged database that could not be closed safely (`closeLeavingFiles`). */
 const leftOpen: DatabaseSync[] = [];

@@ -1,6 +1,6 @@
 import { legacyIndexRows } from './legacy-run-rows.ts';
-import { dataReadDirs, fallbackProjectWriteError } from '../project-paths.ts';
-import { addRunSource, fallbackRunSource, validWorkerResultPath, fallbackRunDeleteError, workerResultsDirectory } from './project-run-sources.ts';
+import { dataReadDirs } from '../project-paths.ts';
+import { addRunSource, copyFallbackFamily, fallbackRunSource, bindWorkerResultPath, fallbackRunDeleteError, workerResultsDirectory } from './project-run-sources.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
@@ -325,7 +325,6 @@ export function __setLegacyImportHookForTests(hook?: { beforeTransaction?: () =>
   legacyImportHook = hook;
 }
 
-
 /**
  * Import legacy rows and the completion marker atomically, once. Recheck live-writer evidence
  * before commit and preserve exact input bytes in a synced backup. Leave runs.json untouched;
@@ -421,8 +420,7 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup' | 'maintenance';
  *   manager recovers the family);
  * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
  * - `quarantined`: a write found it changed under this store; refused until cezar restarts;
- * - `fallback`: a member of its family is read from `.ai/squawk/`. Only an explicit control adopts
- *   it (`RunStore.adoptFallbackFamily`); every other write is refused, as for `foreign`.
+ * - `fallback`: a family member is read from `.ai/squawk/`: refused as `foreign` until a control adopts it.
  */
 export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined' | 'fallback';
 
@@ -547,7 +545,6 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-
 const WORKER_PROCESS_CAP = 32;
 const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional(),
   pgid: z.number().int().positive().optional() }).strict();
@@ -620,9 +617,7 @@ export class RunStore extends EventEmitter {
   private readonly liveItems = new LiveItemSnapshots();
 
   private fallbackFacts: TranscriptFactsIndex | undefined;
-  private factsFor(id: string): TranscriptFactsIndex {
-    return this.isFallbackRun(id) ? this.fallbackFacts ??= new TranscriptFactsIndex(this.sourceDataDir(id), true) : this.facts;
-  }
+  private factsFor(id: string): TranscriptFactsIndex { return this.isFallbackRun(id) ? this.fallbackFacts ??= new TranscriptFactsIndex(this.sourceDataDir(id), true) : this.facts; }
 
   /** Capture both sources on the same synchronous sequence boundary before history IO. */
   liveReadSnapshot(runId: string) {
@@ -872,7 +867,7 @@ export class RunStore extends EventEmitter {
   writeRefusal(id: string): string | undefined {
     const ownership = this.runOwnership(id);
     if (ownership === 'quarantined') return RUN_QUARANTINED;
-    if (ownership === 'fallback') return this.fallbackWriteError();
+    if (ownership === 'fallback') return this.fallbackRefusal(id).message;
     return ownership === 'foreign' || ownership === 'orphaned' ? RUN_IN_USE_ELSEWHERE : undefined;
   }
 
@@ -888,28 +883,15 @@ export class RunStore extends EventEmitter {
     return family;
   }
 
-  /**
-   * Copy a family that is read from `.ai/squawk/` into this store, records and run files, so a
-   * control can then write it. Only an explicit user control calls this (`requireRunControl`):
-   * it is the one write that may carry the adoption intent. Throws while a live process of the
-   * migrating binary claims the family. Returns whether anything was copied.
-   */
+  /** Explicit controls only (`requireRunControl`): copy a `.ai/squawk/` family in so it can be written. */
   adoptFallbackFamily(id: string): boolean {
-    const family = this.db?.familyOf(id);
-    if (!this.db || family === undefined || !this.db.familyHasFallback(family)) return false;
-    this.db.transaction({ upserts: [], deletes: [], adoptFallback: [family] });
-    for (const member of [family, ...this.db.listIdsByParent(family)]) this.coldReads.forget(member);
-    return true;
+    const members = copyFallbackFamily(this.db, id);
+    for (const member of members) this.coldReads.forget(member);
+    return members.length > 0;
   }
-
-  private fallbackWriteError(): string {
-    return fallbackProjectWriteError(dataReadDirs(this.dataDir)[1] ?? this.dataDir) ?? RUN_IN_USE_ELSEWHERE;
-  }
-
-  /** Run files are written only for families this store may write: never a fallback family's. */
-  private assertFilesWritable(id: string): void {
-    if (this.runOwnership(id) === 'fallback') throw new RunWriteRefusedError(id, 'fallback', this.fallbackWriteError());
-  }
+  private fallbackRefusal(id: string): RunWriteRefusedError { return new RunWriteRefusedError(id, 'fallback', fallbackRunDeleteError(this.dataDir, true)); }
+  /** Run files are written only for a family this store may write, never a fallback family. */
+  private writeDir(id: string): string { if (this.runOwnership(id) === 'fallback') throw this.fallbackRefusal(id); return this.dataDir; }
 
   /** Every run whose family another process owns — alive, or dead with a live run left to
    *  recover (cleanup keeps their scratch: it is theirs, or recovery's once someone adopts them).
@@ -1910,10 +1892,7 @@ export class RunStore extends EventEmitter {
     this.commitIndex(staged);
   }
 
-  private workerResultsDir(parentId: string, write = false): string {
-    if (write) this.assertFilesWritable(parentId);
-    return workerResultsDirectory(write ? this.dataDir : this.sourceDataDir(parentId), parentId, write);
-  }
+  private workerResultsDir(parentId: string, write = false): string { return workerResultsDirectory(write ? this.writeDir(parentId) : this.sourceDataDir(parentId), parentId, write); }
 
   workerResultSnapshotPath(parentId: string, workerId: string, snapshotId: string): string {
     return join(this.dataDir, 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
@@ -1930,10 +1909,7 @@ export class RunStore extends EventEmitter {
       let raw: string;
       try { const info = fstatSync(fd); if (!info.isFile() || info.size > 3_145_728) return undefined; raw = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
       const file = workerResultFileSchema.parse(JSON.parse(raw));
-      if (file.result.diff.state === 'available') {
-        if (!validWorkerResultPath(this.dataDir, this.hasFallbackRun(parentId), parentId, path, file.result.diff.path)) return undefined;
-        file.result.diff.path = path;
-      }
+      if (!bindWorkerResultPath(file.result.diff, this.dataDir, this.hasFallbackRun(parentId), parentId, path)) return undefined;
       if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.workspace.ownerRunId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
         (file.result.diff.state === 'available' && (file.result.diff.snapshotId !== reference.snapshotId || file.diffSnapshot === undefined))) return undefined;
       return file;
@@ -2107,10 +2083,7 @@ export class RunStore extends EventEmitter {
     const owned = new Set([...this.claimFamilies(held, { allowLive: true }),
       ...this.claimFamilies([...families.values()].filter((family) => !held.has(family)))]);
     for (const [id, family] of families) {
-      if (owned.has(family)) continue;
-      const ownership = this.runOwnership(id);
-      if (ownership === 'fallback') throw new RunWriteRefusedError(id, 'fallback', this.fallbackWriteError());
-      throw new RunWriteRefusedError(id, ownership === 'orphaned' ? 'orphaned' : 'foreign');
+      if (!owned.has(family)) throw this.runOwnership(id) === 'fallback' ? this.fallbackRefusal(id) : new RunWriteRefusedError(id, this.runOwnership(id) === 'orphaned' ? 'orphaned' : 'foreign');
     }
   }
 
@@ -2527,7 +2500,7 @@ export class RunStore extends EventEmitter {
     const run = this.record(runId);
     if (!run) {
       const ownership = this.runOwnership(runId);
-      if (ownership === 'fallback') throw new RunWriteRefusedError(runId, ownership, this.fallbackWriteError());
+      if (ownership === 'fallback') throw this.fallbackRefusal(runId);
       if (ownership === 'foreign' || ownership === 'orphaned' || ownership === 'quarantined') throw new RunWriteRefusedError(runId, ownership);
       throw new Error(`unknown run: ${runId}`);
     }
@@ -2804,8 +2777,7 @@ export class RunStore extends EventEmitter {
 
   private executionPath(id: string, write = false): string {
     z.string().uuid().parse(id);
-    if (write) this.assertFilesWritable(id);
-    const dir = join(write ? this.dataDir : this.sourceDataDir(id), 'runs');
+    const dir = join(write ? this.writeDir(id) : this.sourceDataDir(id), 'runs');
     if (write) mkdirSync(dir, { recursive: true });
     if (lstatSync(dir).isSymbolicLink() || realpathSync(dir) !== resolve(dir)) throw new Error('Unsafe execution directory');
     return join(dir, `${id}.execution.json`);

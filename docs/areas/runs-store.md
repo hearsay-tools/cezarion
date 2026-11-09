@@ -23,17 +23,38 @@ keeps its existing failure contract; fallback cannot conceal it.
 
 When only fallback runs exist, the legacy connection stays in memory. Reads,
 report-cache backfill and boot create no empty legacy `runs.db`. Fallback reads
-never enter the held family set, including workers of a live legacy root. Fallback reads follow the cold-read contract: detached records are deep-frozen only under Vitest; callers write through store methods. An explicit
-family write preserves only that family's records and sidecars in the existing
-primary transaction after ownership checks. Writing a legacy row does not copy
-untouched fallback relatives. It leaves fallback records and
-evidence unchanged. A retry accepts byte-identical sidecars left by an interrupted
-copy; a differing destination still refuses the write. No boot copy, whole-tree copy, move or symlink occurs.
+follow the cold-read contract: detached records are deep-frozen only under Vitest;
+callers write through store methods.
+
+### Fallback families are read only until an explicit control adopts them
+
+The family (`parent_run_id ?? id`) is the unit. A family with any member whose
+winning row is under `.ai/squawk/` has run ownership `fallback`, a legacy root with
+fallback workers included. The store treats it like `foreign`: it never claims or
+holds the family, `record()` answers undefined, `assertWritable`, `appendEvent` and
+run-file writes throw `RunWriteRefusedError` (ownership `fallback`), and
+`writeRefusal` returns the `.ai/squawk/` refusal. Boot, recovery, reconcilers,
+archive on merge, completion actions, retention and compression already skip
+families they may not write, so they skip these too and never copy them.
+
+`RunDatabase` enforces the same rule: `transaction()` and `takeClaims()` throw
+`FallbackWriteRefusedError` for any upsert, delete or claim in such a family. The
+store refuses first, so this error means a caller bypassed the store. The one
+exception is the `adoptFallback` intent, set only by `RunStore.adoptFallbackFamily`,
+which `requireRunControl` calls for an explicit run control (not `read`, `unread`
+or `DELETE /runs/:id`). Adoption copies the whole family's records and run files into
+`.ai/cezar/` inside one transaction, refuses a family a live process of the migrating
+binary claims, and leaves every fallback byte unchanged. A retry accepts
+byte-identical files left by an interrupted copy; a differing destination refuses.
+Every other explicit write to a fallback family fails with the refusal message. No
+boot copy, whole-tree copy, move or symlink occurs.
 
 | Operation | Fallback or duplicate item |
 | --- | --- |
 | Read a run ID | Legacy record first; all evidence follows its source |
-| Explicit write to a family | Preserve missing family records/evidence under legacy; keep ownership fences |
+| Automatic write to a family with a fallback member | Refused as `fallback` ownership; the caller skips it |
+| Explicit run control (`requireRunControl`) | Adopt: copy the whole family's records and run files under legacy, then write |
+| Other explicit write to such a family | Refuse with the refusal message |
 | Explicit logical delete of run, workflow or automation | Refuse whenever its ID/name also exists under `.ai/squawk/`, even if legacy wins |
 | Refusal message | Name the `.ai/squawk/` path; tell the user to use the binary that migrated the project |
 | Automatic record retention | Skip fallback and duplicate IDs; report one count per sweep |

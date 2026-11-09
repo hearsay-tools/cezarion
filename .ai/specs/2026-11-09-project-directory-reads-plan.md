@@ -8,10 +8,13 @@ Singleton files use whole-file presence precedence, even when the first file is
 damaged. Catalogs use names; runs use IDs. A run's sidecars follow its record,
 including when a duplicate sidecar is absent in the winning directory.
 
-The coordinator approved per-family copy-on-write on 2026-11-09. Only an explicit
-family write may preserve its fallback records and sidecars into the legacy
-directory, inside the existing transaction and ownership checks. Boot and reads
-do not copy fallback state or create an empty legacy database. Neither tree is
+The coordinator approved per-family copy-on-write on 2026-11-09. A family with any
+member read from `.ai/squawk/` has run ownership `fallback`: every automatic path
+meets the same refusal as a foreign family and skips it. Only an explicit run control
+(`requireRunControl`) adopts the family, which copies its records and sidecars into
+the legacy directory inside one transaction. `RunDatabase` refuses any other write or
+claim in such a family, so a bypass fails loudly. Boot and reads do not copy fallback
+state or create an empty legacy database. Neither tree is
 moved or symlinked. The fallback tree stays logically read only. Normal read-only SQLite WAL coordination
 may change only `runs.db-wal` and `runs.db-shm`. An unreadable or unsupported
 fallback database contributes no runs and one warning; it never fails boot.
@@ -26,12 +29,13 @@ from fallback on the next read.
 | --- | --- | --- |
 | Neither tree | Existing defaults | Explicit writes use legacy |
 | Legacy only | Existing behavior, including import and recovery | Existing behavior |
-| Fallback only | Read-only source, no shadow database | Explicit family writes preserve source data into legacy |
+| Fallback only | Read-only source, no shadow database | An explicit run control adopts the family into legacy; automatic writes skip it |
+| Legacy root with fallback workers | Union; one mixed family | Read only for automatic paths, like fallback only |
 | Both, duplicate ID/name | Legacy item and its own sidecars | Legacy |
 | Both, disjoint IDs/names | Union | Legacy |
 | Damaged legacy singleton/store | Existing failure/default contract; no fallback substitution | Refuse unsafe replacement |
-| Live foreign fallback claim | Readable; ownership stays foreign | Refuse |
-| Dead fallback live family | Readable; no boot recovery write | Explicit adoption uses normal ownership checks |
+| Live foreign fallback claim | Readable; ownership `fallback` | Refuse adoption and writes |
+| Dead fallback live family | Readable; no boot recovery write | A control adopts it, then normal orphan adoption recovers it |
 | Automatic fallback cleanup | Retain bytes and evidence | Skip; one count per sweep |
 | Explicit fallback or duplicate deletion | Retain bytes and evidence | Refuse; name source path and required binary |
 | Writes in a fallback worktree | Refuse agent launch/Continue, setup, preview commands and Git writes; autosave/cleanup skip with a count; diff, files and result collection remain readable |
@@ -55,7 +59,7 @@ winning record before reading and the legacy directory before writing.
 | `serve-command.ts` | Converted project boot resolver and switch-gated notice |
 | `server/project-context.ts` boot/lazy/maintenance | Converted resolver; fallback maintenance preflight; no empty DB |
 | `server/server.ts` boot and cold workspace search | Converted resolver and winning-run source calls |
-| `runs/store.ts` | Converted ID union, source-bound evidence and explicit family preservation |
+| `runs/store.ts` | Converted ID union, source-bound evidence; `fallback` ownership and explicit `adoptFallbackFamily` |
 | `runs/run-database.ts`, legacy imports | Converted read projection; fallback DB read-only, JSON parsed in memory |
 | `runs/run-index.ts` | Converted cold listing, search and checkout lookup; no recovery |
 | `artifacts/reports-index.ts`, `runs/report-rows.ts` | Converted scan source; retained legacy/in-memory derived cache writes |

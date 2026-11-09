@@ -45,15 +45,26 @@ function readFallbackSource(directory: string, database: string, parse: (bytes: 
   return { directory, database, jsonRows };
 }
 
+/** Copy the family of `id` in with the explicit adoption intent. Returns its member IDs, or none. */
+export function copyFallbackFamily(db: RunDatabase | null, id: string): string[] {
+  const family = db?.familyOf(id);
+  if (!db || family === undefined || !db.familyHasFallback(family)) return [];
+  db.transaction({ upserts: [], deletes: [], adoptFallback: [family] });
+  return [family, ...db.listIdsByParent(family)];
+}
+
 export function addRunSource(db: RunDatabase, dataDir: string, source: ProjectRunSource, readOnly = false): RunDatabase {
   return RunDatabase.withProjectSource(db, join(dataDir, RUNS_DB_FILE), source.database, source.jsonRows, readOnly);
 }
 
-/** Counterpart writes preserve snapshot bytes. Accept only their exact validated old path. */
-export function validWorkerResultPath(dataDir: string, hasFallback: boolean, parentId: string, path: string, recorded: string): boolean {
-  if (recorded === path) return true;
+/** Adopted snapshots keep their bytes, so they name their `.ai/squawk/` path. Accept only that exact
+ *  old path, then answer with the path being read. False for any other recorded path. */
+export function bindWorkerResultPath(diff: { state: string; path?: string }, dataDir: string, hasFallback: boolean, parentId: string, path: string): boolean {
+  if (diff.state !== 'available' || diff.path === path) return true;
   const fallback = dataReadDirs(dataDir)[1];
-  return Boolean(fallback && hasFallback && recorded === join(fallback, 'runs', `${parentId}-worker-results`, basename(path)));
+  if (!fallback || !hasFallback || diff.path !== join(fallback, 'runs', `${parentId}-worker-results`, basename(path))) return false;
+  diff.path = path;
+  return true;
 }
 
 export function fallbackRunDeleteError(dataDir: string, hasFallback: boolean, worktree?: string): string | undefined {
