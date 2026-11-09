@@ -151,19 +151,19 @@ test('mixed Node and Vitest collections run each test once and measure the merge
   git('init', '-q'); git('config', 'user.email', 'quality@example.invalid'); git('config', 'user.name', 'Quality');
   git('add', 'package.json'); git('commit', '-qm', 'baseline');
   const base = git('rev-parse', 'HEAD');
-  f.write('source.mjs', `export function choose(value) {
+  f.write('source.ts', `export function choose(value: boolean): string {
   if (value) return 'yes';
   return 'no';
 }`);
   mkdirSync(join(f.cwd, 'node'));
   f.write('node/choose.test.ts', `import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
-import { choose } from '../source.mjs';
+import { choose } from '../source.ts';
 function check() { assert.equal(choose(false), 'no'); }
 check(); appendFileSync('../ran.txt', 'node\\n');`);
   f.write('choose.test.js', `import { expect, test } from 'vitest';
 import { appendFileSync } from 'node:fs';
-import { choose } from './source.mjs';
+import { choose } from './source.ts';
 test('choose', () => { expect(choose(true)).toBe('yes'); appendFileSync('ran.txt', 'vitest\\n'); });`);
   f.write('vitest.config.mjs', `export default { test: { include: ['*.test.js'] } };`);
   let output = '', log = '';

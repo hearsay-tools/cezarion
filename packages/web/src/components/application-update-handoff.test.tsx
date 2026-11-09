@@ -35,6 +35,7 @@ for (const scenario of ['connected', 'disconnected', 'failed-arm'] as const) it(
   const { WebSocket } = createRequire(join(packageRoot, 'package.json'))('ws') as typeof import('ws')
   let socket: InstanceType<typeof WebSocket> | undefined
   let unmount: (() => void) | undefined
+  let bodyFailed = false
   try {
     await waitFor(() => { expect(child.exitCode, stderr).toBeNull(); expect(events.some(e => e.event === 'listening')).toBe(true) }, { timeout: 15_000 })
     const base = `http://127.0.0.1:${events.find(e => e.event === 'listening')!.port}`
@@ -78,14 +79,21 @@ for (const scenario of ['connected', 'disconnected', 'failed-arm'] as const) it(
       await waitFor(() => expect(responseStatus).toBe(200))
       expect(events.findIndex(e => e.event === 'finish')).toBeLessThan(events.findIndex(e => e.event === 'handoff'))
     }
+  } catch (error) {
+    bodyFailed = true
+    throw error
   } finally {
     unmount?.(); socket?.close(); vi.unstubAllGlobals(); sessionStorage.clear()
     try {
-      if (measurementEnabled()) {
-        child.send('quality:flush')
+      if (measurementEnabled() && child.connected) {
+        await new Promise<void>((resolve, reject) => child.send('quality:flush', error => error ? reject(error) : resolve()))
         // bound: a coverage flush must acknowledge before cleanup terminates the child.
         await waitFor(() => expect(events.some(e => e.event === 'quality:flushed')).toBe(true), { timeout: 5000 })
       }
+    } catch (error) {
+      // Keep the original assertion when cleanup also fails. A successful body
+      // still requires a flush acknowledgement for a complete measurement.
+      if (!bodyFailed) throw error
     } finally {
       child.kill('SIGTERM')
       if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()))

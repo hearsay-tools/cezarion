@@ -102,7 +102,10 @@ export function nativeCoverageSource(url, functions, raw) {
 
 export function preserveVitestSourceProvenance(vitest, raw) {
   const provider = vitest.coverageProvider;
-  if (!provider?.remapCoverage) return;
+  if (!provider) return;
+  if (typeof provider.remapCoverage !== 'function') {
+    throw new Error('The installed coverage provider lacks remapCoverage; native source provenance cannot be verified.');
+  }
   const remap = provider.remapCoverage.bind(provider);
   provider.remapCoverage = (url, wrapperLength, result, functions) => {
     if (!wrapperLength) {

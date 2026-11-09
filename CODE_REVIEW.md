@@ -77,10 +77,10 @@ may stay; say which is which.
 A change to a shared name, value or default finds and updates every reader, or
 states why a reader stays. Search source, browser e2e, package tests and scripts,
 including embedded child scripts, mock parity/final-message cells and records
-later automation runs read. Start with both forms across the tracked trees:
+later automation runs read. Search both literal forms from the repository root:
 
 ```sh
-rg --hidden -n -e '<old form>' -e '<new form>' packages scripts .ai .github
+rg --hidden -n -F -e '<old form>' -e '<new form>' .
 ```
 
 A search cannot find a caller that omits a newly required field: keep executable

@@ -9,7 +9,13 @@ import test from 'node:test';
 import { transformSync } from 'esbuild';
 import { runCheck } from './check.mjs';
 import { runMetrics } from './metrics.mjs';
-import { nativeCoverageSource } from './vitest-provenance.mjs';
+import { nativeCoverageSource, preserveVitestSourceProvenance } from './vitest-provenance.mjs';
+
+test('an installed provider without the provenance hook fails closed', () => {
+  assert.doesNotThrow(() => preserveVitestSourceProvenance({}, '/unused'));
+  assert.throws(() => preserveVitestSourceProvenance({ coverageProvider: {} }, '/unused'), /lacks remapCoverage/);
+  assert.throws(() => preserveVitestSourceProvenance({ coverageProvider: { remapCoverage: true } }, '/unused'), /lacks remapCoverage/);
+});
 
 const staticImports = `import { existsSync } from 'node:fs';
 import { join } from 'node:path';
