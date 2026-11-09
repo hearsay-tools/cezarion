@@ -1,3 +1,4 @@
+import { readDataPath, readProjectPath } from './project-paths.ts';
 import type { Home } from './home/home.ts';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -163,7 +164,7 @@ export async function loadConfig(repoRoot: string, home: Home): Promise<CezConfi
   const machine = (await loadWorkspaceConfig(home.workspaceConfig)).agentDefaults;
   let raw: unknown = {};
   try {
-    raw = JSON.parse(await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'));
+    raw = JSON.parse(await readFile(readProjectPath(repoRoot, 'config.json'), 'utf8'));
   } catch {
     // A missing file or malformed JSON degrades to the default.
   }
@@ -216,7 +217,7 @@ export type RawConfigRead = { ok: true; raw: Record<string, unknown> } | { ok: f
 export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
   let text: string;
   try {
-    text = await readFile(join(dataDir, 'config.json'), 'utf8');
+    text = await readFile(readDataPath(dataDir, 'config.json'), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, raw: {} };
     return { ok: false, issue: configIssue(error) };
@@ -251,7 +252,7 @@ export function readDisabledSkillsReposSync(repoRoot: string): SkillsRepoRef[] {
 /** Every `skillsRepos` entry as the file says now, read synchronously; an unreadable file has none. */
 export function readSkillsReposSync(repoRoot: string): SkillsRepoSource[] {
   try {
-    return parseLeniently(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'))).skillsRepos;
+    return parseLeniently(JSON.parse(readFileSync(readProjectPath(repoRoot, 'config.json'), 'utf8'))).skillsRepos;
   } catch {
     return [];
   }
@@ -302,7 +303,7 @@ export function updateConfigFile<T>(
 async function ownWorktreeRetention(repoRoot: string): Promise<number | undefined> {
   let raw: string;
   try {
-    raw = await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8');
+    raw = await readFile(readProjectPath(repoRoot, 'config.json'), 'utf8');
   } catch {
     return undefined; // no file — nothing set
   }

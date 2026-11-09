@@ -1,3 +1,5 @@
+import { dataReadDirs } from '../project-paths.ts';
+import { mergeAppendOnly } from '../merged-streams.ts';
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { voiceOutcomeSchema, type VoiceDecision, type VoiceOutcome } from '@open-mercato/cezar-contract/voice';
@@ -70,6 +72,16 @@ function readLogTail(path: string): string[] {
  * so the server hands it what just happened ("yes" after a proposal needs that). The first `load`
  * for a project seeds it from that project's decision log, so a restart does not empty it.
  */
+type ParsedLogLine = { type?: unknown; at?: unknown; decisionId: string; sentence?: unknown; decision?: unknown; outcome?: unknown };
+
+/** One log line as replay reads it, or undefined when it is not an object with a decision ID. */
+function parseLogLine(line: string): ParsedLogLine | undefined {
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return undefined; }
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  return typeof (parsed as { decisionId?: unknown }).decisionId === 'string' ? parsed as ParsedLogLine : undefined;
+}
+
 export class RecentVoiceActions {
   private readonly byProject = new Map<string, RecentEntry[]>();
   private readonly loaded = new Set<string>();
@@ -81,30 +93,26 @@ export class RecentVoiceActions {
   load(projectId: string, dataDir: string): void {
     if (this.loaded.has(projectId)) return;
     this.loaded.add(projectId);
-    let lines: string[];
-    try {
-      lines = readLogTail(join(dataDir, 'voice', 'decisions.ndjson'));
-    } catch {
-      return;
+    const sources = dataReadDirs(dataDir).map(directory => {
+      try { return readLogTail(join(directory, 'voice', 'decisions.ndjson')).flatMap(line => parseLogLine(line) ?? []); }
+      catch { return []; }
+    });
+    // Legacy wins a duplicate (decisionId, type); survivors replay in recorded time across both logs.
+    // Decisions first, then outcomes: an outcome may belong to the other directory's decision.
+    const lines = mergeAppendOnly(sources, entry => `${entry.decisionId}:${String(entry.type)}`, entry => typeof entry.at === 'string' ? entry.at : undefined);
+    for (const type of ['decision', 'outcome'] as const) {
+      for (const entry of lines) if (entry.type === type) this.replay(projectId, entry);
     }
-    for (const line of lines) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (parsed === null || typeof parsed !== 'object') continue;
-      const entry = parsed as { type?: unknown; decisionId?: unknown; sentence?: unknown; decision?: unknown; outcome?: unknown };
-      if (typeof entry.decisionId !== 'string') continue;
-      if (entry.type === 'decision' && typeof entry.sentence === 'string') {
-        // Only the action is replayed, so a line written by another version still seeds what it can.
-        const action = (entry.decision as { action?: unknown } | null)?.action;
-        if (typeof action === 'string') this.record(projectId, entry.decisionId, entry.sentence, action);
-      } else if (entry.type === 'outcome') {
-        const outcome = voiceOutcomeSchema.safeParse(entry.outcome);
-        if (outcome.success) this.settle(projectId, entry.decisionId, outcome.data);
-      }
+  }
+
+  private replay(projectId: string, entry: ParsedLogLine): void {
+    if (entry.type === 'decision' && typeof entry.sentence === 'string') {
+      // Only the action is replayed, so a line written by another version still seeds what it can.
+      const action = (entry.decision as { action?: unknown } | null)?.action;
+      if (typeof action === 'string') this.record(projectId, entry.decisionId, entry.sentence, action);
+    } else if (entry.type === 'outcome') {
+      const outcome = voiceOutcomeSchema.safeParse(entry.outcome);
+      if (outcome.success) this.settle(projectId, entry.decisionId, outcome.data);
     }
   }
 

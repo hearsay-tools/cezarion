@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { noticeLegacyProject, projectPaths } from './project-paths.ts';
+import { fallbackWorkflowPath } from './workflows/load.ts';
+import { fallbackSkillPath } from './skills.ts';
 import { commandText } from './home/command.ts';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -87,15 +90,16 @@ async function runCommand(
 
 // ---- init --------------------------------------------------------------------
 
-function initCommand(repoRoot: string): void {
-  const workflowsDir = join(repoRoot, '.ai/cezar', 'workflows');
-  const skillsDir = join(repoRoot, '.ai/cezar', 'skills');
+async function initCommand(repoRoot: string): Promise<void> {
+  const workflowsDir = join(projectPaths(repoRoot).write, 'workflows');
+  const skillsDir = join(projectPaths(repoRoot).write, 'skills');
   mkdirSync(workflowsDir, { recursive: true });
   mkdirSync(skillsDir, { recursive: true });
 
-  const examples: Array<{ path: string; content: string }> = [
+  const examples: Array<{ path: string; fallback: () => Promise<string | undefined>; content: string }> = [
     {
       path: join(workflowsDir, 'fix-and-verify.yaml'),
+      fallback: () => fallbackWorkflowPath(repoRoot, 'fix-and-verify'),
       content: `name: fix-and-verify
 description: Implement the task, then run your test command; on failure the agent retries with the failing output.
 steps:
@@ -112,6 +116,7 @@ steps:
     },
     {
       path: join(skillsDir, 'project-conventions.md'),
+      fallback: () => fallbackSkillPath(repoRoot, 'project-conventions'),
       content: `---
 name: project-conventions
 description: House rules the agent should follow in this repo.
@@ -126,8 +131,12 @@ description: House rules the agent should follow in this repo.
   ];
 
   for (const example of examples) {
+    // A starter with the same name under .ai/squawk/ is the user's: a legacy copy would hide it.
+    const fallback = existsSync(example.path) ? undefined : await example.fallback();
     if (existsSync(example.path)) {
       console.log(`  = ${example.path} (exists, left untouched)`);
+    } else if (fallback) {
+      console.log(`  = ${fallback} (exists, left untouched)`);
     } else {
       writeFileSync(example.path, example.content, 'utf8');
       console.log(`  + ${example.path}`);
@@ -142,7 +151,8 @@ description: House rules the agent should follow in this repo.
 /** The project's run store, at the start of a process: a busy database is waited out
  *  (`retryBusy`), and a store that cannot open throws its `RunStoreOpenError`. */
 function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHandleSignal?: AbortSignal }): RunStore {
-  const dataDir = join(repoRoot, '.ai/cezar');
+  noticeLegacyProject(repoRoot);
+  const dataDir = projectPaths(repoRoot).write;
   // First: an open that fails may already have created the database and the history backups.
   ensureDataGitignore(repoRoot);
   const store = RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });
@@ -163,7 +173,7 @@ function openBootStore(repoRoot: string): RunStore {
   } catch (error) {
     if (!(error instanceof RunStoreOpenError)) throw error;
     console.error(`\n  ✗ ${error.message}\n`);
-    return RunStore.unavailable(join(repoRoot, '.ai/cezar'), error);
+    return RunStore.unavailable(projectPaths(repoRoot).write, error);
   }
 }
 

@@ -6,6 +6,15 @@
 
 `packages/cezar/src/git-worktree.ts`, `packages/cezar/src/git-diff-base.ts`, `packages/cezar/src/server/git.ts`
 
+## Two project directories before P5
+
+Recognize managed worktrees under both `.ai/cezar/worktrees/` and
+`.ai/squawk/worktrees/`, including owned-workspace receipts and orphan protection.
+New worktrees and receipts retain the legacy write paths. Never remove or change
+fallback worktree bytes. Retention and orphan cleanup skip them and print one
+count per sweep. Legacy-only resource cleanup keeps all existing ownership checks.
+Git common-directory discovery remains independent of either directory name.
+
 ## Rules
 
 One worktree per task at `.ai/cezar/worktrees/<runId>`, branch `cez/<id8>` off the configured base branch. Helpers never throw (except `createWorktree`) — degradation is the caller's policy. Diffs are capped (`DIFF_CAP`). Orphaned worktrees are pruned at startup. **"Which ref anchors *this task's* diff" lives in exactly one place** — `resolveTaskDiffBase` (`git-diff-base.ts`): the merge-base against the **freshest** base ref (`origin/<base>` when the local branch is behind it — agents fetch, they never pull, and a stale local `main` is what turned an eight-line fix into `+59514 −12160`), and, when the agent checked another branch out into the worktree, that branch **as the run found it** (`<branch>@{<run start>}`), whichever of the two attributes fewer changed lines. Attributing a checked-out branch's history to this task is what produced five-figure numbers on review and QA runs (open-mercato/cezar#591 fixed the Changes tab, open-mercato/cezar#751 the stored `diffStat`); anchoring those runs at `HEAD` instead then reported `+0 −0` for work they really did commit. A new task-diff surface resolves through that helper and passes the run's `branch` **and** `startedAt`; `worktreeDiff`/`worktreeDiffStat` deliberately keep the whole-branch anchor and each carry a comment saying why.

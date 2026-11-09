@@ -1,3 +1,6 @@
+import { legacyIndexRows } from './legacy-run-rows.ts';
+import { dataReadDirs } from '../project-paths.ts';
+import { addRunSource, copyFallbackFamily, fallbackRunSource, bindWorkerResultPath, fallbackRunDeleteError, workerResultsDirectory } from './project-run-sources.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
@@ -322,36 +325,6 @@ export function __setLegacyImportHookForTests(hook?: { beforeTransaction?: () =>
   legacyImportHook = hook;
 }
 
-/** `runs.json`'s records as rows, and how many of its entries were left out. Each row's `data` is
- *  the record's own JSON as `runs.json` held it, so nothing this cezar's schema does not know is lost
- *  (raw-record.ts); its summary and columns come from the parsed record, which is what decoding that
- *  JSON gives back. An entry that does not parse is skipped and costs that entry only, as an
- *  unreadable row does once it is in the database. Undefined when the file is not a JSON array. */
-function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number; total: number } | undefined {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(bytes.toString('utf8'));
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(raw)) return undefined;
-  // A hand-edited index may repeat an id; the last one won when it loaded into a map, so it still does.
-  const rows = new Map<string, RunRowInput>();
-  let skipped = 0;
-  for (const entry of raw as unknown[]) {
-    // `parseRunRecords`' salvage rewrites top-level keys: the stored JSON is taken from a copy.
-    const stored = entry !== null && typeof entry === 'object' && !Array.isArray(entry) ? { ...entry } : entry;
-    const parsed = parseRunRecords([entry]);
-    if (!parsed.success) {
-      skipped += 1;
-      continue;
-    }
-    const run = parsed.data[0]!;
-    rows.set(run.id, encodeRunRow(run, JSON.stringify(stored)));
-  }
-  return { rows: [...rows.values()], skipped, total: raw.length };
-}
-
 /**
  * Import legacy rows and the completion marker atomically, once. Recheck live-writer evidence
  * before commit and preserve exact input bytes in a synced backup. Leave runs.json untouched;
@@ -360,7 +333,7 @@ function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number;
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   assertNoLegacyCockpit(dataDir);
   const snapshot = readLegacyIndex(join(dataDir, LEGACY_INDEX_FILE));
-  const parsed = snapshot ? legacyIndexRows(snapshot.bytes) : undefined;
+  const parsed = snapshot ? legacyIndexRows(snapshot.bytes, parseRunRecords) : undefined;
   const rows = parsed?.rows ?? [];
   const skipped = parsed?.skipped ?? 0;
   const source = !snapshot ? 'none' : parsed ? LEGACY_INDEX_FILE : `${LEGACY_INDEX_FILE} (unparseable)`;
@@ -446,9 +419,10 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup' | 'maintenance';
  *   claimed it): taking it means adopting it first (`RunStore.adoptFamily` settles it, then the
  *   manager recovers the family);
  * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
- * - `quarantined`: a write found it changed under this store; refused until cezar restarts.
+ * - `quarantined`: a write found it changed under this store; refused until cezar restarts;
+ * - `fallback`: a family member is read from `.ai/squawk/`: refused as `foreign` until a control adopts it.
  */
-export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined';
+export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined' | 'fallback';
 
 /** The one answer every control gives for a run another cezar process owns (`409 { error }`). */
 export const RUN_IN_USE_ELSEWHERE = `run is in use by another ${productName('cezar')} process`;
@@ -458,8 +432,9 @@ export const RUN_QUARANTINED = `run changed under this ${productName('cezar')} p
 /** A write this store must not make: another process owns the run, its owner died with work
  *  still live (adopt it first), or a conflict quarantined it. Nothing was changed. */
 export class RunWriteRefusedError extends Error {
-  constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>) {
-    super(ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
+  constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>, fallbackError?: string) {
+    super(ownership === 'fallback' ? fallbackError ?? `run ${runId} is read only under .ai/squawk/`
+      : ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
       : ownership === 'orphaned' ? `run ${runId} belongs to a ${productName('cezar')} process that exited; take it over before writing it`
         : `${RUN_IN_USE_ELSEWHERE}: ${runId}`);
     this.name = 'RunWriteRefusedError';
@@ -570,7 +545,6 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-
 const WORKER_PROCESS_CAP = 32;
 const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional(),
   pgid: z.number().int().positive().optional() }).strict();
@@ -642,6 +616,9 @@ export class RunStore extends EventEmitter {
   private readonly facts: TranscriptFactsIndex;
   private readonly liveItems = new LiveItemSnapshots();
 
+  private fallbackFacts: TranscriptFactsIndex | undefined;
+  private factsFor(id: string): TranscriptFactsIndex { return this.isFallbackRun(id) ? this.fallbackFacts ??= new TranscriptFactsIndex(this.sourceDataDir(id), true) : this.facts; }
+
   /** Capture both sources on the same synchronous sequence boundary before history IO. */
   liveReadSnapshot(runId: string) {
     return { events: this.liveItems.read(runId), throughSeq: this.seqs.get(runId) ?? Infinity };
@@ -688,13 +665,17 @@ export class RunStore extends EventEmitter {
     }
   }
   private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean, persist?: RunStorePersistence): RunStore {
-    mkdirSync(join(dataDir, 'runs'), { recursive: true });
+    const source = fallbackRunSource(dataDir, bytes => legacyIndexRows(bytes, parseRunRecords)?.rows);
+    const deferred = source && !existsSync(path) && !existsSync(join(dataDir, LEGACY_INDEX_FILE));
+    if (!deferred) mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
     store.keepLive = keepLive;
     store.persistence = persist;
-    const db = RunDatabase.open(path);
+    let db = RunDatabase.open(deferred ? ':memory:' : path);
     try {
-      if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
+      if (deferred) db.transaction({ upserts: [], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'none' } });
+      else if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
+      if (source) db = addRunSource(db, dataDir, source);
       store.db = db;
       store.owner = openClaimSession();
       if (!maintenance) {
@@ -736,6 +717,11 @@ export class RunStore extends EventEmitter {
    *  not absent. */
   get unavailable(): RunStoreOpenError | undefined { return this.openFailure; }
 
+  /** Every sidecar for a run follows the winning record, never file-by-file fallback. */
+  sourceDataDir(id: string): string { return this.isFallbackRun(id) ? dataReadDirs(this.dataDir)[1]! : this.dataDir; }
+  isFallbackRun(id: string): boolean { return this.db?.isFallback(id) ?? false; }
+  hasFallbackRun(id: string): boolean { return this.db?.hasFallback(id) ?? false; }
+  fallbackDeleteError(id: string, kind: 'record' | 'worktree' = 'record'): string | undefined { return fallbackRunDeleteError(this.dataDir, kind === 'record' ? this.hasFallbackRun(id) : this.isFallbackRun(id), this.peek(id)?.worktreePath); }
   /**
    * Open-time load: the live rows, the finished rows a load normalization repairs, then the
    * delegation families of the live ones. A row that does not parse is skipped and left in the
@@ -800,6 +786,7 @@ export class RunStore extends EventEmitter {
    *  and recomputes its summary and live column (`upgradeLegacyWaits`). The caller has claimed
    *  the row's family. */
   private adoptLoadedRun({ run, extras, upgraded }: DecodedRun, opts: { keepLive?: boolean; onlyIfChanged?: boolean; settle?: boolean; stop?: boolean }, row: RunRow): void {
+    if (this.db?.familyHasFallback(rowFamily(row))) return;
     const before = loadNormalizedFields(run);
     const wasCancelled = run.status === 'cancelled';
     if (opts.settle) settleOrphanedRun(run, { stop: opts.stop });
@@ -868,6 +855,7 @@ export class RunStore extends EventEmitter {
     if (!this.db) return held ? 'held' : undefined;
     const family = held ? familyKey(held) : this.deleted.has(id) ? undefined : this.db.familyOf(id);
     if (family === undefined) return undefined;
+    if (this.db.familyHasFallback(family)) return 'fallback';
     if (this.claimed.has(family) || this.pendingClaims.has(family)) return 'held';
     const claim = this.db.getClaim(family);
     if (claim && claimOwnerLive(claim)) return 'foreign';
@@ -879,13 +867,13 @@ export class RunStore extends EventEmitter {
   writeRefusal(id: string): string | undefined {
     const ownership = this.runOwnership(id);
     if (ownership === 'quarantined') return RUN_QUARANTINED;
+    if (ownership === 'fallback') return this.fallbackRefusal(id).message;
     return ownership === 'foreign' || ownership === 'orphaned' ? RUN_IN_USE_ELSEWHERE : undefined;
   }
 
   /**
-   * Claim an orphaned family and settle its live rows before a control acts. Stop cancels its
-   * target. Return the root id, or undefined for a live owner or missing run; adoption never
-   * resumes work.
+   * Claim an orphaned family before a control, then settle its live rows.
+   * Stop cancels its target. Return the root id, or undefined for a live owner or missing run.
    */
   adoptFamily(id: string, opts: { stop?: boolean } = {}): string | undefined {
     const family = this.db?.familyOf(id);
@@ -894,6 +882,16 @@ export class RunStore extends EventEmitter {
     this.exitEvents.writeLoaded();
     return family;
   }
+
+  /** Explicit controls only (`requireRunControl`): copy a `.ai/squawk/` family in so it can be written. */
+  adoptFallbackFamily(id: string): boolean {
+    const members = copyFallbackFamily(this.db, id, this.owner);
+    for (const member of members) this.coldReads.forget(member);
+    return members.length > 0;
+  }
+  private fallbackRefusal(id: string): RunWriteRefusedError { return new RunWriteRefusedError(id, 'fallback', fallbackRunDeleteError(this.dataDir, true)); }
+  /** Run files are written only for a family this store may write, never a fallback family. */
+  private writeDir(id: string): string { if (this.runOwnership(id) === 'fallback') throw this.fallbackRefusal(id); return this.dataDir; }
 
   /** Every run whose family another process owns — alive, or dead with a live run left to
    *  recover (cleanup keeps their scratch: it is theirs, or recovery's once someone adopts them).
@@ -976,8 +974,9 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Hold a run just decoded from its row: the object every later read and write shares. */
+  /** Hold a writable row. A fallback family's reads stay detached (the cold-read contract). */
   private holdDecoded(run: RunRecord): RunRecord {
+    if (this.db?.familyHasFallback(familyKey(run))) return process.env.VITEST ? deepFreeze(run) : run;
     const read = this.coldBase.get(run.id);
     this.held.set(run.id, run);
     if (read) this.base.set(run.id, storedRow(read));
@@ -985,10 +984,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Bring a run into memory and return the held object: the record a write changes in place.
-   * It leaves again at the first sweep after its write settles, unless something anchors it.
-   * Its family is claimed first, then the row is read, so the version held is the claimed one;
-   * undefined while another process owns it (see `claimFamilies`).
+   * Hold a claimed run for a write; leave after settlement unless anchored.
+   * Take the family claim before reading its row. Return undefined for a live foreign owner
+   * or a fallback family: neither claim is granted.
    */
   private hold(id: string): RunRecord | undefined {
     const held = this.held.get(id);
@@ -1009,8 +1007,7 @@ export class RunStore extends EventEmitter {
     return this.held.get(id) ?? this.hold(id);
   }
 
-  /** The current record for reading: the held object, the held copy of a run whose family is in
-   *  memory, or else a fresh copy nobody holds. */
+  /** Read held legacy family members, or a detached cold record. */
   private peek(id: string): RunRecord | undefined {
     const held = this.held.get(id);
     if (held) return held;
@@ -1895,13 +1892,7 @@ export class RunStore extends EventEmitter {
     this.commitIndex(staged);
   }
 
-  private workerResultsDir(parentId: string): string {
-    z.uuid().parse(parentId);
-    const dir = join(this.dataDir, 'runs', `${parentId}-worker-results`);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (realpathSync(dir) !== resolve(dir) || !lstatSync(dir).isDirectory()) throw new Error('worker result storage redirected');
-    return dir;
-  }
+  private workerResultsDir(parentId: string, write = false): string { return workerResultsDirectory(write ? this.writeDir(parentId) : this.sourceDataDir(parentId), parentId, write); }
 
   workerResultSnapshotPath(parentId: string, workerId: string, snapshotId: string): string {
     return join(this.dataDir, 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
@@ -1918,7 +1909,7 @@ export class RunStore extends EventEmitter {
       let raw: string;
       try { const info = fstatSync(fd); if (!info.isFile() || info.size > 3_145_728) return undefined; raw = readFileSync(fd, 'utf8'); } finally { closeSync(fd); }
       const file = workerResultFileSchema.parse(JSON.parse(raw));
-      if (file.result.diff.state === 'available' && file.result.diff.path !== path) return undefined;
+      if (!bindWorkerResultPath(file.result.diff, this.dataDir, this.hasFallbackRun(parentId), parentId, path)) return undefined;
       if (file.result.parentRunId !== parentId || file.result.workerId !== workerId || file.result.workspace.ownerRunId !== workerId || file.result.revision !== reference.revision || file.result.observedAt !== reference.observedAt ||
         (file.result.diff.state === 'available' && (file.result.diff.snapshotId !== reference.snapshotId || file.diffSnapshot === undefined))) return undefined;
       return file;
@@ -1941,7 +1932,7 @@ export class RunStore extends EventEmitter {
       readWorkerResult: (id, workerId) => this.readWorkerResult(id, workerId),
       redactText: (text) => this.redactText(text),
       workerResultSnapshotPath: (id, workerId, snapshotId) => this.workerResultSnapshotPath(id, workerId, snapshotId),
-      workerResultsDir: (id) => this.workerResultsDir(id),
+      workerResultsDir: (id) => this.workerResultsDir(id, true),
       commitDelegation: (patches) => this.commitDelegation(patches),
     }, parentId, value, diffSnapshot, opts);
   }
@@ -2010,7 +2001,7 @@ export class RunStore extends EventEmitter {
   private completionArchiveBlocker(root: RunRecord): string | undefined {
     const family = [root, ...this.listWorkersOf(root.id)];
     for (const run of family) {
-      const facts = this.facts.peek(run.id);
+      const facts = this.factsFor(run.id).peek(run.id);
       if (!facts || !['done', 'review', 'failed', 'cancelled'].includes(run.status) || run.waits?.some(wait => wait.phase === 'open') ||
         run.hasPendingPermission || facts.pendingAsk !== undefined)
         return 'Task or worker work still needs attention. Open the task or archive manually.';
@@ -2092,7 +2083,7 @@ export class RunStore extends EventEmitter {
     const owned = new Set([...this.claimFamilies(held, { allowLive: true }),
       ...this.claimFamilies([...families.values()].filter((family) => !held.has(family)))]);
     for (const [id, family] of families) {
-      if (!owned.has(family)) throw new RunWriteRefusedError(id, this.runOwnership(id) === 'orphaned' ? 'orphaned' : 'foreign');
+      if (!owned.has(family)) throw this.runOwnership(id) === 'fallback' ? this.fallbackRefusal(id) : new RunWriteRefusedError(id, this.runOwnership(id) === 'orphaned' ? 'orphaned' : 'foreign');
     }
   }
 
@@ -2227,7 +2218,7 @@ export class RunStore extends EventEmitter {
       decodeRunRow,
       decodeCold: (row) => this.decodeCold(row),
       writeRefusal: (memberId) => this.writeRefusal(memberId),
-      factsPeek: (memberId) => this.facts.peek(memberId),
+      factsPeek: (memberId) => this.factsFor(memberId).peek(memberId),
       readWorkerExecution: (memberId) => this.readWorkerExecution(memberId),
     }, id, isActive);
   }
@@ -2256,7 +2247,7 @@ export class RunStore extends EventEmitter {
   async prepareArchiveOnMerge(id: string): Promise<void> {
     const ids = [id, ...(this.db?.listIdsByParent(id) ?? [])];
     if (ids.length > 1025) return;
-    for (const memberId of ids) await this.facts.ready(memberId);
+    for (const memberId of ids) await this.factsFor(memberId).ready(memberId);
   }
 
   archiveOnMergeSnapshot(id: string, repoBase?: string, isActive: (id: string) => boolean = () => false): ArchiveOnMergeSnapshot | undefined {
@@ -2509,6 +2500,7 @@ export class RunStore extends EventEmitter {
     const run = this.record(runId);
     if (!run) {
       const ownership = this.runOwnership(runId);
+      if (ownership === 'fallback') throw this.fallbackRefusal(runId);
       if (ownership === 'foreign' || ownership === 'orphaned' || ownership === 'quarantined') throw new RunWriteRefusedError(runId, ownership);
       throw new Error(`unknown run: ${runId}`);
     }
@@ -2653,13 +2645,13 @@ export class RunStore extends EventEmitter {
   /** The run's indexed transcript facts (#880): a read-only view, never a transcript read once
    *  the run's index is loaded. An unreadable transcript answers as empty, as readEvents does. */
   transcriptFacts(runId: string): Readonly<TranscriptFacts> {
-    return this.facts.get(runId) ?? emptyFacts();
+    return this.factsFor(runId).get(runId) ?? emptyFacts();
   }
 
   /** The run's transcript facts when they are known: undefined when the transcript exists but its
    *  facts are not current or cannot be read, so a caller can tell "no ask" from "no evidence". */
   knownTranscriptFacts(runId: string): Readonly<TranscriptFacts> | undefined {
-    return this.facts.peek(runId);
+    return this.factsFor(runId).peek(runId);
   }
 
   hasProjection(runId: string, projectionId: string): boolean {
@@ -2695,7 +2687,7 @@ export class RunStore extends EventEmitter {
     for (const id of new Set(runIds)) {
       // Exact sidecars resolve immediately too: recovery must yield to timers/I/O between IDs.
       await new Promise<void>(resolve => setImmediate(resolve));
-      await this.facts.ready(id);
+      await this.factsFor(id).ready(id);
     }
   }
 
@@ -2743,7 +2735,7 @@ export class RunStore extends EventEmitter {
   /** `readEvents` off the event loop (async read and async brotli), for collection paths. */
   async readEventsAsync(runId: string): Promise<RunEvent[]> {
     try {
-      const raw = await readHistoryTextAsync(this.dataDir, runId);
+      const raw = await readHistoryTextAsync(this.sourceDataDir(runId), runId);
       return raw === undefined ? [] : parseEvents(raw);
     } catch {
       return [];
@@ -2752,7 +2744,7 @@ export class RunStore extends EventEmitter {
 
   readEvents(runId: string): RunEvent[] {
     try {
-      const raw = readHistoryText(this.dataDir, runId);
+      const raw = readHistoryText(this.sourceDataDir(runId), runId);
       if (raw === undefined) return [];
       return parseEvents(raw);
     } catch {
@@ -2761,8 +2753,8 @@ export class RunStore extends EventEmitter {
   }
 
   /** Private process-generation evidence; never part of run JSON or SSE. */
-  private identityPath(id: string): string {
-    return this.executionPath(id).replace(/\.execution\.json$/, '.identity.json');
+  private identityPath(id: string, write = false): string {
+    return this.executionPath(id, write).replace(/\.execution\.json$/, '.identity.json');
   }
 
   readWorkerIdentity(id: string): WorkerExecutionIdentity | undefined {
@@ -2779,14 +2771,14 @@ export class RunStore extends EventEmitter {
 
   private writeWorkerIdentity(id: string, identity: WorkerExecutionIdentity): void {
     // Immutable acceptance evidence. An orphan from failed index publication cannot be adopted.
-    const fd = openSync(this.identityPath(id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    const fd = openSync(this.identityPath(id, true), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { writeFileSync(fd, JSON.stringify(identity)); fsyncSync(fd); } finally { closeSync(fd); }
   }
 
-  private executionPath(id: string): string {
+  private executionPath(id: string, write = false): string {
     z.string().uuid().parse(id);
-    const dir = join(this.dataDir, 'runs');
-    mkdirSync(dir, { recursive: true });
+    const dir = join(write ? this.writeDir(id) : this.sourceDataDir(id), 'runs');
+    if (write) mkdirSync(dir, { recursive: true });
     if (lstatSync(dir).isSymbolicLink() || realpathSync(dir) !== resolve(dir)) throw new Error('Unsafe execution directory');
     return join(dir, `${id}.execution.json`);
   }
@@ -2805,7 +2797,7 @@ export class RunStore extends EventEmitter {
   }
 
   private writeWorkerExecution(id: string, proof: WorkerExecution, fresh = false): void {
-    const path = this.executionPath(id);
+    const path = this.executionPath(id, true);
     try {
       const existing = lstatSync(path);
       if (fresh || !existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe execution checkpoint');
@@ -2886,8 +2878,8 @@ export class RunStore extends EventEmitter {
   }
 
   /** Private process record (#469): which processes a generation spawned, never part of run JSON or SSE. */
-  private processesPath(id: string): string {
-    return this.executionPath(id).replace(/\.execution\.json$/, '.processes.json');
+  private processesPath(id: string, write = false): string {
+    return this.executionPath(id, write).replace(/\.execution\.json$/, '.processes.json');
   }
 
   /** Tri-state: only ENOENT is `absent` (legacy, scan-only). A present record that is unreadable,
@@ -2906,7 +2898,7 @@ export class RunStore extends EventEmitter {
   }
 
   private writeWorkerProcesses(id: string, record: WorkerProcessRecord): void {
-    const path = this.processesPath(id);
+    const path = this.processesPath(id, true);
     try {
       const existing = lstatSync(path);
       if (!existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe process record');
@@ -2988,7 +2980,8 @@ export class RunStore extends EventEmitter {
     });
   }
 
-  canDeleteRun(id: string): boolean {
+  canDeleteRun(id: string, kind: 'record' | 'worktree' = 'record'): boolean {
+    if (this.fallbackDeleteError(id, kind)) return false;
     if (autosaveCleanupBlocker(this.dataDir, id)) return false;
     const run = this.peek(id);
     if (run?.delegation?.role === 'invalid') return false;
@@ -3075,6 +3068,8 @@ export class RunStore extends EventEmitter {
   }
 
   deleteRun(id: string): boolean {
+    const refusal = this.fallbackDeleteError(id);
+    if (refusal) throw new Error(refusal);
     if (!this.canDeleteRun(id)) return false;
     const run = this.peek(id);
     if (run && this.db && (this.quarantined.has(id) || !this.claimFamilies([familyKey(run)]).size)) return false;
@@ -3121,18 +3116,18 @@ export class RunStore extends EventEmitter {
   }
 
   private eventsPath(runId: string): string {
-    return historyPaths(this.dataDir, runId).plain;
+    return historyPaths(this.sourceDataDir(runId), runId).plain;
   }
 
   /** Same location `handoffPath()` in handoff.ts produces — inlined to keep
    *  the store free of upward imports. */
   private handoffPath(runId: string): string {
-    return join(this.dataDir, 'runs', `${runId}.handoff.md`);
+    return join(this.sourceDataDir(runId), 'runs', `${runId}.handoff.md`);
   }
 
   /** Agent screenshots persisted by the run manager (see persistImage). */
   private imagesDir(runId: string): string {
-    return join(this.dataDir, 'runs', `${runId}-images`);
+    return join(this.sourceDataDir(runId), 'runs', `${runId}-images`);
   }
 
   private touch(run: RunRecord): void {
@@ -3196,9 +3191,11 @@ export class RunStore extends EventEmitter {
       const run = this.held.get(id);
       // Retention must not archive a live task between turns, a pinned run, or a delegation
       // family whose history is promised until explicit deletion.
-      return run && RETENTION_RUN_RULE.matches(run) ? [id] : [];
+      return run && !this.hasFallbackRun(id) && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
-    const cold = overflow.filter((id) => !this.held.has(id));
+    const skipped = overflow.filter(id => this.hasFallbackRun(id)).length;
+    if (skipped) console.info(`[cez] Retention skipped ${skipped} read-only fallback run(s) under .ai/squawk/.`);
+    const cold = overflow.filter((id) => !this.held.has(id) && !this.hasFallbackRun(id));
     if (cold.length > 0) {
       // Another process's runs are its own to keep or archive (#779, plan step 3).
       const rows = this.db!.listWhere(RETENTION_RUN_RULE.sql, [JSON.stringify(cold)]);
@@ -3365,6 +3362,7 @@ export class RunStore extends EventEmitter {
       }
       const decoded = conflict.current ? decodeRunRow(conflict.current.data) : undefined;
       const current = decoded?.run;
+      if (this.isFallbackRun(conflict.id)) this.held.delete(conflict.id);
       const held = this.held.get(conflict.id);
       if (current && conflict.current) {
         // The other writer's record as it stands, normalized only as a live owner's run would be.
@@ -3416,6 +3414,7 @@ export class RunStore extends EventEmitter {
     // Demand-bound feeds stop before storage disappears during project removal/shutdown.
     this.emit('closed');
     this.compressor.stop();
+    this.fallbackFacts?.stop();
     this.facts.stop();
     this.facts.flush();
     if (this.saveTimer) {

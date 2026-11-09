@@ -1,3 +1,4 @@
+import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
 import { inspectGeneration } from './process-liveness.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
 import { windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } from './windows-workspace-identity.ts';
@@ -126,7 +127,7 @@ export async function planOwnedWorkspace(repoRoot: string, workerId: string, bas
 async function validateIntent(repoRoot: string, value: WorkerWorkspace): Promise<WorkerWorkspace> {
   const workspace = workerWorkspaceSchema.parse(value);
   const root = await realpath(repoRoot);
-  if (workspace.path !== worktreePathFor(root, workspace.ownerRunId) || workspace.branch !== branchFor(workspace.ownerRunId)) {
+  if (!projectPaths(root).reads.some(directory => workspace.path === join(directory, 'worktrees', workspace.ownerRunId)) || workspace.branch !== branchFor(workspace.ownerRunId)) {
     throw new Error('Owned workspace identity does not match the managed resource');
   }
   // Do not let a symlinked managed-path prefix redirect creation into another tree.
@@ -213,6 +214,8 @@ async function liveGitDir(repoRoot: string, workspace: WorkerWorkspace): Promise
 /** Fresh-only primitive. Runtime callers supply the already-durable preallocated intent. */
 export async function createOwnedWorkspace(repoRoot: string, workerId: string, baselineSha: string, intent?: WorkerWorkspace): Promise<WorkerWorkspace> {
   const workspace = await validateIntent(repoRoot, intent ?? await planOwnedWorkspace(repoRoot, workerId, baselineSha));
+  const refusal = fallbackProjectWriteError(workspace.path);
+  if (refusal) throw new Error(refusal);
   if (workspace.ownerRunId !== workerId || workspace.baselineSha !== baselineSha) throw new Error('Owned workspace intent mismatch');
   const receiptPath = await receiptLocation(repoRoot, workspace, true);
   if (await exists(receiptPath)) throw new Error('Owned workspace receipt already exists');
@@ -246,6 +249,8 @@ export async function verifyOwnedWorkspace(repoRoot: string, run: RunRecord): Pr
 /** Reuse only proven resources. No reattachment/replacement after resource loss or ambiguous provisioning. */
 export async function ensureOwnedWorkspace(repoRoot: string, run: RunRecord): Promise<WorkerWorkspace> {
   const workspace = await validateIntent(repoRoot, workerWorkspace(run));
+  const refusal = fallbackProjectWriteError(workspace.path);
+  if (refusal) throw new Error(refusal);
   if (run.delegation?.role === 'worker' && run.delegation.destroy) throw new Error('Worker destruction has begun');
   const path = await receiptLocation(repoRoot, workspace);
   if (await exists(path)) return verifyOwnedWorkspace(repoRoot, run);
@@ -293,6 +298,8 @@ export class WorkspaceHeldError extends Error {
 export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
   beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport): Promise<WorkerDestroyResult> {
+  const refusal = fallbackProjectWriteError(value.path);
+  if (refusal) return { workerId: value.ownerRunId, state: 'incomplete', remaining: ['worktree', 'branch'], error: refusal };
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };

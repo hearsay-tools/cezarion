@@ -68,8 +68,13 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
   for (const message of state.messages) {
     for (const runId of [message.senderRunId, message.recipientRunId]) {
       if (!store.getRun(runId)) continue;
-      projectDelivery(store, runId, message);
-      projectOutcome(store, runId, outcomes.get(message.id));
+      try {
+        projectDelivery(store, runId, message);
+        projectOutcome(store, runId, outcomes.get(message.id));
+      } catch (error) {
+        // A peer read from `.ai/squawk/` stays unchanged; its own binary projects its transcript.
+        if (!(error instanceof RunWriteRefusedError && error.ownership === 'fallback')) throw error;
+      }
     }
   }
 }
@@ -204,6 +209,7 @@ export function commitAccepted(store: RunStore, ledgerId: string, next: Conversa
   catch (error) {
     if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message);
     // Another cezar process controls the recipient (a headless run beside the cockpit): nothing is written.
+    if (error instanceof RunWriteRefusedError && error.ownership === 'fallback') throw new DelegationPolicyError('incompatible_state', `Not delivered: ${error.message}`);
     if (error instanceof RunWriteRefusedError) throw new DelegationPolicyError('incompatible_state', `Not delivered: run ${error.runId} is controlled by another ${productName('cezar')} process. Messages reach only tasks this ${productName('cezar')} process runs.`);
     throw error;
   }

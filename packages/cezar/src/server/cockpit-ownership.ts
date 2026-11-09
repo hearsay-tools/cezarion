@@ -1,3 +1,4 @@
+import { dataReadDirs } from '../project-paths.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,10 +15,12 @@ const ownerSchema = z.object({
 type Owner = z.infer<typeof ownerSchema>;
 
 export class CockpitAlreadyRunningError extends Error {
-  constructor(dataDir: string, owner?: Owner) {
-    super(owner?.url
-      ? `A cockpit already serves ${dataDir} at ${owner.url}`
-      : `A cockpit already owns ${dataDir} and is still starting; retry shortly`);
+  constructor(dataDir: string, owner?: Owner, unreadableLock?: string) {
+    super(unreadableLock
+      ? `Cannot read the cockpit lock ${unreadableLock}; a cockpit of the binary that migrated the project may own ${dataDir}. Remove the file only if no cockpit runs from that directory`
+      : owner?.url
+        ? `A cockpit already serves ${dataDir} at ${owner.url}`
+        : `A cockpit already owns ${dataDir} and is still starting; retry shortly`);
     this.name = 'CockpitAlreadyRunningError';
   }
 }
@@ -99,11 +102,12 @@ function claim(path: string, owner: Owner, depth = 0): boolean {
 /** The live cockpit other than this process that owns `dataDir`, if any: its pid and, once it
  *  listens, its URL. Read-only: nothing is claimed. */
 export function anotherCockpitOwner(dataDir: string): { pid: number; url?: string } | undefined {
-  let canonical: string;
-  try { canonical = realpathSync(dataDir); } catch { return undefined; }
-  const owner = readOwner(join(canonical, 'cockpit.lock'));
-  if (owner === undefined || owner.pid === process.pid || !alive(owner)) return undefined;
-  return { pid: owner.pid, ...(owner.url ? { url: owner.url } : {}) };
+  for (const directory of dataReadDirs(dataDir)) {
+    const owner = readOwner(join(directory, 'cockpit.lock'));
+    if (owner === undefined || owner.pid === process.pid || !alive(owner)) continue;
+    return { pid: owner.pid, ...(owner.url ? { url: owner.url } : {}) };
+  }
+  return undefined;
 }
 
 /** Whether a live cockpit other than this process owns `dataDir`. Read-only: nothing is claimed. */
@@ -123,6 +127,7 @@ export class CockpitOwnership {
   }
 
   async acquire(dataDir: string): Promise<void> {
+    this.checkFallbackOwner(dataDir);
     mkdirSync(dataDir, { recursive: true });
     const canonical = realpathSync(dataDir);
     const path = join(canonical, 'cockpit.lock');
@@ -133,12 +138,28 @@ export class CockpitOwnership {
     const deadline = Date.now() + 15_000;
     while (true) {
       if (this.owned.has(path)) return;
-      if (claim(path, owner)) { this.owned.set(path, owner); return; }
+      this.checkFallbackOwner(dataDir);
+      if (claim(path, owner)) {
+        try { this.checkFallbackOwner(dataDir); }
+        catch (error) { release(path, owner); throw error; }
+        this.owned.set(path, owner); return;
+      }
       const current = readOwner(path);
       if (current?.url && alive(current)) throw new CockpitAlreadyRunningError(canonical, current);
       if (Date.now() >= deadline) throw new CockpitAlreadyRunningError(canonical, current);
       await delay(50);
     }
+  }
+
+  private checkFallbackOwner(dataDir: string): void {
+    const fallback = dataReadDirs(dataDir)[1];
+    if (!fallback) return;
+    const path = join(fallback, 'cockpit.lock');
+    if (!existsSync(path)) return;
+    const owner = readOwner(path);
+    // Invalid fallback claims cannot be repaired by this binary; retain them unchanged.
+    if (!owner) throw new CockpitAlreadyRunningError(fallback, undefined, path);
+    if (alive(owner)) throw new CockpitAlreadyRunningError(fallback, owner);
   }
 
   publishUrl(url: string): void {

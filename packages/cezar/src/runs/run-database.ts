@@ -1,6 +1,7 @@
+import { ProjectRunConnection } from './project-run-connection.ts';
 import { MERGE_WAIT_MIGRATION, RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
 export { RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
-import { toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
+import { validateChanges, toRunClaim, toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
 import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
@@ -294,6 +295,8 @@ export interface RunDatabaseChanges {
    *  back. The last moment a caller can still refuse what it wrote. What it returns is more
    *  private metadata, written in the same commit. */
   beforeCommit?: () => Readonly<Record<string, string>> | void;
+  /** Explicit adoption only (`RunStore.adoptFallbackFamily`): fallback families to copy in first. */
+  adoptFallback?: readonly string[];
 }
 
 /** A family a fenced write touches: held at `generation`, or to `take` in that same transaction if
@@ -333,7 +336,7 @@ export interface RunClaim {
 /** A row a fenced write found other than its writer last saw it. */
 export interface RunRowConflict {
   id: string;
-  reason: 'changed' | 'created' | 'deleted' | 'claim-lost';
+  reason: 'changed' | 'created' | 'deleted' | 'claim-lost' | 'fallback';
   /** The row as it stands, or undefined when another writer deleted it. */
   current: RunRow | undefined;
 }
@@ -497,34 +500,11 @@ export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 
 type SqlRow = Record<string, unknown>;
 
-
-
-function validateChanges(changes: RunDatabaseChanges): void {
-  const upserted = new Set<string>();
-  for (const row of changes.upserts) {
-    if (upserted.has(row.id)) throw new TypeError(`run ${row.id} is upserted twice in one transaction`);
-    upserted.add(row.id);
-  }
-  for (const id of changes.deletes) {
-    if (upserted.has(id)) throw new TypeError(`run ${id} is both upserted and deleted in one transaction`);
-  }
-}
-
 /** `meta` key of the database-wide commit sequence every upsert stamps as its row's revision. */
 const COMMIT_SEQ_KEY = 'commit-seq';
 /** `meta` key of the sequence every claim acquisition takes its generation from. */
 const CLAIM_GENERATION_KEY = 'claim-generation';
 const CLAIM_COLUMNS = 'family, session, pid, start_token, generation';
-
-function toRunClaim(row: SqlRow): RunClaim {
-  return {
-    family: row.family as string,
-    session: row.session as string,
-    pid: row.pid as number,
-    startToken: row.start_token as string | null,
-    generation: row.generation as number,
-  };
-}
 
 export class RunDatabase {
   private readonly db: DatabaseSync;
@@ -568,7 +548,7 @@ export class RunDatabase {
     listConflicts: StatementSync;
   };
 
-  private constructor(db: DatabaseSync, path: string) {
+  private constructor(db: DatabaseSync, path: string, private readonly project?: ProjectRunConnection) {
     this.db = db;
     this.path = path;
     this.statements = {
@@ -618,8 +598,8 @@ export class RunDatabase {
           start_token = excluded.start_token, generation = excluded.generation`),
       releaseClaims: db.prepare('DELETE FROM run_claims WHERE session = ? AND family IN (SELECT value FROM json_each(?))'),
       releaseSessionClaims: db.prepare('DELETE FROM run_claims WHERE session = ?'),
-      listForeignClaimedIds: db.prepare(`SELECT runs.id AS id, run_claims.family AS family FROM run_claims JOIN runs
-        ON runs.id = run_claims.family OR runs.parent_run_id = run_claims.family WHERE run_claims.session <> ?`),
+      listForeignClaimedIds: db.prepare(`SELECT r.id AS id, c.family AS family FROM run_claims c JOIN runs r
+        ON r.id = c.family OR r.parent_run_id = c.family WHERE c.session <> ?`),
       insertConflict: db.prepare(`INSERT INTO run_conflicts (run_id, detected_at, session, reason, base_revision, base_data,
           local_data, local_deleted, current_revision, current_data)
         VALUES (:runId, :detectedAt, :session, :reason, :baseRevision, :baseData, :localData, :localDeleted,
@@ -682,6 +662,18 @@ export class RunDatabase {
       throw toRunDatabaseError(error, path);
     }
   }
+
+  /** Add a read-only source; a read-only (cold) projection never switches its primary to disk. */
+  static withProjectSource(primary: RunDatabase, target: string, source: string, jsonRows?: readonly RunRowInput[], readOnly = false): RunDatabase {
+    const projection = new ProjectRunConnection(primary.db, target, source,
+      () => RunDatabase.open(target).db, jsonRows, primary.path === ':memory:' && !readOnly);
+    return new RunDatabase(projection.connection, target, projection);
+  }
+
+  isFallback(id: string): boolean { return this.project?.isFallback(id) ?? false; }
+  get hasProjectSource(): boolean { return this.project !== undefined; }
+  hasFallback(id: string): boolean { return this.project?.hasFallback(id) ?? false; }
+  familyHasFallback(family: string): boolean { return this.project?.familyHasFallback(family) ?? false; }
 
   get(id: string): RunRow | undefined {
     const row = this.run(() => this.statements.get.get(id));
@@ -880,6 +872,7 @@ export class RunDatabase {
    */
   transaction(changes: RunDatabaseChanges): RunDatabaseCommit {
     validateChanges(changes);
+    const adopted = this.run(() => this.project?.beforeWrite(changes)) ?? new Set<string>();
     const revisions = new Map<string, number>();
     const seqs = new Map<string, number>();
     let claims = new Map<string, number>();
@@ -893,6 +886,7 @@ export class RunDatabase {
           return;
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
+        this.project?.preserveFamilies(adopted, changes);
         for (const id of changes.deletes) {
           this.reports.deleteRun(id);
           this.statements.delete.run(id);
@@ -911,8 +905,10 @@ export class RunDatabase {
         writeMetadata(this.statements, changes.meta ?? {});
         writeMetadata(this.statements, changes.beforeCommit?.() ?? {});
         this.db.exec('COMMIT');
+        this.project?.commitFiles();
       } catch (error) {
         rollback(this.db);
+        this.project?.rollbackFiles();
         throw error;
       }
     });
@@ -993,6 +989,7 @@ export class RunDatabase {
     take: ReadonlyArray<{ family: string; expect: { session: string; generation: number } | null }>,
   ): Map<string, number> {
     const taken = new Map<string, number>();
+    take = this.run(() => this.project?.claimable(take)) ?? take;
     if (take.length === 0) return taken;
     this.run(() => {
       this.db.exec('BEGIN IMMEDIATE');

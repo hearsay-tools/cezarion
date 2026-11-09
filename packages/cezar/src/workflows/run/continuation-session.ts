@@ -1,4 +1,5 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
+import { fallbackProjectWriteError } from '../../project-paths.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { continuationNextStep, waitingWorkflowStepIndex, ciWorkflowResumeStepIndex } from './workflow-position.ts';
 import type { QueuedInput } from './queued-input.ts';
@@ -96,6 +97,9 @@ export class ContinuationSession {
     stepId: string,
     record: RunRecord | undefined,
   ): Promise<{ cwd: string; rematerialized: boolean } | undefined> {
+    const path = record?.worktreePath ?? (record?.delegation?.role === 'worker' ? record.delegation.workspace.path : undefined);
+    const refusal = path && fallbackProjectWriteError(path);
+    if (refusal) { this.failWorkspace(runId, stepId, refusal); return undefined; }
     if (record?.delegation?.role === 'worker') {
       const cwd = await this.ownedContinuationWorkspace(runId, stepId, record, record.delegation);
       return cwd === undefined ? undefined : { cwd, rematerialized: false };
@@ -118,14 +122,18 @@ export class ContinuationSession {
       return await ownedContinuationWorkspace(this.context.store, this.context.repoRoot, this.context.dataDir, record, delegation);
     } catch (error) {
       const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
-      const finishedAt = new Date().toISOString();
-      this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-      this.host.move(runId, 'fail-start', { error: message, finishedAt });
-      this.context.store.appendEvent(runId, { type: 'lifecycle', message });
-      this.line.unmarkStarting(runId);
-      this.host.dropActive(runId);
+      this.failWorkspace(runId, stepId, message);
       return undefined;
     }
+  }
+
+  private failWorkspace(runId: string, stepId: string, message: string): void {
+    const finishedAt = new Date().toISOString();
+    this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
+    this.host.move(runId, 'fail-start', { error: message, finishedAt });
+    this.context.store.appendEvent(runId, { type: 'lifecycle', message });
+    this.line.unmarkStarting(runId);
+    this.host.dropActive(runId);
   }
 
   /** A Stop that arrived while the Continue resolved its workspace cancels the run before it

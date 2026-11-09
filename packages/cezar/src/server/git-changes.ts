@@ -1,3 +1,4 @@
+import { fallbackProjectWriteError } from '../project-paths.ts';
 import { imageMimeType } from '@open-mercato/cezar-contract/image-path';
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
@@ -266,7 +267,7 @@ export async function collectChanges(
   let env: Record<string, string> | undefined;
   let scratchIndex: string | undefined;
   try {
-    if (opts.intentToAdd === false) {
+    if (opts.intentToAdd === false || fallbackProjectWriteError(dir)) {
       scratchIndex = join(tmpdir(), `cez-scratch-index-${process.pid}-${scratchSeq++}`);
       env = { GIT_INDEX_FILE: scratchIndex };
       await git(dir, ['read-tree', 'HEAD'], env); // seed with tracked files; harmless if no HEAD
@@ -600,6 +601,8 @@ export async function createOrSwitchBranch(
   name: string,
   from?: string,
 ): Promise<BranchResult> {
+  const refusal = fallbackProjectWriteError(dir);
+  if (refusal) return { ok: false, error: refusal };
   // Dash-guard (#431): `name` reaches `git checkout <name>` / `git checkout -b <name>` as a
   // positional operand, so it gets the same explicit guard as `from` below — check-ref-format
   // already rejects option-like names, and the point is not to rely on that alone.
@@ -633,6 +636,8 @@ export type CommitResult = { ok: true; sha: string } | { ok: false; error: strin
 /** `git add -A && git commit -m <message>` in `dir`. A clean tree, a failing
  *  hook or missing identity all come back as `{ ok:false, error }`. */
 export async function commitAll(dir: string, message: string): Promise<CommitResult> {
+  const refusal = fallbackProjectWriteError(dir);
+  if (refusal) return { ok: false, error: refusal };
   const status = await git(dir, ['status', '--porcelain']);
   if (!status.ok) return { ok: false, error: gitReason(status, 'git status failed') };
   if (!status.stdout.trim()) {
@@ -653,6 +658,8 @@ export type PushResult =
 /** Push the current branch, setting upstream when it has none. No remote,
  *  detached HEAD and rejected pushes all degrade to `{ ok:false, error }`. */
 export async function pushCurrentBranch(dir: string): Promise<PushResult> {
+  const refusal = fallbackProjectWriteError(dir);
+  if (refusal) return { ok: false, error: refusal };
   const branchRes = await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
   if (!branchRes.ok) return { ok: false, error: gitReason(branchRes, 'not a git repository') };
   const branch = branchRes.stdout.trim();

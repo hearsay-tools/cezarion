@@ -1,3 +1,5 @@
+import { legacyIndexRows } from './legacy-run-rows.ts';
+import { addRunSource, fallbackRunSource } from './project-run-sources.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/cezar-contract/runs';
@@ -80,10 +82,24 @@ export function findColdRunByCheckout(
 /** The source rule both readers share: an imported `runs.db` is the only source, a `runs.db` that
  *  cannot be read contributes `empty`, and before the import the legacy `runs.json` is read. */
 function readCold<T>(dataDir: string, empty: T, fromDatabase: (db: RunDatabase) => T, fromLegacy: () => T): T {
-  let db: RunDatabase | null;
+  let db: RunDatabase | null = null;
   try {
     db = RunDatabase.openReadOnly(join(dataDir, RUNS_DB_FILE));
+    const source = fallbackRunSource(dataDir, bytes => legacyIndexRows(bytes, parseRunRecords)?.rows);
+    if (source) {
+      if (db && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) { db.close(); db = null; }
+      if (!db) {
+        const index = join(dataDir, LEGACY_INDEX_FILE);
+        const parsed = existsSync(index) ? legacyIndexRows(readFileSync(index), parseRunRecords) : { rows: [] };
+        if (!parsed) return empty;
+        const rows = parsed.rows;
+        db = RunDatabase.open(':memory:');
+        db.transaction({ upserts: rows, deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'read-only' } });
+      }
+      db = addRunSource(db, dataDir, source, true);
+    }
   } catch {
+    db?.close();
     return empty;
   }
   if (db) {

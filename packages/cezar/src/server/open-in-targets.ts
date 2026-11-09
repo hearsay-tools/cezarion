@@ -1,4 +1,5 @@
 import type { Home } from '../home/home.ts';
+import { fallbackProjectWriteError } from '../project-paths.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Context } from 'hono';
@@ -92,6 +93,8 @@ export async function openRunCli(
   repoRoot: string,
   { providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal, home }: CliHandoffDeps,
 ) {
+  const refusal = fallbackProjectWriteError(dir);
+  if (refusal) return c.json({ error: refusal }, 409);
   const blocked = await providerActionError([cliRunner]);
   if (blocked) return c.json({ error: blocked }, 409);
   // A usage-limit hold has no session until its resume (hearsay-tools/cezarion#1236), so it resumes.

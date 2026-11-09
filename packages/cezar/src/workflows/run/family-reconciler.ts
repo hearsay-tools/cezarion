@@ -169,6 +169,8 @@ export class FamilyReconciler {
   /** One pass reads each cold run once (hearsay-tools/cezarion#2378): a family's conversation
    *  names its sender and recipient on every message. */
   private reconcileWorkerFamily(familyRootId?: string): void {
+    // As the global pass: a family this store may not write (foreign, fallback) is not repaired here.
+    if (familyRootId !== undefined && this.context.store.writeRefusal(familyRootId)) return;
     this.context.store.withReadCache(() => this.reconcileFamilyPass(familyRootId));
   }
 

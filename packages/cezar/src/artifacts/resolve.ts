@@ -12,7 +12,7 @@ const IMAGE_CAP = 10 * 1024 * 1024;
 const contained = (root: string, path: string) => path === root || path.startsWith(root + sep);
 function privatePath(root: string, target: string): boolean {
   const segments = relative(root, target).split(sep);
-  return segments.includes('.git') || segments.some((part, i) => part === '.ai' && segments[i + 1] === 'cezar');
+  return segments.includes('.git') || segments.some((part, i) => part === '.ai' && ['cezar', 'squawk'].includes(segments[i + 1] ?? ''));
 }
 export function rasterMime(path: string): string | null { return isOsOpenableImage(path) ? imageMimeType(path) : null; }
 

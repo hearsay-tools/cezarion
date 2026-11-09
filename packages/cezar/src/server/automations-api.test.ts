@@ -958,6 +958,36 @@ describe('GitHub automation API', () => {
     expect(listed.counts).toEqual({ matches: 2, launched: 3, duplicates: 1, errors: 3 });
   });
 
+  it('pages both log sources to the end with positive cursors while legacy entries are appended', async () => {
+    const legacy = join(root, '.ai/cezar');
+    const fallback = join(root, '.ai/squawk');
+    mkdirSync(fallback, { recursive: true });
+    const rows = (automationId: string) => Array.from({ length: 4 }, (_, index) => JSON.stringify({
+      automationId, revision: 1, seq: index + 1, ts: new Date().toISOString(), result: 'skipped', reason: `${automationId}-${index + 1}`,
+    })).join('\n') + '\n';
+    writeFileSync(join(legacy, 'automation-log.ndjson'), rows('legacy'));
+    writeFileSync(join(fallback, 'automation-log.ndjson'), rows('fallback'));
+    const automationStore = AutomationStore.open(legacy);
+    const server = app({ automationStore });
+    const read = async (cursor?: number) => {
+      const response = await apiRequest(server, `/api/v1/automation-log?limit=3${cursor ? `&cursor=${cursor}` : ''}`);
+      expect(response.status).toBe(200);
+      return (await response.json() as { records: Array<{ seq: number; reason: string }> }).records;
+    };
+    const first = await read();
+    await automationStore.appendLog({ automationId: 'legacy', revision: 1, result: 'skipped', reason: 'between pages' });
+    const second = await read(first.at(-1)!.seq);
+    const third = await read(second.at(-1)!.seq);
+    expect(await read(third.at(-1)!.seq)).toEqual([]);
+    const all = [...first, ...second, ...third];
+    expect(all).toHaveLength(8);
+    expect(new Set(all.map(row => row.reason)).size).toBe(8);
+    expect(all.every(row => Number.isInteger(row.seq) && row.seq > 0)).toBe(true);
+    expect(all.some(row => row.reason === 'between pages')).toBe(false);
+    await automationStore.compact();
+    expect(await read(first.at(-1)!.seq)).toEqual(second);
+  });
+
   it('accepts preview as an automation-log result filter', async () => {
     const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
     await automationStore.appendLog({
