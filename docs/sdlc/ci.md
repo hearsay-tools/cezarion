@@ -802,7 +802,9 @@ strictly after the PR's **first-ever** `ready_for_review` event. That execution
 must have completed successfully. A later ready transition does not reset the
 cutoff, and a review started on a later push can satisfy it. The shared reader is
 `.github/scripts/queue-coderabbit-admission.cjs`; `land-pr` uses the same order.
-Missing or unreadable first-ready proof blocks actual-review admission. Existing
+A non-draft PR with no ready event was opened ready and uses existing
+current-head admission without a cutoff. Malformed or unreadable timeline proof
+blocks actual-review admission. Existing
 trusted no-files, release-stamps and upstream-ledger exceptions remain unchanged.
 Readiness still returns a PR to draft when a new same-head review is pending.
 See `.ai/specs/2026-11-09-post-first-ready-queue-review.md` and

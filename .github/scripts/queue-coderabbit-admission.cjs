@@ -36,7 +36,9 @@ async function readQueueCodeRabbitAdmission({ github, owner, repo, pullNumber, h
   if (pr.draft !== false) return blocked('PR is draft');
   // Keep the established verified exceptions; they do not require a model run.
   if (exempt) return admission;
-  if (!ready) return blocked('PR has no first ready event');
+  // An open, non-draft PR with no ready event was opened ready. No ready
+  // transition can trigger a re-review, so current-head admission is sufficient.
+  if (!ready) return admission;
   if (!Number.isFinite(timestamp(admission.providerStartedAt))) return blocked('provider review start unavailable');
   if (timestamp(admission.providerStartedAt) <= timestamp(ready)) return blocked('provider review pending after first ready');
   if (admission.providerState === 'pending') return blocked('provider review pending after first ready');

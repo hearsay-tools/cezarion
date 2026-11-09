@@ -185,7 +185,6 @@ test('queue refuses a draft never marked ready', async () => {
   await assert.rejects(h.run, /PR head is no longer eligible/);
 });
 for (const [label, ready, started, reason] of [
-  ['no event', null, '2026-11-08T22:51:37Z', /no first ready event/],
   ['bad event timestamp', 'invalid', '2026-11-08T22:51:37Z', /timestamp unavailable/],
   ['missing start', '2026-11-08T22:51:04Z', undefined, /review start unavailable/],
   ['bad start', '2026-11-08T22:51:04Z', 'invalid', /review start unavailable/],
@@ -198,5 +197,10 @@ test('queue preserves trusted no-files skip without post-ready execution', async
   const h = fixture(); h.s.checks[0].conclusion = 'skipped';
   h.s.checks[0].output = { title: 'No files to review' };
   h.s.checks[0].started_at = '2026-11-08T22:34:53Z';
+  assert.equal((await h.run()).head, HEAD);
+});
+
+for (const fork of [false, true]) test(`queue admits opened-ready PR without a ready event (fork=${fork})`, async () => {
+  const h = fixture(fork); h.s.firstReady = null;
   assert.equal((await h.run()).head, HEAD);
 });

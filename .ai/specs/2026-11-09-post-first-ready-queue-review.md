@@ -16,8 +16,10 @@ being enough to queue before the first post-ready review.
 
 For actual provider review evidence, the newest trusted current-head check must
 start strictly after the PR's first-ever ready event and complete successfully.
-The first event applies across later ready transitions and new heads. Missing,
-malformed or unreadable proof blocks admission. The existing verified no-files,
+The first event applies across later ready transitions and new heads. An open,
+non-draft PR with no ready event was opened ready, has no cutoff, and uses
+existing current-head admission alone. Malformed or unreadable proof blocks
+admission. The existing verified no-files,
 release-stamps and upstream-ledger exceptions remain unchanged.
 
 | Case | Before | After |
@@ -28,7 +30,8 @@ release-stamps and upstream-ledger exceptions remain unchanged.
 | Later ready, same current-head post-first-ready success | Admit | Admit without waiting for another review |
 | New head after first ready, reviewed on push | Admit if all proof passes | Admit if all proof passes |
 | Never-ready draft | Refuse | Refuse |
-| Missing or malformed first-ready timestamp for actual review | No ordering check | Refuse |
+| Opened ready, same-repo or fork, no ready event | Current-head admission | Same current-head admission; no cutoff |
+| Malformed or unreadable first-ready proof for actual review | No ordering check | Refuse |
 | Trusted no-files, release-stamps or upstream-ledger exception | Existing exception policy | Same exception policy |
 | New push, required failure, unresolved thread | Refuse or demote | Same behavior |
 
