@@ -1017,10 +1017,12 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
   // a cell registers only when its row runs on this file's runner. The group is carried into each
   // suite factory, which Vitest may call after describeRunners returns.
   let currentGroup: string | undefined;
-  const inGroup = <A extends unknown[]>(group: string | undefined, factory: (...args: A) => unknown) => (...args: A) => {
-    const previous = currentGroup;
-    currentGroup = group;
-    try { return factory(...args); } finally { currentGroup = previous; }
+  const inGroup = <A extends unknown[]>(group: string | undefined, factory: (...args: A) => unknown) => {
+    return (...args: A) => {
+      const previous = currentGroup;
+      currentGroup = group;
+      try { return factory(...args); } finally { currentGroup = previous; }
+    };
   };
   const describe = new Proxy(registration.describe, {
     apply: (target, self, args: unknown[]) => Reflect.apply(target, self, args.map(arg => typeof arg === 'function' ? inGroup(currentGroup, arg as () => unknown) : arg)),
