@@ -15,7 +15,11 @@ vi.mock('./cli-dispatch.ts', () => ({ defaultCliDeps: {}, main: vi.fn(async () =
 vi.mock('./serve-command.ts', () => ({ defaultServeDeps: {}, serveCommand: vi.fn(async () => undefined) }));
 vi.mock('./headless-run.ts', () => ({ defaultHeadlessDeps: {}, runHeadless: vi.fn(async () => undefined) }));
 vi.mock('./runs/arm-repo-handle.ts', () => ({ armRepoHandle: vi.fn() }));
-vi.mock('./task-cli/hint.ts', () => ({ startCockpitHint: () => () => undefined }));
+vi.mock('./task-cli/hint.ts', () => ({
+  startCockpitHint: () => {
+    return () => { return undefined; };
+  },
+}));
 await import('./index.ts');
 const cli = vi.mocked(main).mock.calls[0]![0];
 
