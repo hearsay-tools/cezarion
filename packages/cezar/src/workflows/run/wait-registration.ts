@@ -2,14 +2,14 @@ import { WaitDeadlineConflict } from '../../ci-wait/errors.ts';
 import { createHash } from 'node:crypto';
 import type { CezarWaitRequest, Wait, WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
-import { WAIT_KINDS } from './wait-kinds.ts';
+import { WAIT_KINDS, waitRequestRow } from './wait-kinds.ts';
 
 export type RegistrationIdentity = Pick<WaitRegistrationReceipt, 'operationId' | 'requestHash'>;
 export function registrationIdentity(request: CezarWaitRequest): RegistrationIdentity | undefined {
   if (!request.operation_id) return undefined;
   const { operation_id, ...fields } = request;
   const canonical = { ...fields };
-  const row = Object.values(WAIT_KINDS).find(row => row.requestKinds.includes(canonical.kind))!;
+  const row = waitRequestRow(canonical.kind);
   row.canonicalize(canonical);
   for (const field of ['worker_ids', 'request_ids', 'peer_ids'] as const) {
     if (field in canonical) (canonical as Record<string, unknown>)[field] = [...(canonical as unknown as Record<string, string[]>)[field]!].sort();

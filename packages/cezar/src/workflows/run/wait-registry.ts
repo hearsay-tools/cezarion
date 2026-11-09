@@ -8,7 +8,6 @@ import { workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError, requireMessagingAllowed } from '../../delegation/policy.ts';
 import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget, waitCapacityPolicyError } from '../wait-scope.ts';
-import { identicalWorkerWait } from '../waits.ts';
 import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -106,7 +105,7 @@ export class WaitRegistry {
     const getRun = (id: string) => this.context.store.getRun(id);
     if (request.workerIds) assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds, getRun);
     else assertRequestWaitScope(run, run.delegation, request.requestIds ?? [], getRun);
-    const repeated = identicalWorkerWait(run.waits ?? [], request);
+    const repeated = WAIT_KINDS.worker.duplicateWorker(run.waits ?? [], request);
     if (repeated && WAIT_KINDS.worker.hasDeadline(repeated)) return repeatRegistration(this.context.store, runId, repeated, request.timeoutSeconds, registration) as DeadlinedWorkerWaitEntry;
     try { assertWaitCapacity(run); }
     catch (error) {
@@ -115,9 +114,7 @@ export class WaitRegistry {
     }
     const now = Date.now();
     const target = workerWaitTarget(request, getRun);
-    const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
-      turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
+    const entry = WAIT_KINDS.worker.entry(request, via, now, state.waitIdentity.ensureCiTurn(), target);
     this.host.withdrawCezarHumanWaits(runId);
     try { this.context.store.commitWait(runId, entry, undefined, registrationReceipt(registration, entry)); }
     catch (error) {
@@ -143,9 +140,8 @@ export class WaitRegistry {
   registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry {
     const state = this.host.active(runId)!;
     const ids = workerIds.filter(id => { const worker = this.context.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
-    const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'cezar', via: 'completion', registeredAt: new Date().toISOString(),
-      turnId: state.waitIdentity.ensureCiTurn(), phase: 'open', mode: 'all',
-      ...workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.context.store.getRun(id)) };
+    const entry = WAIT_KINDS.worker.completionEntry(state.waitIdentity.ensureCiTurn(),
+      workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.context.store.getRun(id)));
     this.context.store.commitWait(runId, entry);
     this.host.reconcileWorkerWaits(familyOf(this.context.store.getRun(runId)!));
     this.host.noticeParkedWorkers(runId);
@@ -253,7 +249,7 @@ export class WaitRegistry {
     if (open?.askSeq !== undefined) return open;
     try { if (!open) assertWaitCapacity(run); }
     catch (error) { if (error instanceof WaitCapacityError) refuse('capacity'); throw error; }
-    const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
+    const base: HumanWaitEntry = open ?? WAIT_KINDS.human.entry(turnId);
     const { context: _replaced, ...kept } = base;
     return this.openWait(runId, active, { ...kept, ...card });
   }

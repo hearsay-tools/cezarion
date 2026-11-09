@@ -1,7 +1,7 @@
 import { WAIT_KINDS } from './run/wait-kinds.ts';
-import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type CezarWaitRequest, type WaitVia, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
+import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
-import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
  * Pure wait-list readers and agent-facing text. RunManager owns registration, resolution and
@@ -119,7 +119,9 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
     : { wait_id: wait.id, kind: wait.kind as Exclude<Wait['kind'], 'human'>, deadline: ('deadline' in wait ? wait.deadline : undefined)!, summary: summary(wait) });
 }
 
-export { identicalWait, identicalWorkerWait, identicalPeerWait } from './run/wait-kinds.ts';
+export { identicalWait } from './run/wait-kinds.ts';
+export const identicalWorkerWait = WAIT_KINDS.worker.duplicateWorker;
+export const identicalPeerWait = WAIT_KINDS.peer.duplicatePeer;
 
 /** The agent input that delivers a resolved wait's result: the wait's own id, or for an upgraded
  *  worker wait whose wake was already queued, that input (`wakeInputId`). */
@@ -249,7 +251,9 @@ export function hasPrWait(run: Pick<RunRecord, 'waits'>): boolean {
   return (run.waits ?? []).some((wait) => WAIT_KINDS[wait.kind].holdsConversationInput && (wait.phase === 'open' || wait.phase === 'resolved'));
 }
 
-export { timerWaitEntry, prWaitEntry, processWaitEntry } from './run/wait-kinds.ts';
+export const timerWaitEntry = WAIT_KINDS.timer.entry;
+export const prWaitEntry = WAIT_KINDS.pr.entry;
+export const processWaitEntry = WAIT_KINDS.process.entry;
 
 export type WaitResult = CiWaitResult | ProcessWaitResult | PeerWaitResult | SubagentWaitResult;
 
