@@ -260,6 +260,7 @@ describe('wait checkpoints', () => {
     const resolved = timerEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0) });
     const kept = timerEntry();
     store.commitWait(id, open);
+    store.commitWait(id, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(id, resolved, input(resolved.id));
     store.commitWait(id, kept);
     const other: AgentInput = { ...input(randomUUID(), 'unrelated') };
@@ -275,6 +276,7 @@ describe('wait checkpoints', () => {
 
   it('a cancelled outcome keeps an input that was already delivered', () => {
     const resolved = timerEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0) });
+    store.commitWait(id, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(id, resolved, { ...input(resolved.id), deliveredAt: iso(0) });
     store.commitOutcome(id, { kind: 'cancelled', waitIds: [resolved.id] });
     expect(store.getRun(id)?.agentInputs?.map((entry) => entry.id)).toEqual([resolved.id]);
@@ -284,7 +286,9 @@ describe('wait checkpoints', () => {
     const first = ciEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0), result });
     const second = timerEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0) });
     const open = ciEntry();
+    store.commitWait(id, { ...first, phase: WAIT_PHASE.open });
     store.commitWait(id, first, input(first.id));
+    store.commitWait(id, { ...second, phase: WAIT_PHASE.open });
     store.commitWait(id, second, input(second.id));
     store.commitWait(id, open);
     const commits = vi.spyOn(runPersistence(store), 'persist');
@@ -303,6 +307,7 @@ describe('wait checkpoints', () => {
   // hearsay-tools/cezarion#1234: a wake's charge and its cleared failure count commit with it.
   it('a delivered outcome commits the wake counters in the same commit', () => {
     const resolved = timerEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0) });
+    store.commitWait(id, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(id, resolved, input(resolved.id));
     store.updateRun(id, { automaticWakes: 6, waitDeliveryFailures: 2 });
     const commits = vi.spyOn(runPersistence(store), 'persist');
@@ -321,6 +326,7 @@ describe('wait checkpoints', () => {
     const stepId = 'main';
     const runId = store.createRun({ title: 'Waits', workflow: 'quick-task', task: 'wait', steps: [{ id: stepId, name: 'main', kind: STEP_KIND.agent }] }).id;
     const resolved = timerEntry({ phase: WAIT_PHASE.resolved, resolvedAt: iso(0) });
+    store.commitWait(runId, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
     store.move(runId, 'park-release', {}, { stepId });
     const commits = vi.spyOn(runPersistence(store), 'persist');
