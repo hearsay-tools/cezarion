@@ -1,5 +1,5 @@
 import { warnRegistrationRefused, type WaitEngine } from './wait-engine.ts';
-import { WAIT_KINDS, waitRequestRow } from './wait-kinds.ts';
+import { WAIT_KINDS, waitRequestRow, registersAs } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { registrationIdentity, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
@@ -249,18 +249,20 @@ export class WaitRegistry {
     // tool's own codes. It answers its own repeat, so it is checked before the capacity below.
     if (isDelegationWait(parsed)) return this.registerDelegation(runId, parsed, run, registration, refuse);
     const turnId = active.waitIdentity.ensureCiTurn();
-    if (waitRequestRow(parsed).registration === 'process') return this.registerProcessWait(runId, active, run, parsed as Extract<CezarWaitRequest, { kind: 'process' }>, via, turnId, registration);
+    const row = waitRequestRow(parsed.kind);
+    if (registersAs(parsed, 'process', row)) return this.registerProcessWait(runId, active, run, parsed, via, turnId, registration);
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
     if (existing) return repeatRegistration(this.context.store, runId, existing, WAIT_KINDS[parsed.kind].requestedTimeout(parsed), registration) as typeof existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
     this.host.waitEngine.compare(run, refuse);
-    if (waitRequestRow(parsed).registration === 'timer') {
+    if (registersAs(parsed, 'timer', row)) {
       this.checkAutomaticWaitAdmission('timer', runId, refuse);
       const now = Date.now();
-      const wait = timerWaitEntry(parsed as Extract<CezarWaitRequest, { kind: 'timer' }>, via, turnId, now);
+      const wait = timerWaitEntry(parsed, via, turnId, now);
       return this.host.waitEngine.open(runId, active, wait, { withdraw: 'before-commit', receipt: registration, onCommitFailure: 'persistence', arm: 'watch', park: 'boundary', return: 'stored' }).wait!;
     }
-    const pr = parsed as Extract<CezarWaitRequest, { kind: 'pr' }>;
+    if (!registersAs(parsed, 'pr', row)) throw new Error('Unsupported wait registration');
+    const pr = parsed;
     const key = `${runId}\n${normalizePrUrl(pr.pr)}\n${pr.until}\n${pr.wake_on_conflict}`;
     const pending = this.ciRegistrations.get(key);
     if (pending) {
@@ -297,11 +299,12 @@ export class WaitRegistry {
     registration: RegistrationIdentity | undefined, refuse: (code: WaitErrorCode) => never): WorkerWaitEntry | PeerWaitEntry {
       if (!run.delegation || run.delegation.role === 'invalid') refuse('denied_scope');
       try {
-        if (waitRequestRow(parsed).registration === 'peer') {
-          const peer = parsed as Extract<CezarWaitRequest, { kind: 'peer' }>;
-          return this.registerPeerWait(runId, { peerIds: peer.peer_ids, timeoutSeconds: peer.timeout_seconds }, 'cezar_wait', registration);
+        const row = waitRequestRow(parsed.kind);
+        if (registersAs(parsed, 'peer', row)) {
+          return this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait', registration);
         }
-        return this.registerWorkerListWait(runId, workerListTarget(parsed as Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>), 'cezar_wait', registration);
+        if (!registersAs(parsed, 'worker-list', row)) throw new Error('Unsupported wait registration');
+        return this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait', registration);
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'duplicate_deadline') throw error;
         return refuse(delegationWaitRefusal(error, () => this.host.executionBlockedByRootFinish(run))); }

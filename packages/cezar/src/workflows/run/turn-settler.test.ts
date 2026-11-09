@@ -1,3 +1,4 @@
+import type { Wait } from '@open-mercato/cezar-contract/waits';
 import { WaitEngine } from './wait-engine.ts';
 import { traceBoundary } from './boundary-order.testkit.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -38,13 +39,13 @@ function fixture() {
     turnEndHumanWait: call<object | undefined>('humanWait', undefined),
     prepareHumanAsk: call('prepareAsk', undefined), raiseHumanGate: call('raiseGate', undefined),
     recordTurnEndQuestion: call('recordQuestion', undefined), holdsAgentWaits: call('agentWaits', false),
-    humanWaitShown: call('shown', false), withdrawCezarHumanWaits: call('withdraw', undefined),
+    humanWaitShown: call('shown', false), withdrawCezarHumanWaits: vi.fn((_id: string) => { log.push('withdraw'); }),
     openHumanAlias: call('humanAlias', { source: WAIT_SOURCE.cezar }), showCezarHumanWait: call('show', undefined),
     surfaceHumanWait: call('surface', undefined),
   };
   const host = {
     humanWaits, line: { isParked: call('isParked', false), inPool: call('inPool', false), park: call('parkLine', undefined) },
-    waitWatches: { armWait: call('armWait', undefined) }, waitRegistry: { registerCompletionWait: call('completionWait', undefined) },
+    waitWatches: { armWait: vi.fn((_id: string, _wait: Wait) => { log.push('armWait'); }) }, waitRegistry: { registerCompletionWait: call('completionWait', undefined) },
     workerQuestions: { askParentForWorker: call('askParent', undefined) }, completionGateHost: { parentCompletionBlockers: () => [] },
     move: call('move', undefined), releaseSlot: call('release', undefined), completionGate: call('gate', 'accept' as 'accept' | 'held' | CompletionRefusal),
     cancelOpenWaits: call('cancelWaits', undefined), countAutomaticWakes: call('wakes', 0), workerExecutionStopped: () => false,
@@ -59,8 +60,8 @@ function fixture() {
   const semaphore = { monitoringWakeIntervalMinutes: call<number | null>('interval', 1) };
   const context = { store, semaphore } as unknown as RunModuleContext;
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
-    withdrawCezarHumanWaits: () => host.humanWaits.withdrawCezarHumanWaits(),
-    armWait: () => host.waitWatches.armWait(),
+    withdrawCezarHumanWaits: id => host.humanWaits.withdrawCezarHumanWaits(id),
+    armWait: (id, wait) => host.waitWatches.armWait(id, wait),
   }));
   const settler = new TurnSettler(context, { ...host, waitEngine } as unknown as Host, 60_000, 10, 'wait for workers', 3600);
   log.length = 0;

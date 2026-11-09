@@ -28,6 +28,15 @@ const PR_UNTIL_TEXT = {
 
 const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
 
+type RegistrationRequest = {
+  timer: Extract<CezarWaitRequest, { kind: 'timer' }>;
+  pr: Extract<CezarWaitRequest, { kind: 'pr' }>;
+  process: Extract<CezarWaitRequest, { kind: 'process' }>;
+  peer: Extract<CezarWaitRequest, { kind: 'peer' }>;
+  'worker-list': Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>;
+};
+type RegistrationPath = { pr: 'pr'; timer: 'timer'; process: 'process'; peer: 'peer'; worker: 'worker-list'; human: 'none'; subagent: 'none' };
+
 export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   is: (wait: Wait) => wait is Extract<Wait, { kind: K }>;
   select: (waits: readonly Wait[]) => Extract<Wait, { kind: K }>[];
@@ -44,7 +53,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   watch: 'ci' | 'process' | 'none' | 'worker' | 'peer' | 'subagent' | 'timer';
   answerKind: (wait: Wait) => Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' | undefined;
   hasDeadline: (wait: Wait) => boolean;
-  registration: 'timer' | 'pr' | 'process' | 'worker-list' | 'peer' | 'none';
+  registration: RegistrationPath[K];
   requestKinds: readonly CezarWaitRequest['kind'][];
   delegation: boolean;
 
@@ -557,4 +566,10 @@ export function sessionlessWakePrompt(resolved: ReturnType<typeof resolvedWaits>
 /** The first budgeted wait label, with monitoring timers ahead of ordinary timers, processes and peers. */
 export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
   return waits.flatMap(wait => WAIT_KINDS[wait.kind].deliveryLabel(wait)).sort((a, b) => a.priority - b.priority)[0]?.text;
+}
+
+/** Request dispatch follows the typed registration cell of its stored-kind row. */
+export function registersAs<R extends keyof RegistrationRequest>(request: CezarWaitRequest, registration: R,
+  row = waitRequestRow(request.kind)): request is RegistrationRequest[R] {
+  return row.registration === registration;
 }
