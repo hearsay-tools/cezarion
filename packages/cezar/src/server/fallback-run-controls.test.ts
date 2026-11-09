@@ -156,3 +156,17 @@ it('refuses to adopt a family whose legacy root another live process claims, and
     expect(store.isFallbackRun(family.workerId)).toBe(true);
   } finally { other.close(); closeClaimSession(owner.session); }
 });
+
+it('answers a refused worker-destroy adoption in the delegation error shape', async () => {
+  const family = seedFamily(false, false);
+  const owner = openClaimSession();
+  const db = RunDatabase.open(join(fallback, RUNS_DB_FILE));
+  try {
+    db.takeClaims(owner, [{ family: family.parentId, expect: null }]);
+    start();
+    const response = await post(`${family.workerId}/worker-destroy`, {});
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ code: 'incompatible_state', error: expect.stringContaining('in use by another process') });
+    expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
+  } finally { db.close(); closeClaimSession(owner.session); }
+});

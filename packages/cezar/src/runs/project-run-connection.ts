@@ -162,8 +162,7 @@ export class ProjectRunConnection {
   }
 
   private prepare(sql: string): StatementSync {
-    const read = /^\s*(?:SELECT|WITH)\b/i.test(sql);
-    const projected = read ? projectReadTables(sql) : sql;
+    const projected = projectReadTables(sql);
     let owner = this.current;
     let statement = owner.prepare(projected);
     return new Proxy(statement, { get: (_target, key) => {
@@ -246,7 +245,8 @@ export class ProjectRunConnection {
 function projectReadTables(sql: string): string {
   return sql.replace(/('(?:''|[^'])*'|"(?:""|[^"])*"|`[^`]*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?\*\/)|\b(FROM|JOIN)(\s+)(runs|run_claims)\b/gi,
     (match, quoted: string | undefined, keyword: string, space: string, table: string, offset: number) => {
-      if (quoted) return match;
+      // A DELETE target stays the primary table; every other reference, nested reads in writes included, is a read.
+      if (quoted || /\bDELETE\s*$/i.test(sql.slice(0, offset))) return match;
       const next = /^\s+(?:AS\s+)?([a-z_]\w*|"|`|\[)/i.exec(sql.slice(offset + match.length))?.[1];
       const aliased = next && !/^(WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|GROUP|ORDER|LIMIT|UNION|INTERSECT|EXCEPT|ON|USING|NOT|INDEXED)$/i.test(next);
       return `${keyword}${space}${table.toLowerCase() === 'runs' ? 'project_runs' : 'project_claims'}${aliased ? '' : ` AS ${table}`}`;

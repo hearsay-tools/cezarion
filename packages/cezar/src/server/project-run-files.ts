@@ -1,6 +1,8 @@
 import { artifactDirectory } from '../artifacts/store.ts';
 import type { RunStore } from '../runs/store.ts';
 import type { MiddlewareHandler } from 'hono';
+import { delegationFailure } from '../delegation/routes.ts';
+import { DelegationPolicyError } from '../delegation/policy.ts';
 import type { ProjectApiEnv } from './server.ts';
 
 /** Logical deletion cannot expose a fallback copy. Legacy-only resource cleanup remains allowed. */
@@ -25,7 +27,12 @@ export const adoptFallbackControl: MiddlewareHandler<ProjectApiEnv> = async (con
   const store = context.get('project').store;
   if (store.runOwnership(id) !== 'fallback') return next();
   try { store.adoptFallbackFamily(id); }
-  catch (error) { return context.json({ error: error instanceof Error ? error.message : String(error) }, 409); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // The delegation route answers in the delegation error shape, as `requireRunControl` does.
+    if (path.endsWith('/worker-destroy')) return context.json(delegationFailure(new DelegationPolicyError('incompatible_state', message)).body, 409);
+    return context.json({ error: message }, 409);
+  }
   return next();
 };
 

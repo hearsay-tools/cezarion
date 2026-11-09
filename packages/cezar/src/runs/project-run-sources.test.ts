@@ -226,6 +226,16 @@ describe('project run sources', () => {
     expect((await store.reports.list({}))).toMatchObject({ reports: [{ id: artifact.id, runId: run.id }] });
   });
 
+  it('writes the report retry marker for a fallback-only run, so the watcher retries its scan', () => {
+    const run = record('fallback report');
+    seed('squawk', [run]);
+    const store = open();
+    const db = (store as unknown as { db: RunDatabase }).db;
+    db.reports.retry(run.id, 1);
+    expect(db.reports.dirty()).toContain(run.id);
+    expect(existsSync(join(root('cezar'), 'runs.db'))).toBe(false);
+  });
+
   it('reports fallback cleanup skips once per sweep and still reclaims legacy byte-only resources', async () => {
     const newest = record('new', { worktreePath: join(root('cezar'), 'worktrees', 'new'), finishedAt: '2026-11-08T00:00:00Z' });
     const old = record('legacy', { worktreePath: join(root('cezar'), 'worktrees', 'old') });
