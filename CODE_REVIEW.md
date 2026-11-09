@@ -83,6 +83,13 @@ later automation runs read. Search both literal forms from the repository root:
 rg --hidden -n -F -e '<old form>' -e '<new form>' .
 ```
 
+Also search each reader's actual record paths, including paths outside the
+checkout. For ignored records, use a targeted `--no-ignore` search; for example:
+
+```sh
+rg --hidden --no-ignore -n -F -e '<old form>' -e '<new form>' -g '*.handoff.md' .ai/cezar/runs
+```
+
 A search cannot find a caller that omits a newly required field: keep executable
 fixtures in typed modules and use the root typecheck, including its coverage guard.
 Review active spec rules and case-table rows for semantic changes; edit the rules
