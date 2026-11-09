@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
@@ -118,4 +119,25 @@ it('refuses other explicit writes cleanly: a webhook report still answers, a mes
   try { store.commitConversation(family.parentId, state); } catch (error) { refused = error; }
   expect(refused).toBeInstanceOf(RunWriteRefusedError);
   expect(delegationFailure(refused)).toEqual({ status: 409, body: { code: 'incompatible_state', error: expect.stringMatching(refusal) } });
+});
+
+it('keeps the diff of a fallback run readable, from its worktree under .ai/squawk/', async () => {
+  const family = seedFamily(false, false);
+  const worktree = join(fallback, 'worktrees', family.parentId);
+  mkdirSync(worktree, { recursive: true });
+  const git = (...args: string[]) => execFileSync('git', ['-C', worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', ...args]);
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(worktree, 'file.txt'), 'before\n');
+  git('add', '.'); git('commit', '-qm', 'fixture');
+  writeFileSync(join(worktree, 'file.txt'), 'after\n');
+  const record = readPersistedRuns(fallback).find(run => run.id === family.parentId);
+  seedRuns(fallback, [...readPersistedRuns(fallback).filter(run => run.id !== family.parentId), { ...record, worktreePath: worktree }]);
+  const before = readFileSync(join(fallback, RUNS_DB_FILE));
+  start();
+  const diff = await apiRequest(app, `/api/v1/runs/${family.parentId}/diff`);
+  expect(diff.status).toBe(200);
+  expect(await diff.text()).toContain('+after');
+  expect((await apiRequest(app, `/api/v1/runs/${crypto.randomUUID()}/diff`)).status).toBe(404);
+  expect(existsSync(join(primary, RUNS_DB_FILE))).toBe(false);
+  expect(readFileSync(join(fallback, RUNS_DB_FILE))).toEqual(before);
 });
