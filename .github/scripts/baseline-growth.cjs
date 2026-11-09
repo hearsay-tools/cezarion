@@ -97,9 +97,10 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   const base = dispatched ? git(cwd, 'rev-parse', 'HEAD').trim() : context.payload.pull_request.base.sha;
   const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
   if (pr.head.sha !== expectedHead || pr.base.sha !== base) throw new Error('PR changed; rerun CI for the current head/base');
-  git(cwd, 'fetch', '--no-tags', 'origin', `refs/pull/${number}/head`);
+  git(cwd, 'fetch', '--no-tags', 'origin', expectedHead);
   const fetched = git(cwd, 'rev-parse', 'FETCH_HEAD').trim();
-  if (fetched !== expectedHead) throw new Error('PR changed during fetch; rerun CI');
+  const { data: current } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+  if (fetched !== expectedHead || current.head.sha !== expectedHead || current.base.sha !== base) throw new Error('PR changed during fetch; rerun CI');
   // GitHub never moves the event's base.sha when the base branch advances. Measure from the
   // branch tip this workflow runs from, so commits the head took from that branch stay out.
   const mergeBase = git(cwd, 'merge-base', dispatched ? base : context.sha, fetched).trim();

@@ -50,7 +50,7 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   const { data: pr } = await github.rest.pulls.get(params);
   if (!sameRevision(pr, expected)) return report(core, ['PR head or base changed during the patch check; run CI for the current revision.']);
   const files = await github.paginate(github.rest.pulls.listFiles, { ...params, per_page: 100 });
-  git(cwd, 'fetch', '--no-tags', 'origin', `refs/pull/${expected.number}/head`);
+  git(cwd, 'fetch', '--no-tags', 'origin', expected.head.sha);
   if (git(cwd, 'rev-parse', 'FETCH_HEAD').trim() !== expected.head.sha) {
     return report(core, ['PR head changed during fetch; run CI for the current revision.']);
   }
