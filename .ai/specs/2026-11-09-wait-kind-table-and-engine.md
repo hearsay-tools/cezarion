@@ -245,7 +245,7 @@ process wait checks its PID (`:337-339`).
 | 7 | `run/human-waits.ts:65` | `openHumanAlias` | silent: returns the open human wait, or undefined | nothing | stays silent |
 | 8 | `run/turn-settler.ts:463` | monitoring and `ScheduleWakeup` timer | silent `return` | nothing | stays silent |
 | 9 | `runs/wait-registration-write.ts:17` | store backstop on every `commitWait` of a new open entry | plain `Error('open wait limit reached (16)')` | depends on the caller, below | throws `WaitCapacityError` with the same message |
-| 10 | `run/wait-registry.ts`, `registerCompletionWait` | completion worker or request wait | before 4.2: the store backstop throws out of the turn end | nothing after 4.2 | After 4.2: `waitCapacityAvailable` silently returns undefined on a full list; no commit, reconcile or parked-worker notice; turn settlement parks on the remaining waits, else for the user |
+| 10 | `run/wait-registry.ts`, `registerCompletionWait` | completion worker or request wait | before 4.2: the store backstop throws out of the turn end | nothing after 4.2 | After 4.2: `registerCompletionWait` compares `waitCapacityAvailable` and on a full list returns undefined silently; no commit, reconcile or parked-worker notice; turn settlement parks on the remaining waits, else for the user |
 
 Callers that reach row 9. "Unreachable" means the backstop cannot refuse once the path's own
 compare passed. Between that compare and the commit the path runs only synchronous code. Its one
