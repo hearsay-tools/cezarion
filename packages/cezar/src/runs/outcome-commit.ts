@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 import type { AgentInput, Wait } from '@open-mercato/cezar-contract';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { LAST_WAITS_LIMIT } from '@open-mercato/cezar-contract/waits';
@@ -154,7 +155,7 @@ const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
       ? agentInputSchema.parse({ ...input, deliveredAt: outcome.at, inboxClaim: { ...input.inboxClaim, acknowledgedAt: outcome.at } }) : input);
   },
   answered(run, outcome, out) {
-    const waits = (run.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open' && (!outcome.waitIds || outcome.waitIds.includes(wait.id)));
+    const waits = (run.waits ?? []).filter((wait) => WAIT_KINDS[wait.kind].userAnswers && wait.phase === 'open' && (!outcome.waitIds || outcome.waitIds.includes(wait.id)));
     if (!waits.length) return unchanged(run);
     const deliveredAt = new Date().toISOString();
     out.answered.push(...waits.map((wait) => wait.id));

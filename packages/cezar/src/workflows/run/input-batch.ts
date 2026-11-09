@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../../runs/store.ts';
 import { agentInputBatch } from '../../delegation/input.ts';
@@ -9,7 +10,7 @@ import { chargesBudget, chargesBudgetMessage, resolvedWaits } from '../waits.ts'
 export function pendingConversationBatch(run: RunRecord | undefined, state: ActiveRun, formatAgentInput: (input: AgentInput) => string, answerId?: string): { inputs: AgentInput[]; text: string } | undefined {
   // The answer this batch rides on settles every human wait, so only a CI or timer wait holds it
   // (hearsay-tools/cezarion#1234).
-  if (!run || run.waits?.some(wait => wait.kind !== 'human') || state.inputState.agentInputFlight) return undefined;
+  if (!run || run.waits?.some(wait => !WAIT_KINDS[wait.kind].userAnswers) || state.inputState.agentInputFlight) return undefined;
   const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.inputState.openingAgentInputId && input.id !== answerId),
     input => formatAgentInput(input));
   return batch?.inputs.every(input => input.conversation) ? batch : undefined;

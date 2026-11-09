@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
@@ -442,12 +443,14 @@ export class TurnSettler {
     const open = openWaits(run);
     // The live-workers timer is a fallback, not another poll beside a wait that already supplies
     // its wake (hearsay-tools/cezarion#1268). Keep explicit ScheduleWakeup requests and existing timers.
-    if (via === 'monitoring-line' && open.some(wait => wait.kind !== 'human')) return;
+    if (open.some(wait => via === 'monitoring-line' && !WAIT_KINDS[wait.kind].userAnswers)) return;
     if (open.some(wait => wait.kind === 'timer' && wait.via === via)) return;
     const minutes = this.context.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
-      this.context.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
-      this.host.humanWaits.openHumanAlias(runId, state, 'monitoring-line');
+      if (WAIT_KINDS.timer.timersDisabled) {
+        this.context.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
+        this.host.humanWaits.openHumanAlias(runId, state, 'monitoring-line');
+      }
       return;
     }
     if (this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {

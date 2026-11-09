@@ -11,7 +11,11 @@
  */
 import type { RunRecord, RunStatus, Wait, WaitPhase } from '@open-mercato/cezar-contract';
 import { computeWaitingOn } from '@open-mercato/cezar-contract/waits';
+import { WAIT_KINDS as WAIT_KIND_ROWS, type WaitKindSpec } from './run/wait-kinds.ts';
 import type { RunExitId } from '../runs/run-exits.ts';
+
+export type { WaitKindSpec } from './run/wait-kinds.ts';
+export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindSpec } = WAIT_KIND_ROWS;
 
 /** Who or what fires a trigger. `peer` is another root task of the project (hearsay-tools/cezarion#1995). */
 export type FiredBy = 'human' | 'parent' | 'agent' | 'runner' | 'timer' | 'scheduler' | 'watcher'
@@ -256,47 +260,6 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   { id: 'failed.restart', states: ['failed'], trigger: 'Restart after an interrupted run', firedBy: 'recovery', behavior: 'queued again, or continued (continue.now)', exit: 'requeue', to: ['queued'], via: ['requeueInterruptedRun', 'recoverInterruptedRun'] },
   { id: 'failed.legacy-hold', states: ['failed'], trigger: 'A row a schema-7 cezar stored: failed with autoResumeAt', firedBy: 'recovery', behavior: 'waiting on the hold', exit: 'hold', to: ['waiting:usage-limit'], via: ['store:reconcileLoadedRun', 'store:restoreLoadedUsageLimitHold', 'exits:applyExit'] },
 ];
-
-/** Each wait kind: its deadline, whether it keeps a slot while it is the top wait, who resolves it. */
-export type WaitKindSpec = {
-  deadline: 'required' | 'agent-only' | 'none';
-  keepsSlot: boolean;
-  resolves: readonly { trigger: string; firedBy: FiredBy }[];
-  cancels: readonly string[];
-  humanOnly?: string;
-};
-
-const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
-
-export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindSpec } = {
-  pr: { deadline: 'required', keepsSlot: true, cancels: ENDS_WAITS, resolves: [
-    { trigger: 'checks settle or the head changes; a merge wait: merged, closed or a conflict; merge_or_blocked also resolves when no merge remains pending', firedBy: 'watcher' },
-    { trigger: 'the deadline (1 to 7,200 s, default 1,800) or a fatal gh error', firedBy: 'watcher' },
-  ] },
-  timer: { deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the wake budget is spent at its deadline'], resolves: [
-    { trigger: 'the deadline (60 to 7,200 s)', firedBy: 'timer' },
-  ] },
-  process: { deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the process is not signalled'], resolves: [
-    { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
-  ] },
-  subagent: { deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the runner starts a parent turn itself', 'every child already ended at the turn end', 'the deadline with the wake budget spent'], resolves: [
-    { trigger: 'every child ended and no parent turn started within 15 s', firedBy: 'runner' },
-    { trigger: 'the deadline, 30 minutes after the last child event', firedBy: 'timer' },
-    { trigger: 'a restart or a lost session: the children stopped', firedBy: 'recovery' },
-  ] },
-  peer: { deadline: 'required', keepsSlot: false, cancels: [...ENDS_WAITS, 'the wake budget is spent at its resolution'], resolves: [
-    { trigger: 'a message of any kind from a named peer', firedBy: 'peer' },
-    { trigger: 'a named peer settles or is deleted', firedBy: 'watcher' },
-    { trigger: 'the deadline (1 to 1,800 s, default 600)', firedBy: 'timer' },
-  ] },
-  worker: { deadline: 'agent-only', keepsSlot: false, cancels: [...ENDS_WAITS, 'the parent settles'], resolves: [
-    { trigger: 'the workers report outcomes or the requests get replies, as its mode says', firedBy: 'worker' },
-    { trigger: 'the deadline of an agent wait; Cezar\'s completion wait has none', firedBy: 'timer' },
-  ] },
-  human: { deadline: 'none', keepsSlot: false, humanOnly: 'The question is the user\'s gate.',
-    cancels: ['the agent\'s own wait replaces Cezar\'s', 'a done in the same turn', 'Stop', 'Finish', 'an authored step timeoutMs'],
-    resolves: [{ trigger: 'an answer; the parent\'s for a routed worker question', firedBy: 'human' }] },
-};
 
 /** The phases a wait entry moves through. Their writes go through RunStore.commitOutcome (hearsay-tools/cezarion#1805). */
 export const WAIT_PHASES: { readonly [P in WaitPhase]: readonly { to: WaitPhase; firedBy: readonly FiredBy[] }[] } = {

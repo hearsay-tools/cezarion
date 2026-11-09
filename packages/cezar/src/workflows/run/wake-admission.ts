@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
@@ -407,7 +408,7 @@ export class WakeAdmission {
 /** Native subagents live in the session, so any park with a subagent wait open keeps the session
  *  and a slot, whichever wait ranks first (hearsay-tools/cezarion#2431). */
 function holdsNativeSubagents(run: RunRecord): boolean {
-  return openWaits(run).some((wait) => wait.kind === 'subagent');
+  return openWaits(run).some((wait) => WAIT_KINDS[wait.kind].holdsSession);
 }
 
 /** Whether the park keeps the session and a slot. Live children hold them even when their wait
@@ -423,5 +424,8 @@ function parkHold(run: RunRecord, state: ActiveRun, top: WaitingOn['kind'] | und
 
 /** A CI, process or timer park keeps its slot, and so does a wake due now with nothing open. */
 function parkTopKeepsSlot(run: RunRecord, top: WaitingOn['kind'] | undefined): boolean {
-  return top === 'subagents' || top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+  if (top === undefined) return resolvedWaits(run).length > 0;
+  if (top === 'human' || top === 'usage-limit') return false;
+  const kind = top === 'workers' ? 'worker' : top === 'peers' ? 'peer' : top === 'subagents' ? 'subagent' : top;
+  return WAIT_KINDS[kind].keepsSlot;
 }
