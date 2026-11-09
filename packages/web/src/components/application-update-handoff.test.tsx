@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -14,6 +14,18 @@ import { useApplicationUpdate } from './use-application-update'
 // This helper reads Node process state. Load it through Node, as the child does,
 // so Vite does not transform its builtin imports into synthetic binding adapters.
 const { measurementEnabled } = createRequire(import.meta.url)('../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs') as typeof import('../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs')
+
+async function flushCoverage(child: ChildProcess, events: Array<{ event: string }>, bodyFailed: boolean) {
+  if (!measurementEnabled() || !child.connected) return
+  try {
+    await new Promise<void>((resolve, reject) => child.send('quality:flush', error => error ? reject(error) : resolve()))
+    // bound: a coverage flush must acknowledge before cleanup terminates the child.
+    await waitFor(() => expect(events.some(e => e.event === 'quality:flushed')).toBe(true), { timeout: 5000 })
+  } catch (error) {
+    // Preserve the original assertion. A successful body still requires a flush.
+    if (!bodyFailed) throw error
+  }
+}
 
 // A separate Node process keeps the real service/server/WS stack out of jsdom.
 // Only npm preparation and helper arming are fixture seams; the hook, HTTP and
@@ -85,15 +97,7 @@ for (const scenario of ['connected', 'disconnected', 'failed-arm'] as const) it(
   } finally {
     unmount?.(); socket?.close(); vi.unstubAllGlobals(); sessionStorage.clear()
     try {
-      if (measurementEnabled() && child.connected) {
-        await new Promise<void>((resolve, reject) => child.send('quality:flush', error => error ? reject(error) : resolve()))
-        // bound: a coverage flush must acknowledge before cleanup terminates the child.
-        await waitFor(() => expect(events.some(e => e.event === 'quality:flushed')).toBe(true), { timeout: 5000 })
-      }
-    } catch (error) {
-      // Keep the original assertion when cleanup also fails. A successful body
-      // still requires a flush acknowledgement for a complete measurement.
-      if (!bodyFailed) throw error
+      await flushCoverage(child, events, bodyFailed)
     } finally {
       child.kill('SIGTERM')
       if (child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()))

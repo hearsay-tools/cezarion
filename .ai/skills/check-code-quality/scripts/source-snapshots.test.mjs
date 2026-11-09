@@ -173,7 +173,7 @@ test('choose', () => { expect(choose(true)).toBe('yes'); appendFileSync('ran.txt
   const report = JSON.parse(output);
   assert.equal(status, 0, log + output);
   assert.deepEqual(readFileSync(join(f.cwd, 'ran.txt'), 'utf8').trim().split('\n').sort(), ['node', 'vitest']);
-  const fn = report.files.find(file => file.file === 'source.mjs').functions[0];
+  const fn = report.files.find(file => file.file === 'source.ts').functions[0];
   assert.equal(fn.coverage.percent, 100);
   assert.equal(fn.coverage.calls, 2);
   assert.equal(report.measurement.collections.length, 2);
