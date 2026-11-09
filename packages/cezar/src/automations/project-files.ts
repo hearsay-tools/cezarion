@@ -1,3 +1,4 @@
+import { mergeAppendOnly } from '../merged-streams.ts';
 import { automationDefinitionSchema, type AutomationDefinition } from './types.ts';
 
 /** Files arrive in precedence order. Unknown top-level keys survive a counterpart write. */
@@ -25,20 +26,16 @@ export function mergeProjectAutomationFiles<T>(filename: string, files: readonly
   return result as T;
 }
 
-/** Keep raw identities for deduplication. Only page reads project two positive sequence domains. */
+/** Deduplicate by raw identity, then replay chronologically (`mergeAppendOnly`). A page read over two
+ *  logs numbers the merged rows 1..n in that order: the cursor stays positive, and a row appended later
+ *  (newest time, highest raw seq) only extends it. One log alone keeps its stored sequences. */
 export function mergeProjectAutomationLog<T>(filename: string, sources: readonly T[][], page = false): T[] {
-  const seen = new Set<unknown>();
-  const kept: T[][] = [];
-  const project = page && filename === 'automation-log.ndjson' && sources.slice(1).some(rows => rows.length > 0);
-  for (const [index, rows] of sources.entries()) {
-    const key = (row: T) => {
-      const record = row as Record<string, unknown>;
-      return filename === 'automation-receipts.ndjson' ? `${record.receiptId}:${record.status}:${record.updatedAt}` : `${record.automationId}:${record.seq}`;
-    };
-    const missing = rows.filter(row => !seen.has(key(row)));
-    kept.push(project ? missing.map(row => ({ ...row, seq: Number((row as Record<string, unknown>).seq) * 2 - (index > 0 ? 1 : 0) })) : missing);
-    rows.forEach(row => seen.add(key(row)));
-  }
-  const merged = kept.reverse().flat();
-  return project ? merged.sort((a, b) => Number((a as Record<string, unknown>).seq) - Number((b as Record<string, unknown>).seq)) : merged;
+  const field = (row: T, key: string) => (row as Record<string, unknown>)[key];
+  const receipts = filename === 'automation-receipts.ndjson';
+  const merged = mergeAppendOnly(sources,
+    row => receipts ? `${field(row, 'receiptId')}:${field(row, 'status')}:${field(row, 'updatedAt')}` : `${field(row, 'automationId')}:${field(row, 'seq')}`,
+    row => String(field(row, receipts ? 'updatedAt' : 'ts')),
+    receipts ? undefined : (a, b) => Number(field(a, 'seq')) - Number(field(b, 'seq')));
+  const project = page && !receipts && sources.slice(1).some(rows => rows.length > 0);
+  return project ? merged.map((row, index) => ({ ...row, seq: index + 1 })) : merged;
 }

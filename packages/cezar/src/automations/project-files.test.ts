@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AutomationStore } from './store.ts';
+import { retryAutomationLogReceipt, type AutomationLogRetryInput } from '../server/automation-log-retry.ts';
 
 const input = { name: 'Review', enabled: false, events: ['pull_request.opened'] as const,
   intervalSeconds: 300, filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review {{github.url}}' } };
@@ -109,5 +110,31 @@ describe('project automation sources', () => {
     expect(open().receipts().map(row => row.status)).toEqual(['reserved', 'launched']);
     expect(open().latestReceipts().get('one:event')?.status).toBe('launched');
     expect(readFileSync(join(root('squawk'), 'automation-receipts.ndjson'), 'utf8')).toBe(bytes);
+  });
+
+  it('takes the newest receipt transition across directories, so a launched fallback receipt is not retried', async () => {
+    seed('cezar', ['one']);
+    const receipt = { receiptKey: 'one:event', receiptId: 'receipt', automationId: 'one', eventId: 'event', revision: 1, observedAt: '2026-11-01T00:00:00Z' };
+    writeFileSync(join(root('cezar'), 'automation-receipts.ndjson'), JSON.stringify({ ...receipt, status: 'launch-error', error: 'boom', updatedAt: '2026-11-01T00:00:00Z' }) + '\n');
+    mkdirSync(root('squawk'), { recursive: true });
+    writeFileSync(join(root('squawk'), 'automation-receipts.ndjson'), JSON.stringify({ ...receipt, status: 'launched', runId: 'already-launched', updatedAt: '2026-11-02T00:00:00Z' }) + '\n');
+    const store = open();
+    expect(store.latestReceipts().get('one:event')).toMatchObject({ status: 'launched', runId: 'already-launched' });
+    const retried = await retryAutomationLogReceipt({ project: { automationStore: store }, receiptId: 'receipt' } as unknown as AutomationLogRetryInput);
+    expect(retried).toEqual({ status: 409, body: { error: 'receipt is not retryable' } });
+    expect(store.receipts()).toHaveLength(2);
+  });
+
+  it('pages merged log rows newest first in recorded time across directories', () => {
+    seed('cezar', ['legacy']); seed('squawk', ['fallback']);
+    const row = (automationId: string, seq: number, day: number) => JSON.stringify({ automationId, revision: 1, seq, ts: `2026-11-0${day}T00:00:00.000Z`, result: 'skipped', reason: `${automationId}-${day}` });
+    writeFileSync(join(root('cezar'), 'automation-log.ndjson'), [row('legacy', 1, 1), row('legacy', 2, 3)].join('\n') + '\n');
+    writeFileSync(join(root('squawk'), 'automation-log.ndjson'), row('fallback', 1, 2) + '\n');
+    const store = open();
+    expect(store.logs().map(entry => entry.reason)).toEqual(['legacy-3', 'fallback-2', 'legacy-1']);
+    const pages: string[] = [];
+    let cursor: number | undefined;
+    for (let page = store.logs({ limit: 1 }); page.length; page = store.logs({ cursor, limit: 1 })) { pages.push(page[0]!.reason!); cursor = page[0]!.seq; }
+    expect(pages).toEqual(['legacy-3', 'fallback-2', 'legacy-1']);
   });
 });

@@ -1,4 +1,5 @@
 import { dataReadDirs } from '../project-paths.ts';
+import { mergeAppendOnly } from '../merged-streams.ts';
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { voiceOutcomeSchema, type VoiceDecision, type VoiceOutcome } from '@open-mercato/cezar-contract/voice';
@@ -71,7 +72,7 @@ function readLogTail(path: string): string[] {
  * so the server hands it what just happened ("yes" after a proposal needs that). The first `load`
  * for a project seeds it from that project's decision log, so a restart does not empty it.
  */
-type ParsedLogLine = { type?: unknown; decisionId: string; sentence?: unknown; decision?: unknown; outcome?: unknown };
+type ParsedLogLine = { type?: unknown; at?: unknown; decisionId: string; sentence?: unknown; decision?: unknown; outcome?: unknown };
 
 /** One log line as replay reads it, or undefined when it is not an object with a decision ID. */
 function parseLogLine(line: string): ParsedLogLine | undefined {
@@ -92,28 +93,15 @@ export class RecentVoiceActions {
   load(projectId: string, dataDir: string): void {
     if (this.loaded.has(projectId)) return;
     this.loaded.add(projectId);
-    const seen = new Set<string>();
     const sources = dataReadDirs(dataDir).map(directory => {
-      try { return readLogTail(join(directory, 'voice', 'decisions.ndjson')); }
+      try { return readLogTail(join(directory, 'voice', 'decisions.ndjson')).flatMap(line => parseLogLine(line) ?? []); }
       catch { return []; }
     });
-    const entries = sources.map(lines => {
-      const current: Array<{ line: string; key: string }> = [];
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line) as VoiceLogLine;
-          const key = `${entry.decisionId}:${entry.type}`;
-          if (!seen.has(key)) current.push({ line, key });
-        } catch { /* The existing per-line reader salvages valid lines only. */ }
-      }
-      current.forEach(entry => seen.add(entry.key));
-      return current;
-    });
-    // Decisions from both files first, then outcomes: a fallback outcome may belong to the legacy copy
-    // of its decision, which loads after the fallback lines, and must not be lost before it exists.
-    const lines = entries.reverse().flat().map(({ line }) => parseLogLine(line));
+    // Legacy wins a duplicate (decisionId, type); survivors replay in recorded time across both logs.
+    // Decisions first, then outcomes: an outcome may belong to the other directory's decision.
+    const lines = mergeAppendOnly(sources, entry => `${entry.decisionId}:${String(entry.type)}`, entry => typeof entry.at === 'string' ? entry.at : undefined);
     for (const type of ['decision', 'outcome'] as const) {
-      for (const entry of lines) if (entry?.type === type) this.replay(projectId, entry);
+      for (const entry of lines) if (entry.type === type) this.replay(projectId, entry);
     }
   }
 

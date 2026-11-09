@@ -12,10 +12,16 @@ On by default; only exact `CEZ_AUTOMATIONS=0` opts out, and the gate middleware 
 
 ## Project directory log reads
 
-With both log sources present, page reads use positive cursor domains: legacy
-sequence `n` becomes `2n`, and fallback `n` becomes `2n-1`. Pages sort by that
-cursor after duplicate automation/sequence keys prefer legacy. Appending legacy
-entries keeps existing cursors stable. Legacy-only pages keep their sequences.
+Both log sources and both receipt sources merge through `mergeAppendOnly`
+(`merged-streams.ts`): a duplicate key (automation and sequence for log rows;
+receipt, status and update time for receipts) keeps the legacy row, then the
+survivors replay in recorded time (`ts`, `updatedAt`), so the latest receipt and
+the newest log row are the newest events whichever directory holds them. With
+both log sources present, a page read numbers the merged rows 1..n in that order
+and uses that number as the positive cursor; a later append (newest time, highest
+raw sequence) only extends it, so existing cursors stay stable. Compaction that
+drops the oldest legacy rows can shift merged cursors down, which repeats rows on
+an open page but never skips one. Legacy-only pages keep their stored sequences.
 The projection is read-only: appends and compaction retain original positive
 legacy sequences. Compaction rewrites legacy receipts and logs only. Fallback
 records remain readable from their source and are never copied by compaction.
