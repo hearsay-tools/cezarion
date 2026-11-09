@@ -1,5 +1,5 @@
 import { warnRegistrationRefused, type WaitEngine } from './wait-engine.ts';
-import { WAIT_KINDS } from './wait-kinds.ts';
+import { WAIT_KINDS, waitRequestRow } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { registrationIdentity, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
@@ -249,22 +249,23 @@ export class WaitRegistry {
     // tool's own codes. It answers its own repeat, so it is checked before the capacity below.
     if (isDelegationWait(parsed)) return this.registerDelegation(runId, parsed, run, registration, refuse);
     const turnId = active.waitIdentity.ensureCiTurn();
-    if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId, registration);
+    if (waitRequestRow(parsed).registration === 'process') return this.registerProcessWait(runId, active, run, parsed as Extract<CezarWaitRequest, { kind: 'process' }>, via, turnId, registration);
     const existing = identicalWait(run.waits ?? [], parsed, turnId);
     if (existing) return repeatRegistration(this.context.store, runId, existing, WAIT_KINDS[parsed.kind].requestedTimeout(parsed), registration) as typeof existing;
     // Counted as the store counts them, so a registration accepted here is never refused there.
     this.host.waitEngine.compare(run, refuse);
-    if (parsed.kind === 'timer') {
+    if (waitRequestRow(parsed).registration === 'timer') {
       this.checkAutomaticWaitAdmission('timer', runId, refuse);
       const now = Date.now();
-      const wait = timerWaitEntry(parsed, via, turnId, now);
+      const wait = timerWaitEntry(parsed as Extract<CezarWaitRequest, { kind: 'timer' }>, via, turnId, now);
       return this.host.waitEngine.open(runId, active, wait, { withdraw: 'before-commit', receipt: registration, onCommitFailure: 'persistence', arm: 'watch', park: 'boundary', return: 'stored' }).wait!;
     }
-    const key = `${runId}\n${normalizePrUrl(parsed.pr)}\n${parsed.until}\n${parsed.wake_on_conflict}`;
+    const pr = parsed as Extract<CezarWaitRequest, { kind: 'pr' }>;
+    const key = `${runId}\n${normalizePrUrl(pr.pr)}\n${pr.until}\n${pr.wake_on_conflict}`;
     const pending = this.ciRegistrations.get(key);
     if (pending) {
       const wait = await pending.promise;
-      return repeatRegistration(this.context.store, runId, wait, parsed.timeout_seconds, registration) as typeof wait;
+      return repeatRegistration(this.context.store, runId, wait, pr.timeout_seconds, registration) as typeof wait;
     }
     const abort = new AbortController();
     const signal = capabilitySignal ? AbortSignal.any([abort.signal, capabilitySignal]) : abort.signal;
@@ -274,17 +275,17 @@ export class WaitRegistry {
         if (signal.aborted) refuse('registration_aborted');
         if (active.waitIdentity.ciTurnId !== turnId) refuse('turn_changed');
       };
-      const identity = await this.host.ciSupervisor().resolve(parsed.pr, signal).catch(error => {
+      const identity = await this.host.ciSupervisor().resolve(pr.pr, signal).catch(error => {
         assertLookupCurrent();
         throw error;
       });
       assertLookupCurrent();
       // The same PR may have registered while this lookup was in flight under another spelling.
-      const repeated = identicalWait(this.context.store.getRun(runId)?.waits ?? [], parsed, turnId);
-      if (repeated && repeated.kind !== 'process') return repeatRegistration(this.context.store, runId, repeated, parsed.timeout_seconds, registration) as PrWaitEntry | TimerWaitEntry;
+      const repeated = identicalWait(this.context.store.getRun(runId)?.waits ?? [], pr, turnId);
+      if (repeated && !WAIT_KINDS.process.is(repeated)) return repeatRegistration(this.context.store, runId, repeated, pr.timeout_seconds, registration) as PrWaitEntry | TimerWaitEntry;
       this.host.waitEngine.compare(this.context.store.getRun(runId) ?? {}, refuse);
       const now = Date.now();
-      const wait = prWaitEntry(identity, parsed, via, generation, turnId, now);
+      const wait = prWaitEntry(identity, pr, via, generation, turnId, now);
       return this.host.waitEngine.open(runId, active, wait, { withdraw: 'before-commit', receipt: registration, onCommitFailure: 'persistence', arm: 'watch', park: 'boundary', return: 'stored' }).wait!;
     })();
     this.ciRegistrations.set(key, { runId, abort, promise });
@@ -296,8 +297,11 @@ export class WaitRegistry {
     registration: RegistrationIdentity | undefined, refuse: (code: WaitErrorCode) => never): WorkerWaitEntry | PeerWaitEntry {
       if (!run.delegation || run.delegation.role === 'invalid') refuse('denied_scope');
       try {
-        return parsed.kind === 'peer' ? this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait', registration)
-          : this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait', registration);
+        if (waitRequestRow(parsed).registration === 'peer') {
+          const peer = parsed as Extract<CezarWaitRequest, { kind: 'peer' }>;
+          return this.registerPeerWait(runId, { peerIds: peer.peer_ids, timeoutSeconds: peer.timeout_seconds }, 'cezar_wait', registration);
+        }
+        return this.registerWorkerListWait(runId, workerListTarget(parsed as Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>), 'cezar_wait', registration);
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'duplicate_deadline') throw error;
         return refuse(delegationWaitRefusal(error, () => this.host.executionBlockedByRootFinish(run))); }
@@ -333,7 +337,7 @@ export class WaitRegistry {
     const live = recordedProcessLive({ pid: request.pid });
     const startToken = live ? processStartToken(request.pid) : undefined;
     const existing = identicalWait(run.waits ?? [], request, turnId, { ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }) });
-    if (existing?.kind === 'process') return repeatRegistration(this.context.store, runId, existing, request.timeout_seconds, registration) as ProcessWaitEntry;
+    if (existing && WAIT_KINDS.process.is(existing)) return repeatRegistration(this.context.store, runId, existing, request.timeout_seconds, registration) as ProcessWaitEntry;
     this.host.waitEngine.compare(run, refuse);
     const now = Date.now();
     const wait = processWaitEntry(request, via, turnId, now, startToken, exitFile);

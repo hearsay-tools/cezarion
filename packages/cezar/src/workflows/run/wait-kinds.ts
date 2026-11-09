@@ -44,6 +44,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   watch: 'ci' | 'process' | 'none' | 'worker' | 'peer' | 'subagent' | 'timer';
   answerKind: (wait: Wait) => Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' | undefined;
   hasDeadline: (wait: Wait) => boolean;
+  registration: 'timer' | 'pr' | 'process' | 'worker-list' | 'peer' | 'none';
   requestKinds: readonly CezarWaitRequest['kind'][];
   delegation: boolean;
 
@@ -120,7 +121,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     requestedTimeout: request => 'timeout_seconds' in request ? request.timeout_seconds : undefined,
     answerKind: () => 'pr',
     hasDeadline: () => true,
-    requestKinds: ['pr'],
+    registration: 'pr', requestKinds: ['pr'],
     delegation: false,
     userAnswers: false, holdsConversationInput: true, runnerResumeCancels: [],
     chargesWake: false, refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
@@ -155,7 +156,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicateMonitoring: (waits, via) => waits.some(wait => wait.phase === 'open' && wait.kind === 'timer' && wait.via === via),
     answerKind: () => 'timer',
     hasDeadline: () => true,
-    requestKinds: ['timer'],
+    registration: 'timer', requestKinds: ['timer'],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: ['open'],
     chargesWake: true, refusesSpentBudget: true, holdsSession: false, cancellable: true, timersDisabled: true,
@@ -180,7 +181,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     requestedTimeout: request => 'timeout_seconds' in request ? request.timeout_seconds : undefined,
     answerKind: () => 'process',
     hasDeadline: () => true,
-    requestKinds: ['process'],
+    registration: 'process', requestKinds: ['process'],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: true, refusesSpentBudget: true, holdsSession: false, cancellable: true, timersDisabled: true,
@@ -206,7 +207,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     requestedTimeout: () => undefined,
     answerKind: () => undefined,
     hasDeadline: () => true,
-    requestKinds: [],
+    registration: 'none', requestKinds: [],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: ['open', 'resolved'],
     chargesWake: 'timeout', refusesSpentBudget: false, holdsSession: true, cancellable: true, timersDisabled: false,
@@ -234,7 +235,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicatePeer: identicalPeerWait,
     answerKind: () => 'peer',
     hasDeadline: () => true,
-    requestKinds: ['peer'],
+    registration: 'peer', requestKinds: ['peer'],
     delegation: true,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: true, refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
@@ -264,7 +265,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicateWorker: identicalWorkerWait,
     answerKind: wait => 'requestIds' in wait && wait.requestIds ? 'request' : 'worker',
     hasDeadline: wait => 'deadline' in wait && wait.deadline !== undefined,
-    requestKinds: ['worker', 'request'],
+    registration: 'worker-list', requestKinds: ['worker', 'request'],
     delegation: true,
     workerListTarget: request => ({ ...(request.kind === 'worker' ? { workerIds: request.worker_ids } : { requestIds: request.request_ids }), ...(request.mode === undefined ? {} : { mode: request.mode }), timeoutSeconds: request.timeout_seconds }),
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
@@ -296,7 +297,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicateAsk: (waits, answering) => WAIT_KINDS.human.selectOpen(waits).find(wait => wait.source !== 'cezar' && (answering === undefined || wait.askSeq !== answering)),
     answerKind: () => undefined,
     hasDeadline: () => false,
-    requestKinds: [],
+    registration: 'none', requestKinds: [],
     delegation: false,
     userAnswers: true, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: false, refusesSpentBudget: false, holdsSession: false, cancellable: 'unshown', timersDisabled: false,
