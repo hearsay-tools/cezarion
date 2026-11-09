@@ -129,3 +129,19 @@ test('comparison reports real changes and rejects incompatible files and malform
   before.scoringEvidence.report.files[file].mutants[0].status = 'Unmeasured';
   await assert.rejects(m.cli(['--rescore', 'before'], deps, new EventEmitter()), /scoring evidence/);
 });
+
+test('measurement preflight preserves the documented output on a fresh managed cache', t => {
+  const { preflight } = require('./mutants-file-results.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mutants-fresh-cache-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const originalHome = process.env.HOME;
+  process.env.HOME = dir;
+  t.after(() => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; });
+  const out = path.join(dir, '.cache/cez/mutants/result.json');
+  preflight({ file, out }, {});
+  assert.equal(fs.statSync(path.dirname(out)).isDirectory(), true);
+  assert.equal(fs.existsSync(out), false);
+  const arbitrary = path.join(dir, 'arbitrary/result.json');
+  assert.throws(() => preflight({ file, out: arbitrary }, {}));
+  assert.equal(fs.existsSync(path.dirname(arbitrary)), false);
+});

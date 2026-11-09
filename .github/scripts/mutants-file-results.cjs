@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const USAGE = 'Usage: mutants-file.cjs packages/<pkg>/src/<file>.ts [--tests <files>] [--compare <json>] [--out <json>] [--concurrency <n>]\n  measures the committed HEAD\n  mutants-file.cjs --rescore <result.json> [--out <new.json>]\n  mutants-file.cjs --compare-results <before.json> <after.json> [--out <delta.json>]';
 const sourceFile = file => typeof file === 'string' && /^packages\/[^/]+\/src\/.+\.tsx?$/.test(file) && !file.split('/').includes('..');
 const keys = ['killed', 'timeout', 'survived', 'noCoverage', 'error', 'ignored'];
@@ -45,11 +46,19 @@ function validateOutput(out, inputs) {
   }
   fs.accessSync(dest ? out : path.dirname(out), dest ? fs.constants.W_OK : fs.constants.W_OK | fs.constants.X_OK);
 }
+/** Scratch setup historically creates this managed parent, including on a fresh cache. */
+function prepareMeasurementOutput(out) {
+  const cache = path.join(os.homedir(), '.cache/cez/mutants');
+  if (!out.endsWith(path.sep) && path.dirname(path.resolve(out)) === cache) fs.mkdirSync(cache, { recursive: true });
+}
 function preflight(opts, deps) {
   const inputs = opts.compareResults ?? [opts.rescore ?? opts.compare].filter(Boolean);
   const results = inputs.map(name => validateResult(deps.readJson(name)));
   if (opts.file && results.some(result => result.file !== opts.file)) throw new Error('Comparison needs the same result version and file');
-  if (opts.out) (deps.validateOutput ?? validateOutput)(opts.out, inputs);
+  if (opts.out) {
+    if (opts.file) prepareMeasurementOutput(opts.out);
+    (deps.validateOutput ?? validateOutput)(opts.out, inputs);
+  }
   return results;
 }
 function point(p, zeroBased) {

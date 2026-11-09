@@ -94,7 +94,8 @@ the live repository or cockpit. Contract files also run their direct server and 
 mutants (code that runs at import) and counts them; the consumer pass skips them. The command measures the committed HEAD, including committed tests, rather than uncommitted edits.
 It prints phase changes and progress every 30 seconds: completed/total mutants and elapsed time.
 Preparation and the initial test run show an unknown count until Stryker has a mutation plan.
-It validates `--compare` inputs and the `--out` destination before creating the scratch checkout;
+It validates `--compare` inputs and the `--out` destination before creating the scratch checkout.
+For measurement, the managed `~/.cache/cez/mutants` output parent is created when absent;
 validation does not reserve the destination, so a later filesystem change can still make the write fail.
 Use `--compare ~/.cache/cez/mutants/earlier.json` to compare runs of the same result version and file.
 
