@@ -1,4 +1,3 @@
-import { measurementEnabled } from '../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -11,6 +10,10 @@ import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from '@/api/query-client'
 import { queryKeys } from '@/api/queries'
 import { useApplicationUpdate } from './use-application-update'
+
+// This helper reads Node process state. Load it through Node, as the child does,
+// so Vite does not transform its builtin imports into synthetic binding adapters.
+const { measurementEnabled } = createRequire(import.meta.url)('../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs') as typeof import('../../../../.ai/skills/check-code-quality/scripts/source-snapshots.mjs')
 
 // A separate Node process keeps the real service/server/WS stack out of jsdom.
 // Only npm preparation and helper arming are fixture seams; the hook, HTTP and
