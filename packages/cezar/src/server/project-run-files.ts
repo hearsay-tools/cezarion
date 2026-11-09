@@ -1,3 +1,5 @@
+import { artifactDirectory } from '../artifacts/store.ts';
+import type { RunStore } from '../runs/store.ts';
 import type { MiddlewareHandler } from 'hono';
 import type { ProjectApiEnv } from './server.ts';
 
@@ -9,4 +11,9 @@ export function protectFallbackRun(kind: 'record' | 'worktree'): MiddlewareHandl
     if (error) return context.json({ error }, 409);
     return next();
   };
+}
+
+/** All artifact routes bind their reads to the directory that owns the selected run. */
+export function runArtifactDirectory(store: Pick<RunStore, 'sourceDataDir'>, runId: string): string {
+  return artifactDirectory(store.sourceDataDir(runId), runId);
 }

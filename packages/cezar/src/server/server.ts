@@ -1,4 +1,4 @@
-import { protectFallbackRun } from './project-write-guards.ts';
+import { protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from '../project-paths.ts';
 import { productIdentity } from '../home/identity.ts';
@@ -188,7 +188,7 @@ import {
 } from '@open-mercato/cezar-contract/events';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract/artifacts';
-import { artifactDirectory, listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/store.ts';
+import { listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../workflows/run.ts';
 import type { PastedContent } from '../workflows/run/types.ts';
@@ -3793,13 +3793,13 @@ export function createApp(deps: ServerDeps) {
       const { store } = c.get('project');
       const id = c.req.valid('param').id;
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      return c.json({ artifacts: await listArtifacts(artifactDirectory(store.sourceDataDir(id), id), id) });
+      return c.json({ artifacts: await listArtifacts(runArtifactDirectory(store, id), id) });
     })
     .get('/runs/:id/artifacts/:artifactId', paramZodValidator(artifactParamsSchema), async (c) => {
       const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const entry = await readArtifact(artifactDirectory(store.sourceDataDir(id), id), id, artifactId);
+      const entry = await readArtifact(runArtifactDirectory(store, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.json(artifactPreview(entry.metadata, entry.bytes));
     })
@@ -3807,7 +3807,7 @@ export function createApp(deps: ServerDeps) {
       const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const artifact = await readArtifactMetadata(artifactDirectory(store.sourceDataDir(id), id), id, artifactId);
+      const artifact = await readArtifactMetadata(runArtifactDirectory(store, id), id, artifactId);
       if (!artifact) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.json({ artifact });
     })
@@ -3815,7 +3815,7 @@ export function createApp(deps: ServerDeps) {
       const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const entry = await readArtifact(artifactDirectory(store.sourceDataDir(id), id), id, artifactId);
+      const entry = await readArtifact(runArtifactDirectory(store, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.body(new Uint8Array(entry.bytes).buffer, 200, {
         'content-type': 'application/octet-stream', 'x-content-type-options': 'nosniff',
@@ -3827,7 +3827,7 @@ export function createApp(deps: ServerDeps) {
       const { store } = c.get('project');
       const { id, artifactId } = c.req.valid('param');
       if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
-      const entry = await readArtifact(artifactDirectory(store.sourceDataDir(id), id), id, artifactId);
+      const entry = await readArtifact(runArtifactDirectory(store, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       const mime = rasterMime(entry.metadata.name);
       if (!mime) return c.json({ error: 'Only raster images can be served inline.' }, 409);
