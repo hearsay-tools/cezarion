@@ -17,6 +17,7 @@ export type WaitKindSpec = {
 const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
 
 export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
+  watch: 'ci' | 'process' | 'none' | 'worker' | 'peer' | 'subagent' | 'timer';
   answerKind: (wait: Wait) => Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' | undefined;
   hasDeadline: (wait: Wait) => boolean;
   requestKinds: readonly CezarWaitRequest['kind'][];
@@ -66,7 +67,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
 }[K];
 
 export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
-  pr: { entry: prWaitEntry,
+  pr: { watch: 'ci', entry: prWaitEntry,
     duplicate: (wait, request) => request.kind === 'pr' && wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr) && wait.until === (request.until ?? 'checks') && wait.wakeOnConflict === (request.wake_on_conflict ?? true),
     canonicalize: request => { if (request.kind === 'pr') request.pr = normalizePrUrl(request.pr); },
     repeatTimeout: wait => 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined,
@@ -81,7 +82,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'checks settle or the head changes; a merge wait: merged, closed or a conflict; merge_or_blocked also resolves when no merge remains pending', firedBy: 'watcher' },
     { trigger: 'the deadline (1 to 7,200 s, default 1,800) or a fatal gh error', firedBy: 'watcher' },
   ] },
-  timer: { entry: timerWaitEntry,
+  timer: { watch: 'timer', entry: timerWaitEntry,
     monitoringEntry: monitoringTimerEntry,
     duplicate: (wait, request, turnId) => request.kind === 'timer' && wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId,
     canonicalize: () => {},
@@ -97,7 +98,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the wake budget is spent at its deadline'], resolves: [
     { trigger: 'the deadline (60 to 7,200 s)', firedBy: 'timer' },
   ] },
-  process: { entry: processWaitEntry,
+  process: { watch: 'process', entry: processWaitEntry,
     duplicate: (wait, request, _turnId, context) => request.kind === 'process' && wait.kind === 'process' && wait.pid === request.pid && wait.startToken === context.startToken && wait.exitFile === context.exitFile,
     canonicalize: () => {},
     repeatTimeout: wait => 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined,
@@ -111,7 +112,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the process is not signalled'], resolves: [
     { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
   ] },
-  subagent: { entry: subagentWaitEntry,
+  subagent: { watch: 'subagent', entry: subagentWaitEntry,
     duplicate: () => false,
     canonicalize: () => {},
     repeatTimeout: wait => 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined,
@@ -127,7 +128,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline, 30 minutes after the last child event', firedBy: 'timer' },
     { trigger: 'a restart or a lost session: the children stopped', firedBy: 'recovery' },
   ] },
-  peer: { entry: peerWaitBuilder,
+  peer: { watch: 'peer', entry: peerWaitBuilder,
     duplicate: () => false,
     canonicalize: () => {},
     repeatTimeout: wait => 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined,
@@ -144,7 +145,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'a named peer settles or is deleted', firedBy: 'watcher' },
     { trigger: 'the deadline (1 to 1,800 s, default 600)', firedBy: 'timer' },
   ] },
-  worker: { entry: workerWaitBuilder,
+  worker: { watch: 'worker', entry: workerWaitBuilder,
     completionEntry: completionWaitEntry,
     duplicate: () => false,
     canonicalize: request => { if ((request.kind === 'worker' || request.kind === 'request') && request.mode === undefined) request.mode = 'any'; },
@@ -162,7 +163,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the workers report outcomes or the requests get replies, as its mode says', firedBy: 'worker' },
     { trigger: 'the deadline of an agent wait; Cezar\'s completion wait has none', firedBy: 'timer' },
   ] },
-  human: { entry: askWaitEntry,
+  human: { watch: 'none', entry: askWaitEntry,
     aliasEntry: humanAliasEntry,
     recoveredEntry: recoveredAskEntry,
     aliasSource: via => via === 'budget' || via === 'no-wait' || via === 'completion' ? 'cezar' : 'agent',
