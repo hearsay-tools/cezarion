@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { probeProcessWait } from '../process-wait/supervisor.ts';
 import { runJobCommand } from './cli.ts';
 import { jobStartCommand } from './command.ts';
-import { jobPaths, jobStatus, startJob } from './job.ts';
+import { jobPaths, jobStatus, startJob, superviseJob } from './job.ts';
 
 const run = promisify(execFile);
 const dirs: string[] = [];
@@ -77,6 +77,21 @@ it.runIf(posix)('a command that cannot run exits 127 with the reason in the log'
   expect(jobStatus(dir, 'missing')).toMatchObject({ state: 'exited', exitCode: 127 });
   expect(readFileSync(job.log, 'utf8')).toContain('cannot run');
 }, 30_000);
+
+it('the supervisor records itself, writes the output and the exit code, and leaves no signal handler', async () => {
+  const dir = scratch();
+  const before = process.listenerCount('SIGTERM');
+  expect(await superviseJob(dir, 'inline', node("console.log('ran');process.exit(4)"))).toBe(4);
+  const paths = jobPaths(dir, 'inline');
+  expect(JSON.parse(readFileSync(paths.record, 'utf8'))).toMatchObject({ name: 'inline', pid: process.pid });
+  expect(readFileSync(paths.log, 'utf8')).toBe('ran\n');
+  expect(readFileSync(paths.exitFile, 'utf8')).toBe('4\n');
+  expect(process.listenerCount('SIGTERM')).toBe(before);
+  // The record names this live process, so only the exit file says the job ended.
+  expect(jobStatus(dir, 'inline')).toMatchObject({ state: 'exited', exitCode: 4 });
+  expect(await superviseJob(dir, 'killed', node("process.kill(process.pid,'SIGKILL')"))).toBe(137);
+  expect(await superviseJob(dir, 'absent', [join(dir, 'no-such-binary')])).toBe(127);
+});
 
 it('status reads a record whose supervisor is gone and left no exit file as exited without a code', () => {
   const dir = scratch();

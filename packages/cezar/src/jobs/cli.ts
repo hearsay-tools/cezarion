@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { commandText } from '../home/command.ts';
-import { JobError, SUPERVISE, jobDirectory, jobStatus, startJob, superviseJob } from './job.ts';
+import { JobError, SUPERVISE, jobDirectory, jobStatus, startJob, superviseJob, tellStarter } from './job.ts';
 
 const HELP = commandText(`Usage: cez job start <name> [--dir <dir>] -- <command> [args...]
        cez job status <name> [--dir <dir>]
@@ -21,7 +21,7 @@ The command runs without a shell. For a pipeline, pass: -- sh -c '<pipeline>'.`)
 
 /** `cez job`: every answer is one JSON object, on stdout for a result and on stderr for an error. */
 export async function runJobCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
-  if (argv[0] === SUPERVISE) return superviseJob(argv[1]!, argv[2]!, argv.slice(4));
+  if (argv[0] === SUPERVISE) return superviseJob(argv[1]!, argv[2]!, argv.slice(4), tellStarter);
   const split = argv.indexOf('--');
   const own = split === -1 ? argv : argv.slice(0, split);
   const command = split === -1 ? [] : argv.slice(split + 1);

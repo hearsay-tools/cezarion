@@ -134,29 +134,36 @@ function writeAtomic(path: string, text: string): void {
 
 const signalNumber = (signal: NodeJS.Signals): number => constants.signals[signal] ?? 0;
 
+/** Tells the starter, over the channel it opened, that the record is written; then lets go of it. */
+export function tellStarter(): void {
+  if (process.send) process.send('ready', () => { if (process.connected) process.disconnect(); });
+}
+
 /**
  * The supervisor: records itself, tells its starter, runs the command and writes its exit code.
  * The exit file is renamed into place, so a reader never sees it half written. A SIGTERM or
  * SIGINT goes on to the command, and the exit file still records how it ended.
  */
-export function superviseJob(dir: string, name: string, command: string[]): Promise<number> {
+export function superviseJob(dir: string, name: string, command: string[], ready: () => void = () => {}): Promise<number> {
   const paths = jobPaths(dir, name);
   const start = processStartToken(process.pid);
   const record: JobRecord = { name, pid: process.pid, ...(start === undefined ? {} : { start }), command, startedAt: new Date().toISOString() };
   writeAtomic(paths.record, `${JSON.stringify(record)}\n`);
   const log = openSync(paths.log, 'w');
   // A hangup must not end the supervisor: its starter's terminal or session may close.
-  process.on('SIGHUP', () => {});
-  if (process.send) process.send('ready', () => { if (process.connected) process.disconnect(); });
+  const signals: Array<[NodeJS.Signals, () => void]> = [['SIGHUP', () => {}]];
+  ready();
   return new Promise((done) => {
     const finish = (code: number, note?: string) => {
+      for (const [signal, handler] of signals) process.off(signal, handler);
       if (note) writeFileSync(log, `${note}\n`);
       closeSync(log);
       writeAtomic(paths.exitFile, `${code}\n`);
       done(code);
     };
     const child = spawn(command[0]!, command.slice(1), { stdio: ['ignore', log, log] });
-    for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { child.kill(signal); });
+    for (const signal of ['SIGTERM', 'SIGINT'] as const) signals.push([signal, () => { child.kill(signal); }]);
+    for (const [signal, handler] of signals) process.on(signal, handler);
     child.once('error', error => finish(127, `cez job: cannot run ${command[0]}: ${error.message}`));
     child.once('exit', (code, signal) => finish(code ?? 128 + (signal ? signalNumber(signal) : 0)));
   });
