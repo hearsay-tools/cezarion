@@ -125,3 +125,22 @@ At the end: git checkout cez/<your 8-char id>; squeal stop in this worktree;
    enforces. Check the load average before any CPU burner and stop the burners
    after the run.
 ```
+
+## Kind: mutation
+
+```text
+6. Start the baseline measurement with --out <baseline.json>. While it runs,
+   write tests from the issue's FAIL lines; do not wait idle for the baseline.
+   mutants-file.cjs measures the committed HEAD: commit the tests before the
+   final measurement. Start the final run with --out <final.json> independently
+   of the baseline. Once both finish, run:
+   node .github/scripts/mutants-file.cjs --compare-results <baseline.json> <final.json>
+   Cite the final result's PASS lines and the measured HEAD in the PR.
+   Progress appears every 30 seconds; an unknown count means preparation or
+   the initial test run has not produced a mutation plan yet.
+   To recount saved outcomes with current counting, targets and equivalents:
+   node .github/scripts/mutants-file.cjs --rescore <final.json> --out <rescored.json>
+   Rescore requires scoring evidence from the current command; older stored
+   results remain comparable but need a new measurement for exact rescoring.
+   A rescore does not rerun tests or prove the current HEAD passes.
+```

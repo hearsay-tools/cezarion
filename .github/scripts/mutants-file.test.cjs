@@ -189,10 +189,10 @@ test('command installs, builds, measures own tests then consumers, writes versio
   assert.ok(calls.find(c => c[0] === 'write' && c[1] === '/tmp/result.json'));
   // hearsay-tools/cezarion#2363: the own-package pass measures static mutants; the consumer pass skips them.
   const ownWrite = calls.find(c => c[0] === 'write' && c[1] === '/cache/scratch/checkout/stryker.mutants-file.config.json');
-  assert.deepEqual(JSON.parse(ownWrite[2]), { ...deps.readJson(), ignoreStatic: false });
+  assert.deepEqual(JSON.parse(ownWrite[2]), { ...deps.readJson(), ignoreStatic: false, plugins: ['./cezar-mutation-progress.cjs'], reporters: ['json', 'cezar-progress'] });
   assert.ok(calls.indexOf(ownWrite) < calls.findIndex(c => c[0] === 'stryker'));
   const configWrite = calls.find(c => c[0] === 'write' && c[1].endsWith('stryker.mutants-consumers.config.json'));
-  assert.deepEqual(JSON.parse(configWrite[2]), { ...deps.readJson(), ignoreStatic: true, vitest: { pool: 'forks', configFile: 'vitest.mutants-consumers.config.ts' } });
+  assert.deepEqual(JSON.parse(configWrite[2]), { ...deps.readJson(), ignoreStatic: true, plugins: ['./cezar-mutation-progress.cjs'], reporters: ['json', 'cezar-progress'], vitest: { pool: 'forks', configFile: 'vitest.mutants-consumers.config.ts' } });
   assert.deepEqual(calls.slice(-1), [['remove-scratch', '/cache/scratch']]);
   assert.match(m.summary(result), /FAIL: logic score/);
 });
@@ -433,7 +433,7 @@ test('failed consumer pass writes own-package result and failing names, prints F
   assert.deepEqual(result.consumers.tests, ['packages/cezar/src/sample.test.ts']);
   assert.match(result.consumers.reason, /Suite fails one; Suite fails two/);
   assert.doesNotMatch(result.consumers.reason, /expected undefined/);
-  assert.match(calls.find(c => c[0] === 'log')[1], /FAIL: consumer tests: failed/);
+  assert.match(calls.find(c => c[0] === 'log' && c[1].startsWith('File:'))[1], /FAIL: consumer tests: failed/);
   assert.deepEqual(calls.at(-1), ['remove-scratch', '/cache/scratch']);
 });
 

@@ -11,6 +11,8 @@ const { runStryker, restoreTree } = require('./mutants-run.cjs');
 const { EQUIVALENT_FILE, readEquivalent, matchesEntry, sourceSite } = require('./mutants-equivalent.cjs');
 const { namedRanges, functionRanges, functionOf, duplicateNames } = require('./mutants-functions.cjs');
 const TARGETS = require('../mutants/targets.json');
+const { USAGE, sourceFile, storedArgs, preflight, validateOutput, scoringEvidence } = require('./mutants-file-results.cjs');
+const { startProgress, progressConfig, PLUGIN_FILE } = require('./mutants-file-progress.cjs');
 const REPORT = 'reports/mutation/mutation.json';
 // Version 2 counts static rows (hearsay-tools/cezarion#2363); --compare refuses version 1 results.
 const RESULT_VERSION = 2;
@@ -92,8 +94,9 @@ function compareResults(before, after) {
 }
 
 function parseArgs(argv) {
+  if (['--rescore', '--compare-results'].includes(argv[0])) return storedArgs(argv);
   const [file, ...rest] = argv;
-  if (!/^packages\/[^/]+\/src\/.+\.tsx?$/.test(file ?? '') || file.split('/').includes('..')) throw new Error('Usage: mutants-file.cjs packages/<pkg>/src/<file>.ts [--tests <files>] [--compare <json>] [--out <json>] [--concurrency <n>]');
+  if (!sourceFile(file)) throw new Error(USAGE);
   const opts = { file, tests: [], concurrency: 4 };
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i];
@@ -181,7 +184,7 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
     .map(entry => ({ ...entry, matchCount: mutants.filter(m => matchesEntry(entry, m)).length }))
     .filter(entry => entry.matchCount > 1);
   const rawCounts = countsOf(data.mutants);
-  return { version: RESULT_VERSION, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
+  return { version: RESULT_VERSION, file, head, scoringEvidence: { version: 1, report: { files: { [file]: data } }, ranges }, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
     ...staticResults(mutants),
     moduleLevelCount: mutants.filter(m => m.static && m.function === '(module)').length,
     staticFunctions: [...new Set(mutants.filter(m => m.static && m.function !== '(module)').map(m => m.function))].map(name => ({ name, count: mutants.filter(m => m.static && m.function === name).length })),
@@ -190,6 +193,7 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
 
 function summary(result) {
   const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`];
+  if (result.rescored) lines.push('Rescored stored outcomes under current counting; tests were not rerun.');
   lines.push(`Static outcomes (counted): ${JSON.stringify(result.staticCounts)}`);
   for (const group of result.staticByFunction) lines.push(`Static outcomes in ${group.name} (counted): ${JSON.stringify(group.counts)}`);
   lines.push(`Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`);
@@ -246,11 +250,13 @@ function isolatedEnv(env, home) {
 
 /** One committed snapshot, always removed after the active command has stopped. */
 async function runMeasurement(opts, deps, signal = new AbortController().signal) {
+  const [baseline] = preflight(opts, deps);
   const head = deps.git(['rev-parse', 'HEAD']).trim();
   const source = deps.git(['rev-parse', '--show-toplevel']).trim();
   const scratch = deps.scratch();
   const cwd = path.join(scratch, 'checkout');
   const env = isolatedEnv(deps.env, path.join(scratch, 'cez-home'));
+  const finish = startProgress('Preparing committed HEAD', { now: Date.now, log: deps.log, setInterval, clearInterval });
   try {
     standaloneCheckout(deps.git, source, head, cwd);
     deps.mkdir(env.CEZ_HOME);
@@ -260,18 +266,22 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
     signal.throwIfAborted();
     const ranges = deps.ranges(opts.file, cwd);
     const config = deps.readJson(path.join(cwd, 'stryker.config.json'));
-    deps.write(path.join(cwd, OWN_CONFIG), `${JSON.stringify({ ...config, ignoreStatic: false }, null, 2)}\n`);
+    deps.write(path.join(cwd, PLUGIN_FILE), fs.readFileSync(path.join(__dirname, 'mutants-file-progress.cjs'), 'utf8'));
+    deps.write(path.join(cwd, OWN_CONFIG), `${JSON.stringify(progressConfig({ ...config, ignoreStatic: false }), null, 2)}\n`);
+    finish();
+    deps.log('Own-package pass starting');
     const first = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [OWN_CONFIG], signal, undefined, env);
     const consumer = opts.file.startsWith('packages/contract/')
       ? await runConsumers(opts, deps, cwd, first, signal, env) : { report: first };
     const { report, consumers } = consumer;
     const equivalent = readEquivalent(path.join(cwd, EQUIVALENT_FILE), { readFileSync: deps.read });
     const result = { ...measure(report, opts.file, head, ranges, TARGETS, equivalent.entries), warning: equivalent.warning, ...(consumers ? { consumers } : {}) };
-    if (opts.compare) result.comparison = compareResults(deps.readJson(opts.compare), result);
+    if (baseline) result.comparison = compareResults(baseline, result);
     if (opts.out) deps.write(opts.out, `${JSON.stringify(result, null, 2)}\n`);
     deps.log(summary(result));
     return result;
   } finally {
+    finish();
     deps.removeScratch(scratch);
   }
 }
@@ -284,8 +294,9 @@ async function runConsumers(opts, deps, cwd, first, signal, env) {
   const config = deps.readJson(path.join(cwd, 'stryker.config.json'));
   // Static mutants stay ignored here: with ignoreStatic off, each would run every consumer test
   // file, over three hours for waits.ts. The own-package pass has already measured them.
-  const scratchConfig = { ...config, ignoreStatic: true, vitest: { ...config.vitest, configFile: 'vitest.mutants-consumers.config.ts' } };
+  const scratchConfig = progressConfig({ ...config, ignoreStatic: true, vitest: { ...config.vitest, configFile: 'vitest.mutants-consumers.config.ts' } });
   deps.write(path.join(cwd, 'stryker.mutants-consumers.config.json'), `${JSON.stringify(scratchConfig, null, 2)}\n`);
+  deps.log('Consumer pass starting');
   let output = '';
   try {
     const second = await strykerReport(deps, cwd, opts, 'contract', ['stryker.mutants-consumers.config.json'], signal, chunk => { output = (output + chunk).slice(-1024 * 1024); }, env);
@@ -316,6 +327,7 @@ function defaultDeps() {
     env: process.env,
     command: (bin, args, cwd, signal, env) => promisify(execFile)(bin, args, { cwd, signal, env, maxBuffer: 32 * 1024 * 1024 }).then(({ stdout, stderr }) => { process.stdout.write(stdout); process.stderr.write(stderr); }),
     stryker: runStryker,
+    validateOutput,
     reset: cwd => restoreTree(cwd, { removeReport: true }),
     readReport: cwd => JSON.parse(fs.readFileSync(path.join(cwd, REPORT), 'utf8')),
     removeReport: cwd => fs.rmSync(path.join(cwd, REPORT), { force: true }),
@@ -328,6 +340,24 @@ function defaultDeps() {
   };
 }
 
+function runStored(opts, deps) {
+  const results = preflight(opts, deps);
+  let result;
+  if (opts.rescore) {
+    const before = results[0];
+    const evidence = scoringEvidence(before);
+    const equivalent = readEquivalent(EQUIVALENT_FILE, { readFileSync: deps.read });
+    result = { ...measure(evidence.report, before.file, before.head, evidence.ranges, TARGETS, equivalent.entries),
+      warning: equivalent.warning, rescored: true, ...(before.consumers ? { consumers: before.consumers } : {}) };
+    deps.log(summary(result));
+  } else {
+    result = compareResults(...results);
+    deps.log(`Change: ${JSON.stringify(result)}`);
+  }
+  if (opts.out) deps.write(opts.out, `${JSON.stringify(result, null, 2)}\n`);
+  return result;
+}
+
 async function cli(argv, deps = defaultDeps(), events = process) {
   const opts = parseArgs(argv);
   const controller = new AbortController();
@@ -337,7 +367,7 @@ async function cli(argv, deps = defaultDeps(), events = process) {
   events.on('SIGINT', interrupt);
   events.on('SIGTERM', terminate);
   try {
-    const result = await runMeasurement(opts, deps, controller.signal);
+    const result = opts.rescore || opts.compareResults ? runStored(opts, deps) : await runMeasurement(opts, deps, controller.signal);
     return exitCode || (result.consumers?.state === 'failed' ? 2 : 0);
   } catch (error) {
     if (exitCode) return exitCode;
