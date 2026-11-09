@@ -527,6 +527,20 @@ the old scoped wrapper's matching runtime dependency. No saved launch path or
 update record changes. The new dispatcher prints one old-command
 notice on stderr; JSON stdout stays parseable.
 
+A build from before cutover accepts an exact-pinned forwarding update target
+with the release switch off. Current-install discovery still follows that build's
+switch. Target validation checks the alias, old scoped wrapper and new runtime at
+the same exact version and rejects foreign paths. The updater preserves the
+original outer name and launch entry across this first update.
+
+A global alias can have both its old scoped wrapper and its new runtime hoisted
+beside it. Recovery saves the wrapper in a fixed private
+`recovery-scoped-package` slot beside `recovery-package`. The saved alias layout
+and canonical npm paths determine the slot; no update record stores a new path.
+Nested dependencies remain inside the alias backup, and npx keeps its whole-root
+backup. Recovery validates every saved package before replacing roots, copies all
+roots first, and undoes replacements if a later rename fails.
+
 Exact matching versions keep installed copies updating: the updater reinstalls
 the original outer name at the selected runtime version. A single pinned wrapper
 at rename would freeze those copies. A range cannot create a missing

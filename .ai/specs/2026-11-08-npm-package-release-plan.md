@@ -132,3 +132,28 @@ pins are supported. A hoisted global runtime uses the existing fixed
 `recovery-package` slot. Recovery checks its identity and version before it
 removes any installation path. Npx recovery retains its whole-root copy and lock.
 No installed identity, pending-record schema or state-directory hash is migrated.
+
+
+## First forwarding target and wrapper recovery
+
+Coordinator decision D28 (2026-11-09) keeps current-install discovery behind the
+running switch, but validates update target shape independently of that switch.
+Both old names can stage and refresh the first exact-pinned forwarding target
+with the switch off. Outer, old scoped wrapper and canonical runtime versions
+match exactly for forwarding targets. Ordinary legacy alias versions may differ
+from their runtime, as the shipped caret dependency allowed.
+
+A hoisted old scoped wrapper has a fixed private `recovery-scoped-package` slot
+beside `recovery-package`. Its source and destination derive from the saved alias
+backup and canonical npm layout, never a record path. Nested wrappers remain in
+the alias backup; npx retains its whole-root backup. Snapshot and Ready refresh
+validate every saved package. Recovery stages all copies before replacing roots
+and undoes replacements if a later rename fails. No record schema changes.
+
+
+A compound filesystem failure can prevent both a commit rename and an undo
+rename. In that case the helper retains private copies of the previous roots,
+reports recovery failure, and lists each retained path with its canonical target
+in the existing application-update status message. A person must finish that
+recovery by hand. The canonical roots can be mixed until then. This accepted D28
+limitation does not add a persistent transaction journal or a new status surface.

@@ -120,7 +120,7 @@ function discoverForwardingPackage(layout: InstallLayout, launchPath: string): I
       .find(name => inside(layout.launchEntry, join(layout.modules, name)));
   }
   if (!outerPackage) return undefined;
-  const runtime = installedRuntime(layout.modules, outerPackage, true);
+  const runtime = installedRuntime(layout.modules, outerPackage);
   const outerRoot = join(layout.modules, outerPackage);
   if (runtime.path !== layout.packageRoot || (!inside(layout.launchEntry, outerRoot)
     && !(layout.kind === 'npx' && inside(layout.launchEntry, runtime.path)))) {

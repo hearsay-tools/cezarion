@@ -58,7 +58,10 @@ function dependencyRoot(from: string, name: string): string | undefined {
     cursor = parent;
   }
 }
-function bundle(source: string, destination: string, ancestors: Set<string> = new Set()): void {
+type BundleGraph = { modules: string; sources: Map<string, string>; copied: Set<string> };
+function bundle(source: string, destination: string, graph: BundleGraph, ancestors: Set<string> = new Set()): void {
+  if (graph.copied.has(destination)) return;
+  graph.copied.add(destination);
   cpSync(source, destination, { recursive: true, dereference: true, filter: path => basename(path) !== 'node_modules' });
   const pkg = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
   const next = new Set([...ancestors, source]);
@@ -68,7 +71,12 @@ function bundle(source: string, destination: string, ancestors: Set<string> = ne
       assert.ok(name in (pkg.optionalDependencies ?? {}), `missing local dependency ${name}`);
       continue;
     }
-    if (!next.has(dependency)) bundle(dependency, join(destination, 'node_modules', name), next);
+    if (next.has(dependency)) continue;
+    // Hoist each shared exact source once. Keep conflicting versions nested.
+    // Direct dependencies reserve their root slots before traversal starts.
+    if (!graph.sources.has(name)) graph.sources.set(name, dependency);
+    const target = graph.sources.get(name) === dependency ? join(graph.modules, name) : join(destination, 'node_modules', name);
+    bundle(dependency, target, graph, next);
   }
 }
 function pack(dir: string, destination: string): string {
@@ -85,11 +93,13 @@ function packRuntime(root: string): { tarball: string; source: string; manifest:
   const manifest = { ...pkg, name: active.npmPackage, version: '0.18.0', scripts: {}, devDependencies: {}, bundleDependencies: Object.keys(pkg.dependencies) };
   writeFileSync(join(source, 'package.json'), JSON.stringify(manifest));
   writeFileSync(join(source, 'dist/home/switch.js'), 'export const REBRAND_SWITCH = true;\n');
+  const graph: BundleGraph = { modules: join(source, 'node_modules'), sources: new Map(), copied: new Set() };
   for (const name of Object.keys(pkg.dependencies)) {
     const dependency = dependencyRoot(original, name);
     assert.ok(dependency, `missing installed dependency ${name}`);
-    bundle(dependency, join(source, 'node_modules', name));
+    graph.sources.set(name, dependency);
   }
+  for (const [name, dependency] of [...graph.sources]) bundle(dependency, join(graph.modules, name), graph);
   return { tarball: pack(source, root), source, manifest };
 }
 

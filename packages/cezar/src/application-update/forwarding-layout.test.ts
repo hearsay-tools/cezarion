@@ -25,7 +25,8 @@ function fixture(kind: 'global' | 'npx', alias: boolean, hoisted: boolean) {
   const outerPackage = alias ? old.npmAlias : old.npmPackage;
   const outerRoot = join(modules, outerPackage);
   const packageRoot = join(hoisted ? modules : join(outerRoot, 'node_modules'), active.npmPackage);
-  packageAt(outerRoot, outerPackage, '1.0.0', { [active.npmPackage]: '1.0.0' });
+  packageAt(outerRoot, outerPackage, '1.0.0', { [active.npmPackage]: '1.0.0', ...(alias ? { [old.npmPackage]: '1.0.0' } : {}) });
+  if (alias) packageAt(join(hoisted ? modules : join(outerRoot, 'node_modules'), old.npmPackage), old.npmPackage, '1.0.0', { [active.npmPackage]: '1.0.0' });
   packageAt(packageRoot, active.npmPackage, '1.0.0');
   if (kind === 'npx') writeFileSync(join(installRoot, 'package.json'), JSON.stringify({ _npx: { packages: [outerPackage] } }));
   let target = '2.0.0';
@@ -33,7 +34,8 @@ function fixture(kind: 'global' | 'npx', alias: boolean, hoisted: boolean) {
     expect(args.at(-1)).toBe(`${outerPackage}@${target}`);
     const stageModules = join(args[args.indexOf('--prefix') + 1]!, 'node_modules');
     const stagedOuter = join(stageModules, outerPackage);
-    packageAt(stagedOuter, outerPackage, target, { [active.npmPackage]: target });
+    packageAt(stagedOuter, outerPackage, target, { [active.npmPackage]: target, ...(alias ? { [old.npmPackage]: target } : {}) });
+    if (alias) packageAt(join(hoisted ? stageModules : join(stagedOuter, 'node_modules'), old.npmPackage), old.npmPackage, target, { [active.npmPackage]: target });
     packageAt(join(hoisted ? stageModules : join(stagedOuter, 'node_modules'), active.npmPackage), active.npmPackage, target);
   });
   let restart: RestartPlan | undefined;

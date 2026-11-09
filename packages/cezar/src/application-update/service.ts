@@ -1,3 +1,4 @@
+import { scopedRecoveryTarget, validateScopedRecovery, validateRecoveryLayout } from './scoped-recovery.ts';
 import { installedRuntime, originalRuntimeName, hoistedRuntime } from './runtime-layout.ts';
 import { npmPackageIdentity, productIdentity } from '../home/identity.ts';
 import { createHash } from 'node:crypto';
@@ -135,8 +136,8 @@ export function validateInstalledPackage(path: string, expectedVersion: string, 
   validateRuntimeDependencies(path, installRoot, manifest.dependencies);
 }
 
-function stagedRuntime(stage: string, outer: string, rebrand: boolean) {
-  return installedRuntime(realpathSync(join(stage, 'node_modules')), outer as Exclude<Installation, { kind: 'unsupported' }>['outerPackage'], rebrand);
+function stagedRuntime(stage: string, outer: string) {
+  return installedRuntime(realpathSync(join(stage, 'node_modules')), outer as Exclude<Installation, { kind: 'unsupported' }>['outerPackage']);
 }
 
 function isAlias(installation: Installation): boolean {
@@ -219,7 +220,10 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
       if (this.recoveryPackage && this.installation.kind === 'global') {
         validateInstalledPackage(this.recoveryPackage, packageVersion(this.installation.packageRoot, this.options.rebrand), this.recoveryPackage, originalRuntimeName(this.installation));
       }
-      const runtime = stagedRuntime(stage, this.installation.kind === 'unsupported' ? PACKAGE : this.installation.outerPackage, this.options.rebrand ?? productIdentity().rebrand);
+      if (this.installation.kind !== 'unsupported') {
+        validateRecoveryLayout(this.installation, recovery, this.recoveryPackage, packageVersion(this.installation.packageRoot, this.options.rebrand));
+      }
+      const runtime = stagedRuntime(stage, this.installation.kind === 'unsupported' ? PACKAGE : this.installation.outerPackage);
       validateInstalledPackage(runtime.path, loaded.state.targetVersion, realpathSync(stage), runtime.name);
       if (this.installation.kind !== 'unsupported' && isAlias(this.installation)) {
         const alias = JSON.parse(readFileSync(join(stage, 'node_modules', this.installation.outerPackage, 'package.json'), 'utf8')) as { version?: string };
@@ -304,6 +308,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     await assertOwned();
     await rm(stage, { recursive: true, force: true });
     await rm(recovery, { recursive: true, force: true });
+    await rm(join(this.dir, 'recovery-scoped-package'), { recursive: true, force: true });
     if (this.recoveryPackage) {
       await assertOwned();
       await rm(this.recoveryPackage, { recursive: true, force: true });
@@ -319,7 +324,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     const args = ['install', '--prefix', stage, '--engine-strict', '--no-audit', '--no-fund', '--ignore-scripts', '--prefer-online', '--fetch-retries=1', spec];
     await (this.options.runNpm ?? ((argv, abortSignal) => this.runNpm(argv, installation.cache, abortSignal)))(args, signal);
     await assertOwned();
-    const runtime = stagedRuntime(stage, installation.outerPackage, this.options.rebrand ?? productIdentity().rebrand);
+    const runtime = stagedRuntime(stage, installation.outerPackage);
     validateInstalledPackage(runtime.path, target, realpathSync(stage), runtime.name);
     if (isAlias(installation)) {
       const alias = JSON.parse(await readFile(join(stage, 'node_modules', installation.outerPackage, 'package.json'), 'utf8')) as { version?: string };
@@ -335,6 +340,13 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
     await cp(installation.kind === 'npx' ? installation.installRoot : installation.outerRoot,
       recovery, { recursive: true, dereference: false,
         filter: async () => { await assertOwned(); return true; } });
+    const scoped = scopedRecoveryTarget(installation, recovery);
+    if (scoped) {
+      validateScopedRecovery(scoped.destination, oldVersion);
+      await cp(scoped.destination, scoped.source, { recursive: true, dereference: false,
+        filter: async () => { await assertOwned(); return true; } });
+      validateScopedRecovery(scoped.source, oldVersion);
+    }
     // A global alias can resolve a sibling runtime that npm also replaces.
     // Nested aliases and npx already include it in their whole-root copy.
     if (this.recoveryPackage) {
@@ -343,6 +355,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
         filter: async () => { await assertOwned(); return true; } });
       validateInstalledPackage(this.recoveryPackage, oldVersion, this.recoveryPackage, originalRuntimeName(installation));
     }
+    validateRecoveryLayout(installation, recovery, this.recoveryPackage, oldVersion);
     if (installation.kind === 'global') {
       const outer = JSON.parse(await readFile(join(installation.outerRoot, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
       const windows = windowsGlobalLayout(installation.prefix, installation.outerRoot, installation.outerPackage);

@@ -1,7 +1,8 @@
+import { scopedRecoveryTarget, validateScopedRecovery, restorePackageTrees, validateRecoveryLayout, PackageRecoveryError } from './scoped-recovery.js';
 import { installedRuntime, installationModules, originalRuntimeName, hoistedRuntime, assertCanonicalPath } from './runtime-layout.js';
 import { type NpmLaunchPackage } from '../home/identity.js';
 import type { spawn } from 'node:child_process';
-import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isIP, type AddressInfo } from 'node:net';
@@ -83,7 +84,7 @@ export interface RestartIO {
   restore(): Promise<void>;
   launchPrevious(): Promise<void>;
   reportSuccess(): Promise<void>;
-  reportFailure(rollbackFailed: boolean): Promise<void>;
+  reportFailure(rollbackFailed: boolean, recoveryDetail?: string): Promise<void>;
   assertOwned?(): Promise<void>;
 }
 
@@ -119,24 +120,26 @@ export async function runRestartWorkflow(io: RestartIO): Promise<void> {
     // recovery copy and leave the stale claim for the next boot to salvage.
     await io.assertOwned?.();
     let rollbackFailed = false;
+    let recoveryDetail: string | undefined;
     try {
       await io.assertOwned?.();
       await io.restore();
       await io.assertOwned?.();
       await io.launchPrevious();
       await io.assertOwned?.();
-    } catch {
+    } catch (error) {
+      if (error instanceof PackageRecoveryError) recoveryDetail = error.message;
       await io.reapReplacement().catch(() => undefined);
       await io.assertOwned?.();
       rollbackFailed = true;
     }
     await io.assertOwned?.();
-    await io.reportFailure(rollbackFailed);
+    await io.reportFailure(rollbackFailed, recoveryDetail);
   }
 }
 
 function validateOriginal(plan: HelperPlan, expected: string): void {
-  const runtime = installedRuntime(installationModules(plan.installation), plan.installation.outerPackage, true);
+  const runtime = installedRuntime(installationModules(plan.installation), plan.installation.outerPackage);
   const pkg = JSON.parse(readFileSync(join(runtime.path, 'package.json'), 'utf8')) as { name?: string; version?: string; bin?: Record<string, string> };
   if (pkg.name !== runtime.name || pkg.version !== expected || !existsSync(join(runtime.path, 'dist/index.js')) || !existsSync(join(runtime.path, 'web/dist/index.html'))) {
     throw new Error('promoted installation did not validate');
@@ -252,8 +255,6 @@ async function reap(child: ReturnType<typeof spawn> | undefined): Promise<void> 
 
 export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promise<void> = async () => {}): Promise<void> {
   const { installation } = plan;
-  const copy = async (from: string, to: string) => cp(from, to, { recursive: true, dereference: false,
-    filter: async () => { await assertOwned(); return true; } });
   await assertOwned();
   const name = originalRuntimeName(installation);
   const hoisted = hoistedRuntime(installation);
@@ -272,29 +273,23 @@ export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promi
       throw new Error('invalid hoisted package recovery');
     }
   }
+  validateRecoveryLayout(installation, plan.recovery, plan.recoveryPackage, plan.oldVersion);
+  const scoped = scopedRecoveryTarget(installation, plan.recovery);
+  if (scoped) validateScopedRecovery(scoped.source, plan.oldVersion);
   if (installation.kind === 'npx') {
-    // Preserve the live concurrency.lock directory while restoring the rest of
-    // the npx root. Removing the root would compromise our own npm lock.
-    for (const name of await readdir(installation.installRoot)) {
-      await assertOwned();
-      if (name !== 'concurrency.lock') await rm(join(installation.installRoot, name), { recursive: true, force: true });
-    }
-    for (const name of await readdir(plan.recovery)) {
-      await assertOwned();
-      if (name !== 'concurrency.lock') await copy(join(plan.recovery, name), join(installation.installRoot, name));
-    }
+    // Keep the held lock in place; commit all other root entries as one recoverable batch.
+    const saved = await readdir(plan.recovery);
+    const entries = new Set([...saved, ...await readdir(installation.installRoot)]);
+    const trees = [...entries].filter(name => name !== 'concurrency.lock').map(name => ({
+      source: saved.includes(name) ? join(plan.recovery, name) : undefined,
+      destination: join(installation.installRoot, name),
+    }));
+    await restorePackageTrees(trees, assertOwned);
   } else {
-    const outer = installation.outerRoot;
-    await assertOwned();
-    await rm(outer, { recursive: true, force: true });
-    await assertOwned();
-    await copy(plan.recovery, outer);
-    if (hoisted) {
-      await assertOwned();
-      await rm(installation.packageRoot, { recursive: true, force: true });
-      await assertOwned();
-      await copy(plan.recoveryPackage!, installation.packageRoot);
-    }
+    const trees = [{ source: plan.recovery, destination: installation.outerRoot }];
+    if (hoisted) trees.push({ source: plan.recoveryPackage!, destination: installation.packageRoot });
+    if (scoped) trees.push(scoped);
+    await restorePackageTrees(trees, assertOwned);
     if (plan.binLinks) {
       const outerManifest = JSON.parse(await readFile(join(plan.recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
       await restoreGlobalBins(installation.prefix, Object.keys(outerManifest.bin ?? {}),
@@ -329,9 +324,9 @@ export async function runHelper(plan: HelperPlan, onArmed?: () => void): Promise
       // Keep the recovery copy until a later preparation has the lock. This
       // avoids a crash gap between committing success and deleting recovery.
     },
-    reportFailure: (rollbackFailed) => writeState(plan, {
+    reportFailure: (rollbackFailed, recoveryDetail) => writeState(plan, {
       status: 'error', supported: true, targetVersion: plan.targetVersion,
-      message: rollbackFailed ? 'Update and recovery failed. Reinstall cezarion manually.' : 'Update failed; previous release was restored. Retry Update.',
+      message: rollbackFailed ? `Update and recovery failed. Reinstall cezarion manually.${recoveryDetail ? ` ${recoveryDetail}` : ''}` : 'Update failed; previous release was restored. Retry Update.',
     }, rollbackFailed ? manualRepairCommand(plan.installation, plan.oldVersion) : undefined),
   };
   await withDirectoryLock(join(dirname(plan.recordPath), 'operation.lock'), async (assertInstallationOwned, installationSignal) => {
