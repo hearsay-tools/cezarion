@@ -65,6 +65,7 @@ export async function endNodeCapture(root: string, spec: string): Promise<void> 
     const manifest = JSON.parse(readFileSync(join(directory, file), 'utf8')) as Manifest
     if (!manifest.spec) continue
     if (!existsSync(manifest.socket)) {
+      if (manifest.spec !== spec) continue
       const hasCoverage = manifest.coverageDirectory && existsSync(manifest.coverageDirectory)
         && readdirSync(manifest.coverageDirectory).some(name => name.startsWith(`coverage-${manifest.pid}-`))
       if (!hasCoverage) {

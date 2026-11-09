@@ -140,6 +140,9 @@ test('rejects a terminated mock with no coverage for its pid', async () => {
   writeFileSync(join(directory, 'processes', `${pid}.json`), JSON.stringify({
     pid, spec, coverageDirectory, socket: join(directory, 'absent.sock'),
   }))
+  const otherSpec = 'packages/web/e2e/other.e2e.ts'
+  await beginNodeCapture(directory, otherSpec)
+  await expect(endNodeCapture(directory, otherSpec)).resolves.toBeUndefined()
   await expect(endNodeCapture(directory, spec)).rejects.toThrow(
     `Node coverage missing for terminated process ${pid} (${spec}) in ${coverageDirectory}`,
   )
