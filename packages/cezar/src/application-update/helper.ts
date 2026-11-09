@@ -1,7 +1,9 @@
-import { npmPackageIdentity, type NpmLaunchPackage } from '../home/identity.js';
+import { canonicalRecoverySlot, RECOVERY_FAILURE_MESSAGE, scopedRecoveryTarget, validateScopedRecovery, restorePackageTrees, validateRecoveryLayout, PackageRecoveryError } from './scoped-recovery.js';
+import { installedRuntime, installationModules, originalRuntimeName, hoistedRuntime, assertCanonicalPath } from './runtime-layout.js';
+import { type NpmLaunchPackage } from '../home/identity.js';
 import type { spawn } from 'node:child_process';
-import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isIP, type AddressInfo } from 'node:net';
 import { Agent, get } from 'node:http';
@@ -82,7 +84,7 @@ export interface RestartIO {
   restore(): Promise<void>;
   launchPrevious(): Promise<void>;
   reportSuccess(): Promise<void>;
-  reportFailure(rollbackFailed: boolean): Promise<void>;
+  reportFailure(rollbackFailed: boolean, recoveryDetail?: string): Promise<void>;
   assertOwned?(): Promise<void>;
 }
 
@@ -118,35 +120,28 @@ export async function runRestartWorkflow(io: RestartIO): Promise<void> {
     // recovery copy and leave the stale claim for the next boot to salvage.
     await io.assertOwned?.();
     let rollbackFailed = false;
+    let recoveryDetail: string | undefined;
     try {
       await io.assertOwned?.();
       await io.restore();
       await io.assertOwned?.();
       await io.launchPrevious();
       await io.assertOwned?.();
-    } catch {
+    } catch (error) {
+      if (error instanceof PackageRecoveryError) recoveryDetail = error.message;
       await io.reapReplacement().catch(() => undefined);
       await io.assertOwned?.();
       rollbackFailed = true;
     }
     await io.assertOwned?.();
-    await io.reportFailure(rollbackFailed);
+    await io.reportFailure(rollbackFailed, recoveryDetail);
   }
 }
 
-function scopedPath(plan: HelperPlan): string {
-  const identity = npmPackageIdentity(plan.installation.outerPackage)!;
-  if (plan.installation.outerPackage === identity.npmPackage) return plan.installation.packageRoot;
-  const nested = join(plan.installation.outerRoot, 'node_modules', identity.npmPackage);
-  if (existsSync(nested)) return nested;
-  const modules = plan.installation.kind === 'npx' ? join(plan.installation.installRoot, 'node_modules')
-    : dirname(plan.installation.outerRoot);
-  return join(modules, identity.npmPackage);
-}
-
 function validateOriginal(plan: HelperPlan, expected: string): void {
-  const pkg = JSON.parse(readFileSync(join(scopedPath(plan), 'package.json'), 'utf8')) as { name?: string; version?: string; bin?: Record<string, string> };
-  if (pkg.name !== npmPackageIdentity(plan.installation.outerPackage)!.npmPackage || pkg.version !== expected || !existsSync(join(scopedPath(plan), 'dist/index.js')) || !existsSync(join(scopedPath(plan), 'web/dist/index.html'))) {
+  const runtime = installedRuntime(installationModules(plan.installation), plan.installation.outerPackage);
+  const pkg = JSON.parse(readFileSync(join(runtime.path, 'package.json'), 'utf8')) as { name?: string; version?: string; bin?: Record<string, string> };
+  if (pkg.name !== runtime.name || pkg.version !== expected || !existsSync(join(runtime.path, 'dist/index.js')) || !existsSync(join(runtime.path, 'web/dist/index.html'))) {
     throw new Error('promoted installation did not validate');
   }
   if (!existsSync(plan.installation.launchEntry)) throw new Error('original launch entry missing');
@@ -260,49 +255,45 @@ async function reap(child: ReturnType<typeof spawn> | undefined): Promise<void> 
 
 export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promise<void> = async () => {}): Promise<void> {
   const { installation } = plan;
-  const copy = async (from: string, to: string) => cp(from, to, { recursive: true, dereference: false,
-    filter: async () => { await assertOwned(); return true; } });
   await assertOwned();
-  const identity = npmPackageIdentity(installation.outerPackage)!;
-  const hoisted = installation.kind === 'global' && installation.outerPackage === identity.npmAlias
-    && installation.packageRoot === join(dirname(installation.outerRoot), identity.npmPackage);
+  const name = originalRuntimeName(installation);
+  const hoisted = hoistedRuntime(installation);
+  assertCanonicalPath(installation.outerRoot);
+  assertCanonicalPath(installation.packageRoot);
   if (hoisted || plan.recoveryPackage !== undefined) {
     // No destination list from disk: only the discovery-owned scoped sibling
     // and one fixed private backup are allowed. Validate before removing roots.
     if (!hoisted || plan.recoveryPackage !== join(dirname(plan.recordPath), 'recovery-package')) {
       throw new Error('invalid hoisted package recovery');
     }
+    assertCanonicalPath(join(realpathSync(dirname(plan.recoveryPackage)), 'recovery-package'));
     const pkg = JSON.parse(await readFile(join(plan.recoveryPackage, 'package.json'), 'utf8')) as { name?: string; version?: string };
-    if (pkg.name !== identity.npmPackage || pkg.version !== plan.oldVersion
+    if (pkg.name !== name || pkg.version !== plan.oldVersion
       || !existsSync(join(plan.recoveryPackage, 'dist/index.js')) || !existsSync(join(plan.recoveryPackage, 'web/dist/index.html'))) {
       throw new Error('invalid hoisted package recovery');
     }
   }
+  const recovery = canonicalRecoverySlot(plan.recovery);
+  const runtimeBackup = plan.recoveryPackage ? canonicalRecoverySlot(plan.recoveryPackage) : undefined;
+  validateRecoveryLayout(installation, recovery, runtimeBackup, plan.oldVersion);
+  const scoped = scopedRecoveryTarget(installation, recovery);
+  if (scoped) validateScopedRecovery(scoped.source, plan.oldVersion);
   if (installation.kind === 'npx') {
-    // Preserve the live concurrency.lock directory while restoring the rest of
-    // the npx root. Removing the root would compromise our own npm lock.
-    for (const name of await readdir(installation.installRoot)) {
-      await assertOwned();
-      if (name !== 'concurrency.lock') await rm(join(installation.installRoot, name), { recursive: true, force: true });
-    }
-    for (const name of await readdir(plan.recovery)) {
-      await assertOwned();
-      if (name !== 'concurrency.lock') await copy(join(plan.recovery, name), join(installation.installRoot, name));
-    }
+    // Keep the held lock in place; commit all other root entries as one recoverable batch.
+    const saved = await readdir(recovery);
+    const entries = new Set([...saved, ...await readdir(installation.installRoot)]);
+    const trees = [...entries].filter(name => name !== 'concurrency.lock').map(name => ({
+      source: saved.includes(name) ? join(recovery, name) : undefined,
+      destination: join(installation.installRoot, name),
+    }));
+    await restorePackageTrees(trees, assertOwned);
   } else {
-    const outer = installation.outerRoot;
-    await assertOwned();
-    await rm(outer, { recursive: true, force: true });
-    await assertOwned();
-    await copy(plan.recovery, outer);
-    if (hoisted) {
-      await assertOwned();
-      await rm(installation.packageRoot, { recursive: true, force: true });
-      await assertOwned();
-      await copy(plan.recoveryPackage!, installation.packageRoot);
-    }
+    const trees = [{ source: recovery, destination: installation.outerRoot }];
+    if (hoisted) trees.push({ source: runtimeBackup!, destination: installation.packageRoot });
+    if (scoped) trees.push(scoped);
+    await restorePackageTrees(trees, assertOwned);
     if (plan.binLinks) {
-      const outerManifest = JSON.parse(await readFile(join(plan.recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
+      const outerManifest = JSON.parse(await readFile(join(recovery, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
       await restoreGlobalBins(installation.prefix, Object.keys(outerManifest.bin ?? {}),
         windowsGlobalLayout(installation.prefix, installation.outerRoot, installation.outerPackage), plan.binLinks, assertOwned);
     }
@@ -335,9 +326,9 @@ export async function runHelper(plan: HelperPlan, onArmed?: () => void): Promise
       // Keep the recovery copy until a later preparation has the lock. This
       // avoids a crash gap between committing success and deleting recovery.
     },
-    reportFailure: (rollbackFailed) => writeState(plan, {
+    reportFailure: (rollbackFailed, recoveryDetail) => writeState(plan, {
       status: 'error', supported: true, targetVersion: plan.targetVersion,
-      message: rollbackFailed ? 'Update and recovery failed. Reinstall cezarion manually.' : 'Update failed; previous release was restored. Retry Update.',
+      message: rollbackFailed ? `${RECOVERY_FAILURE_MESSAGE}${recoveryDetail ? ` ${recoveryDetail}` : ''}` : 'Update failed; previous release was restored. Retry Update.',
     }, rollbackFailed ? manualRepairCommand(plan.installation, plan.oldVersion) : undefined),
   };
   await withDirectoryLock(join(dirname(plan.recordPath), 'operation.lock'), async (assertInstallationOwned, installationSignal) => {
