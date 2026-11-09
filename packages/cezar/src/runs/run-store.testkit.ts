@@ -188,3 +188,13 @@ export function setRunStatus(
   const update = store.updateRun as (id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>) => RunRecord | undefined;
   return update.call(store, id, { ...extras, status });
 }
+
+/** Seed wait fixtures through the unchecked update path. Production uses wait commits. */
+export function seedWaits(
+  store: Pick<RunStore, 'updateRun'>,
+  runId: string,
+  patch: Partial<Pick<RunRecord, 'waits' | 'lastWaits'>>,
+): RunRecord | undefined {
+  const update = store.updateRun as (id: string, patch: Partial<Pick<RunRecord, 'waits' | 'lastWaits'>>) => RunRecord | undefined;
+  return update.call(store, runId, patch);
+}

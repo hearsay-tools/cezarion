@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentInput, CiWait } from '@open-mercato/cezar-contract';
-import { RunStore } from './store.ts';
+import { ciWaitEntry, RunStore } from './store.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
@@ -34,25 +34,27 @@ describe('atomic CI wait checkpoints', () => {
     const disk = readPersistedText(directory);
     const events = vi.fn(); store.on('run', events);
     vi.spyOn(runPersistence(store), 'persist').mockImplementation(() => { throw new Error('read only'); });
-    expect(() => store.commitCiWait(id, wait)).toThrow('read only');
+    expect(() => store.commitWait(id, ciWaitEntry(wait))).toThrow('read only');
     expect(store.getRun(id)?.waits).toBeUndefined();
     expect(events).not.toHaveBeenCalled();
     expect(readPersistedText(directory)).toBe(disk);
   });
 
   it('settlement and deterministic queue entry survive reopen with no duplicate input', () => {
+    store.commitWait(id, ciWaitEntry(wait));
     const settled: CiWait = { ...wait, phase: 'wake-pending', wakeId: wait.id, result: {
       outcome: 'deadline', headSha: wait.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
     } };
-    store.commitCiWait(id, settled, input(id, wait.id));
-    store.commitCiWait(id, settled, input(id, wait.id));
+    store.commitWait(id, ciWaitEntry(settled), input(id, wait.id));
+    store.commitWait(id, ciWaitEntry(settled), input(id, wait.id));
     const reopened = RunStore.open(directory, { keepLive: true });
     expect(reopened.getRun(id)?.waits).toEqual([expect.objectContaining({ id: wait.id, kind: WAIT_KIND.pr, phase: WAIT_PHASE.resolved, result: expect.objectContaining({ outcome: 'deadline' }) })]);
     expect(reopened.getRun(id)?.agentInputs).toHaveLength(1);
   });
 
   it('checkpointing delivery retires current intent atomically and preserves the stable receipt', () => {
-    store.commitCiWait(id, { ...wait, phase: 'wake-pending', wakeId: wait.id }, input(id, wait.id));
+    store.commitWait(id, ciWaitEntry(wait));
+    store.commitWait(id, ciWaitEntry({ ...wait, phase: 'wake-pending', wakeId: wait.id }), input(id, wait.id));
     store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() });
     const record = openTestRunStore(directory, { keepLive: true }).getRun(id);
     expect(store.getRun(id)?.waits).toBeUndefined();
@@ -94,7 +96,7 @@ describe('atomic CI wait checkpoints', () => {
     expect(reopened.getRun(id)?.lastWaits).toBeUndefined();
     reopened.flush();
     expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastWaitsError).toContain('unreadable');
-    reopened.commitCiWait(id, wait);
+    reopened.commitWait(id, ciWaitEntry(wait));
     expect(reopened.getRun(id)?.lastWaitsError).toBeUndefined();
     expect(RunStore.open(directory, { keepLive: true }).getRun(id)?.lastWaitsError).toBeUndefined();
   });

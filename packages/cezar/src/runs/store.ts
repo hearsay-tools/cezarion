@@ -18,7 +18,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
-import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import {
   agentInputSchema,
   inboxClaimSchema,
@@ -42,7 +41,7 @@ import {
   type WaitRegistrationReceipt,
 } from '@open-mercato/cezar-contract/waits';
 import { isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry } from '@open-mercato/cezar-contract';
 import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -69,7 +68,7 @@ import {
 } from './run-database.ts';
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { failLoadedInterruptedRun, restoreLoadedUsageLimitHold, settleLoadedStop } from './loaded-run-exits.ts';
-import { ciWaitEntry, hasLegacyWaitFields, upgradeLegacyWaits, UNREADABLE_WAIT } from './legacy-waits.ts';
+import { hasLegacyWaitFields, upgradeLegacyWaits, UNREADABLE_WAIT } from './legacy-waits.ts';
 export { ciWaitEntry, holdsWorkerWait, upgradeLegacyWaits, workerWaitEntry } from './legacy-waits.ts';
 import { ExitEvents } from './exit-events.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
@@ -1792,11 +1791,6 @@ export class RunStore extends EventEmitter {
     if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
     if (isUsageLimitHold(run)) this.move(id, 'withdraw-hold');
     else this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }]]));
-  }
-
-  /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
-  commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
-    this.commitWait(id, ciWaitEntry(ciWaitSchema.parse(wait)), input);
   }
 
   /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, and
