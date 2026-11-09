@@ -795,9 +795,17 @@ function complexityGateFixture(t) {
   git('update-ref', 'refs/remotes/origin/main', tip);
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'cezar-gate-bin-'));
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nprintf \'%s\\n\' "$FAKE_PR"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh
+if [ -n "$FAKE_PR_AFTER_FETCH" ] && [ -f "$PR_READ_MARKER" ]; then
+  printf '%s\\n' "$FAKE_PR_AFTER_FETCH"
+else
+  touch "$PR_READ_MARKER"
+  printf '%s\\n' "$FAKE_PR"
+fi
+`, { mode: 0o755 });
   const step = workflow().jobs['complexity-gate'].steps.find(candidate => candidate.name === 'Reject function complexity growth');
   const run = (env, cwd = dir) => spawnSync('bash', ['-e', '-c', step.run], { cwd, encoding: 'utf8', env: {
+    PR_READ_MARKER: path.join(bin, 'pr-read'),
     PATH: `${bin}:${process.env.PATH}`, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GH_TOKEN: 'unused',
     GITHUB_REPOSITORY: 'owner/repo', PR_NUMBER: '7', EXPECTED_HEAD_SHA: head, EVENT_NAME: 'pull_request_target',
     GITHUB_SHA: tip, FAKE_PR: JSON.stringify({ head: { sha: head }, labels: [] }), ...env,
@@ -841,8 +849,8 @@ test('the baseline-growth label read live approves the growth, and a stale or mo
   const stale = f.run({ FAKE_PR: JSON.stringify({ head: { sha: 'a'.repeat(40) }, labels: [] }) });
   assert.equal(stale.status, 1);
   assert.match(stale.stderr, /changed after this run started/);
-  f.git('update-ref', 'refs/pull/7/head', f.forkPoint);
-  const moved = f.run({});
+  const moved = f.run({ FAKE_PR_AFTER_FETCH: JSON.stringify({ head: { sha: f.forkPoint }, labels: [] }),
+    PR_READ_MARKER: path.join(f.dir, '.git', 'moved-pr-read') });
   assert.equal(moved.status, 1);
   assert.match(moved.stderr, /changed during the fetch/);
 });

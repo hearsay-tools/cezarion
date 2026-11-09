@@ -365,7 +365,8 @@ jobs:
             fi
             git fetch --no-tags origin "$EXPECTED_HEAD_SHA"
             head="$(git rev-parse FETCH_HEAD)"
-            if [ "$head" != "$EXPECTED_HEAD_SHA" ]; then
+            current_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+            if [ "$head" != "$EXPECTED_HEAD_SHA" ] || ! jq -e --arg head "$EXPECTED_HEAD_SHA" '.head.sha == $head' <<<"$current_pr" >/dev/null; then
               echo "::error::The pull request changed during the fetch. Re-run CI for the current head." >&2
               exit 1
             fi
@@ -447,7 +448,8 @@ jobs:
             fi
             git fetch --no-tags origin "$EXPECTED_HEAD_SHA"
             head="$(git rev-parse FETCH_HEAD)"
-            if [ "$head" != "$EXPECTED_HEAD_SHA" ]; then
+            current_pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+            if [ "$head" != "$EXPECTED_HEAD_SHA" ] || ! jq -e --arg head "$EXPECTED_HEAD_SHA" '.head.sha == $head' <<<"$current_pr" >/dev/null; then
               echo "::error::The pull request changed during the fetch. Re-run CI for the current head." >&2
               exit 1
             fi
