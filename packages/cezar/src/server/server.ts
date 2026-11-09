@@ -1,6 +1,6 @@
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
-import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from '../project-paths.ts';
+import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
 import { productIdentity } from '../home/identity.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
@@ -4137,8 +4137,8 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store, manager } = c.get('project');
       const run = store.getRun(c.req.valid('param').runId);
       if (!run) return c.json({ error: 'not found' }, 404);
-      if (store.isFallbackRun(run.id) || (run.worktreePath && isFallbackProjectPath(repoRoot, run.worktreePath)))
-        return c.json({ error: store.fallbackDeleteError(run.id)! }, 409);
+      const refused = store.fallbackDeleteError(run.id, 'worktree') ?? store.writeRefusal(run.id);
+      if (refused) return c.json({ error: refused }, 409);
       // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
       const release = manager.claimWorktreeReclaim(run.id);
       if (!release) {

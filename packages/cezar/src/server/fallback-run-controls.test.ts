@@ -188,3 +188,18 @@ it('adopts only for a matched same-origin control: no preflight, read, unknown p
   expect((await post(`${family.parentId}/pin`, { pinned: true })).status).toBe(200);
   expect(primaryIds()).toEqual(expect.arrayContaining([family.parentId, family.workerId]));
 });
+
+it('refuses a worktree reclaim for a mixed family with the named refusal, before touching the checkout', async () => {
+  const family = seedFamily(true, false);
+  const worktree = join(primary, 'worktrees', family.parentId);
+  mkdirSync(worktree, { recursive: true });
+  writeFileSync(join(worktree, 'file.txt'), 'checkout');
+  const record = readPersistedRuns(primary).find(run => run.id === family.parentId);
+  seedRuns(primary, [...readPersistedRuns(primary).filter(run => run.id !== family.parentId), { ...record, worktreePath: worktree }]);
+  start();
+  const response = await apiRequest(app, `/api/v1/worktrees/${family.parentId}/reclaim`, { method: 'POST' });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({ error: expect.stringMatching(refusal) });
+  expect(readFileSync(join(worktree, 'file.txt'), 'utf8')).toBe('checkout');
+  expect(primaryIds()).not.toContain(family.workerId);
+});

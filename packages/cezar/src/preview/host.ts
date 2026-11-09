@@ -30,7 +30,7 @@ export type RunContext = {
   title: string;
   worktreePath: string;
   dataDir: string;
-  store: Pick<RunStore, 'getRun' | 'appendEvent'>;
+  store: Pick<RunStore, 'getRun' | 'appendEvent'> & Partial<Pick<RunStore, 'writeRefusal'>>;
 };
 
 export type PreviewTarget = { port: number } | { url: string } | { agent: true };
@@ -215,12 +215,17 @@ export class PreviewHost implements PreviewHostLike {
     const entry = this.entries.get(runId);
     const server = entry && this.registration(entry, port);
     if (!entry || entry.released || !server || live(entry.servers.get(port))) return;
-    const refusal = fallbackProjectWriteError(entry.ctx.worktreePath);
+    // A run this store may not write (another process's, or read from .ai/squawk/) reserves nothing.
+    const refusal = fallbackProjectWriteError(entry.ctx.worktreePath) ?? entry.ctx.store.writeRefusal?.(runId);
     if (refusal) return this.tell(entry, { t: 'state', stage: 'server-exited', server, exitCode: null, logTail: refusal });
     const previous = entry.servers.get(port);
     if (owned(previous) && this.stopping.has(previous)) return;
     if (this.heldByOther(entry, server)) return;
     const dev = this.deps.createServer({ server, worktreePath: entry.ctx.worktreePath, dir: this.runDir(entry.ctx) });
+    // A DevServer is born `starting` without emitting it, so the host records that transition, before
+    // it reserves the port: a refused record write leaves no live entry and no held port behind.
+    try { this.recordState(entry, port, 'starting', dev); }
+    catch (error) { return this.tell(entry, { t: 'state', stage: 'server-exited', server, exitCode: null, logTail: error instanceof Error ? error.message : String(error) }); }
     entry.servers.set(port, dev);
     entry.approvals.set(port, { ...server });
     entry.startedAt.set(port, new Date().toISOString());
@@ -230,8 +235,6 @@ export class PreviewHost implements PreviewHostLike {
     dev.on('attempt', () => {
       if (entry.servers.get(port) === dev && dev.state === 'starting') this.report(entry, port, dev);
     });
-    // A DevServer is born `starting` without emitting it, so the host records that transition.
-    this.recordState(entry, port, 'starting', dev);
     this.report(entry, port, dev);
     dev.start();
     this.armServerIdle(entry);
