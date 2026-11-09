@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -20,49 +19,8 @@ for (const scenario of ['connected', 'disconnected', 'failed-arm'] as const) it(
   const failedArm = scenario === 'failed-arm'
   const root = await mkdtemp('/tmp/cez-update-handoff-')
   const packageRoot = dirname(createRequire(import.meta.url).resolve('@wjarka/cezarion/package.json'))
-  const source = (path: string) => JSON.stringify(pathToFileURL(join(packageRoot, 'src', path)).href)
-  const script = join(root, 'server.mts')
-  await writeFile(script, `
-import { mkdir, writeFile, cp, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { once } from 'node:events';
-import { ApplicationUpdateService } from ${source('application-update/service.ts')};
-import { RunStore } from ${source('runs/store.ts')};
-import { startServer } from ${source('server/server.ts')};
-import { Home } from ${source('home/home.ts')};
-const root = ${JSON.stringify(root)};
-const home = Home.sandbox(join(root, 'home'));
-const original = join(root, 'prefix/lib/node_modules/@wjarka/cezarion');
-await mkdir(join(original, 'dist'), { recursive: true });
-await mkdir(join(original, 'web/dist'), { recursive: true });
-await writeFile(join(original, 'package.json'), JSON.stringify({name:'@wjarka/cezarion',version:'1.0.0',bin:{cez:'dist/index.js'},dependencies:{}}));
-await writeFile(join(original, 'dist/index.js'), '');
-await writeFile(join(original, 'web/dist/index.html'), '');
-let arm;
-const gate = new Promise(resolve => { arm = resolve });
-let handoffs = 0;
-const service = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original,'dist/index.js'),
-  npmPrefix: join(root,'prefix'), npmCache: join(root,'cache'), home: home.root, targetVersion: () => '2.0.0',
-  runNpm: async args => {
-    const target = join(args[args.indexOf('--prefix') + 1], 'node_modules/@wjarka/cezarion');
-    await cp(original, target, {recursive:true});
-    const pkg = JSON.parse(await readFile(join(target,'package.json'),'utf8')); pkg.version = '2.0.0';
-    await writeFile(join(target,'package.json'),JSON.stringify(pkg));
-  },
-  armRestart: async () => { await gate; if (${failedArm}) { process.send?.({event:'arm-failed'}); throw new Error('fixture arm failure'); } process.send?.({event:'armed'}); },
-  handoff: () => { process.send?.({event:'handoff', count: ++handoffs}); void server.shutdownForRestart(); },
-});
-await service.apply();
-const server = startServer({home, repoRoot:root, store:RunStore.open(join(root,'.ai/cezar')), manager:{}, version:'1.0.0', applicationUpdate:service},0);
-server.prependListener('request', (req,res) => { if (req.url.endsWith('/restart')) {
-  res.on('finish', () => process.send?.({event:'finish'}));
-  res.on('close', () => process.send?.({event:'close'}));
-}});
-process.on('message', message => { if(message === 'arm') arm(); });
-await once(server,'listening');
-process.send?.({event:'listening',port:server.address().port});
-`)
-  const child = spawn(process.execPath, ['--import', 'tsx', script], {
+  const script = join(packageRoot, 'test/fixtures/application-update-handoff.ts')
+  const child = spawn(process.execPath, ['--import', 'tsx', script, root, scenario], {
     cwd: packageRoot, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0' },
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   })
