@@ -76,7 +76,13 @@ const selectRecord = (paths: JobPaths, db: DatabaseSync): JobRecord | undefined 
 
 function readRecord(paths: JobPaths): JobRecord | undefined {
   if (!existsSync(paths.record)) return undefined;
-  return withRecords(paths, { readOnly: true }, db => selectRecord(paths, db));
+  return withRecords(paths, { readOnly: true }, (db) => {
+    // A claimant that ended before its first commit leaves a database with nothing in it.
+    if (db.prepare('SELECT count(*) AS objects FROM sqlite_master').get()?.objects === 0) return undefined;
+    const record = selectRecord(paths, db);
+    if (record === undefined) throw damaged(paths, 'it holds no job record');
+    return record;
+  });
 }
 
 /** The first line of the exit file as an integer, when the supervisor has written it. */
@@ -114,8 +120,12 @@ export function claimJob(paths: JobPaths, record: JobRecord): ClaimAnswer {
   return withRecords(paths, { readOnly: false }, (db) => {
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.exec('CREATE TABLE IF NOT EXISTS job (id INTEGER PRIMARY KEY CHECK (id = 1), record TEXT NOT NULL)');
+      // Only a database with nothing in it is a free name. One that holds anything else, or a job
+      // table without its row, is not this command's record of an ended job: it is refused.
+      const fresh = db.prepare('SELECT count(*) AS objects FROM sqlite_master').get()?.objects === 0;
+      if (fresh) db.exec('CREATE TABLE job (id INTEGER PRIMARY KEY CHECK (id = 1), record TEXT NOT NULL)');
       const previous = selectRecord(paths, db);
+      if (!fresh && previous === undefined) throw damaged(paths, 'it holds no job record');
       if (previous && running(previous) && readExit(paths) === undefined) { db.exec('ROLLBACK'); return { claimed: false, pid: previous.pid }; }
       // An exit file that stays would resolve the next process wait at once with the old code.
       rmSync(paths.exitFile, { force: true });

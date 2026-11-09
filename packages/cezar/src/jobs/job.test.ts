@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it, vi } from 'vitest';
-import { processStartToken } from '../detached-process.ts';
+import { processStartToken, startAndForget } from '../detached-process.ts';
 import { probeProcessWait } from '../process-wait/supervisor.ts';
 import { runJobCommand } from './cli.ts';
 import { jobStartCommand, ownCommand } from './command.ts';
@@ -135,9 +135,9 @@ it.runIf(posix)('of several starts of one name at once, exactly one runs the com
 
 it.runIf(posix)('a supervisor whose starter has ended still claims the name and runs the command', async () => {
   const dir = scratch();
-  // The starter here is `sh`, which ends at once and never listens: the supervisor has no one to tell.
+  // No channel to a starter: the supervisor has no one to tell.
   const [bin, ...prefix] = ownCommand();
-  await run('sh', ['-c', '"$@" > /dev/null 2>&1 &', 'sh', 'setsid', bin!, ...prefix, 'job', '__supervise', dir, 'orphan', '--', ...node('process.exit(8)')]);
+  expect(await startAndForget(bin!, [...prefix, 'job', '__supervise', dir, 'orphan', '--', ...node('process.exit(8)')], { settleMs: 0 })).toBe(true);
   const paths = jobPaths(dir, 'orphan');
   await written(paths.exitFile);
   const status = jobStatus(dir, 'orphan');
@@ -158,7 +158,22 @@ it.runIf(posix)('a record file that is not a record never counts as absent: star
   db.close();
   await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('it holds no job record');
   expect(() => jobStatus(dir, 'damaged')).toThrow('it holds no job record');
+  // Another program's database, and a job table that lost its row, are not a free name either.
+  for (const schema of ['CREATE TABLE other (x)', 'CREATE TABLE job (id INTEGER PRIMARY KEY, record TEXT NOT NULL)']) {
+    rmSync(paths.record);
+    const other = new DatabaseSync(paths.record);
+    other.exec(schema);
+    other.close();
+    await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('cannot be used');
+    expect(() => jobStatus(dir, 'damaged')).toThrow('cannot be used');
+  }
   expect(readFileSync(paths.log, 'utf8')).toBe('earlier output\n');
+  // A claimant that ended before its first commit leaves an empty file: that is a free name.
+  writeFileSync(paths.record, '');
+  expect(() => jobStatus(dir, 'damaged')).toThrow('No job named "damaged"');
+  const job = await startJob({ name: 'damaged', dir, command: node('') });
+  pids.push(job.pid);
+  await written(job.exitFile);
 }, 30_000);
 
 it('answers usage errors as JSON on stderr with exit 1, and help with exit 0', async () => {

@@ -1509,9 +1509,9 @@ depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longe
 | Starter interrupted (SIGINT or SIGKILL) before the supervisor starts | The interrupt | No job and no record: the starter writes nothing. |
 | Starter interrupted after the supervisor starts | Nothing stops the job | The supervisor claims the name and runs the command without a starter. No PID was printed: `status` gives it. A retry is refused and names the PID. |
 | Several starts of one name at once | Nothing | One supervisor claims the name. The others exit without running the command, and their starts are refused with the claimant's PID. |
-| Supervisor ends inside its claim | The kernel | The transaction rolls back, so the earlier record stands. The operating system drops the file lock. |
+| Supervisor ends inside its claim | The kernel | The transaction rolls back, so the earlier record stands. The operating system drops the file lock. A first claim that ends this way leaves a database with nothing in it, which is a free name. |
 | Record deleted while the job runs | Nothing stops the job | `status` answers that no job has that name. A start of the name runs a second job beside the first and both write the same log: the record is the only handle. |
-| Record unreadable, not a database, or without a job record (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
+| Record unreadable, not a database, another program's database, or without its job row (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
 | Record names a PID that another process has reused | Nothing | With a start identity the job reads as ended. Without one (Windows) the name reads as running until that process ends. |
 
 No command signals a job. The start identity cases (unreadable, reused, zombie) are held by the
