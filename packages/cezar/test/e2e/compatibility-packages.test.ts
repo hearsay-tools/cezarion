@@ -3,11 +3,11 @@ import { execFileSync, execFile as execFileCallback } from 'node:child_process';
 import { once } from 'node:events';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { stripTypeScriptTypes } from 'node:module';
+import { createRequire, stripTypeScriptTypes } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { productIdentity } from '../../src/home/identity.ts';
 import { withCompatibilityPackages } from '../../src/release/compatibility.ts';
@@ -63,8 +63,47 @@ function packRuntime(root: string): { tarball: string; source: string; manifest:
   return { tarball: pack(source, root), source, manifest };
 }
 
-// bound: pack/bundle/install and real CLI children need more than the default unit-test timeout.
-test('old forwarding tarballs install offline, execute the new runtime and pass the shipped validator', { timeout: 240_000 }, async () => {
+type ConsumerKind = 'global' | 'npx';
+async function verifyCommands(consumer: string, binDir: string, shim: string, env: NodeJS.ProcessEnv): Promise<void> {
+  for (const command of ['cezarion', 'cez', 'hsq']) {
+    const entry = command === 'hsq' ? 'hsq.js' : 'index.js';
+    const calls = [[process.execPath, [join(shim, 'dist', entry)], false, command === 'hsq' ? 'hsq' : 'cez'],
+      [join(binDir, command + (process.platform === 'win32' ? '.cmd' : '')), [], process.platform === 'win32', process.platform === 'win32' && command !== 'hsq' ? 'cez' : command]] as const;
+    for (const [file, args, shell, identity] of calls) {
+      const result = await execFile(file, [...args, 'worker', 'list'], { cwd: consumer, env, shell });
+      assert.deepEqual(JSON.parse(result.stdout), { workers: [] });
+      assert.equal(result.stderr, identity === 'hsq' ? '' : `[${identity}] '${identity}' is deprecated; use 'hsq' instead.\n`);
+      await assert.rejects(execFile(file, [...args, 'invalid-compatibility-test-command'], { cwd: consumer, env, shell }),
+        (error: unknown) => (error as { code?: number }).code === 1);
+    }
+  }
+}
+async function verifyInstalled(consumer: string, kind: ConsumerKind, name: string, version: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const windows = process.platform === 'win32';
+  const modules = join(consumer, kind === 'global' && !windows ? 'lib/node_modules' : 'node_modules');
+  const binDir = kind === 'global' ? windows ? consumer : join(consumer, 'bin') : join(modules, '.bin');
+  const shim = join(modules, name);
+  const implementation = dirname(createRequire(join(shim, 'package.json')).resolve(`${active.npmPackage}/package.json`));
+  assert.equal(JSON.parse(readFileSync(join(implementation, 'package.json'), 'utf8')).name, active.npmPackage);
+  // Exercise the installed implementation's discovery against the actual npm result.
+  const { discoverInstallation } = await import(pathToFileURL(join(implementation, 'dist/application-update/discovery.js')).href);
+  const layout = discoverInstallation({ prefix: kind === 'global' ? consumer : join(consumer, 'unused-prefix'),
+    cache: env.npm_config_cache, packageRoot: implementation, launchEntry: join(shim, 'dist/index.js') });
+  assert.equal(layout.kind, kind);
+  assert.equal(layout.outerPackage, name);
+  assert.equal(layout.packageRoot, realpathSync(implementation));
+  await verifyCommands(consumer, binDir, shim, env);
+  if (name === old.npmPackage) {
+    const frozen = stripTypeScriptTypes(readFileSync(new URL('../fixtures/v0.17.0-package-validator.ts.txt', import.meta.url), 'utf8'));
+    const args = ['--input-type=module', '-e', `${frozen}\nvalidateInstalledPackage(process.argv[1], process.argv[2], process.argv[3]);`, shim, version, consumer];
+    await execFile(process.execPath, args, { env });
+    rmSync(join(shim, 'web/dist/assets'), { recursive: true });
+    await assert.rejects(execFile(process.execPath, args, { env }), /staged web assets incomplete/);
+  }
+}
+
+// bound: four offline npm installs and real CLI children measured 132s for two installs; allow CI slowdown.
+test('old forwarding tarballs install offline in global and npx layouts, execute the new runtime and pass the shipped validator', { timeout: 480_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'compatibility-packages-'));
   const token = 'p'.repeat(43);
   let registryCalls = 0;
@@ -79,37 +118,19 @@ test('old forwarding tarballs install offline, execute the new runtime and pass 
     const runtime = packRuntime(root);
     const bridges = withCompatibilityPackages(runtime.source, runtime.manifest,
       packages => Object.values(packages).map(({ dir, manifest }) => ({ name: manifest.name, file: pack(dir, root) })), true);
-    for (const bridge of bridges) {
-      const consumer = join(root, bridge.name === old.npmPackage ? 'scoped' : 'alias'); mkdirSync(consumer);
-      writeFileSync(join(consumer, 'package.json'), '{"private":true}');
+    for (const kind of ['global', 'npx'] as const) for (const bridge of bridges) {
+      const id = bridge.name === old.npmPackage ? 'scoped1' : 'alias1';
+      const cache = join(root, 'empty-cache');
+      const consumer = kind === 'global' ? join(root, `global-${id}`) : join(cache, '_npx', id);
+      mkdirSync(consumer, { recursive: true });
+      writeFileSync(join(consumer, 'package.json'), JSON.stringify({ private: true, _npx: { packages: [bridge.name] } }));
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CEZ_|HSQ_)/i.test(key)));
-      Object.assign(env, { HOME: root, NODE_NO_WARNINGS: '1', npm_config_cache: join(root, 'empty-cache'),
+      Object.assign(env, { HOME: root, NODE_NO_WARNINGS: '1', npm_config_cache: cache,
         npm_config_registry: `http://127.0.0.1:${address.port}`, HSQ_DELEGATION_URL: `http://127.0.0.1:${address.port}/api/v1/delegation`,
         HSQ_DELEGATION_TOKEN: token, HSQ_TASK_ID: '11111111-1111-4111-8111-111111111111' });
-      await execFile(npm, ['install', '--no-update-notifier', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', runtime.tarball, bridge.file],
+      await execFile(npm, ['install', ...(kind === 'global' ? ['--global', '--prefix', consumer] : []), '--no-update-notifier', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', runtime.tarball, bridge.file],
         { cwd: consumer, env, shell: process.platform === 'win32', maxBuffer: 10 * 1024 * 1024 });
-      const shim = join(consumer, 'node_modules', bridge.name);
-      const implementation = join(consumer, 'node_modules', active.npmPackage);
-      assert.equal(JSON.parse(readFileSync(join(implementation, 'package.json'), 'utf8')).name, active.npmPackage);
-      for (const command of ['cezarion', 'cez', 'hsq']) {
-        const entry = command === 'hsq' ? 'hsq.js' : 'index.js';
-        const calls = [[process.execPath, [join(shim, 'dist', entry)], false, command === 'hsq' ? 'hsq' : 'cez'],
-          [join(consumer, 'node_modules/.bin', command + (process.platform === 'win32' ? '.cmd' : '')), [], process.platform === 'win32', process.platform === 'win32' && command !== 'hsq' ? 'cez' : command]] as const;
-        for (const [file, args, shell, identity] of calls) {
-          const result = await execFile(file, [...args, 'worker', 'list'], { cwd: consumer, env, shell });
-          assert.deepEqual(JSON.parse(result.stdout), { workers: [] });
-          assert.equal(result.stderr, identity === 'hsq' ? '' : `[${identity}] '${identity}' is deprecated; use 'hsq' instead.\n`);
-          await assert.rejects(execFile(file, [...args, 'invalid-compatibility-test-command'], { cwd: consumer, env, shell }),
-            (error: unknown) => (error as { code?: number }).code === 1);
-        }
-      }
-      if (bridge.name === old.npmPackage) {
-        const frozen = stripTypeScriptTypes(readFileSync(new URL('../fixtures/v0.17.0-package-validator.ts.txt', import.meta.url), 'utf8'));
-        const args = ['--input-type=module', '-e', `${frozen}\nvalidateInstalledPackage(process.argv[1], process.argv[2], process.argv[3]);`, shim, runtime.manifest.version, consumer];
-        await execFile(process.execPath, args, { env });
-        rmSync(join(shim, 'web/dist/assets'), { recursive: true });
-        await assert.rejects(execFile(process.execPath, args, { env }), /staged web assets incomplete/);
-      }
+      await verifyInstalled(consumer, kind, bridge.name, runtime.manifest.version, env);
     }
     assert.equal(registryCalls, 0);
   } finally {
