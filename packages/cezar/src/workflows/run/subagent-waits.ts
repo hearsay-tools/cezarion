@@ -88,7 +88,7 @@ export function liveSubagents(state: ActiveRun): number {
 
 /** The run's open subagent wait, if it has one. */
 export function openSubagentWaitOf(run: Pick<RunRecord, 'waits'> | undefined): SubagentWaitEntry | undefined {
-  return openWaits(run ?? {}).find((wait): wait is SubagentWaitEntry => wait.kind === 'subagent');
+  return WAIT_KINDS.subagent.select(openWaits(run ?? {}))[0];
 }
 
 export class SubagentWaits {

@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { RunModuleContext } from './types.ts';
@@ -47,7 +48,7 @@ export function hasLiveWorkers(context: RunModuleContext, host: CompletionGateHo
 /** Live workers keep a turn end monitoring unless the agent already waits on workers: an open
  *  worker entry is the wait, so no implicit re-check timer goes beside it (hearsay-tools/cezarion#1235). */
 export function monitorsLiveWorkers(context: RunModuleContext, host: CompletionGateHost, runId: string): boolean {
-  return hasLiveWorkers(context, host, runId) && !openWaits(context.store.getRun(runId) ?? {}).some(wait => wait.kind === 'worker');
+  return hasLiveWorkers(context, host, runId) && !WAIT_KINDS.worker.select(openWaits(context.store.getRun(runId) ?? {})).length;
 }
 
 export function delegationFinishBlockedReason(context: RunModuleContext, host: CompletionGateHost, runId: string): string | undefined {

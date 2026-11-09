@@ -26,7 +26,7 @@ export function parkNoticeWait(workerRunId: string, waits: readonly Wait[], mess
   const selects = (wait: WorkerWaitEntry) => wait.workerIds ? wait.workerIds.includes(workerRunId)
     : (wait.requestIds ?? []).some(id => messages.some(message => message.id === id && message.recipientRunId === workerRunId));
   const noticed = (wait: WorkerWaitEntry) => { const id = parkNoticeId(workerRunId, wait.id); return messages.some(message => message.id === id); };
-  return waits.find((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open' && selects(wait) && !noticed(wait));
+  return WAIT_KINDS.worker.selectOpen(waits).find(wait => selects(wait) && !noticed(wait));
 }
 
 /** Whether the worker sent its parent a message since `since`, the start of its parking turn. A

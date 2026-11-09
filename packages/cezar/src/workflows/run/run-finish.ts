@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { cezarDoneRequestSchema, type CezarDoneRequest, type CezarDoneAnswer, type DoneErrorCode } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
@@ -230,5 +231,5 @@ export class RunFinish {
 
 /** An agent question registered in this turn: open, and not yet shown (no `askSeq`). */
 function askedThisTurn(run: RunRecord): boolean {
-  return openWaits(run).some(wait => wait.kind === 'human' && wait.source !== 'cezar' && wait.askSeq === undefined);
+  return WAIT_KINDS.human.select(openWaits(run)).some(wait => wait.source !== 'cezar' && wait.askSeq === undefined);
 }

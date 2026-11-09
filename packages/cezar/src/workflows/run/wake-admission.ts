@@ -2,7 +2,7 @@ import { WAIT_KINDS } from './wait-kinds.ts';
 import { cancelWaits } from './wait-cancel.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
-import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
+import { computeWaitingOn, isUsageLimitHold, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord } from '../../runs/store.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { rootsAwaitingPeer } from '../../delegation/conversations.ts';
@@ -168,7 +168,7 @@ export class WakeAdmission {
   parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
     if (!run?.waits?.length || !state.liveSession.session?.open || state.liveSession.cancelled || state.boundary.pendingHumanAsk) return false;
-    const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    const human = WAIT_KINDS.human.select(openWaits(run))[0];
     if (human) {
       this.host.humanWaits.surfaceHumanWait(runId, state, human);
       this.host.parkForUser(runId, state, state.liveSession.currentStepId);
@@ -287,7 +287,7 @@ export class WakeAdmission {
   restoreWorkerWaitInputs(runId: string): void {
     const run = this.context.store.getRun(runId);
     for (const wait of resolvedWaits(run ?? {})) {
-      if (!run || wait.kind !== 'worker' || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
+      if (!run || !WAIT_KINDS.worker.is(wait) || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
       if ((this.context.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.context.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
         text: waitResultText(wait, { workerStatus: this.host.waitRegistry.workerStatus }) });

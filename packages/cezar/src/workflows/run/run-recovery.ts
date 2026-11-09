@@ -1,6 +1,5 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { atContinue } from './launch-read-resolver.ts';
-import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
@@ -256,10 +255,10 @@ export class RunRecovery {
    *  saving the ask and replacing it leaves that wait open (review of #1437). */
   private adoptTranscriptAsk(runId: string): boolean {
     const askSeq = pendingHumanAskSeq(this.context.store, runId);
-    const human = openWaits(this.context.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    const human = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {}));
     if (askSeq === undefined || !this.context.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
     this.host.humanWaits.withdrawCezarHumanWaits(runId);
-    if (openWaits(this.context.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
+    if (WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {})).length > 0) return false;
     try {
       this.context.store.commitWait(runId, WAIT_KINDS.human.recoveredEntry(askSeq));
       return true;
@@ -274,7 +273,7 @@ export class RunRecovery {
    *  flag was read from the transcript, so its ask was answered after the row was last saved.
    *  Unknown facts are no evidence, and the wait stays open. */
   private settleAnsweredLegacyAsk(runId: string): boolean {
-    const legacy = this.context.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
+    const legacy = WAIT_KINDS.human.selectOpen(this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.turnId === 'legacy' && wait.askSeq === undefined);
     // Only facts read from a non-empty transcript are evidence of the answer (review of #1437).
     const facts = this.context.store.knownTranscriptFacts(runId);
     if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;

@@ -133,7 +133,7 @@ export class WaitRegistry {
   /** The wait as the store now holds it, open or already delivered, with its deadline. */
   private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
     const latest = this.context.store.getRun(runId);
-    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && WAIT_KINDS.worker.hasDeadline(wait));
+    return WAIT_KINDS.worker.select([...latest?.waits ?? [], ...latest?.lastWaits ?? []]).find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && WAIT_KINDS.worker.hasDeadline(wait));
   }
 
   /** Cezar waits on live workers or open requests without adding a deadline of its own. */
@@ -196,7 +196,7 @@ export class WaitRegistry {
 
   /** The open peer waits of these runs whose named peer already wrote, settled or was deleted resolve now. */
   resolvePeerWaits(runIds: readonly string[]): void {
-    for (const id of runIds) for (const wait of openWaits(this.context.store.getRun(id) ?? {})) if (wait.kind === 'peer') this.resolvePeerWait(id, wait);
+    for (const id of runIds) for (const wait of WAIT_KINDS.peer.select(openWaits(this.context.store.getRun(id) ?? {}))) this.resolvePeerWait(id, wait);
   }
 
   /** Like a timer, the wake is the agent's own arrangement: a stopping or finishing run takes none,

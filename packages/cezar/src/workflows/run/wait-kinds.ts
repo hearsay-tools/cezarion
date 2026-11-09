@@ -29,6 +29,9 @@ const PR_UNTIL_TEXT = {
 const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
 
 export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
+  is: (wait: Wait) => wait is Extract<Wait, { kind: K }>;
+  select: (waits: readonly Wait[]) => Extract<Wait, { kind: K }>[];
+  selectOpen: (waits: readonly Wait[]) => Extract<Wait, { kind: K }>[];
   capNote: (wait: Wait, maxAutoContinues: number) => string;
   deliveryLabel: (wait: Wait) => readonly { priority: number; text: string }[];
   sessionlessPrompt: { priority: number; text: string };
@@ -89,8 +92,17 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   peer: { duplicatePeer: typeof identicalPeerWait };
 }[K];
 
+/** Typed selectors share the stored kind's list order and phase rule. */
+function waitSelectors<K extends Wait['kind']>(kind: K) {
+  const is = (wait: Wait): wait is Extract<Wait, { kind: K }> => wait.kind === kind;
+  const select = (waits: readonly Wait[]) => waits.filter(is);
+  const selectOpen = (waits: readonly Wait[]) => select(waits).filter(wait => wait.phase === 'open');
+  return { is, select, selectOpen };
+}
+
 export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
   pr: {
+    ...waitSelectors('pr'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: () => [],
     sessionlessPrompt: { priority: 0, text: 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.' },
@@ -117,6 +129,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline (1 to 7,200 s, default 1,800) or a fatal gh error', firedBy: 'watcher' },
   ] },
   timer: {
+    ...waitSelectors('timer'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: wait => [{ priority: WAIT_KINDS.timer.monitoring(wait) ? 0 : 1, text: WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer' }],
     sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
@@ -150,6 +163,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline (60 to 7,200 s)', firedBy: 'timer' },
   ] },
   process: {
+    ...waitSelectors('process'),
     capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
     deliveryLabel: () => [{ priority: 2, text: 'process' }],
     sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
@@ -174,6 +188,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
   ] },
   subagent: {
+    ...waitSelectors('subagent'),
     capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
     deliveryLabel: () => [],
     sessionlessPrompt: { priority: 2, text: 'Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so Cezar can deliver it.' },
@@ -201,6 +216,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'a restart or a lost session: the children stopped', firedBy: 'recovery' },
   ] },
   peer: {
+    ...waitSelectors('peer'),
     capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
     deliveryLabel: () => [{ priority: 3, text: 'peer' }],
     sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
@@ -228,6 +244,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline (1 to 1,800 s, default 600)', firedBy: 'timer' },
   ] },
   worker: {
+    ...waitSelectors('worker'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: () => [],
     sessionlessPrompt: { priority: 1, text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.' },
@@ -257,6 +274,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     { trigger: 'the deadline of an agent wait; Cezar\'s completion wait has none', firedBy: 'timer' },
   ] },
   human: {
+    ...waitSelectors('human'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: () => [],
     sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
@@ -275,7 +293,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     canonicalize: () => {},
     repeatTimeout: wait => 'timeoutSeconds' in wait ? wait.timeoutSeconds : undefined,
     requestedTimeout: () => undefined,
-    duplicateAsk: (waits, answering) => waits.find((wait): wait is HumanWaitEntry => wait.phase === 'open' && wait.kind === 'human' && wait.source !== 'cezar' && (answering === undefined || wait.askSeq !== answering)),
+    duplicateAsk: (waits, answering) => WAIT_KINDS.human.selectOpen(waits).find(wait => wait.source !== 'cezar' && (answering === undefined || wait.askSeq !== answering)),
     answerKind: () => undefined,
     hasDeadline: () => false,
     requestKinds: [],
@@ -422,7 +440,7 @@ export function isMonitoringTimer(wait: Wait): boolean {
  *  and is replaced by the agent's own (hearsay-tools/cezarion#1234), so the agent is never told of
  *  it as one of its waits. */
 export function isCezarHumanWait(wait: Wait): boolean {
-  return wait.kind === 'human' && wait.source === 'cezar';
+  return WAIT_KINDS.human.is(wait) && wait.source === 'cezar';
 }
 
 function clip(text: string, max = SUMMARY_MAX): string {
