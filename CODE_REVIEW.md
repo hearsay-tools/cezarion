@@ -106,7 +106,7 @@ worktree files, detached process or restored client state need the applicable
 
 ## CI surface rules
 
-[SDLC.md](SDLC.md#validation-gate) owns validation policy. The
+[AGENTS.md § Validation](AGENTS.md#validation) owns local validation. The
 [CI guide](docs/sdlc/ci.md#ci-verification),
 [workflow](.github/workflows/ci.yml) and
 [change classifier](.github/scripts/change-surface.cjs) define the checks and

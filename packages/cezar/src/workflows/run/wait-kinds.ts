@@ -374,11 +374,6 @@ export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly stri
   return waits.find((wait): wait is PeerWaitEntry => wait.kind === 'peer' && wait.phase === 'open' && key(wait.peerIds) === key(peerIds));
 }
 
-/** Whether this request kind registers through the delegation facade. */
-export function registersThroughDelegation(kind: CezarWaitRequest['kind']): boolean {
-  return waitRequestRow(kind).delegation;
-}
-
 /** The stored row that serves a tool request kind, including request waits in the worker row. */
 export function waitRequestRow(kind: CezarWaitRequest['kind']): WaitKindRow<Wait['kind']> {
   const row = Object.values(WAIT_KINDS).find(row => row.requestKinds.includes(kind));
@@ -579,8 +574,12 @@ export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
   return waits.flatMap(wait => WAIT_KINDS[wait.kind].deliveryLabel(wait)).sort((a, b) => a.priority - b.priority)[0]?.text;
 }
 
+/** The handler of each registration path. A new path fails typecheck until every router names it. */
+export type RegistrationRoutes<R> = { readonly [P in keyof RegistrationRequest]: (request: RegistrationRequest[P]) => R };
+
 /** Request dispatch follows the typed registration cell of its stored-kind row. */
-export function registersAs<R extends keyof RegistrationRequest>(request: CezarWaitRequest, registration: R,
-  row = waitRequestRow(request.kind)): request is RegistrationRequest[R] {
-  return row.registration === registration;
+export function routeRegistration<R>(request: CezarWaitRequest, routes: RegistrationRoutes<R>): R {
+  const path = waitRequestRow(request.kind).registration;
+  if (path === 'none') throw new Error('Unsupported wait registration');
+  return (routes[path] as (request: CezarWaitRequest) => R)(request);
 }

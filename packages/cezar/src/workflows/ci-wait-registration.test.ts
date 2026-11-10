@@ -68,7 +68,7 @@ function registrationFixture() {
   });
   const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root,
     work: unused(), semaphore: unused(), disposed: () => false };
-  Object.assign(host, { waitEngine: new WaitEngine(context, unused()) });
+  Object.assign(host, { waitEngine: new WaitEngine(context, unused(), 10) });
   const registry = new WaitRegistry(context, host, 10);
   return { run, state, registry, resolve, remove: () => { current = undefined; }, replace: () => { current = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false }); } };
 }

@@ -1,4 +1,3 @@
-import type { WaitCancellation } from './wait-cancellation.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -16,7 +15,6 @@ import type { RunModuleContext } from './types.ts';
 
 export interface HumanWaitsHost {
   waitEngine: WaitEngine;
-  waitCancellation: WaitCancellation;
   routeWorkerQuestion(runId: string): void;
 }
 
@@ -65,13 +63,12 @@ export class HumanWaits {
     const run = this.context.store.getRun(runId);
     if (!run) return undefined;
     const source = WAIT_KINDS.human.aliasSource(via);
-    return this.host.waitEngine.open(runId, state,
-      () => WAIT_KINDS.human.aliasEntry(source, via, state?.waitIdentity.ciTurnId ?? via, card ? askCardFields(card) : undefined), {
-        withdraw: source === 'agent' ? 'first' : 'none',
-        existing: () => WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? run))[0],
-        compare: 'silent', onCommitFailure: { log: '[cez] human wait checkpoint failed' },
-        arm: 'none', park: 'none', return: 'built',
-      }).wait;
+    if (source === 'agent') this.withdrawCezarHumanWaits(runId);
+    const existing = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? run))[0];
+    if (existing) return existing;
+    if (!this.host.waitEngine.hasRoom(this.context.store.getRun(runId) ?? {})) return undefined;
+    const wait = WAIT_KINDS.human.aliasEntry(source, via, state?.waitIdentity.ciTurnId ?? via, card ? askCardFields(card) : undefined);
+    return this.host.waitEngine.open(runId, state, wait, { withdraw: false, onCommitFailure: { log: '[cez] human wait checkpoint failed' }, park: false }).wait;
   }
 
   /** Record which question a human wait is shown as: the pending card or gate, whose answer settles
@@ -136,7 +133,7 @@ export class HumanWaits {
   withdrawCezarHumanWaits(runId: string): void {
     const ids = openWaits(this.context.store.getRun(runId) ?? {}).filter(isCezarHumanWait).map(wait => wait.id);
     if (!ids.length) return;
-    this.host.waitCancellation.cancel(runId, ids, { onCommitFailure: 'skip', log: '[cez] human wait checkpoint failed' });
+    this.host.waitEngine.cancel(runId, ids, { onCommitFailure: 'skip', log: '[cez] human wait checkpoint failed' });
   }
 
   /** Whether a closing session leaves the run waits to park on. Cezar's own human waits end with the

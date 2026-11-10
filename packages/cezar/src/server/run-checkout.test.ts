@@ -1,0 +1,101 @@
+import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { RUN_IN_USE_ELSEWHERE, type RunRecord } from '../runs/store.ts';
+import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
+import { runCheckout, type RunCheckoutHost } from './run-checkout.ts';
+
+vi.mock('../autosave-cleanup.ts', () => ({ autosaveCleanupBlocker: vi.fn() }));
+
+const root = mkdtempSync(join(tmpdir(), 'cez-run-checkout-'));
+const live = join(root, 'live');
+const gone = join(root, 'gone');
+mkdirSync(live);
+const fallback = join(root, '.ai', 'squawk', 'worktrees', 'fallback');
+mkdirSync(fallback, { recursive: true });
+afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+const baseRun: RunRecord = makeRunRecord({ id: '43d2b279-0dd9-49b5-aecb-1060c3020b9b' });
+const notFound = { status: 404, body: { error: 'not found' } };
+const noWorktree = { status: 409, body: { error: 'no worktree — this task ran directly in the repo working tree' } };
+const autosave = { status: 409, body: { error: 'autosave cleanup pending' } };
+
+// One policy row for each Table A read route. Other intents join this table in later slices.
+const routes = [
+  { route: 'diff', checksAutosave: true, directory: 'existing-worktree', column: 'diff' },
+  { route: 'changes', checksAutosave: true, directory: 'working-directory', column: 'working' },
+  { route: 'commits', checksAutosave: false, directory: 'working-directory', column: 'working' },
+  { route: 'commit/:sha', checksAutosave: false, directory: 'working-directory', column: 'working' },
+  { route: 'files', checksAutosave: false, directory: 'working-directory', column: 'working' },
+  { route: 'file-link', checksAutosave: false, directory: 'recorded-path-or-root', column: 'fileLink' },
+] as const;
+type Expected = string | null | typeof notFound;
+interface State {
+  name: string;
+  run: RunRecord | undefined;
+  blocked: boolean;
+  claimHeld?: boolean;
+  foreignOwner?: boolean;
+  diff: Expected;
+  working: Expected;
+  fileLink: Expected;
+}
+const states: State[] = [
+  { name: 'unknown', run: undefined, blocked: false, diff: notFound, working: notFound, fileLink: notFound },
+  { name: 'live', run: { ...baseRun, worktreePath: live }, blocked: false, diff: live, working: live, fileLink: live },
+  { name: 'worktree off', run: { ...baseRun, worktree: false }, blocked: false, diff: null, working: root, fileLink: root },
+  { name: 'worktree off with recorded path', run: { ...baseRun, worktree: false, worktreePath: live }, blocked: false, diff: live, working: root, fileLink: live },
+  { name: 'empty recorded path', run: { ...baseRun, worktreePath: '' }, blocked: false, diff: null, working: noWorktree, fileLink: '' },
+  { name: 'no path', run: baseRun, blocked: false, diff: null, working: noWorktree, fileLink: root },
+  { name: 'removed', run: { ...baseRun, worktreePath: gone }, blocked: false, diff: null, working: noWorktree, fileLink: gone },
+  { name: 'reclaimed', run: { ...baseRun, worktreeReclaimedAt: '2026-11-10T01:00:00Z' }, blocked: false, diff: null, working: noWorktree, fileLink: root },
+  { name: 'fallback', run: { ...baseRun, worktreePath: fallback }, blocked: false, diff: fallback, working: fallback, fileLink: fallback },
+  { name: 'worker', run: { ...baseRun, worktreePath: live, delegation: {
+    role: 'worker', parentRunId: '0869dc16-0d6e-48a1-a693-e32cafc02c3f', permissions: [],
+    workspace: { ownerRunId: baseRun.id, resourceId: baseRun.id, kind: 'owned-isolated', path: live, branch: 'worker', baselineSha: 'a'.repeat(40) },
+  } }, blocked: false, diff: live, working: live, fileLink: live },
+  { name: 'claim held elsewhere', run: { ...baseRun, worktreePath: live }, blocked: false, claimHeld: true, diff: live, working: live, fileLink: live },
+  { name: 'foreign owner', run: { ...baseRun, worktreePath: live }, blocked: false, foreignOwner: true, diff: live, working: live, fileLink: live },
+  { name: 'running', run: { ...baseRun, status: RUN_STATUS.running, worktreePath: live }, blocked: false, diff: live, working: live, fileLink: live },
+  { name: 'usage hold', run: { ...baseRun, status: RUN_STATUS.waiting, autoResumeAt: '2026-11-11T00:00:00Z', worktreePath: live }, blocked: false, diff: live, working: live, fileLink: live },
+  { name: 'autosave with live path', run: { ...baseRun, worktreePath: live }, blocked: true, diff: live, working: live, fileLink: live },
+  { name: 'autosave with removed path', run: { ...baseRun, worktreePath: gone }, blocked: true, diff: null, working: noWorktree, fileLink: gone },
+  { name: 'autosave with unknown id', run: undefined, blocked: true, diff: notFound, working: notFound, fileLink: notFound },
+];
+
+function fakeHost({ run, claimHeld, foreignOwner }: State): RunCheckoutHost {
+  const forbidden = () => { throw new Error('a read must not check ownership, claim or write'); };
+  return {
+    root,
+    store: {
+      getRun: vi.fn(() => run), sourceDataDir: vi.fn(() => join(root, 'source')),
+      updateRun: forbidden, writeRefusal: vi.fn(() => foreignOwner ? RUN_IN_USE_ELSEWHERE : undefined),
+      fallbackDeleteError: forbidden, canDeleteRun: forbidden,
+    },
+    manager: { isActive: forbidden, claimForPublish: vi.fn(claimHeld ? () => null : forbidden), claimWorktreeReclaim: vi.fn(claimHeld ? () => null : forbidden) },
+  };
+}
+
+describe.each(routes)('read $route', (route) => {
+  it.each(states)('$name keeps admission order and directory policy', (state) => {
+    const host = fakeHost(state);
+    vi.mocked(autosaveCleanupBlocker).mockReset().mockReturnValue(state.blocked ? autosave.body.error : undefined);
+    const result = runCheckout(host, baseRun.id, 'read', route);
+    const checksAutosave = Boolean(state.run && route.checksAutosave);
+    const expected = checksAutosave && state.blocked ? autosave : state[route.column];
+    expect(result).toEqual(typeof expected === 'object' && expected !== null
+      ? expected
+      : { run: state.run, directory: expected });
+    expect(host.store.writeRefusal).not.toHaveBeenCalled();
+    expect(host.manager.claimForPublish).not.toHaveBeenCalled();
+    expect(host.manager.claimWorktreeReclaim).not.toHaveBeenCalled();
+    expect(host.store.getRun).toHaveBeenCalledExactlyOnceWith(baseRun.id);
+    expect(autosaveCleanupBlocker).toHaveBeenCalledTimes(Number(checksAutosave));
+    expect(host.store.sourceDataDir).toHaveBeenCalledTimes(Number(checksAutosave));
+    if (checksAutosave) {
+      expect(autosaveCleanupBlocker).toHaveBeenCalledWith(join(root, 'source'), baseRun.id);
+    }
+  });
+});

@@ -1,11 +1,11 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import type { WaitCancellation } from './wait-cancellation.ts';
 import { holdsOwedResults } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { CommitSource, RunRecord } from '../../runs/store.ts';
-import type { Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import type { WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { historyDeletionPending, executionBlockedByRootFinish } from './run-guards.ts';
 import { repairFailedRootFinish } from '../completion-policy.ts';
 import { reconcileConversationState, projectConversationEvents, settledRunFamilies } from '../../delegation/conversations.ts';
@@ -14,15 +14,12 @@ import { workerOutcome } from '../../runs/delegation-state.ts';
 import { workerOutcomeKey } from '../../runs/transcript-facts.ts';
 
 interface FamilyReconcilerHost {
-  resolveWorkerWait(id: string, entry: WorkerWaitEntry, observed: WorkerWaitEntry): boolean;
   reapTerminalScratch(id: string): void;
-  waitCancellation: WaitCancellation;
-  resolvePeerWaits(runs: readonly string[]): void;
+  waitEngine: WaitEngine;
   active(id: string): ActiveRun | undefined;
   isActive(id: string): boolean;
   recoveringRun(run: RunRecord | string | undefined): boolean;
   cancel(id: string): void;
-  armWait(id: string, wait: Wait): void;
   retireSettledQuestions(id: string): void;
   closeRoutedQuestions(id: string): void;
   reconcileWorkerWaits(id?: string): void;
@@ -36,7 +33,7 @@ export class FamilyReconciler {
     // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
     if (source === 'live-release') return;
     if (!this.context.disposed() && source === undefined) this.host.reapTerminalScratch(run.id);
-    if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.waitCancellation.cancelAll(run.id);
+    if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.waitEngine.cancelAll(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.host.active(run.id)?.liveSession.revokeDelegation?.();
     if (this.context.disposed() || this.host.recoveringRun(run)) return;
     // A destroy retry changes nothing the family reconcile reads (#880).
@@ -44,7 +41,7 @@ export class FamilyReconciler {
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       for (const id of settledRunFamilies(this.context.store, run)) this.host.reconcileWorkerWaits(id);
     }
-    this.host.resolvePeerWaits(runsAwaitingPeer(run, () => this.context.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
+    this.host.waitEngine.resolvePeerWaits(runsAwaitingPeer(run, () => this.context.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
 
   private readonly requestDeadlineTimers = new Map<string, NodeJS.Timeout>();
@@ -207,7 +204,7 @@ export class FamilyReconciler {
     if (['queued', 'running', 'waiting'].includes(parent.status)) return false;
     if (recovering) return true;
     const stale = WAIT_KINDS.worker.select(parent.waits ?? []).filter(wait => wait.phase === 'open' || wait.phase === 'resolved').map(wait => wait.id);
-    if (stale.length) this.host.waitCancellation.cancel(parent.id, stale);
+    if (stale.length) this.host.waitEngine.cancel(parent.id, stale);
     this.host.closeRoutedQuestions(parent.id);
     for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
       if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
@@ -263,7 +260,7 @@ export class FamilyReconciler {
     });
     // A result still owed for workers the executing turn has since destroyed is no longer news.
     const retired = entries.filter(entry => entry.phase === 'resolved' && destroyed(entry)).map(entry => entry.id);
-    if (retired.length) this.host.waitCancellation.cancel(parent.id, retired);
+    if (retired.length) this.host.waitEngine.cancel(parent.id, retired);
     for (const entry of entries.filter(wait => wait.phase === 'open')) {
       let selected = entry;
       if (entry.workerIds) {
@@ -278,12 +275,11 @@ export class FamilyReconciler {
       }
       const { entry: next, reason } = reconcileWorkerEntry(selected, outcomes, now, requests);
       if (reason && destroyed(next)) {
-        this.host.waitCancellation.cancel(parent.id, [entry.id]);
+        this.host.waitEngine.cancel(parent.id, [entry.id]);
       } else if (reason) {
-        if (!this.host.resolveWorkerWait(parent.id, entry, { ...next, result: { reason } })) continue;
+        if (!this.host.waitEngine.resolveWorkerWait(parent.id, entry, { ...next, result: { reason } })) continue;
       } else {
-        if (next !== entry) this.context.store.commitWait(parent.id, next);
-        this.host.armWait(parent.id, next);
+        this.host.waitEngine.refresh(parent.id, entry, next);
       }
       const recorded = this.context.store.transcriptFacts(parent.id).workerOutcomeKeys;
       for (const outcome of next.outcomes ?? []) {
