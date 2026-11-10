@@ -25,3 +25,7 @@ an open page but never skips one. Legacy-only pages keep their stored sequences.
 The projection is read-only: appends and compaction retain original positive
 legacy sequences. Compaction rewrites legacy receipts and logs only. Fallback
 records remain readable from their source and are never copied by compaction.
+
+Log compaction retains the newest 10,000 legacy rows plus durable retry rows.
+`AutomationStoreOptions.logRetentionCount` is a test-only override so paging
+regressions can cross the compaction boundary with small fixtures.
