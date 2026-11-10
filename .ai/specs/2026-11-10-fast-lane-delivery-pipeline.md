@@ -138,7 +138,9 @@ takes the guarded lane. 7 of 320 PRs carried it.
 The lane belongs to a head commit and its labels. A label change runs the pull request
 check again. The queue check computes the lane again and fails an entry whose lane differs
 from the one its pull request check ran, so a `needs-qa` label that arrives after
-auto-merge was armed still stops the merge.
+auto-merge was armed still stops the merge. The queue check also reads the labels itself and
+fails an entry that carries `needs-qa` without `qa-approved`, so removing `qa-approved`
+stops the merge too. Today that rule is policy only (`SDLC.md`); no workflow enforces it.
 
 ### Before the PR (5 minutes)
 
