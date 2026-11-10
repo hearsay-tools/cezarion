@@ -33,6 +33,7 @@ response and failed tool result were inspected on `2026.10.01-e373342`.
 two exact-resume print turns, including one logical `session.started`.
 Native subagent tools remain callable. Print reports the parent Task call but
 no child-session transcript; child attribution remains a named unsupported print case.
+Print runs with `--force`: Cursor permissions auto-resolve and create no human ask.
 
 `print-tools.ndjson` is a constructed fixture for hearsay-tools/cezarion#1267, so
 the UI parity matrix reads Cursor's tool rows from print alone. Text, IDs and
