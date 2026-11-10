@@ -10,7 +10,7 @@
 
 `project-paths.ts` supplies ordered read roots: the write root, then the fallback.
 The write root is `.ai/cezar/` unless the release switch is on and the project is
-moved (`.ai/squawk/moved.json`, hearsay-tools/cezarion#3150); then it is `.ai/squawk/`
+moved (a completed migration's marker in the Git common directory, hearsay-tools/cezarion#3150); then it is `.ai/squawk/`
 and `.ai/cezar/` is the fallback. Below, "legacy" means the write root and
 "`.ai/squawk/`" the fallback directory of a project that is not moved. Run IDs form a
 union; the write root's record wins a duplicate. History, artifacts, handoffs, transcript facts,

@@ -10,7 +10,7 @@
 
 `projectPaths(root)` is the one rule for the write root; no caller picks a folder itself.
 With `REBRAND_SWITCH` on, a moved project (a completed migration wrote
-`.ai/squawk/moved.json`, `PROJECT_MOVED_FILE`) writes `.ai/squawk/` and reads `.ai/cezar/`
+the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` names the project's real root; `projectMovedMarker`) writes `.ai/squawk/` and reads `.ai/cezar/`
 as its fallback (hearsay-tools/cezarion#3150). Every other project, and every project with
 the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
 below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
@@ -128,8 +128,11 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
      summary's `worktreePath`, the `worktree_path` column).
   6. `run-files`: worker execution, autosave cleanup, worker results, artifact metadata and
      the seeded `**Worktree:**` line of each handoff.
-  7. `mark-moved`: write the marker `.ai/squawk/moved.json` (private, settled before the
-     journal goes). From then on, with the switch on, the project writes `.ai/squawk/`.
+  7. `mark-moved`: write the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json`, naming the root (private,
+     settled before the journal goes). A commit, clone or pull cannot write inside the Git
+     directory, so a repository cannot ship or forge it; a linked checkout registered as its own
+     project has its own key. The plan refuses when `.git` does not lead to the directory Git
+     reports, so the reader (no Git call) and the writer agree. From then on, with the switch on, the project writes `.ai/squawk/`.
 
   Steps 1 to 3 run inside one hold of the common directory's worktree mutation lock. The
   Git locks keep a `git worktree prune` from any checkout sharing the Git directory from

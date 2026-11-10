@@ -1,8 +1,8 @@
-import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
-import { pathPresent, PROJECT_MOVED_FILE } from '../project-paths.ts';
+import { pathPresent, projectMovedMarker, projectMoveMarked } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
 import { notRegularFile, outsideOf, receiptDirectory, runStoreFiles } from './containment.ts';
 import { replaceAtomically, settle } from './durable.ts';
@@ -275,19 +275,21 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
 }
 
 /**
- * The durable mark that the project is moved: `.ai/squawk/moved.json`, written once every other
- * step is done and settled before the journal goes. From then on, with the release switch on,
- * `projectPaths` writes the project under `.ai/squawk/`.
+ * The durable mark that the project is moved (`projectMovedMarker`: in the Git common directory,
+ * naming the project's real root), written once every other step is done and settled before the
+ * journal goes. From then on, with the release switch on, `projectPaths` writes `.ai/squawk/`.
  */
 function markMovedStep(journal: ProjectMigrationJournal): void {
-  const marker = join(journal.destination, PROJECT_MOVED_FILE);
-  contained('mark-moved', journal.destination, marker);
-  regularFile('mark-moved', marker);
-  createDirectories(journal.destination, journal.source, journal.destination);
-  if (!pathPresent(marker)) {
-    replaceAtomically(marker, `${JSON.stringify({ version: 1, from: journal.source }, null, 2)}\n`, 0o600);
+  const marker = projectMovedMarker(journal.repoRoot);
+  if (!marker || marker.root !== journal.repoRoot) throw new ProjectMigrationStepError('mark-moved', `cannot find the Git directory of ${journal.repoRoot}`);
+  const directory = dirname(marker.path);
+  if (!pathPresent(directory)) mkdirSync(directory, { mode: 0o700 });
+  if (!lstatSync(directory).isDirectory()) throw new ProjectMigrationStepError('mark-moved', `${directory} is not a directory`);
+  regularFile('mark-moved', marker.path);
+  if (!projectMoveMarked(journal.repoRoot)) {
+    replaceAtomically(marker.path, `${JSON.stringify({ version: 1, root: marker.root, from: journal.source }, null, 2)}\n`, 0o600);
   }
-  settle(dirname(journal.destination), marker, { data: true });
+  settle(dirname(directory), marker.path, { data: true });
 }
 
 /** The steps that run inside one hold of the Git common directory's worktree mutation lock. */

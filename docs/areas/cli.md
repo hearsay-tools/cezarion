@@ -10,7 +10,7 @@
 
 Project entry points use `projectPaths`: the write root is the first read root, the
 other directory is the fallback. The write root is `.ai/cezar/`, or `.ai/squawk/` for a
-moved project with the release switch on (`.ai/squawk/moved.json`,
+moved project with the release switch on (a completed migration's marker in the Git common directory,
 hearsay-tools/cezarion#3150). Dual reads work with the release switch off. `init`,
 generated task paths, task state and config writes go to the write root; `init` skips a
 starter whose workflow or skill name already exists in the fallback.

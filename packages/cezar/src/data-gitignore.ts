@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { projectPaths, PROJECT_MOVED_FILE } from './project-paths.ts';
+import { projectPaths } from './project-paths.ts';
 import { projectWriteRefused } from './server/cockpit-ownership.ts';
 
 /**
@@ -68,7 +68,7 @@ export function ensureDataGitignore(repoRoot: string): void {
     const sharedPath = join(resolve(repoRoot, common), 'info', 'exclude');
     mkdirSync(join(resolve(repoRoot, common), 'info'), { recursive: true });
     const shared = existsSync(sharedPath) ? readFileSync(sharedPath, 'utf8') : '';
-    const sharedRules = [...['cezar', 'squawk'].flatMap(name => wanted.map(rule => `/.ai/${name}/${rule}`)), `/.ai/squawk/${PROJECT_MOVED_FILE}`, '/.ai/squawk-migration.json', '/.ai/squawk-migration.lock*'];
+    const sharedRules = [...['cezar', 'squawk'].flatMap(name => wanted.map(rule => `/.ai/${name}/${rule}`)), '/.ai/squawk-migration.json', '/.ai/squawk-migration.lock*'];
     const absent = sharedRules.filter(rule => !shared.split('\n').includes(rule));
     if (absent.length) writeFileSync(sharedPath, `${shared}${shared && !shared.endsWith('\n') ? '\n' : ''}${absent.join('\n')}\n`, 'utf8');
   } catch {

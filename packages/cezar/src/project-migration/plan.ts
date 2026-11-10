@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
 import { copyFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
-import nodePath, { posix, join, resolve, sep } from 'node:path';
+import nodePath, { dirname, posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
-import { pathPresent, projectMoveMarked, PROJECT_MOVED_FILE } from '../project-paths.ts';
+import { pathPresent, projectMovedMarker, projectMoveMarked } from '../project-paths.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseUnsupportedSchemaError } from '../runs/run-database.ts';
 import { migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -235,6 +235,10 @@ export function gitReportedPath(path: string, api: Pick<typeof nodePath, 'normal
   return api.normalize(path);
 }
 
+function realpathOrSelf(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
+}
+
 function sortedEntries(path: string): Dirent[] {
   return readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 }
@@ -255,6 +259,12 @@ class Planner {
     const { plan } = this;
     if (pathPresent(plan.journal)) plan.blockers.push(`An unfinished project migration journal ${plan.journal} exists; resume it first`);
     if (projectMoveMarked(this.root)) return this.moved();
+    // The mark-moved step writes where `projectPaths` looks; refuse before the journal when they differ.
+    const common = await gitOutput(this.root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    const marker = projectMovedMarker(this.root);
+    if (common && (!marker || dirname(dirname(marker.path)) !== realpathOrSelf(common.trim()))) {
+      plan.blockers.push(`Cannot find the Git directory of ${this.root} from its .git entry, so a move could not be marked`);
+    }
     if (!pathPresent(plan.source)) return plan;
     if (!realDirectory(plan.source) || realpathSync(plan.source) !== plan.source) { plan.blockers.push(`${plan.source} is not a directory of this project`); return plan; }
     if (pathPresent(plan.destination) && !realDirectory(plan.destination)) {
@@ -442,7 +452,7 @@ export function describeProjectMigrationPlan(plan: ProjectMigrationPlan): string
   const section = (title: string, lines: readonly string[]) => lines.length ? [`${title}:`, ...lines.map(line => `  ${line}`)] : [`${title}: none`];
   return [
     `Project ${plan.repoRoot}: ${plan.source} -> ${plan.destination}`,
-    ...plan.alreadyMoved ? [`Already moved: ${join(plan.destination, PROJECT_MOVED_FILE)} marks a completed migration; nothing moves`] : [],
+    ...plan.alreadyMoved ? ['Already moved: a completed migration marked this project; nothing moves'] : [],
     ...section('Blockers', plan.blockers),
     ...section('Destination conflicts', plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)),
     ...section('Moves', plan.moves.map(move => `${move.from} -> ${move.to}`)),

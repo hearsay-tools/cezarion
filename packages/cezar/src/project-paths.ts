@@ -1,24 +1,62 @@
 import { REBRAND_SWITCH } from './home/switch.ts';
-import { lstatSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, isAbsolute, relative, resolve } from 'node:path';
 
 /**
- * The marker a completed project migration writes into `.ai/squawk/` as its last step, before it
- * removes its journal (hearsay-tools/cezarion#3150). Runtime state, never tracked.
+ * Where a completed project migration marks the project moved (hearsay-tools/cezarion#3150):
+ * `<git common dir>/cezar-moved-projects/<sha256 of the project's real root>.json`, naming that
+ * root. A commit, clone or pull never writes inside the Git directory, so a repository cannot ship
+ * or forge the mark; a linked checkout registered as its own project has its own key.
  */
-export const PROJECT_MOVED_FILE = 'moved.json';
+export const MOVED_PROJECTS_DIR = 'cezar-moved-projects';
 
-/** Whether the project's migration has completed: its marker is a regular file under `.ai/squawk/`. */
+/** The Git common directory of the checkout at `root`, read from `.git` without running Git. */
+function commonDirOf(root: string): string | undefined {
+  const dotGit = join(root, '.git');
+  try {
+    let admin = dotGit;
+    if (statSync(dotGit).isFile()) {
+      const gitdir = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, 'utf8').slice(0, 4096))?.[1]?.trim();
+      if (!gitdir) return undefined;
+      admin = resolve(root, gitdir);
+    }
+    let common = admin;
+    try { common = resolve(admin, readFileSync(join(admin, 'commondir'), 'utf8').trim()); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return undefined; }
+    return realpathSync(common);
+  } catch { return undefined; }
+}
+
+const markers = new Map<string, { root: string; path: string }>();
+/** The project's real root and its moved marker path; undefined when its Git directory is not found. */
+export function projectMovedMarker(repoRoot: string): { root: string; path: string } | undefined {
+  const cached = markers.get(repoRoot);
+  if (cached) return cached;
+  let root: string;
+  try { root = realpathSync(repoRoot); } catch { return undefined; }
+  const common = commonDirOf(root);
+  if (!common) return undefined;
+  const marker = { root, path: join(common, MOVED_PROJECTS_DIR, `${createHash('sha256').update(root).digest('hex')}.json`) };
+  markers.set(repoRoot, marker);
+  return marker;
+}
+
+/** Whether the project's migration has completed: its marker is a regular file that names this root. */
 export function projectMoveMarked(repoRoot: string): boolean {
-  try { return lstatSync(join(repoRoot, '.ai', 'squawk', PROJECT_MOVED_FILE)).isFile(); }
-  catch { return false; }
+  const marker = projectMovedMarker(repoRoot);
+  if (!marker) return false;
+  try {
+    if (!lstatSync(marker.path).isFile()) return false;
+    return (JSON.parse(readFileSync(marker.path, 'utf8')) as { root?: unknown }).root === marker.root;
+  } catch { return false; }
 }
 
 /**
  * The one rule for a project's write root. With the release switch on, a moved project writes
  * `.ai/squawk/` and reads `.ai/cezar/` as its fallback; every other project, and every project
- * with the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. One `lstat`
- * with the switch on, none with it off.
+ * with the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. With the
+ * switch on: one `lstat` (and a small read once marked); none with it off.
  */
 export function projectPaths(repoRoot: string) {
   const legacy = join(repoRoot, '.ai', 'cezar');

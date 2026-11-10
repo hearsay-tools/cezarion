@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 const release = vi.hoisted(() => ({ enabled: true }));
@@ -13,13 +13,15 @@ import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { CockpitOwnership } from '../server/cockpit-ownership.ts';
 import { ProjectContexts } from '../server/project-context.ts';
 import { worktreePathFor } from '../git-worktree.ts';
-import { fallbackProjectWriteError, PROJECT_MOVED_FILE, projectPaths } from '../project-paths.ts';
+import { fallbackProjectWriteError, projectMovedMarker, projectMoveMarked, projectPaths } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { migrationAnswer, migrationAnswerText } from './answer.ts';
 import { moveProjectWhenIdle } from './auto.ts';
-import { migrate, moved, TIMEOUT } from './engine.testkit.ts';
+import { crashAt, fence, migrate, moved, TIMEOUT } from './engine.testkit.ts';
+import { migrateProject, resumeProjectMigration } from './engine.ts';
+import { planProjectMigration } from './plan.ts';
 import { buildMigrationProject, git, projectSnapshot, removeMigrationProject, TASK, WORKER, type MigrationProject } from './project-migration.testkit.ts';
 
 /**
@@ -64,7 +66,7 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
 
   it('writes a new task to .ai/squawk/runs.db and creates no .ai/cezar/runs.db', async () => {
     await migrate(project);
-    expect(existsSync(join(project.newDir, PROJECT_MOVED_FILE))).toBe(true);
+    expect(projectMoveMarked(project.root)).toBe(true);
     expect(projectPaths(project.root)).toEqual({ write: project.newDir, reads: [project.newDir, project.dataDir] });
     newTask(project.root);
     expect(existsSync(join(project.newDir, RUNS_DB_FILE))).toBe(true);
@@ -105,7 +107,7 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
     expect(projectSnapshot(project)).toEqual(before);
     expect(existsSync(join(project.root, '.ai/squawk-migration.json'))).toBe(false);
     const text = migrationAnswerText(migrationAnswer(again));
-    expect(text).toContain(`Already moved: ${join(project.newDir, PROJECT_MOVED_FILE)}`);
+    expect(text).toContain('Already moved: a completed migration marked this project');
     expect(text).toContain("git mv -- '.ai/cezar/workflows/flow.yaml' '.ai/squawk/workflows/flow.yaml'");
     expect(text.endsWith('The project was already moved; nothing changed. Run the git mv commands above and commit them.')).toBe(true);
   });
@@ -133,7 +135,7 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
     const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, listProjects: async () => [{ id: 'p', root: project.root, status: 'ok' as const }] });
     try {
       const context = await contexts.context('p');
-      expect(existsSync(join(project.newDir, PROJECT_MOVED_FILE))).toBe(true);
+      expect(projectMoveMarked(project.root)).toBe(true);
       expect(context.dataDir).toBe(project.newDir);
       const run = context.store.createRun({ title: 'after', task: 'after', workflow: 'quick-task', steps: [] });
       context.store.flush();
@@ -147,6 +149,50 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
     finally { next.releaseAll(); }
   });
 
+  it('never counts a marker a repository can ship or forge, and still moves the project', async () => {
+    // A committed marker where an earlier design kept it, and a forged one naming another root.
+    mkdirSync(join(project.newDir), { recursive: true });
+    writeFileSync(join(project.newDir, 'moved.json'), '{}\n');
+    git(project.root, 'add', '-f', '.ai/squawk/moved.json');
+    git(project.root, 'commit', '-qm', 'ship a marker');
+    const marker = projectMovedMarker(project.root)!;
+    expect(dirname(dirname(marker.path))).toBe(realpathSync(join(project.root, '.git')));
+    mkdirSync(dirname(marker.path), { recursive: true });
+    writeFileSync(marker.path, `${JSON.stringify({ version: 1, root: '/elsewhere' })}\n`);
+    expect(projectMoveMarked(project.root)).toBe(false);
+    expect(projectPaths(project.root).write).toBe(project.dataDir);
+    expect((await planProjectMigration(project.root)).alreadyMoved).toBe(false);
+    const ownership = new CockpitOwnership();
+    try { expect((await moveProjectWhenIdle(project.root, { ownership, homes: [testHome()] })).status).toBe('moved'); }
+    finally { ownership.releaseAll(); }
+    expect(projectMoveMarked(project.root)).toBe(true);
+    expect(JSON.parse(readFileSync(marker.path, 'utf8'))).toMatchObject({ root: realpathSync(project.root) });
+    expect(projectPaths(project.root).write).toBe(project.newDir);
+  });
+
+  it('keys the marker by the project root, so a linked checkout of the same repository has its own', () => {
+    const linked = join(project.base, 'work', 'linked-project');
+    git(project.root, 'worktree', 'add', '-q', '-b', 'linked-project', linked);
+    const main = projectMovedMarker(project.root)!, other = projectMovedMarker(linked)!;
+    expect(dirname(other.path)).toBe(dirname(main.path));
+    expect(dirname(dirname(main.path))).toBe(realpathSync(git(project.root, 'rev-parse', '--path-format=absolute', '--git-common-dir')));
+    expect(other.path).not.toBe(main.path);
+    expect(other.root).toBe(realpathSync(linked));
+  });
+
+  it('resumes a crash between the mark and the journal removal into a marked, moved project', async () => {
+    const crashed = await fence(project);
+    await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt('mark-moved:after') })).rejects.toThrow('mark-moved:after');
+    crashed.release();
+    expect(existsSync(join(project.root, '.ai/squawk-migration.json'))).toBe(true);
+    const recovery = await fence(project);
+    try { expect((await resumeProjectMigration({ repoRoot: project.root, fence: recovery }))?.resumed).toBe(true); }
+    finally { recovery.release(); }
+    expect(existsSync(join(project.root, '.ai/squawk-migration.json'))).toBe(false);
+    expect(projectMoveMarked(project.root)).toBe(true);
+    expect(projectPaths(project.root).write).toBe(project.newDir);
+  });
+
   it('keeps the run data ignore rules in the write root, without blocking the git mv of a tracked copy', async () => {
     git(project.root, 'add', '-f', '.ai/cezar/.gitignore');
     git(project.root, 'commit', '-qm', 'track the ignore file');
@@ -156,7 +202,7 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
     expect(existsSync(join(project.dataDir, '.gitignore'))).toBe(true);
     expect(existsSync(join(project.newDir, '.gitignore'))).toBe(false);
     const exclude = readFileSync(join(project.root, git(project.root, 'rev-parse', '--git-common-dir'), 'info', 'exclude'), 'utf8');
-    expect(exclude.split('\n')).toEqual(expect.arrayContaining([`/.ai/squawk/${PROJECT_MOVED_FILE}`, '/.ai/squawk/runs.db', '/.ai/squawk/worktrees/']));
+    expect(exclude.split('\n')).toEqual(expect.arrayContaining(['/.ai/squawk/runs.db', '/.ai/squawk/worktrees/']));
     git(project.root, 'mv', '.ai/cezar/.gitignore', '.ai/squawk/.gitignore');
     ensureDataGitignore(project.root);
     expect(readFileSync(join(project.newDir, '.gitignore'), 'utf8').split('\n')).toContain('runs.db');
@@ -164,7 +210,7 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
 
   it('keeps writing .ai/cezar/ with the switch off, marker or not', async () => {
     await migrate(project);
-    expect(existsSync(join(project.newDir, PROJECT_MOVED_FILE))).toBe(true);
+    expect(projectMoveMarked(project.root)).toBe(true);
     release.enabled = false;
     expect(projectPaths(project.root)).toEqual({ write: project.dataDir, reads: [project.dataDir, project.newDir] });
     expect(fallbackProjectWriteError(project.newDir)).toMatch(/Cannot write read-only project data/);
