@@ -1,3 +1,4 @@
+import { watchDeadline } from './wait-watches.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { peerWaitResult } from '../wait-scope.ts';
@@ -77,12 +78,11 @@ export class WaitResolve {
     };
     const due = Date.parse((wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline) - Date.now();
     if (due <= 0) { fire(); return; }
-    const timer = setTimeout(() => {
+    const timer = watchDeadline({ deadline: (wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline, delay: due }, new AbortController().signal, () => {
       if (this.waitTimers.get(wait.id)?.timer !== timer) return;
       this.waitTimers.delete(wait.id);
       fire();
-    }, due);
-    timer.unref?.();
+    });
     this.waitTimers.set(wait.id, { runId, timer });
   }
 
@@ -100,7 +100,7 @@ export class WaitResolve {
     const family = familyOf(run);
     let warned = false;
     const arm = (delay: number) => {
-      const timer = setTimeout(() => {
+      const timer = watchDeadline({ deadline: wait.deadline, delay }, new AbortController().signal, () => {
         if (this.waitTimers.get(wait.id)?.timer !== timer) return;
         this.waitTimers.delete(wait.id);
         try { this.host.reconcileWorkerWaits(family); }
@@ -109,8 +109,7 @@ export class WaitResolve {
           warned = true;
           if (!this.context.disposed() && this.context.store.getRun(runId)?.waits?.some(entry => entry.id === wait.id && entry.phase === 'open')) arm(1_000);
         }
-      }, delay);
-      timer.unref?.();
+      });
       this.waitTimers.set(wait.id, { runId, timer });
     };
     arm(Math.max(0, firstDelay ?? Date.parse(wait.deadline!) - Date.now()));

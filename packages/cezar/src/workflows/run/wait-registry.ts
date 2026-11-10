@@ -45,22 +45,11 @@ interface WaitRegistryHost {
   workerExecutionStopped(id: string): boolean;
   executionBlockedByRootFinish(run: RunRecord): boolean;
   ciSupervisor(): Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
-  isParked(id: string): boolean;
   countAutomaticWakes(id: string): number;
   reconcileWorkerWaits(family?: string): void;
-  noticeParkedWorkers(id: string): void;
-  canProceedWithRun(id: string, run: RunRecord | undefined): run is RunRecord;
   exitFileRoots(id: string, run: RunRecord): ExitFileRoots;
   disarmWait(id: string): void;
   settleWait(id: string, waitId: string, result?: WaitResult): void;
-  withdrawCezarHumanWaits(id: string): void;
-  armWait(id: string, wait: Wait): void;
-  parkOnWaits(id: string, state: ActiveRun): void;
-  cancelAutomaticAtCap(id: string, waits: readonly Wait[]): void;
-  reparkWithoutWaits(id: string, state: ActiveRun): void;
-  waitOnUserWithoutSession(id: string): void;
-  queueWaitWake(id: string): void;
-  retryWaitAdmission(id: string): void;
 }
 
 export class WaitRegistry {

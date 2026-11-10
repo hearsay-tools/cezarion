@@ -301,15 +301,10 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     waitEngine: modules.waitEngine,
     active: id => host.active.get(id), workerExecutionStopped: id => host.workerExecutionStopped(id),
     executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), ciSupervisor: () => host.ciSupervisor,
-    isParked: id => modules.line.isParked(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
-    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family), noticeParkedWorkers: id => modules.workerQuestions.noticeParkedWorkers(id),
-    canProceedWithRun: (id, run) => host.canProceedWithRun(id, run),
+    countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
+    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
     exitFileRoots: (id, run) => modules.waitResolve.exitFileRoots(id, run), disarmWait: id => host.disarmWait(id),
     settleWait: (id, waitId, result) => modules.waitResolve.settleWait(id, waitId, result),
-    withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id), armWait: (id, wait) => modules.waitResolve.armWait(id, wait),
-    parkOnWaits: (id, state) => modules.wakeAdmission.parkOnWaits(id, state), cancelAutomaticAtCap: (id, waits) => modules.wakeAdmission.cancelAutomaticAtCap(id, waits),
-    reparkWithoutWaits: (id, state) => modules.wakeAdmission.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => modules.wakeAdmission.waitOnUserWithoutSession(id),
-    queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => modules.retries.retryWaitAdmission(id),
   }, MAX_AUTO_CONTINUES);
   modules.subagentWaits = new SubagentWaits(context, {
     waitEngine: modules.waitEngine,
