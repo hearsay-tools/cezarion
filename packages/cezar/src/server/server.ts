@@ -3759,7 +3759,7 @@ export function createApp(deps: ServerDeps) {
     .get('/runs/:id/commit/:sha', async (c) => {
       const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
-      const { run, directory: workingDirectory } = checkout;
+      const { directory: workingDirectory } = checkout;
       const result = await collectCommitChanges(workingDirectory, c.req.param('sha'));
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json(result.commit);
