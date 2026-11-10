@@ -172,3 +172,17 @@ it('takes the fresh decision before seeding split files that have no marker', as
   const { getHomeRecovery } = await import('./recovery.ts');
   expect(getHomeRecovery(f.home, true).files.some(file => file.reason === 'legacy-change')).toBe(true);
 });
+
+it('lists the split home when its install marker is unreadable', async () => {
+  const f = await fixture(true);
+  mkdirSync(f.home.config, { recursive: true }); // Intentional corrupt-marker fixture.
+  writeFileSync(join(f.home.config, 'install.json'), '{corrupt'); // Intentional corrupt marker.
+  mkdirSync(f.legacy.root, { recursive: true }); // Intentional pre-migration fixture.
+  writeFileSync(`${f.legacy.workspaceConfig}.bak`, '{"projects":[]}'); // Intentional pre-migration fixture.
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const { loadSubcommand } = await import('../subcommands.ts');
+  const run = await loadSubcommand('backup', () => f.home);
+  expect(await run!(['list'], f.env)).toBe(0);
+  const listed: Array<{ path: string }> = JSON.parse(output.mock.calls[0]![0]);
+  expect(listed.every(entry => !entry.path.startsWith(f.legacy.root))).toBe(true);
+});

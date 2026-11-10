@@ -12,6 +12,11 @@ export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promi
 
 export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'job', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate', 'server-migrate', 'migrate-project'] : [])] as const;
 
+/** An unreadable marker still marks the split home as in use: list it, as before the fallback. */
+function hasInstallMarker(root: string): boolean {
+  try { return readInstallMarker(root) !== undefined; } catch { return true; }
+}
+
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
 export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env }), rebrand = REBRAND_SWITCH): Promise<SubcommandRunner | undefined> {
   if (rebrand && name === 'migrate') return (await import('./home/migration-cli.ts')).runMigrationCommand;
@@ -25,7 +30,7 @@ export async function loadSubcommand(name: string | undefined, home: (env: NodeJ
   switch (name) {
     case 'backup': return async (argv, env) => {
       const selected = home(env);
-      const source = rebrand && selected.layout === 'split' && argv[0] === 'list' && !readInstallMarker(selected.config)
+      const source = rebrand && selected.layout === 'split' && argv[0] === 'list' && !hasInstallMarker(selected.config)
         ? resolveHome({ purpose: 'cli', env, layout: 'legacy' }) : selected;
       return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, source, undefined, { contained: source !== selected });
     };
