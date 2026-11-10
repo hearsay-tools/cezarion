@@ -18,34 +18,13 @@ The types in `agent-runner.ts` and their doc comments are the contract: `AgentRu
 runner id. Each runner's `*_SPEC_SUPPORT` constant, next to its class, says which
 `AgentRunSpec` fields its wire honors.
 
-### Identity
-
-- Derive every runner list from `RUNNER_IDS`, or narrow a string with `isRunnerId()`. Never
-  write the roster by hand.
-- Never repurpose or remove a shipped backend id. `claude-cli` is the legacy id of `claude`.
-
-### `AgentRunner`
-
-- Only `createRunner` in `core/runner-factory.ts` constructs a runner class. Code outside
-  `packages/cezar/src/core/` takes a `RunnerFactory`.
-- Code outside `packages/cezar/src/core/` never compares runner ids to decide what a runner
-  can do. It reads the runner's `RUNNER_FACTS` row. An identity choice, such as the default
-  runner, may name an id.
 - `.ai/scripts/probe-steering.ts` probes the `inputDelivery` of a real CLI. It spends a paid
   session, so run it by hand.
-
-### `AgentSession`
-
-- Gate a SIGKILL escalation on `trackChildExit`, never on `ChildProcess.killed`, which turns
-  true when the signal is sent.
 - Agent input delivery is at-least-once. After a crash between harness acceptance and the
   delivery checkpoint, recovery replays the input with the same ID.
 - The delegation CLI (`cez worker`, `cez message`) is agent-facing and has no compatibility
   window: change or remove a verb without an alias. This does not apply to human commands
   such as `cez task send`.
-
-### `AgentRunSpec`
-
 - The zero-config tool grant (`DEFAULT_ALLOWED_TOOLS`) includes unrestricted `Bash`, and a
   runner whose `specSupport.toolGrant` is not honored ignores the grant. Treat the default
   `auto` permission mode as full shell access, not a sandbox (open-mercato/cezar#430).
@@ -83,7 +62,7 @@ ask bridge maps onto the same `ask.requested` event (§10 item 8).
 
 Each backend's mapper is `packages/cezar/src/core/<backend>-ui-mapper.ts`
 (`cursor-print-ui-mapper.ts` for Cursor). Its golden fixtures (§8) are the wire-to-event
-table. A mapper never throws on wire input and never mutates the state it receives.
+table.
 
 <a id="cursor-acp-264"></a>
 
@@ -229,12 +208,9 @@ Owners. Paths are relative to `packages/cezar/src/`.
 - **Matrix guards and single-runner cells:** `core/harness-parity.test.ts` and
   `workflows/waits-parity.test.ts`.
 
-Rules that no check holds:
+[docs/areas/runners.md](docs/areas/runners.md) holds the rules for a parity row, for a
+per-runner file and for regression coverage. Rules that no check holds:
 
-- A fix to runner lifecycle, input delivery, attention, asks or completion adds or extends a
-  parity row in the same PR. Prove that the row fails without the fix.
-  [docs/areas/runners.md](docs/areas/runners.md#runner-regressions-ship-with-shared-coverage)
-  says where the row runs.
 - A red cell is a runner bug until proven otherwise. Fix the runner. Do not weaken the row.
 - A new mock scenario is wire-faithful on the terms of §8: derive its frames from that
   backend's real transcripts and cite the source.
