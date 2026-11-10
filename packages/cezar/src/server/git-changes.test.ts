@@ -1,3 +1,4 @@
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
@@ -915,7 +916,7 @@ describe('session git API routes', () => {
   });
 
   it.each(['commit', 'push'])('POST git/%s refuses a running run before changing Git state', async (action) => {
-    store.updateRun(run.id, { status: 'running' });
+    setRunStatus(store, run.id, 'running');
     writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
     const before = g(worktree, 'rev-parse', 'HEAD');
     const res = action === 'commit'
@@ -928,7 +929,7 @@ describe('session git API routes', () => {
   });
 
   it.each(['queued', 'waiting'] as const)('POST git/commit commits everything while %s; clean tree is 409, bad body is 400', async (status) => {
-    store.updateRun(run.id, { status });
+    setRunStatus(store, run.id, status);
     writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
     const res = await commit(run.id, { message: 'feat: add feature' });
     expect(res.status).toBe(200);
@@ -954,7 +955,7 @@ describe('session git API routes', () => {
   });
 
   it.each(['queued', 'waiting'] as const)('POST git/push sets upstream on first push while %s', async (status) => {
-    store.updateRun(run.id, { status });
+    setRunStatus(store, run.id, status);
     const remote = mkdtempSync(join(tmpdir(), 'cez-remote-'));
     try {
       execFileSync('git', ['init', '--bare', remote], { encoding: 'utf8' });
