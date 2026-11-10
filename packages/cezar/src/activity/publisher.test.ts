@@ -11,6 +11,10 @@ import {
   type ActivityChangeSource, type ActivityPublisherDeps, type LiveActivityStore,
 } from './publisher.ts';
 import type { ToolActivitySource } from './read-model.ts';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CockpitOwnership } from '../server/cockpit-ownership.ts';
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -152,6 +156,32 @@ describe('the activity publisher', () => {
     await vi.advanceTimersByTimeAsync(ONE_CHECK_MS);
     expect(frames.map(titles)).toEqual([['after']]);
     stop();
+  });
+
+  it('reads no claims of a project while a migration fence holds it', async () => {
+    const project = mkdtempSync(join(realpathSync(tmpdir()), 'cez-activity-fence-'));
+    const dataDir = join(project, '.ai', 'cezar');
+    const migrator = new CockpitOwnership();
+    try {
+      const { store } = liveStore([makeRoot({ title: 'task' })], { held: [] });
+      const reads = vi.spyOn(store, 'listForeignClaimedRunIds');
+      const publisher = createActivityPublisher({
+        sources: async () => [{ projectId: 'shop', name: 'Shop', loaded: { store, isActive: () => false, dataDir } }],
+        watch: () => new ActivityDemand().watch('shop'),
+      });
+      const { stop } = await subscribe(publisher);
+      const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0 });
+      reads.mockClear();
+      await vi.advanceTimersByTimeAsync(2 * ONE_CHECK_MS);
+      expect(reads).not.toHaveBeenCalled();
+      fence.release();
+      await vi.advanceTimersByTimeAsync(ONE_CHECK_MS);
+      expect(reads).toHaveBeenCalled();
+      stop();
+    } finally {
+      migrator.releaseAll();
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 
   it('shows a foreign run created after subscribe within one check', async () => {

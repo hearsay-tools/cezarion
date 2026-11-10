@@ -1,4 +1,5 @@
 import { readDataPath } from '../project-paths.ts';
+import { assertProjectWritable } from './cockpit-ownership.ts';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -19,6 +20,7 @@ export function ensureLaunchKey(dataDir: string): string {
     // unreadable — fall through and regenerate
   }
   const key = randomUUID();
+  assertProjectWritable(dataDir);
   try {
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(path, `${key}\n`, { encoding: 'utf8', mode: 0o600 });

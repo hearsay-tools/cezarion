@@ -208,7 +208,7 @@ import {
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
-import { loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
+import { healthConfig, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
@@ -279,7 +279,7 @@ import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resol
 import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
-import type { CockpitOwnership } from './cockpit-ownership.ts';
+import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -937,7 +937,7 @@ export function createApp(deps: ServerDeps) {
     // runs in front of every workspace route (`/health` above all), which must keep answering.
     if (project.store.unavailable && servesProjectRoute(c)) return c.json({ error: project.store.unavailable.message }, 409);
     c.set('project', project);
-    return next();
+    return servesProjectRoute(c) ? withProjectAdmission(project.dataDir, next, (error) => c.json({ error: error.message }, 409)) : next();
   };
   /** Every method+path of the project table, under both prefixes; filled once `v1` is built. */
   let projectRoutePaths: ReadonlySet<string> = new Set();
@@ -1069,7 +1069,7 @@ export function createApp(deps: ServerDeps) {
     const [checks, repo, config, workspace] = await Promise.all([
       readBackendChecks(),
       getRepoInfo(bootRoot),
-      loadConfig(bootRoot, deps.home),
+      healthConfig(bootRoot, deps.home),
       workspaceSummary(),
     ]);
     // Additive fields only below — the pre-forge shape is the most
@@ -3043,7 +3043,7 @@ export function createApp(deps: ServerDeps) {
       const check: ManualCheck = { id, automationId: automation.id, mode: parsed.data.mode, status: 'queued', createdAt: new Date().toISOString() };
       if (manualChecks.size >= 200) manualChecks.delete(manualChecks.keys().next().value!);
       manualChecks.set(id, check);
-      void (async () => {
+      void withProjectAdmission(project.dataDir, async function manualCheck() {
         check.status = 'running';
         try {
           const repoRemote = (await getRepoInfo(project.root))?.remote;
@@ -3064,7 +3064,7 @@ export function createApp(deps: ServerDeps) {
         } catch (error) {
           Object.assign(check, { status: 'error', completedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
         }
-      })();
+      }, (error) => { Object.assign(check, { status: 'error', completedAt: new Date().toISOString(), error: error.message }); });
       return c.json({ checkId: id }, 202);
     })
 
@@ -4916,8 +4916,8 @@ export function createApp(deps: ServerDeps) {
     coldRepoHandles.retainRoots(new Set(projects
       .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
       .map((project) => project.root)));
-    // No folder, no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
-    return projects.filter((project) => project.status !== 'missing').map((project) => {
+    // No folder or a migration fence: no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
+    return projects.filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
       const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
       // A cold project's repository identity only: asking for an owned one starts a discovery
       // nothing reads.
@@ -5120,11 +5120,11 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;
     },
-    withStore: async (project, work) => {
+    withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, function admittedStore() {
       if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
       return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
-    },
+    }, () => undefined),
     lookup: (root, identities, signal) => resolveForgeRoot(root, deps.forgeFactory).mergedPullRequests(identities, signal),
   };
   const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);

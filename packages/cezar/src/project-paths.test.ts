@@ -100,6 +100,7 @@ describe('project directory reads before P5', () => {
     expect(shared).toContain('/.ai/squawk/runs.db-wal\n');
     expect(shared).toContain('/.ai/squawk/runs/\n');
     expect(shared).toContain('/.ai/squawk-migration.json\n');
+    expect(shared).toContain('/.ai/squawk-migration.lock*\n');
     expect(shared).not.toContain('/.ai/squawk/workflows');
     expect(execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })).toBe('');
     seed('squawk', 'runs.db', 'runtime');

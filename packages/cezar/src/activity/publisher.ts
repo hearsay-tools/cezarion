@@ -2,6 +2,7 @@ import type { ActivityRun, ActivitySnapshot, ActivityWorker } from '@open-mercat
 import type { RunStore } from '../runs/store.ts';
 import type { TopicPublisher } from '../server/ws.ts';
 import { buildActivityProject, type ActivityDeps, type ActivityProjectSource, type ActivityStore, type CiProgressSource } from './read-model.ts';
+import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 
 /** At most one snapshot in this window (spec 2026-11-05-live-activity-view, Live transport). */
 export const ACTIVITY_COALESCE_MS = 500;
@@ -14,7 +15,7 @@ export const ACTIVITY_FOREIGN_CHECK_MS = 5_000;
 export type LiveActivityStore = ActivityStore & Pick<RunStore, 'on' | 'off'>;
 
 export interface LiveActivitySource extends ActivityProjectSource {
-  loaded?: { store: LiveActivityStore; isActive: (runId: string) => boolean; ci?: CiProgressSource | undefined } | undefined;
+  loaded?: { store: LiveActivityStore; isActive: (runId: string) => boolean; ci?: CiProgressSource | undefined; dataDir?: string | undefined } | undefined;
 }
 
 /** What one topic watches: a project, or every project of the workspace. */
@@ -51,7 +52,7 @@ interface Running {
   drain: ReturnType<typeof setInterval> | undefined;
   foreign: ReturnType<typeof setInterval>;
   foreignSeen: Map<string, string>;
-  stores: Map<LiveActivityStore, { projectId: string; off: () => void }>;
+  stores: Map<LiveActivityStore, { projectId: string; dataDir: string | undefined; off: () => void }>;
   release: Array<() => void>;
 }
 
@@ -92,10 +93,10 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
 
   /** Follow the run changes of exactly the stores in scope. */
   const listen = (run: Running, sources: readonly LiveActivitySource[]): void => {
-    const wanted = new Map<LiveActivityStore, string>();
-    for (const source of sources) if (source.loaded) wanted.set(source.loaded.store, source.projectId);
+    const wanted = new Map<LiveActivityStore, { projectId: string; dataDir: string | undefined }>();
+    for (const source of sources) if (source.loaded) wanted.set(source.loaded.store, { projectId: source.projectId, dataDir: source.loaded.dataDir });
     for (const [store, entry] of run.stores) if (!wanted.has(store)) { entry.off(); run.stores.delete(store); }
-    for (const [store, projectId] of wanted) {
+    for (const [store, { projectId, dataDir }] of wanted) {
       if (run.stores.has(store)) continue;
       // The claims as this build reads them: a foreign owner that settles and exits before the
       // first check empties the list, and that change must count.
@@ -103,7 +104,7 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
       const onChange = () => schedule(run);
       store.on('run', onChange);
       store.on('deleted', onChange);
-      run.stores.set(store, { projectId, off: () => { store.off('run', onChange); store.off('deleted', onChange); } });
+      run.stores.set(store, { projectId, dataDir, off: () => { store.off('run', onChange); store.off('deleted', onChange); } });
     }
   };
 
@@ -159,7 +160,9 @@ export function createActivityPublisher(scope: ActivityScope, deps: ActivityPubl
   /** A foreign claim in scope, or a changed claim list, may hide a write this process never saw. */
   const checkForeign = (run: Running): void => {
     let changed = false;
-    for (const [store, { projectId }] of run.stores) {
+    for (const [store, { projectId, dataDir }] of run.stores) {
+      // A project under a migration fence is not read; its next snapshot answers it as unavailable.
+      if (dataDir && projectAdmissionRefusal(dataDir)) continue;
       const ids = store.listForeignClaimedRunIds();
       const seen = claimsKey(ids);
       if (ids.length > 0 || seen !== (run.foreignSeen.get(projectId) ?? '')) changed = true;

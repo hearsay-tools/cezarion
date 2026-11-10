@@ -10,6 +10,7 @@ import { AutomationCandidateChangedError, GithubPoller, type GithubCandidate } f
 import { stopOnceSchedule, type ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
 import { githubBaselineState } from './github-baseline.ts';
+import { holdProjectWork, ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { isGithubAutomation, isOnceSchedule } from './types.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
@@ -227,14 +228,15 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
     // a busy log lock must not undo a reconciliation that already held.
     if (!runId) {
       const { candidate } = receipt;
-      void automationStore.appendLog({
+      // Held work: a migration fence waits for it, and it writes only where admitted.
+      void holdProjectWork(automationStore.dataDir, () => automationStore.appendLog({
         automationId: receipt.automationId,
         revision: receipt.revision,
         result: 'failed',
         reason: error,
         receiptId: receipt.receiptId,
         ...(candidate ? { event: candidate.event, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url } : {}),
-      }).catch(() => undefined);
+      })).catch(() => undefined);
     }
     reconciled++;
   }
@@ -273,7 +275,8 @@ export function rebaselineIdleAutomations(
     const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : Number.NaN;
     const idleDays = Number.isFinite(lastSuccess) ? Math.round((now - lastSuccess) / 86_400_000) : undefined;
     let armed = false;
-    automationStore.setState(definition.id, (current) => {
+    try {
+      automationStore.setState(definition.id, (current) => {
       // An editor or successful poll can land after the idle snapshot. Check again under
       // the state lock; a stale recovery must never roll that revision or progress back.
       if (current.revision !== undefined && current.revision !== definition.revision) return current;
@@ -282,10 +285,15 @@ export function rebaselineIdleAutomations(
       if (freshInstants.length && now - Math.max(...freshInstants) <= lookbackMs) return current;
       armed = true;
       return { ...current, ...githubBaselineState(definition, now) };
-    });
+      });
+    } catch (error) {
+      // A migration fence refused the write: this automation keeps its state and the boot goes on.
+      if (error instanceof ProjectMigrationFencedError) continue;
+      throw error;
+    }
     if (!armed) continue;
     // The log write is best effort: a busy log lock must not undo a brake that already held.
-    void automationStore.appendLog({
+    void holdProjectWork(automationStore.dataDir, () => automationStore.appendLog({
       automationId: definition.id,
       revision: definition.revision,
       result: 'baseline',
@@ -294,7 +302,7 @@ export function rebaselineIdleAutomations(
         : idleDays === undefined
         ? 'Re-baselined at start: this automation had never polled successfully; the backlog is not launched.'
         : `Re-baselined at start after ${idleDays} day${idleDays === 1 ? '' : 's'} idle; the backlog is not launched.`,
-    }).catch(() => undefined);
+    })).catch(() => undefined);
     onChange?.(definition.id, definition.revision);
     rebaselined += 1;
   }

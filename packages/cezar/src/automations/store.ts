@@ -16,7 +16,8 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 import {
   automationDefinitionSchema,
   automationDefinitionsFileSchema,
@@ -82,6 +83,8 @@ export interface AutomationStoreOptions {
 }
 
 export class AutomationStore {
+  /** Releases a migration fence kept off disk, by receipt key: the next reservation writes each. */
+  private readonly fencedReleases = new Map<string, AutomationReceipt>();
   private definitionsFile: DefinitionsFile = { version: 1, automations: [] };
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
@@ -363,6 +366,8 @@ export class AutomationStore {
   }
 
   appendReceipt(receipt: AutomationReceipt): void {
+    // A release a migration fence keeps off disk is written by the occurrence's next reservation.
+    if (receipt.status === 'released' && projectWriteRefused(this.dataDir)) this.fencedReleases.set(receipt.receiptKey, receipt);
     const key = resolve(this.dataDir);
     const pending = inFlightReservations.get(key) ?? new Set<string>();
     try {
@@ -391,6 +396,11 @@ export class AutomationStore {
     occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
+    const fenced = this.fencedReleases.get(receiptKey);
+    if (fenced && this.latestReceipts().get(receiptKey)?.receiptId === fenced.receiptId) {
+      this.fencedReleases.delete(receiptKey);
+      this.appendReceipt(fenced);
+    }
     const previous = this.latestReceipts().get(receiptKey);
     if (previous && previous.status !== 'released') return undefined;
     const now = this.now().toISOString();
@@ -478,17 +488,23 @@ export class AutomationStore {
   }
 
   acquireLease(staleAfterMs = 10 * 60_000): AutomationLease | undefined {
+    // Under a migration fence the poll lease reads as held: the check is skipped, nothing written.
+    if (projectWriteRefused(this.dataDir)) return undefined;
     mkdirSync(this.dataDir, { recursive: true });
     return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), join(this.dataDir, POLL_RECLAIM), staleAfterMs, 0, false);
   }
 
   private async withLogLease<T>(operation: () => T): Promise<T> {
+    // Under a migration fence no lock is taken (no directory is recreated); every write inside skips.
+    if (projectWriteRefused(this.dataDir)) return operation();
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, LOG_LOCK);
     const guardPath = join(this.dataDir, LOG_RECLAIM);
     const deadline = Date.now() + 15_000;
     let lease: AutomationLease | undefined;
     while (!lease && Date.now() < deadline) {
+      // A fence taken while this waited: no lock, no guard, and every write inside skips.
+      if (projectWriteRefused(this.dataDir)) return operation();
       lease = this.tryAcquireLease(path, guardPath, 10 * 60_000, 0, false);
       if (!lease) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
@@ -504,6 +520,9 @@ export class AutomationStore {
    * throws rather than write unserialized and lose the other process's keys.
    */
   private withWriteLock<T>(lockName: string, reclaimName: string, operation: () => T): T {
+    // Definition and state writes report what they persisted: a migration fence refuses them
+    // before memory changes, as a closed store refuses a durable commit.
+    assertProjectWritable(this.dataDir);
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, lockName);
     const guardPath = join(this.dataDir, reclaimName);
@@ -511,6 +530,7 @@ export class AutomationStore {
     let lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     while (!lease && Date.now() < deadline) {
       Atomics.wait(SLEEP, 0, 0, 2);
+      assertProjectWritable(this.dataDir);
       lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     }
     if (!lease) throw new Error(`automation ${lockName} is busy; retry shortly`);
@@ -519,6 +539,7 @@ export class AutomationStore {
   }
 
   private tryAcquireLease(path: string, guardPath: string, staleAfterMs: number, attempt: number, reclaiming: boolean): AutomationLease | undefined {
+    if (projectWriteRefused(this.dataDir)) return undefined;
     if (!reclaiming && existsSync(guardPath)) {
       const releaseGuard = this.acquireReclaimGuard(guardPath, staleAfterMs);
       if (!releaseGuard) return undefined;
@@ -560,6 +581,7 @@ export class AutomationStore {
 
   /** Only one process may inspect and remove an abandoned poll lock at a time. */
   private acquireReclaimGuard(path: string, staleAfterMs: number): (() => void) | undefined {
+    if (projectWriteRefused(this.dataDir)) return undefined;
     for (let attempt = 0; attempt <= 1; attempt++) {
       try {
         mkdirSync(path, { mode: 0o700 });
@@ -589,6 +611,7 @@ export class AutomationStore {
 
   /** Fresh live guards are respected; abandoned or aged-out guards are recoverable. */
   private retireAbandonedReclaimGuard(path: string, staleAfterMs: number): boolean {
+    if (projectWriteRefused(this.dataDir)) return false;
     const marker = join(path, '.reaping');
     let claimedToken: string | undefined;
     try {
@@ -746,7 +769,9 @@ export class AutomationStore {
     return rows;
   }
 
+  /** The write backstop: a project under a migration fence takes no automation file write. */
   private atomicJson(filename: string, value: unknown): void {
+    if (projectWriteRefused(this.dataDir)) return;
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, filename);
     const temporary = `${path}.tmp`;
@@ -755,6 +780,7 @@ export class AutomationStore {
   }
 
   private appendNdjson(filename: string, value: unknown): void {
+    if (projectWriteRefused(this.dataDir)) return;
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, filename);
     const fd = openSync(path, 'a', 0o600);
@@ -766,6 +792,7 @@ export class AutomationStore {
   }
 
   private rewriteNdjson(filename: string, rows: unknown[]): void {
+    if (projectWriteRefused(this.dataDir)) return;
     const path = join(this.dataDir, filename);
     const temporary = `${path}.tmp`;
     writeFileSync(temporary, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), {
@@ -824,7 +851,8 @@ export class AutomationLease {
     if (this.released) return;
     this.released = true;
     try {
-      if (this.isCurrent()) unlinkSync(this.path);
+      // A lock left under a migration fence stays; its owner's pid proves it stale later.
+      if (this.isCurrent() && !projectWriteRefused(dirname(this.path))) unlinkSync(this.path);
     } catch {
       // Already removed during shutdown cleanup.
     } finally {

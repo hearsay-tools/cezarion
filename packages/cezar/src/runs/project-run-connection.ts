@@ -4,7 +4,7 @@ import { warnFallbackRunSource } from './project-run-sources.ts';
 import { cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite';
 import { pathPresent } from '../project-paths.ts';
 import { RunConflictError, type RunRowInput } from './run-database.ts';
 import { toRunBindings, toRunRow } from './run-database-row.ts';
@@ -101,6 +101,16 @@ export class ProjectRunConnection {
   }
 
   /** A family with a fallback member is never claimed here; adoption copies it first. */
+  /**
+   * The claim rows of both physical databases, unmerged. `project_claims` lets the legacy row win
+   * a family, so a stale claim there would hide a live one in the fallback database; a check that
+   * asks whether any owner is live reads both.
+   */
+  physicalClaims(columns: string): Array<Record<string, SQLOutputValue>> {
+    const main = this.current.prepare(`SELECT ${columns} FROM main.run_claims`).all();
+    return this.attached ? [...main, ...this.current.prepare(`SELECT ${columns} FROM project_fallback.run_claims`).all()] : main;
+  }
+
   claimable<T extends { family: string }>(take: readonly T[]): readonly T[] {
     const kept = take.filter(({ family }) => !this.familyHasFallback(family));
     if (kept.length) this.writable();

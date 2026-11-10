@@ -1,4 +1,6 @@
 import { fallbackProjectWriteError, projectPaths } from '../project-paths.ts';
+import { assertProjectAdmitted, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
+import { isLiveRecord } from '../runs/run-row.ts';
 import type { Home } from '../home/home.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './run/launch-read-resolver.ts';
 import { composeRunModules, type RunModules } from './run/compose.ts';
@@ -378,7 +380,14 @@ export class RunManager {
    */
   startRunIdempotent(workflow: WorkflowDef, input: StartRunInput, request: { id: string; hash: string }): { run: RunRecord; created: boolean } | { conflict: true } { return this.#modules.runStart.startRunIdempotent(workflow, input, request); }
 
-  startRun(workflow: WorkflowDef, input: StartRunInput, clientRequest?: { id: string; hash: string }): RunRecord { return this.#modules.runStart.startRun(workflow, input, clientRequest); }
+  /** Async work this manager still owns (`TrackedWork`): a project migration fence waits for none. */
+  pendingWork(): number { return this.#context.work.pending.size; }
+
+  /** Every task start, from any source, passes the project's migration admission first. */
+  startRun(workflow: WorkflowDef, input: StartRunInput, clientRequest?: { id: string; hash: string }): RunRecord {
+    assertProjectAdmitted(this.#dataDir);
+    return this.#modules.runStart.startRun(workflow, input, clientRequest);
+  }
 
   /** Accept only the store's already-durable owned creation, never caller-supplied paths/workflows. */
   enqueueOwnedRun(runId: string): void { this.#modules.runStart.enqueueOwnedRun(runId); }
@@ -582,6 +591,10 @@ export class RunManager {
     conversation?: Parameters<RunStore['commitWorkerContinuation']>[4],
   ): { ok: boolean; error?: string } {
     const record = this.#store.getRun(runId);
+    // A migration fence refuses new work only. An automatic resume or a wait wake continues a run
+    // that is already live, which the fence lists and waits for; it is never refused here.
+    const fenced = record && isLiveRecord(record) ? undefined : projectAdmissionRefusal(this.#dataDir);
+    if (fenced) return { ok: false, error: fenced.message };
     const workspace = record?.worktreePath ?? (record?.delegation?.role === 'worker' ? record.delegation.workspace.path : undefined);
     const fallback = workspace && fallbackProjectWriteError(workspace);
     if (fallback) return { ok: false, error: fallback };
