@@ -130,6 +130,11 @@ without the owner from 34% to 58%.
 `needs-qa` keeps its meaning: such a PR needs `qa-approved` before merge (`SDLC.md`). It
 takes the guarded lane. 7 of 320 PRs carried it.
 
+The lane belongs to a head commit and its labels. A label change runs the pull request
+check again. The queue check computes the lane again and fails an entry whose lane differs
+from the one its pull request check ran, so a `needs-qa` label that arrives after
+auto-merge was armed still stops the merge.
+
 ### Before the PR (5 minutes)
 
 1. One command, `npm run prepr`, prints one verdict and the evidence block for the PR body.
@@ -157,10 +162,14 @@ Fast lane:
 4. Findings scored 4 or lower do not block. The agent lists them in the PR body. It fixes
    them in the same push when it pushes anyway.
 5. The `Automated Code Review` check passes without waiting for CodeRabbit.
-6. CodeRabbit still reviews every PR. After the merge, a workflow reads its threads on the
-   merged PR. For each unresolved thread it files one follow-up issue. A thread labelled
-   Major or Critical also gets `release-blocker`. A Cezar automation starts a task for each
-   follow-up issue, as the main CI repair automation does today.
+6. CodeRabbit still reviews every PR. A workflow reads its threads on the merged PR. It
+   runs at the merge and again each time CodeRabbit finishes a review or posts on a merged
+   PR, because the review can end after the merge. For each unresolved thread it files one
+   follow-up issue, keyed by the thread, so a repeated run files nothing twice. A thread
+   labelled Major or Critical also gets `release-blocker`. A Cezar automation starts a task
+   for each follow-up issue, as the main CI repair automation does today.
+7. The release reads the same state (§ Release, Gates): a merged fast-lane PR in the release
+   range whose head has no finished CodeRabbit review blocks the release.
 
 Guarded lane: unchanged. The reviewer loop runs until a round has no active finding, and the
 `Automated Code Review` check requires CodeRabbit admission and resolved threads.
@@ -213,7 +222,9 @@ One workflow, `main-verify.yml`, verifies `main`.
    each commit between the last green commit and the verified one. The cause of a failing
    unit is the newest commit where the unit fails and passes on the parent. An older break
    that a later commit of the batch already repaired is not a cause.
-6. **Revert.** The bot opens one PR per confirmed failure. It reverts every cause that the
+6. **Revert.** First the bot runs the failing units on the newest commit of `main`. If
+   they pass there, a repair already landed: it opens no revert. Otherwise the bot opens one
+   PR per confirmed failure. It reverts every cause that the
    bisect named, newest first, with the label `main-revert` and auto-merge armed. One PR
    keeps two causes from blocking each other's check, as the one-repair-per-run-attempt
    rule in `docs/sdlc/main-ci-repair.md` does for repairs. It uses the release App token, so the PR starts CI. The bot comments on
@@ -225,25 +236,32 @@ One workflow, `main-verify.yml`, verifies `main`.
    `Automated Code Review` check passes without CodeRabbit admission. Its queue run is the
    check of § Queue check. `pr-readiness.yml` does not return it to draft. A PR with the
    label whose tree is not a plain revert fails its check.
-8. **Hold.** While the verdict is `failure`, the pull request check of every other PR
-   reports "main is red" and does not pass. Two kinds of PR are not held: a verified revert,
+8. **Hold.** `main` is red from a `failure` status until a later commit on `main` gets
+   `success`. A newer commit with no status, or with `pending`, does not end it. While
+   `main` is red, the pull request check of every other PR reports "main is red" and does
+   not pass. Two kinds of PR are not held: a verified revert,
    and a repair PR, which is a PR with a closing reference to an open `main-ci-failure`
    summary. A repair PR runs the normal checks of its lane. The queue check applies the
-   same hold: a queue run that starts while the verdict is `failure` fails with "main is
+   same hold: a queue run that starts while `main` is red fails with "main is
    red", so a PR whose check passed before the failure cannot merge either. A queue run that
    started earlier finishes. When `main` is green, the workflow re-runs the held pull request
    checks and arms auto-merge again on each PR that the hold removed from the queue.
 9. **Snapshot.** The `dev` npm snapshot publishes from the verified commit, after `success`.
+   The snapshot helper resolves the `dev` channel only for a push event today
+   (`resolveChannel` in `packages/cezar/src/release/snapshot.ts`). P1.1 extends that
+   contract to a `main-verify.yml` run, whatever started it.
 
 Clocks run in a second workflow, `main-watch.yml`, on a 30-minute schedule. It has its own
 concurrency group and never waits for a verification run, so a stuck run cannot block the
-alert.
+alert. GitHub can delay or drop a scheduled run, so the schedule is not the only trigger:
+the end of every `main-verify.yml` run starts `main-watch.yml`, and so does the hold step
+of any pull request check that finds `main` red for more than 60 minutes.
 
 | When | Action |
 | --- | --- |
 | A real failure is confirmed | The failure reporter files the `main-ci-failure` summary. It gets `release-blocker` |
 | 60 min after the first confirmed failure, `main` not green | A comment on the summary mentions the owner |
-| 6 h, `main` not green | The bot reverts every commit after the last green one, in one PR |
+| 6 h, `main` not green | The bot reverts every commit after the last green one, in one PR, unless a case below forbids it |
 | Every 30 min | `main-watch.yml` checks that the newest commit on `main` is verified or has a run in progress. If not, it dispatches verification. If commits wait and no verification run has finished for 90 min, it files the same alert |
 
 Expected time red: 20 min to detect, 5 to classify, 5 to bisect, 7 to revert.
@@ -268,7 +286,9 @@ Cases:
 | Two commits in one batch break different tests | The bisect names both. One revert PR reverts both, and its check runs every failed unit |
 | A commit breaks a unit, a later commit of the batch repairs it, a still later one breaks it again | The cause is the last commit. The first one is not reverted |
 | The revert PR's check still fails a unit that failed on `main` | The bisect was wrong. The PR does not merge. The repair automation starts a task |
-| The cause is a guarded-lane commit | Same revert. A revert of code is safe; state that the commit already wrote is not undone, and the comment says so |
+| The cause is a guarded-lane commit | Same revert, with one exception below. State that the commit already wrote is not undone, and the comment says so |
+| A commit to revert matches the "stored state or deletion" rule or changes a schema version | No automatic revert, at any clock. Run-store migrations are forward-only, so the older code can refuse a store that the newer code migrated. The owner is mentioned at once and the repair automation starts a task |
+| The failing units pass on the newest commit of `main` before the revert opens | A repair landed during the bisect. No revert. The next verification run decides |
 | The revert PR fails its own check | The repair automation starts a task. The clocks still run |
 | A new push lands while the bisect runs | It joins the next batch. The bisect range does not change |
 | The App token is missing | The workflow fails visibly. The watchdog alert fires. Nothing is reverted |
@@ -288,7 +308,8 @@ within 24 hours of the last one. No schedule starts a release.
    branch (a maintenance release, as `release.yml` allows today): the branch head. No
    `main-verify` status exists there, so the release runs the same suite on that commit
    first. The suite is one reusable workflow that `main-verify.yml` and `release.yml` call.
-2. **Gates.** No open issue carries `release-blocker`. The last rehearsal (below) passed.
+2. **Gates.** No open issue carries `release-blocker`. No merged fast-lane PR in the release
+   range waits for its CodeRabbit review. The last rehearsal (below) passed.
 3. **Stage.** Compute the stable version as today, from the manifest of the release line.
    Publish a release candidate of the same commit, `<version>-rc.<n>`, under the `next`
    dist-tag. `<n>` is the next free number on the registry. A stable version is not staged:
@@ -299,8 +320,8 @@ within 24 hours of the last one. No schedule starts a release.
 4. **Test the published candidate**, installed from the registry, not built from the tree:
    clean install, boot, cockpit smoke, upgrade from the current `latest` with existing state,
    the Node floor, the OS matrix, shuffled browser specs.
-5. **Promote.** Publish `<version>` from the same commit under `latest`, as the release does
-   today. It differs from the tested candidate only in the version stamp. Then install the
+5. **Promote.** Check the gates of step 2 again. Then publish `<version>` from the same
+   commit under `latest`, as the release does today. It differs from the tested candidate only in the version stamp. Then install the
    stable package through the alias and boot it, as a last check.
 6. **Roll back.** One dispatch releases the last good stable commit again as the next patch
    version, through steps 3 to 5, without the 24-hour limit. Moving `latest` back is not a
@@ -314,7 +335,13 @@ within 24 hours of the last one. No schedule starts a release.
 | The last check in step 5 fails | The stable version is public. The owner starts the rollback. A `release-blocker` issue is filed |
 | A maintenance release from `release/**` | The version comes from that branch's manifest, as today. Its candidate takes the `next` tag only when the branch is the newest line; otherwise it takes a tag named after the line, so `next` never moves backwards |
 
-The version-bump PR and the GitHub Release follow the promotion, as today.
+The version-bump PR and the GitHub Release follow the promotion, as today. The candidate
+commit can be older than the commit the dispatch ran on. `release-finalization.cjs` uses
+the dispatch commit today for the bump PR, the tag and the changelog. P2 passes the
+candidate commit through every one of those steps.
+
+The self-update picker lists plain versions as stable and filters every prerelease except
+`nightly` (`self-update/semver.ts`), so a release candidate does not appear in it.
 
 **Rehearsal.** `nightly.yml` becomes the rehearsal. Each night it publishes the newest
 verified commit under `nightly`, as today, and then runs the tests of step 4 against that
@@ -327,9 +354,9 @@ Desktop and mobile releases keep their own workflows and cadence.
 
 | Record | Writer | Final when | Reader | Absent, unreadable or foreign |
 | --- | --- | --- | --- | --- |
-| Commit status `main-verify` | `main-verify.yml` only, with the Actions token | `success` or `failure` is set | The pull request check (hold), the release workflow, the watchdog, the snapshot job | No status: not verified. The release refuses; the hold does not apply; the watchdog starts a run. A status from another app is ignored |
+| Commit status `main-verify` | `main-verify.yml` only, with the Actions token | `success` or `failure` is set | The pull request check (hold), the release workflow, the watchdog, the snapshot job | No status: not verified. The release refuses; the hold reads the newest commit that has `success` or `failure`; the watchdog starts a run. A status from another app is ignored |
 | Label `release-blocker` | The failure reporter, the post-merge review workflow, the rehearsal | The issue is closed | The release workflow | The label does not exist in the repository: the release workflow fails before it publishes |
-| Lane | The shared classifier | Per head commit | `ci.yml`, `npm run prepr`, the auto-merge decision | The classifier throws or cannot read the base: guarded |
+| Lane | The shared classifier | Per head commit and label set | `ci.yml`, `npm run prepr`, the auto-merge decision | The classifier throws or cannot read the base: guarded |
 | Label `main-revert` | The revert bot | The PR is merged or closed | The pull request check (admit while red, verify plain revert) | A PR with the label whose tree is not a plain revert fails the check |
 | Closing reference to a `main-ci-failure` summary | The repair task, in its PR body | The PR is merged or closed | The pull request check (admit while red) | The referenced issue is closed, or lacks the label: the PR is held like any other |
 
@@ -398,6 +425,9 @@ P4 and P5 bring it to about 5 to 7 minutes for a PR whose reviewer round is clea
   miss, but every commit was green. P5 step 1 measures it.
 - Not verified: that CodeRabbit posts its threads when a PR merges during its review. P4
   checks this first.
+- The 12-hour bound holds when a revert is allowed. A red `main` whose cause changes stored
+  state, or whose last green commit is over 50 commits back, waits for the owner or a
+  repair task.
 - The pre-PR timing comes from 28 tasks on one host in one week.
 - The review-value classification was done by subagents; hand checks covered 16 of 200 and
   6 of 250 findings.
