@@ -1516,7 +1516,7 @@ depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longe
 | Supervisor ends inside its claim | The kernel | The transaction rolls back, so the earlier record stands. The operating system drops the file lock. A first claim that ends this way leaves a database with nothing in it, which is a free name. |
 | The task ends (Finish, Stop, `cezar_done`) while a job with the default `<dir>` runs | Nothing stops the command | Cezar removes the task's temp directory with the record, the log and the place for the exit file. The command runs to its end and its output and exit code are lost. `--dir` avoids it. |
 | A name is started again while a process wait is open on its earlier start | Nothing | The earlier wait keeps its own exit file and reports the earlier start's code. |
-| Record deleted while the job runs | Nothing stops the job | `status` answers that no job has that name. A start of the name runs a second job beside the first and both write the same log: the record is the only handle. |
+| Record deleted while the job runs | Nothing stops the job | `status` answers that no job has that name. A start of the name runs a second job beside the first. Each start has its own log and exit file, but the record is the only handle on the first job. |
 | Record unreadable, not a database, another program's database, or without its job row (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
 | Record names a PID that another process has reused | Nothing | With a start identity the job reads as ended. Without one (Windows) the name reads as running until that process ends. |
 
