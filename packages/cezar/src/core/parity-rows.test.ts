@@ -70,6 +70,9 @@ describe('the parity row index (scripts/parity-rows.ts)', () => {
     expect(byRunner.every(row => row.exemptions.length > 0 && row.exemptions.every(exemption => exemption.runner === runner))).toBe(true);
 
     expect(renderRows(index, { row: 'no-such-row' })).toEqual({ out: ['0 rows in 0 kits'], error: 'no kit declares row "no-such-row"' });
+    // A declared row with no exemption for the runner is an empty answer, not an unknown row.
+    const free = index.find(row => row.exemptions.every(exemption => exemption.runner !== runner))!;
+    expect(renderRows(index, { row: free.id, runner })).toEqual({ out: ['0 rows in 0 kits'] });
     expect(renderRows(index, { runner: 'no-such-runner' }).error).toMatch(/^unknown runner "no-such-runner"; the runners are /);
   });
 });

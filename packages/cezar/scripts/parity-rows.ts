@@ -125,14 +125,14 @@ export function renderRows(index: readonly IndexedRow[], query: RowQuery): { out
   if (query.runner !== undefined && !(RUNNER_IDS as readonly string[]).includes(query.runner)) {
     return { out: [], error: `unknown runner "${query.runner}"; the runners are ${RUNNER_IDS.join(', ')}` };
   }
-  const rows = index
-    .filter(row => query.row === undefined || row.id === query.row)
+  const named = index.filter(row => query.row === undefined || row.id === query.row);
+  const rows = named
     .map(row => query.runner === undefined ? row : { ...row, exemptions: row.exemptions.filter(exemption => exemption.runner === query.runner) })
     .filter(row => query.runner === undefined || row.exemptions.length > 0);
   const out = query.json
     ? [JSON.stringify(rows, null, 2)]
     : [...rows.flatMap(formatRow), `${count(rows.length, 'row')} in ${count(new Set(rows.map(row => row.kit)).size, 'kit')}`];
-  return rows.length === 0 && query.row !== undefined ? { out, error: `no kit declares row "${query.row}"` } : { out };
+  return named.length === 0 && query.row !== undefined ? { out, error: `no kit declares row "${query.row}"` } : { out };
 }
 
 function main(): void {
