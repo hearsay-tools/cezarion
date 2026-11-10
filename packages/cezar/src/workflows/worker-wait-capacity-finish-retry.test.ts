@@ -59,7 +59,7 @@ it.each([false, true])('monitoring synthetic delivery respects legacy pending Fi
       const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
       const w = await worker(p.id, 'mock:schedule-wakeup keep going');
       vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
-      const clock = observationClock(() => /\bat WaitWatches\.armWait \(/.test(new Error().stack ?? ''));
+      const clock = observationClock(() => /\bat WaitResolve\.armWait \(/.test(new Error().stack ?? ''));
       const sessions = new Set(work.liveSessions);
       manager.enqueueOwnedRun(w.id);
       await until(() => !!monitoringWakeOf(store.getRun(w.id)));

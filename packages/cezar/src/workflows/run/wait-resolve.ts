@@ -1,8 +1,11 @@
+import type { ActiveRun } from '../active-run.ts';
+import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
+import { peerWaitResult } from '../wait-scope.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import type { RunModuleContext } from './types.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import { familyOf } from './run-guards.ts';
-import { ciWatchRequest, type WaitResult } from '../waits.ts';
+import { chargesBudget, openWaits, waitInputId, waitResultText, settledWaitEntry, ciWatchRequest, type WaitResult } from '../waits.ts';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { Wait, WorkerWaitEntry, PrWaitEntry, ProcessWaitEntry, ProcessWaitResult, PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
@@ -10,23 +13,25 @@ import { ProcessWaitSupervisor } from '../../process-wait/supervisor.ts';
 import type { ExitFileRoots } from '../../process-wait/exit-file.ts';
 import { agentTmpDirEnabled, resolveAgentTmpDir } from '../../runs/agent-tmpdir.ts';
 
-interface WaitWatchesHost {
-  canProceedWithRun(id: string, run: RunRecord | undefined): boolean;
+interface WaitResolveHost {
+  active(id: string): ActiveRun | undefined;
+  countAutomaticWakes(id: string): number;
+  cancelAutomaticAtCap(id: string, waits: readonly Wait[]): void;
+  reparkWithoutWaits(id: string, state: ActiveRun): void;
+  waitOnUserWithoutSession(id: string): void;
+  queueWaitWake(id: string): void;
+  retryWaitAdmission(id: string): void;
+  canProceedWithRun(id: string, run: RunRecord | undefined): run is RunRecord;
   ciSupervisor(): Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
-  resolveWait(id: string, waitId: string, result?: WaitResult): void;
   reconcileWorkerWaits(family: string): void;
-  resolvePeerWait(id: string, wait: PeerWaitEntry): boolean;
   disarmWait(id: string): void;
-  armWorkerDeadline(id: string, wait: WorkerWaitEntry, firstDelay?: number): void;
-  settleWait(id: string, waitId: string, result?: WaitResult): void;
-  exitFileRoots(id: string): ExitFileRoots;
   /** The session that holds a subagent wait's children is live (hearsay-tools/cezarion#2431). */
   subagentSessionLive(id: string): boolean;
   /** Resolve a subagent wait whose session is gone `interrupted`, ending its running children in the transcript (hearsay-tools/cezarion#2431). */
   interruptSubagentWait(id: string, waitId: string): void;
 }
 
-export class WaitWatches {
+export class WaitResolve {
   /** One CI watch per open CI wait, keyed by wait id. */
   readonly ciWatches = new Map<string, { runId: string; abort: AbortController }>();
   /** A resolution whose checkpoint failed, retried by wait id. */
@@ -37,7 +42,7 @@ export class WaitWatches {
   private readonly processSupervisor = new ProcessWaitSupervisor();
   /** One timer per open timer wait, keyed by wait id. */
   readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
-  constructor(private readonly context: RunModuleContext, private readonly host: WaitWatchesHost) {}
+  constructor(private readonly context: RunModuleContext, private readonly host: WaitResolveHost, private readonly maxAutoContinues: number) {}
 
   /** Where a process wait's exit file may sit: the run's worktree (the checkout for a run without
    *  one) and, unless turned off, the Cezar temp directory its agent gets as `TMPDIR`. */
@@ -55,9 +60,9 @@ export class WaitWatches {
     // Only the user's answer, or a cancel, ends a human wait: nothing to arm.
     if (watch === 'none') return;
     if (this.waitTimers.has(wait.id)) return;
-    if (watch === 'worker') { this.host.armWorkerDeadline(runId, wait as WorkerWaitEntry); return; }
+    if (watch === 'worker') { this.armWorkerDeadline(runId, wait as WorkerWaitEntry); return; }
     // A peer that already wrote or settled resolves it first, at registration and recovery alike.
-    if (watch === 'peer' && this.host.resolvePeerWait(runId, wait as PeerWaitEntry)) return;
+    if (watch === 'peer' && this.resolvePeerWait(runId, wait as PeerWaitEntry)) return;
     // Native subagents live only in their session: with none, as at a restart, they stopped
     // (hearsay-tools/cezarion#2431). At its deadline a lost session reads the same.
     const interrupted = () => watch === 'subagent' && !this.host.subagentSessionLive(runId);
@@ -68,7 +73,7 @@ export class WaitWatches {
       const run = this.context.store.getRun(runId);
       if (!this.host.canProceedWithRun(runId, run)) return;
       if (interrupted()) this.host.interruptSubagentWait(runId, wait.id);
-      else this.host.settleWait(runId, wait.id);
+      else this.settleWait(runId, wait.id);
     };
     const due = Date.parse((wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline) - Date.now();
     if (due <= 0) { fire(); return; }
@@ -138,9 +143,9 @@ export class WaitWatches {
       this.processWatches.delete(wait.id);
       const run = this.context.store.getRun(runId);
       if (!this.host.canProceedWithRun(runId, run)) return;
-      this.host.settleWait(runId, wait.id, result);
+      this.settleWait(runId, wait.id, result);
     };
-    const request = { pid: wait.pid, deadline: wait.deadline, roots: this.host.exitFileRoots(runId),
+    const request = { pid: wait.pid, deadline: wait.deadline, roots: this.exitFileRoots(runId),
       ...(wait.startToken === undefined ? {} : { startToken: wait.startToken }), ...(wait.exitFile === undefined ? {} : { exitFile: wait.exitFile }) };
     void this.processSupervisor.watch(request, abort.signal).then(settle, (error: unknown) => settle({ outcome: 'error', observedAt: new Date().toISOString(),
       diagnostic: (error instanceof Error ? error.message : String(error)).slice(0, 512) }));
@@ -159,7 +164,7 @@ export class WaitWatches {
         observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
         diagnostic: 'CI watcher returned an invalid observation; inspect the PR and register a new wait.' };
       this.ciWatches.delete(wait.id);
-      this.host.settleWait(runId, wait.id, validated);
+      this.settleWait(runId, wait.id, validated);
     };
     void this.host.ciSupervisor().watch(ciWatchRequest(wait), abort.signal).then(settle, () => settle({ outcome: 'error', headSha: wait.headSha,
       observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
@@ -170,11 +175,11 @@ export class WaitWatches {
    *  drop the accepted intent or publish a false result. */
   settleWait(runId: string, waitId: string, result?: WaitResult): void {
     if (this.context.disposed()) return;
-    try { this.host.resolveWait(runId, waitId, result); }
+    try { this.resolveWait(runId, waitId, result); }
     catch {
       if (this.ciRetries.has(waitId)) return;
       console.warn('[cez] wait checkpoint unavailable; retaining result for retry.');
-      const timer = setTimeout(() => { this.ciRetries.delete(waitId); this.host.settleWait(runId, waitId, result); }, 1000);
+      const timer = setTimeout(() => { this.ciRetries.delete(waitId); this.settleWait(runId, waitId, result); }, 1000);
       timer.unref(); this.ciRetries.set(waitId, { runId, timer });
     }
   }
@@ -198,5 +203,62 @@ export class WaitWatches {
   dispose(): void {
     for (const entry of this.waitTimers.values()) clearTimeout(entry.timer);
     this.waitTimers.clear();
+  }
+  /** The open peer waits of these runs whose named peer already wrote, settled or was deleted resolve now. */
+  resolvePeerWaits(runIds: readonly string[]): void {
+    for (const id of runIds) for (const wait of WAIT_KINDS.peer.select(openWaits(this.context.store.getRun(id) ?? {}))) this.resolvePeerWait(id, wait);
+  }
+
+  /** Like a timer, the wake is the agent's own arrangement: a stopping or finishing run takes none,
+   *  and the wait stays for that transition to cancel. True when the wait is no longer open. */
+  resolvePeerWait(runId: string, wait: PeerWaitEntry): boolean {
+    const run = this.context.store.getRun(runId);
+    if (this.context.disposed() || !this.host.canProceedWithRun(runId, run)) return false;
+    const result = peerWaitResult(run, wait, this.context.store);
+    if (result) this.settleWait(runId, wait.id, result);
+    return !!result && this.context.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
+  }
+
+  /** Commit an open wait as resolved together with its lifecycle input (id = wait id, or an
+   *  upgraded worker wait's `wakeInputId`), then queue the run's wake. A worker wait passes the
+   *  entry as reconciled, with its outcomes and `result`. Throws when the checkpoint fails; a wait
+   *  no longer open is ignored. */
+  resolveWait(runId: string, waitId: string, result?: WaitResult, observed?: WorkerWaitEntry): void {
+    const latest = this.context.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
+    if (!latest || latest.phase !== 'open') return;
+    const state = this.host.active(runId);
+    const resolvedAt = new Date().toISOString();
+    const settled = settledWaitEntry(latest, result, observed, resolvedAt);
+    // The count includes a timer batch still awaiting its acknowledgement. A subagent wait charges
+    // by how it resolved, so the resolved entry is what this reads (hearsay-tools/cezarion#2431).
+    if (chargesBudget(settled) && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
+      this.host.cancelAutomaticAtCap(runId, [latest]);
+      if (state) this.host.reparkWithoutWaits(runId, state);
+      else this.host.waitOnUserWithoutSession(runId);
+      return;
+    }
+    const input: AgentInput = { id: waitInputId(settled), parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt,
+      text: waitResultText(settled, { workerStatus: this.workerStatus }) };
+    this.context.store.commitWait(runId, settled, input);
+    try { this.host.queueWaitWake(runId); }
+    catch { this.host.retryWaitAdmission(runId); }
+  }
+
+  /** A worker's current status, as a worker wait's result names it. */
+  readonly workerStatus = (workerId: string): string => this.context.store.getRun(workerId)?.status ?? 'unavailable';
+
+  resolveWorkerWait(runId: string, entry: WorkerWaitEntry, observed: WorkerWaitEntry): boolean {
+    // The deadline stays armed until the resolution is durable. A failed write is retried in a
+    // second, since nothing else may touch this family again before the deadline.
+    try { this.resolveWait(runId, entry.id, undefined, observed); }
+    catch {
+      if (!this.hasWorkerResolveRetry(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
+      this.host.disarmWait(entry.id);
+      this.recordWorkerResolveRetry(entry.id);
+      this.armWorkerDeadline(runId, entry, 1_000);
+      return false;
+    }
+    this.host.disarmWait(entry.id);
+    return true;
   }
 }

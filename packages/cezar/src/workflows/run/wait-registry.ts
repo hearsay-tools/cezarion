@@ -7,19 +7,19 @@ import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato
 import { workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError, requireMessagingAllowed } from '../../delegation/policy.ts';
 import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
-import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget } from '../wait-scope.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, workerWaitTarget } from '../wait-scope.ts';
 import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
-import type { AgentInput, WorkerWaitRequest } from '@open-mercato/cezar-contract/delegation';
+import type { WorkerWaitRequest } from '@open-mercato/cezar-contract/delegation';
 import { cezarAskRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { askErrorMessage, waitErrorMessage } from '../../ci-wait/errors.ts';
 import { toolSessionRefusal } from './cezar-tools.ts';
 import { askCardFields } from './turn-markers.ts';
-import { chargesBudget, type WaitResult, identicalWait, normalizePrUrl, openWaits, waitInputId, waitResultText, timerWaitEntry, prWaitEntry, processWaitEntry, settledWaitEntry } from '../waits.ts';
+import { type WaitResult, identicalWait, normalizePrUrl, openWaits, timerWaitEntry, prWaitEntry, processWaitEntry } from '../waits.ts';
 import { delegationWaitRefusal, isDelegationWait, workerListTarget } from '../wait-scope.ts';
 import { isSessionLeader } from '../../core/session-process.ts';
 import { probeProcessWait } from '../../process-wait/supervisor.ts';
@@ -171,21 +171,6 @@ export class WaitRegistry {
     }
     cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return peerWaitOf(this.context.store.getRun(runId), waitId);
-  }
-
-  /** The open peer waits of these runs whose named peer already wrote, settled or was deleted resolve now. */
-  resolvePeerWaits(runIds: readonly string[]): void {
-    for (const id of runIds) for (const wait of WAIT_KINDS.peer.select(openWaits(this.context.store.getRun(id) ?? {}))) this.resolvePeerWait(id, wait);
-  }
-
-  /** Like a timer, the wake is the agent's own arrangement: a stopping or finishing run takes none,
-   *  and the wait stays for that transition to cancel. True when the wait is no longer open. */
-  resolvePeerWait(runId: string, wait: PeerWaitEntry): boolean {
-    const run = this.context.store.getRun(runId);
-    if (this.context.disposed() || !this.host.canProceedWithRun(runId, run)) return false;
-    const result = peerWaitResult(run, wait, this.context.store);
-    if (result) this.host.settleWait(runId, wait.id, result);
-    return !!result && this.context.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
   }
 
   /** The checks every wait registration shares: the session that called is the run's current one,
@@ -370,33 +355,5 @@ export class WaitRegistry {
     cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
     return { cancelled: true };
   }
-
-  /** Commit an open wait as resolved together with its lifecycle input (id = wait id, or an
-   *  upgraded worker wait's `wakeInputId`), then queue the run's wake. A worker wait passes the
-   *  entry as reconciled, with its outcomes and `result`. Throws when the checkpoint fails; a wait
-   *  no longer open is ignored. */
-  resolveWait(runId: string, waitId: string, result?: WaitResult, observed?: WorkerWaitEntry): void {
-    const latest = this.context.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
-    if (!latest || latest.phase !== 'open') return;
-    const state = this.host.active(runId);
-    const resolvedAt = new Date().toISOString();
-    const settled = settledWaitEntry(latest, result, observed, resolvedAt);
-    // The count includes a timer batch still awaiting its acknowledgement. A subagent wait charges
-    // by how it resolved, so the resolved entry is what this reads (hearsay-tools/cezarion#2431).
-    if (chargesBudget(settled) && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
-      this.host.cancelAutomaticAtCap(runId, [latest]);
-      if (state) this.host.reparkWithoutWaits(runId, state);
-      else this.host.waitOnUserWithoutSession(runId);
-      return;
-    }
-    const input: AgentInput = { id: waitInputId(settled), parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt,
-      text: waitResultText(settled, { workerStatus: this.workerStatus }) };
-    this.context.store.commitWait(runId, settled, input);
-    try { this.host.queueWaitWake(runId); }
-    catch { this.host.retryWaitAdmission(runId); }
-  }
-
-  /** A worker's current status, as a worker wait's result names it. */
-  readonly workerStatus = (workerId: string): string => this.context.store.getRun(workerId)?.status ?? 'unavailable';
 
 }

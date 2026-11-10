@@ -14,6 +14,7 @@ import { workerOutcome } from '../../runs/delegation-state.ts';
 import { workerOutcomeKey } from '../../runs/transcript-facts.ts';
 
 interface FamilyReconcilerHost {
+  resolveWorkerWait(id: string, entry: WorkerWaitEntry, observed: WorkerWaitEntry): boolean;
   reapTerminalScratch(id: string): void;
   cancelOpenWaits(id: string): void;
   resolvePeerWaits(runs: readonly string[]): void;
@@ -22,11 +23,7 @@ interface FamilyReconcilerHost {
   recoveringRun(run: RunRecord | string | undefined): boolean;
   cancel(id: string): void;
   armWait(id: string, wait: Wait): void;
-  armWorkerDeadline(id: string, wait: WorkerWaitEntry, delay?: number): void;
   disarmWait(id: string): void;
-  hasWorkerResolveRetry(id: string): boolean;
-  recordWorkerResolveRetry(id: string): void;
-  resolveWait(id: string, waitId: string, result: undefined, observed: WorkerWaitEntry): void;
   retireSettledQuestions(id: string): void;
   closeRoutedQuestions(id: string): void;
   reconcileWorkerWaits(id?: string): void;
@@ -284,17 +281,7 @@ export class FamilyReconciler {
       if (reason && destroyed(next)) {
         cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, [entry.id]);
       } else if (reason) {
-        // The deadline stays armed until the resolution is durable. A failed write is retried in a
-        // second, since nothing else may touch this family again before the deadline.
-        try { this.host.resolveWait(parent.id, entry.id, undefined, { ...next, result: { reason } }); }
-        catch {
-          if (!this.host.hasWorkerResolveRetry(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
-          this.host.disarmWait(entry.id);
-          this.host.recordWorkerResolveRetry(entry.id);
-          this.host.armWorkerDeadline(parent.id, entry, 1_000);
-          continue;
-        }
-        this.host.disarmWait(entry.id);
+        if (!this.host.resolveWorkerWait(parent.id, entry, { ...next, result: { reason } })) continue;
       } else {
         if (next !== entry) this.context.store.commitWait(parent.id, next);
         this.host.armWait(parent.id, next);

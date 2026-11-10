@@ -20,7 +20,6 @@ import { monitorsLiveWorkers, type CompletionGateHost } from './completion-gate.
 import type { RunModuleContext, SettledTurn } from './types.ts';
 import type { HumanWaits } from './human-waits.ts';
 import type { RunLine } from './run-line.ts';
-import type { WaitWatches } from './wait-watches.ts';
 import type { WaitRegistry } from './wait-registry.ts';
 import { openSubagentWaitOf, type SubagentWaits } from './subagent-waits.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
@@ -29,7 +28,7 @@ import type { WorkerQuestions } from './worker-questions.ts';
 
 interface TurnSettlerHost {
   waitEngine: WaitEngine;
-  humanWaits: HumanWaits; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
+  humanWaits: HumanWaits; line: RunLine; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
   subagentWaits: SubagentWaits;
   move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
   cancelOpenWaits(id: string): void; countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;

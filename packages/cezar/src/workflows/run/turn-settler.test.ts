@@ -43,9 +43,10 @@ function fixture() {
     openHumanAlias: call('humanAlias', { source: WAIT_SOURCE.cezar }), showCezarHumanWait: call('show', undefined),
     surfaceHumanWait: call('surface', undefined),
   };
+  const waitResolve = { armWait: vi.fn((_id: string, _wait: Wait) => { log.push('armWait'); }) };
   const host = {
     humanWaits, line: { isParked: call('isParked', false), inPool: call('inPool', false), park: call('parkLine', undefined) },
-    waitWatches: { armWait: vi.fn((_id: string, _wait: Wait) => { log.push('armWait'); }) }, waitRegistry: { registerCompletionWait: call('completionWait', undefined) },
+    waitRegistry: { registerCompletionWait: call('completionWait', undefined) },
     workerQuestions: { askParentForWorker: call('askParent', undefined) }, completionGateHost: { parentCompletionBlockers: () => [] },
     move: call('move', undefined), releaseSlot: call('release', undefined), completionGate: call('gate', 'accept' as 'accept' | 'held' | CompletionRefusal),
     cancelOpenWaits: call('cancelWaits', undefined), countAutomaticWakes: call('wakes', 0), workerExecutionStopped: () => false,
@@ -61,11 +62,11 @@ function fixture() {
   const context = { store, semaphore } as unknown as RunModuleContext;
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
     withdrawCezarHumanWaits: id => host.humanWaits.withdrawCezarHumanWaits(id),
-    armWait: (id, wait) => host.waitWatches.armWait(id, wait),
+    armWait: (id, wait) => waitResolve.armWait(id, wait),
   }));
   const settler = new TurnSettler(context, { ...host, waitEngine } as unknown as Host, 60_000, 10, 'wait for workers', 3600);
   log.length = 0;
-  return { log, state, session, run, host, store, semaphore, settler };
+  return { log, state, session, run, host, waitResolve, store, semaphore, settler };
 }
 
 type Fixture = ReturnType<typeof fixture>;
@@ -175,7 +176,7 @@ describe('turn settler entry orders', () => {
   it('take-input notes refusal before flushing, opens monitoring after a refused flush, then reads new facts', () => {
     const f = fixture();
     const spy = decide({ kind: 'take-input', refused: true }, { kind: 'park', refused: true });
-    f.host.waitWatches.armWait.mockImplementation(() => { f.log.push('armWait'); expect(spy).toHaveBeenCalledTimes(1); });
+    f.waitResolve.armWait.mockImplementation(() => { f.log.push('armWait'); expect(spy).toHaveBeenCalledTimes(1); });
     f.settler.settleTurn('run', f.state, 'turn-end', { ...turn, done: true, monitoring: true }, refusal);
     order(f, ['queued', 'event:note', 'input', 'withdraw', 'commitWait', 'armWait', 'queued', 'unread', 'parkWaits', 'outcome']);
   });
@@ -388,7 +389,7 @@ describe('turn settler monitoring alias orders', () => {
     f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
     order(f, [...(reason === 'budget' ? ['boundary:turn-end/monitoring-cap'] : []), 'event:note', 'humanAlias', 'parkWaits', 'outcome']);
     expect(f.store.commitWait).not.toHaveBeenCalled();
-    expect(f.host.waitWatches.armWait).not.toHaveBeenCalled();
+    expect(f.waitResolve.armWait).not.toHaveBeenCalled();
   });
 
   it('failed timer checkpoint leaves it unarmed before carrying out the park', () => {
@@ -398,7 +399,7 @@ describe('turn settler monitoring alias orders', () => {
     decide({ kind: 'park' });
     f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
     order(f, ['withdraw', 'commitWait', 'queued', 'parkWaits', 'outcome']);
-    expect(f.host.waitWatches.armWait).not.toHaveBeenCalled();
+    expect(f.waitResolve.armWait).not.toHaveBeenCalled();
   });
 
 });

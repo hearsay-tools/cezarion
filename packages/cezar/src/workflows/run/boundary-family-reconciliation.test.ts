@@ -23,7 +23,7 @@ it.each([true, false])('destroyed worker receipts retire only during an executin
   const reconciler = new FamilyReconciler(f.context, unused<Host>('family host', {
     active: id => f.active.get(id), isActive: id => f.active.has(id), recoveringRun: () => false,
     retireSettledQuestions: () => undefined,
-    hasWorkerResolveRetry: () => false, recordWorkerResolveRetry: () => undefined,
+    resolveWorkerWait: () => true,
   }));
   reconciler.reconcileWorkerWaits(f.run.id);
   expect(f.store.getRun(f.run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe(atBoundary ? WAIT_PHASE.resolved : undefined);
