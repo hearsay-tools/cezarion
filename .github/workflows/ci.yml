@@ -916,7 +916,9 @@ jobs:
   squeal-publish:
     name: Publish Squeal shared results
     needs: [squeal-export]
-    if: github.event_name == 'merge_group'
+    # A status function in the condition: without one GitHub adds success(), which is
+    # false in a merge group because a job further up (pr-test-input) is skipped there.
+    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.squeal-export.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
