@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { createRequire } = require('node:module');
+const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 
 const root = path.resolve(__dirname, '../..');
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -28,7 +29,7 @@ async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source
     fs.writeFileSync(path.join(cwd, file), typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`);
   };
   write('package.json', { name: 'release-fixture', private: true, workspaces: ['packages/*'] });
-  const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', 'alias-cezarion/package.json'];
+  const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', `${productIdentity().npmAliasDirectory}/package.json`];
   for (const [i, file] of manifests.entries()) write(file, { name: `fixture-${i}`, version: '0.12.0', private: i !== 0, ...(i === 3 ? { dependencies: { 'fixture-1': '^0.12.0' } } : {}) });
   write('pnpm-workspace.yaml', 'packages:\n  - packages/*\nlinkWorkspacePackages: true\n');
   const pnpm = () => execFileSync('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--offline', '--no-frozen-lockfile'], { cwd, stdio: 'pipe' });
