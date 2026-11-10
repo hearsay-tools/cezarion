@@ -2,11 +2,12 @@ import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
+import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runArtifactCommand } from '../artifacts/cli.ts';
 import { removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
@@ -20,6 +21,7 @@ import { clearProjectProbeCache, registerProject } from '../workspace/projects.t
 import { runMigrateProjectCommand, type MigrateProjectDeps } from './cli.ts';
 import { crashAt, fence, moved, owners, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject } from './engine.ts';
+import { migrateProjectOffline } from './offline.ts';
 import { buildMigrationProject, projectSnapshot, removeMigrationProject, TASK, type MigrationProject } from './project-migration.testkit.ts';
 
 /**
@@ -145,6 +147,18 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
     expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));
   });
 
+  it('reports what a dry run completed first when it met an interrupted migration', async () => {
+    expect((await cli([], { fault: crashAt('run-store:before') })).code).toBe(1);
+    const dry = await cli(['--dry-run']);
+    expect(dry.code).toBe(0);
+    expect(dry.out.startsWith('An interrupted migration was found and completed first. It did this:\n')).toBe(true);
+    // The recovery's own moves are listed, then what remains is planned.
+    expect(dry.out.indexOf(`  ${project.taskPath} -> ${moved(project, project.taskPath)}`)).toBeLessThan(dry.out.indexOf('The dry run of what remains:'));
+    expect(dry.out.endsWith('Dry run: planning changed nothing; the completed migration above did.')).toBe(true);
+    expect(dry.out).not.toContain('nothing was moved or rewritten');
+    expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));
+  });
+
   it('refuses an artifact publish whose task context names a directory the recovered migration moved', async () => {
     // A real journal: the migration stopped before its first move, so recovery moves runs/.
     const held = await fence(project);
@@ -230,5 +244,29 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
     const migrated = await cli([]);
     expect(migrated.code).toBe(0);
     expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));
+  });
+});
+
+describe('the live-task check of an offline migration', () => {
+  /** Every entry under `root`: its kind, and the bytes of each file. */
+  function snapshot(root: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+      const path = join(entry.parentPath, entry.name);
+      out[path] = entry.isFile() ? readFileSync(path, 'base64') : entry.isDirectory() ? 'dir' : 'other';
+    }
+    return out;
+  }
+
+  it('refuses a live task of a runs.json no store imported yet, and writes nothing', async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-migrate-legacy-'));
+    try {
+      mkdirSync(join(root, '.ai/cezar'), { recursive: true });
+      writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([makeRunRecord({ id: 'legacy-run', title: 'legacy live', status: RUN_STATUS.running })]));
+      const before = snapshot(root);
+      await expect(migrateProjectOffline(root, { homes: [], dryRun: false })).rejects.toThrow(
+        `Cannot migrate ${root}: 1 task is live. Finish or cancel each one, then retry:\n- legacy-run legacy live (running)`);
+      expect(snapshot(root)).toEqual(before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

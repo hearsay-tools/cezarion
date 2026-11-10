@@ -1,10 +1,10 @@
-import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
-import { outsideOf, receiptDirectory } from './containment.ts';
+import { notRegularFile, outsideOf, receiptDirectory, runStoreFiles } from './containment.ts';
 import { replaceAtomically, settle } from './durable.ts';
 import type { PathRewrite, ProjectMigrationJournal, ProjectMigrationStep } from './journal.ts';
 import { gitOutput, gitReportedPath, redirectedComponent, rewriteHandoffWorktreeLine, trackedPaths, valueAt } from './plan.ts';
@@ -30,6 +30,12 @@ export class ProjectMigrationStepError extends Error {
  *  right before the write; the journal was checked as a whole before any step. */
 function contained(step: ProjectMigrationStep, root: string, path: string): void {
   const refusal = outsideOf(root, path);
+  if (refusal) throw new ProjectMigrationStepError(step, refusal);
+}
+
+/** Refuse to open or rewrite in place anything but a regular file: never through a symlink. */
+function regularFile(step: ProjectMigrationStep, path: string): void {
+  const refusal = notRegularFile(path);
   if (refusal) throw new ProjectMigrationStepError(step, refusal);
 }
 
@@ -197,6 +203,7 @@ async function receiptStep(journal: ProjectMigrationJournal, fault: MigrationFau
   let index = 0;
   for (const [file, fields] of byFile(rewrites)) {
     contained('receipts', receipts, file);
+    regularFile('receipts', file);
     const text = await readOwnedWorkspaceRecord(file);
     const value: unknown = JSON.parse(text);
     if (applyFields('receipts', file, value, fields)) await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
@@ -212,6 +219,7 @@ function runStoreStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
   const ids = [...new Set(rewrites.map(rewrite => rewrite.runId))];
   const path = join(journal.destination, RUNS_DB_FILE);
   contained('run-store', journal.destination, path);
+  for (const file of runStoreFiles(journal.destination)) regularFile('run-store', file);
   // RunDatabase.open creates a missing database: refuse first, so no empty store shadows a lost one.
   if (!pathPresent(path)) throw new ProjectMigrationStepError('run-store', `the moved run store ${path} is missing`);
   const db = RunDatabase.open(path);
@@ -250,7 +258,7 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
   let index = 0;
   for (const [file, fields] of byFile(rewrites)) {
     contained('run-files', join(journal.destination, 'runs'), file);
-    if (lstatSync(file).isSymbolicLink()) throw new ProjectMigrationStepError('run-files', `${file} is a symbolic link`);
+    regularFile('run-files', file);
     const text = readFileSync(file, 'utf8');
     let next = text;
     // Only the seeded worktree line, and only while it still names the old path: the agent may edit the file.

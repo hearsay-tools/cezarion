@@ -1,13 +1,16 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Home } from '../home/home.ts';
 import { readCockpitLeases } from '../home/leases.ts';
-import { projectPaths } from '../project-paths.ts';
+import { pathPresent, projectPaths } from '../project-paths.ts';
+import { claimOwnerLive } from '../runs/run-claims.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
-import { RunStore } from '../runs/store.ts';
+import { parseRunRecords, type RunRecord, type RunStore } from '../runs/store.ts';
+import { isLiveRecord } from '../runs/run-row.ts';
 import { anotherCockpitOwner, type LiveProjectTask } from '../server/cockpit-ownership.ts';
 import { projectLiveTasks } from '../server/project-context.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
+import { readQuiescentRunDatabase } from './plan.ts';
 
 /**
  * Whether anything is live for a project (hearsay-tools/cezarion#3089). A project migration runs
@@ -67,10 +70,45 @@ export async function projectCockpits(root: string, homes: readonly Home[], self
   return [...found.values()];
 }
 
-/** The project's run store, opened to read its live tasks; none when neither directory holds runs. */
-export function openLiveTaskStore(root: string): RunStore | undefined {
-  if (!projectPaths(root).reads.some(directory => existsSync(join(directory, RUNS_DB_FILE)) || existsSync(join(directory, 'runs.json')))) return undefined;
-  return RunStore.open(projectPaths(root).write, { keepLive: true, maintenance: true });
+/** One stored record, or nothing when it does not parse. */
+function record(value: unknown): RunRecord | undefined {
+  const parsed = parseRunRecords([value]);
+  return parsed.success ? parsed.data[0] : undefined;
+}
+
+/**
+ * The project's runs as `projectLiveTasks` reads them, read without writing anything: each run
+ * store read-only (`readQuiescentRunDatabase`), and a `runs.json` no store imported yet read as
+ * JSON. The legacy directory wins an id both hold. Live: rows not terminal, and the runs of
+ * families a live process claims.
+ */
+export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'> {
+  const runs = new Map<string, RunRecord>();
+  const live = new Set<string>(), foreign = new Set<string>();
+  const add = (run: RunRecord | undefined) => { if (run && !runs.has(run.id)) runs.set(run.id, run); };
+  for (const directory of projectPaths(root).reads) {
+    const database = join(directory, RUNS_DB_FILE);
+    if (pathPresent(database)) {
+      readQuiescentRunDatabase(database, (db) => {
+        for (const row of db.listAll()) add(record(JSON.parse(row.data)));
+        for (const row of db.listLive()) live.add(row.id);
+        for (const claim of db.listClaims(true)) {
+          if (!claimOwnerLive(claim)) continue;
+          for (const id of [claim.family, ...db.listIdsByParent(claim.family)]) foreign.add(id);
+        }
+      });
+      continue;
+    }
+    const index = join(directory, 'runs.json');
+    if (!pathPresent(index)) continue;
+    const entries: unknown = JSON.parse(readFileSync(index, 'utf8'));
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const run = record(entry);
+      add(run);
+      if (run && isLiveRecord(run)) live.add(run.id);
+    }
+  }
+  return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id) };
 }
 
 /** Refuse when a cockpit serves the project; live tasks are checked under the fence (`fenceProject`). */
@@ -79,7 +117,7 @@ export async function assertNoProjectCockpit(root: string, homes: readonly Home[
   if (cockpits.length > 0) throw new ProjectInUseError(root, cockpits, []);
 }
 
-/** The live tasks of `store`, as the fence's live-task check; none without a store. */
-export function liveTasksOf(store: RunStore | undefined): LiveProjectTask[] {
-  return store ? projectLiveTasks(store) : [];
+/** The project's live tasks, read without writing anything: the fence's live-task check. */
+export function projectLiveTasksOffline(root: string): LiveProjectTask[] {
+  return projectLiveTasks(readLiveTaskView(root));
 }

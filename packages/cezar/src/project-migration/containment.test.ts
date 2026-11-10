@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { testHome } from '../home/test-home.testkit.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
@@ -115,6 +116,24 @@ describe('a migration journal that names a path outside the project', () => {
     expect(listener).not.toHaveBeenCalled();
     expect(readFileSync(user.path, 'utf8')).toBe(user.bytes);
     expect(existsSync(journal)).toBe(true);
+  });
+
+  it('refuses a run store that is a symlink: the journal check and the run-store step leave the target unchanged', async () => {
+    const { root, outside, journal } = project();
+    // Another SQLite database, which RunDatabase.open would switch to WAL and migrate.
+    const external = join(outside, 'other.db');
+    const db = new DatabaseSync(external);
+    db.exec('CREATE TABLE kept (x)');
+    db.close();
+    const bytes = readFileSync(external);
+    symlinkSync(external, join(root, '.ai/squawk/runs.db'));
+    const paused: ProjectMigrationJournal = { ...journalWith(root, { kind: 'run-row', runId: 'r', field: { column: 'worktree_path' },
+      from: join(root, '.ai/cezar/worktrees/x'), to: join(root, '.ai/squawk/worktrees/x') }), done: PROJECT_MIGRATION_STEPS.slice(0, 4) };
+    writeProjectMigrationJournal(journal, paused);
+    await expect(resume(root)).rejects.toThrow(new ProjectMigrationJournalRefusedError(journal, `${join(root, '.ai/squawk/runs.db')} is a symbolic link`));
+    expect(() => MIGRATION_STEP_RUNNERS['run-store'](paused, () => undefined)).toThrow(ProjectMigrationStepError);
+    expect(readFileSync(external)).toEqual(bytes);
+    expect(readdirSync(outside).sort()).toEqual(['other.db']);
   });
 
   it('refuses a journal that Git tracks, even one with nothing left to apply', async () => {

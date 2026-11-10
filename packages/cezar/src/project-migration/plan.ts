@@ -67,6 +67,24 @@ export async function trackedPaths(root: string): Promise<Set<string> | undefine
   return listed === undefined ? undefined : new Set(listed.split('\0').filter(Boolean));
 }
 
+/**
+ * Read the run store at `path` without changing anything beside it: read-only and quiescent, and
+ * from a private copy when a WAL file exists, because even a read-only connection writes
+ * shared-memory state beside the database it reads.
+ */
+export function readQuiescentRunDatabase<T>(path: string, read: (db: RunDatabase) => T): T {
+  const copy = pathPresent(`${path}-wal`) ? mkdtempSync(join(tmpdir(), 'cez-migration-plan-')) : undefined;
+  let db: RunDatabase | null = null;
+  try {
+    if (copy) for (const suffix of ['', '-wal']) copyFileSync(`${path}${suffix}`, join(copy, `${RUNS_DB_FILE}${suffix}`));
+    db = RunDatabase.openReadOnly(copy ? join(copy, RUNS_DB_FILE) : path, RUN_DATABASE_SCHEMA_VERSION, { quiescent: true })!;
+    return read(db);
+  } finally {
+    db?.close();
+    if (copy) rmSync(copy, { recursive: true, force: true });
+  }
+}
+
 export interface PathMapping {
   /** The project root in each form stored paths may use: as registered, and its real path. */
   roots: readonly string[];
@@ -333,30 +351,23 @@ class Planner {
       if (legacyIndex) this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into a run store; open the project with this build first`);
       return;
     }
-    let db: RunDatabase | null = null;
-    // A WAL file (a live writer, or one that crashed) is read from a private copy: even a read-only
-    // connection writes shared-memory state beside the database it reads.
-    const copy = pathPresent(`${path}-wal`) ? mkdtempSync(join(tmpdir(), 'cez-migration-plan-')) : undefined;
     try {
-      if (copy) for (const suffix of ['', '-wal']) copyFileSync(`${path}${suffix}`, join(copy, `${RUNS_DB_FILE}${suffix}`));
-      db = RunDatabase.openReadOnly(copy ? join(copy, RUNS_DB_FILE) : path, RUN_DATABASE_SCHEMA_VERSION, { quiescent: true })!;
-      if (legacyIndex && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
-        this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into ${path}; open the project with this build first`);
-        return;
-      }
-      for (const row of db.listAll()) {
-        const data: unknown = JSON.parse(row.data);
-        for (const field of runRecordPathFields(data)) this.rowField(row.id, { data: field }, valueAt(data, field), map);
-        this.rowField(row.id, { summary: ['worktreePath'] }, valueAt(JSON.parse(row.summary), ['worktreePath']), map);
-        this.rowField(row.id, { column: 'worktree_path' }, row.worktreePath, map);
-      }
+      readQuiescentRunDatabase(path, (db) => {
+        if (legacyIndex && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
+          this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into ${path}; open the project with this build first`);
+          return;
+        }
+        for (const row of db.listAll()) {
+          const data: unknown = JSON.parse(row.data);
+          for (const field of runRecordPathFields(data)) this.rowField(row.id, { data: field }, valueAt(data, field), map);
+          this.rowField(row.id, { summary: ['worktreePath'] }, valueAt(JSON.parse(row.summary), ['worktreePath']), map);
+          this.rowField(row.id, { column: 'worktree_path' }, row.worktreePath, map);
+        }
+      });
     } catch (error) {
       this.plan.blockers.push(error instanceof RunDatabaseUnsupportedSchemaError
         ? `The run store ${path} is not at this build's schema ${RUN_DATABASE_SCHEMA_VERSION}; open the project with this build first`
         : `Cannot read the run store ${path}: ${(error as Error).message}`);
-    } finally {
-      db?.close();
-      if (copy) rmSync(copy, { recursive: true, force: true });
     }
   }
 

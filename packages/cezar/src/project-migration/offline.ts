@@ -1,10 +1,9 @@
 import type { Home } from '../home/home.ts';
 import { pathPresent, projectPaths } from '../project-paths.ts';
-import type { RunStore } from '../runs/store.ts';
 import { assertProjectAdmitted, CockpitOwnership } from '../server/cockpit-ownership.ts';
 import { dryRunAnswer, migrationAnswer, type ProjectMigrationAnswer } from './answer.ts';
 import { migrateProject } from './engine.ts';
-import { assertNoProjectCockpit, liveTasksOf, openLiveTaskStore } from './live.ts';
+import { assertNoProjectCockpit, projectLiveTasksOffline } from './live.ts';
 import { recoverProjectMigration } from './recovery.ts';
 import type { MigrationFault } from './steps.ts';
 
@@ -22,7 +21,6 @@ export async function migrateProjectOffline(root: string, options: {
   const dataDir = projectPaths(root).write;
   await assertNoProjectCockpit(root, options.homes, options.self);
   const ownership = new CockpitOwnership();
-  let store: RunStore | undefined;
   try {
     const recovered = await recoverProjectMigration(root, { ownership, keep: true });
     if (options.dryRun) {
@@ -31,17 +29,16 @@ export async function migrateProjectOffline(root: string, options: {
       if (existing) await ownership.acquire(existing);
       assertProjectAdmitted(dataDir);
       options.fault?.('plan:before');
-      return await dryRunAnswer(root, recovered !== undefined);
+      return await dryRunAnswer(root, recovered);
     }
     if (recovered) return migrationAnswer(recovered);
     assertProjectAdmitted(dataDir);
-    const fence = await ownership.fenceProject(dataDir, { liveTasks: () => liveTasksOf(store ??= openLiveTaskStore(root)) });
+    // The live-task check reads the run stores without writing: a refusal writes nothing.
+    const fence = await ownership.fenceProject(dataDir, { liveTasks: () => projectLiveTasksOffline(root) });
     try {
-      return migrationAnswer(await migrateProject({ repoRoot: root, fence, closeProject: () => { store?.close(); store = undefined; },
-        ...(options.fault ? { fault: options.fault } : {}) }));
+      return migrationAnswer(await migrateProject({ repoRoot: root, fence, ...(options.fault ? { fault: options.fault } : {}) }));
     } finally { fence.release(); }
   } finally {
-    store?.close();
     ownership.releaseAll();
   }
 }

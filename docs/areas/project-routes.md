@@ -37,7 +37,9 @@ plus start-token liveness and token-checked release.
   of the CLI's homes whose registry lists the project (the presence leases of
   `home/leases.ts`: pid, port, instance), which covers a cockpit that does not own the project
   but runs its automations (hearsay-tools/cezarion#3136). Live tasks are
-  `projectLiveTasks(store)`: every non-terminal task (`isLiveRecord`: queued, running,
+  `projectLiveTasks` over a read-only view (`readLiveTaskView`: each run store read quiescent,
+  from a private copy when it has a WAL file, and a `runs.json` no store imported yet read as
+  JSON), so a refusal writes nothing: every non-terminal task (`isLiveRecord`: queued, running,
   waiting on a human, a usage-limit auto-resume, a timer, a PR or a worker) persisted as live
   in either directory, plus the runs of families another live store claims in `run_claims` (a
   headless `cez run`, another binary), read from both physical claim tables so a stale legacy
@@ -128,7 +130,9 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
 - **Untrusted journal.** A journal read back for a resume is untrusted input: a repository can
   commit one. Before any step, `assertJournalContained` (`project-migration/containment.ts`)
   refuses a journal whose `source` and `destination` are not exactly `<root>/.ai/cezar` and
-  `<root>/.ai/squawk`; a move or worktree that does not go from inside `source` to the same place
+  `<root>/.ai/squawk`; a file it rewrites in place (each rewritten JSON file, each receipt, the
+  run store `runs.db` with its `-wal` and `-shm` in either directory) that is not a regular file,
+  a symlink included; a move or worktree that does not go from inside `source` to the same place
   inside `destination`; a receipt or cleanup checkpoint outside `<git common dir>/cezar-owned-workspaces/`;
   another rewritten file outside `<destination>/runs/`; a rewritten value that does not move a path
   of this root's `.ai/cezar` to the same place under `.ai/squawk`; a tracked-file entry that is not a
@@ -136,7 +140,7 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
   symlink out); and a journal Git tracks (one `git ls-files` call, only when a journal exists; the
   shared excludes keep a real journal out of every ordinary add). A fresh plan passes the same
   check before its journal is written. Each step checks its write target again right before it
-  writes. A refused journal changes nothing and stays for inspection; recovery reports it as a
+  writes, and opens or rewrites in place only a regular file. A refused journal changes nothing and stays for inspection; recovery reports it as a
   recovery failure (boot ends, CLI exit 1, 409), and admission keeps refusing the project.
 - **Durability invariant.** One rule, enforced by `settle` in `project-migration/durable.ts`
   and stated there: (a) after every effect on an entry (created, renamed in or out,
@@ -170,9 +174,10 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   (`loadSubcommand`, `main`); the constant never changes.
 - **Offline run.** `migrateProjectOffline` (`project-migration/offline.ts`): refuse while
   anything is live (above), finish an unfinished journal (and report it as the migration),
-  take `cockpit.lock` and the fence with a live-task check over a maintenance store, run
-  `migrateProject` with `closeProject` closing that store, release both claims. A dry run
-  holds only `cockpit.lock` (in the directory that exists), passes admission and plans.
+  take `cockpit.lock` and the fence with the read-only live-task check, run `migrateProject`,
+  release both claims. A dry run holds only `cockpit.lock` (in the directory that exists),
+  passes admission and plans; when it finished an unfinished journal first, it reports what that
+  recovery moved and rewrote before the plan of what remains.
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
   before anything reads the project, in both switch states. Without a journal it costs one
