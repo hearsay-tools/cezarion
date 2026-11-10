@@ -1,5 +1,5 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
 import { TIMER_MIN_SECONDS, type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
@@ -28,6 +28,7 @@ import type { WorkerQuestions } from './worker-questions.ts';
 
 
 interface TurnSettlerHost {
+  waitEngine: WaitEngine;
   humanWaits: HumanWaits; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
   subagentWaits: SubagentWaits;
   move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
@@ -463,13 +464,13 @@ export class TurnSettler {
       this.host.humanWaits.openHumanAlias(runId, state, 'budget');
       return;
     }
-    if (!waitCapacityAvailable(run)) return;
+    if (!this.host.waitEngine.compare(run, 'silent')) return;
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
     const wait = WAIT_KINDS.timer.monitoringEntry(via, now, delay, minutes, state.waitIdentity.ciTurnId ?? 'monitoring');
-    this.host.humanWaits.withdrawCezarHumanWaits(runId);
-    try { this.context.store.commitWait(runId, wait); }
-    catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
-    this.host.waitWatches.armWait(runId, wait);
+    this.host.waitEngine.open(runId, state, wait, {
+      withdraw: 'before-commit', onCommitFailure: { log: '[cez] monitoring timer checkpoint failed' },
+      arm: 'watch', park: 'none', return: 'none',
+    });
   }
 }

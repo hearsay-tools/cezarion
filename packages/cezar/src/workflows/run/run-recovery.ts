@@ -1,3 +1,4 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { atContinue } from './launch-read-resolver.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
@@ -20,6 +21,7 @@ import type { WorkerQuestions } from './worker-questions.ts';
 import type { AutoResumeScheduler } from './auto-resume.ts';
 
 interface RunRecoveryHost {
+  waitEngine: WaitEngine;
   workerScratchCleanup: WorkerScratchCleanup; humanWaits: HumanWaits; waitWatches: WaitWatches;
   inboxClaims: InboxClaims; orphans: WorkerOrphans;
   isActive(id: string): boolean; workerExecutionStopped(id: string): boolean;
@@ -257,15 +259,10 @@ export class RunRecovery {
     const askSeq = pendingHumanAskSeq(this.context.store, runId);
     const human = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {}));
     if (askSeq === undefined || !this.context.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
-    this.host.humanWaits.withdrawCezarHumanWaits(runId);
-    if (WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {})).length > 0) return false;
-    try {
-      this.context.store.commitWait(runId, WAIT_KINDS.human.recoveredEntry(askSeq));
-      return true;
-    } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
+    return this.host.waitEngine.open(runId, undefined, () => WAIT_KINDS.human.recoveredEntry(askSeq), {
+      withdraw: 'first', existing: () => WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {}))[0],
+      onCommitFailure: { log: '[cez] human wait checkpoint failed' }, arm: 'none', park: 'none', return: 'built',
+    }).status === 'opened';
   }
 
   /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)

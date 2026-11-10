@@ -1,3 +1,4 @@
+import { WaitEngine } from './run/wait-engine.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -67,6 +68,7 @@ function registrationFixture() {
   });
   const context: RunModuleContext = { createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root,
     work: unused(), semaphore: unused(), disposed: () => false };
+  Object.assign(host, { waitEngine: new WaitEngine(context, unused()) });
   const registry = new WaitRegistry(context, host, 10);
   return { run, state, registry, resolve, remove: () => { current = undefined; }, replace: () => { current = createActiveRun({ cwd: root, pendingHumanAsk: false, autonomous: false }); } };
 }
