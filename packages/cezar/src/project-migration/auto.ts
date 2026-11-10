@@ -13,8 +13,9 @@ import type { MigrationFault } from './steps.ts';
 
 /**
  * The cockpit's automatic project move (hearsay-tools/cezarion#3089), only with `REBRAND_SWITCH`:
- * at cockpit start for the boot project, and at the first open of every other project, after
- * journal recovery and before any ordinary read or task start. It moves the legacy state under
+ * at cockpit start for the boot project and, right after the listener starts, every other registered
+ * project (or earlier, when a request reaches it first), and a project added later when it is added;
+ * after journal recovery and before any ordinary read or task start. It moves the legacy state under
  * `.ai/cezar/` with the same offline move as `migrate-project` when nothing else is live. When
  * anything else is live (another cockpit, a task from before the restart, a headless run) it does
  * not move: the project is served from both folders as before, a notice names what blocks the

@@ -186,8 +186,11 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   recovery moved and rewrote before the plan of what remains.
 - **Automatic move.** With `REBRAND_SWITCH` true, the cockpit moves an idle legacy project
   itself (`moveProjectWhenIdle`, `project-migration/auto.ts`): at start for the boot project,
-  before the listener, and at the first open of every other project (lazy build and warm-up),
-  before any ordinary read or task start. Journal recovery runs first. When `.ai/cezar/` holds
+  before the listener; right after the listener starts for every other registered project (the
+  post-listen preparation below), or earlier when a request, a lazy build or the warm-up reaches
+  it first; and for a project registered later when it is added. Each move runs before any
+  ordinary read or task start of that project, so a cockpit start moves every idle registered
+  project, opened or not. Journal recovery runs first. When `.ai/cezar/` holds
   state to move and the plan has no blocker or conflict, the same live check as the command
   runs, without counting the cockpit's own process (its `cockpit.lock` claim and its presence
   lease): with nothing live, the offline move runs under the cockpit's own claim
