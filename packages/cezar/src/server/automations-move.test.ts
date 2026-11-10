@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -151,3 +151,46 @@ it('replaces a handle opened before a move at lookup and refresh', async () => {
     expect(AutomationStore.open(projectPaths(root).write).state('poll')?.lastSuccessAt).toBe('2026-02-01T00:00:00.000Z');
   } finally { ownership.releaseAll(); }
 });
+
+
+it('writes boot API automation state to the moved directory and reads it back', async () => {
+  const home = Home.sandbox(directory());
+  const root = repository();
+  const legacy = join(root, '.ai/cezar');
+  mkdirSync(legacy, { recursive: true });
+  const runs = RunStore.open(legacy);
+  const initial = AutomationStore.open(legacy);
+  initial.create({ name: 'Boot schedule', kind: 'schedule', enabled: true,
+    schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Scheduled task' } }, 'boot-schedule');
+  initial.setState('boot-schedule', () => ({ revision: 1, nextRunAt: new Date(Date.now() + 86_400_000).toISOString() }));
+  const project = await registerProject(root, undefined, home);
+  const ownership = new CockpitOwnership();
+  const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+  const server = startServer({ home, repoRoot: root, bootProjectId: project.id, store: runs,
+    manager: { isActive: () => false } as unknown as RunManager, ownership, version: 'test',
+    modelCatalog: new RunnerModelCatalog({ adapters: {} }),
+    providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }) }, 0);
+  try {
+    if (!server.listening) await once(server, 'listening');
+    // bound: scheduler startup signals that boot preparation and its automatic move finished.
+    await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+    expect(projectPaths(root).write).toBe(join(root, '.ai/squawk'));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP listener');
+    const url = `http://127.0.0.1:${address.port}/api/v1/automations/boot-schedule`;
+    const paused = await fetch(`${url}/pause`, { method: 'POST' });
+    expect(paused.status).toBe(200);
+    await paused.json();
+    const disk = AutomationStore.open(join(root, '.ai/squawk'));
+    expect(disk.get('boot-schedule')).toMatchObject({ enabled: false, revision: 2 });
+    expect(disk.state('boot-schedule')).not.toHaveProperty('nextRunAt');
+    expect(existsSync(join(legacy, 'automations.json'))).toBe(false);
+    const read = await fetch(url);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({ automation: { enabled: false, revision: 2 } });
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    ownership.releaseAll();
+    runs.close();
+  }
+}, 30_000);
