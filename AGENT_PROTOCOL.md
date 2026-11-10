@@ -63,8 +63,8 @@ Its `type` strings are additive-only (§ Compatibility).
 ## 3. v2 `UiEvent` — the normalized protocol (`packages/cezar/src/core/ui-events.ts`)
 
 `ui-events.ts` holds the vocabulary and imports no runtime code.
-`packages/api-client/src/protocol/ui-events.ts` is a hand-kept copy for the browser. No
-test compares the two files, so change both in the same commit.
+`packages/api-client/src/protocol/ui-events.ts` is a hand-kept copy for the browser;
+`packages/cezar/src/server/api-types.test.ts` holds the two equal on the wire.
 
 - Where a name is an arbitrary choice (tool status, tool kind, plan entry, diff shape,
   stop reason), use the ACP name.
@@ -358,12 +358,11 @@ force, or force only in part. The item numbers are stable: code cites them.
    `prependSystemPrompt` when the backend has no system-prompt channel. For a fork of an
    existing runner's wire, read the fork's own protocol documents for the turn boundary,
    the session id and the tool flags before you copy code.
-2. **Factory** — add a `case` to `createRunner` (`runner-factory.ts`): its `default`
-   returns the Claude runner, so the compiler does not ask for one. Add the id to
-   `runnerSchema` (`packages/contract/src/health.ts`), and to `UiBackend` in `ui-events.ts`
-   and in its api-client copy (§3).
-3. **Detection** — add a probe to `backend-detect.ts`, to `detectEnvironment` and to the
-   `BackendCheck` name union. An absent CLI never fails the boot.
+2. **Factory** — the compiler and the guard tests name each place: the `case` in
+   `createRunner`, `runnerSchema` (`packages/contract/src/health.ts`), and `UiBackend` in
+   `ui-events.ts` and in its api-client copy (§3).
+3. **Detection** — add the runner's probe to `RUNNER_PROBES` (`core/backend-detect.ts`).
+   An absent CLI never fails the boot.
 4. **Mapper** — `core/<runner>-ui-mapper.ts` emits the v2 stream (§4).
 5. **v1 alongside v2** — emit v2 through `SessionOptions.onUiEvent` and keep the v1
    stream.
@@ -371,7 +370,7 @@ force, or force only in part. The item numbers are stable: code cites them.
 7. **Parity** — every §6 row passes or carries a named exemption.
 8. **Harness parity** — add the runner to `HARNESS_ADAPTERS`
    (`core/harness-parity-core.testkit.ts`) and make its offline mock a wire encoder over
-   `scripts/mock-scenario.mjs`. That module owns scenario selection and scripts; the mock
+   `packages/cezar/scripts/mock-scenario.mjs`. That module owns scenario selection and scripts; the mock
    emits the backend's native frames. A wire gap is a `PARITY_EXEMPTIONS` entry that names
    the wire limit. Never use `it.skip`, and never give "not implemented yet" as the reason.
    Choose the ask path: `cezar_ask` alone, or also a native bridge onto `ask.requested`. A
