@@ -57,6 +57,10 @@ handler's to refuse. In hearsay-tools/cezarion#1081 the create-project schema ad
 handler refused through `isValidCheckoutName`; one project-name pattern exported from the contract
 now serves the schema, the handler and the New project dialog.
 
+A route that touches a run's checkout names its checkout intent and asks the run checkout module
+(`server/run-checkout.ts`) once for the directory, the run-state refusals and the claim; it never
+checks the worktree or takes a claim itself ([ADR 0062](../adr/0062-one-module-decides-run-checkout-access.md)).
+
 Import a contract VALUE from the module that defines it, never through a package root. The
 service writes `@open-mercato/cezar-contract/<module>`. The cockpit writes
 `@open-mercato/cezar-api-client/contract/<module>`, or `@open-mercato/cezar-api-client/<path>` for
