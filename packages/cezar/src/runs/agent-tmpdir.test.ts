@@ -897,6 +897,20 @@ describe('socket-safe temp directory length (#387)', () => {
       expect(existsSync(agentTmpDir(dataDir, runId))).toBe(false);
     });
 
+    it('backfills its missing dataDir record with the pre-migration dataDir, so a deleted project is swept', () => {
+      const legacy = deepDataDir();
+      const dir = mint(legacy, runId);
+      rmSync(join(dir, '.cez-owner-dir'));
+      const dataDir = join(dirname(legacy), 'squawk');
+      renameSync(legacy, dataDir);
+      expect(agentTmpEnv(dataDir, runId, {}).TMPDIR).toBe(dir);
+      expect(readFileSync(join(dir, '.cez-owner-dir'), 'utf8')).toBe(legacy);
+      rmSync(deepPrefix, { recursive: true, force: true });
+      const otherRoot = join(osRoot(), `cez-deep-${'p'.repeat(80)}`);
+      expect(sweepAgentTmpDirs(join(otherRoot, 'other', '.ai', 'cezar'), [])).toContain(basename(dir));
+      expect(existsSync(dir)).toBe(false);
+    });
+
     it('never adopts or sweeps another repo’s pre-migration fallback', () => {
       const { dataDir } = migrated();
       const otherRoot = join(osRoot(), `cez-deep-${'n'.repeat(80)}`);

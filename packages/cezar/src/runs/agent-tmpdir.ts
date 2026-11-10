@@ -256,6 +256,7 @@ function isFallbackFor(dir: string, dataDir: string, runId: string): boolean {
  */
 function writeOwnerMarker(dir: string, dataDir: string): void {
   const marker = join(dir, OWNER_FILE);
+  let owner: string | undefined = dataDir;
   try {
     writeFileSync(marker, dataDirOwner(dataDir), { encoding: 'utf8', flag: 'wx' });
   } catch (err) {
@@ -266,14 +267,16 @@ function writeOwnerMarker(dir: string, dataDir: string): void {
     } catch {
       // unreadable marker (symlink to nowhere, wrong type): verify below.
     }
-    if (!dataDirOwners(dataDir).includes(actual)) {
+    owner = dataDirIdentities(dataDir).find((identity) => dataDirOwner(identity) === actual);
+    if (owner === undefined) {
       throw new AgentTempDirError(dir, new Error('ownership marker was replaced — remove the directory to re-mint it'));
     }
   }
-  // A directory minted before this file existed gets it on its next spawn. An existing one is
-  // left as it is: the sweep checks it against the marker before it acts on it.
+  // A directory minted before this file existed gets it on its next spawn, naming the dataDir the
+  // marker digests (a pre-migration marker names `.ai/cezar`), so the sweep can still match the
+  // two. An existing one is left as it is: the sweep checks it against the marker before it acts.
   try {
-    writeFileSync(join(dir, OWNER_DIR_FILE), dataDir, { encoding: 'utf8', flag: 'wx' });
+    writeFileSync(join(dir, OWNER_DIR_FILE), owner, { encoding: 'utf8', flag: 'wx' });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
   }
