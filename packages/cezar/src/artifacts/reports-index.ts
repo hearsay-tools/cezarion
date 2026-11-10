@@ -10,6 +10,7 @@ import { REPORTS_BACKFILL_KEY, type IndexedArtifact, type ReportRow, type Report
 import { parseStoredSummary } from '../runs/run-summary-page.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { artifactRunsRoot, scanArtifactsForIndex, checkArtifactContentForIndex } from './store.ts';
+import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
@@ -99,7 +100,12 @@ export class ReportsIndex {
     this.started = true;
     void this.backfill().catch(error => console.warn('[cez] Reports backfill failed:', error));
   }
+  /** Settles once the scans queued so far end; a project migration fence drains it. */
+  idle(): Promise<void> { return this.queue; }
   private serial(work: () => Promise<void>): Promise<void> {
+    // A project under a migration fence queues no new scan (watch ticks included), so the
+    // fence's captured `idle()` covers every scan; dirty rows are picked up after it ends.
+    if (projectAdmissionRefusal(this.dataDir)) return Promise.resolve();
     const next = this.queue.then(async () => { if (!this.closed) await work(); });
     this.queue = next.catch(() => undefined);
     return next;
@@ -140,6 +146,7 @@ export class ReportsIndex {
     const scan = await this.storage(runId, directory => scanArtifactsForIndex(directory, runId));
     if (scan.state === 'indeterminate') {
       console.warn(`[cez] Report scan could not be completed: ${runId}`, scan.error);
+      if (this.closed) return false;
       this.db.reports.retry(runId, revision);
       return false;
     }

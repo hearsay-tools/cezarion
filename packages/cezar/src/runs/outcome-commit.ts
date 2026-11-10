@@ -5,6 +5,7 @@ import { LAST_WAITS_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { waitInputId } from '../workflows/waits.ts';
 import { applyExit, type RunExitId } from './run-exits.ts';
 import type { RunRecord } from './store.ts';
+import { checkWaitWrite } from './wait-phases.ts';
 
 /**
  * Outcome writes (hearsay-tools/cezarion#1805). A write that records an outcome — an input or a
@@ -93,6 +94,7 @@ function nonEmpty(waits: Wait[]): Wait[] | undefined {
 /** Append settled waits to the history, newest last, dropping the oldest past `LAST_WAITS_LIMIT`,
  *  and report them in `out`. */
 function settle(run: RunRecord, settled: readonly Wait[], out: Settlement): RunRecord {
+  for (const entry of settled) checkWaitWrite(run, entry);
   out.settled.push(...settled);
   const ids = new Set(settled.map((wait) => wait.id));
   return { ...run, waits: nonEmpty((run.waits ?? []).filter((wait) => !ids.has(wait.id))),

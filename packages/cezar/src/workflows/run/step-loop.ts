@@ -1,3 +1,4 @@
+import type { WaitCancellation } from './wait-cancellation.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { atTaskHead, atStepOpen, type LaunchSource } from './launch-read-resolver.ts';
@@ -36,6 +37,7 @@ import type { StepLoop as StepLoopOutcome } from './types.ts';
 const CHECK_OUTPUT_CAP = 20_000;
 
 interface StepLoopHost {
+  waitCancellation: WaitCancellation;
   active: Map<string, ActiveRun>;
   closingWakeDecision(id: string, holds: boolean, cancelled: boolean, error: string | undefined): 'park' | 'settle' | 'capped';
   owesDelivery(id: string): boolean;
@@ -412,7 +414,7 @@ export class StepLoop {
   expireStepDeadlineWaits(runId: string, step: WorkflowStepDef, failure: string | null, attemptStartedAt: number): void {
     if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
       const human = openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => WAIT_KINDS[wait.kind].userAnswers).map(wait => wait.id);
-      if (human.length) this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: human });
+      if (human.length) this.host.waitCancellation.cancel(runId, human);
     }
   }
 

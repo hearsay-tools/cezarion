@@ -18,6 +18,24 @@ Git excludes cover both runtime trees and `.ai/squawk-migration.json`; tracked
 workflows, skills and `context.yaml` keep their existing committable paths.
 Only the release switch enables the legacy-directory notice; boot does not migrate.
 
+## Project migration fence
+
+Every CLI operation that touches project data checks the migration fence
+([project routes](project-routes.md#project-migration-fence)) and exits 1 with a
+one-line `ProjectMigrationFencedError` message. `serve` checks in its ownership claim
+before the listener and before any directory is created. `run`, `init` and a
+single-project `projects` listing check in `cli-dispatch.ts` (`admitProjectCommand`);
+Every CLI write that follows an await re-checks admission right before it runs
+(`admittedWrite`): `init` before its directories, each starter file and `.gitignore`; the
+headless store open before `.gitignore` and the open (later store writes pass the store's
+backstop, and the run's claims keep another process's fence from passing its preflight);
+the artifact writer before each mkdir, write, rename and removal.
+`artifact publish` checks the data directory of `CEZ_ARTIFACTS_DIR`; `versions` skips
+the run lookup of a fenced project. `task`, `automation`, `webhook`, `worker`,
+`message`, `discover` and `remote-settings` reach the project only through the
+cockpit, whose project routes refuse. `backup`, the managed install commands and
+`server-*` touch no project data. Git excludes also cover `.ai/squawk-migration.lock*`.
+
 ## Rules
 
 Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. Headless `run` treats `review` as a terminal success status (exit 0). `serve` boots in a fixed order: bind the listener, open the boot store and build its `RunManager`, `recover()` the boot project, then `startServer`. So anything a recovered run needs (its cockpit address, for one) must reach the boot manager at construction, not from `startServer`. `init` never overwrites existing files. Keep `.ai/cezar/.gitignore` maintenance (`ensureDataGitignore`) in sync with any new state file.

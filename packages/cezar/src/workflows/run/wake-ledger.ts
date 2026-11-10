@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from './wait-kinds.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { applyOutcomes, type RunOutcome } from '../../runs/outcome-commit.ts';
@@ -81,7 +82,7 @@ export function owesWake(run: RunRecord, reads: WakeReads, beforeHumanReset?: { 
   // A pending native question takes nothing but its answer: results and messages wait for the
   // answer's turn end, and a run with no session is not reopened for them, where its provider
   // would ask again (hearsay-tools/cezarion#1235, parent spec § Wakes beside questions).
-  if (openWaits(run).some(wait => wait.kind === 'human' && wait.via === 'native-ask')) return reads.routedAnswer(run.id) !== undefined;
+  if (WAIT_KINDS.human.select(openWaits(run)).some(wait => wait.via === 'native-ask')) return reads.routedAnswer(run.id) !== undefined;
   if (resolvedWaits(run).length) return true;
   return reads.pendingConversationWakes(run, beforeHumanReset).length > 0 || reads.routedAnswer(run.id) !== undefined;
 }

@@ -83,7 +83,8 @@ import { archiveStoreFamily } from './archive-family.ts';
 import { claimStoreFamilies } from './claim-families.ts';
 import { createStoreOwnedRun } from './owned-run-create.ts';
 import { commitStoreWorkerResult } from './worker-result-commit.ts';
-import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
+import { claimOwnerLive, closeClaimSession, familyKey, foreignClaimedRunIds, liveForeignClaimedRunIds, openClaimSession, rowFamily, type ClaimOwner } from './run-claims.ts';
+import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
 export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
@@ -439,16 +440,6 @@ export class RunWriteRefusedError extends Error {
         : `${RUN_IN_USE_ELSEWHERE}: ${runId}`);
     this.name = 'RunWriteRefusedError';
   }
-}
-
-/** The `run_claims` family of a run: a worker's parent, else the run itself (`parent_run_id ?? id`). */
-function familyKey(run: Pick<RunRecord, 'id' | 'delegation'>): string {
-  return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
-}
-
-/** The same family, off a stored row's columns. */
-function rowFamily(row: Pick<RunRow, 'id' | 'parentRunId'>): string {
-  return row.parentRunId ?? row.id;
 }
 
 /** Make `target` hold exactly `source`'s fields, keeping the object every holder references. */
@@ -816,7 +807,7 @@ export class RunStore extends EventEmitter {
 
   /** Make sure this store claims each of `families`; `claimStoreFamilies` takes the free ones. */
   private claimFamilies(families: Iterable<string>, opts: { allowLive?: boolean; wait?: boolean } = {}): Set<string> {
-    return claimStoreFamilies({
+    return projectWriteRefused(this.dataDir) ? new Set() : claimStoreFamilies({
       claimed: this.claimed,
       pendingClaims: this.pendingClaims,
       db: this.db,
@@ -893,16 +884,10 @@ export class RunStore extends EventEmitter {
   /** Run files are written only for a family this store may write, never a fallback family. */
   private writeDir(id: string): string { if (this.runOwnership(id) === 'fallback') throw this.fallbackRefusal(id); return this.dataDir; }
 
-  /** Every run whose family another process owns — alive, or dead with a live run left to
-   *  recover (cleanup keeps their scratch: it is theirs, or recovery's once someone adopts them).
-   *  A dead owner's claim on a family with nothing live is no claim (see `runOwnership`). */
-  listForeignClaimedRunIds(): string[] {
-    const db = this.db, owner = this.owner;
-    if (!db || !owner) return [];
-    const kept = new Set(db.listClaims().filter((claim) => claim.session !== owner.session &&
-      (claimOwnerLive(claim) || db.familyHasLive(claim.family))).map((claim) => claim.family));
-    return kept.size === 0 ? [] : db.listForeignClaimedIds(owner.session).filter((row) => kept.has(row.family)).map((row) => row.id);
-  }
+  /** Every run whose family another process owns (`foreignClaimedRunIds`). */
+  listForeignClaimedRunIds(): string[] { return foreignClaimedRunIds(this.db, this.owner); }
+  /** Non-terminal rows in the database (both directories) and the runs of families another live store claims. */
+  persistedLiveRunIds(): { live: string[]; foreign: string[] } { return { live: this.db?.listLive().map((row) => row.id) ?? [], foreign: liveForeignClaimedRunIds(this.db, this.owner) }; }
 
   /**
    * Whether a held run anchors itself (and its family) in memory. Anything else held is a family
@@ -3223,7 +3208,7 @@ export class RunStore extends EventEmitter {
 
   /** The single database write, so a test can fail it the way a full disk would. */
   private writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit {
-    const transaction = (changes: RunDatabaseChanges) => this.db!.transaction(changes);
+    const transaction = (changes: RunDatabaseChanges) => { assertProjectWritable(this.dataDir); return this.db!.transaction(changes); };
     return this.persistence ? this.persistence(changes, transaction) : transaction(changes);
   }
 
@@ -3383,7 +3368,7 @@ export class RunStore extends EventEmitter {
 
   /** Write what is pending, then (unless closing) let every run whose write settled leave memory. */
   private saveNow(evict = true): void {
-    if (!this.db) return;
+    if (!this.db || projectWriteRefused(this.dataDir)) return;
     // A second attempt only after a conflict excluded its rows: the unrelated rest goes out at once.
     for (let attempt = 0; attempt < 2 && (this.dirty.size > 0 || this.deleted.size > 0); attempt++) {
       const quarantined = this.quarantined.size;

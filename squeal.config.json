@@ -30,7 +30,7 @@
       "at": "manual",
       "limits": { "maxParallel": 1, "maxWorkers": 1, "priority": "low" }
     },
-    { "name": "lint", "lint": true, "at": "stop" }
+    { "name": "lint", "lint": true, "at": "edit" }
   ],
   "complexity": {
     "enabled": true

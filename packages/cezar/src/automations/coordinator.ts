@@ -1,5 +1,6 @@
 import { projectPaths, readProjectPath } from '../project-paths.ts';
 import { existsSync } from 'node:fs';
+import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 import { AutomationStore } from './store.ts';
 
 export interface AutomationProjectSource {
@@ -22,6 +23,8 @@ export class AutomationCoordinator {
   private readonly stores = new Map<string, AutomationStore>();
   private readonly roots = new Map<string, string>();
   private seenProject = false;
+  /** Projects whose migration fence has been logged, so each fence is logged once. */
+  private readonly fenceLogged = new Set<string>();
   private refreshSeq = 0;
 
   constructor(private readonly options: AutomationCoordinatorOptions) {}
@@ -48,6 +51,8 @@ export class AutomationCoordinator {
         continue;
       }
       this.roots.set(project.id, project.root);
+      // A project under a migration fence is not read; the idle wake looks again after it ends.
+      if (!this.unfenced(project.id, projectPaths(project.root).write)) continue;
       // A store this process already holds is re-read when another cockpit changed its files;
       // a project whose definitions file appeared since the last refresh is opened here.
       const existing = this.stores.get(project.id);
@@ -83,11 +88,12 @@ export class AutomationCoordinator {
     }
   }
 
+  /** None for a project under a migration fence, unless the caller holds its admission lease. */
   store(projectId: string, root?: string): AutomationStore | undefined {
+    const projectRoot = root ?? this.roots.get(projectId);
+    if (!projectRoot || projectAdmissionRefusal(projectPaths(projectRoot).write)) return undefined;
     const existing = this.stores.get(projectId);
     if (existing) return existing;
-    const projectRoot = root ?? this.roots.get(projectId);
-    if (!projectRoot) return undefined;
     const store = AutomationStore.open(projectPaths(projectRoot).write, { warn: this.options.warn });
     this.stores.set(projectId, store);
     this.roots.set(projectId, projectRoot);
@@ -96,8 +102,26 @@ export class AutomationCoordinator {
 
   enabledProjectIds(): string[] {
     return [...this.stores.entries()]
-      .filter(([, store]) => store.list().some((definition) => definition.enabled))
+      .filter(([id, store]) => this.unfenced(id, store.dataDir) && store.list().some((definition) => definition.enabled))
       .map(([id]) => id);
+  }
+
+  /**
+   * A project under a migration fence arms no timer. Its due occurrences stay in its persisted
+   * state and fire once the fence ends (the scheduler's catch-up). The skip goes to the process
+   * log, once per fence: nothing is written into the fenced project.
+   */
+  private unfenced(projectId: string, dataDir: string): boolean {
+    const refusal = projectAdmissionRefusal(dataDir);
+    if (!refusal) {
+      this.fenceLogged.delete(projectId);
+      return true;
+    }
+    if (!this.fenceLogged.has(projectId)) {
+      this.fenceLogged.add(projectId);
+      (this.options.warn ?? console.warn)(`[cez] automations of project ${projectId} are deferred until its migration ends: ${refusal.message}`);
+    }
+    return false;
   }
 
   remove(projectId: string): void {

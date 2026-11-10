@@ -1,6 +1,7 @@
+import type { WaitCancellation } from './wait-cancellation.ts';
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { atContinue } from './launch-read-resolver.ts';
-import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
@@ -8,7 +9,7 @@ import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
 import type { HumanWaits } from './human-waits.ts';
-import type { WaitWatches } from './wait-watches.ts';
+import type { WaitResolve } from './wait-resolve.ts';
 import type { InboxClaims } from './inbox-claims.ts';
 import type { WorkerOrphans } from './worker-orphans.ts';
 import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
@@ -21,7 +22,8 @@ import type { WorkerQuestions } from './worker-questions.ts';
 import type { AutoResumeScheduler } from './auto-resume.ts';
 
 interface RunRecoveryHost {
-  workerScratchCleanup: WorkerScratchCleanup; humanWaits: HumanWaits; waitWatches: WaitWatches;
+  waitEngine: WaitEngine;
+  workerScratchCleanup: WorkerScratchCleanup; humanWaits: HumanWaits; waitResolve: WaitResolve;
   inboxClaims: InboxClaims; orphans: WorkerOrphans;
   isActive(id: string): boolean; workerExecutionStopped(id: string): boolean;
   move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): unknown;
@@ -31,7 +33,7 @@ interface RunRecoveryHost {
   requeueInterruptedRun(run: RunRecord, step: RunRecord['currentStepId']): boolean;
   checkpointRestartContext(run: RunRecord): RunRecord;
   deliverConversationInput(id: string): void; answerRoutedQuestion(id: string): void;
-  queueWaitWake(id: string): void; owesWake(run: RunRecord): boolean; cancelOpenWaits(id: string): void;
+  queueWaitWake(id: string): void; owesWake(run: RunRecord): boolean; waitCancellation: WaitCancellation;
   settleOrphanedWorkerExecution(id: string): boolean; settleRequestedRootFinish(id: string): Promise<void>;
   settleSuccess(id: string): Promise<void>; reconcileWorkerWaits(family?: string): void;
   pump(): Promise<void>; recover(family?: string): Promise<void>;
@@ -219,14 +221,14 @@ export class RunRecovery {
     // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
     // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
     if (isUsageLimitHold(found)) {
-      for (const wait of openWaits(found)) this.host.waitWatches.armWait(found.id, wait);
+      this.host.waitResolve.rearm(found);
       return undefined;
     }
     const run = this.reconcileRecoveredAsk(found);
     if (this.parkRecoveredRun(run)) return undefined;
     // A pending question or a queued message leaves the waits open: they re-arm, and a result
     // still wakes the run.
-    for (const wait of openWaits(run)) this.host.waitWatches.armWait(run.id, wait);
+    this.host.waitResolve.rearm(run);
     if (run.status === 'queued') return this.host.reviveQueuedRun(run, 'cezar restarted');
     this.host.deliverConversationInput(run.id);
     if (run.status === 'waiting') return this.recoverClosedWaitingRun(run);
@@ -256,17 +258,12 @@ export class RunRecovery {
    *  saving the ask and replacing it leaves that wait open (review of #1437). */
   private adoptTranscriptAsk(runId: string): boolean {
     const askSeq = pendingHumanAskSeq(this.context.store, runId);
-    const human = openWaits(this.context.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    const human = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {}));
     if (askSeq === undefined || !this.context.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
-    this.host.humanWaits.withdrawCezarHumanWaits(runId);
-    if (openWaits(this.context.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
-    try {
-      this.context.store.commitWait(runId, WAIT_KINDS.human.recoveredEntry(askSeq));
-      return true;
-    } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
+    return this.host.waitEngine.open(runId, undefined, () => WAIT_KINDS.human.recoveredEntry(askSeq), {
+      withdraw: 'first', existing: () => WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {}))[0],
+      onCommitFailure: { log: '[cez] human wait checkpoint failed' }, arm: 'none', park: 'none', return: 'built',
+    }).status === 'opened';
   }
 
   /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)
@@ -274,7 +271,7 @@ export class RunRecovery {
    *  flag was read from the transcript, so its ask was answered after the row was last saved.
    *  Unknown facts are no evidence, and the wait stays open. */
   private settleAnsweredLegacyAsk(runId: string): boolean {
-    const legacy = this.context.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
+    const legacy = WAIT_KINDS.human.selectOpen(this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.turnId === 'legacy' && wait.askSeq === undefined);
     // Only facts read from a non-empty transcript are evidence of the answer (review of #1437).
     const facts = this.context.store.knownTranscriptFacts(runId);
     if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;
@@ -336,7 +333,7 @@ export class RunRecovery {
   /** Parks a recovered run: `waiting`, with each of its open waits re-armed. */
   private parkOnOpenWaits(run: RunRecord): void {
     this.host.move(run.id, 'park');
-    for (const wait of openWaits(run)) this.host.waitWatches.armWait(run.id, wait);
+    this.host.waitResolve.rearm(run);
   }
 
   /**
@@ -415,8 +412,8 @@ export class RunRecovery {
     for (const run of this.context.store.listRuns()) {
       // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
       // that owes results keeps them for a human, and its open waits still resolve without a wake.
-      if (run.waits?.length && holdsOwedResults(run)) for (const wait of openWaits(run)) this.host.waitWatches.armWait(run.id, wait);
-      else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.host.cancelOpenWaits(run.id);
+      if (run.waits?.length && holdsOwedResults(run)) this.host.waitResolve.rearm(run);
+      else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.host.waitCancellation.cancelAll(run.id);
       else if (run.waits?.length) this.host.queueWaitWake(run.id);
       // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).
       else if (['running', 'waiting', 'queued'].includes(run.status) && this.host.owesWake(run)) this.host.queueWaitWake(run.id);

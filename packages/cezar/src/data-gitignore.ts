@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { projectWriteRefused } from './server/cockpit-ownership.ts';
 
 /**
  * Keep run data out of the user's repo history; workflows/skills stay committable. Best effort:
@@ -8,6 +9,7 @@ import { join, resolve } from 'node:path';
  * history backups an open creates are ignored even when that open then fails.
  */
 export function ensureDataGitignore(repoRoot: string): void {
+  if (projectWriteRefused(join(repoRoot, '.ai/cezar'))) return;
   const path = join(repoRoot, '.ai/cezar', '.gitignore');
   const wanted = [
     'runs.json',
@@ -61,7 +63,7 @@ export function ensureDataGitignore(repoRoot: string): void {
     const sharedPath = join(resolve(repoRoot, common), 'info', 'exclude');
     mkdirSync(join(resolve(repoRoot, common), 'info'), { recursive: true });
     const shared = existsSync(sharedPath) ? readFileSync(sharedPath, 'utf8') : '';
-    const sharedRules = [...['cezar', 'squawk'].flatMap(name => wanted.map(rule => `/.ai/${name}/${rule}`)), '/.ai/squawk-migration.json'];
+    const sharedRules = [...['cezar', 'squawk'].flatMap(name => wanted.map(rule => `/.ai/${name}/${rule}`)), '/.ai/squawk-migration.json', '/.ai/squawk-migration.lock*'];
     const absent = sharedRules.filter(rule => !shared.split('\n').includes(rule));
     if (absent.length) writeFileSync(sharedPath, `${shared}${shared && !shared.endsWith('\n') ? '\n' : ''}${absent.join('\n')}\n`, 'utf8');
   } catch {
