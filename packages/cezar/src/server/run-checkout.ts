@@ -10,7 +10,7 @@ import type { RunRecord, RunStore } from '../runs/store.ts';
 // degrades to 409 + human-readable reason, 404 only for unknown ids.
 const worktreeOf = (run: RunRecord): string | null =>
   run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : null;
-export const workingDirectoryOf = (run: RunRecord, repoRoot: string): string | null =>
+const workingDirectoryOf = (run: RunRecord, repoRoot: string): string | null =>
   run.worktree === false
     ? repoRoot
     : worktreeOf(run);
