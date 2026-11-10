@@ -1,7 +1,7 @@
 # Delivery pipeline: fast lane, main verification and tested releases
 
-Status: **approved** by the owner on 2026-11-10. Owner decisions recorded 2026-11-10.
-Implementation follows in separate issues (§ Phases).
+Epic: hearsay-tools/cezarion#3208. Status: **approved** by the owner on 2026-11-10.
+Owner decisions recorded 2026-11-10. Implementation follows in separate issues (§ Phases).
 
 ## Goal
 
@@ -373,17 +373,17 @@ Only the owner can make these changes. Each phase lists the ones it needs.
 
 Each row is one issue. The safety net comes first; P3 to P6 do not start before P1 is live.
 
-| Phase | Content | Needs |
-| --- | --- | --- |
-| P0 | This spec | |
-| P1.1 | `main-verify.yml`: the reusable suite, the rolling run, the rerun, the `main-verify` status, the flake issue, the `dev` snapshot from the verified commit, the failure reporter and the repair prompt for the new workflow. It runs beside today's `main` push CI for one week before that is removed | Owner action 6 |
-| P1.2 | Bisect, the revert bot, the revert lane and the hold | P1.1; owner actions 2, 3 |
-| P1.3 | `main-watch.yml`: the 60-minute mention, the 6-hour revert, the watchdog | P1.2 |
-| P2 | Release: once-a-day guard, gates, a release candidate on `next`, tests of the published candidate, promote, roll back by a patch release. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
-| P3 | Lanes and merge path: the shared classifier, the auto-merge rules of D4, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check, `requireQueueRules` without thread resolution | P1; then owner action 1 |
-| P4 | Review placement: `Automated Code Review` per lane, the post-merge review workflow, the agent rule | P2, P3; owner actions 4, 5 |
-| P5 | Affected tests on the fast lane. Step 1: a shadow job records, for one week, the selection for each PR run and whether a failing test fell outside it. Step 2: the owner reads the report and decides the switch | P1, P3 |
-| P6 | Local gate: `npm run prepr`, the 2-minute bound, the shorter list of duties in `AGENTS.md` and the skills | P3 |
+| Phase | Issue | Content | Needs |
+| --- | --- | --- | --- |
+| P0 | | This spec | |
+| P1.1 | hearsay-tools/cezarion#3209 | `main-verify.yml`: the reusable suite, the rolling run, the rerun, the `main-verify` status, the flake issue, the `dev` snapshot from the verified commit, the failure reporter and the repair prompt for the new workflow. It runs beside today's `main` push CI for one week before that is removed | Owner action 6 |
+| P1.2 | hearsay-tools/cezarion#3210 | Bisect, the revert bot, the revert lane and the hold | P1.1; owner actions 2, 3 |
+| P1.3 | hearsay-tools/cezarion#3211 | `main-watch.yml`: the 60-minute mention, the 6-hour revert, the watchdog | P1.2 |
+| P2 | hearsay-tools/cezarion#3212 | Release: once-a-day guard, gates, a release candidate on `next`, tests of the published candidate, promote, roll back by a patch release. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
+| P3 | hearsay-tools/cezarion#3213 | Lanes and merge path: the shared classifier, the auto-merge rules of D4, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check, `requireQueueRules` without thread resolution | P1; then owner action 1 |
+| P4 | hearsay-tools/cezarion#3214 | Review placement: `Automated Code Review` per lane, the post-merge review workflow, the agent rule | P2, P3; owner actions 4, 5 |
+| P5 | hearsay-tools/cezarion#3215 | Affected tests on the fast lane. Step 1: a shadow job records, for one week, the selection for each PR run and whether a failing test fell outside it. Step 2: the owner reads the report and decides the switch | P1, P3 |
+| P6 | hearsay-tools/cezarion#3216 | Local gate: `npm run prepr`, the 2-minute bound, the shorter list of duties in `AGENTS.md` and the skills | P3 |
 
 P5 replaces the queue part of hearsay-tools/cezarion#2415: full verification moves to
 `main`, not to the queue.
