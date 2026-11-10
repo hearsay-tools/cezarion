@@ -189,8 +189,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   before the listener; right after the listener starts for every other registered project (the
   post-listen preparation below), or earlier when a request, a lazy build or the warm-up reaches
   it first; and for a project registered later when it is added. Each move runs before any
-  ordinary read or task start of that project, so a cockpit start moves every idle registered
-  project, opened or not. Journal recovery runs first. When `.ai/cezar/` holds
+  ordinary read or task start of that project, so a cockpit start moves every registered
+  project, opened or not, that passes the checks below. Journal recovery runs first. When `.ai/cezar/` holds
   state to move and the plan has no blocker or conflict, the same live check as the command
   runs, without counting the cockpit's own process (its `cockpit.lock` claim and its presence
   lease): with nothing live, the offline move runs under the cockpit's own claim

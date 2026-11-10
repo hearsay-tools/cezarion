@@ -16,9 +16,10 @@ import type { MigrationFault } from './steps.ts';
  * at cockpit start for the boot project and, right after the listener starts, every other registered
  * project (or earlier, when a request reaches it first), and a project added later when it is added;
  * after journal recovery and before any ordinary read or task start. It moves the legacy state under
- * `.ai/cezar/` with the same offline move as `migrate-project` when nothing else is live. When
- * anything else is live (another cockpit, a task from before the restart, a headless run) it does
- * not move: the project is served from both folders as before, a notice names what blocks the
+ * `.ai/cezar/` with the same offline move as `migrate-project` when nothing else is live and the
+ * plan has no blocker or conflict. When anything else is live (another cockpit, a task from before
+ * the restart, a headless run, an automation lease of this cockpit) or the plan has a blocker or
+ * conflict, it does not move: the project is served from both folders as before, a notice names what blocks the
  * move, and the next start tries again. One attempt per project per cockpit run (its ownership).
  * Tracked files are never moved: the notice of a finished move lists their `git mv` commands. A
  * move that fails after its journal exists leaves the project to the recovery path.

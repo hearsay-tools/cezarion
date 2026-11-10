@@ -60,8 +60,10 @@ plans; planning the remaining migration changes nothing. It prints the plan, the
 nothing was moved or rewritten.` (or, after such a recovery, `Dry run: planning changed
 nothing; the completed migration above did.`) or `Migration complete.`; it prints the `git mv` commands for
 tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted
-journal) print one message to stderr and exit 1. A cockpit with the switch on moves every idle
-registered project by itself at start, and a project added later when it is added
+journal) print one message to stderr and exit 1. A cockpit with the switch on moves each
+registered project by itself at start, and a project added later when it is added, when
+nothing else is live and its plan has no blocker or conflict; otherwise the project stays
+in place
 ([automatic move](project-routes.md#project-migration-command-and-early-recovery)); CLI
 entries (`run`, `init`, `artifact`, ...) only recover journals and never start a move.
 
