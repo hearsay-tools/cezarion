@@ -58,7 +58,7 @@ a test marker refuses the account's real cezar home in every process, with or wi
 a test-runner variable: the legacy home, each platform default root, their descendants
 and symlink aliases (`home/protected-roots.ts`, hearsay-tools/cezarion#2778). On
 Windows and macOS the comparison ignores case, so an absent `.CEZAR` still counts as
-`.cezar`. The
+`.cezar`. An empty or relative OS account home fails closed. The
 refusal runs before an existing marker is returned. `scripts/test-install-marker.mjs`
 imports no product module, so it keeps a local copy of the check;
 `home/test-marker-guard.test.ts` holds its roots equal to the product's. Seed fixtures

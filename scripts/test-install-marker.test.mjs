@@ -78,6 +78,23 @@ test('the script refuses the account home and its symlink aliases before any rea
   }
 });
 
+test('the script fails closed when the OS gives no absolute account home', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'cez-script-no-home-'));
+  const real = os.userInfo;
+  try {
+    for (const homedir of ['', 'relative-home']) {
+      os.userInfo = (...args) => ({ ...real(...args), homedir });
+      syncBuiltinESMExports();
+      assert.throws(() => ensureTestInstallMarker(join(fixture, 'sandbox')), /refusing to write a test install marker/);
+      assert.equal(existsSync(join(fixture, 'sandbox')), false);
+    }
+  } finally {
+    os.userInfo = real;
+    syncBuiltinESMExports();
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test('on macOS the script refuses an absent account root spelled in another case', async () => {
   const fixture = mkdtempSync(join(tmpdir(), 'cez-script-case-'));
   const account = join(fixture, 'account');

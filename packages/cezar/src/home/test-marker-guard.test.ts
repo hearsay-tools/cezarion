@@ -137,3 +137,12 @@ it('refuses an absent account root spelled in another case on a case-insensitive
     expect(existsSync(upper)).toBe(false);
   } finally { vi.doUnmock('./kind-roots.ts'); vi.resetModules(); }
 });
+
+it.each([['an empty', ''], ['a relative', 'relative-home']])('fails closed when the OS gives %s account home', (_kind, home) => {
+  account.home = home;
+  const sandbox = join(fixture, 'sandbox');
+  expect(() => accountProtectedRoots()).toThrow('no absolute account home');
+  expect(() => Home.sandbox(sandbox)).toThrow(refusal);
+  expect(() => createInstallMarker(sandbox, 'test')).toThrow(refusal);
+  expect(existsSync(sandbox)).toBe(false);
+});

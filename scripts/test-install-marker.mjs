@@ -40,6 +40,7 @@ export function protectedRootsFor(accountHome, env, platform) {
 /** The account's real roots. HOME can name a sandbox, so the account home comes from the OS; no absolute home throws. */
 export function accountProtectedRoots() {
   const accountHome = userInfo().homedir;
+  if (!accountHome || !isAbsolute(accountHome)) throw new Error('[cez] the OS gives no absolute account home');
   return protectedRootsFor(accountHome, { TMPDIR: process.env.TMPDIR }, nativePlatform);
 }
 

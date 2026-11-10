@@ -18,6 +18,7 @@ export function protectedRootsFor(accountHome: string, env: { TMPDIR?: string | 
  */
 export function accountProtectedRoots(): string[] {
   const accountHome = userInfo().homedir;
+  if (!accountHome || !isAbsolute(accountHome)) throw new Error('[cez] the OS gives no absolute account home');
   return protectedRootsFor(accountHome, { TMPDIR: process.env.TMPDIR }, nativePathPlatform);
 }
 
