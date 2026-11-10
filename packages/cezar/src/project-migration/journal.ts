@@ -13,7 +13,8 @@ import { replaceAtomically, settle } from './durable.ts';
  * fence holder.
  */
 
-export const PROJECT_MIGRATION_STEPS = ['lock-worktrees', 'move', 'repair-worktrees', 'receipts', 'run-store', 'run-files'] as const;
+/** `mark-moved` is last: from its marker on, `projectPaths` writes the project under `.ai/squawk/`. */
+export const PROJECT_MIGRATION_STEPS = ['lock-worktrees', 'move', 'repair-worktrees', 'receipts', 'run-store', 'run-files', 'mark-moved'] as const;
 export type ProjectMigrationStep = typeof PROJECT_MIGRATION_STEPS[number];
 
 const absolute = z.string().min(1).refine(path => path.startsWith('/') || /^[a-z]:[\\/]/i.test(path), 'absolute path');

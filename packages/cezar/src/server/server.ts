@@ -155,7 +155,7 @@ import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/prov
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { allUsage, currentUsage, onUsage } from '../core/process-usage.ts';
-import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
+import { loadWorkflows } from '../workflows/load.ts';
 import {
   normalizeWorkflowDoc,
   skillStackOf,
@@ -2799,7 +2799,7 @@ export function createApp(deps: ServerDeps) {
       const issue = stepsIssue(steps);
       if (issue) return c.json({ error: issue }, 400);
       const slug = slugify(parsed.data.name) || 'chain';
-      const dir = join(repoRoot, WORKFLOWS_DIR);
+      const dir = join(projectPaths(repoRoot).write, 'workflows');
       const path = join(dir, `${slug}.yaml`);
       // Pure skill stacks are written in the portable compact form (spec 012) —
       // `name` + `skills:` — so the file imports cleanly in any repo.

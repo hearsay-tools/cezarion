@@ -421,7 +421,7 @@ export type RunPinHolder = 'active' | 'continue' | 'cleanup' | 'maintenance';
  *   manager recovers the family);
  * - `foreign`: another process that is alive (or cannot be proven dead) holds it: read-only here;
  * - `quarantined`: a write found it changed under this store; refused until cezar restarts;
- * - `fallback`: a family member is read from `.ai/squawk/`: refused as `foreign` until a control adopts it.
+ * - `fallback`: a family member is read from the fallback directory: refused as `foreign` until a control adopts it.
  */
 export type RunOwnership = 'held' | 'free' | 'orphaned' | 'foreign' | 'quarantined' | 'fallback';
 
@@ -434,7 +434,7 @@ export const RUN_QUARANTINED = `run changed under this ${productName('cezar')} p
  *  still live (adopt it first), or a conflict quarantined it. Nothing was changed. */
 export class RunWriteRefusedError extends Error {
   constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>, fallbackError?: string) {
-    super(ownership === 'fallback' ? fallbackError ?? `run ${runId} is read only under .ai/squawk/`
+    super(ownership === 'fallback' ? fallbackError ?? `run ${runId} is read only in the fallback project directory`
       : ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
       : ownership === 'orphaned' ? `run ${runId} belongs to a ${productName('cezar')} process that exited; take it over before writing it`
         : `${RUN_IN_USE_ELSEWHERE}: ${runId}`);
@@ -874,7 +874,7 @@ export class RunStore extends EventEmitter {
     return family;
   }
 
-  /** Explicit controls only (`requireRunControl`): copy a `.ai/squawk/` family in so it can be written. */
+  /** Explicit controls only (`requireRunControl`): copy a fallback family in so it can be written. */
   adoptFallbackFamily(id: string): boolean {
     const members = copyFallbackFamily(this.db, id, this.owner);
     for (const member of members) this.coldReads.forget(member);
@@ -3179,7 +3179,7 @@ export class RunStore extends EventEmitter {
       return run && !this.hasFallbackRun(id) && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
     const skipped = overflow.filter(id => this.hasFallbackRun(id)).length;
-    if (skipped) console.info(`[cez] Retention skipped ${skipped} read-only fallback run(s) under .ai/squawk/.`);
+    if (skipped) console.info(`[cez] Retention skipped ${skipped} read-only fallback run(s) under ${dataReadDirs(this.dataDir)[1]}.`);
     const cold = overflow.filter((id) => !this.held.has(id) && !this.hasFallbackRun(id));
     if (cold.length > 0) {
       // Another process's runs are its own to keep or archive (#779, plan step 3).
