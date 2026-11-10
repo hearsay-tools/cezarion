@@ -122,6 +122,7 @@ const activePublish = 'run is still active — wait for the review gate';
 const workerRemove = 'owned resources require verified worker cleanup';
 const recordRemove = 'owned resources require verified worker cleanup and explicit child history deletion first';
 const holdPublish = 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR';
+const holdRemove = 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry';
 const fallbackRefusal = fallbackProjectWriteError(fallback)!;
 const claimedRoutes = [
   { route: 'pr', intent: 'publish' },
@@ -146,7 +147,7 @@ const claimedOutcomes: Record<string, readonly (string | null | 404)[]> = {
   'claim held elsewhere': [publishPending, cleanupPending, cleanupPending, reclaimPending],
   'foreign owner': [publishPending, cleanupPending, cleanupPending, RUN_IN_USE_ELSEWHERE],
   running: [activePublish, activeRemove, activeRemove, reclaimPending],
-  'usage hold': [holdPublish, null, null, null],
+  'usage hold': [holdPublish, holdRemove, holdRemove, holdRemove],
   'autosave with live path': [null, null, null, null],
   'autosave with removed path': [null, null, null, null],
   'autosave with unknown id': [404, 404, 404, 404],
