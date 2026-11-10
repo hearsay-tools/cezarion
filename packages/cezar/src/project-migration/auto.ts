@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 import type { Home } from '../home/home.ts';
-import { pathPresent, projectPaths } from '../project-paths.ts';
+import { pathPresent, projectMoveMarked, projectPaths } from '../project-paths.ts';
 import { CockpitOwnership, migrationFencePaths } from '../server/cockpit-ownership.ts';
 import { projectCockpits, projectLiveTasksOffline } from './live.ts';
 import { moveUnderFence } from './offline.ts';
@@ -112,7 +112,8 @@ export function moveProjectWhenIdle(root: string, options: {
 }
 
 async function attempt(root: string, options: Parameters<typeof moveProjectWhenIdle>[1]): Promise<AutomaticMove> {
-  if (!legacyStatePresent(root)) return { status: 'nothing' };
+  // A completed move marked the project (hearsay-tools/cezarion#3150): `.ai/cezar/` is its fallback now.
+  if (projectMoveMarked(root) || !legacyStatePresent(root)) return { status: 'nothing' };
   const log = options.log ?? ((line: string) => console.warn(line));
   const blocked = (reason: string): AutomaticMove => {
     log(`[hsq] Project ${root} keeps its state in .ai/cezar/ for now: ${reason}. It is served from both folders; the move runs again at the next start.`);

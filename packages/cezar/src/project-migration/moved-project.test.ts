@@ -1,16 +1,24 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 const release = vi.hoisted(() => ({ enabled: true }));
 vi.mock('../home/switch.ts', () => ({ get REBRAND_SWITCH() { return release.enabled; } }));
 import { ensureDataGitignore } from '../data-gitignore.ts';
+import { createRunner } from '../core/runner-factory.ts';
 import { createOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { Home } from '../home/home.ts';
+import { testHome, useTestHome } from '../home/test-home.testkit.ts';
+import { CockpitOwnership } from '../server/cockpit-ownership.ts';
+import { ProjectContexts } from '../server/project-context.ts';
 import { worktreePathFor } from '../git-worktree.ts';
 import { fallbackProjectWriteError, PROJECT_MOVED_FILE, projectPaths } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { migrationAnswer, migrationAnswerText } from './answer.ts';
+import { moveProjectWhenIdle } from './auto.ts';
 import { migrate, moved, TIMEOUT } from './engine.testkit.ts';
 import { buildMigrationProject, git, projectSnapshot, removeMigrationProject, TASK, WORKER, type MigrationProject } from './project-migration.testkit.ts';
 
@@ -29,6 +37,8 @@ function newTask(root: string): string {
   const store = RunStore.open(projectPaths(root).write, { keepLive: true });
   try {
     const run = store.createRun({ title: 'new', task: 'new', workflow: 'quick-task', steps: [] });
+    // Settled, as a task that finished before the next start: a live one would block a move.
+    setRunStatus(store, run.id, 'review');
     store.flush();
     expect(store.sourceDataDir(run.id)).toBe(projectPaths(root).write);
     return run.id;
@@ -39,7 +49,18 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
   let project: MigrationProject;
   beforeAll(async () => { project = await buildMigrationProject({ linked: false, checkpoint }); }, TIMEOUT);
   afterAll(() => { if (project) removeMigrationProject(project); });
-  beforeEach(() => { project.restore(); release.enabled = true; });
+  const savedHome = process.env.CEZ_HOME;
+  const homes: string[] = [];
+  beforeEach(() => {
+    project.restore();
+    release.enabled = true;
+    homes.push(mkdtempSync(join(realpathSync(tmpdir()), 'cez-moved-project-home-')));
+    useTestHome(Home.sandbox(homes.at(-1)!));
+  });
+  afterEach(() => {
+    useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
+    for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+  });
 
   it('writes a new task to .ai/squawk/runs.db and creates no .ai/cezar/runs.db', async () => {
     await migrate(project);
@@ -104,6 +125,26 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
       expect(store.getRun(after)).toBeDefined();
     } finally { store.close(); }
     expect(existsSync(join(project.dataDir, RUNS_DB_FILE))).toBe(false);
+  });
+
+  it('moves an unmoved project at its first idle open, writes the context to .ai/squawk/, and skips a marked one', async () => {
+    newTask(project.root);
+    const ownership = new CockpitOwnership();
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, listProjects: async () => [{ id: 'p', root: project.root, status: 'ok' as const }] });
+    try {
+      const context = await contexts.context('p');
+      expect(existsSync(join(project.newDir, PROJECT_MOVED_FILE))).toBe(true);
+      expect(context.dataDir).toBe(project.newDir);
+      const run = context.store.createRun({ title: 'after', task: 'after', workflow: 'quick-task', steps: [] });
+      context.store.flush();
+      expect(context.store.sourceDataDir(run.id)).toBe(project.newDir);
+      expect(context.store.writeRefusal(TASK)).toBeUndefined();
+    } finally { contexts.disposeAll(); ownership.releaseAll(); }
+    expect(existsSync(join(project.dataDir, RUNS_DB_FILE))).toBe(false);
+    // The next cockpit run finds the marker: nothing to move, no plan, no journal.
+    const next = new CockpitOwnership();
+    try { expect(await moveProjectWhenIdle(project.root, { ownership: next, homes: [testHome()] })).toEqual({ status: 'nothing' }); }
+    finally { next.releaseAll(); }
   });
 
   it('keeps the run data ignore rules in the write root, without blocking the git mv of a tracked copy', async () => {
