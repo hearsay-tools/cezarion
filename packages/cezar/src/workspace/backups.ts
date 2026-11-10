@@ -22,14 +22,25 @@ export function restoreLimit(at: string | undefined): number {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at) ? Date.parse(at) : NaN;
 }
 
-/** `restore <file> [--at <time>]` with valid input. Anything else is help or a usage error. */
+/** The one parser for `backup` arguments: the command and its home entry read the same options. */
+export function parseBackupArgs(argv: readonly string[]) {
+  return parseArgs({ args: [...argv], allowPositionals: true, options: {
+    at: { type: 'string' }, help: { type: 'boolean', short: 'h' },
+  } });
+}
+
+/** `restore <file> [--at <time>]` with one supported file and no help; anything else is not a restore. */
+export function restoreRequest({ values, positionals }: ReturnType<typeof parseBackupArgs>): { file: BackupFile; at: string | undefined } | undefined {
+  const [command, file] = positionals;
+  if (values.help || command !== 'restore' || positionals.length !== 2 || file === undefined || !isBackupFile(file)) return undefined;
+  return { file, at: values.at };
+}
+
+/** A restore that will run: its arguments parse and its time is valid. Anything else is help or a usage error. */
 export function isValidRestore(argv: readonly string[]): boolean {
   try {
-    const { values, positionals } = parseArgs({ args: [...argv], allowPositionals: true, options: {
-      at: { type: 'string' }, help: { type: 'boolean', short: 'h' },
-    } });
-    const [command, file] = positionals;
-    return !values.help && command === 'restore' && positionals.length === 2 && isBackupFile(file!) && !Number.isNaN(restoreLimit(values.at));
+    const request = restoreRequest(parseBackupArgs(argv));
+    return request !== undefined && !Number.isNaN(restoreLimit(request.at));
   } catch { return false; }
 }
 
