@@ -53,7 +53,15 @@ the shrink-only OS-user reader list (hearsay-tools/cezarion#2810).
 
 Tests select `Home.sandbox(dir)` and use the shared setup's selector for process
 entry tests. The factory contains cache and config paths under that directory and
-creates a test `install.json` marker without replacing an existing one. Seed fixtures
+creates a test `install.json` marker without replacing an existing one. A request for
+a test marker refuses the account's real cezar home in every process, with or without
+a test-runner variable: the legacy home, each platform default root, their descendants
+and symlink aliases (`home/protected-roots.ts`, hearsay-tools/cezarion#2778). On
+Windows and macOS the comparison ignores case, so an absent `.CEZAR` still counts as
+`.cezar`. An empty or relative OS account home fails closed. The
+refusal runs before an existing marker is returned. `scripts/test-install-marker.mjs`
+imports no product module, so it keeps a local copy of the check;
+`home/test-marker-guard.test.ts` holds its roots equal to the product's. Seed fixtures
 with `Home.seed` or `Home.seedBytes`; both use HomeStore. A direct file write belongs
 only in a test that deliberately simulates an outside writer.
 

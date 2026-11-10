@@ -39,8 +39,10 @@ it('a thrown fault releases .migrating and a later run overwrites its pending co
   expect(migrateLegacyHome(legacy, target).status).toBe('migrated');
 });
 
-it('an operator migration creates a live target marker and a test process still cannot write it', () => {
+it('an operator migration from a legacy test marker creates a live target marker and a test process still cannot write it', () => {
   const { legacy, target } = migrationFixture();
+  // The legacy kind never carries over: a wrongly stamped legacy home still migrates to a live target.
+  expect(readInstallMarker(legacy.root)?.kind).toBe('test');
   rmSync(join(target.config, 'install.json'));
   const result = spawnSync(process.execPath, ['--import', 'tsx', fixture, legacy.root, dirname(target.config), 'complete'], { env: childEnv(), encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
