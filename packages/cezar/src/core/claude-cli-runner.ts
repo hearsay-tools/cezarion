@@ -745,7 +745,7 @@ export function buildClaudeArgs(
   // Every hook's lifecycle, so the transcript can show what hooks told the agent (#961).
   if (features.includeHookEvents) args.push('--include-hook-events');
   args.push(...claudePermissionArgs(env));
-  // Refuse other Claude sessions' SendMessage on every launch; fails open (AGENT_PROTOCOL.md D3).
+  // Refuse other Claude sessions' SendMessage on every launch; fails open (spec 2026-10-27-task-communication-protocol § 11).
   args.push('--settings', JSON.stringify({ crossSessionInbound: 'refuse' }));
   const settingSources = productEnv('CLAUDE_SETTING_SOURCES', env);
   if (settingSources) {

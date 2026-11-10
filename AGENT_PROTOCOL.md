@@ -6,8 +6,6 @@ and lint rules do not state. When this file and the code disagree, the code wins
 
 Every runner emits two event streams together: v1 `AgentEvent` (§2) and v2 `UiEvent` (§3).
 
-Name a runner when its wire matters. Never count runners: write "every runner".
-
 ---
 
 ## 1. The runner seam (`packages/cezar/src/core/agent-runner.ts`)
@@ -20,14 +18,9 @@ runner id. Each runner's `*_SPEC_SUPPORT` constant, next to its class, says whic
 
 - `.ai/scripts/probe-steering.ts` probes the `inputDelivery` of a real CLI. It spends a paid
   session, so run it by hand.
-- Agent input delivery is at-least-once. After a crash between harness acceptance and the
-  delivery checkpoint, recovery replays the input with the same ID.
 - The delegation CLI (`cez worker`, `cez message`) is agent-facing and has no compatibility
   window: change or remove a verb without an alias. This does not apply to human commands
   such as `cez task send`.
-- The zero-config tool grant (`DEFAULT_ALLOWED_TOOLS`) includes unrestricted `Bash`, and a
-  runner whose `specSupport.toolGrant` is not honored ignores the grant. Treat the default
-  `auto` permission mode as full shell access, not a sandbox (open-mercato/cezar#430).
 
 ---
 
@@ -45,16 +38,8 @@ Its `type` strings are additive-only (§ Compatibility).
 `packages/api-client/src/protocol/ui-events.ts` is a hand-kept copy for the browser;
 `packages/cezar/src/server/api-types.test.ts` holds the two equal on the wire.
 
-- Where a name is an arbitrary choice (tool status, tool kind, plan entry, diff shape,
-  stop reason), use the ACP name.
-- A hook item is display data. No turn, park, wake, Needs you, ask or completion path
-  reads it.
-
-<a id="bounded-structured-question-recovery-88"></a>
-
-The portable ask is the `cezar_ask` tool, which every runner reaches. It validates its
-arguments in the tool call (`askRequestSchema`); Cezar repairs no malformed ask. A native
-ask bridge maps onto the same `ask.requested` event (§10 item 8).
+Where a name is an arbitrary choice (tool status, tool kind, plan entry, diff shape, stop
+reason), use the ACP name.
 
 ---
 
@@ -68,15 +53,8 @@ table.
 
 ### Cursor print
 
-Limits a user meets on Cursor. `packages/cezar/src/core/__fixtures__/cursor/README.md`
-holds the evidence.
-
-- Cursor auto-skips a native question from a plugin. `cezar_ask` questions stay answerable.
-- Cursor can lose history under a valid session ID without an error. Cezar verifies only
-  the returned ID.
-- A project-local Claude plugin setting does not reliably disable a user or team
-  marketplace copy of that plugin.
-- Print reports no token usage, no reasoning and no child-session transcript.
+`packages/cezar/src/core/__fixtures__/cursor/README.md` holds the limits that a user meets
+on Cursor, with their evidence.
 
 <a id="codex-managed-permissions-708"></a>
 
@@ -87,19 +65,15 @@ own sandbox, and when Codex's managed permissions stay.
 
 ### Codex approval routing
 
-Only a human who picks an offered option in the cockpit answers a native approval. Free
-text, agent messages, autonomous nudges and a worker's parent cannot answer one. Recovery
-never replays a stored decision. The runner alone keeps each exact native reply. Cezar
-answers every server request it does not support with an error, so none stalls the
-transport.
+`packages/cezar/src/core/codex-approvals.test.ts`, `codex-permission-recovery.test.ts` and
+`packages/cezar/src/workflows/permissions.test.ts` hold who can answer a native approval and
+what recovery does with one.
 
 #### MCP tool approvals
 
-Cezar sets the approval mode `approve` only on its own server's per-thread entry. It never
-offers "always allow" for that per-run server, because Codex saves that choice in the
-user's Codex config. When Codex still asks before a Cezar tool, the request reaches Needs
-you; Cezar never answers it silently. `.ai/scripts/probe-approvals.ts` checks this routing
-against the installed Codex in one paid turn. CI never runs it.
+`packages/cezar/src/core/ci-tools.testkit.ts` holds how Codex treats Cezar's own MCP server.
+`.ai/scripts/probe-approvals.ts` checks that routing against the installed Codex in one paid
+turn. CI never runs it.
 
 ---
 
@@ -148,14 +122,11 @@ authority. Word each new result text as data, not as an instruction.
 
 ### Private transport and required harness evidence
 
-- The tools reach Cezar over a private Unix-domain socket or Windows named pipe. It is not a
-  cockpit route and not a network listener.
 - A memory-only session capability binds project, run and generation. The capability, not the
   model, names the calling run. `CEZ_TOOL_TOKEN` and `CEZ_TOOL_SOCKET` exist only in the child
   environment: never write them to a prompt, a record, a descriptor snapshot or a setting.
 - This is cooperative same-user authorization, not isolation from an unrestricted shell.
-- A runner adds the tools beside the user's MCP servers, extensions and permissions, and
-  replaces none of them. An explicit tool denial stays a denial.
+- An explicit tool denial stays a denial.
 - Before a runner ships, the parity rows must list and call the tools through its native mock
   wire and the real bundled adapter or extension, on fresh, Continue and recovery paths. An argv
   or configuration snapshot is not transport proof.
@@ -216,69 +187,44 @@ per-runner file and for regression coverage. Rules that no check holds:
   before the mock matches, in `packages/cezar/scripts/mock-session-context.mjs`. The mock
   still records the raw text, because tests assert what Cezar sent.
 
-Autosave process attribution is observation, not OS containment. It does not see a Git
-descendant that clears its environment and leaves the worktree before a scan. On Windows, an
-intermediate process that exits between snapshots hides its descendants
-(`autosave-holders.ts`, `autosave-windows.ts`).
+Autosave process attribution is observation, not OS containment (`autosave-holders.ts`,
+`autosave-windows.ts`). It does not see a Git descendant that clears its environment and
+leaves the worktree before a scan.
 
 ### Continue: session and step
 
-A Continue makes two separate choices: which step it continues, and which session it resumes.
-The first never depends on the second. `continuedSessionId` and `resumableSessionId` in
-`workflows/run/launch-read-resolver.ts` own the two choices.
+`continuedSessionId` and `resumableSessionId` in `workflows/run/launch-read-resolver.ts` own
+which step a Continue continues and which session it resumes.
 `workflows/native-session-continue.test.ts` drives every runner through them.
 
 ### Governed delegation controls (D1)
 
-A governed session is every session that the delegation listener provisions. Its launch carries
-`restrictCrossSessionMessaging`. Native subagents stay available to root tasks and workers. An
-adapter adds a control only where the runner's native tool for reaching another session is
-separate from subagent messaging. The `restrictCrossSessionMessaging` row of each runner's
-`*_SPEC_SUPPORT` names its control. The D1 entries in `PARITY_EXEMPTIONS` name, for each runner
-without a control, the reason and the version inspected.
+The `restrictCrossSessionMessaging` doc comment in `core/agent-runner.ts` says what a governed
+session is and what its launch turns off. The same row of each runner's `*_SPEC_SUPPORT` names
+that runner's control. The D1 entries in `PARITY_EXEMPTIONS` name, for each runner without a
+control, the reason and the version inspected. The Owned workers part of `README.md` states
+the limits that a user meets, and § 11 of
+`.ai/specs/2026-10-27-task-communication-protocol.md` holds the probe evidence.
 
-A control applies to one launch. It adds no tool grant and writes no harness configuration file.
-When the listener is unavailable, a session is not governed and keeps its ordinary settings.
-
-Trust and known limitations:
-
-- The controls are cooperative same-user supervision, not isolation. The same-user shell reaches
-  another session directly, for example with `opencode run --session <id>`.
-- Custom tools are not controlled. A pi extension or an opt-in OMP tool can reach another
-  session, and Cezar cannot discover its name as messaging.
-- Native subagents are not Cezar tasks. Cezar does not own, collect or clean them up.
-- Claude has no outbound control, because `SendMessage` and `ListAgents` also reach the session's
-  own subagents. A session that Cezar starts can list and message Claude sessions that Cezar did
-  not start, and sessions on other machines.
-- Codex accepts an unknown `features.*` key, so a renamed `features.agent_message_board` key
-  fails open.
-- An OpenCode session that an older Cezar created or resumed under delegation keeps its `task`
-  deny on Continue and restart recovery. OpenCode appends permission rules and has no remove.
+A control applies to one launch. It adds no tool grant and writes no harness configuration
+file. The controls are cooperative same-user supervision, not isolation.
 
 ### Native cross-session messaging at shipped defaults (D3)
 
-A runner's native cross-session messages bypass Cezar's recorded conversations. They carry no
-ledger, cockpit attribution, receipt or deadline, and no protection for human questions. Cezar
-tasks talk through `cez message`. The "Messaging other tasks" text of `handoffInstructions`
-(`packages/cezar/src/handoff.ts`) tells every session so.
+A runner's native cross-session messages bypass Cezar's recorded conversations, so Cezar tasks
+talk through `cez message`. The "Messaging other tasks" text of `handoffInstructions`
+(`packages/cezar/src/handoff.ts`) tells every session so. The D3 cells and the D3 entries in
+`PARITY_EXEMPTIONS` hold each runner's control at shipped defaults; § 11 of the same spec
+holds the entry points and the limits.
 
-- Every Claude launch, governed or not, passes `--settings {"crossSessionInbound":"refuse"}`.
-  The user's other Claude sessions cannot send `SendMessage` text into a Cezar task. Human input
-  reaches a task through the cockpit or `cez task send`.
-- Known limitation: this setting fails open. Claude ignores an unknown value without a warning.
-  After a renamed key or value, only the session instructions remain. No probe has verified the
-  effect between two live sessions.
-- No other runner has a control at shipped defaults. The D3 entries in `PARITY_EXEMPTIONS` give
-  each reason.
-- Cezar changes no MCP server, plugin or tool setting of the user.
+Cezar changes no MCP server, plugin or tool setting of the user.
 
 <a id="codex-retrying-stream-errors-550"></a>
 
 ### Codex retrying stream errors
 
-A Codex `error` notification with `willRetry: true` is not fatal. `STREAM_RETRY_TIMEOUT_MS` in
-`core/codex-app-server-runner.ts` bounds a retry episode that makes no progress; at expiry the
-run fails after process exit. `core/__fixtures__/codex/stream-retry.md` records the probe.
+`core/codex-startup.test.ts` holds the retry rules, and
+`core/__fixtures__/codex/stream-retry.md` records the probe.
 
 ---
 
@@ -308,8 +254,7 @@ event such as `provider-auth-required` never carries vendor error text or creden
 ## 10. Adding a new runner (the open-mercato/cezar#387 `pi` checklist)
 
 A new backend is one class behind the seam, its mapper, its fixtures and its rows in both
-parity matrices. No backend-specific type leaves `packages/cezar/src/core/`, and shared
-code reads a runner's declared facts, never its id.
+parity matrices. No backend-specific type leaves `packages/cezar/src/core/`.
 
 Add the id to `RUNNER_IDS` (`agent-runner.ts`) first. The compiler and the guard tests
 then name most of the missing pieces. The items below are the steps that they do not
@@ -349,16 +294,15 @@ force, or force only in part. The item numbers are stable: code cites them.
    documents no editable file still gets its tab, with `empty` copy that says why and what
    to try. Add the composer presets and the Settings → Agents entry. Keep every change
    additive, so that old run records still parse.
-10. **Model selection** — never drop a model id silently. A backend with no default
-    provider gets no default in `BACKEND_MODEL_MAP`, so a bare id fails with an error.
+10. **Model selection** — `BACKEND_MODEL_MAP` and `core/model-identity.test.ts` hold the
+    rules.
 11. **Host model discovery** — ships in the runner's PR. `model-discovery-guard.test.ts`
     forces the contract enum, the adapter module and the catalog registration, or a
     `MODEL_DISCOVERY_EXEMPTIONS` entry with the wire reason. It does not force these
     rules. The adapter calls the CLI's own model-listing surface under the runner's child
-    environment, with bounds, and throws on every failure. It never reads the CLI's config
-    or cache files and never runs a model turn. An `unavailableReason` is a fixed one-line
-    category: never raw stderr, a command line, environment or config content. Add the
-    runner to `models-api.test.ts`.
+    environment, with bounds, and throws when it cannot read the model list. It never
+    reads the CLI's config or cache files and never runs a model turn. Add the runner to
+    `models-api.test.ts`, which also holds what a failure may report.
 12. **Credentials** — the runner's entry in `BACKEND_ALLOW_PREFIXES` (`core/agent-env.ts`)
     lists a prefix for every provider that its model ids can name. Never widen another
     backend's entry.
@@ -367,13 +311,9 @@ force, or force only in part. The item numbers are stable: code cites them.
 
 ## 11. The plan channel (PR open-mercato/cezar#443)
 
-`plan.updated` is a full replacement. In a new mapper:
-
-- Find the backend's real plan channel on its wire. It is not always a todo tool: Codex
-  sends `turn/plan/updated`, and Claude also plans with `TaskCreate`, `TaskUpdate` and
-  `TaskList`.
-- Only an empty list clears the plan. A malformed frame maps to no event.
-- An entry with an unknown status stays in the plan, as `pending`.
+`plan.updated` is a full replacement (`UiPlanUpdatedEvent`). In a new mapper, find the
+backend's real plan channel on its wire: it is not always a todo tool. The mapper tests of
+the existing backends hold their channels.
 
 ---
 

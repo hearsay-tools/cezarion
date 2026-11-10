@@ -628,7 +628,7 @@ const agentInput = (parentRunId: string, text = '/owned-skill mock:agent-echo pa
 // runner cannot say it maps a field it drops, and cannot quietly start mapping
 // one it declared dropped. Codex and OpenCode ignoring `toolGrant` stays
 // pinned exactly as long as they declare it (the product decision the
-// `AgentRunSpec` caveat in AGENT_PROTOCOL.md records).
+// `AgentRunSpec.toolGrant` doc comment records).
 
 /**
  * How one field is observed. `boundary` probes set the field and nothing else
