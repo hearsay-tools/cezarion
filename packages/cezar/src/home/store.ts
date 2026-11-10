@@ -45,9 +45,11 @@ export class HomeStore {
   transaction<T>(operation: (reportOnly?: boolean) => T, writePaths: readonly string[] = [], readOnly = false): T {
     if (!readOnly && this.writeDepth === 0) assertNoMigration(this.root);
     const authorization = homeEntryAuthorization(this.root);
-    if (!readOnly && authorization?.beforeWrite) {
-      authorization.beforeWrite();
+    const beforeWrite = readOnly ? undefined : authorization?.beforeWrite;
+    if (authorization && beforeWrite) {
+      // Consume first: preparation writes through this store, and a refusal stays armed for the next write.
       authorization.beforeWrite = undefined;
+      try { beforeWrite(); } catch (error) { authorization.beforeWrite = beforeWrite; throw error; }
     }
     const marker = readInstallMarker(this.root);
     const entry = authorization && (!marker || !authorization.seeded) ? authorization : undefined;

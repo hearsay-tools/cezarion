@@ -70,3 +70,27 @@ it('does not mistake the new nested split directories for a pre-existing legacy 
   f.prepareOperatorHome(f.home, 'serve', f.env);
   expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
 });
+
+it('consumes deferred preparation before it writes through the same store', async () => {
+  const f = await fixture(true);
+  const { HomeStore } = await import('./store.ts');
+  const { authorizeHomeEntry } = await import('./entry-authorization.ts');
+  // Deferred accounts finish through a store transaction; that write must not run the preparation again.
+  const prepare = vi.fn(() => new HomeStore(f.home).transaction(() => {}));
+  authorizeHomeEntry(f.home, 'projects', 'test', prepare);
+  new HomeStore(f.home).writeJson(f.home.workspaceConfig, { projects: [], saved: true });
+  expect(prepare).toHaveBeenCalledOnce();
+});
+
+it('keeps a refusing deferred preparation armed for the next write', async () => {
+  const f = await fixture(true);
+  const { HomeStore } = await import('./store.ts');
+  const { authorizeHomeEntry } = await import('./entry-authorization.ts');
+  const prepare = vi.fn(() => { throw new Error('refused'); });
+  authorizeHomeEntry(f.home, 'projects', 'test', prepare);
+  const write = () => new HomeStore(f.home).writeJson(f.home.workspaceConfig, { projects: [], saved: true });
+  expect(write).toThrow('refused');
+  expect(write).toThrow('refused');
+  expect(prepare).toHaveBeenCalledTimes(2);
+  expect(readdirSync(f.dir)).toEqual([]);
+});
