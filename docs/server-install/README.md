@@ -74,7 +74,7 @@ service is running; the cockpit picks the change up on the next page load.
 
 Need **disjoint** project sets on one box — one cockpit per customer, say? Give
 each instance its own home with `HSQ_HOME` (`CEZ_HOME` fallback), for example
-`Environment=HSQ_HOME=/srv/squawk-homes/shop` in its systemd unit or the matching launchd env entry. Each home carries its own registry,
+`Environment=HSQ_HOME=/srv/squawk-homes/shop` in its systemd unit or the matching launchd env entry. Set `CEZ_HOME` to the same path: it is the legacy layout's home and the source of a home migration, so with only `HSQ_HOME` set a migration copies the real `~/.cezar` registry into this home. Each home carries its own registry,
 global config and server state, so instances share nothing — and `--domain`
 already gives them separate ports, nginx sites and logins.
 
