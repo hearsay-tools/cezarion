@@ -1,14 +1,14 @@
+import { execFile } from 'node:child_process';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from './project-paths.ts';
 import { inspectGeneration } from './delegation/process-liveness.ts';
 import { git } from './git-command.ts';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
-import { copyGitIndex } from './git-index-copy.ts';
+import { withPrivateIndex, type IndexGit, type LiveIndexCheck, type DiffRefusal } from './git-private-index.ts';
 import { isSafeGitRef } from './git-refs.ts';
 import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
@@ -812,56 +812,11 @@ function unquotePath(path: string): string {
   return Buffer.from(bytes).toString('utf8');
 }
 
-type IndexGit = (args: string[]) => Promise<GitResult>;
-
-/**
- * Read through a private index copy. Try OS temp, then the Git directory; if neither is
- * writable, check beforeLiveIndex before the real-index fallback. Always remove scratch state.
- */
-export async function withPrivateIndex<T, Refusal = never>(
-  worktreePath: string,
-  read: (git: IndexGit) => Promise<T>,
-  beforeLiveIndex?: () => Refusal | undefined,
-): Promise<T | Refusal> {
-  const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
-  const realIndex = real.ok ? real.stdout.trim() : '';
-  let scratch: string | undefined;
-  for (const parent of [tmpdir(), ...(realIndex ? [dirname(realIndex)] : [])]) {
-    try {
-      scratch = await mkdtemp(join(parent, 'cez-diff-index-'));
-      break;
-    } catch { /* Not writable: try the next location. */ }
-  }
-  if (!scratch) {
-    const blocked = beforeLiveIndex?.();
-    if (blocked !== undefined) return blocked;
-    const refusal = fallbackProjectWriteError(worktreePath);
-    if (refusal) throw new Error(refusal);
-    return read((args) => git(worktreePath, args));
-  }
-  try {
-    const index = join(scratch, 'index');
-    const env = { ...process.env, GIT_INDEX_FILE: index };
-    const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
-    let seeded = false;
-    if (realIndex) {
-      try { await copyGitIndex(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
-    }
-    if (!seeded) await indexed(['read-tree', 'HEAD']);
-    return await read(indexed);
-  } finally {
-    await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
 async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promise<string> {
   await git(['add', '-N', '.']); // intent-to-add (private index, hearsay-tools/cezarion#1080): untracked files show up
   const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
   return mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
 }
-
-export type LiveIndexCheck = () => string | undefined;
-export type DiffRefusal = { error: string };
 
 /**
  * Whole-branch committed, uncommitted and untracked diff against the merge-base. Preserve this

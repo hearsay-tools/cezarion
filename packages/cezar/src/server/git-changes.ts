@@ -6,7 +6,7 @@ import { lstat, open, readFile, readdir, realpath, stat } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { resolveTaskDiffBase, type RepointedHead } from '../git-diff-base.ts';
-import { withPrivateIndex, type LiveIndexCheck } from '../git-worktree.ts';
+import { withPrivateIndex, type LiveIndexCheck } from '../git-private-index.ts';
 import { isSafeGitRef } from '../git-refs.ts';
 
 /**
