@@ -30,7 +30,8 @@ primary write. HomeStore checks the backup directory chain before the write lock
 unavailable, dangling or escaping paths disable both backup creation and pruning.
 `cez backup list [<file>]` reads legacy backups without migration when the switch
 is on and the split home has no install marker. Once the split home has a marker,
-it reads that home. Listing never prepares either home. It discovers every
+it reads that home. Listing never prepares either home. The legacy fallback reads
+only paths inside the legacy home: a link that leaves it is not listed. It discovers every
 supported file, including backups whose
 live file is gone. Legacy root-file snapshots and nested named-instance snapshots
 remain readable. `config.json.bak` is listed as the newest config backup; the

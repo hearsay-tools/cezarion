@@ -27,7 +27,7 @@ export async function loadSubcommand(name: string | undefined, home: (env: NodeJ
       const selected = home(env);
       const source = rebrand && selected.layout === 'split' && argv[0] === 'list' && !readInstallMarker(selected.config)
         ? resolveHome({ purpose: 'cli', env, layout: 'legacy' }) : selected;
-      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, source);
+      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, source, undefined, { contained: source !== selected });
     };
     case 'discover': return (await import('./discovery/cli.ts')).runDiscoverCommand;
     case 'artifact': return (await import('./artifacts/cli.ts')).runArtifactCommand;

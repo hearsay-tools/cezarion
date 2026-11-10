@@ -106,7 +106,8 @@ function warnDroppedEntries(raw: object, key: 'projects' | 'accounts', kept: num
   }
 }
 
-export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home, legacyCanary: boolean = REBRAND_SWITCH): Promise<number> {
+/** `contained` marks a legacy home listed before migration: the list reads nothing outside it. */
+export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home, legacyCanary: boolean = REBRAND_SWITCH, { contained = false } = {}): Promise<number> {
   try {
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
       at: { type: 'string' }, help: { type: 'boolean', short: 'h' },
@@ -116,7 +117,7 @@ export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, 
     if (file !== undefined && !isBackupFile(file)) throw new Error('File must be a supported home-relative HomeStore file');
     if (resolveLegacyCommand(command, file, positionals.length === 2 && values.at === undefined, home, legacyCanary)) return 0;
     if (command === 'list' && positionals.length <= 2 && values.at === undefined) {
-      console.log(JSON.stringify(listBackups(file as BackupFile | undefined, home), null, 2));
+      console.log(JSON.stringify(listBackups(file as BackupFile | undefined, home, { contained }), null, 2));
       return 0;
     }
     if (command === 'restore' && file && positionals.length === 2) {

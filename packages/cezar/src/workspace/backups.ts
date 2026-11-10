@@ -19,9 +19,17 @@ function backupRoot(home: string | Home): string {
   return typeof home === 'string' ? join(home, 'backups') : home.backups;
 }
 
+/** Decides whether a list may read a path. A legacy fallback reads only inside its own home. */
+type ReadGuard = (path: string) => boolean;
+const readAny: ReadGuard = () => true;
+function readInside(root: string): ReadGuard {
+  return path => { try { assertHomePaths(root, [path]); return true; } catch { return false; } };
+}
+
 /** Names are sortable UTC times, with colons replaced for Windows. */
-function entries(home: string | Home, file: BackupFile, directory = join(backupRoot(home), file)): BackupEntry[] {
+function entries(home: string | Home, file: BackupFile, directory = join(backupRoot(home), file), readable = readAny): BackupEntry[] {
   const dir = directory;
+  if (!readable(dir)) return [];
   let names: string[];
   try { names = readdirSync(dir); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
@@ -31,6 +39,7 @@ function entries(home: string | Home, file: BackupFile, directory = join(backupR
     const match = /^(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d\.\d{3}Z)-([a-f0-9]{8})\.json$/.exec(name);
     if (!match) return [];
     const path = join(dir, name);
+    if (!readable(path)) return [];
     try {
       if (createHash('sha256').update(readFileSync(path)).digest('hex').slice(0, 8) !== match[2]) return [];
     } catch { return []; }
@@ -40,13 +49,14 @@ function entries(home: string | Home, file: BackupFile, directory = join(backupR
 }
 
 /** Discover backup keys even after the live file was removed. Never recurse into snapshots. */
-function backupFiles(home: string | Home): BackupFile[] {
+function backupFiles(home: string | Home, readable: ReadGuard): BackupFile[] {
   const files: BackupFile[] = [...BACKUP_FILES];
   for (const family of ['remote-settings', 'server-instances']) {
     const familyRoot = typeof home === 'string' ? home : homeFileLocation(home, `${family}/config.json`).root;
     const directories = [join(backupRoot(home), family)];
     if (typeof home === 'string' || home.layout === 'legacy') directories.push(join(familyRoot, family, 'backups'));
     for (const dir of directories) {
+      if (!readable(dir)) continue;
       try {
         for (const name of readdirSync(dir)) {
           const key = `${family}/${name}`;
@@ -60,17 +70,17 @@ function backupFiles(home: string | Home): BackupFile[] {
   return files;
 }
 
-function listedEntries(home: string | Home, file: BackupFile): BackupEntry[] {
-  const found = entries(home, file);
+function listedEntries(home: string | Home, file: BackupFile, readable: ReadGuard): BackupEntry[] {
+  const found = entries(home, file, undefined, readable);
   const root = typeof home === 'string' ? home : home.root;
   // P0/P1b used the basename under a named instance's own directory.
   if ((typeof home === 'string' || home.layout === 'legacy') && file.includes('/') && ['config.json', 'agent-accounts.json'].includes(basename(file))) {
-    found.push(...entries(home, file, join(root, dirname(file), 'backups', basename(file))));
+    found.push(...entries(home, file, join(root, dirname(file), 'backups', basename(file)), readable));
   }
   found.sort((a, b) => b.time.localeCompare(a.time) || b.path.localeCompare(a.path));
   if (file === 'config.json') {
     const path = join(root, 'config.json.bak');
-    try {
+    if (readable(path)) try {
       const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         // .bak is the newest recovery entry, including on coarse filesystem clocks.
@@ -82,9 +92,11 @@ function listedEntries(home: string | Home, file: BackupFile): BackupEntry[] {
   return found;
 }
 
-export function listBackups(file: BackupFile | undefined, home: string | Home): BackupEntry[] {
+/** `contained` lists a home this command does not own: every read must stay inside its root. */
+export function listBackups(file: BackupFile | undefined, home: string | Home, { contained = false } = {}): BackupEntry[] {
   if (file !== undefined && !isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
-  return (file ? [file] : backupFiles(home)).flatMap((name) => listedEntries(home, name));
+  const readable = contained ? readInside(typeof home === 'string' ? home : home.root) : readAny;
+  return (file ? [file] : backupFiles(home, readable)).flatMap((name) => listedEntries(home, name, readable));
 }
 
 function prune(home: string | Home, file: BackupFile, now: Date): void {

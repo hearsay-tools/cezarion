@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { resolveHome } from './resolve.ts'; // test-home-read: entry tests need unresolved scratch paths without a sandbox marker.
@@ -112,4 +113,27 @@ it.each(['installed', 'rolled-back'])('refuses the deferred split write when an 
   expect(existsSync(join(f.home.config, 'install.json'))).toBe(false);
   expect(existsSync(f.home.workspaceConfig)).toBe(false);
   expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
+});
+
+it('lists only legacy backups inside the legacy home', async () => {
+  const f = await fixture(true);
+  const outside = join(f.dir, 'outside');
+  mkdirSync(outside); // Intentional escape target.
+  const snapshot = (content: string) => `2026-11-10T00-00-00.000Z-${createHash('sha256').update(content).digest('hex').slice(0, 8)}.json`;
+  const inner = '{"projects":[],"inside":true}', outer = '{"projects":[],"outside":true}';
+  writeFileSync(join(outside, 'config.json.bak'), outer);
+  writeFileSync(join(outside, snapshot(outer)), outer);
+  mkdirSync(join(f.legacy.backups, 'config.json'), { recursive: true }); // Intentional pre-migration fixture.
+  writeFileSync(join(f.legacy.backups, 'config.json', snapshot(inner)), inner);
+  // Old-binary layouts can hold links; a list must never follow one out of the legacy home.
+  symlinkSync(join(outside, 'config.json.bak'), `${f.legacy.workspaceConfig}.bak`);
+  symlinkSync(outside, join(f.legacy.backups, 'ui-state.json'));
+  mkdirSync(join(f.legacy.backups, 'agent-accounts.json'));
+  symlinkSync(join(outside, snapshot(outer)), join(f.legacy.backups, 'agent-accounts.json', snapshot(outer)));
+  const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const { loadSubcommand } = await import('../subcommands.ts');
+  const run = await loadSubcommand('backup', () => f.home);
+  expect(await run!(['list'], f.env)).toBe(0);
+  const listed: Array<{ file: string; path: string }> = JSON.parse(output.mock.calls[0]![0]);
+  expect(listed).toEqual([expect.objectContaining({ file: 'config.json', path: join(f.legacy.backups, 'config.json', snapshot(inner)) })]);
 });
