@@ -220,14 +220,14 @@ export class RunRecovery {
     // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
     // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
     if (isUsageLimitHold(found)) {
-      for (const wait of openWaits(found)) this.host.waitResolve.armWait(found.id, wait);
+      this.host.waitResolve.rearm(found);
       return undefined;
     }
     const run = this.reconcileRecoveredAsk(found);
     if (this.parkRecoveredRun(run)) return undefined;
     // A pending question or a queued message leaves the waits open: they re-arm, and a result
     // still wakes the run.
-    for (const wait of openWaits(run)) this.host.waitResolve.armWait(run.id, wait);
+    this.host.waitResolve.rearm(run);
     if (run.status === 'queued') return this.host.reviveQueuedRun(run, 'cezar restarted');
     this.host.deliverConversationInput(run.id);
     if (run.status === 'waiting') return this.recoverClosedWaitingRun(run);
@@ -332,7 +332,7 @@ export class RunRecovery {
   /** Parks a recovered run: `waiting`, with each of its open waits re-armed. */
   private parkOnOpenWaits(run: RunRecord): void {
     this.host.move(run.id, 'park');
-    for (const wait of openWaits(run)) this.host.waitResolve.armWait(run.id, wait);
+    this.host.waitResolve.rearm(run);
   }
 
   /**
@@ -411,7 +411,7 @@ export class RunRecovery {
     for (const run of this.context.store.listRuns()) {
       // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
       // that owes results keeps them for a human, and its open waits still resolve without a wake.
-      if (run.waits?.length && holdsOwedResults(run)) for (const wait of openWaits(run)) this.host.waitResolve.armWait(run.id, wait);
+      if (run.waits?.length && holdsOwedResults(run)) this.host.waitResolve.rearm(run);
       else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.host.cancelOpenWaits(run.id);
       else if (run.waits?.length) this.host.queueWaitWake(run.id);
       // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).

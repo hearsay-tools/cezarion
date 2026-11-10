@@ -14,6 +14,9 @@ import { ProcessWaitSupervisor } from '../../process-wait/supervisor.ts';
 import type { ExitFileRoots } from '../../process-wait/exit-file.ts';
 import { agentTmpDirEnabled, resolveAgentTmpDir } from '../../runs/agent-tmpdir.ts';
 
+// Deadline timers stop through clearTimeout on waitTimers (disarm and dispose); this signal never fires.
+const deadlineSignal = new AbortController().signal;
+
 interface WaitResolveHost {
   active(id: string): ActiveRun | undefined;
   countAutomaticWakes(id: string): number;
@@ -76,9 +79,10 @@ export class WaitResolve {
       if (interrupted()) this.host.interruptSubagentWait(runId, wait.id);
       else this.settleWait(runId, wait.id);
     };
-    const due = Date.parse((wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline) - Date.now();
+    const deadline = (wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline;
+    const due = Date.parse(deadline) - Date.now();
     if (due <= 0) { fire(); return; }
-    const timer = watchDeadline({ deadline: (wait as Exclude<Wait, { kind: 'human' | 'worker' }>).deadline, delay: due }, new AbortController().signal, () => {
+    const timer = watchDeadline({ deadline, delay: due }, deadlineSignal, () => {
       if (this.waitTimers.get(wait.id)?.timer !== timer) return;
       this.waitTimers.delete(wait.id);
       fire();
@@ -100,7 +104,7 @@ export class WaitResolve {
     const family = familyOf(run);
     let warned = false;
     const arm = (delay: number) => {
-      const timer = watchDeadline({ deadline: wait.deadline, delay }, new AbortController().signal, () => {
+      const timer = watchDeadline({ deadline: wait.deadline, delay }, deadlineSignal, () => {
         if (this.waitTimers.get(wait.id)?.timer !== timer) return;
         this.waitTimers.delete(wait.id);
         try { this.host.reconcileWorkerWaits(family); }
@@ -188,6 +192,12 @@ export class WaitResolve {
     for (const [id, entry] of this.waitTimers) if (entry.runId === runId) this.host.disarmWait(id);
     for (const [id, retry] of this.ciRetries) if (retry.runId === runId) this.host.disarmWait(id);
     for (const [id, watch] of this.processWatches) if (watch.runId === runId) this.host.disarmWait(id);
+  }
+
+  /** Re-arm the caller's recovery snapshot. Do not re-read between waits: an overdue
+   *  deadline can resolve synchronously, but the remaining snapshot entries still arm. */
+  rearm(run: RunRecord): void {
+    for (const wait of openWaits(run)) this.armWait(run.id, wait);
   }
 
   disposeWatches(): void {
