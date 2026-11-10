@@ -13,7 +13,10 @@ the repository root, without path filters, so the report covers the whole change
 
 ```sh
 squeal --version
-squeal code --base origin/main --json > /tmp/code-quality.json
+quality_report=$(mktemp "${TMPDIR:-/tmp}/code-quality.XXXXXXXX.json")
+squeal code --base origin/main --json > "$quality_report"
+quality_status=$?
+printf 'Report: %s; exit: %s\n' "$quality_report" "$quality_status"
 ```
 
 Replace `origin/main` when the PR targets another branch. Use a report path outside
