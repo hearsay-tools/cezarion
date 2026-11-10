@@ -197,6 +197,8 @@ function runStoreStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
   if (rewrites.length === 0) return;
   const ids = [...new Set(rewrites.map(rewrite => rewrite.runId))];
   const path = join(journal.destination, RUNS_DB_FILE);
+  // RunDatabase.open creates a missing database: refuse first, so no empty store shadows a lost one.
+  if (!pathPresent(path)) throw new ProjectMigrationStepError('run-store', `the moved run store ${path} is missing`);
   const db = RunDatabase.open(path);
   try {
     const rows = new Map(db.getMany(ids).map(row => [row.id, row]));
