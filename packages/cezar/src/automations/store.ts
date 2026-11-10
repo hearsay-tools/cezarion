@@ -17,7 +17,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 import { dirname, join, resolve } from 'node:path';
-import { projectWriteRefused } from '../server/cockpit-ownership.ts';
+import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 import {
   automationDefinitionSchema,
   automationDefinitionsFileSchema,
@@ -511,7 +511,9 @@ export class AutomationStore {
    * throws rather than write unserialized and lose the other process's keys.
    */
   private withWriteLock<T>(lockName: string, reclaimName: string, operation: () => T): T {
-    if (projectWriteRefused(this.dataDir)) return operation();
+    // Definition and state writes report what they persisted: a migration fence refuses them
+    // before memory changes, as a closed store refuses a durable commit.
+    assertProjectWritable(this.dataDir);
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, lockName);
     const guardPath = join(this.dataDir, reclaimName);
@@ -519,7 +521,7 @@ export class AutomationStore {
     let lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     while (!lease && Date.now() < deadline) {
       Atomics.wait(SLEEP, 0, 0, 2);
-      if (projectWriteRefused(this.dataDir)) return operation();
+      assertProjectWritable(this.dataDir);
       lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     }
     if (!lease) throw new Error(`automation ${lockName} is busy; retry shortly`);

@@ -345,6 +345,31 @@ describe('the write backstop over automation and artifact files', () => {
     }
   });
 
+  it('refuses automation definition and state writes before memory changes, and logs the first skip of every fence', async () => {
+    const { dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+      filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'issues');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const skips = () => warn.mock.calls.filter(([line]) => String(line).includes('was skipped')).length;
+    const migrator = owner();
+    try {
+      for (const round of [1, 2]) {
+        const before = { state: store.state(definition.id), list: store.list().map((item) => item.id) };
+        const fence = await migrator.fenceProject(dataDir, none);
+        expect(() => store.setState(definition.id, (current) => ({ ...current, lastSuccessAt: `2026-11-10T00:0${round}:00.000Z` }))).toThrow(ProjectMigrationFencedError);
+        expect(() => store.create({ name: 'Late', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+          filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Late' } }, `late-${round}`)).toThrow(ProjectMigrationFencedError);
+        expect({ state: store.state(definition.id), list: store.list().map((item) => item.id) }).toEqual(before);
+        expect(skips()).toBe(round);
+        fence.release();
+        // Admitted again: the write lands and the marker clears, so the next fence logs once more.
+        store.setState(definition.id, (current) => ({ ...current, lastSuccessAt: `2026-11-10T01:0${round}:00.000Z` }));
+        expect(store.state(definition.id)?.lastSuccessAt).toBe(`2026-11-10T01:0${round}:00.000Z`);
+      }
+    } finally { warn.mockRestore(); }
+  });
+
   it('leaves the publication lock candidate in place when the fence comes while the lock is awaited', async () => {
     const { root, dataDir } = project();
     const task = randomUUID();

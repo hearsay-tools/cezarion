@@ -161,9 +161,10 @@ const writeSkipsLogged = new Set<string>();
  * draining. A skipped write is logged once per fence. Dormant cost: two `lstat` calls.
  */
 export function projectWriteRefused(dataDir: string): boolean {
-  const refusal = projectAdmissionRefusal(dataDir);
-  const lock = refusal && migrationFencePaths(dataDir)?.lock;
-  if (!refusal || !lock || draining.has(lock)) {
+  const lock = migrationFencePaths(dataDir)?.lock;
+  const refusal = lock && projectAdmissionRefusal(dataDir);
+  if (!lock || !refusal || draining.has(lock)) {
+    // No refusal now: the next fence of this project logs its first skip again.
     if (lock) writeSkipsLogged.delete(lock);
     return false;
   }
