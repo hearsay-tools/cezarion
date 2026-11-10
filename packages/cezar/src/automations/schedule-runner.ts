@@ -1,6 +1,7 @@
 import { productName } from '../home/display.ts';
 import { nextOccurrence, occurrencesBetween, onceCutoff, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
 import type { AutomationLease, AutomationStore } from './store.ts';
+import { ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import {
   isOnceSchedule,
   isScheduleAutomation,
@@ -410,6 +411,8 @@ export class ScheduleRunner {
     try {
       ({ runId } = await this.handle.launch(definition, occurrence, receipt.receiptId));
     } catch (error) {
+      // A migration fence refused the launch: a skip, like an unavailable store; nothing recorded.
+      if (error instanceof ProjectMigrationFencedError) throw new AutomationProjectUnavailableError(error.message, { cause: error });
       const message = error instanceof Error ? error.message : String(error);
       store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
       await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });

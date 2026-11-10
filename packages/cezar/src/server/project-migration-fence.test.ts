@@ -13,6 +13,7 @@ import { runsIndexResponseSchema } from '@open-mercato/cezar-contract/workspace-
 import { runArtifactCommand } from '../artifacts/cli.ts';
 import { AutomationStore } from '../automations/store.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
+import { rebaselineIdleAutomations } from '../automations/task-template.ts';
 import { publishArtifact } from '../artifacts/store.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { createDelegationRoutes } from '../delegation/routes.ts';
@@ -313,12 +314,84 @@ describe('the write backstop over automation and artifact files', () => {
       const startToken = processStartToken(other.pid!);
       writeFileSync(migrationFencePaths(dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
       const calls = refreshed.mock.calls.length;
+      const setState = vi.spyOn(AutomationStore.prototype, 'setState');
+      resume();
+      // bound: hang guard; the fire has ended when the scheduler re-arms through refresh.
+      await vi.waitFor(() => expect(refreshed.mock.calls.length).toBeGreaterThan(calls), { timeout: 5_000 });
+      // The success write was refused (thrown), the error path recorded no failure or backoff,
+      // the rejection was the scheduler's (no unhandled rejection), and nothing was written.
+      expect(setState.mock.results.some((result) => result.type === 'throw' && result.value instanceof ProjectMigrationFencedError)).toBe(true);
+      expect(setState.mock.results.filter((result) => result.type === 'return')).toEqual([]);
+      // The refusal is a skip, not a failure: recordFailure never tries its write.
+      expect(setState).toHaveBeenCalledTimes(1);
+      expect(files()).toEqual(before);
+      setState.mockRestore();
+    } finally {
+      scheduler.stop();
+      warn.mockRestore();
+      other.kill('SIGKILL');
+    }
+  });
+
+  it.each(['returns', 'is refused'])('records nothing when a schedule fire meets another process\'s fence while its launch %s', async (launch) => {
+    const { root, dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
+    store.setState('nightly', (current) => ({ ...current, nextRunAt: new Date(Date.now() - 1_000).toISOString() }));
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => { resume = resolve; });
+    let parked!: () => void;
+    const launching = new Promise<void>((resolve) => { parked = resolve; });
+    const launchSchedule = vi.fn(async () => {
+      parked();
+      await gate;
+      if (launch === 'is refused') throw new ProjectMigrationFencedError('migrating', migrationFencePaths(dataDir)!.lock);
+      return { runId: 'nightly-run' };
+    });
+    const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'p', root, status: 'not-git' }] });
+    const refreshed = vi.spyOn(coordinator, 'refresh');
+    const scheduler = new WorkspaceAutomationScheduler({ coordinator, handle: (_projectId, automations) => ({ projectId: 'p', store: automations, timeZone: 'UTC', launchSchedule }) });
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await scheduler.start();
+      await launching;
+      const before = files();
+      const startToken = processStartToken(other.pid!);
+      writeFileSync(migrationFencePaths(dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
+      const calls = refreshed.mock.calls.length;
+      const receipts = vi.spyOn(AutomationStore.prototype, 'appendReceipt');
       resume();
       // bound: hang guard; the fire has ended when the scheduler re-arms through refresh.
       await vi.waitFor(() => expect(refreshed.mock.calls.length).toBeGreaterThan(calls), { timeout: 5_000 });
       expect(files()).toEqual(before);
+      // A refused launch is a skip: no launch-error receipt is even attempted.
+      if (launch === 'is refused') expect(receipts.mock.calls.filter(([receipt]) => receipt.status === 'launch-error')).toEqual([]);
+      receipts.mockRestore();
     } finally {
       scheduler.stop();
+      warn.mockRestore();
+      other.kill('SIGKILL');
+    }
+  });
+
+  it('keeps a boot rebaseline going when another process fences a project', async () => {
+    const { dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+      filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'issues');
+    // Idle long enough that the boot brake re-baselines it.
+    store.setState(definition.id, (current) => ({ ...current, lastSuccessAt: '2026-01-01T00:00:00.000Z', baselineAt: '2026-01-01T00:00:00.000Z' }));
+    const before = readFileSync(join(dataDir, 'automation-state.json'), 'utf8');
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const startToken = processStartToken(other.pid!);
+      writeFileSync(migrationFencePaths(dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
+      expect(rebaselineIdleAutomations(store)).toBe(0);
+      expect(readFileSync(join(dataDir, 'automation-state.json'), 'utf8')).toBe(before);
+    } finally {
       warn.mockRestore();
       other.kill('SIGKILL');
     }

@@ -2,7 +2,7 @@ import { githubBaselineState } from './github-baseline.ts';
 import type { AutomationCoordinator } from './coordinator.ts';
 import { AutomationCandidateChangedError, type GithubCandidate, type GithubPoller, type GithubPollResult } from './github-poller.ts';
 import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
-import { withProjectAdmission } from '../server/cockpit-ownership.ts';
+import { ProjectMigrationFencedError, withProjectAdmission } from '../server/cockpit-ownership.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
 import { isGithubAutomation, isScheduleAutomation, type AutomationDefinition, type AutomationRuntimeState, type GithubAutomationDefinition } from './types.ts';
 
@@ -190,7 +190,8 @@ export class ProjectAutomationScheduler {
     }
     if (error instanceof LeaseHeldError) await this.recordSkip(definition, error);
     // Not a failure: nothing was launched or moved, and the timer retries at its floor.
-    else if (error instanceof AutomationProjectUnavailableError) { /* see above */ }
+    // A migration fence refusing a state write is a skip too: no failure count, no backoff.
+    else if (error instanceof AutomationProjectUnavailableError || error instanceof ProjectMigrationFencedError) { /* see above */ }
     else if (mode === 'execute') await this.recordFailure(definition, error);
     else await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
     throw error;
