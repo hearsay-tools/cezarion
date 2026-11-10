@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { CheckoutProgressEvent, RunEvent as WebRunEvent } from '@open-mercato/cezar-api-client';
+import type { CheckoutProgressEvent, RunEvent as WebRunEvent, UiEvent as WebUiEvent } from '@open-mercato/cezar-api-client';
+import type { UiEvent } from '../core/ui-events.ts';
 import type { RunEvent } from '../runs/store.ts';
 
 /**
@@ -21,6 +22,9 @@ import type { RunEvent } from '../runs/store.ts';
  * Two shapes genuinely cannot be derived from a route, so they stay hand-mirrored and stay
  * guarded here. Both are SSE FRAME payloads delivered over `text/event-stream`, which Hono types
  * as a string body — the frame shape is invisible to `InferResponseType`.
+ *
+ * The v2 `UiEvent` vocabulary rides inside those frames. `packages/api-client/src/protocol/
+ * ui-events.ts` is a hand-kept copy of `core/ui-events.ts`, so it has a pair here too.
  */
 describe('the shapes that cannot come from a route are still mirrored faithfully', () => {
   /** Mutual assignability. `[…]` wrappers stop a naked union from distributing. */
@@ -28,9 +32,25 @@ describe('the shapes that cannot come from a route are still mirrored faithfully
   /** Key-set equality — `Exact` alone is blind to a missing OPTIONAL property (#472). */
   type ExactKeys<A, B> = Exact<keyof A, keyof B>;
 
+  /**
+   * A type as JSON carries it: an optional property never holds `undefined`, at any depth. The
+   * api-client copy lets three optional fields take an explicit `undefined` for its callers
+   * (`UiToolItem.output`, `.error`, `UiHookItem.name`); the wire drops such a value.
+   */
+  type Wire<T> = T extends readonly (infer E)[] ? Wire<E>[] : T extends object ? { [K in keyof T]: Wire<Exclude<T[K], undefined>> } : T;
+  /** The `type` or `kind` of a union member, so one member's keys do not stand in for another's. */
+  type Tag<T> = T extends { type: infer D extends string } ? `<${D}>` : T extends { kind: infer D extends string } ? `<${D}>` : '';
+  /** Every key at every depth as a path, optional keys included: `<item.completed>.item<hook>.name`. */
+  type KeyPaths<T> = T extends readonly (infer E)[] ? `[]${KeyPaths<E>}`
+    : T extends object ? { [K in keyof T & string]-?: `${Tag<T>}.${K}` | `${Tag<T>}.${K}${KeyPaths<T[K]>}` }[keyof T & string] : never;
+
   const guards = {
     /** `GET /api/v1/runs/:id/events` and `/api/v1/events` — the run event stream. */
     runEvent: true satisfies Exact<RunEvent, WebRunEvent>,
+    /** The v2 events inside that stream, against the api-client's hand-kept copy. */
+    uiEvent: true satisfies Exact<Wire<UiEvent>, Wire<WebUiEvent>>,
+    /** `Exact` is blind to a missing optional property, and `UiEvent` is a union, so compare key paths. */
+    uiEventKeys: true satisfies Exact<KeyPaths<UiEvent>, KeyPaths<WebUiEvent>>,
   };
 
   /**
