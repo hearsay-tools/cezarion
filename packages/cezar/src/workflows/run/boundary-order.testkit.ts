@@ -1,3 +1,4 @@
+import { WaitCancellation } from './wait-cancellation.ts';
 import { WaitEngine } from './wait-engine.ts';
 import type { RunLine } from './run-line.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -68,7 +69,7 @@ export function boundaryOrderFixture(autonomous = false): BoundaryOrderFixture {
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
     withdrawCezarHumanWaits: id => humanWaits.withdrawCezarHumanWaits(id),
   }));
-  const humanWaits = new HumanWaits(context, { waitEngine, routeWorkerQuestion: call('route', undefined) }, 40);
+  const humanWaits = new HumanWaits(context, { waitCancellation: new WaitCancellation(context, unused<ConstructorParameters<typeof WaitCancellation>[1]>('cancellation', { disarmWait: () => {} })), waitEngine, routeWorkerQuestion: call('route', undefined) }, 40);
   type QuestionHost = ConstructorParameters<typeof WorkerQuestions>[1];
   const questionHost = unused<QuestionHost>('workerQuestions', {
     active: id => active.get(id), deliverConversationInput: call('parent-input', undefined), openHumanAlias: (...args) => { log.push('alias'); return humanWaits.openHumanAlias(...args); },

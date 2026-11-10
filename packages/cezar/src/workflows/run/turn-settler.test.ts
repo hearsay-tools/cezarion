@@ -49,7 +49,7 @@ function fixture() {
     waitRegistry: { registerCompletionWait: call('completionWait', undefined) },
     workerQuestions: { askParentForWorker: call('askParent', undefined) }, completionGateHost: { parentCompletionBlockers: () => [] },
     move: call('move', undefined), releaseSlot: call('release', undefined), completionGate: call('gate', 'accept' as 'accept' | 'held' | CompletionRefusal),
-    cancelOpenWaits: call('cancelWaits', undefined), countAutomaticWakes: call('wakes', 0), workerExecutionStopped: () => false,
+    waitCancellation: unused<Host['waitCancellation']>('cancellation', { cancelAll: call('cancelWaits', undefined) }), countAutomaticWakes: call('wakes', 0), workerExecutionStopped: () => false,
     executionBlockedByRootFinish: () => false, submitAgentInput: call('submit', true), flushAgentInputs: call('input', false),
     hasQueuedAgentInputs: call('queued', false), armUnreadInputTimer: call('unread', undefined), armHeldHumanInputTimer: call('held', undefined),
     parkOnWaits: call('parkWaits', true), queueWaitWake: call('wake', undefined), leaveMonitoringPool: call('leavePool', undefined),

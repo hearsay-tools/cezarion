@@ -1,6 +1,6 @@
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { cancelWaits } from './wait-cancel.ts';
+import type { WaitCancellation } from './wait-cancellation.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
 import {
@@ -48,6 +48,7 @@ const INTERRUPT_RETRY_MS = 60_000;
 type ChildEvent = { id: string; status: SubagentStatus; background: boolean };
 
 interface SubagentWaitsHost {
+  waitCancellation: WaitCancellation;
   waitEngine: WaitEngine;
   active: ReadonlyMap<string, ActiveRun>;
   isParked(id: string): boolean;
@@ -232,7 +233,7 @@ export class SubagentWaits {
 
   private supersede(runId: string, waitIds: readonly string[]): void {
     this.clearGrace(runId);
-    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waitIds, { onCommitFailure: 'skip', superseded: true });
+    this.host.waitCancellation.cancel(runId, waitIds, { onCommitFailure: 'skip', superseded: true });
   }
 
   /** The run left the live registry: its session, and the children it held, are gone. An open
