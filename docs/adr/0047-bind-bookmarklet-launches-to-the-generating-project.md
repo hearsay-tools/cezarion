@@ -22,6 +22,6 @@ CSP observation.
 
 - **Probe localhost ports from the source page.** Replaced because the recorded browser policy prevented discovery and could select another cockpit.
 
-Implementation: [bookmarklet.ts](../../packages/web/src/lib/bookmarklet.ts), [launch-key.ts](../../packages/cezar/src/server/launch-key.ts), [BACKWARD_COMPATIBILITY.md](../../BACKWARD_COMPATIBILITY.md).
+Implementation: [bookmarklet.ts](../../packages/web/src/lib/bookmarklet.ts), [launch-key.ts](../../packages/cezar/src/server/launch-key.ts), [new-task-params.ts](../../packages/web/src/routes/new-task-params.ts), [new-task-autostart.ts](../../packages/web/src/routes/new-task-autostart.ts).
 
 Coverage: [bookmarklet.test.ts](../../packages/web/src/lib/bookmarklet.test.ts), [new-task.test.tsx](../../packages/web/src/routes/new-task.test.tsx), [route-parity.test.ts](../../packages/cezar/src/server/route-parity.test.ts).
