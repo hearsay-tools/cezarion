@@ -43,9 +43,6 @@ interface ReadActions {
   beforeLiveIndex: LiveIndexCheck;
 }
 
-interface OpenOptions {
-  ignoresEngineOwnership: boolean;
-}
 type OpenHandle = {
   run: RunRecord;
   directory: () => string;
@@ -63,7 +60,7 @@ interface RemoveOptions {
   nullClaimError: string;
 }
 
-export function runCheckout(host: RunCheckoutHost, id: string, intent: 'open', options: OpenOptions): CheckoutRefusal | OpenHandle;
+export function runCheckout(host: RunCheckoutHost, id: string, intent: 'open'): CheckoutRefusal | OpenHandle;
 /** Admission stays synchronous: no yield between lookup and claim. */
 export function runCheckout(host: RunCheckoutHost, id: string, intent: 'publish'): CheckoutRefusal | ClaimedHandle;
 export function runCheckout(host: RunCheckoutHost, id: string, intent: 'remove', options: RemoveOptions): CheckoutRefusal | ClaimedHandle;
@@ -82,10 +79,10 @@ export function runCheckout(
   host: RunCheckoutHost,
   id: string,
   intent: CheckoutIntent,
-  options: ReadOptions<ReadDirectoryRule> | RemoveOptions | OpenOptions = { directory: 'existing-worktree' },
+  options: ReadOptions<ReadDirectoryRule> | RemoveOptions = { directory: 'existing-worktree' },
 ): CheckoutRefusal | ReadHandle<ReadDirectoryRule> | ClaimedHandle | OpenHandle {
   if (intent === 'publish') return publishCheckout(host, id);
-  if ('ignoresEngineOwnership' in options) return openCheckout(host, id, options);
+  if (intent === 'open') return openCheckout(host, id);
   if ('claim' in options) return removeCheckout(host, id, options);
   const { root, store } = host;
   const run = store.getRun(id);
@@ -178,7 +175,7 @@ export async function reclaimCheckoutError(run: RunRecord): Promise<string> {
     : 'the worktree directory could not be removed';
 }
 
-function openCheckout({ root, store }: RunCheckoutHost, id: string, options: OpenOptions): CheckoutRefusal | OpenHandle {
+function openCheckout({ root, store }: RunCheckoutHost, id: string): CheckoutRefusal | OpenHandle {
   const run = store.getRun(id);
   if (!run) return { status: 404, body: { error: 'not found' } };
   return {
@@ -188,6 +185,6 @@ function openCheckout({ root, store }: RunCheckoutHost, id: string, options: Ope
     defaultWorktree() {
       return workingDirectoryOf(run, root) ?? { status: 409, body: { error: NO_WORKTREE } };
     },
-    get resumeAllowed() { return options.ignoresEngineOwnership || !engineOwnsRun(run); },
+    get resumeAllowed() { return !engineOwnsRun(run); },
   };
 }

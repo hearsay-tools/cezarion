@@ -302,17 +302,12 @@ describe('reclaim failure detail after release', () => {
   });
 });
 
-const openRoutes = [
-  { route: 'open-in-cli', ignoresEngineOwnership: true },
-  { route: 'open-in', ignoresEngineOwnership: false },
-] as const;
-
-describe.each(openRoutes)('open $route', (route) => {
+describe('open checkout', () => {
   it.each([...states, ...(['queued', 'waiting'] as const).map((status) => ({
     ...states[1]!, name: status, run: { ...baseRun, status, worktreePath: live },
   }))])('$name keeps the current open policy without a claim', (state) => {
     const host = fakeHost(state);
-    const result = runCheckout(host, baseRun.id, 'open', route);
+    const result = runCheckout(host, baseRun.id, 'open');
     if (!state.run) {
       expect(result).toEqual(notFound);
       return;
@@ -323,7 +318,7 @@ describe.each(openRoutes)('open $route', (route) => {
     expect(result.directory()).toBe(worktree ?? root);
     expect(result.worktree).toBe(worktree);
     expect(result.defaultWorktree()).toEqual(state.run.worktree === false ? root : worktree ?? noWorktree);
-    expect(result.resumeAllowed).toBe(route.ignoresEngineOwnership || (state.name === 'usage hold' || !['running', 'queued', 'waiting'].includes(state.run.status)));
+    expect(result.resumeAllowed).toBe((state.name === 'usage hold' || !['running', 'queued', 'waiting'].includes(state.run.status)));
     expect(host.store.getRun).toHaveBeenCalledExactlyOnceWith(baseRun.id);
     expect(host.store.writeRefusal).not.toHaveBeenCalled();
     expect(host.store.sourceDataDir).not.toHaveBeenCalled();
@@ -336,7 +331,7 @@ it('resolves the open directory at call time after lookup', () => {
   const path = join(root, 'lazy');
   mkdirSync(path);
   const host = fakeHost({ ...states[1]!, run: { ...baseRun, worktreePath: path } });
-  const result = runCheckout(host, baseRun.id, 'open', openRoutes[1]);
+  const result = runCheckout(host, baseRun.id, 'open');
   if ('status' in result) throw new Error('expected an open handle');
   rmSync(path, { recursive: true });
   expect(result.directory()).toBe(root);
