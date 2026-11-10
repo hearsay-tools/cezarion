@@ -1,14 +1,14 @@
+import { execFile } from 'node:child_process';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from './project-paths.ts';
 import { inspectGeneration } from './delegation/process-liveness.ts';
-import { execFile } from 'node:child_process';
+import { git } from './git-command.ts';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
-import { copyGitIndex } from './git-index-copy.ts';
+import { withPrivateIndex, type IndexGit, type LiveIndexCheck, type DiffRefusal } from './git-private-index.ts';
 import { isSafeGitRef } from './git-refs.ts';
 import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
@@ -16,27 +16,9 @@ import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
 export const DIFF_CAP = 400_000;
 
-interface GitResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-}
-
 interface RegisteredWorktree {
   path: string;
   branch?: string;
-}
-
-/** Run git, never throw — degradation is the caller's policy. */
-function git(cwd: string, args: string[], timeout?: number, env?: NodeJS.ProcessEnv): Promise<GitResult> {
-  return new Promise((resolve) => {
-    execFile(
-      'git',
-      args,
-      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout, ...(env ? { env } : {}) },
-      (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
-    );
-  });
 }
 
 export function branchFor(runId: string): string {
@@ -830,42 +812,6 @@ function unquotePath(path: string): string {
   return Buffer.from(bytes).toString('utf8');
 }
 
-type IndexGit = (args: string[]) => Promise<GitResult>;
-
-/**
- * Read through a private index copy. Try OS temp, then the Git directory; if neither is
- * writable, retain the real-index fallback. Always remove scratch state.
- */
-export async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
-  const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
-  const realIndex = real.ok ? real.stdout.trim() : '';
-  let scratch: string | undefined;
-  for (const parent of [tmpdir(), ...(realIndex ? [dirname(realIndex)] : [])]) {
-    try {
-      scratch = await mkdtemp(join(parent, 'cez-diff-index-'));
-      break;
-    } catch { /* Not writable: try the next location. */ }
-  }
-  if (!scratch) {
-    const refusal = fallbackProjectWriteError(worktreePath);
-    if (refusal) throw new Error(refusal);
-    return read((args) => git(worktreePath, args));
-  }
-  try {
-    const index = join(scratch, 'index');
-    const env = { ...process.env, GIT_INDEX_FILE: index };
-    const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
-    let seeded = false;
-    if (realIndex) {
-      try { await copyGitIndex(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
-    }
-    if (!seeded) await indexed(['read-tree', 'HEAD']);
-    return await read(indexed);
-  } finally {
-    await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
 async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promise<string> {
   await git(['add', '-N', '.']); // intent-to-add (private index, hearsay-tools/cezarion#1080): untracked files show up
   const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
@@ -875,12 +821,16 @@ async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promis
 /**
  * Whole-branch committed, uncommitted and untracked diff against the merge-base. Preserve this
  * anchor for the protected text endpoint and conservative settlement checks.
+ * Callers without a live-index check, including settlement, keep a string result.
  */
+export function worktreeDiff(worktreePath: string, baseBranch: string, cap?: number): Promise<string>;
+export function worktreeDiff(worktreePath: string, baseBranch: string, cap: number | undefined, beforeLiveIndex: LiveIndexCheck): Promise<string | DiffRefusal>;
 export async function worktreeDiff(
   worktreePath: string,
   baseBranch: string,
   cap = DIFF_CAP,
-): Promise<string> {
+  beforeLiveIndex?: LiveIndexCheck,
+): Promise<string | DiffRefusal> {
   if (!isSafeGitRef(baseBranch)) return '(diff failed: refusing option-like base ref)';
   return withPrivateIndex(worktreePath, async (git) => {
     const base = await prepareWholeBranchDiff(git, baseBranch);
@@ -888,6 +838,9 @@ export async function worktreeDiff(
     if (!res.ok) return `(diff failed: ${res.stderr.trim() || 'unknown git error'})`;
     if (res.stdout.length > cap) return `${res.stdout.slice(0, cap)}\n… (diff truncated)`;
     return res.stdout;
+  }, (): DiffRefusal | undefined => {
+    const error = beforeLiveIndex?.();
+    return error === undefined ? undefined : { error };
   });
 }
 

@@ -1,3 +1,4 @@
+import type { LiveIndexCheck } from '../git-private-index.ts';
 import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { fallbackProjectWriteError } from '../project-paths.ts';
@@ -30,7 +31,6 @@ export interface RunCheckoutHost {
 
 type ReadDirectoryRule = 'working-directory' | 'existing-worktree' | 'recorded-path-or-root';
 interface ReadOptions<Rule extends ReadDirectoryRule> {
-  checksAutosave: boolean;
   directory: Rule;
 }
 type CheckoutRefusal = { status: 404 | 409; body: { error: string } };
@@ -38,6 +38,10 @@ type ReadHandle<Rule extends ReadDirectoryRule> = {
   run: RunRecord;
   directory: Rule extends 'existing-worktree' ? string | null : string;
 };
+
+interface ReadActions {
+  beforeLiveIndex: LiveIndexCheck;
+}
 
 interface OpenOptions {
   ignoresEngineOwnership: boolean;
@@ -68,7 +72,7 @@ export function runCheckout<Rule extends ReadDirectoryRule>(
   id: string,
   _intent: Extract<CheckoutIntent, 'read'>,
   options: ReadOptions<Rule>,
-): CheckoutRefusal | ReadHandle<Rule>;
+): CheckoutRefusal | (ReadHandle<Rule> & ReadActions);
 export function runCheckout(
   host: RunCheckoutHost,
   id: string,
@@ -78,7 +82,7 @@ export function runCheckout(
   host: RunCheckoutHost,
   id: string,
   intent: CheckoutIntent,
-  options: ReadOptions<ReadDirectoryRule> | RemoveOptions | OpenOptions = { checksAutosave: true, directory: 'existing-worktree' },
+  options: ReadOptions<ReadDirectoryRule> | RemoveOptions | OpenOptions = { directory: 'existing-worktree' },
 ): CheckoutRefusal | ReadHandle<ReadDirectoryRule> | ClaimedHandle | OpenHandle {
   if (intent === 'publish') return publishCheckout(host, id);
   if ('ignoresEngineOwnership' in options) return openCheckout(host, id, options);
@@ -88,18 +92,27 @@ export function runCheckout(
   if (!run) return { status: 404, body: { error: 'not found' } };
   const refusal = intent === 'mutate' && run.worktreePath && fallbackProjectWriteError(run.worktreePath);
   if (refusal) return { status: 409, body: { error: refusal } };
-  if (options.checksAutosave) {
+  if (intent === 'mutate') {
     const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
     if (blocker) return { status: 409, body: { error: blocker } };
   }
   if (options.directory === 'recorded-path-or-root') {
-    return { run, directory: run.worktreePath ?? root };
+    return readCheckoutHandle(host, run, run.worktreePath ?? root);
   }
   const directory = options.directory === 'existing-worktree' ? worktreeOf(run) : workingDirectoryOf(run, root);
   if (!directory && (intent === 'mutate' || options.directory === 'working-directory')) {
     return { status: 409, body: { error: NO_WORKTREE } };
   }
-  return { run, directory };
+  return intent === 'read' ? readCheckoutHandle(host, run, directory) : { run, directory };
+}
+
+function readCheckoutHandle(host: RunCheckoutHost, run: RunRecord, directory: string | null): ReadHandle<ReadDirectoryRule> & ReadActions {
+  const beforeLiveIndex = () => autosaveCleanupBlocker(host.store.sourceDataDir(run.id), run.id);
+  return {
+    run,
+    directory,
+    beforeLiveIndex,
+  };
 }
 
 function publishCheckout({ store, manager }: RunCheckoutHost, id: string): CheckoutRefusal | ClaimedHandle {

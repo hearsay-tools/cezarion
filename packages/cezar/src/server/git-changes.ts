@@ -6,7 +6,7 @@ import { lstat, open, readFile, readdir, realpath, stat } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { resolveTaskDiffBase, type RepointedHead } from '../git-diff-base.ts';
-import { withPrivateIndex } from '../git-worktree.ts';
+import { withPrivateIndex, type LiveIndexCheck } from '../git-private-index.ts';
 import { isSafeGitRef } from '../git-refs.ts';
 
 /**
@@ -252,6 +252,7 @@ export async function collectChanges(
   dir: string,
   baseBranch: string,
   opts: {
+    beforeLiveIndex?: LiveIndexCheck;
     patchCap?: number;
     intentToAdd?: boolean | undefined;
     taskBranch?: string | undefined;
@@ -296,7 +297,10 @@ export async function collectChanges(
     };
   };
   if (opts.intentToAdd !== false && !fallbackProjectWriteError(dir)) {
-    return withPrivateIndex(dir, read);
+    return withPrivateIndex(dir, read, (): ChangesResult | undefined => {
+      const error = opts.beforeLiveIndex?.();
+      return error === undefined ? undefined : { ok: false, error };
+    });
   }
   const scratchIndex = join(tmpdir(), `cez-scratch-index-${process.pid}-${scratchSeq++}`);
   const env = { GIT_INDEX_FILE: scratchIndex };
