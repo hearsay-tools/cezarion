@@ -914,7 +914,21 @@ describe('session git API routes', () => {
     expect(refused.headers.get('content-type')).toContain('application/json');
   });
 
-  it('POST git/commit commits everything; a clean tree is a 409, a bad body a 400', async () => {
+  it.each(['commit', 'push'])('POST git/%s refuses a running run before changing Git state', async (action) => {
+    store.updateRun(run.id, { status: 'running' });
+    writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
+    const before = g(worktree, 'rev-parse', 'HEAD');
+    const res = action === 'commit'
+      ? await commit(run.id, { message: 'must not commit' })
+      : await apiRequest(app, `/api/v1/runs/${run.id}/git/push`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'the agent is still working in this worktree' });
+    expect(g(worktree, 'rev-parse', 'HEAD')).toBe(before);
+    expect(g(worktree, 'status', '--porcelain')).toContain('?? feat.txt');
+  });
+
+  it.each(['queued', 'waiting'] as const)('POST git/commit commits everything while %s; clean tree is 409, bad body is 400', async (status) => {
+    store.updateRun(run.id, { status });
     writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
     const res = await commit(run.id, { message: 'feat: add feature' });
     expect(res.status).toBe(200);
@@ -939,7 +953,8 @@ describe('session git API routes', () => {
     expect(((await res.json()) as { error: string }).error).toContain('no remote configured');
   });
 
-  it('POST git/push sets upstream on first push to a real remote', async () => {
+  it.each(['queued', 'waiting'] as const)('POST git/push sets upstream on first push while %s', async (status) => {
+    store.updateRun(run.id, { status });
     const remote = mkdtempSync(join(tmpdir(), 'cez-remote-'));
     try {
       execFileSync('git', ['init', '--bare', remote], { encoding: 'utf8' });
