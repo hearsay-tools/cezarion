@@ -232,7 +232,8 @@ install has neither; the migration leaves the operator's proxy untouched and mov
 unit. Units and sites of an install made before the switch keep working with
 `server-uninstall` and `server-deploy`, which act on the recorded names.
 A boot or ordinary command of the new build does not run `migrateLegacyHome()` for a legacy
-home that records an installed server (an `installed` record without `dryRun`) while the new
+home that records an installed server supported by group migration (an `installed` record
+without `dryRun`, whose strategy supports migrate, rollback, stop and start) while the new
 home is not committed: it keeps the legacy home and prints one notice to run
 `hsq server-migrate`, so the home moves only with the group's stop, `pending` stage and
 rollback. `hsq server-migrate --dry-run` prints the stop, every move, each health check, the

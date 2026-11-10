@@ -277,7 +277,8 @@ group, the pending marker and the rollback.
 
 Until `server-migrate` succeeds, the server and every other command keep using
 the old home `~/.cezar` (or `CEZ_HOME`) and print one notice to run
-`server-migrate`. They never migrate a home that records a server install.
+`server-migrate`. They never migrate a home that records a server install with group migration support.
+Desktop platforms without that support, including macOS, keep their boot migration.
 
 ---
 

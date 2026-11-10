@@ -9,6 +9,7 @@ import { applyMigrationReport } from './migration-report.ts';
 import { readServerMigrateJournal, removeServerMigrateJournal, writeServerMigrateJournal, type ServerMigrateJournal } from './migrate-journal.ts';
 import { listServerInstances, loadServerState, saveServerState } from './state.ts';
 import { defaultRunner } from './steps.ts';
+import { supportsServerMigration } from './strategies.ts';
 import type { InstallContext, PlatformMigrationReport, PlatformStrategy, Runner, ServerState, Ui } from './types.ts';
 
 /**
@@ -75,10 +76,10 @@ class Group {
 
   member(instance: string, state: ServerState): Member['strategy'] | string {
     const strategy = this.opts.strategy(state.platform ?? '');
-    if (!strategy?.migrate || !strategy.rollbackMigration || !strategy.stopService || !strategy.startService) {
+    if (!supportsServerMigration(strategy)) {
       return `${instance}: server-migrate does not support platform ${state.platform ?? 'unknown'}`;
     }
-    return strategy as Member['strategy'];
+    return strategy;
   }
 }
 

@@ -194,7 +194,7 @@ with a warning. `rollbackLegacyMigration(target)` renames a
 pending marker to `install.json.failed`; the next explicit migration overwrites
 the recorded pending destinations. Rollback never rewrites legacy registry data.
 
-With the switch on, boot never migrates a server home: only `hsq server-migrate`
+With the switch on, boot defers a server home that supports group migration: only `hsq server-migrate`
 stops the group, stages the home and rolls every instance back on failure. The
 signal is an `installed` record without `dryRun` in the legacy `server.json` or
 `server-instances/` and no committed target marker. Then every CLI entry and the
@@ -211,12 +211,15 @@ Home returned by `prepareOperatorHome`, as CLI boot does.
 
 | Boot state | Selected home and action |
 | --- | --- |
-| Completed server, no committed marker | Legacy home; no target writes; warn to run `hsq server-migrate` |
-| Completed server, failed marker, no committed marker | Legacy home; no target writes; warn to retry `hsq server-migrate` |
+| Completed group-migration server, no committed marker | Legacy home; no target writes; warn to run `hsq server-migrate` |
+| Completed group-migration server, failed marker, no committed marker | Legacy home; no target writes; warn to retry `hsq server-migrate` |
 | Finished staged retry, including a prior failed marker | Pending target, read-only, for the group's health checks |
 | Committed target, including a prior failed marker | Target; normal boot |
 | Desktop, incomplete install or dry-run server, with or without a failed marker | Existing boot migration to the target |
 | Switch off | Existing legacy behavior |
+
+Platforms without group migration support, including `macosx-ngrok`, keep the desktop boot
+migration. The shared capability check requires migrate, rollback, stop and start methods.
 
 An explicit `hsq migrate` or successful `hsq server-migrate` recopies the current
 legacy data and commits the target, which clears the boot skip. The failed marker

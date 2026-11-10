@@ -20,3 +20,9 @@ export function getStrategy(id: string): PlatformStrategy | undefined {
 export function availablePlatformIds(): PlatformId[] {
   return PLATFORM_IDS.filter((id) => REGISTRY[id] !== undefined);
 }
+
+/** Group migration requires reversible resource moves and control of every service. */
+export function supportsServerMigration(strategy: PlatformStrategy | undefined): strategy is PlatformStrategy &
+  Required<Pick<PlatformStrategy, 'migrate' | 'rollbackMigration' | 'stopService' | 'startService'>> {
+  return !!(strategy?.migrate && strategy.rollbackMigration && strategy.stopService && strategy.startService);
+}

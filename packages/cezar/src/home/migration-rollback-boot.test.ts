@@ -252,3 +252,21 @@ it.each([{ installed: false }, { installed: true, dryRun: true }])('does migrate
     expect(warn).not.toHaveBeenCalled();
   } finally { cleanStoreRoots(); }
 });
+
+
+it.each(['projects', 'serve'])('%s migrates an installed macOS home without a server-migrate notice', async command => {
+  vi.resetModules();
+  vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: true }));
+  const { prepareOperatorHome: prepareSwitchedHome } = await import('./entry.ts');
+  const f = serverFixture();
+  try {
+    Home.seed(f.legacy, f.legacy.serverState(), {
+      schema: 1, installed: true, platform: 'macosx-ngrok', primaryPort: 4321, steps: {},
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(prepareSwitchedHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.target);
+    expect(readInstallMarker(f.target.config)?.state).toBe('committed');
+    expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  } finally { cleanStoreRoots(); }
+});
