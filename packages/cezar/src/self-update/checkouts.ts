@@ -141,6 +141,18 @@ function taskDataDir(trees: ReadonlyArray<{ path: string }>): string | null {
   return dataDir && !projectAdmissionRefusal(dataDir) ? dataDir : null;
 }
 
+/** `root`'s worktrees, listed again after its unfinished migration finishes: the migration moves
+ *  and repairs task worktrees, so a list taken before it names their old paths. The new list
+ *  comes from the main checkout, which no migration moves: `root` may be a task checkout that
+ *  the recovery just moved away. */
+async function recoveredWorktreesOf(root: string): ReturnType<typeof worktreesOf> {
+  const trees = await worktreesOf(root);
+  const main = trees[0]?.path;
+  if (!main || projectAdmissionRefusal(projectPaths(main).write)?.reason !== 'journal') return trees;
+  const recovered = await (await import('../project-migration/recovery.ts')).recoverProjectMigration(main).catch(() => undefined);
+  return recovered ? worktreesOf(main) : trees;
+}
+
 /**
  * Every cezar checkout reachable from the project registry (and from existing links, so a repo
  * that was never registered but was linked once keeps showing its siblings), newest commit
@@ -154,7 +166,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, ho
   const found: Omit<CezarCheckout, 'commit'>[] = [];
   for (const root of roots) {
     if (!existsSync(root) || !cezarPackageRoot(root)) continue;
-    const trees = await worktreesOf(root);
+    const trees = await recoveredWorktreesOf(root);
     // Task worktrees live under the main checkout, whose run store names them.
     const dataDir = taskDataDir(trees);
     for (const tree of trees) {

@@ -170,7 +170,7 @@ describe('the activity publisher', () => {
         watch: () => new ActivityDemand().watch('shop'),
       });
       const { stop } = await subscribe(publisher);
-      const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0 });
+      const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [] });
       reads.mockClear();
       await vi.advanceTimersByTimeAsync(2 * ONE_CHECK_MS);
       expect(reads).not.toHaveBeenCalled();

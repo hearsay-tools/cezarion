@@ -210,11 +210,10 @@ import {
 } from './git-changes.ts';
 import { healthConfig, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
-import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
 import { readAgentModelDefaults } from '../agent-config/models.ts';
 import { listAgentConfig } from '../agent-config/service.ts';
-import { listConfigFiles, type AgentHomePaths } from '../agent-config/catalog.ts';
+import { findConfigFile, listConfigFiles, type AgentHomePaths } from '../agent-config/catalog.ts';
 import { readAccountIdentity } from '../agent-config/account-identity.ts';
 import {
   defaultWorkspaceConfig,
@@ -280,6 +279,7 @@ import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forge
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
+import { closingSignal, prepareBeforeTicks, prepareProject, prepareProjects } from '../project-migration/auto.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -4916,8 +4916,8 @@ export function createApp(deps: ServerDeps) {
     coldRepoHandles.retainRoots(new Set(projects
       .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
       .map((project) => project.root)));
-    // No folder or a migration fence: no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
-    return projects.filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
+    // An unfinished migration finishes first. No folder or a fence: no runs. `not-git` still has an `.ai/cezar` worth indexing.
+    return (await prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })).filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
       const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
       // A cold project's repository identity only: asking for an owned one starts a discovery
       // nothing reads.
@@ -5092,7 +5092,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost, home: deps.home });
   // Every registry reader below sees what createApp sees: single-project mode hides other projects.
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
-  const automationCoordinator = new AutomationCoordinator({ listProjects: visibleProjects });
+  const automationCoordinator = new AutomationCoordinator({ listProjects: () => visibleProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })) }); // projects arrive prepared
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
   const taskWebhooks = createTaskWebhooks(deps);
@@ -5110,7 +5110,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
   });
-  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = {
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = prepareBeforeTicks({ ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary }, {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
@@ -5126,7 +5126,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
     }, () => undefined),
     lookup: (root, identities, signal) => resolveForgeRoot(root, deps.forgeFactory).mergedPullRequests(identities, signal),
-  };
+  });
   const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);
   const completionActions = new CompletionActionCoordinator({
     projects: archiveDeps.projects,
@@ -5288,7 +5288,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const project = (data as { project?: { id?: unknown; root?: unknown; status?: unknown } }).project;
       if (project && typeof project.id === 'string' && typeof project.root === 'string' && project.status !== 'missing') {
         const { id, root } = project as { id: string; root: string };
-        void rememberAutomationProject(id, root).then(() => {
+        void prepareProject(root, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary }).then(() => rememberAutomationProject(id, root)).then(() => {
           if (!automationsEnabled()) return;
           brakeIdleAutomations(id, automationCoordinator.store(id, root));
           return rescheduleAutomations();
@@ -5303,13 +5303,14 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       }
     }
   });
+  const lifecycle = closingSignal(server);
   const startBackgroundServices = () => {
     if (!deps.store.unavailable) deps.store.reports.start();
-    archiveOnMerge.start();
-    completionActions.start();
-    void visibleProjects().then((projects) => {
+    void visibleProjects().then(async (projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
+      await prepareProjects(all, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary, stopped: lifecycle.stopped }); // before any touch below
+      if (!lifecycle.stopped()) { archiveOnMerge.start(); completionActions.start(); }
       // #781: every registered project's preview leftovers, not only the boot project's.
       void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #667: build every other project's context now, so the first click on one does not pay
@@ -5323,8 +5324,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         void sharedContexts.warmAll(all.filter((project) => project.id !== bootId && project.root !== deps.repoRoot))
           .catch(() => undefined);
       }
-      // No automation warmup while opted out, or after discovery outlives the listener.
-      // The final continuation also checks for close during Git inspection.
+      // No automation warmup while opted out, or after discovery outlives the listener; the final continuation also checks for close during Git inspection.
       if (!automationsEnabled() || !server.listening) return;
       void Promise.all(all.map(async (project) => {
         await rememberAutomationProject(project.id, project.root);
@@ -5356,7 +5356,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // The one `upgrade` listener: the subscription bus and the preview's sockets (hearsay-tools/cezarion#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), ...previewSockets.routes]);
   const shutdownForRestart = async (): Promise<void> => {
-    archiveOnMerge.stop(); completionActions.stop();
+    lifecycle.stop(); archiveOnMerge.stop(); completionActions.stop();
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();

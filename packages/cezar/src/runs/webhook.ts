@@ -12,7 +12,6 @@ import { loadWorkspaceConfig, type WorkspaceProject } from '../workspace/config.
 import { taskWebhooks } from '../workspace/webhooks.ts';
 import { deriveRunContextEvents } from './event-history.ts';
 import type { RunRecord, RunStore } from './store.ts';
-import { holdProjectWork } from '../server/cockpit-ownership.ts';
 
 /**
  * Opted-in task webhooks from selected derived-state entries. One store subscriber queues
@@ -230,8 +229,8 @@ export class TaskWebhook {
   /** Run `task` after the previous one under `key`, whatever that one did. */
   private chain(map: Map<string, Promise<void>>, key: string, task: () => Promise<void>): void {
     const previous = map.get(key) ?? Promise.resolve();
-    // A project migration fence waits for queued and retrying deliveries, and admits them.
-    const next = holdProjectWork(this.options.dataDir, function delivery() { return previous.then(task); })
+    const next = previous
+      .then(task)
       .catch(() => undefined)
       .finally(() => {
         if (map.get(key) === next) map.delete(key);

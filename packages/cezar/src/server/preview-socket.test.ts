@@ -138,7 +138,7 @@ describe('the preview WebSocket', () => {
     const { status, ws } = await connect(url(SCOPED));
     expect(status).toBe('open');
     const migrator = new CockpitOwnership();
-    const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0 });
+    const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [] });
     try {
       const closed = once(ws, 'close');
       ws.send(JSON.stringify({ t: 'ping', ts: 1 }));

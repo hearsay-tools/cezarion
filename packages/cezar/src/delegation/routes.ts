@@ -43,8 +43,8 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     const caller = token ? credentials.authenticate(token) : undefined;
     if (!caller) return c.json({ code: 'unauthenticated' as const, error: 'Delegation authentication required' }, 401);
     c.set('caller', caller);
-    // The private listener is a second entry into the project: each request holds its migration
-    // admission lease until it answers, so a fence refuses or drains it like a cockpit route.
+    // The private listener is a second entry into the project: a migration fence or an unfinished
+    // journal refuses each request, as it refuses a cockpit route.
     const dataDir = service.projectDataDir(caller);
     if (!dataDir) return next();
     return withProjectAdmission(dataDir, next, (error) => c.json({ code: 'incompatible_state' as const, error: error.message }, 409));
