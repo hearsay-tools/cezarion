@@ -57,7 +57,6 @@ type OpenHandle = {
 type ClaimedHandle = { run: RunRecord; release: () => void };
 interface RemoveOptions {
   claim: 'publish' | 'reclaim';
-  activeBeforeLookup: boolean;
   checksActive: boolean;
   deletion: 'worktree' | 'record' | 'inline';
   nullClaimError: string;
@@ -156,10 +155,9 @@ function removalRefusal(store: RunCheckoutHost['store'], run: RunRecord, id: str
 
 function removeCheckout({ store, manager }: RunCheckoutHost, id: string, options: RemoveOptions): CheckoutRefusal | ClaimedHandle {
   const active = { status: 409, body: { error: 'run is active — cancel it first' } } as const;
-  if (options.checksActive && options.activeBeforeLookup && manager.isActive(id)) return active;
   const run = store.getRun(id);
   if (!run) return { status: 404, body: { error: 'not found' } };
-  if (options.checksActive && !options.activeBeforeLookup && manager.isActive(id)) return active;
+  if (options.checksActive && manager.isActive(id)) return active;
   const refused = removalRefusal(store, run, id, options.deletion);
   if (refused) return { status: 409, body: { error: refused } };
   if (isUsageLimitHold(run)) return { status: 409, body: { error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry' } };

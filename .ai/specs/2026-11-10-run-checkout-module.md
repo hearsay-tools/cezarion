@@ -183,7 +183,7 @@ Tests per slice are in the *Acceptance check* column.
 | Operation | Order | Today |
 |---|---|---|
 | ownership | the `/api/*` origin guard, then `adoptFallbackControl`, then `requireRunControl`, then route middleware (`protectFallbackRun`, validators), then the handler and the module | `srv:3153-3154`; `server/project-run-files.ts:33-47`; `srv:3989`, `:4005` |
-| lookup | 404 before any run-state check, on every route except `DELETE /runs/:id`, which checks `isActive` first until B8 | `srv:4008-4010` |
+| lookup | 404 before any run-state check, on every route, including `DELETE /runs/:id` (B8 implemented) | `srv:4008-4010` |
 | claim | the explicit checks, then the claim, with no `await` from the record read to the claim; the claim before rematerialize and before any other `await` | `srv:3950-3958`, `:3992-3996`, `:4007-4013`, `:4138-4143` |
 | release | `release()` in `finally` after all async work under the claim: rematerialize, push, `gh`, Git removal, `deleteRun` | `srv:3982-3984`, `:4002`, `:4018` |
 | reclaim release | `.finally(release)` on `reclaimWorktree`; the dirty-file count after a failed reclaim runs after the release, unclaimed | `srv:4147-4150` |
@@ -245,7 +245,7 @@ Git or file errors.
 
 | # | Route | Status and exact body today | Readers | After P1 | After P2 |
 |---|---|---|---|---|---|
-| 1 | every route but reclaim | 404 `{ error: 'not found' }` | `packages/web/src/routes/task-git/git-tab-loading.tsx:34`, `routes/task-thread/task-thread.tsx:142`, `lib/project-switch.ts:192`; `server/git-changes.test.ts:598`, `:707`; `server/open-in-file.test.ts:165`; `server/health-forge.test.ts:332` | unchanged | DELETE: before the active check (B8) |
+| 1 | every route but reclaim | 404 `{ error: 'not found' }` | `packages/web/src/routes/task-git/git-tab-loading.tsx:34`, `routes/task-thread/task-thread.tsx:142`, `lib/project-switch.ts:192`; `server/git-changes.test.ts:598`, `:707`; `server/open-in-file.test.ts:165`; `server/health-forge.test.ts:332` | unchanged | DELETE: before the active check (B8 implemented) |
 | 2 | reclaim | 404 `{ error: 'not found' }` | none | unchanged | unchanged |
 | 3 | POST and DELETE under `/runs/:id` | 409 `{ error: RUN_IN_USE_ELSEWHERE }`, `RUN_QUARANTINED` or the fallback text, from `requireRunControl`; 409 adoption error from `adoptFallbackControl` | `server/run-ownership-controls.test.ts:65-90`; `server/fallback-run-controls.test.ts:91-105` | unchanged (middleware) | unchanged |
 | 4 | `remove-worktree`, DELETE | 409 `{ error: 'Cannot write read-only project data in <path>. Use the binary that migrated the project.' }` from `protectFallbackRun` | `server/fallback-run-controls.test.ts:74-89` | unchanged (middleware) | unchanged |
@@ -263,7 +263,7 @@ Git or file errors.
 | 16 | `pr` | 409 `{ error: 'its worktree or branch is being cleaned up — retry in a moment' }` | same text in `workflows/continuation-admission.ts:232` (Continue) | unchanged | unchanged |
 | 17 | `pr` | 409 `{ error: 'no worktree/branch to publish — this task ran in the repo working tree' }` | `review-panel.tsx` toasts any status; sibling text in `server/forge/draft-pr.ts:24` | B7 shipped: 400 → 409, same text | 409, same text (B7) |
 | 18 | `pr` | 409 `{ error: <forge error>, manual: 'git merge <branch>' }` | `review-panel.tsx` (`setManual`); `repo-git/repo-not-landed.tsx:220` | unchanged (built in the handler) | unchanged |
-| 19 | `remove-worktree`, DELETE | 409 `{ error: 'run is active — cancel it first' }` | `packages/web/src/api/client.ts:196` (comment), `client.test.ts:533-537` | unchanged | DELETE: after 404 (B8) |
+| 19 | `remove-worktree`, DELETE | 409 `{ error: 'run is active — cancel it first' }` | `packages/web/src/api/client.ts:196` (comment), `client.test.ts:533-537` | unchanged | DELETE: after 404 (B8 implemented) |
 | 20 | `remove-worktree`, DELETE, reclaim | Phase 1: no explicit hold refusal; B2: 409 hold text before the claim | `server/auto-resume-api.test.ts` and `server/run-checkout.test.ts` | B2 implemented | 409 `{ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry' }` (B2); reclaim answered row 26 for a held run before |
 | 21 | `remove-worktree` | 409 `{ error: 'owned resources require verified worker cleanup' }` | `server/delegation-cleanup.test.ts:42-61`, `server/worktrees-api.test.ts:252-270` (status) | unchanged | unchanged |
 | 22 | DELETE | 409 `{ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }` | `server/worktrees-api.test.ts:252-270` (status) | unchanged | unchanged |
@@ -315,7 +315,7 @@ D-numbers are the research's disagreements; B-numbers are the plan's rows.
 | D8.3 | A null claim folds four causes into one text | Kept | The explicit checks before the claim keep their own texts |
 | D9 | `remove-worktree` uses `canDeleteRun(id, 'worktree')`, so a delegation root needs every child history deleted first, and the text does not name children | Kept | Not in the approved plan |
 | D10 | Reclaim keeps the branch and needs a clean tree; `remove-worktree` deletes the branch and forces | Kept | Plan Kept list; `srv:4133-4135` |
-| D11 | DELETE checks `isActive` before 404 | B8 | One check order |
+| D11 | DELETE checks 404 before `isActive` (B8 implemented) | B8 | One check order |
 
 ### Worktree cases for B5
 
@@ -348,7 +348,7 @@ A row covers what a reader sees on success as well as on refusal.
 | B5 | `/changes` output is unchanged; the run's live index no longer gains intent-to-add entries, so the agent's `git status` and `git stash` stop seeing them | the comment at `server/git-changes.ts:262-266`; `/repo/changes` (`srv:4627`, already a scratch index, unchanged); `packages/web/e2e/task-changes.e2e.ts`, `markdown-preview.e2e.ts`; ADR 0003 (now holds for `changes` too) | Rewrite the comment; no reader changes |
 | B6 | `diff` and `changes` answer 200 under autosave evidence | `server/worktrees-api.test.ts:464` (drops `/changes`); the cockpit's neutral 409 rendering (`routes/task-git/task-changes.tsx:104-105`) no longer shows the blocker; `cez task diff` (`task-cli/cli.ts:679-691`) gets 200 | Updated the test; CLI and cockpit consume the admitted 200 unchanged; settlement calls without a check and keeps a string |
 | B7 | Status 400 → 409 for no worktree or branch on `/pr`; the `AppType` error union of the route loses 400 | `routes/task-thread/review-panel.tsx` (toasts any status); `routes/task-git/task-changes.tsx:75` and `routes/repo-git/repo-not-landed.tsx:220` (toast any status); `createRunPr` forwards to the generic unwrap; `server/contract-parity.runs.test.ts:87` reads only 201 and `typed-bodies.test.ts` has no 400 reader | Checked for B7: no reader change |
-| B8 | An unknown id the manager counts active answers 404, not 409 | `deleteRun` doc comment (`api/client.ts:1587`); `lib/project-switch.ts:192` treats 404 as gone | No web change |
+| B8 | Implemented: an unknown id the manager counts active answers 404, not 409 | `deleteRun` doc comment (`api/client.ts:1587`); `lib/project-switch.ts:192` treats 404 as gone | No web change |
 | B9 implemented | Success: for a `worktree: false` run the `default` target opens `<repository root>/<path>` and answers `{ opened: true, path }` with that path; containment and the image gate stay (`server/open-in-targets.ts:40-69`, ADR 0031) | `openRunFileInApp` from the diff pane (`routes/task-git/task-changes.tsx:97-100`); `server/open-in-targets.test.ts:72-78` (runs with no `worktree` flag, unchanged); `server/open-in-file.test.ts` | No web change |
 
 ## Older specs that disagree with the code
