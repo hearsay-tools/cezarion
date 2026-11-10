@@ -16,7 +16,7 @@ import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contra
  * `{}` — an absent preference, never a throw, never a blocked startup.
  */
 export function uiStatePath(repoRoot: string): string {
-  return join(repoRoot, '.ai/cezar', 'ui-state.json');
+  return join(projectPaths(repoRoot).write, 'ui-state.json');
 }
 
 /**

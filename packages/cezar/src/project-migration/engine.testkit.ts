@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, expect, vi } from 'vitest';
+import { projectMovedMarker } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { CockpitOwnership, projectAdmissionRefusal, type ProjectMigrationFence } from '../server/cockpit-ownership.ts';
 import { directoriesDown, durable } from './durable.ts';
@@ -62,6 +63,10 @@ export function assertDurableOrder(events: readonly string[], journal: ProjectMi
     if (step === 'receipts' && kind === 'item') return [`file:${receipts[index]!}`, `dir:${dirname(receipts[index]!)}`];
     if (step === 'run-files' && kind === 'item') return [`file:${evidence[index]!}`, ...chain(dirname(evidence[index]!))];
     if (point === 'run-store:after' && journal.rewrites.some(rewrite => rewrite.kind === 'run-row')) return [`file:${join(journal.destination, RUNS_DB_FILE)}`, ...chain(journal.destination)];
+    if (point === 'mark-moved:after') {
+      const marker = projectMovedMarker(journal.repoRoot)!.path;
+      return [`file:${marker}`, `dir:${dirname(marker)}`, `dir:${dirname(dirname(marker))}`];
+    }
     if (kind === 'marked' || point === 'journal:written') return [`file:${join(root, 'squawk-migration.json')}`, `dir:${root}`];
     return [];
   };

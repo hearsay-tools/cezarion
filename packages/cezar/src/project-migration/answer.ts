@@ -12,6 +12,8 @@ export interface ProjectMigrationAnswer {
   report: string;
   /** `git mv` commands for the tracked files the migration leaves in place, for the user to run. */
   gitMv: string[];
+  /** The project was already moved: nothing changed. */
+  alreadyMoved: boolean;
 }
 
 /** A finished journal as the plan text: what it moved, repaired and rewrote. */
@@ -19,6 +21,7 @@ function journalReport(result: ProjectMigrationResult): string {
   const { journal } = result;
   return describeProjectMigrationPlan({
     ...journal, journal: '', conflicts: [], blockers: [], gitMv: gitMvCommands(journal.repoRoot, journal.tracked), notRewritten: NOT_REWRITTEN,
+    alreadyMoved: result.alreadyMoved,
   });
 }
 
@@ -26,12 +29,12 @@ function journalReport(result: ProjectMigrationResult): string {
 export async function dryRunAnswer(repoRoot: string, recovered: ProjectMigrationResult | undefined): Promise<ProjectMigrationAnswer> {
   const plan = await planProjectMigration(repoRoot);
   return { dryRun: true, resumed: recovered !== undefined, ...(recovered ? { recovered: journalReport(recovered) } : {}),
-    report: describeProjectMigrationPlan(plan), gitMv: plan.gitMv };
+    report: describeProjectMigrationPlan(plan), gitMv: plan.gitMv, alreadyMoved: plan.alreadyMoved };
 }
 
 /** A finished migration (its journal removed): what it moved, repaired and rewrote. */
 export function migrationAnswer(result: ProjectMigrationResult): ProjectMigrationAnswer {
-  return { dryRun: false, resumed: result.resumed, report: journalReport(result), gitMv: result.gitMv };
+  return { dryRun: false, resumed: result.resumed, report: journalReport(result), gitMv: result.gitMv, alreadyMoved: result.alreadyMoved };
 }
 
 /** The answer as the CLI prints it: what a finished journal did, the report, then what happened. */
@@ -41,7 +44,9 @@ export function migrationAnswerText(answer: ProjectMigrationAnswer): string {
     : [];
   lines.push(answer.report);
   if (answer.resumed && !answer.recovered) lines.push('An unfinished migration was finished first.');
-  if (answer.dryRun) lines.push(answer.recovered ? 'Dry run: planning changed nothing; the completed migration above did.' : 'Dry run: nothing was moved or rewritten.');
-  else lines.push(`Migration complete.${answer.gitMv.length ? ' Run the git mv commands above and commit them.' : ''}`);
+  const next = answer.gitMv.length ? ' Run the git mv commands above and commit them.' : '';
+  if (answer.alreadyMoved && !answer.dryRun) lines.push(`The project was already moved; nothing changed.${next}`);
+  else if (answer.dryRun) lines.push(answer.recovered ? 'Dry run: planning changed nothing; the completed migration above did.' : 'Dry run: nothing was moved or rewritten.');
+  else lines.push(`Migration complete.${next}`);
   return lines.join('\n');
 }

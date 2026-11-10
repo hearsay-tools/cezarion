@@ -155,7 +155,7 @@ import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/prov
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { allUsage, currentUsage, onUsage } from '../core/process-usage.ts';
-import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
+import { loadWorkflows } from '../workflows/load.ts';
 import {
   normalizeWorkflowDoc,
   skillStackOf,
@@ -245,7 +245,7 @@ import {
   type ResolvedAgentProfile,
 } from '../workspace/agent-profiles.ts';
 import { PROFILE_CAPABLE_PROVIDERS, profileAgentDir, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
-import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
+import { quoteExecutable, shellQuote, withEnvPrefix } from '../core/shell-env.ts';
 import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
 import {
@@ -1341,10 +1341,10 @@ export function createApp(deps: ServerDeps) {
   };
 
   /** The copy-paste fallback shown when no terminal could be opened — same account, spelled for
-   *  this platform's shell. `null` when the dir cannot be embedded safely, which is a refusal. */
+   *  this platform's shell. `null` when the account environment cannot be embedded safely. */
   const handoffFallbackCommand = (cwd: string, command: string, env: Record<string, string>): string | null => {
     const prefixed = withEnvPrefix(command, env, process.platform);
-    return prefixed === null ? null : `cd '${cwd}' && ${prefixed}`;
+    return prefixed === null ? null : `cd ${shellQuote(cwd)} && ${prefixed}`;
   };
 
   /** A registered project's realpath'd root, or null when the id is unknown. */
@@ -2799,7 +2799,7 @@ export function createApp(deps: ServerDeps) {
       const issue = stepsIssue(steps);
       if (issue) return c.json({ error: issue }, 400);
       const slug = slugify(parsed.data.name) || 'chain';
-      const dir = join(repoRoot, WORKFLOWS_DIR);
+      const dir = join(projectPaths(repoRoot).write, 'workflows');
       const path = join(dir, `${slug}.yaml`);
       // Pure skill stacks are written in the portable compact form (spec 012) —
       // `name` + `skills:` — so the file imports cleanly in any repo.

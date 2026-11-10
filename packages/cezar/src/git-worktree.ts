@@ -14,9 +14,6 @@ import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
 /** One worktree per task (spec 006). Only createWorktree throws; its caller reports failure. */
 
-/** Repo-relative home of all task worktrees (gitignored via .ai/cezar/.gitignore). */
-export const WORKTREES_DIR = '.ai/cezar/worktrees';
-
 export const DIFF_CAP = 400_000;
 
 interface GitResult {
@@ -66,7 +63,7 @@ export async function resolveBaseRef(repoRoot: string, base: string): Promise<st
 }
 
 export function worktreePathFor(repoRoot: string, runId: string): string {
-  return join(repoRoot, WORKTREES_DIR, runId);
+  return join(projectPaths(repoRoot).write, 'worktrees', runId);
 }
 
 export interface WorktreeInfo {
@@ -220,7 +217,7 @@ async function createWorktreeLocked(
 ): Promise<WorktreeInfo> {
   const base = await resolveWorktreeBase(repoRoot, baseBranch, git);
   const branch = branchFor(runId);
-  const absolutePath = join(canonicalPath(repoRoot), WORKTREES_DIR, runId);
+  const absolutePath = join(projectPaths(canonicalPath(repoRoot)).write, 'worktrees', runId);
   const branchRef = `refs/heads/${branch}`;
 
   if (options.freshOnly) {
@@ -983,13 +980,13 @@ async function pruneOrphansLocked(repoRoot: string, validIds: ReadonlySet<string
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   let entries: Dirent[];
   try {
-    entries = await readdir(join(repoRoot, WORKTREES_DIR), { withFileTypes: true });
+    entries = await readdir(join(projectPaths(repoRoot).write, 'worktrees'), { withFileTypes: true });
   } catch {
     entries = []; // Fallback paths still need the read-only cleanup count.
   }
   const fallbackEntries = await readdir(join(projectPaths(repoRoot).reads[1]!, 'worktrees'), { withFileTypes: true }).catch(() => []);
   const skipped = fallbackEntries.filter(entry => entry.isDirectory() && !validIds.has(entry.name)).length;
-  if (skipped) console.info(`[cez] Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under .ai/squawk/.`);
+  if (skipped) console.info(`[cez] Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under ${projectPaths(repoRoot).reads[1]}.`);
   const removed: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || validIds.has(entry.name) || protection.paths.has(worktreePathFor(repoRoot, entry.name))) continue;

@@ -491,12 +491,13 @@ export class ProjectContexts {
     if (!project) throw new ProjectContextError('unknown-project', projectId);
     if (project.status === 'missing') throw new ProjectContextError('missing-root', projectId);
 
-    noticeLegacyProject(project.root);
-    const dataDir = projectPaths(project.root).write;
     // An unfinished migration finishes first, before any read; this build then keeps the claim it took.
     // With the release switch, an idle legacy project then moves before its first read or task start.
     await prepareProject(project.root, { ownership: this.deps.ownership, homes: [this.deps.home], rebrand: this.deps.rebrand, keep: true });
     if (stale()) throw new ProjectContextsClosedError();
+    noticeLegacyProject(project.root);
+    // Asked after the move: a moved project's write root is `.ai/squawk/`.
+    const dataDir = projectPaths(project.root).write;
     return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
   }
 
