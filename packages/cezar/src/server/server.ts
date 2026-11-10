@@ -281,7 +281,7 @@ import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } 
 import { closingSignal, prepareBeforeTicks, prepareProject, prepareProjects } from '../project-migration/auto.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
-import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
+import { freshCliHandoff, openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import {
@@ -3601,11 +3601,10 @@ export function createApp(deps: ServerDeps) {
       return c.json({ continued: true });
     })
 
-    // "Open in terminal" (spec 003): hand the session off to a real terminal —
-    // in the task's worktree when it still exists (spec 006).
+    // "Open in terminal" (spec 003): open the session or a fresh CLI in a real terminal.
     .post('/runs/:id/open-in-cli', async (c) => {
       const project = c.get('project');
-      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: true });
+      const checkout = runCheckout(project, c.req.param('id'), 'open');
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       // Hosted mode: there is no "my machine" to open a terminal on. The UI
       // hides the button when localHandoff is false — this is defense in depth.
@@ -3627,14 +3626,15 @@ export function createApp(deps: ServerDeps) {
       const cwd = checkout.directory();
       const refusal = fallbackProjectWriteError(cwd);
       if (refusal) return c.json({ error: refusal }, 409);
-      const command = resumeCommand(backend, sessionId);
-      // Fails closed on an id we do not recognise — see resumeCommand (#431).
-      if (!command) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
-      const account = await handoffEnv(backend, sessionStep?.profileId);
+      const resume = checkout.resumeAllowed ? resumeCommand(backend, sessionId) : undefined;
+      if (resume === null) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
+      const account = resume
+        ? { command: resume, ...await handoffEnv(backend, sessionStep?.profileId) }
+        : await freshCliHandoff(backend, project.root, deps.home);
       if ('error' in account) return c.json({ error: account.error }, 409);
+      const { command } = account;
       const fallback = handoffFallbackCommand(cwd, command, account.env);
-      // Fail closed for the same reason as the session id: a terminal opened without the
-      // account's config dir resumes nothing and says nothing about why.
+      // Fail closed: the terminal must use the account that holds the session.
       if (fallback === null) {
         return c.json({ error: 'this account\'s folder cannot be used in a terminal command' }, 409);
       }
@@ -3648,7 +3648,7 @@ export function createApp(deps: ServerDeps) {
     // Open a run's worktree (or the repo root) in the chosen local app.
     .post('/runs/:id/open-in', jsonZodValidator(openInSchema), async (c) => {
       const project = c.get('project');
-      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: false });
+      const checkout = runCheckout(project, c.req.param('id'), 'open');
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       if (!capabilities().localHandoff) {
         return c.json(
