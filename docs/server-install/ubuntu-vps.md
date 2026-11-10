@@ -270,8 +270,15 @@ unit, and its check stays at the bind address. The group commits only after
 every instance passes. Any failure stops the group, restores the old units and
 sites and renames the new home's `install.json` to `install.json.failed`, so the
 next run starts again from the untouched legacy home. After success, old unit
-files stay as `*.migrated`. `--dry-run` lists every unit, site, file and
-`Environment=` line it would change; it shows only `CEZ_HOME`'s value.
+files stay as `*.migrated`. `--dry-run` prints that plan and changes nothing,
+not even the legacy home: the stop, every unit, site, file and `Environment=`
+line it would change (it shows only `CEZ_HOME`'s value), each health check, the
+group, the pending marker and the rollback.
+
+Until `server-migrate` succeeds, the server and every other command keep using
+the old home `~/.cezar` (or `CEZ_HOME`) and print one notice to run
+`server-migrate`. They never migrate a home that records a server install with group migration support.
+Desktop platforms without that support, including macOS, keep their boot migration.
 
 ---
 

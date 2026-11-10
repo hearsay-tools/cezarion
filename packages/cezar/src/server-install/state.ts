@@ -17,11 +17,11 @@ import { freshServerState, serverStateSchema, type ServerState, type StepOutcome
  */
 
 /** Load a host-level instance record, degrading to a fresh record on any error. */
-export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): ServerState {
+export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home: Home, read = (path: string) => readHomeFile(path, home)): ServerState {
   const path = serverStatePath(instance, home);
   let raw: string;
   try {
-    raw = readHomeFile(path, home);
+    raw = read(path);
   } catch {
     return freshServerState();
   }
@@ -41,10 +41,10 @@ export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home
  * uninstall/deploy resolve which instance to act on. Never throws — an
  * unreadable dir or a corrupt file is simply skipped.
  */
-export function listServerInstances(home: Home): Array<{ instance: string; state: ServerState }> {
+export function listServerInstances(home: Home, read = (path: string) => readHomeFile(path, home)): Array<{ instance: string; state: ServerState }> {
   const out: Array<{ instance: string; state: ServerState }> = [];
   if (existsSync(serverStatePath(DEFAULT_SERVER_INSTANCE, home))) {
-    out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE, home) });
+    out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE, home, read) });
   }
   let entries: string[] = [];
   try {
@@ -55,7 +55,7 @@ export function listServerInstances(home: Home): Array<{ instance: string; state
   for (const file of entries) {
     if (!file.endsWith('.json')) continue;
     const instance = basename(file, '.json');
-    out.push({ instance, state: loadServerState(instance, home) });
+    out.push({ instance, state: loadServerState(instance, home, read) });
   }
   return out;
 }
