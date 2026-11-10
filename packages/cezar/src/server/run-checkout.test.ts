@@ -97,7 +97,7 @@ describe.each(routes)('$intent $route', (route) => {
     const result = route.intent === 'mutate'
       ? runCheckout(host, baseRun.id, 'mutate')
       : runCheckout(host, baseRun.id, 'read', route);
-    const checksAutosave = Boolean(state.run && route.checksAutosave && !(route.intent === 'mutate' && state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
+    const checksAutosave = Boolean(state.run && route.intent === 'mutate' && !(state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
     const expected = checksAutosave && state.blocked ? autosave : state[route.column];
     expect(result).toEqual(typeof expected === 'object' && expected !== null
       ? expected
