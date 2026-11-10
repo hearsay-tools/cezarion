@@ -25,6 +25,7 @@ import { RULES } from './plugin.ts';
 import { compareSetters, readSetterBaseline, scanSetters, WEB_SRC } from './raw-query-setter.ts';
 import { readReaders, readsResumeTime } from './run-fact-reader.ts';
 import { historyAccesses, historyReadersFile, readHistoryReaders } from './run-history-reader.ts';
+import { staleRunnerIdBranches } from './runner-id-branch.ts';
 import { repoRoot } from './source-rule.ts';
 
 /**
@@ -169,7 +170,7 @@ export function staleEntries(root = repoRoot): string[] {
       problems.push(`${READERS} cez/run-fact-reader: ${file} no longer reads autoResumeAt; remove it from the list`);
     }
   }
-  problems.push(...staleHistoryReaders(root), ...staleHomeReaders(root));
+  problems.push(...staleHistoryReaders(root), ...staleHomeReaders(root), ...staleRunnerIdBranches(root));
   const baseline = readSetterBaseline(join(root, SETTERS));
   const actual = [...new Set(baseline.map((entry) => entry.file))].flatMap((file) => {
     const text = source(`${WEB_SRC}${file}`);

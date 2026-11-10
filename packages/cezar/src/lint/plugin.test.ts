@@ -73,6 +73,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
   'run-fact-reader': ['packages/web/src/lib/d.ts', "const held = attention.label === 'usage limit';\n"],
   'run-history-reader': ['packages/cezar/src/raw-history.ts', 'const text = readFileSync(historyPaths(dir, id).plain);\n'],
   'runner-fact-combination': ['packages/cezar/src/workflows/run/fact-pair.ts', "function f(runner, id) {\n  return runner.systemPromptOnResume === 'resent' && RUNNER_FACTS[id].nativeAsk === 'none';\n}\n"],
+  'runner-id-branch': ['packages/web/src/routes/runner-branch.ts', "export const held = (runner: string) => runner === 'cursor';\n"],
   'undocumented-env-name': ['packages/cezar/scripts/e.mjs', "process.env.CEZ_NOT_DOCUMENTED_ANYWHERE = '1';\n"],
 };
 
@@ -108,6 +109,11 @@ const APPROVED: Record<string, string> = {
   // runner-fact-combination: one fact per function, and a test outside its scope.
   'packages/cezar/src/workflows/run/fact-single.ts': "const a = runner => runner.systemPromptOnResume === 'resent';\nconst b = id => RUNNER_FACTS[id].nativeAsk;\n",
   'packages/cezar/src/workflows/run/fact-pair.test.ts': "it('x', () => { expect(runner.systemPromptOnResume).toBe(RUNNER_FACTS[id].nativeAsk); });\n",
+  // runner-id-branch: a listed site, the seam itself, a test and a message tag.
+  'packages/cezar/src/planner.ts': "const model = config.defaultRunner === 'claude' ? config.plannerModel : undefined;\n",
+  'packages/cezar/src/core/runner-pick.ts': "const print = backend === 'cursor';\n",
+  'packages/web/src/routes/runner-branch.test.ts': "const print = backend === 'cursor';\n",
+  'packages/web/src/routes/frame.ts': "switch (message.t) { case 'cursor': break; }\n",
   // undocumented-env-name: a documented name, a mock control, and a test.
   'packages/cezar/src/j.ts': "process.env.CEZ_DRY_RUN = '1'; env.CEZ_MOCK_ANYTHING = '1';\n",
   'packages/cezar/src/k.test.ts': 'const c = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n',
@@ -139,7 +145,7 @@ describe('the cez rules under oxlint', () => {
   });
 
   it.each(Object.entries(VIOLATIONS))('%s reports its seeded violation with file, line and rule', (rule, [file]) => {
-    expect(problems.filter((p) => p.startsWith(`${file}:`))).toEqual([expect.stringMatching(new RegExp(`^${file.replaceAll('.', '\\.')}:\\d+:\\d+ cez\\(${rule}\\): .+(?:hearsay-tools/cezarion#|AGENTS\\.md)`))]);
+    expect(problems.filter((p) => p.startsWith(`${file}:`))).toEqual([expect.stringMatching(new RegExp(`^${file.replaceAll('.', '\\.')}:\\d+:\\d+ cez\\(${rule}\\): .+(?:hearsay-tools/cezarion#|open-mercato/cezar#|AGENTS\\.md)`))]);
   });
 
   it('passes every approved exception', () => {
@@ -318,6 +324,7 @@ describe('stale entries', () => {
     'packages/cezar/src/lint/contract-root-import.baseline.json': JSON.stringify({ files: { 'packages/api-client/src/index.ts': 'barrel', 'packages/web/src/gone.ts': 'gone' } }),
     'packages/cezar/src/lint/run-history-readers.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/home-readers.baseline.json': JSON.stringify({ entries: [] }),
+    'packages/cezar/src/lint/runner-id-branch.baseline.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/resume-time-readers.json': JSON.stringify({ files: { 'packages/web/src/lib/reads.ts': 'reads', 'packages/web/src/lib/stopped.ts': 'stopped' } }),
     'packages/web/src/test/search-params-discipline.baseline.json': JSON.stringify({ sites: [{ file: 'routes/x.tsx', site: '[query, setQuery] = useSearchParams()', reason: 'r' }] }),
     'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",
