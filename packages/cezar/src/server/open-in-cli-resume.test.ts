@@ -132,6 +132,18 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
   const openInCli = (runId: string, options: { disabled?: ProviderId[]; disconnected?: ProviderId[] } = {}) =>
     apiRequest(app(options), `/api/v1/runs/${runId}/open-in-cli`, { method: 'POST' });
 
+  it.each(['queued', 'running', 'waiting'] as const)(
+    'open-in-cli opens a fresh CLI for an engine-owned %s run with a session', async (status) => {
+      const run = makeRun('claude', 'sess-1');
+      store.updateStep(run.id, 'work', { backend: 'codex' });
+      setRunStatus(store, run.id, status);
+      const response = await openInCli(run.id);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ opened: true, command: 'codex' });
+      expect(mockOpenInTerminal).toHaveBeenCalledWith(repoRoot, 'codex', {});
+    },
+  );
+
   it.each([
     ['claude', 'cursor', 'agent --resume sess-1'],
     ['cursor', 'claude', 'claude --resume sess-1'],
