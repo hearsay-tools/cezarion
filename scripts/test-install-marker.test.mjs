@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -26,5 +26,19 @@ test('script sandboxes create a stable private marker and refuse an inherited li
     writeFileSync(path, live);
     assert.throws(() => ensureTestInstallMarker(root), /Refusing.*live install marker/);
     assert.equal(readFileSync(path, 'utf8'), live);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('a live split marker refuses before writing an unmarked base', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-script-split-marker-'));
+  const config = join(root, 'config');
+  const live = JSON.stringify({ installId: 'live-split', kind: 'live' });
+  try {
+    mkdirSync(config);
+    writeFileSync(join(config, 'install.json'), live);
+    assert.throws(() => ensureTestInstallMarker(root), /Refusing.*live install marker/);
+    assert.equal(existsSync(join(root, 'install.json')), false);
+    assert.equal(readFileSync(join(config, 'install.json'), 'utf8'), live);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
