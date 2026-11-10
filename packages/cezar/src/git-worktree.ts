@@ -836,7 +836,7 @@ type IndexGit = (args: string[]) => Promise<GitResult>;
  * Read through a private index copy. Try OS temp, then the Git directory; if neither is
  * writable, retain the real-index fallback. Always remove scratch state.
  */
-async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
+export async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
   const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
   const realIndex = real.ok ? real.stdout.trim() : '';
   let scratch: string | undefined;
