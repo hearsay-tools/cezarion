@@ -475,23 +475,30 @@ can import those passes instead of running the same test files again
   exit code are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3
   days. If the fetch fails, the shard runs the plain command with a warning. Other events run
   the command exactly as before.
-- The `Publish Squeal shared results` job (`squeal-results`) runs after all four shards pass
-  in a merge group. It checks out `merge_group.head_sha` with full history, installs
-  dependencies, builds the server, downloads the parts, runs `squeal ci export` and then
-  `squeal ci publish --keep 100`, which pushes `refs/squeal/<sha>` and deletes refs beyond the
-  newest 100 main commits. It is the only job with `contents: write`, keeps the checkout's
-  token for that push, and runs no tests.
-- The job is outside `verify.needs` and the merge-queue roster: its failure never blocks a
+- The `Export Squeal results` job (`squeal-export`) runs after all four shards pass in a
+  merge group, with `contents: read` and no stored credentials. It checks out
+  `merge_group.head_sha`, installs dependencies, builds the server, downloads the parts, runs
+  `squeal ci export` and uploads `squeal-results.json.gz` as the `squeal-results` artifact,
+  kept 3 days. It runs the queued code, so it never holds write access.
+- The `Publish Squeal shared results` job (`squeal-publish`) is the only job with
+  `contents: write`, and it runs no repository code: no install, build or package script. It
+  checks out the same commit with full history and no stored credentials, sets up Node,
+  fetches the Squeal release, downloads the export and runs `squeal ci publish --keep 100`.
+  That pushes `refs/squeal/<sha>` and deletes refs beyond the newest 100 main commits; it
+  runs only git and reads `squeal.config.json`. The token reaches only that step, as a git
+  extra header in its environment.
+- Neither job is in `verify.needs` or the merge-queue roster: their failure never blocks a
   merge. With `shared.ref` in `squeal.config.json`, developers' Squeal daemons fetch the
   nearest published ref.
-- The shards and the export job read Node from `.node-version` (one exact version), so the
+- The shards and both Squeal jobs read Node from `.node-version` (one exact version), so the
   published results carry the environment developers run. Recording assumes nothing changes
   the tests' input files while the command runs.
 
 `.github/scripts/ci-squeal-results.workflow.test.cjs` pins the event selection, the
-unchanged command and exit code, the job's permissions and its absence from required checks.
+unchanged command and exit code, both jobs' permissions, the publish job's token handling
+and their absence from required checks.
 To move to another Squeal release, change `SQUEAL_TAG` and `SQUEAL_COMMIT` in the vitest job's
-`Fetch the Squeal release` step; the export job reuses it.
+`Fetch the Squeal release` step; both Squeal jobs reuse it.
 
 ### Upstream scan PRs
 
