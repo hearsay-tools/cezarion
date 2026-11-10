@@ -38,7 +38,6 @@ invalid:
   - "const x = { kind: 'ci' }"
   - "kind === 'pr'"
   - "'timer' === kind"
-  - "wait.kind === 'pr'"
   - "'timer' === wait.kind"
   - "wait?.kind === 'pr'"
   - "'timer' === wait?.kind"

@@ -195,6 +195,15 @@ the P1b Home selector. Browser workers load `scripts/test-browser-home-env.mjs`:
 they retain host HOME and USERPROFILE for installed browser discovery (the P0b
 exception), while CEZ_HOME and XDG overrides use a private marked sandbox.
 
+### Wait-kind literals (`wait-kind-literal-outside-engine`)
+
+The rule checks production `.ts` files in `packages/cezar/src`; it ignores tests and testkits
+(hearsay-tools/cezarion#3133).
+It reports `===`, `!==`, `==` and `!=` comparisons of `kind` or `*.kind` with a wait-kind
+literal, case labels with one, and `kind:` entry literals, including `as const` and `satisfies`.
+Its exceptions are the reasoned allow-list in the rule's `ignores`, kept current by the stale-entry test.
+It does not follow kinds held in variables, indexes or types, and excludes the request kind `request`.
+
 ## Add a rule
 
 For a safety guard, first apply [New safety guards](#new-safety-guards) and document
@@ -399,5 +408,3 @@ from ordinary HSQ-first operator settings (coordinator decision D11).
   dynamic paths through unrecognized objects, reflection and `eval` are not followed.
 
 These limits need code review. They do not permit new baseline allowances.
-
-`wait-kind-literal-outside-engine` confines production wait-kind comparisons, case labels and entry literals to the reasoned Table F allow-list (hearsay-tools/cezarion#3133); its stale-entry test rejects an exception with no match.
