@@ -98,22 +98,12 @@ export async function openRunCli(
   // An id resumeCommand refuses (open-mercato/cezar#431) degrades to a fresh CLI in the worktree,
   // exactly like a run that never recorded a session.
   const resume = sessionId && cliRunner === (sessionStep?.backend ?? run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-  // Runners with a CEZ_*_BIN override launch the configured binary, not the PATH name.
-  const command = resume ?? freshCliCommand(cliRunner);
-  if (command === null) {
-    return c.json({ error: `the configured ${cliRunner === 'omp' ? 'OMP' : 'Cursor'} executable cannot be used in a terminal command` }, 409);
-  }
-  // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
-  // config dir that holds its session, and a FRESH CLI in this worktree should still open
-  // on the account the project works under — otherwise "Open in → Claude CLI" quietly
-  // hands the user a different subscription than every task in the same project uses.
+  // A resume uses the session account; a fresh CLI uses the project's account.
   const account = resume
-    ? await handoffEnv(cliRunner, sessionStep?.profileId)
-    : await resolveProfileEnvForRoot(repoRoot, cliRunner, undefined, process.env, home).then(({ env }) => ({ env }), (err: unknown) => {
-      if (err instanceof AgentAccountUnavailableError) return { error: err.message };
-      throw err;
-    });
+    ? { command: resume, ...await handoffEnv(cliRunner, sessionStep?.profileId) }
+    : await freshCliHandoff(cliRunner, repoRoot, home);
   if ('error' in account) return c.json({ error: account.error }, 409);
+  const { command } = account;
   const fallback = handoffFallbackCommand(dir, command, account.env);
   if (fallback === null) {
     return c.json({ error: 'this account\'s folder cannot be used in a terminal command' }, 409);
@@ -123,6 +113,22 @@ export async function openRunCli(
     return c.json({ error: 'no terminal emulator found', command: fallback }, 409);
   }
   return c.json({ opened: true, path: dir, command });
+}
+
+/** Fresh terminals use the selected executable and the project's account. */
+export async function freshCliHandoff(cliRunner: RunnerId, repoRoot: string, home: Home): Promise<
+  { command: string; env: Record<string, string> } | { error: string }
+> {
+  // Runners with a CEZ_*_BIN override launch the configured binary, not the PATH name.
+  const command = freshCliCommand(cliRunner);
+  if (command === null) {
+    return { error: `the configured ${cliRunner === 'omp' ? 'OMP' : 'Cursor'} executable cannot be used in a terminal command` };
+  }
+  const account = await resolveProfileEnvForRoot(repoRoot, cliRunner, undefined, process.env, home).then(({ env }) => ({ env }), (err: unknown) => {
+    if (err instanceof AgentAccountUnavailableError) return { error: err.message };
+    throw err;
+  });
+  return { command, ...account };
 }
 
 /** Resolve only the fresh-launch executable; resume commands keep their own session flags. */
