@@ -50,6 +50,25 @@ describe('preview browser launch', () => {
     expect(vi.mocked(connection.close).mock.invocationCallOrder[0]).toBeLessThan(proc.kill.mock.invocationCallOrder[0]!);
   });
 
+  it('kills a closed browser that has not exited after the grace, and only then', async () => {
+    vi.useFakeTimers();
+    const { proc } = browserFixture();
+    const stubborn = await launchBrowser('/profile', {}, testHome({}));
+    stubborn.close();
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(proc.kill.mock.calls).toEqual([[]]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(proc.kill.mock.calls).toEqual([[], ['SIGKILL']]);
+    const second = browserFixture();
+    const polite = await launchBrowser('/profile', {}, testHome({}));
+    polite.close();
+    second.proc.emit('exit', 0, null);
+    await polite.exited;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(second.proc.kill.mock.calls).toEqual([[]]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('throws the missing-browser error before launching', async () => {
     browserFixture();
     vi.mocked(resolveChromium).mockReturnValue(undefined);

@@ -1,10 +1,12 @@
+import { execFile } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
+import { promisify } from 'node:util';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { gitCommonDir } from '../delegation/workspace.ts';
+import { MIGRATION_JOURNAL_FILE } from '../server/cockpit-ownership.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import type { PathRewrite, ProjectMigrationJournal } from './journal.ts';
-import { gitOutput } from './plan.ts';
 
 /**
  * What a project migration journal may name (hearsay-tools/cezarion#3089). A journal is read back
@@ -74,6 +76,8 @@ function carried(from: string, to: string, path: { from: string; to: string }): 
   return outsideOf(from, path.from) ?? outsideOf(to, path.to)
     ?? (path.to === to + path.from.slice(from.length) ? undefined : `${path.to} is not where ${path.from} goes`);
 }
+
+const execFileAsync = promisify(execFile);
 
 const LEGACY = `${sep}.ai${sep}cezar`;
 const MIGRATED = `${sep}.ai${sep}squawk`;
@@ -149,14 +153,30 @@ async function journalRefusal(path: string, journal: ProjectMigrationJournal): P
 export const MAX_JOURNAL_BYTES = 64 * 1024 * 1024;
 
 /**
+ * Why Git tracking refuses the journal of the project at `repoRoot` (a real path): tracked, or the
+ * check could not finish. A directory outside any Git repository tracks nothing. The pathspec is
+ * the journal's canonical place, whatever form the caller's path has.
+ */
+async function trackedJournalRefusal(repoRoot: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync('git', ['ls-files', '-z', '--', `.ai/${MIGRATION_JOURNAL_FILE}`], { cwd: repoRoot, encoding: 'utf8', timeout: 60_000 });
+    return stdout ? 'Git tracks it; a migration journal is never committed' : undefined;
+  } catch (error) {
+    if (/not a git repository/i.test(String((error as { stderr?: unknown }).stderr ?? ''))) return undefined;
+    return `Git could not tell whether it tracks the journal: ${(error as Error).message.split('\n')[0]}`;
+  }
+}
+
+/**
  * Accept the journal file at `path` before it is read: false when there is none; refused when it
- * is a symlink or not a regular file, larger than `MAX_JOURNAL_BYTES`, or tracked by Git (only a
- * forced add or a clone tracks it; one Git call, only when a journal exists). Nothing is read.
+ * is a symlink or not a regular file, larger than `MAX_JOURNAL_BYTES`, tracked by Git (only a
+ * forced add or a clone tracks it; one Git call, only when a journal exists), or when that Git
+ * check cannot finish. Nothing is read.
  */
 export async function assertJournalFile(path: string, repoRoot: string): Promise<boolean> {
   if (!pathPresent(path)) return false;
   const refusal = notRegularFile(path) ?? (lstatSync(path).size > MAX_JOURNAL_BYTES ? `it is larger than ${MAX_JOURNAL_BYTES} bytes` : undefined)
-    ?? (await gitOutput(repoRoot, ['ls-files', '--error-unmatch', '--', relative(repoRoot, path)]) !== undefined ? 'Git tracks it; a migration journal is never committed' : undefined);
+    ?? await trackedJournalRefusal(repoRoot);
   if (refusal) throw new ProjectMigrationJournalRefusedError(path, refusal);
   return true;
 }

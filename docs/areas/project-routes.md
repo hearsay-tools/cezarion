@@ -39,7 +39,8 @@ plus start-token liveness and token-checked release.
   but runs its automations (hearsay-tools/cezarion#3136). Live tasks are
   `projectLiveTasks` over a read-only view (`readLiveTaskView`: each run store read quiescent,
   from a private copy when it has a WAL file, and a `runs.json` no store imported yet read as
-  JSON), so a refusal writes nothing: every non-terminal task (`isLiveRecord`: queued, running,
+  JSON), so a refusal writes nothing; a task marked live whose record cannot be read refuses too:
+  every non-terminal task (`isLiveRecord`: queued, running,
   waiting on a human, a usage-limit auto-resume, a timer, a PR or a worker) persisted as live
   in either directory, plus the runs of families another live store claims in `run_claims` (a
   headless `cez run`, another binary), read from both physical claim tables so a stale legacy
@@ -138,7 +139,8 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
   of this root's `.ai/cezar` to the same place under `.ai/squawk`; a tracked-file entry that is not a
   relative `.ai/cezar/...` path; any existing directory on the way that resolves elsewhere (a
   symlink out); and, before it is read, a journal file that is a symlink, not a regular file,
-  larger than 64 MiB or tracked by Git (one `git ls-files` call, only when a journal exists; the
+  larger than 64 MiB or tracked by Git, or whose Git check cannot finish (one `git ls-files` call
+  at the journal's canonical path, only when a journal exists; the
   shared excludes keep a real journal out of every ordinary add). A fresh plan passes the same
   check before its journal is written. Each step checks its write target again right before it
   writes, and opens or rewrites in place only a regular file. A refused journal changes nothing and stays for inspection; recovery reports it as a

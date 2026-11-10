@@ -45,9 +45,10 @@ export async function runMigrateProjectCommand(argv: string[], deps: MigrateProj
     return 1;
   }
   if (values.help) { deps.log(HELP); return 0; }
-  const cwd = resolve(values.repo ?? deps.cwd());
-  const root = realpathSync((await deps.getRepoInfo(cwd))?.root ?? cwd);
   try {
+    // A missing --repo is a refusal like any other: one line on stderr, exit 1.
+    const cwd = resolve(values.repo ?? deps.cwd());
+    const root = realpathSync((await deps.getRepoInfo(cwd))?.root ?? cwd);
     deps.log(migrationAnswerText(await migrateProjectOffline(root, { homes: deps.homes, dryRun: values['dry-run'] === true, fault: deps.fault, self: deps.self })));
     return 0;
   } catch (error) {

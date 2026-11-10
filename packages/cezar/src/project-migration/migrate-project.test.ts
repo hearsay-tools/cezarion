@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -22,6 +23,8 @@ import { runMigrateProjectCommand, type MigrateProjectDeps } from './cli.ts';
 import { crashAt, fence, moved, owners, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject } from './engine.ts';
 import { migrateProjectOffline } from './offline.ts';
+import { projectLiveTasksOffline } from './live.ts';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 import { buildMigrationProject, projectSnapshot, removeMigrationProject, TASK, type MigrationProject } from './project-migration.testkit.ts';
 
 /**
@@ -268,5 +271,28 @@ describe('the live-task check of an offline migration', () => {
         `Cannot migrate ${root}: 1 task is live. Finish or cancel each one, then retry:\n- legacy-run legacy live (running)`);
       expect(snapshot(root)).toEqual(before);
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('the read-only live-task view', () => {
+  it('refuses a task marked live whose record it cannot read', () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-migrate-unreadable-'));
+    try {
+      const dataDir = join(root, '.ai/cezar');
+      seedRuns(dataDir, [makeRunRecord({ id: 'unreadable-run', title: 'live', status: RUN_STATUS.running })]);
+      const db = new DatabaseSync(join(dataDir, 'runs.db'));
+      try { db.prepare('UPDATE runs SET data = ? WHERE id = ?').run('{"written":"by another binary"}', 'unreadable-run'); } finally { db.close(); }
+      expect(() => projectLiveTasksOffline(root)).toThrow(`Cannot migrate ${root}: these tasks are marked live but their records cannot be read: unreadable-run.`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('the migrate-project command line', () => {
+  it('refuses a --repo that does not exist with one line on stderr and exit 1', async () => {
+    const missing = join(realpathSync(tmpdir()), `cez-missing-${randomUUID()}`);
+    const out: string[] = [], err: string[] = [];
+    const code = await runMigrateProjectCommand(['--repo', missing], { homes: [], getRepoInfo: async () => null, cwd: () => tmpdir(),
+      log: line => out.push(line), error: line => err.push(line) });
+    expect({ code, out, err }).toEqual({ code: 1, out: [], err: [expect.stringMatching(new RegExp(`^ENOENT: no such file or directory, \\w+ '${missing}'$`))] });
   });
 });

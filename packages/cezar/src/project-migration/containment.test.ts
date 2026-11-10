@@ -156,6 +156,21 @@ describe('a migration journal that names a path outside the project', () => {
     expect(statSync(journal).size).toBe(MAX_JOURNAL_BYTES + 1);
   });
 
+  it('checks Git tracking at the canonical journal path, also through a symlinked root, and refuses when Git cannot answer', async () => {
+    const { root } = project();
+    const journal = writeSettledJournal(root);
+    execFileSync('git', ['add', '-f', '.ai/squawk-migration.json'], { cwd: root });
+    const linked = join(directory('cez-containment-link-'), 'repo');
+    symlinkSync(root, linked);
+    await expect(resume(linked)).rejects.toThrow('Git tracks it; a migration journal is never committed');
+    execFileSync('git', ['rm', '-q', '--cached', '.ai/squawk-migration.json'], { cwd: root });
+    // A repository Git cannot read: the check cannot finish, so the journal is refused.
+    renameSync(join(root, '.git'), join(root, '.git-moved'));
+    writeFileSync(join(root, '.git'), 'not a gitfile\n');
+    await expect(resume(root)).rejects.toThrow(/is refused: Git could not tell whether it tracks the journal/);
+    expect(existsSync(journal)).toBe(true);
+  });
+
   it('refuses a journal that Git tracks, even one with nothing left to apply', async () => {
     const { root } = project();
     const journal = writeSettledJournal(root);

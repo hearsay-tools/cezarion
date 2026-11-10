@@ -80,7 +80,7 @@ function record(value: unknown): RunRecord | undefined {
  * The project's runs as `projectLiveTasks` reads them, read without writing anything: each run
  * store read-only (`readQuiescentRunDatabase`), and a `runs.json` no store imported yet read as
  * JSON. The legacy directory wins an id both hold. Live: rows not terminal, and the runs of
- * families a live process claims.
+ * families a live process claims. Throws when a live id's record cannot be read.
  */
 export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'> {
   const runs = new Map<string, RunRecord>();
@@ -107,6 +107,12 @@ export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'per
       add(run);
       if (run && isLiveRecord(run)) live.add(run.id);
     }
+  }
+  // A live task whose record cannot be read is still live: the check refuses what it cannot prove safe.
+  const unreadable = [...new Set([...live, ...foreign])].filter(id => !runs.has(id));
+  if (unreadable.length > 0) {
+    throw new Error(`Cannot migrate ${root}: these tasks are marked live but their records cannot be read: ${unreadable.join(', ')}. `
+      + 'Open the project with the binary that wrote them, finish or cancel each one, then retry');
   }
   return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id) };
 }
