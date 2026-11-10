@@ -59,7 +59,7 @@ export async function probe({ Client, StdioClientTransport, CiToolController, cr
    assert.deepEqual(tools.tools.map(tool => tool.name), defaultTools);
    const optedOutClient = new Client({ name:'installed-opt-out-smoke', version:'1' });
    try {
-     await optedOutClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_AUTOMATIONS:'0' }, stderr:'pipe' }));
+     await optedOutClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_AUTOMATIONS:'0', HSQ_AUTOMATIONS:'0' }, stderr:'pipe' }));
      assert.deepEqual((await optedOutClient.listTools()).tools.map(tool => tool.name), defaultTools.slice(0, 4));
    } finally { await optedOutClient.close(); }
    // Flag unset: neither preview tool appears in the listing or in the instructions.

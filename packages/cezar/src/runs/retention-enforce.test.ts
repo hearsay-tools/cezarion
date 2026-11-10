@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -82,7 +83,7 @@ describe('reclaimWorktrees (real git, #483)', () => {
       finishedRun(oldId, oldWt.path, '2026-07-01T00:00:00.000Z'),
       finishedRun(newId, newWt.path, '2026-07-09T00:00:00.000Z'),
     ]);
-    const dataDir = join(repo, '.ai/cezar');
+    const dataDir = projectPaths(repo).write;
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const retain = () => retainAutosaveCleanup(dataDir, oldId, oldWt.path, 'strict cleanup pending', {
       processes: [], groups: [], uncertain: false,

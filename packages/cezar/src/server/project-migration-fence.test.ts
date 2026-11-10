@@ -29,10 +29,8 @@ import { seedRuns, setRunStatus } from '../runs/run-store.testkit.ts';
 import { closeClaimSession, openClaimSession } from '../runs/run-claims.ts';
 import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { healthConfig } from '../config.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
-import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import {
@@ -67,7 +65,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, rebrand: false,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
@@ -461,13 +459,23 @@ describe('health while fenced', () => {
 
 describe('with the release switch off', () => {
   it('offers no migration command and a normal project build writes no fence or journal', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    expect(SUBCOMMAND_NAMES.filter((name) => name.includes('migrate'))).toEqual([]);
-    expect(await loadSubcommand('migrate-project')).toBeUndefined();
-    const { ai, root } = project();
-    const contexts = contextsFor(owner(), { id: 'p', root });
-    await contexts.context('p');
-    expect(readdirSync(ai)).toEqual(['cezar']);
+    vi.resetModules();
+    vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));
+    try {
+      const { SUBCOMMAND_NAMES: names, loadSubcommand: load } = await import('../subcommands.ts');
+      const { ProjectContexts: SwitchOffContexts } = await import('./project-context.ts');
+      expect(names.includes('migrate-project')).toBe(false);
+      expect(await load('migrate-project', undefined, false)).toBeUndefined();
+      const { ai, root } = project();
+      const contexts = new SwitchOffContexts({ createRunner, home: testHome(), ownership: owner(), rebrand: false,
+        listProjects: async () => [{ id: 'p', root, status: 'not-git' as const }] });
+      disposers.push(() => contexts.disposeAll());
+      await contexts.context('p');
+      expect(readdirSync(ai)).toEqual(['cezar']);
+    } finally {
+      vi.doUnmock('../home/switch.ts');
+      vi.resetModules();
+    }
   });
 });
 

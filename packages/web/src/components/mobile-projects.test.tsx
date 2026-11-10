@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -114,7 +115,7 @@ describe('mobile top bar', () => {
     const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
     expect(bar.firstElementChild?.className).toContain('h-[56px]')
     expect(bar.firstElementChild?.className).toContain('px-[8px]')
-    expect(within(bar).queryByText('Cezarion')).toBeNull()
+    expect(within(bar).queryByText(`${productName("Cezarion")}`)).toBeNull()
     expect(within(bar).getByRole('button', { name: 'Search' })).toBeTruthy()
     const picker = within(bar).getByRole('button', { name: 'Switch project: cezarion' })
     expect(picker.textContent).toContain('cezarion')
@@ -180,7 +181,7 @@ describe('mobile drawer', () => {
     renderShell('/p/cezarion/', nav())
     fireEvent.click(menuButton())
     const identity = drawer().querySelector('[data-slot="drawer-identity"]') as HTMLElement
-    expect(identity.textContent).toContain('Cezarion')
+    expect(identity.textContent).toContain(`${productName("Cezarion")}`)
     expect(identity.textContent).toContain('v0.14.9')
     expect(within(identity).getByRole('button', { name: 'Close menu' })).toBeTruthy()
 

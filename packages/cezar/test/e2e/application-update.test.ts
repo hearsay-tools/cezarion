@@ -151,7 +151,7 @@ async function registryFixture(oldVersion: string, newVersion: string) {
   const address = registry.address();
   assert.ok(address && typeof address !== 'string');
   const url = `http://127.0.0.1:${address.port}`;
-  const env = { ...process.env, npm_config_registry: url, npm_config_cache: cache, CEZ_HOME: home };
+  const env = { ...process.env, npm_config_registry: url, npm_config_cache: cache, CEZ_HOME: home, HSQ_HOME: home };
   for (const version of [oldVersion, newVersion]) {
     for (const name of ['@wjarka/cezarion', 'cezarion'] as const) {
       const dir = join(root, 'fixtures', name === 'cezarion' ? 'alias' : 'scoped', version);
@@ -571,7 +571,7 @@ for (const ephemeral of [false, true]) test(`built production CLI acknowledges i
   const cli = new URL('../../dist/index.js', import.meta.url).pathname;
   const host = ephemeral ? '127.0.0.2' : '127.0.0.1';
   const child = spawn(process.execPath, [cli, 'serve', '--repo', root, '--bind-host', host, '--port', String(ephemeral ? 0 : port), '--no-open', '--restart-exact'], {
-    cwd: root, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0',
+    cwd: root, env: { ...process.env, CEZ_HOME: join(root, 'home'), HSQ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_REMOTE: '0', HSQ_REMOTE: '0',
       npm_config_cache: join(root, 'cache'), npm_config_prefix: join(root, 'prefix') },
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
@@ -620,7 +620,7 @@ const plan = JSON.parse(readFileSync(${JSON.stringify(planPath)}));
 const pid = await armRestartHelper(plan, { repoRoot: plan.repoRoot, host: plan.host, port: plan.port, npmBin: plan.npmBin });
 writeFileSync(${JSON.stringify(join(fixture.root, 'ack'))}, String(pid));`);
     const orchestrator = spawn(process.execPath, [script, 'serve'], {
-      cwd: fixture.root, env: { ...process.env, CEZ_HOME: join(fixture.root, 'home'), npm_config_cache: join(fixture.root, 'cache') },
+      cwd: fixture.root, env: { ...process.env, CEZ_HOME: join(fixture.root, 'home'), HSQ_HOME: join(fixture.root, 'home'), npm_config_cache: join(fixture.root, 'cache') },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const code = await new Promise<number | null>((resolve) => orchestrator.once('exit', resolve));
@@ -663,7 +663,7 @@ process.env.NODE_OPTIONS='--require /definitely-missing-cezar-update-test';
 try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,host:plan.host,port:plan.port,npmBin:plan.npmBin}); }
 catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-failed'))}, 'yes'); }`);
     const child = spawn(process.execPath, [script, 'serve'], { cwd: fixture.root,
-      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
+      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home'), HSQ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
     const code = await new Promise<number | null>((resolve) => child.once('exit', resolve));
     assert.equal(code, 0);
     assert.equal(await readFile(join(fixture.root, 'ack-failed'), 'utf8'), 'yes');
@@ -698,7 +698,7 @@ process.env.NODE_OPTIONS=${JSON.stringify(`--require ${preload}`)};
 try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,host:plan.host,port:plan.port,npmBin:plan.npmBin}); }
 catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-failed'))}, 'yes'); }`);
     const child = spawn(process.execPath, [script, 'serve'], { cwd: fixture.root,
-      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
+      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home'), HSQ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
     const code = await new Promise<number | null>((resolve) => child.once('exit', resolve));
     member = requirePid(memberPid);
     assert.equal(code, 0);
@@ -724,7 +724,7 @@ const plan=JSON.parse(readFileSync(${JSON.stringify(planPath)}));
 try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,host:plan.host,port:plan.port,npmBin:plan.npmBin}); writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'armed'); }
 catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-result'))},'rejected'); }`);
     const child = spawn(process.execPath, [script, 'serve'], { cwd: fixture.root,
-      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
+      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home'), HSQ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
     assert.equal(await new Promise<number | null>((resolve) => child.once('exit', resolve)), 0);
     assert.equal(await readFile(join(fixture.root, 'ack-result'), 'utf8'), 'rejected');
   } finally { await rm(fixture.root, { recursive: true, force: true }); }

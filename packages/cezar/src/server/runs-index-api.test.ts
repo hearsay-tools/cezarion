@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -142,7 +143,7 @@ describe('workspace runs index API', () => {
 
     const res = await apiRequest(makeApp(), '/api/v1/runs/done-bad');
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: expect.stringMatching(/could not be read by this cezar/) });
+    expect(await res.json()).toEqual({ error: expect.stringMatching(`could not be read by this ${productName('cezar')}`) });
     expect(await ids()).toEqual(['ok']);
     const missing = await apiRequest(makeApp(), '/api/v1/runs/no-such-run');
     expect(await missing.json()).toEqual({ error: 'not found' });

@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -32,7 +33,7 @@ it('preserves actionable state and explains a failed request', async () => {
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
   const { result } = renderHook(() => useApplicationUpdate(health), { wrapper })
   await act(async () => { await result.current.apply() })
-  expect(result.current.error).toMatch(/cannot reach the cezar server/)
+  expect(result.current.error).toMatch(new RegExp(`cannot reach the ${productName("cezar")} server`, ""))
   expect(client.getQueryData<HealthResponse>(queryKeys.health)?.applicationUpdate?.status).toBe('idle')
 })
 
@@ -434,7 +435,7 @@ it.each([undefined, 'Update this installation manually.', 'Use the package manag
   render(<ApplicationUpdateFeedback version="1.0.0" latestVersion="2.0.0" state={{ status: 'idle', supported: false, message }} />)
   const text = screen.getByRole('status').textContent
   expect(text).toContain('In-app updates are unavailable for this installation.')
-  expect(text).toContain(message === 'Use the package manager.' ? message : 'Install the newer release using your original installation method, then restart Cezarion.')
+  expect(text).toContain(message === 'Use the package manager.' ? message : `Install the newer release using your original installation method, then restart ${productName("Cezarion")}.`)
 })
 
 it('shows no feedback for a supported idle installation', () => {

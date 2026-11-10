@@ -222,12 +222,12 @@ describe('new-project routes', () => {
       {
         projectCommandRunner: recording((argv) => {
           if (argv[1] !== 'push') return undefined;
-          chmodSync(home, 0o500);
+          chmodSync(testHome().config, 0o500);
           return 'fatal: unable to access';
         }),
       },
     );
-    chmodSync(home, 0o700);
+    chmodSync(testHome().config, 0o700);
     expect(status).toBe(500);
     expect(body.error).toContain(`(the project is at ${join(projectsDir, 'fresh')})`);
     expect(body.error).toContain('https://github.com/acme/fresh was created, but pushing main failed: fatal: unable to access');

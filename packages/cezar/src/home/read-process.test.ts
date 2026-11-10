@@ -13,6 +13,8 @@ it.each(['darwin', 'win32'] as const)('does not spawn during peer-free reads on 
   const { Home } = await import('./home.ts');
   const { HomeStore } = await import('./store.ts');
   const hostPlatform = process.platform;
+  // Emulate Windows ACL writes; this test only measures peer-free reads.
+  vi.mocked(execFileSync).mockReturnValue(Buffer.alloc(0));
   vi.mocked(spawnSync).mockClear();
   vi.mocked(execFileSync).mockClear();
   Object.defineProperty(process, 'platform', { value: platform, configurable: true });
@@ -20,12 +22,14 @@ it.each(['darwin', 'win32'] as const)('does not spawn during peer-free reads on 
     const home = Home.sandbox(storeRoot());
     Home.seed(home, home.workspaceConfig, { saved: true });
     expect(spawnSync).toHaveBeenCalledTimes(platform === 'darwin' ? 1 : 0);
+    const secondRoot = storeRoot();
+    Home.sandbox(secondRoot); // Prepare its Windows ACL before measuring reads.
     vi.mocked(spawnSync).mockClear();
     vi.mocked(execFileSync).mockClear();
     const store = new HomeStore(home);
     expect(JSON.parse(store.read(home.workspaceConfig))).toEqual({ saved: true });
     expect(JSON.parse(store.read(home.workspaceConfig))).toEqual({ saved: true });
-    Home.sandbox(storeRoot()); // A second root reuses the same process identity.
+    Home.sandbox(secondRoot); // A second root reuses the same process identity.
     expect(spawnSync).not.toHaveBeenCalled();
     expect(execFileSync).not.toHaveBeenCalled();
   } finally { Object.defineProperty(process, 'platform', { value: hostPlatform, configurable: true }); }

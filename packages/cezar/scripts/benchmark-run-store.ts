@@ -205,7 +205,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
   const { resolveHome } = await import('../src/home/resolve.ts');
   const home = resolveHome({ purpose: 'cli' });
   const { Home } = await import('../src/home/home.ts');
-  Home.sandbox(home.root);
+  Home.sandbox(home.rootOverride ?? home.root, { layout: home.layout });
   process.env.HSQ_DRY_RUN = process.env.CEZ_DRY_RUN = '1';
   try {
     const { RunStore } = await import('../src/runs/store.ts');

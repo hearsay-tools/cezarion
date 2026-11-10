@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ describe('installing into the managed layout', () => {
   /** What a successful `npm install --prefix <staging>` leaves behind. */
   const npmThatInstalls = (marker = 'v1'): NonNullable<InstallOptions['runNpm']> => async (args) => {
     const staging = args[args.indexOf('--prefix') + 1] ?? '';
-    const dist = join(staging, 'node_modules', '@wjarka', 'cezarion', 'dist');
+    const dist = join(staging, 'node_modules', ...productIdentity().npmPackage.split('/'), 'dist');
     mkdirSync(dist, { recursive: true });
     writeFileSync(join(dist, 'index.js'), `// ${marker}\n`);
   };
@@ -47,7 +48,7 @@ describe('installing into the managed layout', () => {
       },
     });
     expect(result).toEqual({ id: '0.12.1', version: '0.12.1', entry: versionEntry('0.12.1', env, testHome(env)) });
-    expect(seen[0]?.at(-1)).toBe('@wjarka/cezarion@0.12.1');
+    expect(seen[0]?.at(-1)).toBe(`${productIdentity().npmPackage}@0.12.1`);
     expect(existsSync(versionEntry('0.12.1', env, testHome(env)))).toBe(true);
     expect(readManifest('0.12.1', env, testHome(env))).toMatchObject({ version: '0.12.1', source: 'registry' });
     expect(staged()).toEqual([]);
@@ -89,7 +90,7 @@ describe('installing into the managed layout', () => {
 
   it.each(['npm failure', 'missing entry', 'success'])('keeps the active local install until replacement is ready: %s', async outcome => {
     const pkg = join(home, 'checkout');
-    mkdirSync(pkg); writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '0.12.1' }));
+    mkdirSync(pkg); writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: productIdentity().npmPackage, version: '0.12.1' }));
     const pack: NonNullable<InstallOptions['runNpm']> = async (args) => {
       const dir = args[args.indexOf('--pack-destination') + 1]!;
       writeFileSync(join(dir, 'fixture.tgz'), 'fixture');
@@ -172,7 +173,7 @@ describe('a read-only service', () => {
     const home = mkdtempSync(join(tmpdir(), 'cez-readonly-'));
     try {
       const env = { ...process.env, CEZ_HOME: home };
-      const entry = join(versionsDir(env, testHome(env)), 'current', 'node_modules', '@wjarka', 'cezarion', 'dist', 'index.js');
+      const entry = join(versionsDir(env, testHome(env)), 'current', 'node_modules', ...productIdentity().npmPackage.split('/'), 'dist', 'index.js');
       const base = { home: testHome(env), pkgName: '@wjarka/cezarion', version: '0.12.0', entry, restart: () => {}, env };
       expect(new SelfUpdateService(base).capability().canSelfUpdate).toBe(true);
       const readOnly = new SelfUpdateService({ ...base, readOnly: true });

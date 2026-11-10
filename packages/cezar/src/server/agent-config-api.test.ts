@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -171,7 +172,7 @@ describe('the agent-config API', () => {
       await disableRemoteSettings(undefined, undefined, testHome());
       const refused = await put('claude.project.settings', { content: '{"hooks":{}}', version: null });
       expect(refused.status).toBe(409);
-      expect(((await refused.json()) as { error: string }).error).toContain('cez remote-settings enable');
+      expect(((await refused.json()) as { error: string }).error).toContain(`${productIdentity().command} remote-settings enable`);
       expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(409);
       expect(((await (await apiRequest(app, '/api/v1/agent-config')).json()) as { editable: boolean }).editable).toBe(false);
     });

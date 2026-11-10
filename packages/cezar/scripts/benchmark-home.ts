@@ -7,8 +7,9 @@ import { readInstallMarker } from '../src/home/install-marker.ts';
 
 /** Benchmarks may retain an explicit home, but must never use a live installation. */
 export function benchmarkHome(home: Home): Home {
-  if (readInstallMarker(home.root)?.kind === 'live') throw new Error('Benchmark refuses a live install marker');
-  Home.sandbox(home.root);
+  const roots = new Set([home.config, home.rootOverride ?? home.root]);
+  if ([...roots].some(root => readInstallMarker(root)?.kind === 'live')) throw new Error('Benchmark refuses a live install marker');
+  Home.sandbox(home.rootOverride ?? home.root, { layout: home.layout });
   return home;
 }
 

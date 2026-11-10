@@ -183,7 +183,7 @@ describe('resolveWorktreeRetention', () => {
   const writeRepo = (value: unknown) =>
     writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify(value), 'utf8');
   const writeWorkspace = (value: unknown) =>
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from(JSON.stringify(value)));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from(JSON.stringify(value)));
 
   it('inherits the workspace default when the repo sets nothing', async () => {
     writeWorkspace({ resources: { worktreeRetentionDefault: 4 } });
@@ -225,7 +225,7 @@ describe('resolveWorktreeRetention', () => {
   });
 
   it('falls back to 10 when the workspace config is corrupt (unreadable)', async () => {
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from('{ not json'));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from('{ not json'));
     expect(await resolveWorktreeRetention(repoRoot, testHome())).toBe(10);
   });
 
@@ -343,7 +343,7 @@ describe('loadConfig machine-wide agent defaults', () => {
   const writeRepo = (value: unknown) =>
     writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify(value), 'utf8');
   const writeMachine = (agentDefaults: unknown) =>
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from(JSON.stringify({ agentDefaults })));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from(JSON.stringify({ agentDefaults })));
 
   it('fills a repo that has no config file at all', async () => {
     writeMachine({ runner: 'codex', models: { codex: 'gpt-5' } });
@@ -381,7 +381,7 @@ describe('loadConfig machine-wide agent defaults', () => {
   });
 
   it('degrades to the built-in default when the machine file is corrupt', async () => {
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from('{not json'));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from('{not json'));
     expect((await loadConfig(repoRoot, testHome())).defaultRunner).toBe('claude');
   });
 

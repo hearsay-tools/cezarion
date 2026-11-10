@@ -202,7 +202,7 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
   it('a malformed host file grants nothing', () => {
     mkdirSync(join(home, 'remote-settings'), { recursive: true });
     for (const content of ['not json', '{}', '{"enabledAt":"not-a-time"}']) {
-      Home.seedBytes(Home.sandbox(home), join(home, 'remote-settings', '4321.json'), Buffer.from(content));
+      Home.seedBytes(Home.sandbox(home), join(Home.sandbox(home).remoteSettings, '4321.json'), Buffer.from(content));
       expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin, content).toBe(false);
     }
   });

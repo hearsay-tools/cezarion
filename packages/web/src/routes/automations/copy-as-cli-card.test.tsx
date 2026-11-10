@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -21,7 +22,7 @@ const draft = fromDefinition({
 const renderInProject = (ui: ReactElement) => render(<MemoryRouter initialEntries={['/p/my-proj/automations/a1']}>{ui}</MemoryRouter>)
 // D8: pin both names so inherited preferred settings cannot redirect the copied command.
 const address = `CEZ_COCKPIT_URL='${window.location.origin}' CEZ_PROJECT_ID='my-proj' HSQ_COCKPIT_URL='${window.location.origin}' HSQ_PROJECT_ID='my-proj' `
-const line = address + "cez automation add --name 'Nightly' --cron '0 4 * * *' --workflow 'quick-task' --no-autonomous --prompt 'Bump what'\\''s stale'"
+const line = address + `${productCommand()} automation add --name 'Nightly' --cron '0 4 * * *' --workflow 'quick-task' --no-autonomous --prompt 'Bump what'\\''s stale'`
 
 describe('CopyAsCliCard', () => {
   it('prints the line and copies it, saying so', async () => {
@@ -46,16 +47,16 @@ describe('CopyAsCliCard', () => {
   it('once emits --at --tz --latest-start', () => {
     const once = fromDefinition({ name: 'Check', kind: 'schedule', schedule: { type: 'once', at: '2030-01-15T09:00', timeZone: 'Europe/Warsaw', latestStartMinutes: 360 }, task: { prompt: 'Go', workflow: 'quick-task', worktree: true } })
     renderInProject(<CopyAsCliCard draft={once} />)
-    expect(screen.getByText(`${address}cez automation add --name 'Check' --at '2030-01-15T09:00' --tz 'Europe/Warsaw' --latest-start '6h' --workflow 'quick-task' --prompt 'Go'`)).not.toBeNull()
+    expect(screen.getByText(`${address}${productCommand()} automation add --name 'Check' --at '2030-01-15T09:00' --tz 'Europe/Warsaw' --latest-start '6h' --workflow 'quick-task' --prompt 'Go'`)).not.toBeNull()
   })
 
   it('emits --no-workers and --no-messaging when task access is off', () => {
     renderInProject(<CopyAsCliCard draft={{ ...draft, allowWorkers: false, allowMessaging: false }} />)
-    expect(screen.getByText(`${address}cez automation add --name 'Nightly' --cron '0 4 * * *' --workflow 'quick-task' --no-autonomous --no-workers --no-messaging --prompt 'Bump what'\\''s stale'`)).not.toBeNull()
+    expect(screen.getByText(`${address}${productCommand()} automation add --name 'Nightly' --cron '0 4 * * *' --workflow 'quick-task' --no-autonomous --no-workers --no-messaging --prompt 'Bump what'\\''s stale'`)).not.toBeNull()
   })
 
   it('falls back to the JSON form for what flags cannot say', () => {
     renderInProject(<CopyAsCliCard draft={{ ...draft, description: 'Nightly bumps' }} />)
-    expect(screen.getByText((text) => text.startsWith(`${address}cez automation create --json '`))).not.toBeNull()
+    expect(screen.getByText((text) => text.startsWith(`${address}${productCommand()} automation create --json '`))).not.toBeNull()
   })
 })

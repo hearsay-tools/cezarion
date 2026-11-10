@@ -106,7 +106,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(log.mock.calls.flat().join('\n')).toContain("git mv -- '.ai/cezar/workflows/flow.yaml' '.ai/squawk/workflows/flow.yaml'");
     } finally { log.mockRestore(); }
     expect(movedState()).toBe(true);
-    const store = RunStore.open(project.dataDir, { keepLive: true });
+    const store = RunStore.open(REBRAND_SWITCH ? project.newDir : project.dataDir, { keepLive: true });
     try { expect(store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath)); } finally { store.close(); }
   });
 
@@ -203,7 +203,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       const movedAtOpen: boolean[] = [];
       const open = RunStore.open;
       vi.spyOn(RunStore, 'open').mockImplementation((dataDir, options) => {
-        if (dataDir === project.dataDir) movedAtOpen.push(movedState());
+        if (dataDir === (REBRAND_SWITCH ? project.newDir : project.dataDir)) movedAtOpen.push(movedState());
         return open.call(RunStore, dataDir, options);
       });
       // The post-listen preparation's move and a first request for the project, at once.
@@ -333,8 +333,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
   });
 
   it('moves nothing with the release switch off, as shipped', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    const run = cockpit(undefined);
+    const run = cockpit(false);
     const context = await run.contexts.context('p');
     expect(movedState()).toBe(false);
     expect(existsSync(project.newDir)).toBe(false);

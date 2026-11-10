@@ -1,3 +1,5 @@
+import { productName } from './home/display.ts';
+import { REBRAND_SWITCH } from './home/switch.ts';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { defaultCliDeps, main, type CliDeps } from './cli-dispatch.ts';
@@ -77,7 +79,7 @@ describe('main dispatch', () => {
     const f = fixture([flag]);
     await f.run();
     const help = f.deps.console.log.mock.calls[0]![0];
-    expect(help).toContain('cezar — local cockpit for AI agent tasks in your repo\n\nUsage:');
+    expect(help).toContain(`${productName('cezar')} — local cockpit for AI agent tasks in your repo\n\nUsage:`);
     expect(help).toContain('  cez run "<task>"          run a task headless in the terminal');
     expect(help).toContain('      --no-workers');
     expect(help).toContain('      --no-messaging');
@@ -187,7 +189,10 @@ describe('main dispatch', () => {
     const help = fixture(['--help']);
     await unknown.run();
     await help.run();
-    expect(unknown.deps.console.error).toHaveBeenCalledExactlyOnceWith('unknown command: nonsense\n');
+    expect(unknown.deps.console.error.mock.calls).toEqual([
+      ...(REBRAND_SWITCH ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []),
+      ['unknown command: nonsense\n'],
+    ]);
     expect(unknown.deps.console.log.mock.calls).toEqual(help.deps.console.log.mock.calls);
     expect(unknown.processStub.exitCode).toBe(1);
     expect(unknown.deps.prepareOperatorHome).not.toHaveBeenCalled();

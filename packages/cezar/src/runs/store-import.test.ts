@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts'
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -290,7 +291,7 @@ describe('an import that does not complete', () => {
     __setLegacyImportHookForTests({ beforeCommit: () => { throw new RunDatabaseDiskFullError('disk-full', 'runs database: database or disk is full'); } });
     const failure = openFailure();
     expect(failure.kind).toBe('disk-full');
-    expect(failure.message).toMatch(/^No space is left to write .*runs\.db .*Free some disk space, then restart cezar\.$/);
+    expect(failure.message).toMatch(new RegExp(`^No space is left to write .*runs\\.db .*Free some disk space, then restart ${productName("cezar")}\\.$`, ""));
     expect(importMeta()).toBeUndefined();
     __setLegacyImportHookForTests(undefined);
     expect(runIds(open())).toEqual(['bb', 'a']);
@@ -300,7 +301,7 @@ describe('an import that does not complete', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
     open().close();
     const meta = importMeta();
-    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { title: 'written by an older cezar' }), record('zz')]));
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { title: `written by an older ${productName("cezar")}` }), record('zz')]));
     const store = open();
     expect(store.getRun('a')?.title).toBe('run a');
     expect(store.getRun('zz')).toBeUndefined();
@@ -374,7 +375,7 @@ describe('an older cezar still writing runs.json', () => {
     const cockpit = await olderCockpit();
     const failure = openFailure();
     expect(failure.kind).toBe('legacy-writer');
-    expect(failure.message).toBe(`An older cezar (pid ${cockpit.pid} at http://127.0.0.1:4321) still serves this project and writes runs.json. Stop it, then restart cezar: runs.json is imported once, while nothing else writes it.`);
+    expect(failure.message).toBe(`An older ${productName("cezar")} (pid ${cockpit.pid} at http://127.0.0.1:4321) still serves this project and writes runs.json. Stop it, then restart ${productName("cezar")}: runs.json is imported once, while nothing else writes it.`);
     expect(importMeta()).toBeUndefined();
     expect(readPersistedRuns(dataDir)).toEqual([]);
 
@@ -451,7 +452,7 @@ describe('an older cezar still writing runs.json', () => {
     });
     const failure = openFailure();
     expect(failure.kind).toBe('legacy-writer');
-    expect(failure.message).toBe('runs.json changed while cezar was importing it: an older cezar process still writes it. Stop every older cezar process for this project, then restart cezar.');
+    expect(failure.message).toBe(`runs.json changed while ${productName("cezar")} was importing it: an older ${productName("cezar")} process still writes it. Stop every older ${productName("cezar")} process for this project, then restart ${productName("cezar")}.`);
     expect(importMeta()).toBeUndefined();
     __setLegacyImportHookForTests(undefined);
     expect(runIds(open())).toEqual(['saved-meanwhile', 'a']);
@@ -471,7 +472,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     for (const [name, text] of Object.entries(files)) writeFileSync(join(dataDir, name), text);
     const failure = openFailure({ retryBusy: true });
     expect(failure.kind).toBe('corrupt');
-    expect(failure.message).toMatch(/runs\.db is damaged \(.*\)\. cezar left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs\.json\.pre-sqlite\.bak as https:\/\/github\.com\/hearsay-tools\/cezarion\/blob\/main\/docs\/run-history-recovery\.md describes, then restart cezar\.$/);
+    expect(failure.message).toMatch(new RegExp(`runs\\.db is damaged \\(.*\\)\\. ${productName("cezar")} left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs\\.json\\.pre-sqlite\\.bak as https:\\/\\/github\\.com\\/hearsay-tools\\/cezarion\\/blob\\/main\\/docs\\/run-history-recovery\\.md describes, then restart ${productName("cezar")}\\.$`, ""));
     for (const [name, text] of Object.entries(files)) expect(readFileSync(join(dataDir, name), 'utf8')).toBe(text);
     expect(readdirSync(dataDir).sort()).toEqual([...Object.keys(files), 'runs'].sort());
   });
@@ -513,7 +514,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     // A lazy project context opens on a live cockpit's event loop: one attempt, never a backoff.
     expect(performance.now() - started).toBeLessThan(400);
     expect(failure.kind).toBe('busy');
-    expect(failure.message).toMatch(/runs\.db is busy: another cezar process has held its write lock\. Wait for it to finish, then restart cezar\.$/);
+    expect(failure.message).toMatch(new RegExp(`runs\\.db is busy: another ${productName("cezar")} process has held its write lock\\. Wait for it to finish, then restart ${productName("cezar")}\\.$`, ""));
     expect(importMeta()).toBeUndefined();
     expect(readPersistedRuns(dataDir)).toEqual([]);
     expect(runIds(open())).toEqual(['bb', 'a']);
@@ -554,7 +555,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     chmodSync(dataDir, 0o500);
     const failure = openFailure();
     expect(failure.kind).toBe('permission');
-    expect(failure.message).toContain(`Give your user read and write access to ${dataDir}, then restart cezar.`);
+    expect(failure.message).toContain(`Give your user read and write access to ${dataDir}, then restart ${productName("cezar")}.`);
   });
 
   it('a database written by a newer cezar: refused, left as it is', () => {
@@ -565,7 +566,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     const before = snapshot([RUNS_DB_FILE]);
     const failure = openFailure();
     expect(failure.kind).toBe('unsupported-schema');
-    expect(failure.message).toBe(`${join(dataDir, RUNS_DB_FILE)} was written by a newer cezar (schema 99; this cezar reads schema ${RUN_DATABASE_SCHEMA_VERSION}). Upgrade cezar to open this project's runs.`);
+    expect(failure.message).toBe(`${join(dataDir, RUNS_DB_FILE)} was written by a newer ${productName("cezar")} (schema 99; this ${productName("cezar")} reads schema ${RUN_DATABASE_SCHEMA_VERSION}). Upgrade ${productName("cezar")} to open this project's runs.`);
     expect(snapshot([RUNS_DB_FILE])).toEqual(before);
   });
 });

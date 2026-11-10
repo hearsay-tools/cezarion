@@ -177,3 +177,6 @@ it('keeps migration error text literal while formatting the invoked command pref
     expect(output).not.toHaveBeenCalled();
   } finally { process.argv = argv; }
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('./switch.ts', () => ({ REBRAND_SWITCH: false }));

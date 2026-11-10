@@ -27,7 +27,10 @@ const cli = vi.mocked(main).mock.calls[0]![0];
 
 describe('CLI project paths at real entry points', () => {
   let repo: string;
-  beforeEach(() => { repo = mkdtempSync(join(tmpdir(), 'cli-project-paths-')); });
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), 'cli-project-paths-'));
+    mkdirSync(join(repo, '.ai/cezar'), { recursive: true }); // Exercise legacy precedence and Squawk fallback.
+  });
   afterEach(() => { vi.restoreAllMocks(); vi.mocked(serveCommand).mockReset(); vi.mocked(runHeadless).mockReset(); rmSync(repo, { recursive: true, force: true }); });
   function seedFallback() {
     const directory = join(repo, '.ai/squawk');

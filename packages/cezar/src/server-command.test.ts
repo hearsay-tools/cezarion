@@ -1,3 +1,4 @@
+import { productIdentity } from './home/identity.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testHome } from './home/test-home.testkit.ts';
 import { DEFAULT_SERVER_INSTANCE } from './paths.ts';
@@ -172,8 +173,8 @@ describe('serverCommand', () => {
     expect(f.modules.nextFreeInstancePort).toHaveBeenCalledWith(undefined, f.home);
     expect(f.modules.runInstall.mock.calls[0]![1]).toMatchObject({ instance: 'shop-example-com', domain: 'shop.example.com', port: 4322 });
     expect(f.output.log).toHaveBeenCalledWith('\n  New instance "shop-example-com" (shop.example.com) → loopback port 4322 (override with --port).');
-    expect(f.output.log).toHaveBeenCalledWith('\n  cez server-install (ubuntu-vps, shop.example.com) complete.');
-    expect(f.output.log).toHaveBeenCalledWith('  Redeploy a new version any time with: cez server-deploy --platform ubuntu-vps --domain shop.example.com\n');
+    expect(f.output.log).toHaveBeenCalledWith(`\n  ${productIdentity().command} server-install (ubuntu-vps, shop.example.com) complete.`);
+    expect(f.output.log).toHaveBeenCalledWith(`  Redeploy a new version any time with: ${productIdentity().command} server-deploy --platform ubuntu-vps --domain shop.example.com\n`);
   });
 
   it('retains an explicit port without inspecting the instance list', async () => {
@@ -193,9 +194,9 @@ describe('serverCommand', () => {
   });
 
   it.each([
-    ['install', '\n  cez server-install (ubuntu-vps) complete.'],
-    ['deploy', '\n  cez server-deploy (ubuntu-vps) complete — the service was reloaded and verified.\n'],
-    ['uninstall', '\n  cez server-uninstall (ubuntu-vps) complete — the changes it made were reversed.\n'],
+    ['install', `\n  ${productIdentity().command} server-install (ubuntu-vps) complete.`],
+    ['deploy', `\n  ${productIdentity().command} server-deploy (ubuntu-vps) complete — the service was reloaded and verified.\n`],
+    ['uninstall', `\n  ${productIdentity().command} server-uninstall (ubuntu-vps) complete — the changes it made were reversed.\n`],
   ] as const)('runs the %s engine and reports completion', async (mode, message) => {
     const f = fixture();
     await f.run(mode);

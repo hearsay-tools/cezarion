@@ -118,7 +118,7 @@ function runScript(fixtureRoot: string, extraEnv: Record<string, string>, args: 
     GITHUB_RUN_ATTEMPT: '1',
     ...extraEnv,
   };
-  return execFile(process.execPath, [script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
+  return execFile(process.execPath, ['--import', new URL('../fixtures/release-switch-off.mjs', import.meta.url).href, script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
 }
 
 test('dry-run publish stamps every manifest, pins each sibling exact, and emits the result JSON', { timeout: 120_000 }, async () => {

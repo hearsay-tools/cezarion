@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { HEALTH, HEALTH_MULTI, HEALTH_ALL, HEALTH_NO_GIT, PROVIDERS_CONNECTED, PROVIDERS_MULTI, PROVIDERS_NONE, WORKFLOWS, REPO, REPO_NO_GIT, WORKSPACE_CONFIG, requests, deferredJson, serve, renderNewTask, textarea, sourcePill, location, draftSource, pillReady, startTask, postedBody, ACCOUNTS, runnerPill, pickFrom } from './new-task.testkit'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -64,12 +65,12 @@ describe('the hero surface', () => {
     const execution = document.querySelector('[data-slot="execution-options"]')!
     const group = screen.getByRole('group', { name: 'Task access' })
     expect(execution.contains(group)).toBe(true)
-    const workers = screen.getByRole('switch', { name: 'Allow cezar workers' })
+    const workers = screen.getByRole('switch', { name: `Allow ${productName("cezar")} workers` })
     const messaging = screen.getByRole('switch', { name: 'Allow task messaging' })
     expect(workers.getAttribute('aria-checked')).toBe('true')
     expect(messaging.getAttribute('aria-checked')).toBe('true')
     expect(document.getElementById(workers.getAttribute('aria-describedby')!)?.textContent).toBe(
-      'Agents in this task can start Cezar workers. Each worker is a separate paid agent session. Worker limits cap resources, not spending.',
+      `Agents in this task can start ${productName("Cezar")} workers. Each worker is a separate paid agent session. Worker limits cap resources, not spending.`,
     )
     expect(document.getElementById(messaging.getAttribute('aria-describedby')!)?.textContent).toBe(
       'Agents in this task can message other tasks in this project.',

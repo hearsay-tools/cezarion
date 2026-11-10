@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { runArtifactCommand } from './cli.ts';
 import { execFile } from 'node:child_process';
@@ -11,7 +12,7 @@ import { artifactDirectory, readArtifact } from './store.ts';
 afterEach(() => vi.restoreAllMocks());
 it('dispatches artifact help before ordinary CLI parsing', async () => {
   const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../index.ts', import.meta.url)), 'artifact', '--help']);
-  expect(stdout).toContain('cez artifact publish');
+  expect(stdout).toContain(`${productIdentity().command} artifact publish`);
   expect(stdout).not.toContain('start the cockpit');
 }, 15000);
 it('returns immutable metadata, a task-relative link and escaped Markdown', async () => {
@@ -42,7 +43,7 @@ it('rejects publication without task context', async () => {
 it('shows help successfully without context', async () => {
   const output = vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runArtifactCommand(['--help'], {})).toBe(0);
-  expect(output.mock.calls[0]?.[0]).toContain('cez artifact publish');
+  expect(output.mock.calls[0]?.[0]).toContain(`${productIdentity().command} artifact publish`);
 });
 
 // Ownership now comes from task context. Path aliases and cwd cannot change that identity.

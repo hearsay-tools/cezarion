@@ -17,6 +17,7 @@ import { withWorktreeFiles } from './worktree-manifest.ts';
 let root: string, worktree: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'fallback-worktree-'));
+  mkdirSync(join(root, '.ai/cezar'), { recursive: true }); // Keep the worktree in fallback data.
   worktree = join(root, '.ai/squawk/worktrees/task');
   mkdirSync(worktree, { recursive: true });
 });

@@ -283,3 +283,6 @@ describe('a journal that cannot finish', () => {
 function migrationLock(root: string): string {
   return join(root, '.ai/squawk-migration.lock');
 }
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

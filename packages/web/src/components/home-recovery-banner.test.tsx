@@ -1,3 +1,4 @@
+import { productName, productCommand } from '@/lib/product-name'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { HomeRecoveryFile } from '@open-mercato/cezar-api-client/contract/home-recovery'
@@ -58,7 +59,7 @@ it('shows each reset with its approved copy and both recovery actions', () => {
 it('names the outside-written file and leaves accept available when no restore target is readable', () => {
   state([file('ui-state.json', 'outside-write', false)])
   render(<HomeRecoveryBanner />)
-  expect(screen.getByText('ui-state.json changed outside Cezar. Restore the previous version or accept the file as found.')).toBeTruthy()
+  expect(screen.getByText(`ui-state.json changed outside ${productName("Cezar")}. Restore the previous version or accept the file as found.`)).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Restore' }).hasAttribute('disabled')).toBe(true)
   expect(screen.getByRole('button', { name: 'Accept as found' }).hasAttribute('disabled')).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: 'Accept as found' }))
@@ -110,7 +111,7 @@ it('keeps remote grants read-only even in the local cockpit and gives the host C
   state([file('remote-settings/4321.json', 'outside-write')])
   render(<HomeRecoveryBanner />)
   expect(screen.queryByRole('button')).toBeNull()
-  expect(screen.getByText('cez backup restore remote-settings/4321.json')).toBeTruthy()
+  expect(screen.getByText(`${productCommand()} backup restore remote-settings/4321.json`)).toBeTruthy()
   expect(screen.getByText('Only the host operator can restore or accept this file.', { exact: false })).toBeTruthy()
 })
 
@@ -123,7 +124,7 @@ it.each(['pending', 'error'] as const)('keeps capability-dependent actions unset
   expect(rows[0]!.textContent).toBe('The project registry was reset. Restore the previous projects?')
   expect(screen.queryByRole('button')).toBeNull()
   expect(screen.getAllByText('Only the host operator can restore or accept this file.', { exact: false })).toHaveLength(1)
-  expect(screen.getByText('cez backup restore remote-settings/4321.json')).toBeTruthy()
+  expect(screen.getByText(`${productCommand()} backup restore remote-settings/4321.json`)).toBeTruthy()
 })
 
 
@@ -150,9 +151,9 @@ it.each([true, false])('gives host CLI actions for legacy grants with canImport=
   render(<HomeRecoveryBanner />)
   expect(screen.queryByRole('button')).toBeNull()
   expect(screen.getByText(canImport ? 'Only the host operator can import or ignore this file.' : 'Only the host operator can ignore this file.', { exact: false })).toBeTruthy()
-  expect(screen.getByText('cez backup ignore remote-settings/4321.json')).toBeTruthy()
-  expect(screen.queryByText('cez backup import remote-settings/4321.json') !== null).toBe(canImport)
-  expect(screen.queryByText('cez backup restore remote-settings/4321.json')).toBeNull()
+  expect(screen.getByText(`${productCommand()} backup ignore remote-settings/4321.json`)).toBeTruthy()
+  expect(screen.queryByText(`${productCommand()} backup import remote-settings/4321.json`) !== null).toBe(canImport)
+  expect(screen.queryByText(`${productCommand()} backup restore remote-settings/4321.json`)).toBeNull()
 })
 
 it('offers only Ignore when a legacy file cannot be imported', () => {

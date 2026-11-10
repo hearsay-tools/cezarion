@@ -114,7 +114,7 @@ function runScript(fixtureRoot: string, args: string[], extraEnv: Record<string,
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: '',
     ...extraEnv,
   };
-  return execFile(process.execPath, [script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
+  return execFile(process.execPath, ['--import', new URL('../fixtures/release-switch-off.mjs', import.meta.url).href, script, ...args], { env, maxBuffer: 10 * 1024 * 1024 });
 }
 
 async function writeNpmStub(root: string): Promise<{ stub: string; log: string }> {

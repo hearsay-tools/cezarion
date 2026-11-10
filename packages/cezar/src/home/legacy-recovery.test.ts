@@ -22,7 +22,7 @@ afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 const base = { projects: [{ id: 'changed', root: '/old' }, { id: 'removed', root: '/removed' }], liveOnly: 'base', shared: 'base' };
 
 function fixture(fresh = false) {
-  const legacy = Home.sandbox(storeRoot());
+  const legacy = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const home = Home.sandbox(storeRoot(), { layout: 'split' });
   if (!fresh) Home.seed(legacy, legacy.workspaceConfig, base);
   migrateLegacyHome(legacy, home);
@@ -37,7 +37,7 @@ function row(home: Home, file = 'config.json') {
 it('detects legacy changes only for a committed migrated home and leaves the disabled path dark', () => {
   const { legacy, home } = fixture();
   writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true })); // Deliberate older-binary write.
-  expect(getHomeRecovery(home).files).toEqual([]);
+  expect(getHomeRecovery(home, false).files).toEqual([]);
   expect(legacyWatchDirectories(home, false)).toEqual([]);
   expect(row(home)).toMatchObject({ file: 'config.json', reason: 'legacy-change', canRestore: false, canImport: true });
   const detected = row(home).detectedAt;
@@ -118,7 +118,7 @@ it.each(['unreadable', 'corrupt', 'invalid JSON', 'null', 'array', 'primitive'])
   writeFileSync(legacy.workspaceConfig, JSON.stringify({ ...base, late: true }));
   const flag = row(home);
   expect(flag.canImport).toBe(false);
-  expect(getHomeRecovery(home).files).toEqual([]); // The shipped switch remains off.
+  expect(getHomeRecovery(home, false).files).toEqual([]); // The shipped switch remains off.
   expect(() => importHomeRecovery(home, 'config.json', flag.detectedAt, true)).toThrow();
   expect(readFileSync(home.workspaceConfig)).toEqual(live);
   acceptHomeRecovery(home, 'config.json', flag.detectedAt, true);
@@ -233,7 +233,7 @@ it('creates no legacy watcher with the shipped switch off', async () => {
   const { legacy, home } = fixture();
   const watch = vi.mocked(fs.watch);
   watch.mockClear();
-  const release = subscribeHomeRecovery(home, () => {});
+  const release = subscribeHomeRecovery(home, () => {}, false);
   await Promise.resolve();
   release();
   expect(watch.mock.calls.some(([path]) => String(path).startsWith(legacy.root))).toBe(false);
@@ -292,7 +292,7 @@ it('refuses Import before replacement when a required backup fails, but lets Ign
 });
 
 it.each(['claude', 'omp'])('keeps the migration account path policy when importing a changed %s entry', provider => {
-  const legacy = Home.sandbox(storeRoot());
+  const legacy = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const home = Home.sandbox(storeRoot(), { layout: 'split' });
   const configDir = join(legacy.root, 'credentials', ...(provider === 'omp' ? ['profiles', 'work'] : ['work']));
   mkdirSync(configDir, { recursive: true });
@@ -317,7 +317,7 @@ it('refuses a new legacy-internal account with no relocation and leaves Ignore a
 });
 
 it('preserves top-level removal of the accounts key during import', () => {
-  const legacy = Home.sandbox(storeRoot());
+  const legacy = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const home = Home.sandbox(storeRoot(), { layout: 'split' });
   Home.seed(legacy, legacy.agentAccounts, { accounts: [{ id: 'external', provider: 'claude', configDir: '/external' }], kept: true });
   migrateLegacyHome(legacy, home);
@@ -327,7 +327,7 @@ it('preserves top-level removal of the accounts key during import', () => {
 });
 
 it('keeps an untouched live account array as found when only another legacy key changed', () => {
-  const legacy = Home.sandbox(storeRoot());
+  const legacy = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const home = Home.sandbox(storeRoot(), { layout: 'split' });
   Home.seed(legacy, legacy.agentAccounts, { accounts: [], setting: 'base' });
   migrateLegacyHome(legacy, home);

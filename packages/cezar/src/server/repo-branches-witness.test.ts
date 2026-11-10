@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts'
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -153,7 +154,7 @@ describe('branch deletion with a controlled mutation lock', () => {
       const tip = await git(root, 'rev-parse', 'main');
       hook.beforeOperation = async () => { await git(root, 'symbolic-ref', `refs/heads/${name}`, 'refs/heads/main'); };
       expect(await deleteBranches(input(), [name])).toEqual({
-        deleted: [], refused: [{ name, reason: 'not a cezar task branch' }],
+        deleted: [], refused: [{ name, reason: `not a ${productName("cezar")} task branch` }],
       });
       expect(await git(root, 'rev-parse', 'main')).toBe(tip);
       expect(await git(root, 'symbolic-ref', `refs/heads/${name}`)).toBe('refs/heads/main');

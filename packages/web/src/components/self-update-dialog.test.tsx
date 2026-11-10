@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -152,7 +153,7 @@ describe('SelfUpdateDialog', () => {
   it('heads the dialog with the version and marks a local build', async () => {
     renderDialog()
     const dialog = await screen.findByRole('dialog')
-    expect(dialog.textContent).toContain('cezar v0.12.0')
+    expect(dialog.textContent).toContain(`${productName("cezar")} v0.12.0`)
     expect(dialog.textContent).toContain('local build')
     expect(screen.getByRole('radio', { name: 'Stable' }).getAttribute('aria-checked')).toBe('true')
   })
@@ -336,7 +337,7 @@ describe('SelfUpdateDialog', () => {
     fireEvent.click(await screen.findByRole('radio', { name: 'Development' }))
     const dialog = await screen.findByRole('dialog')
     await waitFor(() => expect(dialog.textContent).toContain('Could not switch the channel'))
-    expect(dialog.textContent).toContain('restart cezar')
+    expect(dialog.textContent).toContain(`restart ${productName("cezar")}`)
   })
 
   it('shows no development panel on a release channel', async () => {

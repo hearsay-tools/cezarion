@@ -1,3 +1,4 @@
+import { productName, productCommand } from '@/lib/product-name'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -220,7 +221,7 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     renderAt('/p/other/settings/worktrees', { localHandoff: false })
     await waitFor(() => expect(commandsBox()).not.toBeNull())
     expect(screen.getByText('/host/other project/.ai/cezar/config.json')).toBeTruthy()
-    expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toContain('on the machine running Cezarion')
+    expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toContain(`on the machine running ${productName("Cezarion")}`)
     expect(screen.queryByText('/host/boot/.ai/cezar/config.json')).toBeNull()
   })
 
@@ -280,7 +281,7 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     expect(timeoutInput()!.readOnly).toBe(true)
     expect(saveSetup()!.disabled).toBe(true)
     expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toBe(
-      'Edit worktreeSetup.commands in /host/boot/.ai/cezar/config.json on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed. To edit here, the host operator runs cez remote-settings enable.',
+      `Edit worktreeSetup.commands in /host/boot/.ai/cezar/config.json on the machine running ${productName("Cezarion")}. Valid file edits apply to new worktrees; no restart is needed. To edit here, the host operator runs ${productCommand()} remote-settings enable.`,
     )
     expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
   })
@@ -292,7 +293,7 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     expect(commandsBox()!.readOnly).toBe(false)
     expect(document.querySelector('[data-slot="worktree-setup-readonly"]')).toBeNull()
     expect(document.querySelector('[data-slot="remote-settings-notice"]')?.textContent).toContain(
-      'These commands run on the machine running Cezarion',
+      `These commands run on the machine running ${productName("Cezarion")}`,
     )
     fireEvent.change(commandsBox()!, { target: { value: 'npm ci\npnpm build' } })
     fireEvent.click(saveSetup()!)
