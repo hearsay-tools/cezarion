@@ -52,7 +52,8 @@ them. While the gate is off, help and dispatch omit the command (`cez migrate-pr
 is an unknown command, exit 1), the route path is not served (an unknown route), and every
 ordinary write stays under `.ai/cezar/`. Early recovery is not gated: an entry that
 finds an unfinished `.ai/squawk-migration.json` finishes it before it reads the project,
-and a journal that cannot finish keeps the project refused with the cause. With the
+and a journal that cannot finish keeps the project refused with the cause. A journal that names
+anything outside the project's own state, or that Git tracks, is refused unchanged before any step. With the
 gate on, the command prints the plan text and a closing line, exits 0, and prints the
 `git mv` commands for tracked files without running them; a refusal prints one message
 to stderr and exits 1. hearsay-tools/cezarion#3142, hearsay-tools/cezarion#3146 and

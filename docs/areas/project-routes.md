@@ -174,6 +174,19 @@ behind the P5 gate and `resumeProjectMigration` into every project entry
   holds the new one, so a resume after a crash between an effect and its mark changes
   nothing twice. A value that is neither stops the step; the journal stays and admission
   stays blocked.
+- **Untrusted journal.** A journal read back for a resume is untrusted input: a repository can
+  commit one. Before any step, `assertJournalContained` (`project-migration/containment.ts`)
+  refuses a journal whose `source` and `destination` are not exactly `<root>/.ai/cezar` and
+  `<root>/.ai/squawk`; a move or worktree that does not go from inside `source` to the same place
+  inside `destination`; a receipt or cleanup checkpoint outside `<git common dir>/cezar-owned-workspaces/`;
+  another rewritten file outside `<destination>/runs/`; a rewritten value that does not move a path
+  of this root's `.ai/cezar` to the same place under `.ai/squawk`; a tracked-file entry that is not a
+  relative `.ai/cezar/...` path; any existing directory on the way that resolves elsewhere (a
+  symlink out); and a journal Git tracks (one `git ls-files` call, only when a journal exists; the
+  shared excludes keep a real journal out of every ordinary add). A fresh plan passes the same
+  check before its journal is written. Each step checks its write target again right before it
+  writes. A refused journal changes nothing and stays for inspection; recovery reports it as a
+  recovery failure (boot ends, CLI exit 1, 409), and admission keeps refusing the project.
 - **Durability invariant.** One rule, enforced by `settle` in `project-migration/durable.ts`
   and stated there: (a) after every effect on an entry (created, renamed in or out,
   rewritten or removed, by the engine or by Git or SQLite for it), the entry's data when it

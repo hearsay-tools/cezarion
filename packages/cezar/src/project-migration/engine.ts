@@ -9,6 +9,7 @@ import {
 import { gitMvCommands, LEGACY_PROJECT_DIR, planProjectMigration, type ProjectMigrationPlan } from './plan.ts';
 import { GIT_MIGRATION_STEPS, MIGRATION_STEP_RUNNERS, type MigrationFault } from './steps.ts';
 import { withWorktreeMutation, type WorktreeGit } from '../git-worktree-lock.ts';
+import { assertJournalContained } from './containment.ts';
 
 /**
  * The project state migration engine (P4b2, hearsay-tools/cezarion#3088): it moves a project's
@@ -94,6 +95,8 @@ async function resumeHeld(options: ProjectMigrationOptions): Promise<ProjectMigr
   if (!journal) return undefined;
   const root = realpathSync(resolve(options.repoRoot));
   if (journal.repoRoot !== root) throw new Error(`The migration journal ${options.fence.journal} belongs to ${journal.repoRoot}, not ${root}`);
+  // Read back from disk, so untrusted: nothing outside the project's own state may be named in it.
+  await assertJournalContained(options.fence.journal, journal);
   return runJournal(options.fence.journal, journal, true, options.fault ?? (() => undefined));
 }
 
@@ -116,6 +119,8 @@ export async function migrateProject(options: ProjectMigrationOptions & { closeP
       version: 1, id: randomUUID(), createdAt: new Date().toISOString(), repoRoot: plan.repoRoot, source: plan.source,
       destination: plan.destination, done: [], moves: plan.moves, tracked: plan.tracked, worktrees: plan.worktrees, rewrites: plan.rewrites,
     };
+    // The same rule as a resume, before the journal exists, so a refused plan leaves nothing behind.
+    await assertJournalContained(plan.journal, journal);
     const fault = options.fault ?? (() => undefined);
     fault('journal:before');
     writeProjectMigrationJournal(plan.journal, journal);

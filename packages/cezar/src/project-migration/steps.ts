@@ -1,9 +1,10 @@
-import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
+import { outsideOf, receiptDirectory } from './containment.ts';
 import { replaceAtomically, settle } from './durable.ts';
 import type { PathRewrite, ProjectMigrationJournal, ProjectMigrationStep } from './journal.ts';
 import { gitOutput, gitReportedPath, redirectedComponent, rewriteHandoffWorktreeLine, trackedPaths, valueAt } from './plan.ts';
@@ -23,6 +24,13 @@ export class ProjectMigrationStepError extends Error {
     super(`Project migration step ${step} cannot continue: ${detail}. The journal stays; resume the migration after fixing it`);
     this.name = 'ProjectMigrationStepError';
   }
+}
+
+/** Refuse a write target outside `root` (or behind a directory that resolves elsewhere), checked
+ *  right before the write; the journal was checked as a whole before any step. */
+function contained(step: ProjectMigrationStep, root: string, path: string): void {
+  const refusal = outsideOf(root, path);
+  if (refusal) throw new ProjectMigrationStepError(step, refusal);
 }
 
 type FieldRewrite = { field: readonly string[]; from: string; to: string };
@@ -95,6 +103,8 @@ async function moveStep(journal: ProjectMigrationJournal, fault: MigrationFault)
       // Checked again here: a symlink placed after planning must not redirect the rename.
       const redirected = redirectedComponent(root, dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
       if (redirected) throw new ProjectMigrationStepError('move', `${redirected} is not a directory of this project`);
+      contained('move', journal.source, move.from);
+      contained('move', journal.destination, move.to);
       createDirectories(journal.destination, journal.source, dirname(move.to));
       fault(`move:prepared:${index}`);
       renameSync(move.from, move.to);
@@ -141,6 +151,7 @@ async function lockStep(journal: ProjectMigrationJournal, fault: MigrationFault,
   const { locks } = await worktreeListing(journal, git!);
   for (const [index, worktree] of journal.worktrees.entries()) {
     const path = pathPresent(worktree.from) ? worktree.from : worktree.to;
+    contained('lock-worktrees', path === worktree.from ? journal.source : journal.destination, path);
     if (!locks.has(worktree.from) && !locks.has(worktree.to)) {
       const locked = await git!(journal.repoRoot, ['worktree', 'lock', '--reason', migrationLockReason(journal), '--', path]);
       if (!locked.ok) throw new ProjectMigrationStepError('lock-worktrees', `git worktree lock ${path} failed: ${locked.stderr.trim()}`);
@@ -155,6 +166,7 @@ async function lockStep(journal: ProjectMigrationJournal, fault: MigrationFault,
 async function repairStep(journal: ProjectMigrationJournal, fault: MigrationFault, git?: WorktreeGit): Promise<void> {
   if (journal.worktrees.length === 0) return;
   const paths = journal.worktrees.map(worktree => worktree.to);
+  for (const path of paths) contained('repair-worktrees', journal.destination, path);
   const repaired = await git!(journal.repoRoot, ['worktree', 'repair', '--', ...paths]);
   if (!repaired.ok) throw new ProjectMigrationStepError('repair-worktrees', `git worktree repair failed: ${repaired.stderr.trim()}`);
   const { paths: listed, locks } = await worktreeListing(journal, git!);
@@ -181,8 +193,10 @@ async function repairStep(journal: ProjectMigrationJournal, fault: MigrationFaul
 async function receiptStep(journal: ProjectMigrationJournal, fault: MigrationFault): Promise<void> {
   const rewrites = journal.rewrites.filter((rewrite): rewrite is Extract<PathRewrite, { kind: 'receipt' | 'cleanup-checkpoint' }> =>
     rewrite.kind === 'receipt' || rewrite.kind === 'cleanup-checkpoint');
+  const receipts = rewrites.length > 0 ? await receiptDirectory(journal.repoRoot) : '';
   let index = 0;
   for (const [file, fields] of byFile(rewrites)) {
+    contained('receipts', receipts, file);
     const text = await readOwnedWorkspaceRecord(file);
     const value: unknown = JSON.parse(text);
     if (applyFields('receipts', file, value, fields)) await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
@@ -197,6 +211,7 @@ function runStoreStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
   if (rewrites.length === 0) return;
   const ids = [...new Set(rewrites.map(rewrite => rewrite.runId))];
   const path = join(journal.destination, RUNS_DB_FILE);
+  contained('run-store', journal.destination, path);
   // RunDatabase.open creates a missing database: refuse first, so no empty store shadows a lost one.
   if (!pathPresent(path)) throw new ProjectMigrationStepError('run-store', `the moved run store ${path} is missing`);
   const db = RunDatabase.open(path);
@@ -234,6 +249,8 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
     rewrite.kind !== 'run-row' && rewrite.kind !== 'receipt' && rewrite.kind !== 'cleanup-checkpoint');
   let index = 0;
   for (const [file, fields] of byFile(rewrites)) {
+    contained('run-files', join(journal.destination, 'runs'), file);
+    if (lstatSync(file).isSymbolicLink()) throw new ProjectMigrationStepError('run-files', `${file} is a symbolic link`);
     const text = readFileSync(file, 'utf8');
     let next = text;
     // Only the seeded worktree line, and only while it still names the old path: the agent may edit the file.
