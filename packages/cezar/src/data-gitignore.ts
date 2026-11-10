@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { projectPaths } from './project-paths.ts';
 import { projectWriteRefused } from './server/cockpit-ownership.ts';
 
 /**
@@ -9,8 +10,10 @@ import { projectWriteRefused } from './server/cockpit-ownership.ts';
  * history backups an open creates are ignored even when that open then fails.
  */
 export function ensureDataGitignore(repoRoot: string): void {
-  if (projectWriteRefused(join(repoRoot, '.ai/cezar'))) return;
-  const path = join(repoRoot, '.ai/cezar', '.gitignore');
+  const { write, reads } = projectPaths(repoRoot);
+  const fallback = reads[1]!;
+  if (projectWriteRefused(write)) return;
+  const path = join(write, '.gitignore');
   const wanted = [
     'runs.json',
     'runs.json.tmp',
@@ -47,9 +50,11 @@ export function ensureDataGitignore(repoRoot: string): void {
     'automation-state.reclaim*/',
   ];
   try {
-    const fallbackOnly = existsSync(join(repoRoot, '.ai/squawk')) && !existsSync(join(repoRoot, '.ai/cezar'));
+    // A tracked copy left in the fallback directory awaits the user's `git mv`: a new file at its
+    // destination would make that move fail. The shared excludes below cover both directories.
+    const fallbackOnly = existsSync(fallback) && (!existsSync(write) || (!existsSync(path) && existsSync(join(fallback, '.gitignore'))));
     if (!fallbackOnly) {
-      mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+      mkdirSync(write, { recursive: true });
       const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
       const lines = current.split('\n');
       const missing = wanted.filter((w) => !lines.includes(w));
