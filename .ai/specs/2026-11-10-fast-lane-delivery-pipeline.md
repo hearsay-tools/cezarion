@@ -207,24 +207,29 @@ One workflow, `main-verify.yml`, verifies `main`.
 4. **Flake or real.** On a failure the workflow reruns the failed jobs once on the same
    commit. A pass on the rerun files a flake issue with the failed test names; the verdict
    is `success`.
-5. **Bisect.** A second failure is real. A matrix job runs only the failing files on each
-   commit between the last green commit and the verified one. The first commit that fails is
-   the cause.
+5. **Bisect.** A second failure is real. Its failing units are the failing test files when
+   the failed job names them. A job that names none (build, a coverage threshold, setup, a
+   time limit) is one failing unit as a whole. A matrix job runs only the failing units on
+   each commit between the last green commit and the verified one. The first commit that
+   fails is the cause.
 6. **Revert.** The bot opens a PR that reverts the cause, with the label `main-revert` and
    auto-merge armed. It uses the release App token, so the PR starts CI. The bot comments on
    the reverted PR with the failing tests and the run link.
 7. **Revert lane.** CI proves that the PR tree equals a plain `git revert` of the named
    commits on the current `main`. Such a PR takes its own lane, whatever paths it touches,
    and this lane exists from P1.2, before the fast lane does. Its pull request check runs
-   typecheck, lint, build, the guard tests and the files that failed on `main`. Its
+   typecheck, lint, build, the guard tests and the units that failed on `main`. Its
    `Automated Code Review` check passes without CodeRabbit admission. Its queue run is the
    check of § Queue check. `pr-readiness.yml` does not return it to draft. A PR with the
    label whose tree is not a plain revert fails its check.
 8. **Hold.** While the verdict is `failure`, the pull request check of every other PR
    reports "main is red" and does not pass. Two kinds of PR are not held: a verified revert,
    and a repair PR, which is a PR with a closing reference to an open `main-ci-failure`
-   summary. A repair PR runs the normal checks of its lane. Entries already in the queue
-   finish. The workflow re-runs the held checks when `main` is green.
+   summary. A repair PR runs the normal checks of its lane. The queue check applies the
+   same hold: a queue run that starts while the verdict is `failure` fails with "main is
+   red", so a PR whose check passed before the failure cannot merge either. A queue run that
+   started earlier finishes. When `main` is green, the workflow re-runs the held pull request
+   checks and arms auto-merge again on each PR that the hold removed from the queue.
 9. **Snapshot.** The `dev` npm snapshot publishes from the verified commit, after `success`.
 
 Clocks run in a second workflow, `main-watch.yml`, on a 30-minute schedule. It has its own
@@ -233,12 +238,20 @@ alert.
 
 | When | Action |
 | --- | --- |
-| A real failure is confirmed | The existing reporter files the `main-ci-failure` summary. It gets `release-blocker` |
+| A real failure is confirmed | The failure reporter files the `main-ci-failure` summary. It gets `release-blocker` |
 | 60 min after the first confirmed failure, `main` not green | A comment on the summary mentions the owner |
 | 6 h, `main` not green | The bot reverts every commit after the last green one, in one PR |
 | Every 30 min | `main-watch.yml` checks that the newest commit on `main` is verified or has a run in progress. If not, it dispatches verification. If commits wait and no verification run has finished for 90 min, it files the same alert |
 
 Expected time red: 20 min to detect, 5 to classify, 5 to bisect, 7 to revert.
+
+The reporter and the repair path read `ci.yml` today: `report-workflow-failure.yml`
+subscribes to CI, Release and Nightly; `report-workflow-failure.cjs` and
+`main-ci-summary.cjs` accept only those paths and a push run of `ci.yml`; the repair prompt
+in `main-ci-repair-automation.cjs` requires `.github/workflows/ci.yml`. P1.1 moves all of
+them to `main-verify.yml` before it removes the suites from the `ci.yml` push path. A
+checked-in prompt change does not change the saved automation, so the owner updates that
+(§ Owner actions).
 
 Cases:
 
@@ -256,6 +269,8 @@ Cases:
 | The App token is missing | The workflow fails visibly. The watchdog alert fires. Nothing is reverted |
 | The 6-hour revert: the last green commit is older than 50 commits | No revert. The owner is mentioned. The limit keeps one bad status from undoing a day of work |
 | A repair task's PR while `main` is red | Not held, because it closes the open failure summary. It merges through its lane |
+| A PR whose check passed before the failure enters the queue while `main` is red | Its queue run fails with "main is red". The workflow arms auto-merge on it again when `main` is green |
+| The failed job names no test file (build, coverage threshold, setup, time limit) | The job is the failing unit. Bisect and the revert lane run that job |
 | A verification run hangs | Its job time limit ends it. `main-watch.yml` alerts at 90 min in any case |
 
 ### Release
@@ -269,9 +284,10 @@ within 24 hours of the last one. No schedule starts a release.
    `main-verify` status exists there, so the release runs the same suite on that commit
    first. The suite is one reusable workflow that `main-verify.yml` and `release.yml` call.
 2. **Gates.** No open issue carries `release-blocker`. The last rehearsal (below) passed.
-3. **Stage.** Compute the version as today and publish it under the `next` dist-tag. The
-   version-bump PR opens after the stage, not after the promotion, so the next release
-   always computes a new version.
+3. **Stage.** Compute the version from the manifest and the registry: the next version
+   after the higher of the manifest version and the highest version that the registry holds
+   for another commit. Publish it under the `next` dist-tag. The version-bump PR opens after
+   the stage; a later release does not depend on its merge.
 4. **Test the published package**, installed from the registry, not built from the tree:
    clean install, boot, cockpit smoke, upgrade from the current `latest` with existing state,
    the Node floor, the OS matrix, shuffled browser specs.
@@ -285,7 +301,7 @@ A version is immutable on npm, and `scripts/release.mjs` refuses a version whose
 | Case | Behaviour |
 | --- | --- |
 | Step 4 fails | The version stays on `next` and is deprecated on npm with the reason. `latest` does not move. No GitHub Release. The bump PR still merges. A `release-blocker` issue is filed |
-| The owner dispatches again after a fix | A new candidate, the next version. This attempt does not count against the 24-hour limit, because no stable release happened |
+| The owner dispatches again after a fix | A new candidate. The registry holds the failed version for another commit, so the release takes the next one, whether or not the earlier bump PR merged. This attempt does not count against the 24-hour limit, because no stable release happened |
 | The same run is re-run after a transient failure | Same commit, same version: the publish step sees its own `gitHead` and continues at step 4, as the retry guard does today |
 | Step 5 fails after step 4 passed | Re-run the run; the promotion repeats safely |
 
@@ -338,6 +354,8 @@ Only the owner can make these changes. Each phase lists the ones it needs.
    active finding.
 5. Create two Cezar automations: one for `release-blocker` issues from the rehearsal, one
    for review follow-up issues.
+6. Update the saved "Main CI — guarded repair" automation with the prompt that P1.1 checks
+   in, so that it accepts failures of `main-verify.yml`.
 
 ## Phases
 
@@ -346,7 +364,7 @@ Each row is one issue. The safety net comes first; P3 to P6 do not start before 
 | Phase | Content | Needs |
 | --- | --- | --- |
 | P0 | This spec | |
-| P1.1 | `main-verify.yml`: the reusable suite, the rolling run, the rerun, the `main-verify` status, the flake issue, the `dev` snapshot from the verified commit. It runs beside today's `main` push CI for one week before that is removed | |
+| P1.1 | `main-verify.yml`: the reusable suite, the rolling run, the rerun, the `main-verify` status, the flake issue, the `dev` snapshot from the verified commit, the failure reporter and the repair prompt for the new workflow. It runs beside today's `main` push CI for one week before that is removed | Owner action 6 |
 | P1.2 | Bisect, the revert bot, the revert lane and the hold | P1.1; owner actions 2, 3 |
 | P1.3 | `main-watch.yml`: the 60-minute mention, the 6-hour revert, the watchdog | P1.2 |
 | P2 | Release: once-a-day guard, gates, stage on `next`, test the published package, promote, roll back. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
