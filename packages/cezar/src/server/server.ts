@@ -191,7 +191,7 @@ import { listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../workflows/run.ts';
 import type { PastedContent } from '../workflows/run/types.ts';
-import { worktreeSizeBytes } from '../git-worktree.ts';
+import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
@@ -3720,7 +3720,8 @@ export function createApp(deps: ServerDeps) {
     .get('/runs/:id/diff', async (c) => {
       const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'existing-worktree' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
-      const result = await checkout.diff();
+      if (!checkout.directory) return c.text('(no worktree — this task ran directly in the repo working tree)');
+      const result = await worktreeDiff(checkout.directory, checkout.run.baseBranch ?? 'HEAD', undefined, checkout.beforeLiveIndex);
       if (typeof result !== 'string') return c.json({ error: result.error }, 409);
       return c.text(result);
     })

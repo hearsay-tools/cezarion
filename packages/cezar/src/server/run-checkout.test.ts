@@ -104,7 +104,7 @@ describe.each(routes)('$intent $route', (route) => {
       : {
         run: state.run,
         directory: expected,
-        ...(route.intent === 'read' ? { beforeLiveIndex: expect.any(Function), diff: expect.any(Function) } : {}),
+        ...(route.intent === 'read' ? { beforeLiveIndex: expect.any(Function) } : {}),
       });
     expect(host.store.writeRefusal).not.toHaveBeenCalled();
     expect(host.manager.claimForPublish).not.toHaveBeenCalled();

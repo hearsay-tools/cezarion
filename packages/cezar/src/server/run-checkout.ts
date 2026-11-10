@@ -1,5 +1,4 @@
-import { worktreeDiff } from '../git-worktree.ts';
-import type { LiveIndexCheck, DiffRefusal } from '../git-private-index.ts';
+import type { LiveIndexCheck } from '../git-private-index.ts';
 import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { fallbackProjectWriteError } from '../project-paths.ts';
@@ -42,7 +41,6 @@ type ReadHandle<Rule extends ReadDirectoryRule> = {
 
 interface ReadActions {
   beforeLiveIndex: LiveIndexCheck;
-  diff: () => Promise<string | DiffRefusal>;
 }
 
 interface OpenOptions {
@@ -116,9 +114,6 @@ function readCheckoutHandle(host: RunCheckoutHost, run: RunRecord, directory: st
     run,
     directory,
     beforeLiveIndex,
-    diff: () => directory
-      ? worktreeDiff(directory, run.baseBranch ?? 'HEAD', undefined, beforeLiveIndex)
-      : Promise.resolve('(no worktree — this task ran directly in the repo working tree)'),
   };
 }
 
