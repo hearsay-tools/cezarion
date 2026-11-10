@@ -199,6 +199,20 @@ the P1b Home selector. Browser workers load `scripts/test-browser-home-env.mjs`:
 they retain host HOME and USERPROFILE for installed browser discovery (the P0b
 exception), while CEZ_HOME and XDG overrides use a private marked sandbox.
 
+### Runner classes (`runner-class-outside-factory`)
+
+The ast-grep rule checks production `.ts` files in `packages/cezar/src` outside `core/`; it
+ignores tests and testkits (hearsay-tools/cezarion#2939). Only `createRunner` in
+`core/runner-factory.ts` constructs a runner class; other code takes a `RunnerFactory`.
+The rule reports `new` of a class that implements `AgentRunner`, on the bare name or as a
+namespace member. It also reports a run-time load of a concrete runner module
+`core/<name>-runner.ts`: a static import or re-export that is not `import type` or `export type`,
+a dynamic `import()` and a `require()`. `core/agent-runner.ts` stays allowed.
+`packages/cezar/src/runner-class-rule.test.ts` holds the class names to the classes in `core/`.
+The rule knows no type and resolves no import. It leaves out a class under another name and a
+computed module specifier. It reports an inline `import { type X }`, and a type query
+`import('…').X` outside a type alias or a type annotation. It has no baseline.
+
 ### Wait-kind literals (`wait-kind-literal-outside-engine`)
 
 The rule checks production `.ts` files in `packages/cezar/src`; it ignores tests and testkits
