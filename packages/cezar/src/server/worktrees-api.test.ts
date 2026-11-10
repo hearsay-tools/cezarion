@@ -535,8 +535,8 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       processes: [], groups: [], uncertain: false, message: 'cleanup pending',
     }));
     const indexPath = (await run('git', ['rev-parse', '--path-format=absolute', '--git-path', 'index'], { cwd: path })).stdout.trim();
-    const index = readFileSync(indexPath);
     const status = (await run('git', ['status', '--porcelain=v1'], { cwd: path })).stdout;
+    const index = readFileSync(indexPath);
     if (noScratch) vi.mocked(mkdtemp).mockRejectedValue(new Error('scratch unavailable'));
     try {
       for (const suffix of ['diff', 'changes']) {
@@ -550,6 +550,13 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
         }
         expect(readFileSync(indexPath)).toEqual(index);
         expect((await run('git', ['status', '--porcelain=v1'], { cwd: path })).stdout).toBe(status);
+      }
+      // Without evidence, the degraded fallback must still show untracked work.
+      rmSync(evidence);
+      for (const suffix of ['diff', 'changes']) {
+        const response = await apiRequest(app, `/api/v1/runs/${id}/${suffix}`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain('untracked.txt');
       }
     } finally { vi.mocked(mkdtemp).mockReset().mockImplementation((await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).mkdtemp); }
   });

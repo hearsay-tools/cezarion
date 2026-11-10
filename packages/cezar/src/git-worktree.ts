@@ -834,9 +834,13 @@ type IndexGit = (args: string[]) => Promise<GitResult>;
 
 /**
  * Read through a private index copy. Try OS temp, then the Git directory; if neither is
- * writable, retain the real-index fallback. Always remove scratch state.
+ * writable, check beforeLiveIndex before the real-index fallback. Always remove scratch state.
  */
-export async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
+export async function withPrivateIndex<T, Refusal = never>(
+  worktreePath: string,
+  read: (git: IndexGit) => Promise<T>,
+  beforeLiveIndex?: () => Refusal | undefined,
+): Promise<T | Refusal> {
   const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
   const realIndex = real.ok ? real.stdout.trim() : '';
   let scratch: string | undefined;
@@ -847,6 +851,8 @@ export async function withPrivateIndex<T>(worktreePath: string, read: (git: Inde
     } catch { /* Not writable: try the next location. */ }
   }
   if (!scratch) {
+    const blocked = beforeLiveIndex?.();
+    if (blocked !== undefined) return blocked;
     const refusal = fallbackProjectWriteError(worktreePath);
     if (refusal) throw new Error(refusal);
     return read((args) => git(worktreePath, args));
@@ -872,15 +878,22 @@ async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promis
   return mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
 }
 
+export type LiveIndexCheck = () => string | undefined;
+export type DiffRefusal = { error: string };
+
 /**
  * Whole-branch committed, uncommitted and untracked diff against the merge-base. Preserve this
  * anchor for the protected text endpoint and conservative settlement checks.
+ * Callers without a live-index check, including settlement, keep a string result.
  */
+export function worktreeDiff(worktreePath: string, baseBranch: string, cap?: number): Promise<string>;
+export function worktreeDiff(worktreePath: string, baseBranch: string, cap: number | undefined, beforeLiveIndex: LiveIndexCheck): Promise<string | DiffRefusal>;
 export async function worktreeDiff(
   worktreePath: string,
   baseBranch: string,
   cap = DIFF_CAP,
-): Promise<string> {
+  beforeLiveIndex?: LiveIndexCheck,
+): Promise<string | DiffRefusal> {
   if (!isSafeGitRef(baseBranch)) return '(diff failed: refusing option-like base ref)';
   return withPrivateIndex(worktreePath, async (git) => {
     const base = await prepareWholeBranchDiff(git, baseBranch);
@@ -888,6 +901,9 @@ export async function worktreeDiff(
     if (!res.ok) return `(diff failed: ${res.stderr.trim() || 'unknown git error'})`;
     if (res.stdout.length > cap) return `${res.stdout.slice(0, cap)}\n… (diff truncated)`;
     return res.stdout;
+  }, (): DiffRefusal | undefined => {
+    const error = beforeLiveIndex?.();
+    return error === undefined ? undefined : { error };
   });
 }
 

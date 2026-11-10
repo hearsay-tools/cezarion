@@ -30,7 +30,6 @@ export interface RunCheckoutHost {
 
 type ReadDirectoryRule = 'working-directory' | 'existing-worktree' | 'recorded-path-or-root';
 interface ReadOptions<Rule extends ReadDirectoryRule> {
-  checksAutosave: boolean;
   directory: Rule;
 }
 type CheckoutRefusal = { status: 404 | 409; body: { error: string } };
@@ -80,7 +79,7 @@ export function runCheckout(
   host: RunCheckoutHost,
   id: string,
   intent: CheckoutIntent,
-  options: ReadOptions<ReadDirectoryRule> | RemoveOptions | OpenOptions = { checksAutosave: true, directory: 'existing-worktree' },
+  options: ReadOptions<ReadDirectoryRule> | RemoveOptions | OpenOptions = { directory: 'existing-worktree' },
 ): CheckoutRefusal | ReadHandle<ReadDirectoryRule> | ClaimedHandle | OpenHandle {
   if (intent === 'publish') return publishCheckout(host, id);
   if ('ignoresEngineOwnership' in options) return openCheckout(host, id, options);
@@ -90,7 +89,7 @@ export function runCheckout(
   if (!run) return { status: 404, body: { error: 'not found' } };
   const refusal = intent === 'mutate' && run.worktreePath && fallbackProjectWriteError(run.worktreePath);
   if (refusal) return { status: 409, body: { error: refusal } };
-  if (options.checksAutosave) {
+  if (intent === 'mutate') {
     const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
     if (blocker) return { status: 409, body: { error: blocker } };
   }

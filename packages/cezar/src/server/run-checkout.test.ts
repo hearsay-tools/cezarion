@@ -31,14 +31,14 @@ const autosave = { status: 409, body: { error: 'autosave cleanup pending' } };
 
 // One policy row for each Table A read and mutate route.
 const routes = [
-  { intent: 'read', route: 'diff', checksAutosave: true, directory: 'existing-worktree', column: 'diff' },
-  { intent: 'read', route: 'changes', checksAutosave: true, directory: 'working-directory', column: 'working' },
-  { intent: 'read', route: 'commits', checksAutosave: false, directory: 'working-directory', column: 'working' },
-  { intent: 'read', route: 'commit/:sha', checksAutosave: false, directory: 'working-directory', column: 'working' },
-  { intent: 'read', route: 'files', checksAutosave: false, directory: 'working-directory', column: 'working' },
-  { intent: 'read', route: 'file-link', checksAutosave: false, directory: 'recorded-path-or-root', column: 'fileLink' },
-  { intent: 'mutate', route: 'git/commit', checksAutosave: true, column: 'mutate' },
-  { intent: 'mutate', route: 'git/push', checksAutosave: true, column: 'mutate' },
+  { intent: 'read', route: 'diff', directory: 'existing-worktree', column: 'diff' },
+  { intent: 'read', route: 'changes', directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'commits', directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'commit/:sha', directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'files', directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'file-link', directory: 'recorded-path-or-root', column: 'fileLink' },
+  { intent: 'mutate', route: 'git/commit', column: 'mutate' },
+  { intent: 'mutate', route: 'git/push', column: 'mutate' },
 ] as const;
 type Expected = string | null | typeof notFound;
 interface State {
@@ -97,8 +97,8 @@ describe.each(routes)('$intent $route', (route) => {
     const result = route.intent === 'mutate'
       ? runCheckout(host, baseRun.id, 'mutate')
       : runCheckout(host, baseRun.id, 'read', route);
-    const checksAutosave = Boolean(state.run && route.intent === 'mutate' && !(state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
-    const expected = checksAutosave && state.blocked ? autosave : state[route.column];
+    const checksMutationAutosave = Boolean(state.run && route.intent === 'mutate' && !(state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
+    const expected = checksMutationAutosave && state.blocked ? autosave : state[route.column];
     expect(result).toEqual(typeof expected === 'object' && expected !== null
       ? expected
       : { run: state.run, directory: expected });
@@ -106,9 +106,9 @@ describe.each(routes)('$intent $route', (route) => {
     expect(host.manager.claimForPublish).not.toHaveBeenCalled();
     expect(host.manager.claimWorktreeReclaim).not.toHaveBeenCalled();
     expect(host.store.getRun).toHaveBeenCalledExactlyOnceWith(baseRun.id);
-    expect(autosaveCleanupBlocker).toHaveBeenCalledTimes(Number(checksAutosave));
-    expect(host.store.sourceDataDir).toHaveBeenCalledTimes(Number(checksAutosave));
-    if (checksAutosave) {
+    expect(autosaveCleanupBlocker).toHaveBeenCalledTimes(Number(checksMutationAutosave));
+    expect(host.store.sourceDataDir).toHaveBeenCalledTimes(Number(checksMutationAutosave));
+    if (checksMutationAutosave) {
       expect(autosaveCleanupBlocker).toHaveBeenCalledWith(join(root, 'source'), baseRun.id);
     }
   });

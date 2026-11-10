@@ -1,3 +1,4 @@
+import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { runCheckout, preparePublishCheckout, reclaimCheckoutError } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
@@ -3718,20 +3719,27 @@ export function createApp(deps: ServerDeps) {
 
     // Task diff (spec 006): what this run changed — its worktree vs its base.
     .get('/runs/:id/diff', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: true, directory: 'existing-worktree' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'existing-worktree' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       if (!workingDirectory) {
         return c.text('(no worktree — this task ran directly in the repo working tree)');
       }
-      return c.text(await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD'));
+      const result = await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD', undefined,
+        () => autosaveCleanupBlocker(c.get('project').store.sourceDataDir(run.id), run.id));
+      if (typeof result !== 'string') {
+        const { error } = result;
+        return c.json({ error }, 409);
+      }
+      return c.text(result);
     })
 
     .get('/runs/:id/changes', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: true, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const result = await collectChanges(workingDirectory, run.baseBranch ?? 'HEAD', {
+        beforeLiveIndex: () => autosaveCleanupBlocker(c.get('project').store.sourceDataDir(run.id), run.id),
         taskBranch: run.branch,
         // Anchors a repointed worktree at the branch as this run found it (#751).
         runStartedAt: run.startedAt,
@@ -3744,7 +3752,7 @@ export function createApp(deps: ServerDeps) {
 
     // The run's own commits (<base>..HEAD on the worktree branch) — the Commits tab.
     .get('/runs/:id/commits', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const result = await collectRunCommits(workingDirectory, run.baseBranch ?? 'HEAD');
@@ -3754,7 +3762,7 @@ export function createApp(deps: ServerDeps) {
 
     // One of the run's commits, structured like the Changes tab (reuses collectCommitChanges).
     .get('/runs/:id/commit/:sha', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { directory: workingDirectory } = checkout;
       const result = await collectCommitChanges(workingDirectory, c.req.param('sha'));
@@ -3764,7 +3772,7 @@ export function createApp(deps: ServerDeps) {
 
     .get('/runs/:id/file-link', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), queryZodValidator(fileLinkQuerySchema), async (c) => {
       const { root, store } = c.get('project');
-      const checkout = runCheckout(c.get('project'), c.req.valid('param').id, 'read', { checksAutosave: false, directory: 'recorded-path-or-root' });
+      const checkout = runCheckout(c.get('project'), c.req.valid('param').id, 'read', { directory: 'recorded-path-or-root' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const query = c.req.valid('query');
@@ -3843,7 +3851,7 @@ export function createApp(deps: ServerDeps) {
         query.raw !== undefined
           ? query.raw === '1'
           : negotiate(c.req.header('accept'), FILE_FORMATS) === 'image/*';
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { directory: workingDirectory } = checkout;
       const result = await readWorktreePath(workingDirectory, query.path ?? '');
