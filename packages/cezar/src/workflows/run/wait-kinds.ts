@@ -374,11 +374,6 @@ export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly stri
   return waits.find((wait): wait is PeerWaitEntry => wait.kind === 'peer' && wait.phase === 'open' && key(wait.peerIds) === key(peerIds));
 }
 
-/** Whether this request kind registers through the delegation facade. */
-export function registersThroughDelegation(kind: CezarWaitRequest['kind']): boolean {
-  return waitRequestRow(kind).delegation;
-}
-
 /** The stored row that serves a tool request kind, including request waits in the worker row. */
 export function waitRequestRow(kind: CezarWaitRequest['kind']): WaitKindRow<Wait['kind']> {
   const row = Object.values(WAIT_KINDS).find(row => row.requestKinds.includes(kind));

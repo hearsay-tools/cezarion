@@ -140,7 +140,6 @@ export interface FacadeHost {
   cancel(runId: string): boolean;
   deliverConversationInput(runId: string): void;
   reconcileWorkerWaits(familyRootId?: string): void;
-  disarmWait(waitId: string): void;
   canProceedWithRun(runId: string, run: RunRecord | undefined): run is RunRecord;
   ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   executionBlockedByRootFinish(run: RunRecord): boolean;

@@ -199,7 +199,6 @@ export class RunManager {
       cancel: (...args) => this.cancel(...args),
       deliverConversationInput: (...args) => this.deliverConversationInput(...args),
       reconcileWorkerWaits: (...args) => this.reconcileWorkerWaits(...args),
-      disarmWait: (...args) => this.#disarmWait(...args),
       canProceedWithRun: (id, run): run is RunRecord => this.#canProceedWithRun(id, run),
       get ciSupervisor() { return facade.#ciSupervisor; },
       executionBlockedByRootFinish: (...args) => this.#executionBlockedByRootFinish(...args),
@@ -354,7 +353,6 @@ export class RunManager {
   async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.#modules.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
   cancelWait(runId: string, waitId: string, generation: string) { return this.#modules.waitRegistry.cancelWait(runId, waitId, generation); }
 
-  #disarmWait(waitId: string): void { this.#modules.waitEngine.disarmWait(waitId); }
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
