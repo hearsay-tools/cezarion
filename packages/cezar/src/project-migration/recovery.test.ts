@@ -142,6 +142,25 @@ describe('early recovery of an unfinished project migration', () => {
     expect(existsSync(journal)).toBe(false);
   });
 
+  it('opens a target-only project in the same process after recovery kept its claim in .ai/squawk', async () => {
+    const targetOnly = () => {
+      const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-recovery-target-'));
+      roots.push(root);
+      // The old directory is gone: the claim recovery keeps is taken in .ai/squawk.
+      seedRuns(join(root, '.ai/squawk'), [makeRunRecord({ id: TASK, title: 'kept', status: RUN_STATUS.done })]);
+      return { root, journal: writeSettledJournal(root) };
+    };
+    const booted = targetOnly();
+    const { listener, done } = serve(booted.root);
+    await expect(done).rejects.toThrow('listener reached');
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(existsSync(booted.journal)).toBe(false);
+    const lazy = targetOnly();
+    const contexts = contextsFor(owner(), { id: 'lazy', root: lazy.root });
+    expect((await contexts.context('lazy')).store.getRun(TASK)?.title).toBe('kept');
+    expect(existsSync(lazy.journal)).toBe(false);
+  });
+
   it('finishes the journal in a lazy build and in the warm-up before their reads', async () => {
     const lazy = journaled(), warm = journaled();
     const contexts = contextsFor(owner(), { id: 'lazy', root: lazy.root }, { id: 'warm', root: warm.root });

@@ -22,7 +22,8 @@ import { gitOutput } from './plan.ts';
  *   file the engine opens or rewrites in place (the run store and its `-wal` and `-shm`, each
  *   rewritten JSON file, each receipt) is a regular file, never a symlink. A moved item may be a
  *   symlink: a rename moves the link itself.
- * - Git does not track the journal: the shared excludes keep it out of every ordinary add.
+ * - The journal file itself is a regular file of at most `MAX_JOURNAL_BYTES` that Git does not
+ *   track (the shared excludes keep it out of every ordinary add), checked before it is read.
  */
 
 export class ProjectMigrationJournalRefusedError extends Error {
@@ -137,11 +138,27 @@ async function rewritesRefusal(journal: ProjectMigrationJournal): Promise<string
 
 /** The first reason `journal` may not run, checked before any step; undefined when it may. */
 async function journalRefusal(path: string, journal: ProjectMigrationJournal): Promise<string | undefined> {
-  const refusal = layoutRefusal(journal) ?? await rewritesRefusal(journal);
-  if (refusal) return refusal;
-  // Only a forced add or a clone tracks it; one Git call, only when a journal exists.
-  if (await gitOutput(journal.repoRoot, ['ls-files', '--error-unmatch', '--', relative(journal.repoRoot, path)]) !== undefined) return 'Git tracks it; a migration journal is never committed';
-  return undefined;
+  return layoutRefusal(journal) ?? await rewritesRefusal(journal);
+}
+
+/**
+ * The largest journal a resume reads. A journal holds the plan, a few hundred bytes per path
+ * rewrite: 100,000 runs with several rewritten fields each stay well under it. Anything larger
+ * is not a journal this engine wrote.
+ */
+export const MAX_JOURNAL_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Accept the journal file at `path` before it is read: false when there is none; refused when it
+ * is a symlink or not a regular file, larger than `MAX_JOURNAL_BYTES`, or tracked by Git (only a
+ * forced add or a clone tracks it; one Git call, only when a journal exists). Nothing is read.
+ */
+export async function assertJournalFile(path: string, repoRoot: string): Promise<boolean> {
+  if (!pathPresent(path)) return false;
+  const refusal = notRegularFile(path) ?? (lstatSync(path).size > MAX_JOURNAL_BYTES ? `it is larger than ${MAX_JOURNAL_BYTES} bytes` : undefined)
+    ?? (await gitOutput(repoRoot, ['ls-files', '--error-unmatch', '--', relative(repoRoot, path)]) !== undefined ? 'Git tracks it; a migration journal is never committed' : undefined);
+  if (refusal) throw new ProjectMigrationJournalRefusedError(path, refusal);
+  return true;
 }
 
 /** The repository's receipt directory, where receipt and cleanup checkpoint rewrites must lie. */

@@ -137,7 +137,8 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
   another rewritten file outside `<destination>/runs/`; a rewritten value that does not move a path
   of this root's `.ai/cezar` to the same place under `.ai/squawk`; a tracked-file entry that is not a
   relative `.ai/cezar/...` path; any existing directory on the way that resolves elsewhere (a
-  symlink out); and a journal Git tracks (one `git ls-files` call, only when a journal exists; the
+  symlink out); and, before it is read, a journal file that is a symlink, not a regular file,
+  larger than 64 MiB or tracked by Git (one `git ls-files` call, only when a journal exists; the
   shared excludes keep a real journal out of every ordinary add). A fresh plan passes the same
   check before its journal is written. Each step checks its write target again right before it
   writes, and opens or rewrites in place only a regular file. A refused journal changes nothing and stays for inspection; recovery reports it as a

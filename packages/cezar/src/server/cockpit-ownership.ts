@@ -338,6 +338,12 @@ export class CockpitOwnership {
     }
   }
 
+  /** The claim this instance holds in `directory`, if any. */
+  private ownedClaim(directory: string): Owner | undefined {
+    try { return this.owned.get(join(realpathSync(directory), 'cockpit.lock')); }
+    catch { return undefined; }
+  }
+
   /** A live owner under the project's other directory name; the claimed directory is not checked. */
   private checkFallbackOwner(dataDir: string): void {
     for (const fallback of dataReadDirs(dataDir)) {
@@ -347,6 +353,8 @@ export class CockpitOwnership {
       const owner = readOwner(path);
       // Invalid fallback claims cannot be repaired by this binary; retain them unchanged.
       if (!owner) throw new CockpitAlreadyRunningError(fallback, undefined, path);
+      // This instance's own claim there (a recovery kept it) is not another cockpit.
+      if (this.ownedClaim(fallback)?.token === owner.token) continue;
       if (alive(owner)) throw new CockpitAlreadyRunningError(fallback, owner);
     }
   }

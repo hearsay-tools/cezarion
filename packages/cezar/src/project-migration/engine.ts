@@ -9,7 +9,7 @@ import {
 import { gitMvCommands, LEGACY_PROJECT_DIR, planProjectMigration, type ProjectMigrationPlan } from './plan.ts';
 import { GIT_MIGRATION_STEPS, MIGRATION_STEP_RUNNERS, type MigrationFault } from './steps.ts';
 import { withWorktreeMutation, type WorktreeGit } from '../git-worktree-lock.ts';
-import { assertJournalContained } from './containment.ts';
+import { assertJournalContained, assertJournalFile } from './containment.ts';
 
 /**
  * The project state migration engine (P4b2, hearsay-tools/cezarion#3088): it moves a project's
@@ -91,9 +91,11 @@ export async function resumeProjectMigration(options: ProjectMigrationOptions): 
 }
 
 async function resumeHeld(options: ProjectMigrationOptions): Promise<ProjectMigrationResult | undefined> {
+  const root = realpathSync(resolve(options.repoRoot));
+  // The file is accepted before anything reads it: a symlink, a huge file or a committed one is refused.
+  if (!await assertJournalFile(options.fence.journal, root)) return undefined;
   const journal = readProjectMigrationJournal(options.fence.journal);
   if (!journal) return undefined;
-  const root = realpathSync(resolve(options.repoRoot));
   if (journal.repoRoot !== root) throw new Error(`The migration journal ${options.fence.journal} belongs to ${journal.repoRoot}, not ${root}`);
   // Read back from disk, so untrusted: nothing outside the project's own state may be named in it.
   await assertJournalContained(options.fence.journal, journal);

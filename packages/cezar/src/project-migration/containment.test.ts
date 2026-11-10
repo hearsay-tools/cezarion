@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,11 +9,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { testHome } from '../home/test-home.testkit.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
 import { CockpitOwnership } from '../server/cockpit-ownership.ts';
-import { ProjectMigrationJournalRefusedError } from './containment.ts';
+import { MAX_JOURNAL_BYTES, ProjectMigrationJournalRefusedError } from './containment.ts';
 import { resumeProjectMigration } from './engine.ts';
 import { PROJECT_MIGRATION_STEPS, writeProjectMigrationJournal, type PathRewrite, type ProjectMigrationJournal } from './journal.ts';
 import { writeSettledJournal } from './project-migration.testkit.ts';
-import { ProjectMigrationRecoveryError } from './recovery.ts';
+import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
 import { MIGRATION_STEP_RUNNERS, ProjectMigrationStepError } from './steps.ts';
 
 /**
@@ -134,6 +134,26 @@ describe('a migration journal that names a path outside the project', () => {
     expect(() => MIGRATION_STEP_RUNNERS['run-store'](paused, () => undefined)).toThrow(ProjectMigrationStepError);
     expect(readFileSync(external)).toEqual(bytes);
     expect(readdirSync(outside).sort()).toEqual(['other.db']);
+  });
+
+  it('refuses a committed symlink journal and an oversized journal without reading them', async () => {
+    const { root, outside, journal } = project();
+    // A valid journal outside the project, reached through a committed symlink.
+    const target = writeSettledJournal(root);
+    renameSync(target, join(outside, 'journal.json'));
+    symlinkSync(join(outside, 'journal.json'), journal);
+    execFileSync('git', ['add', '-f', '.ai/squawk-migration.json'], { cwd: root });
+    await expect(resume(root)).rejects.toThrow(new ProjectMigrationJournalRefusedError(journal, `${journal} is a symbolic link`));
+    // The automatic entries take the same refusal.
+    await expect(recoverProjectMigration(root)).rejects.toThrow(`${journal} is a symbolic link`);
+    expect(lstatSync(journal).isSymbolicLink()).toBe(true);
+    execFileSync('git', ['rm', '-q', '--cached', '.ai/squawk-migration.json'], { cwd: root });
+    rmSync(journal);
+    // A sparse file one byte over the bound: refused from its size.
+    writeFileSync(journal, '');
+    truncateSync(journal, MAX_JOURNAL_BYTES + 1);
+    await expect(resume(root)).rejects.toThrow(new ProjectMigrationJournalRefusedError(journal, `it is larger than ${MAX_JOURNAL_BYTES} bytes`));
+    expect(statSync(journal).size).toBe(MAX_JOURNAL_BYTES + 1);
   });
 
   it('refuses a journal that Git tracks, even one with nothing left to apply', async () => {
