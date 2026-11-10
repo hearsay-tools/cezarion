@@ -36,6 +36,24 @@ the run lookup of a fenced project. `task`, `automation`, `webhook`, `worker`,
 cockpit, whose project routes refuse. `backup`, the managed install commands and
 `server-*` touch no project data. Git excludes also cover `.ai/squawk-migration.lock*`.
 
+Before that check, `serve`, `run`, `init`, the single-project `projects` listing,
+`artifact publish` and `versions` finish an unfinished migration journal
+([early recovery](project-routes.md#project-migration-command-and-early-recovery)); a
+journal that cannot finish ends the command with its cause, exit 1.
+
+## Staged `migrate-project`
+
+`migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is registered,
+listed in help and dispatched only behind `PROJECT_MIGRATION_SWITCH`, false until P5.
+`REBRAND_SWITCH` never registers it. With the gate off it is an unknown command, and the
+command module is never loaded. With the gate on, a cockpit that owns the project runs
+the migration through its route; with no owner the CLI locks the project itself. It
+prints the plan, then `Dry run: nothing was moved or rewritten.` or `Migration
+complete.`; it prints the `git mv` commands for tracked files and never runs them.
+Refusals (live tasks, a held fence, another owner, conflicts) print one message to
+stderr and exit 1. hearsay-tools/cezarion#3142, hearsay-tools/cezarion#3146 and
+hearsay-tools/cezarion#3136 must close before P5 turns the gate on.
+
 ## Rules
 
 Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. Headless `run` treats `review` as a terminal success status (exit 0). `serve` boots in a fixed order: bind the listener, open the boot store and build its `RunManager`, `recover()` the boot project, then `startServer`. So anything a recovered run needs (its cockpit address, for one) must reach the boot manager at construction, not from `startServer`. `init` never overwrites existing files. Keep `.ai/cezar/.gitignore` maintenance (`ensureDataGitignore`) in sync with any new state file.

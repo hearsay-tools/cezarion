@@ -1,14 +1,20 @@
 import { realpathSync } from 'node:fs';
-import type { ProjectMigrationError, ProjectMigrationRequest, ProjectMigrationResponse } from '@open-mercato/cezar-contract/project-migration';
+import { Hono } from 'hono';
+import { projectMigrationRequestSchema, type ProjectMigrationError, type ProjectMigrationRequest, type ProjectMigrationResponse } from '@open-mercato/cezar-contract/project-migration';
 import { projectPaths } from '../project-paths.ts';
 import { dryRunAnswer, migrationAnswer } from '../project-migration/answer.ts';
 import { migrateProject, ProjectMigrationRefusedError } from '../project-migration/engine.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from '../project-migration/recovery.ts';
+import { PROJECT_MIGRATION_SWITCH } from '../project-migration/switch.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import {
-  anotherCockpitOwner, assertProjectAdmitted, CockpitAlreadyRunningError, ProjectMigrationBusyError, ProjectMigrationFencedError, type CockpitOwnership,
+  anotherCockpitOwner, assertProjectAdmitted, CockpitAlreadyRunningError, CockpitOwnership, ProjectMigrationBusyError, ProjectMigrationFencedError,
 } from './cockpit-ownership.ts';
 import { fenceProjectContext, ProjectContextError, type ProjectContexts } from './project-context.ts';
+import { jsonZodValidator } from './validators.ts';
+import type { WorkspaceProjects } from './workspace-projects.ts';
+
+export { afterProjectRecovery, recoverProjects } from '../project-migration/recovery.ts';
 
 /**
  * `POST /api/v1/projects/:projectId/migration` (hearsay-tools/cezarion#3089): the owning cockpit
@@ -29,6 +35,40 @@ export interface ProjectMigrationRouteDeps {
   contexts: Pick<ProjectContexts, 'context' | 'dispose'>;
   ownership: CockpitOwnership;
   preview?: Pick<PreviewHost, 'releaseProject'> | undefined;
+}
+
+export interface ProjectMigrationServerDeps {
+  /** Explicit fixture seam for the P5 gate; production uses `PROJECT_MIGRATION_SWITCH`, which stays false. */
+  projectMigration?: boolean | undefined;
+}
+
+/** The route family, mounted beside the project registry routes. */
+export function createProjectMigrationRoutes(options: {
+  deps: ProjectMigrationServerDeps & { ownership?: CockpitOwnership | undefined; previewHost?: Pick<PreviewHost, 'releaseProject'> | undefined };
+  workspaceProjects: Pick<WorkspaceProjects, 'resolveProjectId' | 'listVisibleProjects'>;
+  bootRoot: string;
+  contexts: Pick<ProjectContexts, 'context' | 'dispose'>;
+  hosted: () => boolean;
+}) {
+  const { deps, workspaceProjects } = options;
+  const routeDeps: ProjectMigrationRouteDeps = {
+    enabled: deps.projectMigration ?? PROJECT_MIGRATION_SWITCH,
+    hosted: options.hosted,
+    project: async (raw) => {
+      const resolved = await workspaceProjects.resolveProjectId(raw);
+      if ('error' in resolved) return undefined;
+      return (await workspaceProjects.listVisibleProjects()).find((project) => project.id === resolved.id);
+    },
+    bootRoot: options.bootRoot,
+    contexts: options.contexts,
+    ownership: deps.ownership ?? new CockpitOwnership(),
+    preview: deps.previewHost,
+  };
+  return new Hono()
+    .post('/projects/:projectId/migration', jsonZodValidator(projectMigrationRequestSchema), async (c) => {
+      const answer = await answerProjectMigration(routeDeps, c.req.param('projectId'), c.req.valid('json'), c.req.raw.signal);
+      return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, answer.status);
+    });
 }
 
 export type ProjectMigrationRouteAnswer =

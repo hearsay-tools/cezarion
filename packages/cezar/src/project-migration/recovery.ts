@@ -69,3 +69,20 @@ async function recover(repoRoot: string, dataDir: string, journal: string, optio
   catch (error) { throw new ProjectMigrationRecoveryError(journal, repoRoot, error); }
   finally { fence.release(); done(); }
 }
+
+/** Finish the unfinished journals of `projects` before they are read; a project whose journal
+ *  cannot finish is logged and stays refused by admission. Answers `projects` unchanged. */
+export async function recoverProjects<T extends { root: string; status?: string }>(projects: T[], ownership: CockpitOwnership | undefined): Promise<T[]> {
+  await Promise.all(projects.filter((project) => project.status !== 'missing').map((project) =>
+    recoverProjectMigration(project.root, { ownership }).catch((error: unknown) => {
+      console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
+    })));
+  return projects;
+}
+
+/** `work` after the project's unfinished journal finishes, before `work` opens its lease. A
+ *  journal that cannot finish leaves admission to refuse inside `work`. */
+export async function afterProjectRecovery<T>(repoRoot: string, ownership: CockpitOwnership | undefined, work: () => Promise<T>): Promise<T> {
+  await recoverProjectMigration(repoRoot, { ownership }).catch(() => undefined);
+  return work();
+}

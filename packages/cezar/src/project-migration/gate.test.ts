@@ -13,6 +13,7 @@ import { ProjectContexts } from '../server/project-context.ts';
 import { createApp } from '../server/server.ts';
 import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
+import { projectMigrationErrorSchema } from '@open-mercato/cezar-contract/project-migration';
 import { PROJECT_MIGRATION_SWITCH } from './switch.ts';
 
 /**
@@ -138,7 +139,7 @@ describe('the cockpit migration route', () => {
     expect((await post('no-such-project')).status).toBe(404);
     const refusal = await post(bootId);
     expect(refusal.status).toBe(409);
-    expect((await refusal.json()).error).toBe(`This cockpit serves ${boot} as its boot project. Stop it, then run migrate-project again`);
+    expect(projectMigrationErrorSchema.parse(await refusal.json()).error).toBe(`This cockpit serves ${boot} as its boot project. Stop it, then run migrate-project again`);
     vi.stubEnv('CEZ_REMOTE', '1');
     expect((await post(targetId)).status).toBe(403);
     expect(existsSync(join(boot, '.ai/squawk'))).toBe(false);

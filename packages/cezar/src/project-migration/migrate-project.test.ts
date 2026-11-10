@@ -203,7 +203,7 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
       // The next request builds the context again and reads the migrated task.
       const task = await apiRequest(app, `/api/v1/p/${targetId}/runs/${TASK}`);
       expect(task.status).toBe(200);
-      expect((await task.json()).worktreePath).toBe(moved(project, project.taskPath));
+      expect(((await task.json()) as { worktreePath?: string }).worktreePath).toBe(moved(project, project.taskPath));
       // The rebuilt context's report backfill ends before teardown closes its store.
       await (await contexts.context(targetId)).store.reports.idle();
     });

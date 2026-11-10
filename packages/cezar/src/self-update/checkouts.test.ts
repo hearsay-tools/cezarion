@@ -11,6 +11,7 @@ import { seedRuns } from '../runs/run-store.testkit.ts';
 import { buildCheckout, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { SelfUpdateService } from './service.ts';
 import { CockpitOwnership } from '../server/cockpit-ownership.ts';
+import { writeSettledJournal } from '../project-migration/project-migration.testkit.ts';
 import { activate, activeId, branchSlug, currentEntry, linkCheckout, linkId, listInstalled, listLinks, removeInstalled, versionDir, versionsDir } from './layout.ts';
 
 /** A built cezar monorepo checkout: packages/cezar with dist/index.js and web/dist/index.html. */
@@ -177,7 +178,8 @@ describe('linked checkouts', () => {
   });
 
   // A project under a migration fence (hearsay-tools/cezarion#3087) is not read: no cold run lookup.
-  it('lists a fenced project\'s checkouts without reading its run store', async () => {
+  /** A registered checkout with one task worktree, named by its run. */
+  function registeredTaskRepo(): string {
     const repo = join(home, 'repo');
     fakeCheckout(repo);
     git(repo, 'init', '-q', '-b', 'main');
@@ -190,6 +192,11 @@ describe('linked checkouts', () => {
     seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', branch: 'cez/def67890' })]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    return repo;
+  }
+
+  it('lists a fenced project\'s checkouts without reading its run store', async () => {
+    const repo = registeredTaskRepo();
     const migrator = new CockpitOwnership();
     const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
     try {
@@ -200,6 +207,13 @@ describe('linked checkouts', () => {
       migrator.releaseAll();
     }
     expect((await discoverCheckouts(env, testHome(env))).find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run' });
+  });
+
+  it('finishes an unfinished project migration before it reads the run store', async () => {
+    const repo = registeredTaskRepo();
+    const journal = writeSettledJournal(repo);
+    expect((await discoverCheckouts(env, testHome(env))).find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run' });
+    expect(existsSync(journal)).toBe(false);
   });
 
   // Retention reclaims a task's worktree directory; the branch still names its task.

@@ -121,8 +121,8 @@ pid plus start-token liveness and token-checked release.
   is held the reports index queues no new scan, so the drained `idle()` covers every scan. Branch sweeps
   touch Git refs only.
 - **Journal.** The journal blocks admission whether its owner lives or not; only the
-  fence holder passes. The engine removes it as its last step; the caller then calls `release()`. P4b3 adds
-  early recovery in front of admission.
+  fence holder passes. The engine removes it as its last step; the caller then calls `release()`.
+  Early recovery runs in front of admission ([below](#project-migration-command-and-early-recovery)).
 - **Residual window.** Leases are per process. A short CLI operation (`init`, a
   single-project `projects` listing, `run` before its store opens) admitted just before
   another process takes the fence can still read project files until it ends. Each CLI
@@ -133,9 +133,9 @@ pid plus start-token liveness and token-checked release.
 ## Project state migration engine
 
 `packages/cezar/src/project-migration/` (P4b2, hearsay-tools/cezarion#3088) moves a
-project's runtime state from `.ai/cezar/` to `.ai/squawk/`. It is internal: no command,
-route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
-`resumeProjectMigration`; P5 enables the command.
+project's runtime state from `.ai/cezar/` to `.ai/squawk/`. P4b3 wires `migrateProject`
+behind the P5 gate and `resumeProjectMigration` into every project entry
+([below](#project-migration-command-and-early-recovery)); P5 enables the command.
 
 - **Fence.** It runs only under a fence its own process holds (`holdsProjectFence`), and
   all its work runs inside `holdProjectWork`, so its writes pass the backstop only as the
@@ -195,6 +195,51 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
 - **Limits.** Agent temp fallback directories outside the project are keyed by the data
   directory (hearsay-tools/cezarion#3146). Claude Code keys session history by working
   directory, so a moved worktree starts a new Claude session history.
+
+## Project migration command and early recovery
+
+P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine.
+
+- **Gate.** `PROJECT_MIGRATION_SWITCH` (`project-migration/switch.ts`, false until P5) alone
+  registers, advertises and dispatches `migrate-project` and opens the owner's route.
+  `REBRAND_SWITCH` never does. Tests pass the gate as a parameter (`loadSubcommand`, `main`)
+  or as `ServerDeps.projectMigration`; the constant never changes.
+- **Owner route.** `POST /api/v1/projects/:projectId/migration` (`server/project-migration-route.ts`)
+  is a workspace route on purpose: a project route holds an admission lease for its whole
+  length, and the fence's drain would wait on its own caller. Gate off: 404 before any work.
+  Hosted: 403. A project another cockpit owns, a busy project (the body lists `liveTasks`), a
+  refused plan, a held fence or a failed recovery: 409. The owner builds the context, takes
+  `fenceProjectContext`, runs `migrateProject` with `closeProject` disposing the context, and
+  releases; the next request builds the context again over the moved state. The cockpit
+  refuses its own boot project (409): the boot context is not rebuilt after its store closes,
+  so the user stops that cockpit and runs the command with no owner.
+- **CLI.** With a live owner the CLI finds the project id in the owner's `GET /projects` and
+  posts to its route; it touches no project file. With no owner it takes `cockpit.lock` and
+  the fence itself (`fenceProject`, live tasks read from a maintenance store), runs the
+  engine, closes that store as the holder duty, and releases both claims.
+- **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
+  (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
+  before anything reads the project. Without a journal it costs one `lstat`. It takes the
+  fence with nothing live and nothing in flight: the journal has refused every admission since
+  it was written, and a migration starts only with no live task. It leaves the journal to a
+  live cockpit that owns the project or a process that holds its fence; admission refuses
+  meanwhile. It uses the caller's claim when the caller owns the project or is about to (`keep`),
+  otherwise a temporary claim it releases. Concurrent calls in one process share one recovery.
+  A journal that cannot finish throws `ProjectMigrationRecoveryError` (409 on routes, exit 1
+  in the CLI, a failed boot): the journal stays and admission keeps refusing. Recovery does
+  not depend on the gate.
+- **Recovery before the lease.** Every caller runs recovery before it opens an admission
+  lease (`withProjectAdmission`, `holdProjectWork`): inside a lease, the recovery fence's drain
+  would wait on its own caller.
+- **Entry points.** Cockpit boot (`serveCommand`, before its ownership claim and the listener;
+  boot keeps the claim), lazy context builds (`ProjectContexts.build`, before the lease), the
+  warm-up (a journal alone no longer skips a project), cold maintenance (`coldMaintenance`)
+  and the archive and completion stores (`withStore`, before their lease), the cold workspace
+  runs index and search (`projectRunSources`; a failure leaves the project out with a
+  warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
+  module loaded only when a journal exists), `artifact publish`, `versions` checkout discovery,
+  and `migrate-project` itself (CLI and route; `migrateProject` also resumes first). Other
+  readers skip a refused project, as before.
 
 ## Rules
 
