@@ -1,4 +1,4 @@
-import { runCheckout, NO_WORKTREE } from './run-checkout.ts';
+import { runCheckout, preparePublishCheckout, reclaimCheckoutError, NO_WORKTREE } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
@@ -20,7 +20,6 @@ import { mergeNumberParams, prChangesParams, prChangesQuery, mergeBodySchema } f
 import { gitCommitSchema, reclaimBodySchema, repoBranchSchema } from '@open-mercato/cezar-contract/repo-requests';
 import { setConfigSchema, setAgentConfigSchema } from '@open-mercato/cezar-contract/config-requests';
 import { saveWorkflowInputSchema as saveWorkflowSchema } from '@open-mercato/cezar-contract/workflows';
-import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { patchRunInputSchema as patchRunSchema, messageInputSchema as messageSchema } from '@open-mercato/cezar-contract/runs';
 import { checkoutProjectInputSchema as checkoutSchema, registerProjectInputSchema as registerProjectSchema } from '@open-mercato/cezar-contract/projects';
 import { setWorkspaceConfigInputSchema as workspaceConfigUpdateSchema } from '@open-mercato/cezar-contract/workspace';
@@ -194,7 +193,7 @@ import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../wo
 import type { PastedContent } from '../workflows/run/types.ts';
 import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
-import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
+import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { createGithubBranchForge } from './repo-branch-forge.ts';
 import { attributeLog, classifyInputFor, deleteBranches, forgetRepoBranches, readRepoBranchCounts, readRepoBranches, type BranchForge, type ClassifyProject } from './repo-branches.ts';
@@ -3926,26 +3925,15 @@ export function createApp(deps: ServerDeps) {
     // badge. Failures come back as 409 with a `manual` merge command the GUI
     // shows next to the toast. CEZ_DRY_RUN=1 fakes the URL (no push, no gh).
     .post('/runs/:id/pr', async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
-      const held = store.getRun(id);
-      if (!held) return c.json({ error: 'not found' }, 404);
-      const refusal = held.worktreePath && fallbackProjectWriteError(held.worktreePath);
-      if (refusal) return c.json({ error: refusal }, 409);
-      if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
-      // A hold is live: done would drop its resume (S7 B13). Don’t resume (DELETE …/auto-resume) settles it failed.
-      if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR' }, 409);
-      const release = manager.claimForPublish(id);
-      if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
+      const checkout = runCheckout(c.get('project'), id, 'publish');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { release } = checkout;
       try {
-        // Reclaim (#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
-        // offers this on exactly those rows: restore the checkout first, as Continue does.
-        await rematerializeReclaimedWorktree(repoRoot, store, id);
-        const run = store.getRun(id);
-        if (!run) return c.json({ error: 'not found' }, 404);
-        if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-          return c.json({ error: 'no worktree/branch to publish — this task ran in the repo working tree' }, 400);
-        }
+        const prepared = await preparePublishCheckout(c.get('project'), id);
+        if ('status' in prepared) return c.json(prepared.body, prepared.status);
+        const { run } = prepared;
         const outcome = await resolveForgeRoot(repoRoot, deps.forgeFactory).createPR({
           repoRoot,
           run,
@@ -3968,14 +3956,14 @@ export function createApp(deps: ServerDeps) {
     // Archived tasks keep their worktree for inspection; this is the explicit
     // "🧹 Remove worktree" cleanup (spec 006).
     .post('/runs/:id/remove-worktree', protectFallbackRun('worktree'), async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      if (!store.canDeleteRun(id, 'worktree') || run.delegation?.role === 'worker') return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
-      const release = manager.claimForPublish(id);
-      if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
+      const checkout = runCheckout(c.get('project'), id, 'remove', {
+        claim: 'publish', activeBeforeLookup: false, deletion: 'worktree', ignoresHold: true,
+        nullClaimError: 'worktree cleanup pending — retry after cleanup is confirmed',
+      });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, release } = checkout;
       try {
         if (run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
         store.updateRun(id, { worktreePath: undefined, branch: undefined });
@@ -3984,15 +3972,14 @@ export function createApp(deps: ServerDeps) {
     })
 
     .delete('/runs/:id', protectFallbackRun('record'), async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
-      if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      // Delete cleans up after itself: worktree + branch go with the run (spec 006).
-      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
-      const release = manager.claimForPublish(id);
-      if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
+      const checkout = runCheckout(c.get('project'), id, 'remove', {
+        claim: 'publish', activeBeforeLookup: true, deletion: 'record', ignoresHold: true,
+        nullClaimError: 'worktree cleanup pending — retry after cleanup is confirmed',
+      });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, release } = checkout;
       try {
         if (run.delegation?.role !== 'worker' && run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
         return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
@@ -4102,25 +4089,16 @@ export function createApp(deps: ServerDeps) {
     // the `cez/<id8>` branch is kept, which is what makes this safe to offer on every finished
     // row. `/runs/:id/remove-worktree` (directory AND branch) stays the task screen's action.
     .post('/worktrees/:runId/reclaim', paramZodValidator(reclaimRunParamsSchema), async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
-      const run = store.getRun(c.req.valid('param').runId);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const refused = store.fallbackDeleteError(run.id, 'worktree') ?? store.writeRefusal(run.id);
-      if (refused) return c.json({ error: refused }, 409);
-      // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
-      const release = manager.claimWorktreeReclaim(run.id);
-      if (!release) {
-        return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
-      }
+      const { root: repoRoot, store } = c.get('project');
+      const checkout = runCheckout(c.get('project'), c.req.valid('param').runId, 'remove', {
+        claim: 'reclaim', activeBeforeLookup: false, deletion: 'inline', ignoresHold: true,
+        nullClaimError: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed',
+      });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, release } = checkout;
       const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true, previewHost: deps.previewHost }).finally(release);
       if (!worktreeReclaimedAt) {
-        // Reclaim keeps only what is committed, so it leaves a dirty checkout alone; say which case this was.
-        const dirty = run.worktreePath && existsSync(run.worktreePath) ? (await getStatus(run.worktreePath).catch(() => [])).length : 0;
-        return c.json({
-          error: dirty > 0
-            ? `the worktree has ${dirty} uncommitted file${dirty === 1 ? '' : 's'} that exist nowhere else — commit or discard them first`
-            : 'the worktree directory could not be removed',
-        }, 409);
+        return c.json({ error: await reclaimCheckoutError(run) }, 409);
       }
       forgetRepoBranches(repoRoot);
       return c.json({ runId: run.id, worktreeReclaimedAt });
