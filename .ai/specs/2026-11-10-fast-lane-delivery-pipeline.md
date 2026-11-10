@@ -115,6 +115,11 @@ the auto-merge decision read the same result.
 | Fast | No path or content rule matches | § Pull request check, § Queue check, one reviewer round | GitHub auto-merge, armed by the authoring agent |
 | Guarded | A path or content rule matches, or the PR carries `needs-qa` | Today's gate, unchanged: full suites on the PR, CodeRabbit admission with resolved threads, the reviewer loop until clean, the full queue run | As today |
 
+"Rule" here means every disqualifier that `check.mjs` keeps after D4: the never-lists, the
+content rules, a binary file, ratchet baseline growth, a title that is not a Conventional
+Commits title and a title that marks a breaking change. The lane and the auto-merge
+decision are one result, so no fast-lane PR exists that cannot merge on its own.
+
 The rules are the never-lists and content rules of `.ai/skills/auto-merge/check.mjs`. They
 gain the paths that produced defects a revert would not undo: `packages/cezar/src/home/**`,
 `packages/cezar/src/project-migration/**` and `packages/cezar/src/self-update/**`. The
@@ -183,7 +188,9 @@ lives in the owner's Cezar prompt, outside this repository; § Owner actions has
 2. Lint, typecheck and build run as today.
 3. Vitest runs the files that `scripts/test-changed.mjs` selects, with an explicit base, plus
    the source-reading guard tests. A change to shared inputs, configuration or an unknown
-   path selects the full suite, as the script does today; that PR takes longer.
+   path selects the full suite, as the script does today; that PR takes longer. A source
+   change for which the selection finds no test also runs the full suite. The script exits
+   with an error in that case today; P5 changes that for CI.
 4. Browser specs run the files that `scripts/e2e-affected.mjs` selects.
 5. Coverage leaves the PR run. § Main verification collects it.
 6. Docs-only and infra-only changes keep today's skips.
@@ -324,8 +331,11 @@ within 24 hours of the last one. No schedule starts a release.
    commit under `latest`, as the release does today. It differs from the tested candidate only in the version stamp. Then install the
    stable package through the alias and boot it, as a last check.
 6. **Roll back.** One dispatch releases the last good stable commit again as the next patch
-   version, through steps 3 to 5, without the 24-hour limit. Moving `latest` back is not a
-   rollback: caret ranges and installed copies take the highest version.
+   version, through steps 3 to 5, without the 24-hour limit and without the gates of
+   step 2. Those gates concern new commits on `main`; the rollback commit was released
+   before, and the blocker that the failed release filed must not stop its own rollback.
+   Moving `latest` back is not a rollback: caret ranges and installed copies take the
+   highest version.
 
 | Case | Behaviour |
 | --- | --- |
