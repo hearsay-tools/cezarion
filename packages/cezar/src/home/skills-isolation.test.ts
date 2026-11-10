@@ -31,7 +31,7 @@ it('resolves a worker --skill from Home A while the ambient home and cached cata
   const root = mkdtempSync(join(tmpdir(), 'cez-worker-skill-home-'));
   const selected = isolatedHome(join(root, 'selected'));
   const ambient = isolatedHome(join(root, 'ambient'));
-  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
+  useTestHome(ambient);
   const f = fixture({}, selected);
   try {
     seedSkills(root, selected, 'selected-skill'); seedSkills(root, ambient, 'ambient-skill');

@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { defined } from '../core/defined.ts';
@@ -659,7 +660,7 @@ describe('workspace provider API', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: 'Run this command on the machine hosting cezar.',
+      error: `Run this command on the machine hosting ${productName('cezar')}.`,
       command: "'codex' login",
     });
     expect(openTerminal).not.toHaveBeenCalled();

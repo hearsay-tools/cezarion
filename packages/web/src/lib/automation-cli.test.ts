@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 // @vitest-environment node
 
 import { execFileSync } from 'node:child_process'
@@ -57,7 +58,7 @@ describe('shellQuote', () => {
 describe('cliOf', () => {
   it('prints a schedule as the add flag form', () => {
     expect(cliOf(scheduleDraft())).toBe(
-      "cez automation add --name 'Morning triage' --cron '0 7 * * 1-5' --workflow 'quick-task' --prompt 'Triage new issues'",
+      `${productCommand()} automation add --name 'Morning triage' --cron '0 7 * * 1-5' --workflow 'quick-task' --prompt 'Triage new issues'`,
     )
   })
 
@@ -83,14 +84,14 @@ describe('cliOf', () => {
 
   it('prints a poll with any-of labels and authors as flags', () => {
     expect(cliOf(pollDraft())).toBe(
-      "cez automation add --name 'Review PRs' --on 'pull_request.opened,issue.opened' --every 1h --label 'needs review' --author 'octo cat' --prompt 'Review the diff'",
+      `${productCommand()} automation add --name 'Review PRs' --on 'pull_request.opened,issue.opened' --every 1h --label 'needs review' --author 'octo cat' --prompt 'Review the diff'`,
     )
   })
 
   it('copies an existing-items choice as a flag', () => {
     const draft = pollDraft({ filters: { includeExisting: true, lookbackDays: 7, maxRecords: 25 } })
     expect(cliOf(draft)).toContain(' --include-existing ')
-    expect(cliOf(draft)).toMatch(/^cez automation add /)
+    expect(cliOf(draft)).toMatch(new RegExp(`^${productCommand()} automation add `, ""))
   })
 
   it('falls back to create --json for what flags cannot say', () => {
@@ -105,7 +106,7 @@ describe('cliOf', () => {
     ]
     for (const draft of cases) {
       expect(flagExpressible(draft)).toBe(false)
-      expect(cliOf(draft)).toMatch(/^cez automation create --json '/)
+      expect(cliOf(draft)).toMatch(new RegExp(`^${productCommand()} automation create --json '`, ""))
     }
   })
 })
@@ -122,9 +123,9 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
    * address it received — from an ORDINARY shell: no CEZ_* in the environment, as a user pastes it.
    */
   function shellRun(line: string): { argv: string[]; env: NodeJS.ProcessEnv } {
-    const at = line.indexOf('cez automation ')
+    const at = line.indexOf(`${productCommand()} automation `)
     expect(at).toBeGreaterThan(0)
-    const command = `${line.slice(0, at)}${shellQuote(process.execPath)} ${shellQuote(stub)} ${line.slice(at + 'cez automation '.length)}`
+    const command = `${line.slice(0, at)}${shellQuote(process.execPath)} ${shellQuote(stub)} ${line.slice(at + `${productCommand()} automation `.length)}`
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CEZ_')))
     return JSON.parse(execFileSync('sh', ['-c', command], { encoding: 'utf8', env: { ...env, HSQ_COCKPIT_URL: 'http://wrong', HSQ_PROJECT_ID: 'wrong' } })) as { argv: string[]; env: NodeJS.ProcessEnv }
   }

@@ -19,6 +19,7 @@ const live = join(root, 'live');
 const gone = join(root, 'gone');
 mkdirSync(live);
 const fallback = join(root, '.ai', 'squawk', 'worktrees', 'fallback');
+mkdirSync(join(root, '.ai/cezar'), { recursive: true }); // Exercise fallback admission in both states.
 mkdirSync(fallback, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -122,12 +123,13 @@ const activePublish = 'run is still active — wait for the review gate';
 const workerRemove = 'owned resources require verified worker cleanup';
 const recordRemove = 'owned resources require verified worker cleanup and explicit child history deletion first';
 const holdPublish = 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR';
+const holdRemove = 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry';
 const fallbackRefusal = fallbackProjectWriteError(fallback)!;
 const claimedRoutes = [
   { route: 'pr', intent: 'publish' },
-  { route: 'remove-worktree', intent: 'remove', claim: 'publish', activeBeforeLookup: false, checksActive: true, deletion: 'worktree', ignoresHold: true, nullClaimError: cleanupPending },
-  { route: 'DELETE', intent: 'remove', claim: 'publish', activeBeforeLookup: true, checksActive: true, deletion: 'record', ignoresHold: true, nullClaimError: cleanupPending },
-  { route: 'reclaim', intent: 'remove', claim: 'reclaim', activeBeforeLookup: false, checksActive: false, deletion: 'inline', ignoresHold: true, nullClaimError: reclaimPending },
+  { route: 'remove-worktree', intent: 'remove', claim: 'publish', activeBeforeLookup: false, checksActive: true, deletion: 'worktree', nullClaimError: cleanupPending },
+  { route: 'DELETE', intent: 'remove', claim: 'publish', activeBeforeLookup: true, checksActive: true, deletion: 'record', nullClaimError: cleanupPending },
+  { route: 'reclaim', intent: 'remove', claim: 'reclaim', activeBeforeLookup: false, checksActive: false, deletion: 'inline', nullClaimError: reclaimPending },
 ] as const;
 // Each tuple is pr / remove-worktree / DELETE / reclaim. null means admitted.
 const claimedOutcomes: Record<string, readonly (string | null | 404)[]> = {
@@ -146,7 +148,7 @@ const claimedOutcomes: Record<string, readonly (string | null | 404)[]> = {
   'claim held elsewhere': [publishPending, cleanupPending, cleanupPending, reclaimPending],
   'foreign owner': [publishPending, cleanupPending, cleanupPending, RUN_IN_USE_ELSEWHERE],
   running: [activePublish, activeRemove, activeRemove, reclaimPending],
-  'usage hold': [holdPublish, null, null, null],
+  'usage hold': [holdPublish, holdRemove, holdRemove, holdRemove],
   'autosave with live path': [null, null, null, null],
   'autosave with removed path': [null, null, null, null],
   'autosave with unknown id': [404, 404, 404, 404],
@@ -297,8 +299,8 @@ describe('reclaim failure detail after release', () => {
 });
 
 const openRoutes = [
-  { route: 'open-in-cli', ignoresEngineOwnership: true, defaultTargetNeedsWorktree: false },
-  { route: 'open-in', ignoresEngineOwnership: false, defaultTargetNeedsWorktree: true },
+  { route: 'open-in-cli', ignoresEngineOwnership: true },
+  { route: 'open-in', ignoresEngineOwnership: false },
 ] as const;
 
 describe.each(openRoutes)('open $route', (route) => {
@@ -316,7 +318,7 @@ describe.each(openRoutes)('open $route', (route) => {
     expect(result.run).toBe(state.run);
     expect(result.directory()).toBe(worktree ?? root);
     expect(result.worktree).toBe(worktree);
-    expect(result.defaultWorktree()).toEqual(worktree ?? (route.defaultTargetNeedsWorktree ? noWorktree : root));
+    expect(result.defaultWorktree()).toEqual(state.run.worktree === false ? root : worktree ?? noWorktree);
     expect(result.resumeAllowed).toBe(route.ignoresEngineOwnership || (state.name === 'usage hold' || !['running', 'queued', 'waiting'].includes(state.run.status)));
     expect(host.store.getRun).toHaveBeenCalledExactlyOnceWith(baseRun.id);
     expect(host.store.writeRefusal).not.toHaveBeenCalled();

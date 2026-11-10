@@ -1,3 +1,5 @@
+import { projectPaths } from './project-paths.ts';
+import { productName } from './home/display.ts';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { serveCommand, defaultServeDeps, type ServeDeps } from './serve-command.ts';
@@ -71,7 +73,7 @@ describe('serveCommand', () => {
   it('holds ownership and the actual listener before workspace writes, then recovers before serving', async () => {
     const f = fixture();
     await f.run();
-    expect(f.ownership.acquire).toHaveBeenCalledWith('/repo/.ai/cezar');
+    expect(f.ownership.acquire).toHaveBeenCalledWith(projectPaths('/repo').write);
     expect(f.ownership.acquire).toHaveBeenCalledBefore(f.effects.acquireServeListener);
     expect(f.effects.acquireServeListener).toHaveBeenCalledWith(0, undefined);
     expect(f.effects.acquireServeListener).toHaveBeenCalledBefore(f.effects.initWorkspace);
@@ -216,7 +218,7 @@ describe('serveCommand', () => {
     const f = fixture();
     f.effects.checkForUpdate.mockResolvedValue('2.0.0');
     await f.run();
-    expect(f.effects.console.log).toHaveBeenCalledWith('\n  ⬆ cezar 2.0.0 is available (running 1.2.3) — restart with: npx @wjarka/cezarion@latest\n');
+    expect(f.effects.console.log).toHaveBeenCalledWith(`\n  ⬆ ${productName('cezar')} 2.0.0 is available (running 1.2.3) — restart with: npx @wjarka/cezarion@latest\n`);
     expect(f.effects.startServer).toHaveBeenCalledWith(expect.objectContaining({ update: { latest: '2.0.0' } }), 0, f.listener);
     const pending = fixture();
     pending.effects.checkForUpdate.mockReturnValue(new Promise(() => {}));

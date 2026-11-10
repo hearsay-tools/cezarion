@@ -168,9 +168,7 @@ async function runCli(args: string[]): Promise<{ logs: string[]; errors: string[
 }
 
 function serverState(instance = 'default'): Record<string, unknown> {
-  const path = instance === 'default'
-    ? join(serverHome, 'server.json')
-    : join(serverHome, 'server-instances', `${instance}.json`);
+  const path = Home.sandbox(serverHome).serverState(instance);
   return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
 }
 

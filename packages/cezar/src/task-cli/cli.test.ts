@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { execFileSync } from 'node:child_process';
@@ -145,7 +146,7 @@ describe('cez task', () => {
       expect(last()).toMatchObject({
         code: 'invalid_input',
         error: `unknown option '${flag.split('=')[0]}' before the operation; only --url, --repo and --help go there`,
-        usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) },
+        usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: ("cez task list").replace("cez", productIdentity().command) }]) },
       });
       expect(discoveries).toBe(0);
     });
@@ -160,7 +161,7 @@ describe('cez task', () => {
       ['--help', '-h', 'list'],
     ].map((argv) => ({ argv })))('rejects duplicate shared flags in $argv', async ({ argv }) => {
       expect(await run(argv)).toBe(64);
-      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('duplicate option'), usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) } });
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('duplicate option'), usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: ("cez task list").replace("cez", productIdentity().command) }]) } });
       expect(discoveries).toBe(0);
     });
 
@@ -169,13 +170,13 @@ describe('cez task', () => {
       [`--${flag}`, '', 'list'], [`--${flag}=`, 'list'],
     ]).map((argv) => ({ argv })))('rejects missing or option-shaped leading values in $argv', async ({ argv }) => {
       expect(await run(argv)).toBe(64);
-      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('requires a value'), usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) } });
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('requires a value'), usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: ("cez task list").replace("cez", productIdentity().command) }]) } });
       expect(discoveries).toBe(0);
     });
 
     it.each([['--url', 'http://127.0.0.1:1'], ['--repo=checkout']].map((argv) => ({ argv })))('reports missing operation after $argv', async ({ argv }) => {
       expect(await run(argv)).toBe(64);
-      expect(last()).toMatchObject({ code: 'invalid_input', error: 'missing operation', usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: 'cez task list' }]) } });
+      expect(last()).toMatchObject({ code: 'invalid_input', error: 'missing operation', usage: { operations: expect.arrayContaining([{ name: 'list', synopsis: ("cez task list").replace("cez", productIdentity().command) }]) } });
       expect(discoveries).toBe(0);
     });
 
@@ -678,11 +679,11 @@ describe('cez task', () => {
       expect(await run(args)).toBe(0);
       const help = out.at(-1)!;
       for (const text of [
-        "cez task send <id> 'Use the retry helper instead'",
-        "cez task send <id> 'Use option A'",
-        "cez task send <id> --resume '…'",
+        ("cez task send <id> 'Use the retry helper instead'").replace("cez", productIdentity().command),
+        ("cez task send <id> 'Use option A'").replace("cez", productIdentity().command),
+        ("cez task send <id> --resume '…'").replace("cez", productIdentity().command),
         'delivered', 'queued', 'resumed', 'attention: waiting', 'question',
-        'Human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
+        'Human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', ("cez task start --help").replace("cez", productIdentity().command),
       ]) expect(help).toContain(text);
       expect(discoveries).toBe(0);
     });
@@ -691,7 +692,7 @@ describe('cez task', () => {
   describe('send', () => {
     it.each([[[]], [['--resume']], [['--notify']]])('refuses agent input before discovery with %j', async (flags) => {
       expect(await runTaskCommand(['send', 'target', 'hello', ...flags], { CEZ_TASK_ID: 'sender' }, io())).toBe(64);
-      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('human input'), next: expect.stringContaining('cez message progress') });
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('human input'), next: expect.stringContaining(("cez message progress").replace("cez", productIdentity().command)) });
       expect(discoveries).toBe(0);
     });
 
@@ -719,7 +720,7 @@ describe('cez task', () => {
       manager.cancel(id);
       expect(await run(['send', id, 'hi'])).toBe(1);
       expect(last()).toMatchObject({ id, delivery: 'not-delivered', reason: 'session closed' });
-      expect(last().next).toBe(`cez task send ${id} '…' --resume`);
+      expect(last().next).toBe(`${productIdentity().command} task send ${id} '…' --resume`);
     });
 
     it('reopens a closed session with --resume', async () => {
@@ -789,7 +790,7 @@ describe('cez task', () => {
       const child = worker(parent);
       expect(await run(['notify', child])).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input', parentId: parent });
-      expect(last().error).toContain(`cez task notify ${parent}`);
+      expect(last().error).toContain(`${productIdentity().command} task notify ${parent}`);
       expect(store.getRun(child)?.notify).not.toBe(true);
       // --off still undoes a subscription made before this guard existed.
       store.updateRun(child, { notify: true });
@@ -1181,7 +1182,7 @@ describe('cez task', () => {
       expect(await run([operation, `--${flag}`])).toBe(64);
       expect(last()).toMatchObject({
         code: 'invalid_input', error: `${operation}: Option '--${flag} <value>' argument missing`,
-        usage: { operations: expect.arrayContaining([{ name: operation, synopsis: expect.stringContaining(`cez task ${operation}`) }]) },
+        usage: { operations: expect.arrayContaining([{ name: operation, synopsis: expect.stringContaining(`${productIdentity().command} task ${operation}`) }]) },
       });
       expect(discoveries).toBe(0);
     });
@@ -1236,7 +1237,7 @@ describe('cez task', () => {
     it.each(['start', 'list', 'status', 'log', 'wait', 'send', 'notify', 'stop', 'finish', 'archive', 'unarchive', 'archive-finished', 'diff', 'open'])(
       '%s accepts help without positionals and rejects values for common flags', async (operation) => {
         expect(await run([operation, '--help'])).toBe(0);
-        expect(out.at(-1)).toContain(`cez task ${operation}`);
+        expect(out.at(-1)).toContain(`${productIdentity().command} task ${operation}`);
         for (const flag of ['url', 'repo']) {
           expect(await run([operation, `--${flag}`])).toBe(64);
           expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation}: Option '--${flag} <value>' argument missing` });
@@ -1264,7 +1265,7 @@ describe('cez task', () => {
       { operation: 'open', args: '<id>', max: 1 },
     ])('$operation documents and enforces its positional arguments', async ({ operation, args, max }) => {
       expect(await run([operation, '--help'])).toBe(0);
-      expect(out.at(-1)?.split('\n')).toContain(`  cez task ${operation} ${args}`.trimEnd());
+      expect(out.at(-1)?.split('\n')).toContain(`  ${productIdentity().command} task ${operation} ${args}`.trimEnd());
       expect(await run([operation, ...Array.from({ length: max + 1 }, () => 'x')])).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation} has an extra argument` });
       expect(last()).toHaveProperty('usage.operations');
@@ -1395,10 +1396,10 @@ describe('cez task', () => {
   describe('usage', () => {
     it('prints help text without discovering a cockpit', async () => {
       expect(await run(['--help'])).toBe(0);
-      expect(out.join('\n')).toContain('cez task start');
-      expect(out.at(-1)).toContain('cez task archive <id>');
-      expect(out.at(-1)).toContain('cez task unarchive <id>');
-      expect(out.at(-1)).toContain('cez task archive-finished');
+      expect(out.join('\n')).toContain(("cez task start").replace("cez", productIdentity().command));
+      expect(out.at(-1)).toContain(("cez task archive <id>").replace("cez", productIdentity().command));
+      expect(out.at(-1)).toContain(("cez task unarchive <id>").replace("cez", productIdentity().command));
+      expect(out.at(-1)).toContain(("cez task archive-finished").replace("cez", productIdentity().command));
       expect(await run(['start', '--help'])).toBe(0);
       expect(out.at(-1)).toContain('--request-id');
       expect(out.at(-1)).toMatch(/--archive-when-done[^\n]*default off/);
@@ -1410,9 +1411,9 @@ describe('cez task', () => {
     it.each([[['--help']], [['start', '--help']]])('documents safe task input in %j (#568)', async (argv) => {
       expect(await run(argv)).toBe(0);
       const help = out.at(-1)!;
-      expect(help).toMatch(/cez task start --task-file <path\|-> \| '<task>'/);
-      expect(help).toContain('cez task start --task-file task.md');
-      expect(help).toContain("cez task start --task-file - <<'EOF'");
+      expect(help).toContain(`${productIdentity().command} task start --task-file <path|-> | '<task>'`);
+      expect(help).toContain(("cez task start --task-file task.md").replace("cez", productIdentity().command));
+      expect(help).toContain(("cez task start --task-file - <<'EOF'").replace("cez", productIdentity().command));
       expect(help).toContain('POSIX shells expand backticks and $() in double-quoted arguments');
       expect(help).toContain('before the CLI receives the text');
       expect(help).toContain('Do not put raw backticks in double-quoted task arguments');
@@ -1429,9 +1430,9 @@ describe('cez task', () => {
         expect(help).toMatch(/`waiting` is attention even when no question is pending/);
         expect(help).not.toMatch(/hasPendingHumanAsk/);
         expect(help).toMatch(/`waiting` on its own open PR or timer wait [^`]*"waiting for merge"[^`]* is neither settled nor attention/);
-        expect(help).toContain('cez task wait <id>                   # default: stops when the task needs you');
-        expect(help).toContain('cez task wait <id> --until settled   # terminal status only');
-        expect(help).toContain('cez task start \'…\' --wait --autonomous --until settled');
+        expect(help).toContain(("cez task wait <id>                   # default: stops when the task needs you").replace("cez", productIdentity().command));
+        expect(help).toContain(("cez task wait <id> --until settled   # terminal status only").replace("cez", productIdentity().command));
+        expect(help).toContain(("cez task start '…' --wait --autonomous --until settled").replace("cez", productIdentity().command));
         expect(discoveries).toBe(0);
       });
 
@@ -1439,7 +1440,7 @@ describe('cez task', () => {
     it.each([[['--help']], [['log', '--help']]])('documents the log --follow default in %j (#931)', async (argv) => {
       expect(await run(argv)).toBe(0);
       const help = out.at(-1)!;
-      expect(help).toContain('cez task log <id> --follow             # default: stops when the task needs you');
+      expect(help).toContain(("cez task log <id> --follow             # default: stops when the task needs you").replace("cez", productIdentity().command));
       expect(help).toMatch(/--until <attention\|settled>/);
       expect(discoveries).toBe(0);
     });
@@ -1447,7 +1448,7 @@ describe('cez task', () => {
     it('describes the webhook flags and the notify operation (#589)', async () => {
       expect(await run(['--help'])).toBe(0);
       const all = out.at(-1)!;
-      expect(all).toContain('cez task notify <id>');
+      expect(all).toContain(("cez task notify <id>").replace("cez", productIdentity().command));
       expect(all).toContain('--notify');
       expect(all).toContain('--no-notify');
       expect(all).toContain('--off');

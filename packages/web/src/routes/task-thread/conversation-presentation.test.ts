@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 import { THREAD_CONVERSATION_PENDING_STATUSES } from './thread-state'
 const CONVERSATION_PENDING_STATUS = Object.fromEntries(THREAD_CONVERSATION_PENDING_STATUSES.map(status => [status, status])) as { [Status in (typeof THREAD_CONVERSATION_PENDING_STATUSES)[number]]: Status }
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
@@ -118,7 +119,7 @@ describe('conversation delivery explanations (hearsay-tools/cezarion#1992)', () 
   })
 
   it('words an undelivered message by relationship: a parent can resume a worker, nobody resumes a peer', () => {
-    expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined)).toContain('with cez worker resume')
+    expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined)).toContain(`with ${productCommand()} worker resume`)
     const peer = conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required', relationship: 'peer' }, undefined)
     expect(peer).toContain('Only its human can continue it')
     expect(peer).not.toContain('resume')

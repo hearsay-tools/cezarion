@@ -11,6 +11,7 @@ const {
   isAppUpstreamScanPr,
   classifyUpstreamScanFromEnv,
 } = require('./release-bump-pr.cjs');
+const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 
 const HEAD = 'a'.repeat(40);
 
@@ -19,7 +20,7 @@ const MANIFEST = [
   'packages/contract/package.json',
   'packages/api-client/package.json',
   'packages/web/package.json',
-  'alias-cezarion/package.json',
+  `${productIdentity().npmAliasDirectory}/package.json`,
   'pnpm-lock.yaml',
 ];
 

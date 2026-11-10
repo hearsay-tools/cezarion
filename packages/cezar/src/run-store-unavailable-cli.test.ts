@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,8 +29,9 @@ let dataDir: string;
 let server: ChildProcess | undefined;
 
 const env = () => {
-  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home') };
+  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'), HSQ_HOME: join(root, 'home') };
   delete vars.CEZ_AUTOMATIONS;
+  delete vars.HSQ_AUTOMATIONS;
   return vars;
 };
 
@@ -91,7 +93,7 @@ it('serve boots with the boot project unavailable, and prunes, sweeps and recove
   expect.soft(stderr).toMatch(/runs\.db is damaged/);
   const summaries = await fetch(`${url}/api/v1/run-summaries`);
   expect.soft(summaries.status).toBe(409);
-  expect.soft(await summaries.text()).toMatch(/runs\.db is damaged .*then restart cezar\."\}$/);
+  expect.soft(await summaries.text()).toMatch(new RegExp(`runs\\.db is damaged .*then restart ${productName('cezar')}\\."\\}$`));
   expect.soft((await fetch(`${url}/api/v1/health`)).status).toBe(200);
 }, 60_000);
 
@@ -100,7 +102,7 @@ it('headless run refuses to start, says why, and leaves every file as it was', a
     cwd: PACKAGE_DIR, env: env(), timeout: 30_000,
   }).then(() => ({ code: 0, stderr: '' }), (error: { code?: number; stderr?: string }) => ({ code: error.code, stderr: error.stderr ?? '' }));
   expect(result.code).toBe(1);
-  expect(result.stderr).toMatch(/runs\.db is damaged \(.*\)\. cezar left it and its -wal and -shm files exactly as they are/);
+  expect(result.stderr).toMatch(new RegExp(`runs\\.db is damaged \\(.*\\)\\. ${productName('cezar')} left it and its -wal and -shm files exactly as they are`));
   damagedFilesUnchanged();
   expect(runDataIgnored(), 'not in .ai/cezar/.gitignore').toEqual([]);
   expect(existsSync(join(dataDir, 'worktrees', RUN_ID, 'work-in-progress.txt'))).toBe(true);

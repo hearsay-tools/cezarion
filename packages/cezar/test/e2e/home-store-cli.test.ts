@@ -1,3 +1,4 @@
+import { resolveHome } from '../../src/home/resolve.ts'; // test-home-read: resolve scratch paths after the CLI; constructing a sandbox would write a marker
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,7 +8,7 @@ import test from 'node:test';
 import { Home } from '../../src/home/home.ts';
 
 function cleanEnv(home: string): NodeJS.ProcessEnv {
-  return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !['VITEST', 'NODE_TEST_CONTEXT', 'JEST_WORKER_ID', 'NODE_OPTIONS'].includes(name) && !name.startsWith('STRYKER_') && !name.startsWith('CEZ_'))), CEZ_HOME: home, CEZ_DRY_RUN: '1' };
+  return { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !['VITEST', 'NODE_TEST_CONTEXT', 'JEST_WORKER_ID', 'NODE_OPTIONS'].includes(name) && !name.startsWith('STRYKER_') && !name.startsWith('CEZ_') && !name.startsWith('HSQ_'))), CEZ_HOME: home, CEZ_DRY_RUN: '1' };
 }
 
 test('operator commands bootstrap unmarked homes and retain their write contracts', () => {
@@ -32,8 +33,9 @@ test('operator commands bootstrap unmarked homes and retain their write contract
     for (const [name, args] of commands) {
       const home = join(root, name);
       run(home, args);
-      assert.equal(JSON.parse(readFileSync(join(home, 'install.json'), 'utf8')).kind, 'live', name);
-      const config = name === 'remote' ? join(home, 'remote-settings/4321.json') : join(home, 'config.json');
+      const selected = resolveHome({ purpose: 'cli', env: cleanEnv(home) }); // test-home-read: resolve scratch paths after the CLI; constructing a sandbox would write a marker
+      assert.equal(JSON.parse(readFileSync(join(selected.config, 'install.json'), 'utf8')).kind, 'live', name);
+      const config = name === 'remote' ? join(selected.remoteSettings, '4321.json') : selected.workspaceConfig;
       assert.ok(readFileSync(config).length > 0, name);
     }
     const checkout = join(root, 'checkout');
@@ -42,14 +44,15 @@ test('operator commands bootstrap unmarked homes and retain their write contract
     writeFileSync(join(checkout, 'dist/index.js'), '');
     const linkedHome = join(root, 'link');
     run(linkedHome, ['link', checkout]);
-    assert.equal(JSON.parse(readFileSync(join(linkedHome, 'install.json'), 'utf8')).kind, 'live');
-    assert.ok(readdirSync(join(linkedHome, 'versions')).length > 0);
+    const linked = resolveHome({ purpose: 'cli', env: cleanEnv(linkedHome) }); // test-home-read: resolve scratch paths after the CLI; constructing a sandbox would write a marker
+    assert.equal(JSON.parse(readFileSync(join(linked.config, 'install.json'), 'utf8')).kind, 'live');
+    assert.ok(readdirSync(linked.versions).length > 0);
     const backupHome = Home.sandbox(join(root, 'backup'));
     Home.seed(backupHome, backupHome.agentAccounts, { version: 1, accounts: [], value: 'old' });
     Home.seed(backupHome, backupHome.agentAccounts, { version: 1, accounts: [], value: 'new' });
     // Deliberately model a pre-marker install; its existing files and backups are upgrade input.
     rmSync(join(backupHome.root, 'install.json'));
-    run(backupHome.root, ['backup', 'restore', 'agent-accounts.json']);
+    run(backupHome.rootOverride ?? backupHome.root, ['backup', 'restore', 'agent-accounts.json']);
     assert.equal(JSON.parse(readFileSync(join(backupHome.root, 'install.json'), 'utf8')).kind, 'live');
     assert.equal(JSON.parse(readFileSync(backupHome.agentAccounts, 'utf8')).value, 'old');
 
@@ -57,7 +60,7 @@ test('operator commands bootstrap unmarked homes and retain their write contract
     const env = { ...cleanEnv(testHome), NODE_TEST_CONTEXT: 'child-v8' };
     run(testHome, ['update', '--channel', 'development'], env);
     run(testHome, ['update', '--channel', 'development'], env);
-    assert.equal(JSON.parse(readFileSync(join(testHome, 'install.json'), 'utf8')).kind, 'test');
+    assert.equal(JSON.parse(readFileSync(join(resolveHome({ purpose: 'cli', env }).config, 'install.json'), 'utf8')).kind, 'test'); // test-home-read: resolve scratch paths after the CLI; constructing a sandbox would write a marker
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

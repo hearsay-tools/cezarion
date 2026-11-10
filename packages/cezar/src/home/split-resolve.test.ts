@@ -130,7 +130,7 @@ it('keeps sandbox filesystem paths native when process.platform is mocked', () =
   const platform = process.platform;
   Object.defineProperty(process, 'platform', { value: platform === 'win32' ? 'linux' : 'win32', configurable: true });
   try {
-    const legacy = Home.sandbox(join(dir, 'legacy'));
+    const legacy = Home.sandbox(join(dir, 'legacy'), { layout: 'legacy' });
     const split = Home.sandbox(join(dir, 'split'), { layout: 'split' });
     expect(legacy.workspaceConfig).toBe(join(dir, 'legacy', 'config.json'));
     expect(split.workspaceConfig).toBe(join(dir, 'split', 'config', 'config.json'));

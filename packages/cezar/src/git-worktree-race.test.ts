@@ -1,3 +1,4 @@
+import { projectPaths } from './project-paths.ts';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -107,7 +108,7 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
   ] as const)('protects add from %s (fresh=%s, reattach=%s) across processes/common-dir aliases', async (operation, fresh, reattach) => {
     const { root, linked, start } = await fixture();
     if (reattach) {
-      const path = join(root, '.ai/cezar/worktrees/victim000000');
+      const path = join(projectPaths(root).write, 'worktrees/victim000000');
       await exec('git', ['worktree', 'add', '-b', 'cez/victim00', path, 'main'], { cwd: root });
       rmSync(path, { recursive: true }); // Leave stale metadata and the branch.
     }
@@ -169,6 +170,6 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     const adopted = start(root, 'create', 'adopted', 'victim000000');
     await until(() => existsSync(adopted.result), 'restart adopted checkout');
     expect(JSON.parse(readFileSync(adopted.result, 'utf8'))).toMatchObject({ ok: true });
-    expect((await exec('git', ['status', '--porcelain'], { cwd: join(root, '.ai/cezar/worktrees/victim000000') })).stdout).toBe('');
+    expect((await exec('git', ['status', '--porcelain'], { cwd: join(projectPaths(root).write, 'worktrees/victim000000') })).stdout).toBe('');
   }, 25_000);
 });

@@ -1,7 +1,7 @@
 import { Home } from '../../home/home.ts';
 import { useTestHome } from '../../home/test-home.testkit.ts';
 import { testHome } from '../../home/test-home.testkit.ts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -380,3 +380,6 @@ describe('macosx-ngrok redeploy npx-cache refresh (#32)', () => {
     expect(calls).toEqual([]);
   });
 });
+
+// These installer fixtures describe the existing ai.cezar launchd jobs.
+vi.mock('../../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

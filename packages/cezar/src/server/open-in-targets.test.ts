@@ -78,6 +78,17 @@ describe('run open-in target dispatch and refusals', () => {
     expect(openFile).not.toHaveBeenCalled();
   });
 
+  it('opens the default-app image from the repository root for a worktree-off run', async () => {
+    writeFileSync(join(root, 'image.png'), 'image');
+    store.updateRun(runId, { worktree: false });
+    const res = await post('default', 'image.png');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ opened: true, path: join(root, 'image.png') });
+    expect(openFile).toHaveBeenCalledExactlyOnceWith(join(root, 'image.png'));
+    expect(openApp).not.toHaveBeenCalled();
+    expect(openTerminal).not.toHaveBeenCalled();
+  });
+
   it('preserves the image path when its default app cannot open', async () => {
     const worktree = join(root, 'worktree');
     mkdirSync(worktree);

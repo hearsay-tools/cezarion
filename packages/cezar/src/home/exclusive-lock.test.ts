@@ -25,7 +25,7 @@ it('keeps an older wx writer lock that appears after inspection and before exclu
   });
   expect(() => acquireLock('default', home)).toThrow(LockHeldError);
   expect(readFileSync(path, 'utf8')).toBe(foreign);
-  expect(() => readFileSync(join(home.root, '.versions/server.install.lock/PENDING'))).toThrow(/ENOENT/);
+  expect(() => readFileSync(join(home.state, '.versions/server.install.lock/PENDING'))).toThrow(/ENOENT/);
 });
 
 it('recovers a crash after PENDING and before exclusive publication without an outside flag', () => {
@@ -36,7 +36,7 @@ it('recovers a crash after PENDING and before exclusive publication without an o
   const store = new HomeStore(home);
   expect(store.outsideWrite(path)).toBeUndefined();
   expect(() => readFileSync(path)).toThrow(/ENOENT/);
-  expect(() => readFileSync(join(home.root, '.versions/server.install.lock/PENDING'))).toThrow(/ENOENT/);
+  expect(() => readFileSync(join(home.state, '.versions/server.install.lock/PENDING'))).toThrow(/ENOENT/);
 });
 
 it('recovers a crash after exclusive publication and before HEAD without an outside flag', async () => {
@@ -54,5 +54,5 @@ it('recovers a crash after exclusive publication and before HEAD without an outs
   const store = new HomeStore(home);
   expect(store.outsideWrite(path)).toBeUndefined();
   const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
-  expect(JSON.parse(readFileSync(join(home.root, '.versions/server.install.lock/HEAD'), 'utf8'))).toEqual({ hash });
+  expect(JSON.parse(readFileSync(join(home.state, '.versions/server.install.lock/HEAD'), 'utf8'))).toEqual({ hash });
 });

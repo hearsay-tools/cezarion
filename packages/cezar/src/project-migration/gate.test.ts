@@ -64,3 +64,6 @@ describe('migrate-project and the release switch', () => {
     expect(loaded.cli).toBe(true);
   });
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -76,7 +77,7 @@ it('refuses a secondary project before its store opens or recovery runs', async 
 });
 
 it('secondary ownership lasts until process exit, even after context disposal', async () => {
-  const { root, owner, dataDir } = fixture();
+  const { root, owner } = fixture();
   owner.publishUrl('http://127.0.0.1:4321');
   const contexts = new ProjectContexts({ createRunner, home: testHome(),
     ownership: owner,
@@ -84,9 +85,10 @@ it('secondary ownership lasts until process exit, even after context disposal', 
   });
   await contexts.context('secondary');
   contexts.disposeAll();
-  const record = JSON.parse(readFileSync(join(dataDir, 'cockpit.lock'), 'utf8'));
+  const selectedDataDir = projectPaths(root).write;
+  const record = JSON.parse(readFileSync(join(selectedDataDir, 'cockpit.lock'), 'utf8'));
   expect(record.url).toBe('http://127.0.0.1:4321');
-  await expect(fixture().owner.acquire(dataDir)).rejects.toThrow('http://127.0.0.1:4321');
+  await expect(fixture().owner.acquire(selectedDataDir)).rejects.toThrow('http://127.0.0.1:4321');
 });
 
 it.each([false, true])('releases a cold maintenance claim without releasing the boot project (work fails: %s)', async (fails) => {

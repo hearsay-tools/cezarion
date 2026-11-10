@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { describe, expect, it } from 'vitest';
 import type { DiscoverOptions } from './discovery.ts';
 import type { Cockpit } from './http.ts';
@@ -9,7 +10,7 @@ import { startCockpitHint } from './hint.ts';
  * discovery still prints while the run is going, and nothing prints once the run has ended.
  */
 const cockpit: Cockpit = { origin: 'http://127.0.0.1:4350', projectId: 'p', api: 'http://127.0.0.1:4350/api/v1/p/p' };
-const line = 'a cockpit is running at http://127.0.0.1:4350; use "cez task start" to run this task there instead';
+const line = `a cockpit is running at http://127.0.0.1:4350; use "${productIdentity().command} task start" to run this task there instead`;
 
 function deferredDiscovery() {
   let settle!: { resolve: (c: Cockpit) => void; reject: (e: unknown) => void };

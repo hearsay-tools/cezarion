@@ -1,3 +1,6 @@
+import { projectPaths } from '../project-paths.ts';
+import { productIdentity } from './identity.ts';
+import { productName } from './display.ts';
 import { expect, it, vi } from 'vitest';
 import * as homes from './resolve.ts';
 
@@ -7,7 +10,7 @@ it('prints global CLI help without resolving a Home', async () => {
   let printed!: () => void;
   const help = new Promise<void>(done => { printed = done; });
   const log = vi.spyOn(console, 'log').mockImplementation(message => {
-    if (String(message).startsWith('cezar —')) printed();
+    if (String(message).startsWith(`${productName('cezar')} —`)) printed();
   });
   process.argv = [process.execPath, 'cez', '--help'];
   try {
@@ -26,6 +29,7 @@ it('keeps init command generation inside the CLI home boundary', async () => {
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const root = mkdtempSync(join(tmpdir(), 'cli-init-'));
+  const expectedWriteRoot = projectPaths(root).write;
   const argv = process.argv;
   let completed!: () => void;
   const done = new Promise<void>(resolve => { completed = resolve; });
@@ -37,8 +41,8 @@ it('keeps init command generation inside the CLI home boundary', async () => {
     vi.resetModules();
     await import('../index.ts');
     await done;
-    expect(log).toHaveBeenCalledWith('\nDone. Start the cockpit with: npx cezarion');
-    expect(readFileSync(join(root, '.ai/cezar/workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
+    expect(log).toHaveBeenCalledWith(`\nDone. Start the cockpit with: npx ${productIdentity().npmAlias}`);
+    expect(readFileSync(join(expectedWriteRoot, 'workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
   } finally {
     process.argv = argv;
     vi.restoreAllMocks();

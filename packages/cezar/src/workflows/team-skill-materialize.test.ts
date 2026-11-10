@@ -162,7 +162,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     const { repo, source } = await seedTeamSource();
 
     const offRun = await runToEnd(false);
-    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
+    const filesDir = join(testHome().cache, 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
     expect(offRun.spec.cwd).toBe(repoRoot);
     expect(offRun.spec.systemPrompt).toContain(V1_BODY);
     expect(offRun.spec.systemPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
@@ -208,7 +208,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     await execFileAsync('git', [...GIT_ID, 'commit', '-q', '-m', 'linked agent dirs'], { cwd: repoRoot });
 
     const worktreeRun = await runToEnd(undefined);
-    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
+    const filesDir = join(testHome().cache, 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
     expect(worktreeRun.spec.cwd).not.toBe(repoRoot);
     expect(lstatSync(join(worktreeRun.spec.cwd, '.claude')).isSymbolicLink()).toBe(true);
     for (const agentDir of AGENT_SKILL_DIRS) {
@@ -318,7 +318,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   it('a worktree-off /name opening prompt names the cache copy (#1118)', async () => {
     const { repo, source } = await seedTeamSource();
     const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`, false);
-    const filesDir = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
+    const filesDir = join(testHome().cache, 'skill-files', basename(bareDirFor(repo, testHome())), source.commit, TEAM_SKILL);
     expect(run.spec.userPrompt).toContain(`Skill files are installed on disk at: ${filesDir}`);
     expect(readFileSync(join(filesDir, 'references', 'notes.md'), 'utf8')).toBe(NOTES);
     await run.finish();
@@ -533,7 +533,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
       const run = await launch(promptWorkflow, `Fix it, then run /named-1672 and /${TEAM_SKILL}.`, false);
       expect(run.spec.cwd).toBe(repoRoot);
       for (const agentDir of AGENT_SKILL_DIRS) expect(existsSync(join(repoRoot, agentDir)), agentDir).toBe(false);
-      expect(existsSync(join(home, '.cache', 'cez', 'skill-files'))).toBe(false);
+      expect(existsSync(join(testHome().cache, 'skill-files'))).toBe(false);
       await run.finish();
     });
 

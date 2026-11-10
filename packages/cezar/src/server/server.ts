@@ -3605,7 +3605,7 @@ export function createApp(deps: ServerDeps) {
     // in the task's worktree when it still exists (spec 006).
     .post('/runs/:id/open-in-cli', async (c) => {
       const project = c.get('project');
-      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: true, defaultTargetNeedsWorktree: false });
+      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: true });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       // Hosted mode: there is no "my machine" to open a terminal on. The UI
       // hides the button when localHandoff is false — this is defense in depth.
@@ -3648,7 +3648,7 @@ export function createApp(deps: ServerDeps) {
     // Open a run's worktree (or the repo root) in the chosen local app.
     .post('/runs/:id/open-in', jsonZodValidator(openInSchema), async (c) => {
       const project = c.get('project');
-      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: false, defaultTargetNeedsWorktree: true });
+      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: false });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       if (!capabilities().localHandoff) {
         return c.json(
@@ -3958,7 +3958,7 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
       const checkout = runCheckout(c.get('project'), id, 'remove', {
-        claim: 'publish', activeBeforeLookup: false, checksActive: true, deletion: 'worktree', ignoresHold: true,
+        claim: 'publish', activeBeforeLookup: false, checksActive: true, deletion: 'worktree',
         nullClaimError: 'worktree cleanup pending — retry after cleanup is confirmed',
       });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
@@ -3974,7 +3974,7 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
       const checkout = runCheckout(c.get('project'), id, 'remove', {
-        claim: 'publish', activeBeforeLookup: true, checksActive: true, deletion: 'record', ignoresHold: true,
+        claim: 'publish', activeBeforeLookup: true, checksActive: true, deletion: 'record',
         nullClaimError: 'worktree cleanup pending — retry after cleanup is confirmed',
       });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
@@ -4090,7 +4090,7 @@ export function createApp(deps: ServerDeps) {
     .post('/worktrees/:runId/reclaim', paramZodValidator(reclaimRunParamsSchema), async (c) => {
       const { root: repoRoot, store } = c.get('project');
       const checkout = runCheckout(c.get('project'), c.req.valid('param').runId, 'remove', {
-        claim: 'reclaim', activeBeforeLookup: false, checksActive: false, deletion: 'inline', ignoresHold: true,
+        claim: 'reclaim', activeBeforeLookup: false, checksActive: false, deletion: 'inline',
         nullClaimError: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed',
       });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);

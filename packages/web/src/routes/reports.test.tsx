@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -21,7 +22,7 @@ describe('Reports shelf', () => {
     expect(screen.getByRole('status').textContent).toBe('Loading reports…')
     mocks.useReports.mockReturnValue(result()); view.rerender(<MemoryRouter><ReportsRoute /></MemoryRouter>)
     expect(screen.getByText('No published reports yet')).toBeTruthy()
-    expect(screen.getByText('cez artifact publish')).toBeTruthy()
+    expect(screen.getByText(`${productCommand()} artifact publish`)).toBeTruthy()
     mocks.useReports.mockReturnValue(result({ isError: true, error: new Error('Storage unavailable') }))
     view.rerender(<MemoryRouter><ReportsRoute /></MemoryRouter>)
     expect(screen.getByRole('alert').textContent).toContain('Storage unavailable')

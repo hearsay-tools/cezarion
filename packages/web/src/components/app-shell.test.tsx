@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { Link as RouterLink, MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router'
@@ -175,7 +176,7 @@ describe('AppShell', () => {
     const header = footer()
     expect(header).not.toBeNull()
     expect(within(header).getByRole('status').textContent).toContain('In-app updates are unavailable for this installation.')
-    expect(within(header).getByRole('status').textContent).toContain('Install the newer release using your original installation method, then restart Cezarion.')
+    expect(within(header).getByRole('status').textContent).toContain(`Install the newer release using your original installation method, then restart ${productName("Cezarion")}.`)
     expect(header.querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.0.0')
     expect(within(sidebar()).queryByRole('button', { name: /update|restart/i })).toBeNull()
   })
@@ -545,8 +546,8 @@ describe('AppShell', () => {
     })
 
     it('renders the repo chip and version chip from props', () => {
-      renderShell('/', { repo: { name: 'cezar', branch: 'main' }, version: '1.2.3' })
-      expect(within(sidebar()).getByText('cezar')).toBeTruthy()
+      renderShell('/', { repo: { name: `${productName("cezar")}`, branch: 'main' }, version: '1.2.3' })
+      expect(within(sidebar()).getByText(`${productName("cezar")}`)).toBeTruthy()
       // The chip prefixes the raw semver from /api/v1/health — `v1.2.3`, mono, muted.
       expect(within(sidebar()).getByText('v1.2.3')).toBeTruthy()
     })

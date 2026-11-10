@@ -261,7 +261,7 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
     dirs.push(source.sourceDir);
     const greeter = await listGreeter(repo);
     // Keyed exactly like the bare clone, under a sibling cache root.
-    const cacheRoot = join(home, '.cache', 'cez', 'skill-files', basename(bareDirFor(repo, testHome())));
+    const cacheRoot = join(testHome().skillFilesCache, basename(bareDirFor(repo, testHome())));
     return { home, repo, source, greeter, cacheRoot };
   }
 
@@ -332,8 +332,8 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
   });
 
   it('degrades to null, never a throw, when the cache cannot be written', async () => {
-    const { home, greeter } = await greeterSource();
-    writeFileSync(join(home, '.cache', 'cez', 'skill-files'), 'not a directory\n');
+    const { greeter } = await greeterSource();
+    writeFileSync(testHome().skillFilesCache, 'not a directory\n');
     await expect(materializeSkillToCache(greeter, testHome())).resolves.toBeNull();
   });
 });

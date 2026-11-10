@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { registerPreviewServer } from '../preview/run-tools.ts';
@@ -131,9 +132,9 @@ describe('ProjectContexts', () => {
 
     const first = await contexts.context('a');
     expect(first.id).toBe('a');
-    expect(first.dataDir).toBe(join(rootA, '.ai/cezar'));
+    expect(first.dataDir).toBe(projectPaths(rootA).write);
     expect(first.launchKey).not.toBe('');
-    expect(existsSync(join(rootA, '.ai/cezar', 'launch-key'))).toBe(true);
+    expect(existsSync(join(projectPaths(rootA).write, 'launch-key'))).toBe(true);
     // Only the accessed project was built.
     expect(existsSync(join(rootB, '.ai/cezar'))).toBe(false);
     expect(contexts.ids()).toEqual(['a']);
@@ -267,10 +268,10 @@ describe('ProjectContexts', () => {
     expect(spy).toHaveBeenCalledTimes(1); // unsubscribed — no further ticks
     // Store closed: the pending row landed on disk despite the debounced save, and a late write
     // to the disposed store saves nothing.
-    expect(readPersistedRuns(join(rootA, '.ai/cezar')).map((saved) => saved.id)).toEqual([run.id]);
+    expect(readPersistedRuns(projectPaths(rootA).write).map((saved) => saved.id)).toEqual([run.id]);
     ctx.store.updateRun(run.id, { title: 'after dispose' });
     ctx.store.flush();
-    expect(readPersistedRuns(join(rootA, '.ai/cezar'))[0]?.title).toBe('pending');
+    expect(readPersistedRuns(projectPaths(rootA).write)[0]?.title).toBe('pending');
     expect(ctx.store.listenerCount('event')).toBe(0);
 
     // Disposed id is gone from the map; the next access builds a fresh context.

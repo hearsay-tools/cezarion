@@ -1,7 +1,7 @@
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { resolveHome } from '../home/resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
-const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env }); // test-home-read: resolve pinned fixtures or the fake-account refusal target
+const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env, layout: 'legacy' }); // test-home-read: resolve pinned fixtures or the fake-account refusal target
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -38,12 +38,12 @@ describe('cezar home write safety', () => {
     pinned = mkdtempSync(join(base, 'cez-home-safety-pinned-'));
     elsewhere = mkdtempSync(join(base, 'cez-home-safety-elsewhere-'));
     fakeUserHome = mkdtempSync(join(base, 'cez-home-safety-user-'));
-    useTestHome(pinned ? Home.sandbox(pinned) : undefined);
+    useTestHome(pinned ? Home.sandbox(pinned, { layout: 'legacy' }) : undefined);
   });
 
   afterEach(() => {
     if (originalCezHome === undefined) useTestHome(undefined);
-    else useTestHome(originalCezHome ? Home.sandbox(originalCezHome) : undefined);
+    else useTestHome(originalCezHome ? Home.sandbox(originalCezHome, { layout: 'legacy' }) : undefined);
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
     vi.mocked(userInfo).mockRestore();
@@ -55,7 +55,7 @@ describe('cezar home write safety', () => {
       // Exactly what a test's afterEach does to an orphaned write: the pin is
       // gone by the time the write runs. The write must still land where the
       // read came from.
-      useTestHome(elsewhere ? Home.sandbox(elsewhere) : undefined);
+      useTestHome(elsewhere ? Home.sandbox(elsewhere, { layout: 'legacy' }) : undefined);
       config.projects.push({
         id: 'shop',
         root: '/tmp/shop',
@@ -82,7 +82,7 @@ describe('cezar home write safety', () => {
         source: 'local',
       });
     }, testHome());
-    useTestHome(pinned ? Home.sandbox(pinned) : undefined);
+    useTestHome(pinned ? Home.sandbox(pinned, { layout: 'legacy' }) : undefined);
     expect((await loadWorkspaceConfig(testHome().workspaceConfig)).projects.map((p) => p.id)).toEqual(['shop']);
   });
 

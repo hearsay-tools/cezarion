@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -200,10 +201,10 @@ it('answers usage errors as JSON on stderr with exit 1, and help with exit 0', a
   expect(await runJobCommand(['status', 'absent', '--dir', dir], {})).toBe(1);
   expect(await runJobCommand(['stop', 'x'], {})).toBe(1);
   expect(error.mock.calls.map(call => JSON.parse(String(call[0])).error)).toEqual([
-    expect.stringContaining('after "--"'), expect.stringContaining('Invalid job name'), expect.stringContaining('No job named "absent"'), expect.stringContaining('Usage: cez job start'),
+    expect.stringContaining('after "--"'), expect.stringContaining('Invalid job name'), expect.stringContaining('No job named "absent"'), expect.stringContaining(`Usage: ${productIdentity().command} job start`),
   ]);
   expect(await runJobCommand(['--help'], {})).toBe(0);
-  expect(log.mock.calls[0]?.[0]).toContain('cez job status');
+  expect(log.mock.calls[0]?.[0]).toContain(`${productIdentity().command} job status`);
   // A `--help` after `--` belongs to the command, not to `cez job`.
   expect(await runJobCommand(['status', 'absent', '--dir', dir, '--', '--help'], {})).toBe(1);
 });

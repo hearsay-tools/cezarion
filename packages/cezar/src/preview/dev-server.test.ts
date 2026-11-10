@@ -236,7 +236,7 @@ describe('DevServer', () => {
   });
 
   it.each(['0', '1'])('preview process strips the cockpit home with full-env=%s', async (full) => {
-    useTestHome(Home.sandbox(testHome().root));
+    useTestHome(Home.sandbox(testHome().rootOverride ?? testHome().root));
     vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
     vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
     try {

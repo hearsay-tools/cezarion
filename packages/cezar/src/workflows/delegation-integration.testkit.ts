@@ -1,3 +1,4 @@
+import { REBRAND_SWITCH } from '../home/switch.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { workerCollectedResultSchema, workerInspectionSchema } from '@open-mercato/cezar-contract/delegation';
@@ -127,8 +128,17 @@ export function registerDelegationIntegrationGroup(group: 'reviewed-integration'
   }
 
   async function command<T = Record<string, unknown>>(id: string, args: string[], code = 0): Promise<T> {
+    const env: NodeJS.ProcessEnv = { ...process.env, ...environments.get(id), PATH: '' };
+    if (REBRAND_SWITCH) {
+      for (const name of Object.keys(env)) {
+        if (!name.startsWith('CEZ_')) continue;
+        const preferred = 'HSQ_' + name.slice(4);
+        env[preferred] = env[name];
+        delete env[name];
+      }
+    }
     const result = await execFile(process.execPath, [cli.entry, 'worker', ...args], {
-      cwd: root, env: { ...process.env, ...environments.get(id), PATH: '' }, timeout: 45_000,
+      cwd: root, env, timeout: 45_000,
     }).then(value => ({ ...value, code: 0 }), (error: { stdout: string; stderr: string; code: number }) => error);
     expect(result.stderr).toBe(''); expect(result.code, result.stdout).toBe(code);
     return JSON.parse(result.stdout) as T;

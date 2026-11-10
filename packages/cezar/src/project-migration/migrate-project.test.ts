@@ -17,6 +17,7 @@ import { holdCockpitLease } from '../home/leases.ts';
 import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
+import { projectPaths } from '../project-paths.ts';
 import { CockpitOwnership, migrationFencePaths, projectAdmissionRefusal, ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { runMigrateProjectCommand, type MigrateProjectDeps } from './cli.ts';
@@ -72,7 +73,7 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
 
   /** The task as the product reads it after the move: P4a's dual read finds it under `.ai/squawk/`. */
   function migratedTask() {
-    const store = RunStore.open(project.dataDir, { keepLive: true });
+    const store = RunStore.open(projectPaths(project.root).write, { keepLive: true });
     try { return store.getRun(TASK); } finally { store.close(); }
   }
 

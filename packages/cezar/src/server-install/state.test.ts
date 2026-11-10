@@ -75,11 +75,11 @@ describe('server state', () => {
   it('lock is exclusive against a live foreign pid and reclaims stale', () => {
     const release = acquireLock(undefined, testHome());
     // simulate a live foreign holder
-    Home.seedBytes(testHome(), join(home, 'server.install.lock'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
+    Home.seedBytes(testHome(), testHome().serverLock(), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
     // pid 1 is alive on posix; expect the lock to be held
     expect(() => acquireLock(undefined, testHome())).toThrow(LockHeldError);
     // a dead pid is reclaimed
-    Home.seedBytes(testHome(), join(home, 'server.install.lock'), Buffer.from('999999999\n'));
+    Home.seedBytes(testHome(), testHome().serverLock(), Buffer.from('999999999\n'));
     const release2 = acquireLock(undefined, testHome());
     release2();
     release();
@@ -87,7 +87,7 @@ describe('server state', () => {
 
   it('lock acquisition is atomic (wx) — a pre-existing live lock file always wins', () => {
     // Simulate the race loser: the file appears (live pid) before our write.
-    Home.seedBytes(testHome(), join(home, 'server.install.lock'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
+    Home.seedBytes(testHome(), testHome().serverLock(), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
     expect(() => acquireLock(undefined, testHome())).toThrow(LockHeldError);
   });
 
@@ -146,7 +146,7 @@ describe('server state', () => {
     const releaseOther = acquireLock('blog-example-com', testHome());
     releaseOther();
     // but the SAME instance is exclusive against a live foreign pid
-    Home.seedBytes(testHome(), join(home, 'server-instances', 'shop-example-com.install.lock'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
+    Home.seedBytes(testHome(), testHome().serverLock('shop-example-com'), Buffer.from(`${process.pid === 1 ? 2 : 1}\n`));
     expect(() => acquireLock('shop-example-com', testHome())).toThrow(LockHeldError);
     release();
   });
