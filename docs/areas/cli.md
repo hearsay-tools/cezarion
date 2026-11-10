@@ -50,13 +50,13 @@ recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff
 listed in help and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it is an
 unknown command and its module is never loaded. Only the user runs it, and it runs
 offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner, or a live
-cockpit of this home whose registry lists the project) or any task of it is live, and
+cockpit of the user's legacy or split home whose registry lists the project) or any task of it is live, and
 names each pid, URL, port or task to stop. It cannot see a cockpit of another home that
-lists the project but never opened it: stop such a cockpit yourself first (the write
-backstop refuses its writes while the fence holds). It then takes `cockpit.lock` and the migration
-fence, moves the state and releases both. A dry run holds `cockpit.lock` and passes
-admission before it plans. It first completes and reports an unfinished migration, if one
-exists; planning the remaining migration changes nothing. It prints the plan, then `Dry run:
+lists the project but never opened it: stop such a cockpit yourself first (while the
+fence holds, the write backstop refuses its store and listed state writes). It then takes `cockpit.lock` and the migration
+fence, moves the state and releases both. A dry run first completes and reports an
+unfinished migration, if one exists. It then holds `cockpit.lock`, passes admission and
+plans; planning the remaining migration changes nothing. It prints the plan, then `Dry run:
 nothing was moved or rewritten.` (or, after such a recovery, `Dry run: planning changed
 nothing; the completed migration above did.`) or `Migration complete.`; it prints the `git mv` commands for
 tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted

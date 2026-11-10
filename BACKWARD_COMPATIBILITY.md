@@ -54,8 +54,11 @@ per-project write root follows moved state (hearsay-tools/cezarion#3150): until 
 project's runs are read-only fallback runs. With the switch false, as
 shipped, help and dispatch omit it (`cez migrate-project` is an unknown command, exit 1), no
 route or setting exposes it, and every ordinary write stays under `.ai/cezar/`. Only the user
-runs it, offline: it refuses while a cockpit serves the project or a task is live and names
-what to stop. Early recovery runs in both switch states: an entry that finds an unfinished
+runs it, offline: it refuses while a cockpit it can see serves the project or a task is live,
+and names what to stop; a cockpit of another home that lists the project but never opened it
+is not seen, so the user stops it. An older binary checks neither the fence nor the journal
+and opens `.ai/cezar/` directly: on a moved project it sees no earlier task but loses no data. Early
+recovery runs in both switch states: an entry that finds an unfinished
 `.ai/squawk-migration.json` finishes it before it reads the project, and a journal that
 cannot finish keeps the project refused with the cause. A journal that names anything
 outside the project's own state, or that Git tracks, is refused unchanged before any step.

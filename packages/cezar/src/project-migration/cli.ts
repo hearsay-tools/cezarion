@@ -17,7 +17,8 @@ const HELP = commandText(`Usage: cez migrate-project [--dry-run] [--repo <dir>]
 Move this project's runtime state from .ai/cezar/ to .ai/squawk/, offline. Stop every
 cockpit that serves the project and finish or cancel every task first; the command
 names what it finds still running. It cannot see a cockpit of another home that
-never opened the project: stop that one yourself. Tracked files are never moved: the command prints the
+lists the project but never opened it: stop it yourself, and keep older binaries off
+the project. Tracked files are never moved: the command prints the
 git mv commands to run and commit.
 
     --dry-run     print every move, repair and rewrite; only an unfinished

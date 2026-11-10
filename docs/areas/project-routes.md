@@ -16,8 +16,9 @@ Maintenance can read fallback history without recovery or a shadow legacy databa
 
 ## Project migration fence
 
-A project migration runs offline (hearsay-tools/cezarion#3089): no cockpit serves the
-project and no task of it is live. One claim file, `<root>/.ai/squawk-migration.lock`,
+A project migration runs offline (hearsay-tools/cezarion#3089): it refuses while a cockpit it
+can see serves the project or a task of it is live. The fence and the journal stop only a
+binary that knows them; an older binary checks neither. One claim file, `<root>/.ai/squawk-migration.lock`,
 fences the project during the move (hearsay-tools/cezarion#3087). It sits beside both
 directory names, so a directory move never carries it and never creates a second owner. It
 uses the `CockpitOwnership` claim protocol: exclusive link-create, the `.reclaim` guard, pid
@@ -27,14 +28,14 @@ plus start-token liveness and token-checked release.
   offline migration and by early recovery, never by a cockpit for a project it serves. It
   first owns `cockpit.lock` (taken in whichever project directory exists, so a resume after
   the move never recreates the old name), so no cockpit boots on or builds the project, then
-  claims the fence, so no other process is admitted. A competing CLI meets the held fence and
+  claims the fence, so no other process that checks admission is admitted. A competing CLI meets the held fence and
   fails at once. Right after the claim, `liveTasks` runs as the holder; any live task
   releases the fence and throws `ProjectMigrationBusyError` with each task's id, title and
   state and the next step (finish or cancel each one).
 - **Anything live.** Before it claims, `migrateProjectOffline` refuses with
   `ProjectInUseError` while a cockpit serves the project (`project-migration/live.ts`): the
   `cockpit.lock` owner in either directory (any home, with its URL), and every live cockpit
-  of the CLI's homes whose registry lists the project (the presence leases of
+  of the user's legacy and split homes whose registry lists the project (the presence leases of
   `home/leases.ts`: pid, port, instance), which covers a cockpit that does not own the project
   but runs its automations (hearsay-tools/cezarion#3136). Live tasks are
   `projectLiveTasks` over a read-only view (`readLiveTaskView`: each run store read quiescent,
@@ -45,8 +46,9 @@ plus start-token liveness and token-checked release.
   in either directory, plus the runs of families another live store claims in `run_claims` (a
   headless `cez run`, another binary), read from both physical claim tables so a stale legacy
   claim never hides a live fallback one. An agent process belongs to a live task. Not seen: a
-  cockpit of another home that lists the project but never opened it; the admission checks and
-  the write backstop stop its writes during the move.
+  cockpit of another home that lists the project but never opened it. The user stops it; during
+  the move, admission and the write backstop refuse its project entries and its store and
+  listed state writes.
 - **Admission.** `projectAdmissionRefusal(dataDir)`: two `lstat` calls when dormant,
   nothing written. It refuses a live fence, an unreadable lock (the message names the file
   and when it is safe to remove it) and an existing journal `.ai/squawk-migration.json`. A
@@ -194,7 +196,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   notice names what blocks the move, and the next start tries again (one attempt per project
   per cockpit run; a caller that comes while it runs waits for it). The notice of a finished
   move lists the `git mv` commands for tracked files. Any failure before the journal exists
-  only delays the move; a failure after it closes the project through recovery. Every cockpit
+  only delays the move; a failure after it leaves the journal, so admission refuses the
+  project until recovery finishes it. Every cockpit
   path that touches a project before or without its context runs the same prepare step
   (`prepareProject`: journal recovery, then the automatic move): the context build, the
   post-listen preparation of every registered project (before the preview sweep, automation
@@ -208,9 +211,9 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   runs are fallback runs.
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
-  before anything reads the project, in both switch states. Without a journal it costs one
-  `lstat`. It takes the fence with nothing live: the journal has refused every admission
-  since it was written, and a migration starts only with no live task. It leaves the journal
+  before the entry that finds it reads the project, in both switch states. Without a journal it costs one
+  `lstat`. It takes the fence without a live-task check: the journal has refused every admission
+  since it was written, and a migration starts only with no live task it can see. It leaves the journal
   to a live cockpit that owns the project or a process that holds its fence; admission
   refuses meanwhile. It uses the caller's claim when the caller owns the project or is about
   to (`keep`), otherwise a temporary claim it releases. Concurrent calls in one process share

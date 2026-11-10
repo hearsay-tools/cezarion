@@ -10,7 +10,7 @@ import type { MigrationFault } from './steps.ts';
 /**
  * One offline project migration (hearsay-tools/cezarion#3089). It refuses while any cockpit it can
  * see serves the project (`live.ts`). It then takes the project's `cockpit.lock` and its migration
- * fence, so no cockpit boots on the project and no other process is admitted; under the fence it
+ * fence, so no cockpit boots on the project and no process that checks admission is admitted; under the fence it
  * refuses while any task is live, then runs the engine and releases both claims. An unfinished
  * journal finishes first and is reported as the migration. A dry run holds only `cockpit.lock`
  * while it plans and writes nothing.
