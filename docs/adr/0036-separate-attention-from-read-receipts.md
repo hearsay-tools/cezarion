@@ -8,7 +8,7 @@ happened or who must act.
 ## Consequences
 
 One shared unread rule, `isUnread` in the contract’s run predicates, uses finish and seen
-timestamps and excludes cancelled and archived runs. The cockpit and the store’s mark-read
+timestamps. Only done or failed runs with a finish time can be unread; archived runs cannot. The cockpit and the store’s mark-read
 sweep both use it. It is not unified into the reserved attention `unseen` bucket. The sweep’s
 SQL prefilter (`UNREAD_RUN_RULE.sql`) may admit extra rows but must not miss an unread one;
 `isUnread` re-checks each decoded record. A run waiting for a usage-limit resume is not a

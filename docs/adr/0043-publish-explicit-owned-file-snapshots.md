@@ -12,9 +12,9 @@ A worker’s copied attachment becomes its own after first launch and must not b
 by Continue. Require its baseline ignore rule before copying and recheck the whole batch;
 a failed placement removes only copies made by that call.
 
-Artifact URLs identify the project that owns the run’s storage. The task runner supplies that
-project’s id in `CEZ_PROJECT_ID`, together with the task’s artifact directory (`agentEnv`).
-Without the id, the link stays unscoped. Browser file links
+Artifact URLs identify the project that owns the run’s storage. When the task has a cockpit
+address, the task runner supplies that project’s id in `CEZ_PROJECT_ID` (`agentEnv`). Without
+a cockpit address there is no id, and the link stays unscoped. Browser file links
 retain the run’s route scope. Publishing produces a snapshot that survives worktree cleanup;
 mentioning a source filename does not publish it. These checks do not imply a general sandbox.
 
