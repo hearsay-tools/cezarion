@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, statSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -200,5 +200,20 @@ describe('the planner', () => {
       expect(plan.blockers).toEqual([expect.stringContaining(`Git tracks run state the migration must move: .ai/cezar/${path}`)]);
       expect(plan.moves).toEqual([]);
     }
+  });
+  it('refuses to merge into an existing destination directory broader than its source', async () => {
+    const { root, source } = repository();
+    mkdirSync(join(source, 'runs'), { mode: 0o700 });
+    chmodSync(join(source, 'runs'), 0o700);
+    writeFileSync(join(source, 'runs/1.handoff.md'), '# Handoff');
+    mkdirSync(join(root, '.ai/squawk/runs'), { recursive: true });
+    chmodSync(join(root, '.ai/squawk/runs'), 0o755);
+    chmodSync(join(root, '.ai/squawk'), statSync(source).mode & 0o777);
+    const plan = await planProjectMigration(root);
+    expect(plan.conflicts).toEqual([{ path: join(root, '.ai/squawk/runs'), reason: expect.stringContaining('has mode 755, broader than 700') }]);
+    expect(plan.moves.map(move => move.from)).not.toContain(join(source, 'runs/1.handoff.md'));
+    chmodSync(source, 0o700);
+    chmodSync(join(root, '.ai/squawk'), 0o750);
+    expect((await planProjectMigration(root)).conflicts.map(conflict => conflict.path)).toContain(join(root, '.ai/squawk'));
   });
 });

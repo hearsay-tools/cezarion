@@ -182,6 +182,8 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
     // Items already under .ai/squawk are conflicts; a real migration refuses and writes nothing.
     mkdirSync(join(project.newDir, 'runs'), { recursive: true });
+    // As private as their source directories, so only the two items conflict.
+    for (const path of ['', 'runs']) chmodSync(join(project.newDir, path), statSync(join(project.dataDir, path)).mode & 0o777);
     writeFileSync(join(project.newDir, RUNS_DB_FILE), 'not a run store');
     writeFileSync(join(project.newDir, 'runs', `${TASK}.handoff.md`), 'another handoff');
     const blocked = projectSnapshot(project, { databaseBytes: true });
@@ -231,6 +233,21 @@ describe('crash recovery', { timeout: TIMEOUT }, () => {
     }
   });
 
+  it('keeps every moved worktree registered when another checkout prunes between the move and the repair', async () => {
+    for (const point of ['move:item:0', 'move:after', 'move:marked']) {
+      project.restore();
+      const crashed = await fence(project);
+      await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt(point) }), point).rejects.toThrow(point);
+      crashed.release();
+      // Git's own prune, as any checkout sharing this Git directory runs it: it ignores cezar's receipts.
+      git(project.repo, 'worktree', 'prune');
+      const recovery = await fence(project);
+      try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery }); } finally { recovery.release(); }
+      expect(projectSnapshot(project), point).toEqual(reference);
+      expect(git(project.root, 'worktree', 'list', '--porcelain')).not.toMatch(/^locked/m);
+    }
+  });
+
   it('rolls back every row when the one run-store transaction fails, and a resume finishes it', async () => {
     project.restore();
     const original = rows(join(project.dataDir, RUNS_DB_FILE));
@@ -238,7 +255,7 @@ describe('crash recovery', { timeout: TIMEOUT }, () => {
     await expect(migrateProject({ repoRoot: project.root, fence: held, fault: crashAt('run-store:commit') })).rejects.toThrow('run-store:commit');
     held.release();
     expect(rows(join(project.newDir, RUNS_DB_FILE))).toEqual(original);
-    expect(readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))?.done).toEqual(['move', 'repair-worktrees', 'receipts']);
+    expect(readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))?.done).toEqual(['lock-worktrees', 'move', 'repair-worktrees', 'receipts']);
     const recovery = await fence(project);
     try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery }); } finally { recovery.release(); }
     expect(projectSnapshot(project)).toEqual(reference);
@@ -283,7 +300,7 @@ describe('the holder', { timeout: TIMEOUT }, () => {
     try {
       await expect(resumeProjectMigration({ repoRoot: project.root, fence: recovery })).rejects.toBeInstanceOf(ProjectMigrationStepError);
     } finally { recovery.release(); }
-    expect(readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))?.done).toEqual(['move', 'repair-worktrees']);
+    expect(readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))?.done).toEqual(['lock-worktrees', 'move', 'repair-worktrees']);
     expect(projectAdmissionRefusal(project.dataDir)?.reason).toBe('journal');
   });
 
@@ -338,6 +355,37 @@ describe('the holder', { timeout: TIMEOUT }, () => {
       if (point.endsWith(':marked')) expect(events.slice(events.lastIndexOf(point.replace(':marked', ':after'), index), index)).toContain(`dir:${ai}`);
     }
     expect(events.at(-1)).toBe(`dir:${ai}`);
+  });
+
+  it('keeps a lock the user set, and unlocks only the worktrees the migration locked', async () => {
+    project.restore();
+    git(project.root, 'worktree', 'lock', '--reason', 'mine, keep it', project.taskPath);
+    await migrate(project);
+    const listed = git(project.root, 'worktree', 'list', '--porcelain');
+    expect(listed).toContain(`worktree ${moved(project, project.taskPath)}\nHEAD`);
+    expect(listed.match(/^locked.*$/gm)).toEqual(['locked mine, keep it']);
+    expect(listed.split('\n\n').find(record => record.startsWith(`worktree ${moved(project, project.taskPath)}\n`))).toContain('locked mine, keep it');
+  });
+
+  it('makes items applied before a crash durable on resume, before the step is marked', async () => {
+    const receiptDir = () => join(git(project.root, 'rev-parse', '--path-format=absolute', '--git-common-dir'), 'cezar-owned-workspaces');
+    for (const step of ['move', 'receipts', 'run-files']) {
+      project.restore();
+      const crashed = await fence(project);
+      await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt(`${step}:after`) })).rejects.toThrow(Crash);
+      crashed.release();
+      const journal = readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))!;
+      const events: string[] = [];
+      const directory = vi.spyOn(durable, 'directory').mockImplementation((path) => { events.push(`dir:${path}`); });
+      const recovery = await fence(project);
+      try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery, fault: point => { events.push(point); } }); }
+      finally { recovery.release(); directory.mockRestore(); }
+      const before = events.slice(events.indexOf(`${step}:before`), events.indexOf(`${step}:after`));
+      const expected = step === 'move' ? journal.moves.flatMap(move => [dirname(move.to), dirname(move.from)])
+        : step === 'receipts' ? [receiptDir()]
+          : journal.rewrites.flatMap(rewrite => 'file' in rewrite && !['receipt', 'cleanup-checkpoint'].includes(rewrite.kind) ? [dirname(rewrite.file)] : []);
+      for (const path of expected) expect(before, `${step} ${path}`).toContain(`dir:${path}`);
+    }
   });
 
   it('runs in an owning cockpit after its drain: the context is disposed first, then rebuilt on the moved state', async () => {

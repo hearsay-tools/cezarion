@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
-import { withWorktreeMutation } from '../git-worktree-lock.ts';
+import type { WorktreeGit } from '../git-worktree-lock.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
 import { durable, replaceDurably } from './durable.ts';
@@ -89,38 +89,93 @@ async function moveStep(journal: ProjectMigrationJournal, fault: MigrationFault)
   for (const [index, move] of journal.moves.entries()) {
     const from = pathPresent(move.from);
     const to = pathPresent(move.to);
-    if (!from && to) continue;
     if (from && to) throw new ProjectMigrationStepError('move', `both ${move.from} and ${move.to} exist`);
-    if (!from) throw new ProjectMigrationStepError('move', `${move.from} and ${move.to} are both missing`);
-    // Checked again here: a symlink placed after planning must not redirect the rename.
-    const redirected = redirectedComponent(dirname(journal.destination), dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
-    if (redirected) throw new ProjectMigrationStepError('move', `${redirected} is not a directory of this project`);
-    createDirectories(journal.destination, journal.source, dirname(move.to));
-    renameSync(move.from, move.to);
+    if (!from && !to) throw new ProjectMigrationStepError('move', `${move.from} and ${move.to} are both missing`);
+    if (from) {
+      // Checked again here: a symlink placed after planning must not redirect the rename.
+      const redirected = redirectedComponent(dirname(journal.destination), dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
+      if (redirected) throw new ProjectMigrationStepError('move', `${redirected} is not a directory of this project`);
+      createDirectories(journal.destination, journal.source, dirname(move.to));
+      renameSync(move.from, move.to);
+    } else {
+      // Moved before a crash: the directories created for it may not be durable in their parents yet.
+      for (let directory = dirname(move.to); directory === journal.destination || directory.startsWith(journal.destination + sep); directory = dirname(directory)) {
+        durable.directory(dirname(directory));
+      }
+    }
     durable.directory(dirname(move.to));
     durable.directory(dirname(move.from));
     fault(`move:item:${index}`);
   }
 }
 
-/** Point Git at each moved task worktree, then prove it sees each one at its new path. */
-async function repairStep(journal: ProjectMigrationJournal): Promise<void> {
+/** A worktree's administrative directory, from its `.git` link. */
+function adminDirectory(worktree: string): string {
+  return resolve(worktree, gitReportedPath(readFileSync(join(worktree, '.git'), 'utf8').replace(/^gitdir: /, '').trim()));
+}
+
+/** The registered worktrees, and the lock reason of each locked one ('' without one), by path in this platform's form. */
+async function worktreeListing(journal: ProjectMigrationJournal, git: WorktreeGit): Promise<{ paths: Set<string>; locks: Map<string, string> }> {
+  const listed = await git(journal.repoRoot, ['worktree', 'list', '--porcelain', '-z']);
+  if (!listed.ok) throw new ProjectMigrationStepError('lock-worktrees', `Git cannot list the worktrees of ${journal.repoRoot}`);
+  const paths = new Set<string>();
+  const locks = new Map<string, string>();
+  let current: string | undefined;
+  for (const entry of listed.stdout.split('\0')) {
+    if (entry.startsWith('worktree ')) paths.add(current = gitReportedPath(entry.slice('worktree '.length)));
+    else if (current && (entry === 'locked' || entry.startsWith('locked '))) locks.set(current, entry.slice('locked '.length));
+  }
+  return { paths, locks };
+}
+
+/** The lock reason that marks a worktree this migration locked; only those are unlocked again. */
+export function migrationLockReason(journal: Pick<ProjectMigrationJournal, 'id'>): string {
+  return `cezar project migration ${journal.id}`;
+}
+
+/**
+ * Lock every worktree the move carries before it moves: between the move and the repair its old
+ * path is missing, and a `git worktree prune` from any checkout sharing this Git directory would
+ * delete an unlocked registration (its index included). A worktree the user locked keeps its lock.
+ */
+async function lockStep(journal: ProjectMigrationJournal, fault: MigrationFault, git?: WorktreeGit): Promise<void> {
+  if (journal.worktrees.length === 0) return;
+  const { locks } = await worktreeListing(journal, git!);
+  for (const [index, worktree] of journal.worktrees.entries()) {
+    const path = pathPresent(worktree.from) ? worktree.from : worktree.to;
+    if (!locks.has(worktree.from) && !locks.has(worktree.to)) {
+      const locked = await git!(journal.repoRoot, ['worktree', 'lock', '--reason', migrationLockReason(journal), '--', path]);
+      if (!locked.ok) throw new ProjectMigrationStepError('lock-worktrees', `git worktree lock ${path} failed: ${locked.stderr.trim()}`);
+    }
+    const admin = adminDirectory(path);
+    if (pathPresent(join(admin, 'locked'))) durable.file(join(admin, 'locked'));
+    durable.directory(admin);
+    fault(`lock-worktrees:item:${index}`);
+  }
+}
+
+/** Point Git at each moved task worktree, prove it sees each one at its new path, then unlock what this migration locked. */
+async function repairStep(journal: ProjectMigrationJournal, fault: MigrationFault, git?: WorktreeGit): Promise<void> {
   if (journal.worktrees.length === 0) return;
   const paths = journal.worktrees.map(worktree => worktree.to);
-  const repaired = await withWorktreeMutation(journal.repoRoot, git => git(journal.repoRoot, ['worktree', 'repair', '--', ...paths]));
+  const repaired = await git!(journal.repoRoot, ['worktree', 'repair', '--', ...paths]);
   if (!repaired.ok) throw new ProjectMigrationStepError('repair-worktrees', `git worktree repair failed: ${repaired.stderr.trim()}`);
-  const listed = new Set(((await gitOutput(journal.repoRoot, ['worktree', 'list', '--porcelain', '-z']))?.split('\0') ?? [])
-    .flatMap(entry => entry.startsWith('worktree ') ? [gitReportedPath(entry.slice('worktree '.length))] : []));
-  for (const path of paths) {
+  const { paths: listed, locks } = await worktreeListing(journal, git!);
+  for (const [index, path] of paths.entries()) {
     const real = realpathSync(path);
     const top = (await gitOutput(path, ['rev-parse', '--show-toplevel']))?.trim();
     if (!listed.has(path) && !listed.has(real) || !top || realpathSync(gitReportedPath(top)) !== real) {
       throw new ProjectMigrationStepError('repair-worktrees', `Git does not see the worktree ${path} after repair`);
     }
-    // Git writes both links in place without an fsync: make them durable before the mark.
+    if ((locks.get(path) ?? locks.get(real)) === migrationLockReason(journal)) {
+      const unlocked = await git!(journal.repoRoot, ['worktree', 'unlock', '--', path]);
+      if (!unlocked.ok) throw new ProjectMigrationStepError('repair-worktrees', `git worktree unlock ${path} failed: ${unlocked.stderr.trim()}`);
+    }
+    // Git writes the links and removes the lock without an fsync: make them durable before the mark.
     const link = join(path, '.git');
-    const admin = resolve(path, gitReportedPath(readFileSync(link, 'utf8').replace(/^gitdir: /, '').trim()));
+    const admin = adminDirectory(path);
     for (const file of [link, join(admin, 'gitdir')]) { durable.file(file); durable.directory(dirname(file)); }
+    fault(`repair-worktrees:item:${index}`);
   }
 }
 
@@ -131,10 +186,9 @@ async function receiptStep(journal: ProjectMigrationJournal, fault: MigrationFau
   for (const [file, fields] of byFile(rewrites)) {
     const text = await readOwnedWorkspaceRecord(file);
     const value: unknown = JSON.parse(text);
-    if (applyFields('receipts', file, value, fields)) {
-      await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
-      durable.directory(dirname(file));
-    }
+    if (applyFields('receipts', file, value, fields)) await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
+    // Also for a file rewritten before a crash: its directory entry may not be durable yet.
+    durable.directory(dirname(file));
     fault(`receipts:item:${index++}`);
   }
 }
@@ -191,11 +245,16 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
       if (applyFields('run-files', file, value, json)) next = serializeLike(text, value);
     }
     if (next !== text) replaceKeepingMode(file, next);
+    else durable.directory(dirname(file));
     fault(`run-files:item:${index++}`);
   }
 }
 
-export const MIGRATION_STEP_RUNNERS: Record<ProjectMigrationStep, (journal: ProjectMigrationJournal, fault: MigrationFault) => Promise<void> | void> = {
+/** The steps that run inside one hold of the Git common directory's worktree mutation lock. */
+export const GIT_MIGRATION_STEPS: readonly ProjectMigrationStep[] = ['lock-worktrees', 'move', 'repair-worktrees'];
+
+export const MIGRATION_STEP_RUNNERS: Record<ProjectMigrationStep, (journal: ProjectMigrationJournal, fault: MigrationFault, git?: WorktreeGit) => Promise<void> | void> = {
+  'lock-worktrees': lockStep,
   move: moveStep,
   'repair-worktrees': repairStep,
   receipts: receiptStep,

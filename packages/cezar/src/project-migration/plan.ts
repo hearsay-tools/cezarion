@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, type Dirent } from 'node:fs';
+import { copyFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
 import nodePath, { posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -192,6 +192,14 @@ function realDirectory(path: string): boolean {
  * directory (a symlink, a file); undefined when there is none. A move never passes through one,
  * so no rename can land outside the project.
  */
+/** Why moving into the existing directory `target` from `source` would widen access, if it would. */
+function broaderMode(target: string, source: string): string | undefined {
+  const wanted = statSync(source).mode & 0o777;
+  const found = statSync(target).mode & 0o777;
+  return (found & ~wanted) === 0 ? undefined
+    : `${target} has mode ${found.toString(8)}, broader than ${wanted.toString(8)} of ${source}; run chmod ${wanted.toString(8)} on it or remove it`;
+}
+
 export function redirectedComponent(base: string, path: string): string | undefined {
   if (!inside(path, base)) return path;
   let current = base;
@@ -232,6 +240,8 @@ class Planner {
       plan.blockers.push(`${plan.destination} exists and is not a directory`);
       return plan;
     }
+    const rootMode = pathPresent(plan.destination) ? broaderMode(plan.destination, plan.source) : undefined;
+    if (rootMode) plan.conflicts.push({ path: plan.destination, reason: rootMode });
     const tracked = await trackedPaths(this.root);
     if (!tracked) { plan.blockers.push(`Git cannot list the tracked files of ${this.root}`); return plan; }
     this.trackedFiles = tracked;
@@ -271,17 +281,24 @@ class Planner {
       if (kind === 'directory' && this.trackedDirectories.has(path)) {
         // Untracked items move into this directory: it must be a real one, or absent.
         if (pathPresent(target) && !realDirectory(target)) this.plan.conflicts.push({ path: target, reason: `${target} is not a directory; nothing may move through it` });
-        else this.walk(source, target, path, false);
+        else this.mergeInto(source, target, path);
         continue;
       }
       if (pathPresent(target)) {
         // Merge into an existing directory, item by item; a Git worktree is one unit.
-        if (kind === 'directory' && realDirectory(target) && !pathPresent(join(source, '.git'))) { this.walk(source, target, path, false); continue; }
+        if (kind === 'directory' && realDirectory(target) && !pathPresent(join(source, '.git'))) { this.mergeInto(source, target, path); continue; }
         this.plan.conflicts.push({ path: target, reason: `${source} would replace an existing path` });
         continue;
       }
       this.plan.moves.push({ from: source, to: target, kind });
     }
+  }
+
+  /** Move items into `target`, which exists or is created with the bits of `source`: never a broader one. */
+  private mergeInto(source: string, target: string, path: string): void {
+    const broader = pathPresent(target) ? broaderMode(target, source) : undefined;
+    if (broader) this.plan.conflicts.push({ path: target, reason: broader });
+    else this.walk(source, target, path, false);
   }
 
   private async worktreeRepairs(map: (path: string) => string | undefined): Promise<void> {

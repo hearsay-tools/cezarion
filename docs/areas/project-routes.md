@@ -155,22 +155,33 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
   conflict, and the move step checks every source and destination component again before
   each rename. Paths Git prints are read in the platform's form (`gitReportedPath`).
 - **Journal.** `.ai/squawk-migration.json` holds the whole plan and the steps done. Steps:
-  `move` (rename), `repair-worktrees` (`git worktree repair` under the worktree mutation
-  lock, then a check that Git lists each new path), `receipts` (`workspace.path` of each
-  receipt and `.cleanup.json` under `gitCommonDir(root)/cezar-owned-workspaces` that names
-  a moved worktree), `run-store` (one `RunDatabase.transaction` for every affected row:
-  record fields, the summary's `worktreePath` and the `worktree_path` column), `run-files`
-  (worker execution, autosave cleanup, worker results, artifact metadata and the seeded
-  `**Worktree:**` line of each handoff). Each item is applied only while it holds its old
-  value and skipped when it holds the new one, so a resume after a crash between an effect
-  and its mark changes nothing twice. A value that is neither stops the step; the journal
-  stays and admission stays blocked.
+  1. `lock-worktrees`: `git worktree lock` with the reason `cezar project migration <id>` on
+     each worktree the move carries; a lock the user set stays.
+  2. `move`: rename each item.
+  3. `repair-worktrees`: `git worktree repair`, a check that Git lists each new path, then
+     `git worktree unlock` of the worktrees this migration locked.
+  4. `receipts`: `workspace.path` of each receipt and `.cleanup.json` under
+     `gitCommonDir(root)/cezar-owned-workspaces` that names a moved worktree.
+  5. `run-store`: one `RunDatabase.transaction` for every affected row (record fields, the
+     summary's `worktreePath`, the `worktree_path` column).
+  6. `run-files`: worker execution, autosave cleanup, worker results, artifact metadata and
+     the seeded `**Worktree:**` line of each handoff.
+
+  Steps 1 to 3 run inside one hold of the common directory's worktree mutation lock. The
+  Git locks keep a `git worktree prune` from any checkout sharing the Git directory from
+  deleting a registration whose old path is gone, also after a crash between the move and
+  the repair. Each item is applied only while it holds its old value and skipped when it
+  holds the new one, so a resume after a crash between an effect and its mark changes
+  nothing twice. A value that is neither stops the step; the journal stays and admission
+  stays blocked.
 - **Durability order.** Within a step: each rename, creation or removal, then an fsync of
   its parent directory (`durable.directory`); each file Git or SQLite rewrote (the worktree
   `.git` link and admin `gitdir`, `runs.db` after the close's checkpoint) gets a file fsync.
-  Only then is the journal rewritten with the step done (temp file, fsync, rename, directory
+  An item a resume finds already applied still gets its fsyncs. Only then is the journal
+  rewritten with the step done (temp file, fsync, rename, directory
   fsync). New destination parents take the permission bits of their source counterparts
-  (private when none), so no move exposes private data. Git-tracked run state (`runs.db*`,
+  (private when none), and an existing destination directory broader than its source is a
+  conflict, so no move exposes private data. Git-tracked run state (`runs.db*`,
   `runs.json`, `runs/`) blocks the plan.
 - **After a migration** `.ai/cezar/` keeps only tracked files (until the user runs the
   printed `git mv`) and the `cockpit.lock*` claims. It holds no `runs.db`, so P4a's reads

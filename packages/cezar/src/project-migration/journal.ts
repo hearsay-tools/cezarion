@@ -13,7 +13,7 @@ import { durable, replaceDurably } from './durable.ts';
  * fence holder.
  */
 
-export const PROJECT_MIGRATION_STEPS = ['move', 'repair-worktrees', 'receipts', 'run-store', 'run-files'] as const;
+export const PROJECT_MIGRATION_STEPS = ['lock-worktrees', 'move', 'repair-worktrees', 'receipts', 'run-store', 'run-files'] as const;
 export type ProjectMigrationStep = typeof PROJECT_MIGRATION_STEPS[number];
 
 const absolute = z.string().min(1).refine(path => path.startsWith('/') || /^[a-z]:[\\/]/i.test(path), 'absolute path');

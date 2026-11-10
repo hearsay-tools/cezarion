@@ -4,9 +4,11 @@ import { join, resolve } from 'node:path';
 import { holdProjectWork, holdsProjectFence, migrationFencePaths, type ProjectMigrationFence } from '../server/cockpit-ownership.ts';
 import {
   PROJECT_MIGRATION_STEPS, readProjectMigrationJournal, removeProjectMigrationJournal, writeProjectMigrationJournal, type ProjectMigrationJournal,
+  type ProjectMigrationStep,
 } from './journal.ts';
 import { gitMvCommands, LEGACY_PROJECT_DIR, planProjectMigration, type ProjectMigrationPlan } from './plan.ts';
-import { MIGRATION_STEP_RUNNERS, type MigrationFault } from './steps.ts';
+import { GIT_MIGRATION_STEPS, MIGRATION_STEP_RUNNERS, type MigrationFault } from './steps.ts';
+import { withWorktreeMutation, type WorktreeGit } from '../git-worktree-lock.ts';
 
 /**
  * The project state migration engine (P4b2, hearsay-tools/cezarion#3088): it moves a project's
@@ -61,15 +63,21 @@ function assertHeldFence(dataDir: string, fence: ProjectMigrationFence): void {
 
 async function runJournal(path: string, start: ProjectMigrationJournal, resumed: boolean, fault: MigrationFault): Promise<ProjectMigrationResult> {
   let journal = start;
-  for (const step of PROJECT_MIGRATION_STEPS) {
-    if (journal.done.includes(step)) continue;
+  const run = async (step: ProjectMigrationStep, git?: WorktreeGit) => {
+    if (journal.done.includes(step)) return;
     fault(`${step}:before`);
-    await MIGRATION_STEP_RUNNERS[step](journal, fault);
+    await MIGRATION_STEP_RUNNERS[step](journal, fault, git);
     fault(`${step}:after`);
     journal = { ...journal, done: [...journal.done, step] };
     writeProjectMigrationJournal(path, journal);
     fault(`${step}:marked`);
+  };
+  // Worktree locks, moves and repairs in one hold of the common directory's mutation lock, so no
+  // cooperating process mutates worktree registrations in between; the Git locks cover a crash.
+  if (journal.worktrees.length > 0 && GIT_MIGRATION_STEPS.some(step => !journal.done.includes(step))) {
+    await withWorktreeMutation(journal.repoRoot, async git => { for (const step of GIT_MIGRATION_STEPS) await run(step, git); });
   }
+  for (const step of PROJECT_MIGRATION_STEPS) await run(step);
   removeProjectMigrationJournal(path);
   return { journal, resumed, gitMv: gitMvCommands(journal.repoRoot, journal.tracked) };
 }
