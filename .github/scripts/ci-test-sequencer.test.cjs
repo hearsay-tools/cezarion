@@ -96,7 +96,7 @@ test('invalid reserved work cannot silently corrupt shard assignment', async () 
   }
 });
 
-test('the actual LTS workflow command loads all unit projects and a sequencer constructor', async (t) => {
+test('the actual workflow command loads all unit projects and a sequencer constructor', async (t) => {
   const { createVitest, parseCLI } = await import('vitest/node');
   const root = join(__dirname, '..', '..');
   const workflow = parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8'));

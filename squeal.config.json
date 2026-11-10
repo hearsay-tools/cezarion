@@ -270,5 +270,8 @@
   "store": {
     "retentionDays": 7,
     "maxSizeMb": null
+  },
+  "shared": {
+    "ref": "refs/squeal"
   }
 }
