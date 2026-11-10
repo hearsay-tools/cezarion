@@ -1,7 +1,7 @@
 import { ProjectRunConnection } from './project-run-connection.ts';
 import { MERGE_WAIT_MIGRATION, RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
 export { RUN_DATABASE_READABLE_FROM, RUN_DATABASE_SCHEMA_VERSION } from './run-database-version.ts';
-import { validateChanges, toRunClaim, toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
+import { validateChanges, toRunClaim, toRunRow, toRunBindings, writeMetadata, readOnlyTarget } from './run-database-row.ts';
 import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
@@ -643,15 +643,15 @@ export class RunDatabase {
    * Return null before a readable schema exists; refuse newer schemas. WAL/SHM coordination may
    * need writes; do not bypass it with immutable mode.
    */
-  static openReadOnly(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION): RunDatabase | null {
+  static openReadOnly(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION, options: { quiescent?: boolean } = {}): RunDatabase | null {
     if (!existsSync(path)) return null;
     let db: DatabaseSync | undefined;
     try {
       assertDatabaseHeader(path);
-      db = new DatabaseSync(path, { readOnly: true });
+      db = new DatabaseSync(readOnlyTarget(path, options.quiescent === true), { readOnly: true });
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
       const found = readSchemaVersion(db);
-      if (found > supported) throw new RunDatabaseUnsupportedSchemaError(found, supported);
+      if (found > supported || (options.quiescent && found !== supported)) throw new RunDatabaseUnsupportedSchemaError(found, supported);
       if (found < RUN_DATABASE_READABLE_FROM) {
         db.close();
         return null;
