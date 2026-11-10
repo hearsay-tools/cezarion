@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { readArtifact, artifactDirectory } from '../artifacts/store.ts';
@@ -14,8 +14,8 @@ import { CockpitOwnership, ProjectMigrationFencedError, projectAdmissionRefusal,
 import { fenceProjectContext, ProjectContexts } from '../server/project-context.ts';
 import { SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { migrateProject, ProjectMigrationRefusedError, resumeProjectMigration } from './engine.ts';
-import { durable } from './durable.ts';
-import { readProjectMigrationJournal } from './journal.ts';
+import { directoriesDown, durable } from './durable.ts';
+import { readProjectMigrationJournal, type ProjectMigrationJournal } from './journal.ts';
 import { ProjectMigrationStepError } from './steps.ts';
 import { describeProjectMigrationPlan, NOT_REWRITTEN, planProjectMigration } from './plan.ts';
 import {
@@ -63,6 +63,51 @@ async function migrate(project: MigrationProject, fault?: (point: string) => voi
  *  later claim reclaim it. */
 class Crash extends Error {}
 const crashAt = (point: string) => (at: string) => { if (at === point) throw new Crash(point); };
+
+/** The durability invariant (durable.ts) checked on a recorded run: every fault point is an action
+ *  that depends on the effects before it, so the syncs each effect needs must appear after the
+ *  previous fault point and before it. A resumed run is checked the same way: items it finds
+ *  applied still need their syncs. */
+function assertDurableOrder(events: readonly string[], journal: ProjectMigrationJournal, label: string): void {
+  const root = dirname(journal.destination);
+  const chain = (path: string) => directoriesDown(root, path).map(directory => `dir:${directory}`);
+  const admin = (worktree: string) => resolve(worktree, readFileSync(join(worktree, '.git'), 'utf8').replace(/^gitdir: /, '').trim());
+  const files = (kinds: readonly string[]) => [...new Set(journal.rewrites.flatMap(rewrite => 'file' in rewrite && kinds.includes(rewrite.kind) ? [rewrite.file] : []))];
+  const receipts = files(['receipt', 'cleanup-checkpoint']);
+  const evidence = files(['worker-execution', 'autosave-cleanup', 'worker-result', 'artifact-metadata', 'handoff']);
+  const required = (point: string): string[] => {
+    const [step, kind, at] = point.split(':');
+    const index = Number(at);
+    if (step === 'move' && kind === 'item') return [...chain(dirname(journal.moves[index]!.to)), ...chain(dirname(journal.moves[index]!.from))];
+    if (step === 'lock-worktrees' && kind === 'item') return [`dir:${admin(journal.worktrees[index]!.to)}`];
+    if (step === 'repair-worktrees' && kind === 'unlock') {
+      const worktree = journal.worktrees[index]!.to;
+      return [`file:${join(worktree, '.git')}`, `dir:${worktree}`, `file:${join(admin(worktree), 'gitdir')}`, `dir:${admin(worktree)}`];
+    }
+    if (step === 'repair-worktrees' && kind === 'item') return [`dir:${admin(journal.worktrees[index]!.to)}`];
+    if (step === 'receipts' && kind === 'item') return [`file:${receipts[index]!}`, `dir:${dirname(receipts[index]!)}`];
+    if (step === 'run-files' && kind === 'item') return [`file:${evidence[index]!}`, ...chain(dirname(evidence[index]!))];
+    if (point === 'run-store:after' && journal.rewrites.some(rewrite => rewrite.kind === 'run-row')) return [`file:${join(journal.destination, RUNS_DB_FILE)}`, ...chain(journal.destination)];
+    if (kind === 'marked' || point === 'journal:written') return [`file:${join(root, 'squawk-migration.json')}`, `dir:${root}`];
+    return [];
+  };
+  let window: string[] = [];
+  for (const event of events) {
+    if (event.startsWith('dir:') || event.startsWith('file:')) { window.push(event); continue; }
+    for (const sync of required(event)) expect(window, `${label}: ${event} needs ${sync}`).toContain(sync);
+    window = [];
+  }
+  expect(window, `${label}: the journal removal`).toContain(`dir:${root}`);
+}
+
+/** Run `work` recording each durable call and each fault point, in order. */
+async function recording(work: (fault: (point: string) => void) => Promise<unknown>): Promise<string[]> {
+  const events: string[] = [];
+  const directory = vi.spyOn(durable, 'directory').mockImplementation((path) => { events.push(`dir:${path}`); });
+  const file = vi.spyOn(durable, 'file').mockImplementation((path) => { events.push(`file:${path}`); });
+  try { await work(point => { events.push(point); }); } finally { directory.mockRestore(); file.mockRestore(); }
+  return events;
+}
 
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
@@ -171,7 +216,7 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
     expect(plan.blockers).toEqual([]);
     expect(plan.conflicts).toEqual([]);
     expect(plan.moves.map(move => relative(project.root, move.from)).sort()).toEqual(['.ai/cezar/.gitignore', '.ai/cezar/runs', '.ai/cezar/runs.db',
-      '.ai/cezar/workflows/local.yaml', '.ai/cezar/worktrees'].sort());
+      '.ai/cezar/skills/review/local.txt', '.ai/cezar/workflows/local.yaml', '.ai/cezar/worktrees'].sort());
     expect(plan.worktrees.map(item => item.to).sort()).toEqual([project.taskPath, project.worker.path, project.checkpointed.path].map(path => moved(project, path)).sort());
     expect([...new Set(plan.rewrites.map(rewrite => rewrite.kind))].sort()).toEqual(['artifact-metadata', 'autosave-cleanup', 'cleanup-checkpoint',
       'handoff', 'receipt', 'run-row', 'worker-execution', 'worker-result']);
@@ -211,7 +256,8 @@ describe('crash recovery', { timeout: TIMEOUT }, () => {
     for (const step of ['move', 'repair-worktrees', 'receipts', 'run-store', 'run-files']) {
       expect(points).toEqual(expect.arrayContaining([`${step}:before`, `${step}:after`, `${step}:marked`]));
     }
-    expect(points).toEqual(expect.arrayContaining(['journal:before', 'journal:written', 'move:item:0', 'receipts:item:0', 'run-store:commit', 'run-files:item:0']));
+    expect(points).toEqual(expect.arrayContaining(['journal:before', 'journal:written', 'lock-worktrees:item:0', 'move:prepared:0', 'move:renamed:0', 'move:item:0',
+      'repair-worktrees:unlock:0', 'repair-worktrees:item:0', 'receipts:item:0', 'run-store:commit', 'run-files:item:0']));
   });
 
   it('completes the same result with no duplicate rewrite after a crash at any fault point', async () => {
@@ -245,6 +291,26 @@ describe('crash recovery', { timeout: TIMEOUT }, () => {
       try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery }); } finally { recovery.release(); }
       expect(projectSnapshot(project), point).toEqual(reference);
       expect(git(project.root, 'worktree', 'list', '--porcelain')).not.toMatch(/^locked/m);
+    }
+  });
+
+  it('settles every effect before each action that depends on it, on the first run and on a resume from every fault point', async () => {
+    project.restore();
+    let journal: ProjectMigrationJournal | undefined;
+    const first = await recording(async fault => { journal = (await migrate(project, fault)).journal; });
+    assertDurableOrder(first, journal!, 'first run');
+    for (const point of points) {
+      project.restore();
+      const crashed = await fence(project);
+      await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt(point) }), point).rejects.toThrow(point);
+      crashed.release();
+      const saved = readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'));
+      if (!saved) continue;
+      const recovery = await fence(project);
+      try {
+        const resumed = await recording(fault => resumeProjectMigration({ repoRoot: project.root, fence: recovery, fault }));
+        assertDurableOrder(resumed, saved, `resume after ${point}`);
+      } finally { recovery.release(); }
     }
   });
 
@@ -330,33 +396,6 @@ describe('the holder', { timeout: TIMEOUT }, () => {
     expect(mode(join(project.newDir, 'runs'))).toBe(0o700);
   });
 
-  it('makes every rename, creation and rewritten link durable before the step that made it is marked done', async () => {
-    project.restore();
-    const events: string[] = [];
-    const directory = vi.spyOn(durable, 'directory').mockImplementation((path) => { events.push(`dir:${path}`); });
-    const file = vi.spyOn(durable, 'file').mockImplementation((path) => { events.push(`file:${path}`); });
-    let result;
-    try { result = await migrate(project, point => { events.push(point); }); }
-    finally { directory.mockRestore(); file.mockRestore(); }
-    const { journal } = result;
-    const ai = join(project.root, '.ai');
-    const before = (point: string) => events.slice(0, events.indexOf(point));
-    for (const [index, move] of journal.moves.entries()) {
-      expect(before(`move:item:${index}`).slice(-2)).toEqual([`dir:${dirname(move.to)}`, `dir:${dirname(move.from)}`]);
-    }
-    for (const worktree of journal.worktrees) expect(before('repair-worktrees:after')).toContain(`file:${join(worktree.to, '.git')}`);
-    const receipts = journal.rewrites.filter(rewrite => rewrite.kind === 'receipt' || rewrite.kind === 'cleanup-checkpoint');
-    // One rewrite per receipt file, so each file is one item.
-    for (const index of receipts.keys()) expect(before(`receipts:item:${index}`).at(-1)).toMatch(/^dir:.*cezar-owned-workspaces$/);
-    expect(before('run-store:after').slice(-2)).toEqual([`file:${join(project.newDir, RUNS_DB_FILE)}`, `dir:${project.newDir}`]);
-    for (const [index, point] of events.entries()) {
-      if (point.startsWith('run-files:item:')) expect(events[index - 1]).toMatch(/^dir:/);
-      // The journal's done mark, written between a step's effect and its marked point, is durable too.
-      if (point.endsWith(':marked')) expect(events.slice(events.lastIndexOf(point.replace(':marked', ':after'), index), index)).toContain(`dir:${ai}`);
-    }
-    expect(events.at(-1)).toBe(`dir:${ai}`);
-  });
-
   it('keeps a lock the user set, and unlocks only the worktrees the migration locked', async () => {
     project.restore();
     git(project.root, 'worktree', 'lock', '--reason', 'mine, keep it', project.taskPath);
@@ -365,27 +404,6 @@ describe('the holder', { timeout: TIMEOUT }, () => {
     expect(listed).toContain(`worktree ${moved(project, project.taskPath)}\nHEAD`);
     expect(listed.match(/^locked.*$/gm)).toEqual(['locked mine, keep it']);
     expect(listed.split('\n\n').find(record => record.startsWith(`worktree ${moved(project, project.taskPath)}\n`))).toContain('locked mine, keep it');
-  });
-
-  it('makes items applied before a crash durable on resume, before the step is marked', async () => {
-    const receiptDir = () => join(git(project.root, 'rev-parse', '--path-format=absolute', '--git-common-dir'), 'cezar-owned-workspaces');
-    for (const step of ['move', 'receipts', 'run-files']) {
-      project.restore();
-      const crashed = await fence(project);
-      await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt(`${step}:after`) })).rejects.toThrow(Crash);
-      crashed.release();
-      const journal = readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))!;
-      const events: string[] = [];
-      const directory = vi.spyOn(durable, 'directory').mockImplementation((path) => { events.push(`dir:${path}`); });
-      const recovery = await fence(project);
-      try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery, fault: point => { events.push(point); } }); }
-      finally { recovery.release(); directory.mockRestore(); }
-      const before = events.slice(events.indexOf(`${step}:before`), events.indexOf(`${step}:after`));
-      const expected = step === 'move' ? journal.moves.flatMap(move => [dirname(move.to), dirname(move.from)])
-        : step === 'receipts' ? [receiptDir()]
-          : journal.rewrites.flatMap(rewrite => 'file' in rewrite && !['receipt', 'cleanup-checkpoint'].includes(rewrite.kind) ? [dirname(rewrite.file)] : []);
-      for (const path of expected) expect(before, `${step} ${path}`).toContain(`dir:${path}`);
-    }
   });
 
   it('runs in an owning cockpit after its drain: the context is disposed first, then rebuilt on the moved state', async () => {

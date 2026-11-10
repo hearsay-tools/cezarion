@@ -1,7 +1,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
-import { durable, replaceDurably } from './durable.ts';
+import { replaceAtomically, settle } from './durable.ts';
 
 /**
  * The project migration journal, `<root>/.ai/squawk-migration.json` (P4b1's
@@ -63,13 +63,14 @@ export function readProjectMigrationJournal(path: string): ProjectMigrationJourn
   return projectMigrationJournalSchema.parse(JSON.parse(text));
 }
 
-/** Durable, atomic, private replacement (temp file, fsync, rename, directory fsync). */
+/** Durable, atomic, private replacement, settled before the caller goes on. */
 export function writeProjectMigrationJournal(path: string, journal: ProjectMigrationJournal): void {
-  replaceDurably(path, `${JSON.stringify(projectMigrationJournalSchema.parse(journal), null, 2)}\n`, 0o600);
+  replaceAtomically(path, `${JSON.stringify(projectMigrationJournalSchema.parse(journal), null, 2)}\n`, 0o600);
+  settle(dirname(path), path, { data: true });
 }
 
 /** The last step: the project is admitted again once this file is gone. */
 export function removeProjectMigrationJournal(path: string): void {
   rmSync(path, { force: true });
-  durable.directory(dirname(path));
+  settle(dirname(path), path);
 }

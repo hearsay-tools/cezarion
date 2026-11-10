@@ -174,15 +174,20 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
   holds the new one, so a resume after a crash between an effect and its mark changes
   nothing twice. A value that is neither stops the step; the journal stays and admission
   stays blocked.
-- **Durability order.** Within a step: each rename, creation or removal, then an fsync of
-  its parent directory (`durable.directory`); each file Git or SQLite rewrote (the worktree
-  `.git` link and admin `gitdir`, `runs.db` after the close's checkpoint) gets a file fsync.
-  An item a resume finds already applied still gets its fsyncs. Only then is the journal
-  rewritten with the step done (temp file, fsync, rename, directory
-  fsync). New destination parents take the permission bits of their source counterparts
-  (private when none), and an existing destination directory broader than its source is a
-  conflict, so no move exposes private data. Git-tracked run state (`runs.db*`,
-  `runs.json`, `runs/`) blocks the plan.
+- **Durability invariant.** One rule, enforced by `settle` in `project-migration/durable.ts`
+  and stated there: (a) after every effect on an entry (created, renamed in or out,
+  rewritten or removed, by the engine or by Git or SQLite for it), the entry's data when it
+  is a written file, then every directory from its root (`.ai`, the Git admin directory, the
+  receipt directory, the worktree) down to its parent are fsynced, on the first run and on
+  every resume, whether the effect happened now or before a crash; (b) each step settles an
+  effect right after it and before anything that depends on it: the next item, a worktree
+  unlock (the repaired links settle first), the step's done mark, the journal's removal.
+  The journal itself is written and removed the same way. One ordering test walks every
+  fault point, on the first run and on a resume from each, and checks (a) and (b).
+- **Permissions and tracked state.** New destination parents take the permission bits of
+  their source counterparts (private when none), and an existing destination directory
+  broader than its source is a conflict, so no move exposes private data. Git-tracked run
+  state (`runs.db*`, `runs.json`, `runs/`) blocks the plan.
 - **After a migration** `.ai/cezar/` keeps only tracked files (until the user runs the
   printed `git mv`) and the `cockpit.lock*` claims. It holds no `runs.db`, so P4a's reads
   find every run, artifact and handoff under `.ai/squawk/`; opening the store creates no

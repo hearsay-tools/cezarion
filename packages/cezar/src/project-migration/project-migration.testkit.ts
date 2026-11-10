@@ -80,6 +80,8 @@ export async function buildMigrationProject(options: { linked: boolean; checkpoi
   git(root, 'add', '-f', '.ai/cezar');
   git(root, 'commit', '-qm', 'project inputs');
   writeFileSync(join(dataDir, 'workflows/local.yaml'), 'name: local, untracked\n');
+  // Untracked beside a tracked skill: its move creates .ai/squawk/skills/review and its parent.
+  writeFileSync(join(dataDir, 'skills/review/local.txt'), 'untracked note\n');
   ensureDataGitignore(root);
   const sha = git(root, 'rev-parse', 'HEAD');
 

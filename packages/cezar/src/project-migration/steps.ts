@@ -4,7 +4,7 @@ import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delega
 import type { WorktreeGit } from '../git-worktree-lock.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
-import { durable, replaceDurably } from './durable.ts';
+import { replaceAtomically, settle } from './durable.ts';
 import type { PathRewrite, ProjectMigrationJournal, ProjectMigrationStep } from './journal.ts';
 import { gitOutput, gitReportedPath, redirectedComponent, rewriteHandoffWorktreeLine, trackedPaths, valueAt } from './plan.ts';
 
@@ -47,15 +47,15 @@ function serializeLike(original: string, value: unknown): string {
   return JSON.stringify(value, null, indent) + (original.endsWith('\n') ? '\n' : '');
 }
 
-/** Atomic replacement that keeps the file's permission bits. */
+/** Atomic replacement that keeps the file's permission bits; the caller settles it. */
 function replaceKeepingMode(path: string, content: string): void {
-  replaceDurably(path, content, statSync(path).mode & 0o777);
+  replaceAtomically(path, content, statSync(path).mode & 0o777);
 }
 
 /**
  * Create the missing directories from `root` down to `path`, each with the permission bits of its
  * counterpart under `sourceRoot` (private when it has none), so a move never exposes private data
- * through a new parent; each creation is made durable in its parent.
+ * through a new parent. The move that follows settles them.
  */
 function createDirectories(root: string, sourceRoot: string, path: string): void {
   const parts = path === root ? [] : path.slice(root.length + 1).split(sep);
@@ -67,7 +67,6 @@ function createDirectories(root: string, sourceRoot: string, path: string): void
     const mode = pathPresent(counterpart) ? statSync(counterpart).mode & 0o777 : 0o700;
     mkdirSync(current, { mode });
     chmodSync(current, mode);
-    durable.directory(dirname(current));
   }
 }
 
@@ -86,6 +85,7 @@ async function moveStep(journal: ProjectMigrationJournal, fault: MigrationFault)
     const item = relative(journal.repoRoot, move.from).split(sep).join(posix.sep);
     if ([...tracked].some(path => path === item || path.startsWith(`${item}/`))) throw new ProjectMigrationStepError('move', `${move.from} now holds a tracked file`);
   }
+  const root = dirname(journal.destination);
   for (const [index, move] of journal.moves.entries()) {
     const from = pathPresent(move.from);
     const to = pathPresent(move.to);
@@ -93,18 +93,16 @@ async function moveStep(journal: ProjectMigrationJournal, fault: MigrationFault)
     if (!from && !to) throw new ProjectMigrationStepError('move', `${move.from} and ${move.to} are both missing`);
     if (from) {
       // Checked again here: a symlink placed after planning must not redirect the rename.
-      const redirected = redirectedComponent(dirname(journal.destination), dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
+      const redirected = redirectedComponent(root, dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
       if (redirected) throw new ProjectMigrationStepError('move', `${redirected} is not a directory of this project`);
       createDirectories(journal.destination, journal.source, dirname(move.to));
+      fault(`move:prepared:${index}`);
       renameSync(move.from, move.to);
-    } else {
-      // Moved before a crash: the directories created for it may not be durable in their parents yet.
-      for (let directory = dirname(move.to); directory === journal.destination || directory.startsWith(journal.destination + sep); directory = dirname(directory)) {
-        durable.directory(dirname(directory));
-      }
+      fault(`move:renamed:${index}`);
     }
-    durable.directory(dirname(move.to));
-    durable.directory(dirname(move.from));
+    // Moved now or before a crash: both sides, with every directory created for it, become durable.
+    settle(root, move.to);
+    settle(root, move.from);
     fault(`move:item:${index}`);
   }
 }
@@ -148,8 +146,7 @@ async function lockStep(journal: ProjectMigrationJournal, fault: MigrationFault,
       if (!locked.ok) throw new ProjectMigrationStepError('lock-worktrees', `git worktree lock ${path} failed: ${locked.stderr.trim()}`);
     }
     const admin = adminDirectory(path);
-    if (pathPresent(join(admin, 'locked'))) durable.file(join(admin, 'locked'));
-    durable.directory(admin);
+    settle(admin, join(admin, 'locked'), { data: true });
     fault(`lock-worktrees:item:${index}`);
   }
 }
@@ -167,14 +164,16 @@ async function repairStep(journal: ProjectMigrationJournal, fault: MigrationFaul
     if (!listed.has(path) && !listed.has(real) || !top || realpathSync(gitReportedPath(top)) !== real) {
       throw new ProjectMigrationStepError('repair-worktrees', `Git does not see the worktree ${path} after repair`);
     }
+    // Git writes the links without an fsync; the unlock depends on them, so they settle first.
+    const admin = adminDirectory(path);
+    settle(path, join(path, '.git'), { data: true });
+    settle(admin, join(admin, 'gitdir'), { data: true });
     if ((locks.get(path) ?? locks.get(real)) === migrationLockReason(journal)) {
+      fault(`repair-worktrees:unlock:${index}`);
       const unlocked = await git!(journal.repoRoot, ['worktree', 'unlock', '--', path]);
       if (!unlocked.ok) throw new ProjectMigrationStepError('repair-worktrees', `git worktree unlock ${path} failed: ${unlocked.stderr.trim()}`);
     }
-    // Git writes the links and removes the lock without an fsync: make them durable before the mark.
-    const link = join(path, '.git');
-    const admin = adminDirectory(path);
-    for (const file of [link, join(admin, 'gitdir')]) { durable.file(file); durable.directory(dirname(file)); }
+    settle(admin, join(admin, 'locked'));
     fault(`repair-worktrees:item:${index}`);
   }
 }
@@ -187,8 +186,7 @@ async function receiptStep(journal: ProjectMigrationJournal, fault: MigrationFau
     const text = await readOwnedWorkspaceRecord(file);
     const value: unknown = JSON.parse(text);
     if (applyFields('receipts', file, value, fields)) await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
-    // Also for a file rewritten before a crash: its directory entry may not be durable yet.
-    durable.directory(dirname(file));
+    settle(dirname(file), file, { data: true });
     fault(`receipts:item:${index++}`);
   }
 }
@@ -224,9 +222,8 @@ function runStoreStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
     }
     if (upserts.length > 0) db.transaction({ upserts, deletes: [], beforeCommit: () => { fault('run-store:commit'); } });
   } finally { db.close(); }
-  // The last connection's close checkpoints the WAL into the database; make that durable before the mark.
-  durable.file(path);
-  durable.directory(journal.destination);
+  // The last connection's close checkpoints the WAL into the database and removes the WAL file.
+  settle(dirname(journal.destination), path, { data: true });
 }
 
 /** File-backed evidence SQLite cannot transact: each file is replaced atomically on its own. */
@@ -245,7 +242,7 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
       if (applyFields('run-files', file, value, json)) next = serializeLike(text, value);
     }
     if (next !== text) replaceKeepingMode(file, next);
-    else durable.directory(dirname(file));
+    settle(dirname(journal.destination), file, { data: true });
     fault(`run-files:item:${index++}`);
   }
 }
