@@ -339,6 +339,31 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       expect(existsSync(join(pathOf(untracked), 'notes.md'))).toBe(true);
     });
 
+    it('releases the reclaim claim before counting uncommitted files for the refusal', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const path = store.getRun(id)!.worktreePath!;
+      writeFileSync(join(path, 'before-release.txt'), 'uncommitted work\n');
+      const claim = manager.claimWorktreeReclaim.bind(manager);
+      const released = vi.fn();
+      vi.spyOn(manager, 'claimWorktreeReclaim').mockImplementation((runId) => {
+        const release = claim(runId);
+        if (!release) return release;
+        return () => {
+          release();
+          writeFileSync(join(path, 'after-release.txt'), 'written after release\n');
+          released();
+        };
+      });
+
+      const res = await reclaimOne(id);
+      expect(res.status).toBe(409);
+      expect(released).toHaveBeenCalledOnce();
+      expect(await res.json()).toEqual({
+        error: 'the worktree has 2 uncommitted files that exist nowhere else — commit or discard them first',
+      });
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+    });
+
     it('refuses a checkout whose HEAD is a commit no branch keeps', async () => {
       const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
       const path = store.getRun(id)!.worktreePath!;
@@ -400,6 +425,28 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       // from runs.db once its write settled (the key absent) — #779.
       store.flush();
       expect(store.getRun(id)).toMatchObject({ branch, pullRequestUrl: expect.any(String) });
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+    });
+
+    it('claims a reclaimed checkout for publishing before restoring its directory', async () => {
+      const id = store.createRun({ title: 'reclaimed', workflow: 'w', task: 't', steps: [] }).id;
+      const wt = await createWorktree(repoRoot, id, 'main');
+      setRunStatus(store, id, RUN_STATUS.done, {
+        finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch, baseBranch: 'main',
+      });
+      expect((await reclaimOne(id)).status).toBe(200);
+      expect(existsSync(wt.path)).toBe(false);
+      const claim = manager.claimForPublish.bind(manager);
+      const directoryAtClaim: boolean[] = [];
+      vi.spyOn(manager, 'claimForPublish').mockImplementation((runId) => {
+        directoryAtClaim.push(existsSync(wt.path));
+        return claim(runId);
+      });
+
+      const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
+      expect(res.status).toBe(201);
+      expect(directoryAtClaim).toEqual([false]);
+      expect(existsSync(wt.path)).toBe(true);
       expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
     });
 
