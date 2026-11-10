@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { projectMigrationErrorSchema, projectMigrationResponseSchema } from '@open-mercato/cezar-contract/project-migration';
 import { createRunner } from '../core/runner-factory.ts';
@@ -23,7 +23,9 @@ import { fenceProjectContext, ProjectContexts } from '../server/project-context.
 import { createApp } from '../server/server.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { runMigrateProjectCommand, type MigrateProjectDeps } from './cli.ts';
-import { crashAt, moved, owners, TIMEOUT } from './engine.testkit.ts';
+import { crashAt, fence, moved, owners, TIMEOUT } from './engine.testkit.ts';
+import { migrateProject } from './engine.ts';
+import { runArtifactCommand } from '../artifacts/cli.ts';
 import { buildMigrationProject, projectSnapshot, removeMigrationProject, TASK, type MigrationProject } from './project-migration.testkit.ts';
 
 /**
@@ -179,6 +181,28 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
     expect(retried.out.endsWith('Migration complete. Run the git mv commands above and commit them.')).toBe(true);
     expectReleased();
     expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));
+  });
+
+  it('refuses an artifact publish whose task context names a directory the recovered migration moved', async () => {
+    // A real journal: the migration stopped before its first move, so recovery moves runs/.
+    const held = await fence(project);
+    await expect(migrateProject({ repoRoot: project.root, fence: held, fault: crashAt('move:before') })).rejects.toThrow('move:before');
+    held.release();
+    const artifactsDir = join(project.dataDir, 'runs', `${TASK}-artifacts`);
+    const report = join(project.taskPath, 'report.html');
+    const errors: string[] = [];
+    const error = vi.spyOn(console, 'error').mockImplementation((line: string) => { errors.push(line); });
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        // The first publish recovers the journal; the second meets the finished migration.
+        const code = await runArtifactCommand(['publish', moved(project, report)], { CEZ_ARTIFACTS_DIR: artifactsDir, CEZ_TASK_ID: TASK });
+        expect(code).toBe(1);
+        expect(JSON.parse(errors.at(-1)!).error).toBe(`The task context is out of date: a project migration moved ${artifactsDir} to ${moved(project, artifactsDir)}. `
+          + 'Nothing was published. Continue the task from the cockpit so it gets its new paths');
+        expect(existsSync(join(project.dataDir, 'runs'))).toBe(false);
+      }
+    } finally { error.mockRestore(); }
+    expect(existsSync(migrationFencePaths(project.dataDir)!.journal)).toBe(false);
   });
 
   it('refuses at once while another process owns the project or holds its fence', async () => {

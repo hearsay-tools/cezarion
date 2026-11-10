@@ -51,6 +51,24 @@ export function fallbackProjectWriteError(path: string): string | undefined {
     ? `Cannot write read-only project data in ${path}. Use the binary that migrated the project.` : undefined;
 }
 
+/**
+ * Where a project migration moved `path`, a path under `<root>/.ai/cezar/`: the first component
+ * that is gone from the old directory and present under `.ai/squawk/` marks the move. Undefined
+ * when nothing moved it. A CLI write to a path it was handed before the migration (a task's
+ * `CEZ_ARTIFACTS_DIR`) checks this first, so it never recreates a moved directory.
+ */
+export function movedProjectPath(path: string): string | undefined {
+  const parts = resolve(path).split(/[\\/]/);
+  const at = parts.lastIndexOf('cezar');
+  if (at < 1 || parts[at - 1] !== '.ai') return undefined;
+  for (let end = at + 1; end < parts.length; end++) {
+    const old = parts.slice(0, end + 1).join('/'), moved = [...parts.slice(0, at), 'squawk', ...parts.slice(at + 1, end + 1)].join('/');
+    if (pathPresent(old)) continue;
+    return pathPresent(moved) ? [...parts.slice(0, at), 'squawk', ...parts.slice(at + 1)].join('/') : undefined;
+  }
+  return undefined;
+}
+
 const noticedProjects = new Set<string>();
 /** Internal release seam; dual reads themselves do not depend on this flag. */
 export function noticeLegacyProject(repoRoot: string, options: { releaseEnabled?: boolean; warn?: (message: string) => void } = {}): void {

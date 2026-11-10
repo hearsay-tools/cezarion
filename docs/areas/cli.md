@@ -39,7 +39,10 @@ cockpit, whose project routes refuse. `backup`, the managed install commands and
 Before that check, `serve`, `run`, `init`, the single-project `projects` listing,
 `artifact publish` and `versions` finish an unfinished migration journal
 ([early recovery](project-routes.md#project-migration-command-and-early-recovery)); a
-journal that cannot finish ends the command with its cause, exit 1.
+journal that cannot finish ends the command with its cause, exit 1. No CLI write targets a
+path the migration moved: `artifact publish` refuses (exit 1, nothing written, never
+recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff file moved to
+`.ai/squawk/` (`movedProjectPath`); the task gets its new paths when it continues.
 
 ## Staged `migrate-project`
 

@@ -242,7 +242,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine.
   maintenance store lease), the cold workspace
   runs index and search (`projectRunSources`; a failure leaves the project out with a
   warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
-  module loaded only when a journal exists), `artifact publish`, `versions` checkout discovery
+  module loaded only when a journal exists), `artifact publish` (which then refuses a task context
+that names a moved path), `versions` checkout discovery
   (which lists the worktrees again after a recovery moved them), and `migrate-project` itself (CLI and route; `migrateProject` also resumes first). Other
   readers skip a refused project, as before.
 
