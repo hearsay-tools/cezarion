@@ -7,44 +7,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { projectMigrationErrorSchema, projectMigrationResponseSchema } from '@open-mercato/cezar-contract/project-migration';
-import { createRunner } from '../core/runner-factory.ts';
+import { runArtifactCommand } from '../artifacts/cli.ts';
 import { removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { Home } from '../home/home.ts';
+import { holdCockpitLease } from '../home/leases.ts';
 import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
-import {
-  CockpitOwnership, migrationFencePaths, projectAdmissionRefusal, ProjectMigrationFencedError,
-} from '../server/cockpit-ownership.ts';
-import { apiRequest } from '../server/loopback-request.testkit.ts';
-import { fenceProjectContext, ProjectContexts } from '../server/project-context.ts';
-import { createApp } from '../server/server.ts';
+import { CockpitOwnership, migrationFencePaths, projectAdmissionRefusal, ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { runMigrateProjectCommand, type MigrateProjectDeps } from './cli.ts';
 import { crashAt, fence, moved, owners, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject } from './engine.ts';
-import { runArtifactCommand } from '../artifacts/cli.ts';
 import { buildMigrationProject, projectSnapshot, removeMigrationProject, TASK, type MigrationProject } from './project-migration.testkit.ts';
 
 /**
- * `migrate-project` behind its P5 gate (hearsay-tools/cezarion#3089), through the gate's test
- * seams, on a real project: the dry run, an ownerless CLI that locks the project, the owning
- * cockpit that migrates on request, live tasks that refuse, an interrupted migration and its retry.
+ * The offline `migrate-project` (hearsay-tools/cezarion#3089) on a real project: the dry run, the
+ * exclusive lock for the whole move, refusals while a cockpit serves the project or a task is live,
+ * an interrupted migration and its retry, and a task context the migration made stale.
  */
 
 async function checkpoint(root: string, workspace: WorkerWorkspace): Promise<void> {
   await removeOwnedWorkspace(root, workspace, undefined, async () => { throw new Error('stopped after the checkpoint'); }).catch(() => undefined);
 }
 
-const none = { liveTasks: () => [], inFlight: () => 0 };
+const none = { liveTasks: () => [] };
 const temporary: string[] = [];
-const disposers: Array<() => void> = [];
 const savedHome = process.env.CEZ_HOME;
 const savedDryRun = process.env.CEZ_DRY_RUN;
 
-describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
+describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
   let project: MigrationProject;
   beforeAll(async () => { project = await buildMigrationProject({ linked: false, checkpoint }); }, TIMEOUT);
   afterAll(() => { if (project) removeMigrationProject(project); });
@@ -57,7 +50,6 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
     clearProjectProbeCache();
   });
   afterEach(() => {
-    for (const dispose of disposers.splice(0)) dispose();
     for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
     useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
@@ -66,8 +58,8 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
 
   async function cli(args: string[], deps: Partial<MigrateProjectDeps> = {}) {
     const out: string[] = [], err: string[] = [];
-    const code = await runMigrateProjectCommand([...args, '--repo', project.root], {}, {
-      fetch, owner: () => undefined, getRepoInfo: async () => { return { root: project.root } as never; }, cwd: () => project.root,
+    const code = await runMigrateProjectCommand([...args, '--repo', project.root], {
+      homes: [testHome()], getRepoInfo: async () => { return { root: project.root } as never; }, cwd: () => project.root,
       log: line => out.push(line), error: line => err.push(line), ...deps,
     });
     return { code, out: out.join('\n'), err: err.join('\n') };
@@ -108,36 +100,6 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
     expect(code).toBe(0);
     expect(claims).toEqual([expect.objectContaining({ pid: process.pid })]);
     expectReleased();
-  });
-
-  it('asks a cockpit that takes the project during the claim instead of planning locally', async () => {
-    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
-    try {
-      const startToken = processStartToken(other.pid!);
-      const url = 'http://127.0.0.1:4999';
-      writeFileSync(join(project.dataDir, 'cockpit.lock'), JSON.stringify({ pid: other.pid, token: randomUUID(), url, ...(startToken ? { startToken } : {}) }));
-      let checks = 0;
-      const asked: string[] = [];
-      const answer = await cli(['--dry-run'], {
-        // The first check ran before that cockpit's claim landed.
-        owner: () => { checks += 1; return checks === 1 ? undefined : { pid: other.pid!, url }; },
-        fetch: async (input, init) => {
-          asked.push(`${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`);
-          if (!init?.method) {
-            return Response.json({ projects: [{ id: 'p', name: 'p', root: project.root, addedAt: '2026-11-10T00:00:00.000Z', lastOpenedAt: '2026-11-10T00:00:00.000Z', source: 'local', status: 'ok' }],
-              bootProject: 'boot', projectsDir: '/tmp' });
-          }
-          return Response.json({ dryRun: true, resumed: false, report: 'planned by the owner', gitMv: [] });
-        },
-      });
-      expect(answer).toMatchObject({ code: 0, out: 'planned by the owner\nDry run: nothing was moved or rewritten.' });
-      expect(asked).toEqual(['GET /api/v1/projects', 'POST /api/v1/projects/p/migration']);
-    } finally {
-      const exited = once(other, 'exit');
-      other.kill('SIGKILL');
-      await exited;
-      rmSync(join(project.dataDir, 'cockpit.lock'), { force: true });
-    }
   });
 
   it('locks an ownerless project for the whole migration, keeps competitors out, and leaves readable migrated tasks', async () => {
@@ -205,16 +167,18 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
     expect(existsSync(migrationFencePaths(project.dataDir)!.journal)).toBe(false);
   });
 
-  it('refuses at once while another process owns the project or holds its fence', async () => {
+  it('refuses at once, writing nothing, while another process owns the project or holds its fence', async () => {
     const before = projectSnapshot(project, { databaseBytes: true });
     const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
     try {
       const startToken = processStartToken(other.pid!);
       const claim = JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) });
       const cockpitLock = join(project.dataDir, 'cockpit.lock');
-      writeFileSync(cockpitLock, claim);
-      const starting = await cli([], { owner: (await import('../server/cockpit-ownership.ts')).anotherCockpitOwner });
-      expect(starting).toMatchObject({ code: 1, err: `A cockpit (pid ${other.pid}) owns ${project.root} and is still starting; retry shortly` });
+      writeFileSync(cockpitLock, JSON.stringify({ ...JSON.parse(claim), url: 'http://127.0.0.1:4999' }));
+      for (const args of [[], ['--dry-run']]) {
+        expect(await cli(args)).toMatchObject({ code: 1, err: `Cannot migrate ${project.root} while it is in use. Stop what is listed, then retry:\n`
+          + `- cockpit pid ${other.pid} at http://127.0.0.1:4999: stop it` });
+      }
       rmSync(cockpitLock);
       writeFileSync(migrationFencePaths(project.dataDir)!.lock, claim);
       // A dry run is an admitted read: it is refused under a fence like a migration.
@@ -232,82 +196,39 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
     expect(projectSnapshot(project, { databaseBytes: true })).toEqual(before);
   });
 
-  describe('through the owning cockpit', () => {
-    async function owningCockpit() {
-      const boot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-migrate-project-boot-'));
-      temporary.push(boot);
-      const bootId = (await registerProject(boot, undefined, testHome())).id!;
-      const targetId = (await registerProject(project.root, undefined, testHome())).id!;
-      const ownership = new CockpitOwnership();
-      owners.push(ownership);
-      ownership.publishUrl('http://127.0.0.1:4321');
-      const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
-        listProjects: async () => [{ id: bootId, root: boot, status: 'not-git' as const }, { id: targetId, root: project.root, status: 'ok' as const }] });
-      disposers.push(() => contexts.disposeAll());
-      const bootContext = await contexts.context(bootId);
-      const app = createApp({ home: testHome(), repoRoot: boot, store: bootContext.store, manager: bootContext.manager, ownership, contexts,
-        bootProjectId: bootId, version: '0.0.0-test', projectMigration: true });
-      const request: typeof fetch = async (input, init) => apiRequest(app, new URL(String(input)).pathname, init);
-      const viaOwner = (args: string[]) => cli(args, { owner: () => ({ pid: 1, url: 'http://127.0.0.1:4321' }), fetch: request });
-      return { app, contexts, ownership, targetId, bootId, viaOwner };
-    }
-
-    it('dispatches a dry run and a migration to the owner, which reopens the project over the moved state', async () => {
-      const { app, contexts, targetId, viaOwner } = await owningCockpit();
-      await contexts.context(targetId);
-      const before = projectSnapshot(project, { databaseBytes: true });
-      const dry = await viaOwner(['--dry-run']);
+  // hearsay-tools/cezarion#3136: a cockpit that does not own the project but lists it runs its
+  // automations, so it serves the project too.
+  it('refuses while a cockpit of this home that does not own the project lists it, and names it', async () => {
+    const before = projectSnapshot(project, { databaseBytes: true });
+    // A live cockpit of this home that lists nothing of this project does not stop the migration.
+    const release = holdCockpitLease(testHome(), 4998, 'elsewhere');
+    try {
+      const dry = await cli(['--dry-run'], { self: -1 });
       expect(dry.code).toBe(0);
-      expect(dry.out).toContain(`  ${project.taskPath} -> ${moved(project, project.taskPath)}`);
-      expect(dry.out.endsWith('Dry run: nothing was moved or rewritten.')).toBe(true);
-      expect(projectSnapshot(project, { databaseBytes: true })).toEqual(before);
+      await registerProject(project.root, undefined, testHome());
+      const refused = await cli([], { self: -1 });
+      expect(refused).toMatchObject({ code: 1, err: `Cannot migrate ${project.root} while it is in use. Stop what is listed, then retry:\n`
+        + `- cockpit pid ${process.pid} on port 4998, instance elsewhere, home ${testHome().root}: stop it` });
+      expect(existsSync(join(project.dataDir, 'cockpit.lock'))).toBe(false);
+    } finally { release(); }
+    expect(projectSnapshot(project, { databaseBytes: true })).toEqual(before);
+    expect((await cli([], { self: -1 })).code).toBe(0);
+  });
 
-      const real = await viaOwner([]);
-      expect(real.code).toBe(0);
-      expect(real.out.endsWith('Migration complete. Run the git mv commands above and commit them.')).toBe(true);
-      expect(existsSync(migrationFencePaths(project.dataDir)!.journal)).toBe(false);
-      expect(existsSync(migrationFencePaths(project.dataDir)!.lock)).toBe(false);
-      // The next request builds the context again and reads the migrated task.
-      const task = await apiRequest(app, `/api/v1/p/${targetId}/runs/${TASK}`);
-      expect(task.status).toBe(200);
-      expect(((await task.json()) as { worktreePath?: string }).worktreePath).toBe(moved(project, project.taskPath));
-      // The rebuilt context's report backfill ends before teardown closes its store.
-      await (await contexts.context(targetId)).store.reports.idle();
-    });
-
-    it('plans a dry run as an admitted read: refused while the project is fenced', async () => {
-      const { app, contexts, ownership, targetId } = await owningCockpit();
-      const context = await contexts.context(targetId);
-      const fence = await fenceProjectContext(ownership, context);
-      try {
-        const refused = await apiRequest(app, `/api/v1/projects/${targetId}/migration`,
-          { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dryRun: true }) });
-        expect(refused.status).toBe(409);
-        expect(projectMigrationErrorSchema.parse(await refused.json()).error).toMatch(/^A project migration \(pid \d+ at http:\/\/127\.0\.0\.1:4321\) holds /);
-      } finally { fence.release(); }
-    });
-
-    it('refuses while a task is live and lists it, keeps other projects served, and migrates once the task ends', async () => {
-      const { app, contexts, targetId, bootId } = await owningCockpit();
-      const context = await contexts.context(targetId);
-      setRunStatus(context.store, TASK, 'waiting');
-      const post = () => apiRequest(app, `/api/v1/projects/${targetId}/migration`,
-        { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dryRun: false }) });
-      const refused = await post();
-      expect(refused.status).toBe(409);
-      const body = projectMigrationErrorSchema.parse(await refused.json());
-      expect(body.liveTasks?.map(task => task.id)).toEqual([TASK]);
-      expect(body.error).toContain('Finish or cancel each one, then retry');
-      expect(existsSync(project.newDir)).toBe(false);
-      // The project and an unrelated project still answer.
-      expect((await apiRequest(app, `/api/v1/p/${targetId}/runs/${TASK}`)).status).toBe(200);
-      expect((await apiRequest(app, `/api/v1/p/${bootId}/runs`)).status).toBe(200);
-
-      setRunStatus(context.store, TASK, 'review');
-      const migrated = await post();
-      expect(migrated.status).toBe(200);
-      expect(projectMigrationResponseSchema.parse(await migrated.json())).toMatchObject({ dryRun: false, resumed: false });
-      expect((await apiRequest(app, `/api/v1/p/${bootId}/runs`)).status).toBe(200);
-    });
+  it('refuses while a task is live, lists it with the next step, and migrates once the task ends', async () => {
+    const live = (status: 'waiting' | 'review') => {
+      const store = RunStore.open(project.dataDir, { keepLive: true });
+      try { setRunStatus(store, TASK, status); store.flush(); } finally { store.close(); }
+    };
+    live('waiting');
+    const refused = await cli([]);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toMatch(new RegExp(`^Cannot migrate ${project.root}: 1 task is live\\. Finish or cancel each one, then retry:\\n- ${TASK} `));
+    expect(existsSync(project.newDir)).toBe(false);
+    expectReleased();
+    live('review');
+    const migrated = await cli([]);
+    expect(migrated.code).toBe(0);
+    expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));
   });
 });

@@ -1,12 +1,13 @@
 import { projectPaths, pathPresent } from '../project-paths.ts';
 import { anotherCockpitOwner, CockpitAlreadyRunningError, CockpitOwnership, migrationFencePaths, ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { resumeProjectMigration, type ProjectMigrationResult } from './engine.ts';
+import type { ArchiveOnMergeDeps } from '../server/archive-on-merge.ts';
 
 /**
  * Early recovery of an unfinished project migration (P4b3, hearsay-tools/cezarion#3089). Every
- * entry that opens a project calls it before its first ordinary read and before it opens an
- * admission lease: cockpit boot, lazy context builds, maintenance, cold run reads, CLI project
- * commands and `migrate-project`. It does not depend on the P5 gate: only a gated command or a
+ * entry that opens a project calls it before its first ordinary read: cockpit boot, lazy context
+ * builds, the archive and completion ticks, cold run reads, CLI project commands and
+ * `migrate-project`. It does not depend on the release switch: only the switch-gated command or a
  * newer binary writes a journal, and once written the journal must finish before anything reads
  * the project.
  */
@@ -21,8 +22,8 @@ export class ProjectMigrationRecoveryError extends Error {
 }
 
 /** The journal blocks every admission from the moment it is written, and a migration starts only
- *  with no live task, so a recovery fence has nothing live and nothing in flight to drain. */
-const NOTHING_LIVE = { liveTasks: () => [], inFlight: () => 0 };
+ *  with no live task, so a recovery fence finds nothing live. */
+const NOTHING_LIVE = { liveTasks: () => [] };
 
 /** Recoveries in flight in this process, by journal path: concurrent entries share one. */
 const recovering = new Map<string, Promise<ProjectMigrationResult | undefined>>();
@@ -72,4 +73,10 @@ export async function recoverProjects<T extends { root: string; status?: string 
       console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
     })));
   return projects;
+}
+
+/** The archive and completion ticks: each tick's project list finishes every unfinished journal
+ *  first, before the tick's admission check and its maintenance store. */
+export function recoverBeforeTicks(ownership: CockpitOwnership | undefined, deps: ArchiveOnMergeDeps): ArchiveOnMergeDeps {
+  return { ...deps, projects: async () => { return recoverProjects([...await deps.projects()], ownership); } };
 }

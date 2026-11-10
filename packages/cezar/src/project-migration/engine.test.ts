@@ -10,7 +10,6 @@ import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
 import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 import { SUBCOMMAND_NAMES } from '../subcommands.ts';
-import { PROJECT_MIGRATION_SWITCH } from './switch.ts';
 import { migrateProject, ProjectMigrationRefusedError, resumeProjectMigration } from './engine.ts';
 import { migrate, moved, rows, TIMEOUT } from './engine.testkit.ts';
 import { describeProjectMigrationPlan, NOT_REWRITTEN, planProjectMigration } from './plan.ts';
@@ -150,20 +149,18 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
 
 describe('without a release', () => {
-  it('keeps both switches off, starts a migration only behind the P5 gate, and refuses to run without the fence held by this process', async () => {
+  it('keeps the release switch off, starts a migration only from the switch-gated command, and refuses to run without the fence held by this process', async () => {
     expect(REBRAND_SWITCH).toBe(false);
-    expect(PROJECT_MIGRATION_SWITCH).toBe(false);
     expect(SUBCOMMAND_NAMES.some(name => /migrat/.test(name))).toBe(false);
     const src = join(import.meta.dirname, '..');
     const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter(path => path.endsWith('.ts') && !/\.(?:test|testkit)\.ts$/.test(path) && !path.startsWith('project-migration'))
       .map(path => ({ path, text: readFileSync(join(src, path), 'utf8') }));
-    // P4b3 (hearsay-tools/cezarion#3089): the gate, early recovery at each entry, and the two gated starts.
+    // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry, and the one switch-gated start.
     expect(sources.filter(({ text }) => /project-migration\//.test(text)).map(({ path }) => path).sort()).toEqual([
       'artifacts/cli.ts', 'cli-dispatch.ts', 'self-update/checkouts.ts', 'serve-command.ts', 'server/project-context.ts',
-      'server/project-migration-route.ts', 'server/workspace-projects.ts', 'subcommands.ts']);
-    expect(sources.filter(({ text }) => /\bmigrateProject\(|project-migration\/cli\.ts/.test(text)).map(({ path }) => path).sort())
-      .toEqual(['server/project-migration-route.ts', 'subcommands.ts']);
+      'server/server.ts', 'server/workspace-projects.ts', 'subcommands.ts']);
+    expect(sources.filter(({ text }) => /\bmigrateProject(?:Offline)?\(|project-migration\/cli\.ts/.test(text)).map(({ path }) => path)).toEqual(['subcommands.ts']);
     const root = join(import.meta.dirname, 'nowhere');
     const unheld = { lock: join(root, '.ai/squawk-migration.lock'), journal: join(root, '.ai/squawk-migration.json'), release: () => undefined };
     await expect(migrateProject({ repoRoot: root, fence: unheld })).rejects.toThrow(/needs the project's migration fence/);

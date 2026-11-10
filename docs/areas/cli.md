@@ -47,15 +47,16 @@ recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff
 ## Staged `migrate-project`
 
 `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is registered,
-listed in help and dispatched only behind `PROJECT_MIGRATION_SWITCH`, false until P5.
-`REBRAND_SWITCH` never registers it. With the gate off it is an unknown command, and the
-command module is never loaded. With the gate on, a cockpit that owns the project runs
-the migration through its route; with no owner the CLI locks the project itself. A dry run
-holds `cockpit.lock` and passes admission before it plans; it moves nothing. It prints the plan, then `Dry run: nothing was moved or rewritten.` or `Migration
-complete.`; it prints the `git mv` commands for tracked files and never runs them.
-Refusals (live tasks, a held fence, another owner, conflicts) print one message to
-stderr and exit 1. hearsay-tools/cezarion#3142, hearsay-tools/cezarion#3146 and
-hearsay-tools/cezarion#3136 must close before P5 turns the gate on.
+listed in help and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it is an
+unknown command and its module is never loaded. Only the user runs it, and it runs
+offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner, or a live
+cockpit of this home whose registry lists the project) or any task of it is live, and
+names each pid, URL, port or task to stop. It then takes `cockpit.lock` and the migration
+fence, moves the state and releases both. A dry run holds `cockpit.lock` and passes
+admission before it plans; it moves nothing. It prints the plan, then `Dry run: nothing
+was moved or rewritten.` or `Migration complete.`; it prints the `git mv` commands for
+tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted
+journal) print one message to stderr and exit 1.
 
 ## Rules
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { holdProjectWork, holdsProjectFence, migrationFencePaths, type ProjectMigrationFence } from '../server/cockpit-ownership.ts';
+import { asFenceHolder, holdsProjectFence, migrationFencePaths, type ProjectMigrationFence } from '../server/cockpit-ownership.ts';
 import {
   PROJECT_MIGRATION_STEPS, readProjectMigrationJournal, removeProjectMigrationJournal, writeProjectMigrationJournal, type ProjectMigrationJournal,
   type ProjectMigrationStep,
@@ -13,14 +13,14 @@ import { assertJournalContained } from './containment.ts';
 
 /**
  * The project state migration engine (P4b2, hearsay-tools/cezarion#3088): it moves a project's
- * runtime state from `.ai/cezar/` to `.ai/squawk/` under the exclusive project fence (P4b1). It is
- * internal: no command, route or boot hook calls it until P4b3 wires it and P5 enables it.
+ * runtime state from `.ai/cezar/` to `.ai/squawk/` under the exclusive project fence. A migration
+ * runs offline (hearsay-tools/cezarion#3089): no cockpit serves the project and no task is live.
  *
- * Order: the caller takes the fence (`fenceProject` or `fenceProjectContext`); the engine checks
- * that this process holds it, runs the holder duty (`closeProject`: dispose the project's context
- * and close its store), plans, writes the journal, runs each step and marks it done, and removes
- * the journal last. The caller releases the fence afterwards, also after a failure: the journal
- * then keeps the project blocked until a resume completes it.
+ * Order: the caller takes the fence (`fenceProject`); the engine checks that this process holds
+ * it, runs as its holder (`asFenceHolder`), closes the store the caller opened (`closeProject`),
+ * plans, writes the journal, runs each step and marks it done, and removes the journal last. The
+ * caller releases the fence afterwards, also after a failure: the journal then keeps the project
+ * blocked until a resume completes it.
  */
 
 export interface ProjectMigrationOptions {
@@ -87,7 +87,7 @@ async function runJournal(path: string, start: ProjectMigrationJournal, resumed:
 export async function resumeProjectMigration(options: ProjectMigrationOptions): Promise<ProjectMigrationResult | undefined> {
   const dataDir = legacyDataDir(options.repoRoot);
   assertHeldFence(dataDir, options.fence);
-  return holdProjectWork(dataDir, async () => resumeHeld(options));
+  return asFenceHolder(options.fence, async () => resumeHeld(options));
 }
 
 async function resumeHeld(options: ProjectMigrationOptions): Promise<ProjectMigrationResult | undefined> {
@@ -101,15 +101,13 @@ async function resumeHeld(options: ProjectMigrationOptions): Promise<ProjectMigr
 }
 
 /**
- * Migrate the project, or finish its unfinished journal first. `closeProject` is the holder duty
- * after the drain and before the first move: an owning cockpit disposes the project's context
- * (`ProjectContexts.dispose(id, { releasePreviews: false })`, previews were released in the drain),
- * which closes its store; a CLI closes the store it opened. A refused plan writes nothing.
+ * Migrate the project, or finish its unfinished journal first. `closeProject` runs before the
+ * plan: the CLI closes the store it opened for its live-task check. A refused plan writes nothing.
  */
 export async function migrateProject(options: ProjectMigrationOptions & { closeProject?: () => void | Promise<void> }): Promise<ProjectMigrationResult> {
   const dataDir = legacyDataDir(options.repoRoot);
   assertHeldFence(dataDir, options.fence);
-  return holdProjectWork(dataDir, async () => {
+  return asFenceHolder(options.fence, async () => {
     await options.closeProject?.();
     const unfinished = await resumeHeld(options);
     if (unfinished) return unfinished;

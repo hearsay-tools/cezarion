@@ -7,18 +7,15 @@
 import type { Home } from './home/home.ts';
 import { resolveHome } from './home/resolve.ts';
 import { REBRAND_SWITCH } from './home/switch.ts';
-import { PROJECT_MIGRATION_SWITCH } from './project-migration/switch.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
-export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate', 'server-migrate'] : []),
-  ...(PROJECT_MIGRATION_SWITCH ? ['migrate-project'] : [])] as const;
+export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate', 'server-migrate', 'migrate-project'] : [])] as const;
 
-/** The runner for `name`, or nothing when `name` is not a subcommand. `migrate-project` answers only
- *  behind its own P5 gate (`projectMigration`), never behind `rebrand`. */
-export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env }), rebrand = REBRAND_SWITCH,
-  projectMigration = PROJECT_MIGRATION_SWITCH): Promise<SubcommandRunner | undefined> {
-  if (projectMigration && name === 'migrate-project') return (await import('./project-migration/cli.ts')).runMigrateProjectCommand;
+/** The runner for `name`, or nothing when `name` is not a subcommand. */
+export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env }), rebrand = REBRAND_SWITCH): Promise<SubcommandRunner | undefined> {
   if (rebrand && name === 'migrate') return (await import('./home/migration-cli.ts')).runMigrationCommand;
+  if (rebrand && name === 'migrate-project') return (await import('./project-migration/cli.ts')).migrateProjectRunner(env => [
+    resolveHome({ purpose: 'cli', env, layout: 'legacy' }), resolveHome({ purpose: 'cli', env, layout: 'split' })]);
   if (rebrand && name === 'server-migrate') return async (argv, env) => {
     const legacy = resolveHome({ purpose: 'cli', env, layout: 'legacy' }), target = resolveHome({ purpose: 'cli', env, layout: 'split' });
     return (await import('./server-install/migrate-cli.ts')).runServerMigrateCommand(argv, env, { legacy, target });

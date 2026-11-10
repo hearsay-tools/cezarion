@@ -45,16 +45,15 @@ state and binds its private journal to the source, target and payload before
 honoring a startup acknowledgement; it refuses conflicting destination data.
 System-package installs keep a working old app and a manual move notice.
 
-The staged project command `hsq migrate-project [--dry-run] [--repo <dir>]` and its
-owner route `POST /api/v1/projects/:projectId/migration` stay closed behind their own
-P5 gate, `PROJECT_MIGRATION_SWITCH`, which is false. `REBRAND_SWITCH` never opens
-them. While the gate is off, help and dispatch omit the command (`cez migrate-project`
-is an unknown command, exit 1), the route path is not served (an unknown route), and every
-ordinary write stays under `.ai/cezar/`. Early recovery is not gated: an entry that
-finds an unfinished `.ai/squawk-migration.json` finishes it before it reads the project,
-and a journal that cannot finish keeps the project refused with the cause. A journal that names
-anything outside the project's own state, or that Git tracks, is refused unchanged before any step. With the
-gate on, the command prints the plan text and a closing line, exits 0, and prints the
-`git mv` commands for tracked files without running them; a refusal prints one message
-to stderr and exits 1. hearsay-tools/cezarion#3142, hearsay-tools/cezarion#3146 and
-hearsay-tools/cezarion#3136 must close before P5 turns the gate on.
+The staged project command `hsq migrate-project [--dry-run] [--repo <dir>]` is registered,
+advertised and runs exactly when `REBRAND_SWITCH` is true. With the switch false, as
+shipped, help and dispatch omit it (`cez migrate-project` is an unknown command, exit 1), no
+route or setting exposes it, and every ordinary write stays under `.ai/cezar/`. Only the user
+runs it, offline: it refuses while a cockpit serves the project or a task is live and names
+what to stop. Early recovery runs in both switch states: an entry that finds an unfinished
+`.ai/squawk-migration.json` finishes it before it reads the project, and a journal that
+cannot finish keeps the project refused with the cause. A journal that names anything
+outside the project's own state, or that Git tracks, is refused unchanged before any step.
+The command prints the plan text and a closing line, exits 0, and prints the `git mv`
+commands for tracked files without running them; a refusal prints one message to stderr
+and exits 1.

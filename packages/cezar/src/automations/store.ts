@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 import {
   automationDefinitionSchema,
@@ -83,8 +83,6 @@ export interface AutomationStoreOptions {
 }
 
 export class AutomationStore {
-  /** Releases a migration fence kept off disk, by receipt key: the next reservation writes each. */
-  private readonly fencedReleases = new Map<string, AutomationReceipt>();
   private definitionsFile: DefinitionsFile = { version: 1, automations: [] };
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
@@ -366,8 +364,6 @@ export class AutomationStore {
   }
 
   appendReceipt(receipt: AutomationReceipt): void {
-    // A release a migration fence keeps off disk is written by the occurrence's next reservation.
-    if (receipt.status === 'released' && projectWriteRefused(this.dataDir)) this.fencedReleases.set(receipt.receiptKey, receipt);
     const key = resolve(this.dataDir);
     const pending = inFlightReservations.get(key) ?? new Set<string>();
     try {
@@ -396,11 +392,6 @@ export class AutomationStore {
     occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
-    const fenced = this.fencedReleases.get(receiptKey);
-    if (fenced && this.latestReceipts().get(receiptKey)?.receiptId === fenced.receiptId) {
-      this.fencedReleases.delete(receiptKey);
-      this.appendReceipt(fenced);
-    }
     const previous = this.latestReceipts().get(receiptKey);
     if (previous && previous.status !== 'released') return undefined;
     const now = this.now().toISOString();
@@ -851,8 +842,7 @@ export class AutomationLease {
     if (this.released) return;
     this.released = true;
     try {
-      // A lock left under a migration fence stays; its owner's pid proves it stale later.
-      if (this.isCurrent() && !projectWriteRefused(dirname(this.path))) unlinkSync(this.path);
+      if (this.isCurrent()) unlinkSync(this.path);
     } catch {
       // Already removed during shutdown cleanup.
     } finally {

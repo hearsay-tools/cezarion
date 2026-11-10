@@ -88,7 +88,7 @@ export class AutomationCoordinator {
     }
   }
 
-  /** None for a project under a migration fence, unless the caller holds its admission lease. */
+  /** None for a project under a migration fence or with an unfinished migration journal. */
   store(projectId: string, root?: string): AutomationStore | undefined {
     const projectRoot = root ?? this.roots.get(projectId);
     if (!projectRoot || projectAdmissionRefusal(projectPaths(projectRoot).write)) return undefined;

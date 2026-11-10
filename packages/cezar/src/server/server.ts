@@ -279,7 +279,7 @@ import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forge
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
-import { createProjectMigrationRoutes, recoverBeforeTicks, recoverProjects, type ProjectMigrationServerDeps } from './project-migration-route.ts';
+import { recoverBeforeTicks, recoverProjects } from '../project-migration/recovery.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -317,7 +317,7 @@ import {
   isSafeAssetFilename,
   resolveGetRequest,
 } from './static-ui.ts';
-export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps, ProjectMigrationServerDeps {
+export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   /** Explicit fixture seam; production defaults to the disabled rebrand release switch. */
   legacyCanary?: boolean | undefined;
   /** Per-repository forge injection for embedded servers and tests. */
@@ -5031,7 +5031,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', healthRoutes)
     .route('/', modelsRoutes)
     .route('/', providersRoutes)
-    .route('/', projectsRoutes).route('/', createProjectMigrationRoutes({ deps, workspaceProjects, bootRoot, contexts, hosted: isHostedMode }))
+    .route('/', projectsRoutes)
     .route('/', agentProfilesRoutes)
     .route('/', createSelfUpdateRoutes(deps, () => capabilities().localHandoff, () => [deps.store, ...contexts.ids().flatMap((id) => contexts.peek(id)?.store ?? [])]))
     .route('/', applicationUpdateRoutes)

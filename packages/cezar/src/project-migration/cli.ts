@@ -1,55 +1,42 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { projectMigrationErrorSchema, projectMigrationResponseSchema, type ProjectMigrationResponse } from '@open-mercato/cezar-contract/project-migration';
-import { projectsResponseSchema } from '@open-mercato/cezar-contract/projects';
 import { commandText } from '../home/command.ts';
-import { pathPresent, projectPaths } from '../project-paths.ts';
-import { RUNS_DB_FILE } from '../runs/run-database.ts';
-import { RunStore } from '../runs/store.ts';
-import { anotherCockpitOwner, assertProjectAdmitted, CockpitAlreadyRunningError, CockpitOwnership } from '../server/cockpit-ownership.ts';
+import type { Home } from '../home/home.ts';
 import { getRepoInfo } from '../server/git.ts';
-import { projectLiveTasks } from '../server/project-context.ts';
-import { dryRunAnswer, migrationAnswer, migrationAnswerText } from './answer.ts';
-import { migrateProject } from './engine.ts';
-import { recoverProjectMigration } from './recovery.ts';
+import { migrationAnswerText } from './answer.ts';
+import { migrateProjectOffline } from './offline.ts';
 import type { MigrationFault } from './steps.ts';
 
 /**
- * `migrate-project [--dry-run]` (hearsay-tools/cezarion#3089), registered only behind the P5 gate
- * (`PROJECT_MIGRATION_SWITCH`). A cockpit that owns the project migrates it itself: the CLI asks
- * it over HTTP and touches no project file. With no owner the CLI takes the project's
- * `cockpit.lock` and its migration fence (P4b1) itself, so no cockpit starts on the project
- * meanwhile, and runs the engine (P4b2). Either way an unfinished journal finishes first.
+ * `migrate-project [--dry-run] [--repo <dir>]` (hearsay-tools/cezarion#3089): the offline project
+ * migration, run only by the user, registered only with the release switch.
  */
 
 const HELP = commandText(`Usage: cez migrate-project [--dry-run] [--repo <dir>]
-Move this project's runtime state from .ai/cezar/ to .ai/squawk/. The cockpit that
-serves the project runs the migration itself; with no cockpit, this command locks
-the project. Every live task must be finished or cancelled first. Tracked files
-are never moved: the command prints the git mv commands to run and commit.
+Move this project's runtime state from .ai/cezar/ to .ai/squawk/, offline. Stop every
+cockpit that serves the project and finish or cancel every task first; the command
+names what is still running. Tracked files are never moved: the command prints the
+git mv commands to run and commit.
 
     --dry-run     print every move, repair and rewrite; change nothing
     --repo <dir>  the project (default: the current directory)
 -h, --help        show this help`);
 
 export interface MigrateProjectDeps {
-  fetch: typeof fetch;
-  /** The live cockpit that owns the project, other than this process. */
-  owner: typeof anotherCockpitOwner;
+  /** The homes whose live cockpits may serve the project. */
+  homes: readonly Home[];
   /** Test seam: the engine's fault points (`MigrationFault`), and `plan:before` in a dry run. */
   fault?: MigrationFault;
+  /** Test seam: the process the cockpit check skips (this one). */
+  self?: number;
   getRepoInfo: typeof getRepoInfo;
   cwd: () => string;
   log: (line: string) => void;
   error: (line: string) => void;
 }
 
-const defaultDeps: MigrateProjectDeps = {
-  fetch: (...args) => fetch(...args), owner: anotherCockpitOwner, getRepoInfo, cwd: () => process.cwd(), log: line => console.log(line), error: line => console.error(line),
-};
-
-export async function runMigrateProjectCommand(argv: string[], _env: NodeJS.ProcessEnv, deps: MigrateProjectDeps = defaultDeps): Promise<number> {
+export async function runMigrateProjectCommand(argv: string[], deps: MigrateProjectDeps): Promise<number> {
   let values: { 'dry-run'?: boolean; repo?: string; help?: boolean };
   try {
     ({ values } = parseArgs({ args: argv, options: { 'dry-run': { type: 'boolean' }, repo: { type: 'string' }, help: { type: 'boolean', short: 'h' } }, strict: true, allowPositionals: false }));
@@ -60,17 +47,8 @@ export async function runMigrateProjectCommand(argv: string[], _env: NodeJS.Proc
   if (values.help) { deps.log(HELP); return 0; }
   const cwd = resolve(values.repo ?? deps.cwd());
   const root = realpathSync((await deps.getRepoInfo(cwd))?.root ?? cwd);
-  const dryRun = values['dry-run'] === true;
   try {
-    const dataDir = projectPaths(root).write;
-    const owner = deps.owner(dataDir);
-    const answer = owner ? await askOwner(root, owner, dryRun, deps) : await migrateWithoutOwner(root, dryRun, deps.fault).catch((error: unknown) => {
-      // A cockpit took the project between the check and this claim: it runs the migration.
-      const appeared = error instanceof CockpitAlreadyRunningError ? deps.owner(dataDir) : undefined;
-      if (!appeared) throw error;
-      return askOwner(root, appeared, dryRun, deps);
-    });
-    deps.log(migrationAnswerText(answer));
+    deps.log(migrationAnswerText(await migrateProjectOffline(root, { homes: deps.homes, dryRun: values['dry-run'] === true, fault: deps.fault, self: deps.self })));
     return 0;
   } catch (error) {
     deps.error(error instanceof Error ? error.message : String(error));
@@ -78,57 +56,9 @@ export async function runMigrateProjectCommand(argv: string[], _env: NodeJS.Proc
   }
 }
 
-/** The owning cockpit migrates: find the project's id in its registry, then ask its route. */
-async function askOwner(root: string, owner: { pid: number; url?: string }, dryRun: boolean, deps: MigrateProjectDeps): Promise<ProjectMigrationResponse> {
-  if (!owner.url) throw new Error(`A cockpit (pid ${owner.pid}) owns ${root} and is still starting; retry shortly`);
-  const listed = await deps.fetch(new URL('/api/v1/projects', owner.url));
-  if (!listed.ok) throw new Error(`The cockpit at ${owner.url} did not list its projects (HTTP ${listed.status})`);
-  const project = projectsResponseSchema.parse(await listed.json()).projects.find(entry => entry.root === root);
-  if (!project) throw new Error(`The cockpit at ${owner.url} owns ${root} but does not list it; open the project there, then retry`);
-  const response = await deps.fetch(new URL(`/api/v1/projects/${encodeURIComponent(project.id)}/migration`, owner.url), {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dryRun }),
+/** The runner the subcommand table registers. */
+export function migrateProjectRunner(homes: (env: NodeJS.ProcessEnv) => readonly Home[]) {
+  return (argv: string[], env: NodeJS.ProcessEnv) => runMigrateProjectCommand(argv, {
+    homes: homes(env), getRepoInfo, cwd: () => process.cwd(), log: line => console.log(line), error: line => console.error(line),
   });
-  const body: unknown = await response.json().catch(() => undefined);
-  if (response.ok) return projectMigrationResponseSchema.parse(body);
-  const failure = projectMigrationErrorSchema.safeParse(body);
-  throw new Error(failure.success ? failure.data.error : `The cockpit at ${owner.url} answered HTTP ${response.status}`);
-}
-
-/** No cockpit owns the project: this process takes `cockpit.lock` and the fence, then releases both. */
-async function migrateWithoutOwner(root: string, dryRun: boolean, fault: MigrationFault | undefined): Promise<ProjectMigrationResponse> {
-  const dataDir = projectPaths(root).write;
-  const ownership = new CockpitOwnership();
-  let store: RunStore | undefined;
-  try {
-    const recovered = await recoverProjectMigration(root, { ownership, keep: true });
-    if (dryRun) {
-      // An admitted read under `cockpit.lock`: no cockpit boots and no fence starts while the plan
-      // reads. The claim goes to the directory that exists; with neither there is nothing to read.
-      const existing = projectPaths(root).reads.find(pathPresent);
-      if (existing) await ownership.acquire(existing);
-      assertProjectAdmitted(dataDir);
-      fault?.('plan:before');
-      return await dryRunAnswer(root, recovered !== undefined);
-    }
-    assertProjectAdmitted(dataDir);
-    // The unfinished migration was this migration: it is complete now.
-    if (recovered) return migrationAnswer(recovered);
-    const fence = await ownership.fenceProject(dataDir, {
-      liveTasks: () => { store ??= openRunStore(root); return store ? projectLiveTasks(store) : []; },
-      inFlight: () => 0,
-    });
-    try {
-      const result = await migrateProject({ repoRoot: root, fence, closeProject: () => { store?.close(); store = undefined; }, ...(fault ? { fault } : {}) });
-      return migrationAnswer(result);
-    } finally { fence.release(); }
-  } finally {
-    store?.close();
-    ownership.releaseAll();
-  }
-}
-
-/** The project's run store, opened for reading only its live tasks; none when it has no runs. */
-function openRunStore(root: string): RunStore | undefined {
-  if (!projectPaths(root).reads.some(directory => existsSync(join(directory, RUNS_DB_FILE)) || existsSync(join(directory, 'runs.json')))) return undefined;
-  return RunStore.open(projectPaths(root).write, { keepLive: true, maintenance: true });
 }

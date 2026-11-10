@@ -61,7 +61,7 @@ function userFile(path: string, value: string): { path: string; bytes: string } 
 async function resume(root: string) {
   const ownership = new CockpitOwnership();
   owners.push(ownership);
-  const fence = await ownership.fenceProject(join(root, '.ai/cezar'), { liveTasks: () => [], inFlight: () => 0 });
+  const fence = await ownership.fenceProject(join(root, '.ai/cezar'), { liveTasks: () => [] });
   // Released as a CLI's exit releases it.
   try { return await resumeProjectMigration({ repoRoot: root, fence }); } finally { fence.release(); ownership.releaseAll(); }
 }

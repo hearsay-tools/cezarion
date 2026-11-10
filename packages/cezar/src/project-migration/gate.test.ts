@@ -1,51 +1,20 @@
-import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defaultCliDeps, main, type CliDeps } from '../cli-dispatch.ts';
-import { createRunner } from '../core/runner-factory.ts';
-import { Home } from '../home/home.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
-import { testHome, useTestHome } from '../home/test-home.testkit.ts';
-import { CockpitOwnership } from '../server/cockpit-ownership.ts';
-import { apiRequest } from '../server/loopback-request.testkit.ts';
-import { ProjectContexts } from '../server/project-context.ts';
-import { createApp } from '../server/server.ts';
+import { testHome } from '../home/test-home.testkit.ts';
 import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
-import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
-import { projectMigrationErrorSchema } from '@open-mercato/cezar-contract/project-migration';
-import { PROJECT_MIGRATION_SWITCH } from './switch.ts';
 
 /**
- * The P5 gate of `migrate-project` (hearsay-tools/cezarion#3089): off in P4, independent of
- * `REBRAND_SWITCH`. Help, registration, dispatch and the cockpit's migration route answer only
- * behind it; with it off, nothing loads the command module and nothing is written.
+ * `migrate-project` follows the release switch (hearsay-tools/cezarion#3089): with
+ * `REBRAND_SWITCH` false, as shipped, help and dispatch omit it and nothing loads the command
+ * module; through the switch's test seam it is registered, advertised and runs.
  */
 
 const loaded = vi.hoisted(() => ({ cli: false }));
 vi.mock('./cli.ts', async (importOriginal) => {
   loaded.cli = true;
   return importOriginal();
-});
-
-const roots: string[] = [];
-const owners: CockpitOwnership[] = [];
-const disposers: Array<() => void> = [];
-const savedHome = process.env.CEZ_HOME;
-
-beforeEach(() => {
-  const home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-migrate-gate-home-'));
-  roots.push(home);
-  useTestHome(Home.sandbox(home));
-  clearProjectProbeCache();
-});
-
-afterEach(() => {
-  for (const dispose of disposers.splice(0)) dispose();
-  for (const owner of owners.splice(0)) owner.releaseAll();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
-  vi.unstubAllEnvs();
 });
 
 function cli(args: string[], runSubcommand: CliDeps['runSubcommand'] = defaultCliDeps.runSubcommand) {
@@ -58,23 +27,18 @@ function cli(args: string[], runSubcommand: CliDeps['runSubcommand'] = defaultCl
   return { deps, output };
 }
 
-describe('the P5 gate of migrate-project', () => {
-  it('ships off, beside an off release switch', () => {
-    expect(PROJECT_MIGRATION_SWITCH).toBe(false);
+describe('migrate-project and the release switch', () => {
+  it('stays hidden and unusable with the switch off, as shipped, and loads no command module', async () => {
     expect(REBRAND_SWITCH).toBe(false);
     expect(SUBCOMMAND_NAMES).not.toContain('migrate-project');
-  });
-
-  it.each([false, true])('omits the command from help and dispatch with the release switch %s, and loads no command module', async (rebrand) => {
-    expect(await loadSubcommand('migrate-project', () => testHome(), rebrand)).toBeUndefined();
+    expect(await loadSubcommand('migrate-project', () => testHome(), false)).toBeUndefined();
     const help = cli(['--help']);
-    await main(help.deps as unknown as CliDeps, rebrand);
+    await main(help.deps as unknown as CliDeps, false);
     expect(help.output.join('\n')).not.toMatch(/migrate-project|\.ai\/squawk/);
-
     // The global parser meets the command's flag first: the same refusal as any unknown option.
-    await expect(main(cli(['migrate-project', '--dry-run']).deps as unknown as CliDeps, rebrand)).rejects.toThrow(/^Unknown option '--dry-run'/);
+    await expect(main(cli(['migrate-project', '--dry-run']).deps as unknown as CliDeps, false)).rejects.toThrow(/^Unknown option '--dry-run'/);
     const direct = cli(['migrate-project']);
-    await main(direct.deps as unknown as CliDeps, rebrand);
+    await main(direct.deps as unknown as CliDeps, false);
     expect(direct.deps.process.exitCode).toBe(1);
     const lines = direct.output.join('\n').split('\n');
     const unknown = lines.indexOf('unknown command: migrate-project');
@@ -83,69 +47,20 @@ describe('the P5 gate of migrate-project', () => {
     expect(loaded.cli).toBe(false);
   });
 
-  it('registers, advertises and dispatches the command only through its own gate', async () => {
-    const gated: CliDeps['runSubcommand'] = async (argv, env) => {
-      const run = await loadSubcommand(argv[0], () => testHome(), false, true);
+  it('is registered, advertised and dispatched with the switch on', async () => {
+    const switched: CliDeps['runSubcommand'] = async (argv, env) => {
+      const run = await loadSubcommand(argv[0], () => testHome(), true);
       return run ? run(argv.slice(1), env) : undefined;
     };
-    const help = cli(['--help'], gated);
-    await main(help.deps as unknown as CliDeps, false, true);
-    expect(help.output.join('\n')).toContain('cez migrate-project [--dry-run]');
+    const help = cli(['--help'], switched);
+    await main(help.deps as unknown as CliDeps, true);
+    expect(help.output.join('\n')).toContain('migrate-project [--dry-run] move this project\'s state from .ai/cezar/ to .ai/squawk/, offline');
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const run = cli(['migrate-project', '--help'], gated);
-    await main(run.deps as unknown as CliDeps, false, true);
+    const run = cli(['migrate-project', '--help'], switched);
+    await main(run.deps as unknown as CliDeps, true);
     expect(run.deps.process.exitCode).toBe(0);
-    expect(log.mock.calls.join('\n')).toContain('Usage: cez migrate-project [--dry-run]');
+    expect(log.mock.calls.join('\n')).toContain('migrate-project [--dry-run] [--repo <dir>]');
     log.mockRestore();
     expect(loaded.cli).toBe(true);
-  });
-});
-
-describe('the cockpit migration route', () => {
-  async function cockpit(options: { projectMigration?: boolean } = {}) {
-    const [boot, target] = ['boot', 'target'].map(() => {
-      const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-migrate-gate-'));
-      roots.push(root);
-      return root;
-    });
-    const [bootId, targetId] = await Promise.all([boot!, target!].map(async (root) => { return (await registerProject(root, undefined, testHome())).id!; }));
-    const ownership = new CockpitOwnership();
-    owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
-      listProjects: async () => [{ id: bootId!, root: boot!, status: 'not-git' as const }, { id: targetId!, root: target!, status: 'not-git' as const }] });
-    disposers.push(() => contexts.disposeAll());
-    const ctx = await contexts.context(bootId!);
-    const app = createApp({ home: testHome(), repoRoot: boot!, store: ctx.store, manager: ctx.manager, ownership, contexts, bootProjectId: bootId!,
-      version: '0.0.0-test', ...options });
-    const request = (path: string, init: RequestInit) => apiRequest(app, path, init);
-    const post = (id: string, dryRun = false) => request(`/api/v1/projects/${id}/migration`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dryRun }) });
-    return { boot: boot!, target: target!, bootId: bootId!, targetId: targetId!, post, request };
-  }
-
-  it('does not serve the route while the gate is off: every request answers as an unknown route, before parsing, and writes nothing', async () => {
-    const { target, targetId, post, request } = await cockpit();
-    const before = readdirSync(target);
-    const unknown = await request(`/api/v1/projects/${targetId}/no-such-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-    const expected = { status: unknown.status, body: await unknown.text() };
-    expect(expected.status).toBe(404);
-    const answers = [await post(targetId, false), await post(targetId, true),
-      await request(`/api/v1/projects/${targetId}/migration`, { method: 'POST' }),
-      await request(`/api/v1/projects/${targetId}/migration`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' }),
-      await request(`/api/v1/projects/${targetId}/migration`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"dryRun":"yes"}' })];
-    for (const answer of answers) expect({ status: answer.status, body: await answer.text() }).toEqual(expected);
-    expect(readdirSync(target)).toEqual(before);
-    expect(existsSync(join(target, '.ai'))).toBe(false);
-  });
-
-  it('behind the gate keeps the host-only rule, unknown ids and the boot project out', async () => {
-    const { boot, targetId, bootId, post } = await cockpit({ projectMigration: true });
-    expect((await post('no-such-project')).status).toBe(404);
-    const refusal = await post(bootId);
-    expect(refusal.status).toBe(409);
-    expect(projectMigrationErrorSchema.parse(await refusal.json()).error).toBe(`This cockpit serves ${boot} as its boot project. Stop it, then run migrate-project again`);
-    vi.stubEnv('CEZ_REMOTE', '1');
-    expect((await post(targetId)).status).toBe(403);
-    expect(existsSync(join(boot, '.ai/squawk'))).toBe(false);
   });
 });

@@ -198,7 +198,7 @@ describe('linked checkouts', () => {
   /** A project migration of `repo` that stops at `point`, as a crash would, leaving its journal. */
   async function interruptMigration(repo: string, point: string): Promise<void> {
     const migrator = new CockpitOwnership();
-    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [] });
     try {
       await expect(migrateProject({ repoRoot: realpathSync(repo), fence, fault: at => { if (at === point) throw new Error(at); } })).rejects.toThrow(point);
     } finally {
@@ -211,7 +211,7 @@ describe('linked checkouts', () => {
   it('lists a fenced project\'s checkouts without reading its run store', async () => {
     const repo = registeredTaskRepo();
     const migrator = new CockpitOwnership();
-    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [] });
     try {
       const found = await discoverCheckouts(env, testHome(env));
       expect(found.map((c) => [c.branch, c.task])).toEqual(expect.arrayContaining([['cez/def67890', null], ['main', null]]));

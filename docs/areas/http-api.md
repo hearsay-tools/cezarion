@@ -66,16 +66,6 @@ then reruns tests that never use it (hearsay-tools/cezarion#1237). Types still c
 roots, as `import type`. The lint rule `cez/contract-root-import` refuses every other root
 import and names the subpath for each value.
 
-## Project migration
-
-`POST /api/v1/projects/:projectId/migration` takes `{ dryRun }` and answers
-`{ dryRun, resumed, report, gitMv }` (`project-migration` contract). It is a workspace
-route, not a project route, so it holds no admission lease while the fence drains. While
-the P5 gate `PROJECT_MIGRATION_SWITCH` is off the path is not served: every request answers
-as an unknown route does, before its body is parsed. It keeps the normal origin guard and refuses hosted sessions with 403. Other refusals are
-`{ error, liveTasks? }` with 404 or 409; see
-[project routes](project-routes.md#project-migration-command-and-early-recovery).
-
 ## Home recovery
 
 The workspace-only `/api/v1/home/recovery` GET returns the `home-recovery` contract.

@@ -19,18 +19,17 @@ import { CockpitOwnership, projectAdmissionRefusal, withProjectAdmission } from 
 import { apiRequest } from '../server/loopback-request.testkit.ts';
 import { ArchiveOnMergeCoordinator } from '../server/archive-on-merge.ts';
 import { CompletionActionCoordinator } from '../server/completion-actions.ts';
-import { recoverBeforeTicks } from '../server/project-migration-route.ts';
 import { ProjectContexts } from '../server/project-context.ts';
 import { projectPaths } from '../project-paths.ts';
 import { createApp } from '../server/server.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { writeSettledJournal } from './project-migration.testkit.ts';
-import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
-import { PROJECT_MIGRATION_SWITCH } from './switch.ts';
+import { ProjectMigrationRecoveryError, recoverBeforeTicks, recoverProjectMigration } from './recovery.ts';
+import { REBRAND_SWITCH } from '../home/switch.ts';
 
 /**
  * Early recovery of an unfinished project migration (hearsay-tools/cezarion#3089): every entry
- * finishes the journal under the exclusive fence before it reads the project, with the P5 gate off,
+ * finishes the journal under the exclusive fence before it reads the project, with the release switch off,
  * and a journal that cannot finish keeps the project closed with a usable error.
  */
 
@@ -101,8 +100,8 @@ function serve(root: string) {
 }
 
 describe('early recovery of an unfinished project migration', () => {
-  it('runs with the P5 gate off', () => {
-    expect(PROJECT_MIGRATION_SWITCH).toBe(false);
+  it('runs with the release switch off, as shipped', () => {
+    expect(REBRAND_SWITCH).toBe(false);
   });
 
   it('costs nothing without a journal and finishes one under a temporary claim', async () => {
