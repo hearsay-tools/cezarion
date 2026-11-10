@@ -1,6 +1,6 @@
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from './project-paths.ts';
 import { inspectGeneration } from './delegation/process-liveness.ts';
-import { execFile } from 'node:child_process';
+import { git } from './git-command.ts';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
@@ -16,27 +16,9 @@ import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
 export const DIFF_CAP = 400_000;
 
-interface GitResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-}
-
 interface RegisteredWorktree {
   path: string;
   branch?: string;
-}
-
-/** Run git, never throw — degradation is the caller's policy. */
-function git(cwd: string, args: string[], timeout?: number, env?: NodeJS.ProcessEnv): Promise<GitResult> {
-  return new Promise((resolve) => {
-    execFile(
-      'git',
-      args,
-      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout, ...(env ? { env } : {}) },
-      (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
-    );
-  });
 }
 
 export function branchFor(runId: string): string {
