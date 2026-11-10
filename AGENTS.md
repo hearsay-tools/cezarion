@@ -86,7 +86,7 @@ holds that area's rules.
 | Web UI (cockpit) | [`docs/areas/web-ui.md`](docs/areas/web-ui.md) |
 | Agent config files (Settings → Agent config) | [`docs/areas/agent-config.md`](docs/areas/agent-config.md) |
 | Cockpit e2e specs, the browser seam, a flaky shard | [`packages/web/e2e/README.md`](packages/web/e2e/README.md) |
-| Feature specs / design history | `.ai/specs/` says why a feature took its shape. Code, tests and ADRs win; only an open PR's plan binds |
+| Feature specs / design history | `.ai/specs/` says why a design was chosen. Code, tests and ADRs win; a plan binds until its work ends |
 | Upstream drift: what open-mercato/cezar shipped, ported, declined | [`.ai/upstream/README.md`](.ai/upstream/README.md); fetch upstream into `refs/cez-upstream/main`, as its scan does |
 
 ## Validation
