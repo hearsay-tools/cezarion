@@ -103,37 +103,44 @@ export function unmatchedExemptions(index: readonly IndexedRow[]): string[] {
     .flatMap(([, list]) => list.map(entry => text(entry.criterion)!)).filter(id => !ids.has(id));
 }
 
-function printRow(row: IndexedRow): void {
+/** The lines that print one row. */
+export function formatRow(row: IndexedRow): string[] {
   // Some kits start a name with the row id; the id is already the first column.
   const names = row.names.map(name => name.startsWith(`${row.id} `) ? name.slice(row.id.length + 1) : name);
-  console.log(`${row.id}  ${names[0] ?? '(no name: its cells carry it in their titles)'}`);
-  for (const name of names.slice(1)) console.log(`    also: ${name}`);
-  console.log(`    scenario: ${row.scenarios.join(', ') || '(none declared)'}`);
-  console.log(`    kit: ${row.kit} (${row.lists.join(', ')})`);
-  for (const { runner, kind, reason } of row.exemptions) console.log(`    exempt: ${runner}${kind === undefined ? '' : ` (${kind})`}: ${reason}`);
+  return [
+    `${row.id}  ${names[0] ?? '(no name: its cells carry it in their titles)'}`,
+    ...names.slice(1).map(name => `    also: ${name}`),
+    `    scenario: ${row.scenarios.join(', ') || '(none declared)'}`,
+    `    kit: ${row.kit} (${row.lists.join(', ')})`,
+    ...row.exemptions.map(({ runner, kind, reason }) => `    exempt: ${runner}${kind === undefined ? '' : ` (${kind})`}: ${reason}`),
+  ];
 }
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+export interface RowQuery { readonly row?: string; readonly runner?: string; readonly json?: boolean }
+
+/** What the command prints for a query: `out` on stdout, `error` on stderr with exit code 1. */
+export function renderRows(index: readonly IndexedRow[], query: RowQuery): { out: string[]; error?: string } {
+  if (query.runner !== undefined && !(RUNNER_IDS as readonly string[]).includes(query.runner)) {
+    return { out: [], error: `unknown runner "${query.runner}"; the runners are ${RUNNER_IDS.join(', ')}` };
+  }
+  const rows = index
+    .filter(row => query.row === undefined || row.id === query.row)
+    .map(row => query.runner === undefined ? row : { ...row, exemptions: row.exemptions.filter(exemption => exemption.runner === query.runner) })
+    .filter(row => query.runner === undefined || row.exemptions.length > 0);
+  const out = query.json
+    ? [JSON.stringify(rows, null, 2)]
+    : [...rows.flatMap(formatRow), `${count(rows.length, 'row')} in ${count(new Set(rows.map(row => row.kit)).size, 'kit')}`];
+  return rows.length === 0 && query.row !== undefined ? { out, error: `no kit declares row "${query.row}"` } : { out };
+}
+
 function main(): void {
   const { values } = parseArgs({ options: { row: { type: 'string' }, runner: { type: 'string' }, json: { type: 'boolean' } } });
-  if (values.runner !== undefined && !(RUNNER_IDS as readonly string[]).includes(values.runner)) {
-    console.error(`unknown runner "${values.runner}"; the runners are ${RUNNER_IDS.join(', ')}`);
-    process.exitCode = 1;
-    return;
-  }
-  const rows = parityRowIndex()
-    .filter(row => values.row === undefined || row.id === values.row)
-    .map(row => values.runner === undefined ? row : { ...row, exemptions: row.exemptions.filter(exemption => exemption.runner === values.runner) })
-    .filter(row => values.runner === undefined || row.exemptions.length > 0);
-  if (values.json) {
-    console.log(JSON.stringify(rows, null, 2));
-  } else {
-    for (const row of rows) printRow(row);
-    console.log(`${count(rows.length, 'row')} in ${count(new Set(rows.map(row => row.kit)).size, 'kit')}`);
-  }
-  if (rows.length === 0 && values.row !== undefined) {
-    console.error(`no kit declares row "${values.row}"`);
+  const { out, error } = renderRows(parityRowIndex(), values);
+  for (const line of out) console.log(line);
+  if (error !== undefined) {
+    console.error(error);
     process.exitCode = 1;
   }
 }
