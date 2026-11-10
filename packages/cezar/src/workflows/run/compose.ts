@@ -23,7 +23,7 @@ import { FamilyReconciler } from './family-reconciler.ts';
 import * as completionGateReads from './completion-gate.ts';
 import { WaitRegistry } from './wait-registry.ts';
 import { WakeRetries } from './wake-retries.ts';
-import { WaitWatches } from './wait-watches.ts';
+import { WaitResolve } from './wait-resolve.ts';
 import { HumanWaits } from './human-waits.ts';
 import { SubagentWaits } from './subagent-waits.ts';
 import { RunStart } from './run-start.ts';
@@ -84,7 +84,7 @@ export interface RunModules {
   line: RunLine;
   workerQuestions: WorkerQuestions;
   familyReconciler: FamilyReconciler;
-  waitWatches: WaitWatches;
+  waitResolve: WaitResolve;
   waitRegistry: WaitRegistry;
   waitEngine: WaitEngine;
   subagentWaits: SubagentWaits;
@@ -270,31 +270,30 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   }, MAX_AUTO_CONTINUES);
   modules.familyReconciler = new FamilyReconciler(context, {
     reapTerminalScratch: id => modules.runSettlement.reapTerminalScratch(id), cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id),
-    resolvePeerWaits: runs => modules.waitRegistry.resolvePeerWaits(runs),
+    resolvePeerWaits: runs => modules.waitResolve.resolvePeerWaits(runs),
     active: id => host.active.get(id), isActive: id => host.isActive(id), recoveringRun: run => modules.recovery.recoveringRun(run),
-    cancel: id => host.cancel(id), armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
-    armWorkerDeadline: (id, wait, delay) => modules.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => host.disarmWait(id),
-    resolveWait: (id, waitId, result, observed) => modules.waitRegistry.resolveWait(id, waitId, result, observed),
-    hasWorkerResolveRetry: id => modules.waitWatches.hasWorkerResolveRetry(id),
-    recordWorkerResolveRetry: id => modules.waitWatches.recordWorkerResolveRetry(id),
+    cancel: id => host.cancel(id), armWait: (id, wait) => modules.waitResolve.armWait(id, wait),
+    disarmWait: id => host.disarmWait(id),
+    resolveWorkerWait: (id, entry, observed) => modules.waitResolve.resolveWorkerWait(id, entry, observed),
     retireSettledQuestions: id => modules.workerQuestions.retireSettledQuestions(id), closeRoutedQuestions: id => modules.workerQuestions.closeRoutedQuestions(id),
     reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
   });
-  modules.waitWatches = new WaitWatches(context, {
+  modules.waitResolve = new WaitResolve(context, {
+    active: id => host.active.get(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
+    cancelAutomaticAtCap: (id, waits) => modules.wakeAdmission.cancelAutomaticAtCap(id, waits),
+    reparkWithoutWaits: (id, state) => modules.wakeAdmission.reparkWithoutWaits(id, state),
+    waitOnUserWithoutSession: id => modules.wakeAdmission.waitOnUserWithoutSession(id),
+    queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => modules.retries.retryWaitAdmission(id),
     canProceedWithRun: (id, run) => host.canProceedWithRun(id, run), ciSupervisor: () => host.ciSupervisor,
-    resolveWait: (id, waitId, result) => modules.waitRegistry.resolveWait(id, waitId, result),
-    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
-    resolvePeerWait: (id, wait) => modules.waitRegistry.resolvePeerWait(id, wait), disarmWait: id => host.disarmWait(id),
-    armWorkerDeadline: (id, wait, delay) => modules.waitWatches.armWorkerDeadline(id, wait, delay),
-    settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result), exitFileRoots: id => modules.waitWatches.exitFileRoots(id),
+    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family), disarmWait: id => host.disarmWait(id),
     subagentSessionLive: id => modules.subagentWaits.sessionLive(id),
     interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
-  });
+  }, MAX_AUTO_CONTINUES);
   modules.waitEngine = new WaitEngine(context, {
     reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
     noticeParkedWorkers: id => modules.workerQuestions.noticeParkedWorkers(id),
     withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
-    armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
+    armWait: (id, wait) => modules.waitResolve.armWait(id, wait),
     isParked: id => modules.line.isParked(id),
     parkOnWaits: (id, state) => modules.wakeAdmission.parkOnWaits(id, state),
   });
@@ -302,21 +301,16 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     waitEngine: modules.waitEngine,
     active: id => host.active.get(id), workerExecutionStopped: id => host.workerExecutionStopped(id),
     executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), ciSupervisor: () => host.ciSupervisor,
-    isParked: id => modules.line.isParked(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
-    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family), noticeParkedWorkers: id => modules.workerQuestions.noticeParkedWorkers(id),
-    canProceedWithRun: (id, run) => host.canProceedWithRun(id, run),
-    exitFileRoots: (id, run) => modules.waitWatches.exitFileRoots(id, run), disarmWait: id => host.disarmWait(id),
-    settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result),
-    withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id), armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
-    parkOnWaits: (id, state) => modules.wakeAdmission.parkOnWaits(id, state), cancelAutomaticAtCap: (id, waits) => modules.wakeAdmission.cancelAutomaticAtCap(id, waits),
-    reparkWithoutWaits: (id, state) => modules.wakeAdmission.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => modules.wakeAdmission.waitOnUserWithoutSession(id),
-    queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => modules.retries.retryWaitAdmission(id),
+    countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
+    reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
+    exitFileRoots: (id, run) => modules.waitResolve.exitFileRoots(id, run), disarmWait: id => host.disarmWait(id),
+    settleWait: (id, waitId, result) => modules.waitResolve.settleWait(id, waitId, result),
   }, MAX_AUTO_CONTINUES);
   modules.subagentWaits = new SubagentWaits(context, {
     waitEngine: modules.waitEngine,
     active: host.active, isParked: id => modules.line.isParked(id), isAdmitted: id => modules.line.isAdmitted(id),
-    settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result),
-    armWait: (id, wait) => modules.waitWatches.armWait(id, wait), disarmWait: id => host.disarmWait(id),
+    settleWait: (id, waitId, result) => modules.waitResolve.settleWait(id, waitId, result),
+    armWait: (id, wait) => modules.waitResolve.armWait(id, wait), disarmWait: id => host.disarmWait(id),
     releaseHeldPark: (id, state) => { modules.wakeAdmission.leaveMonitoringPool(id); modules.turnSettler.armIdleTimer(id, state); },
   }, host.subagentWaitMs().graceMs, host.subagentWaitMs().deadlineMs);
   modules.humanWaits = new HumanWaits(context, { waitEngine: modules.waitEngine, routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
@@ -422,7 +416,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   modules.recovery = new RunRecovery(context, modules.familyReconciler,
     modules.workerQuestions, modules.autoResumeScheduler, {
       waitEngine: modules.waitEngine, workerScratchCleanup: modules.workerScratchCleanup, humanWaits: modules.humanWaits,
-      waitWatches: modules.waitWatches, inboxClaims: modules.inboxClaims, orphans: modules.orphans,
+      waitResolve: modules.waitResolve, inboxClaims: modules.inboxClaims, orphans: modules.orphans,
       isActive: (...args) => host.isActive(...args),
       workerExecutionStopped: (...args) => host.workerExecutionStopped(...args),
       move: (...args) => host.move(...args),
@@ -444,7 +438,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
       recover: (...args) => host.recover(...args),
     }, RESTART_CONTINUATION_PROMPT);
   modules.wakeAdmission = new WakeAdmission(context, {
-    active: host.active, retries: modules.retries, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
+    active: host.active, retries: modules.retries, line: modules.line, waitResolve: modules.waitResolve, waitRegistry: modules.waitRegistry,
     inboxClaims: modules.inboxClaims, workerQuestions: modules.workerQuestions, humanWaits: modules.humanWaits,
     isActive: id => host.isActive(id), move: (...args) => host.move(...args),
     recoveringRun: run => modules.recovery.recoveringRun(run),
@@ -517,7 +511,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   }, modules.line, modules.attachments, modules.turnBookkeeper, modules.queuedInput, modules.continuationAcceptance, modules.workerExecutions);
   modules.turnSettler = new TurnSettler(context, {
     waitEngine: modules.waitEngine,
-    humanWaits: modules.humanWaits, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
+    humanWaits: modules.humanWaits, line: modules.line, waitRegistry: modules.waitRegistry,
     workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost, subagentWaits: modules.subagentWaits,
     move: (...args) => host.move(...args), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),
     cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
@@ -546,7 +540,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   modules.inputDelivery = new InputDelivery(context, {
     active: host.active, line: modules.line, workerExecutions: modules.workerExecutions, runSkills: modules.runSkills,
     attachments: modules.attachments, humanWaits: modules.humanWaits, workerQuestions: modules.workerQuestions,
-    waitRegistry: modules.waitRegistry, inputReceiptHost: modules.inputReceiptHost,
+    waitResolve: modules.waitResolve, inputReceiptHost: modules.inputReceiptHost,
     isActive: id => host.isActive(id), move: (id, exit) => host.move(id, exit),
     canProceedWithRun: (id, run) => host.canProceedWithRun(id, run),
     workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),

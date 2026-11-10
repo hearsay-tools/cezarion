@@ -1,5 +1,5 @@
 import { testHome } from '../home/test-home.testkit.ts';
-import { WaitRegistry } from './run/wait-registry.ts';
+import { WaitResolve } from './run/wait-resolve.ts';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -68,11 +68,11 @@ const mergeReads = (log: string) => existsSync(log) ? readFileSync(log, 'utf8').
 // This module case reaches the registry guard itself. A settled wait must return
 // before it reads a live session or queues another input; every host read is a fault.
 function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitResult): void {
-  type Host = ConstructorParameters<typeof WaitRegistry>[1];
+  type Host = ConstructorParameters<typeof WaitResolve>[1];
   const host: Host = new Proxy(Object.create(null), {
     get(_target, property) { throw new Error(`Settled wait consulted ${String(property)}`); },
   });
-  const registry = new WaitRegistry({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
+  const registry = new WaitResolve({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: join(root, '.ai/cezar'), semaphore, work, disposed: () => false }, host, 10);
   const before = structuredClone(store.getRun(runId));
   registry.resolveWait(runId, waitId, result);
   expect(store.getRun(runId)).toEqual(before);

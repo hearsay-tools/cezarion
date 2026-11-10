@@ -23,7 +23,7 @@ import * as stepDecisions from './step-decisions.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WakeRetries } from './wake-retries.ts';
 import type { RunLine } from './run-line.ts';
-import type { WaitWatches } from './wait-watches.ts';
+import type { WaitResolve } from './wait-resolve.ts';
 import type { WaitRegistry } from './wait-registry.ts';
 import type { InboxClaims } from './inbox-claims.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
@@ -32,7 +32,7 @@ import type { HumanWaits } from './human-waits.ts';
 type HumanAnswerBudget = { spent: number };
 interface WakeAdmissionHost {
   active: ReadonlyMap<string, ActiveRun>;
-  retries: WakeRetries; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry;
+  retries: WakeRetries; line: RunLine; waitResolve: WaitResolve; waitRegistry: WaitRegistry;
   inboxClaims: InboxClaims; workerQuestions: WorkerQuestions; humanWaits: HumanWaits;
   isActive(id: string): boolean; move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown;
   recoveringRun(run: RunRecord | string | undefined): boolean;
@@ -290,7 +290,7 @@ export class WakeAdmission {
       if (!run || !WAIT_KINDS.worker.is(wait) || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
       if ((this.context.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.context.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
-        text: waitResultText(wait, { workerStatus: this.host.waitRegistry.workerStatus }) });
+        text: waitResultText(wait, { workerStatus: this.host.waitResolve.workerStatus }) });
     }
   }
 
@@ -361,7 +361,7 @@ export class WakeAdmission {
   /** Stop every watch, timer, retry and queued wake a run's waits hold in memory. */
   disarmRunWaits(runId: string): void {
     this.host.waitRegistry.abortRegistrations(runId);
-    this.host.waitWatches.disarmRun(runId);
+    this.host.waitResolve.disarmRun(runId);
     this.host.retries.forget(runId);
     this.resetWakeDelivery(runId);
     this.host.line.removeWake(runId, this.host.active.has(runId));
@@ -371,7 +371,7 @@ export class WakeAdmission {
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
   readonly onRunDeleted = (runId: string): void => {
     this.disarmRunWaits(runId);
-    if (!this.context.disposed()) this.host.waitRegistry.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
+    if (!this.context.disposed()) this.host.waitResolve.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
     if (this.context.disposed()) return;
