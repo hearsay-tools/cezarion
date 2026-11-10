@@ -6,6 +6,7 @@ import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { SubagentWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
+import { exemptionReasonProblem } from '../core/exemption-reason.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { runnersWhere } from '../core/runner-facts.ts';
 import { reportsNativeSubagents } from './run/subagent-waits.ts';
@@ -179,7 +180,7 @@ export function subagentGuard(file: (runner: RunnerId) => string): void {
         expect({ runner, scenario: SCENARIO[runner] !== undefined, reports: reportsNativeSubagents(runner) })
           .toEqual({ runner, scenario: !exemptAll, reports: !exemptAll });
       }
-      for (const entry of SUBAGENT_EXEMPTIONS) expect(entry.reason).not.toMatch(/not implemented/i);
+      for (const entry of SUBAGENT_EXEMPTIONS) expect(exemptionReasonProblem(entry.reason), `${entry.criterion}/${entry.runner}`).toBeUndefined();
     });
   });
 }
