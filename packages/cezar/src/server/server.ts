@@ -3722,11 +3722,18 @@ export function createApp(deps: ServerDeps) {
       const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'existing-worktree' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
-      if (!workingDirectory) return c.text('(no worktree — this task ran directly in the repo working tree)');
-      const result = await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD', undefined, () => autosaveCleanupBlocker(c.get('project').store.sourceDataDir(run.id), run.id));
-      if (typeof result !== 'string') { const { error } = result; return c.json({ error }, 409); }
+      if (!workingDirectory) {
+        return c.text('(no worktree — this task ran directly in the repo working tree)');
+      }
+      const result = await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD', undefined,
+        () => autosaveCleanupBlocker(c.get('project').store.sourceDataDir(run.id), run.id));
+      if (typeof result !== 'string') {
+        const { error } = result;
+        return c.json({ error }, 409);
+      }
       return c.text(result);
     })
+
     .get('/runs/:id/changes', async (c) => {
       const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
@@ -3742,6 +3749,7 @@ export function createApp(deps: ServerDeps) {
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json(result.changes);
     })
+
     // The run's own commits (<base>..HEAD on the worktree branch) — the Commits tab.
     .get('/runs/:id/commits', async (c) => {
       const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
