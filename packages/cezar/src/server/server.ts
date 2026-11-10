@@ -359,7 +359,7 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   /** Boot project's shared automation store. `startServer` injects the
    *  coordinator-owned instance so HTTP routes and the scheduler never cache
    *  separate views of the same project files. */
-  automationStore?: AutomationStore;
+  automationStore?: AutomationStore | (() => AutomationStore);
   /** Workspace-wide parallel-cap semaphore + cached resource config (spec
    *  2026-07-20, step 2.5): the ONE instance boot created, refreshed, and gave
    *  the boot manager — threaded into the default `ProjectContexts` so every
@@ -5040,7 +5040,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
   const automationCoordinator = new AutomationCoordinator({ listProjects: () => visibleProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })) }); // projects arrive prepared
   const bootProjectId = deps.bootProjectId ?? 'default';
-  const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
+  const bootAutomationStore = () => automationCoordinator.store(bootProjectId, deps.repoRoot)!; // resolve after preparation
   const taskWebhooks = createTaskWebhooks(deps);
   // #774: the bound origin every agent env carries (`CEZ_COCKPIT_URL`), so `cez automation` calls
   // this cockpit instead of probing ports. Unset until `listening`; a project built after that is

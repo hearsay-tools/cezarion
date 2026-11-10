@@ -110,13 +110,16 @@ export function createBootContext(
   bootRoot: string,
   bootDataDir: string,
 ): ProjectContext {
+  const automationStore = deps.automationStore ?? AutomationStore.open(bootDataDir);
   return {
     id: deps.bootProjectId ?? 'default', home: deps.home,
     root: bootRoot,
     dataDir: bootDataDir,
     store: deps.store,
     manager: deps.manager,
-    automationStore: deps.automationStore ?? AutomationStore.open(bootDataDir),
+    get automationStore() {
+      return typeof automationStore === 'function' ? automationStore() : automationStore;
+    },
     launchKey: ensureLaunchKey(bootDataDir), // bookmarklet auto-start secret (spec 011)
   };
 }
