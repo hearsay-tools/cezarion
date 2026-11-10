@@ -28,7 +28,11 @@ stay listed and restorable. Private snapshots keep the last 20 plus
 one per day for 30 days. Backup failures warn once per file and never block the
 primary write. HomeStore checks the backup directory chain before the write lock;
 unavailable, dangling or escaping paths disable both backup creation and pruning.
-`cez backup list [<file>]` discovers every supported file, including backups whose
+`cez backup list [<file>]` reads legacy backups without migration when the switch
+is on and the split home has no install marker. Once the split home has a marker,
+it reads that home. Listing never prepares either home. The legacy fallback reads
+only paths inside the legacy home: a link that leaves it is not listed. It discovers every
+supported file, including backups whose
 live file is gone. Legacy root-file snapshots and nested named-instance snapshots
 remain readable. `config.json.bak` is listed as the newest config backup; the
 loader still restores it only when the primary is missing, blank or corrupt.
@@ -67,7 +71,9 @@ are a stated limit. An unconfirmed process claim expires after 30 seconds to rec
 from PID reuse. A confirmed live process token never expires. See ADR 0060 for
 the long-running-holder trade-off and cross-namespace lease collisions.
 
-Serve, init, run and backup restore prepare an install marker unconditionally.
+Serve, init, run and backup restore prepare an install marker unconditionally,
+after their arguments validate: `run` without a task, and `backup restore` with
+help, an unsupported file, extra arguments or an invalid `--at`, prepare nothing.
 Other authorized operator entries prepare existing registry files at entry. On an
 empty home, they record authorization in process memory and create nothing until
 the first write. That write creates the marker and seeds HEAD under the same lock.
@@ -163,7 +169,15 @@ They then run the normal journal interpretation on a report-only VersionLog,
 which keeps every record change in memory: a reset interrupted after its
 replacement (PENDING, stale HEAD) still reports, and no journal file changes.
 
-An empty or absent legacy home returns `fresh` and commits an explicit
+An absent legacy home leaves conditional entries read-only. Their first write
+commits the fresh decision before the registry mutation; serve, init, run and
+backup restore commit it at entry. Help, invalid commands and pure reads create
+no home. The deferred preparation runs once per entry, before the first write. When
+it selects another home (a legacy server install appeared, a rolled-back group or a
+staged group), the write fails with `Run hsq server-migrate.` and the split home stays
+unwritten; each later write fails the same way. An existing empty legacy home keeps
+its migration decision at entry.
+A fresh decision returns `fresh` and commits an explicit
 decision: a v1 record with `files: []` and `backup: ''`, then the marker with
 `migratedFrom` and `state: 'committed'`. A fresh home therefore carries
 `migratedFrom` and `committed` too. `MOVED.json` is written only when the

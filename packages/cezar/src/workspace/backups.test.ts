@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mergeWriteWorkspaceConfig, loadWorkspaceConfig, atomicWriteJsonSync } from './config.ts';
 import { mergeWriteAgentAccounts, loadAgentAccounts } from './agent-accounts.ts';
-import { listBackups as allBackups } from './backups.ts';
+import { listBackups as allBackups, isValidRestore } from './backups.ts';
 import { runBackupCommand } from './backup-cli.ts';
 
 
@@ -214,4 +214,21 @@ it('publishes only completed staging bytes and retries an exclusive publication 
   expect(snapshots).toHaveLength(1);
   expect(readFileSync(snapshots[0]!.path)).toEqual(previous);
   expect(fs.readdirSync(join(home, 'backups', 'config.json'))).toHaveLength(1);
+});
+
+it('the home entry calls an argument list a restore exactly when the command restores', async () => {
+  await mergeWriteAgentAccounts((store) => { store.marker = 'a'; }, testHome());
+  await mergeWriteAgentAccounts((store) => { store.marker = 'b'; }, testHome());
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const forms = [['restore', 'agent-accounts.json'], ['restore', 'agent-accounts.json', '--at', '2099-01-01T00:00:00Z'],
+    ['restore', 'agent-accounts.json', '--at=2099-01-01T00:00:00.000Z'], ['restore', 'agent-accounts.json', '--at', 'yesterday'],
+    ['restore', 'invalid.json'], ['restore'], ['restore', 'agent-accounts.json', 'extra'], ['restore', 'agent-accounts.json', '-h'],
+    ['restore', 'agent-accounts.json', '--unknown'], ['list', 'agent-accounts.json'], ['agent-accounts.json', 'restore']];
+  for (const argv of forms) {
+    log.mockClear();
+    await runBackupCommand(argv, process.env, testHome());
+    const restored = log.mock.calls.some(([line]) => String(line).startsWith('Restored '));
+    expect(isValidRestore(argv), argv.join(' ')).toBe(restored);
+  }
 });

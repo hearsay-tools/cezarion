@@ -5,12 +5,12 @@ import type { InstallMarker } from './install-marker.ts';
 import type { HomeStore } from './store.ts';
 import { homePathLocation } from './file-location.ts';
 
-interface EntryAuthorization { home: Home; entry: string; kind: InstallMarker['kind']; seeded: boolean }
+interface EntryAuthorization { home: Home; entry: string; kind: InstallMarker['kind']; seeded: boolean; beforeWrite?: (() => void) | undefined }
 const entries = new Map<string, EntryAuthorization>();
 
 /** Authorization stays in this process; resolving or reading an empty home writes nothing. */
-export function authorizeHomeEntry(home: Home, entry: string, kind: InstallMarker['kind']): void {
-  entries.set(resolve(home.root), { home, entry, kind, seeded: false });
+export function authorizeHomeEntry(home: Home, entry: string, kind: InstallMarker['kind'], beforeWrite?: () => void): void {
+  entries.set(resolve(home.root), { home, entry, kind, seeded: false, beforeWrite });
 }
 
 export function homeEntryAuthorization(root: string): EntryAuthorization | undefined {

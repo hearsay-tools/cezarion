@@ -161,8 +161,15 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    (`loadWorkspaceConfig` restores `config.json` from `config.json.bak`, ADR 0010) and count
    `config.json.bak` and `backups/` as registry data. Only a legacy home that does not exist,
    or holds no registry file, backup or account file after that recovery, has nothing to
-   migrate: write a fresh `live` marker in the new
-   home and stop. Every later lock and marker of this migration lives in the resolved legacy
+   migrate. With no legacy home, read-only and invalid commands write nothing.
+   Only writer entries with valid arguments (serve, init, run, backup restore, or the
+   first authorized registry write) record the fresh decision and write a `live` marker
+   in the new home. A deferred first write that finds a legacy server install refuses
+   and names `hsq server-migrate`. Never create the absent legacy directory to publish `MOVED.json`. An
+   existing empty legacy directory keeps the committed empty inventory and
+   `MOVED.json`. Later legacy data reaches the canary and is never copied over
+   the fresh home. Before a split marker exists, `hsq backup list` reads legacy
+   backups without migration or writes. Every later lock and marker of this migration lives in the resolved legacy
    home.
 2. Take `<legacy>/.migrating` with `O_EXCL`; a second migration waits or stops. Then take
    the legacy `write.lock`, which drains any writer already in its critical section, and hold
