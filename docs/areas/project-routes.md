@@ -6,10 +6,16 @@
 
 `packages/cezar/src/server/project-context.ts`, then `packages/cezar/src/server/server.ts`, `packages/web/src/routes.tsx`
 
-## Two project directories before P5
+## Two project directories
 
-Context `dataDir` remains the legacy write root from `projectPaths`. `RunStore`
-and cold indexes merge the read roots internally. History, artifacts, handoffs,
+`projectPaths(root)` is the one rule for the write root; no caller picks a folder itself.
+With `REBRAND_SWITCH` on, a moved project (a completed migration wrote
+`.ai/squawk/moved.json`, `PROJECT_MOVED_FILE`) writes `.ai/squawk/` and reads `.ai/cezar/`
+as its fallback (hearsay-tools/cezarion#3150). Every other project, and every project with
+the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
+below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
+`isFallbackProjectPath` ask `projectPaths` too. Context `dataDir` is the write root.
+`RunStore` and cold indexes merge the read roots internally. History, artifacts, handoffs,
 attachments and cleanup checks use `store.sourceDataDir(runId)`. Inspect fallback
 cockpit ownership before claiming legacy state; never reclaim a fallback claim.
 Maintenance can read fallback history without recovery or a shadow legacy database.
@@ -122,6 +128,8 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
      summary's `worktreePath`, the `worktree_path` column).
   6. `run-files`: worker execution, autosave cleanup, worker results, artifact metadata and
      the seeded `**Worktree:**` line of each handoff.
+  7. `mark-moved`: write the marker `.ai/squawk/moved.json` (private, settled before the
+     journal goes). From then on, with the switch on, the project writes `.ai/squawk/`.
 
   Steps 1 to 3 run inside one hold of the common directory's worktree mutation lock. The
   Git locks keep a `git worktree prune` from any checkout sharing the Git directory from
@@ -164,7 +172,13 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
 - **After a migration** `.ai/cezar/` keeps only tracked files (until the user runs the
   printed `git mv`) and the `cockpit.lock*` claims. It holds no `runs.db`, so P4a's reads
   find every run, artifact and handoff under `.ai/squawk/`; opening the store creates no
-  legacy database. Until P5 changes the write root, the moved runs are fallback runs.
+  legacy database. With the switch on, the marker makes `.ai/squawk/` the write root: moved
+  runs are ordinary writable runs, not fallback runs, and new tasks, worktrees, worker
+  workspaces and previews write there. With the switch off they stay fallback runs. A
+  second migration of a marked project plans nothing and writes no journal
+  (`alreadyMoved`); it still prints the `git mv` commands for tracked files left in
+  `.ai/cezar/`. A tracked `.ai/cezar/.gitignore` is not shadowed by a new file in
+  `.ai/squawk/` until the user moves it; the shared Git excludes cover both directories.
 - **Limits.** Agent temp fallback directories outside the project are keyed by the data
   directory (hearsay-tools/cezarion#3146). Claude Code keys session history by working
   directory, so a moved worktree starts a new Claude session history.

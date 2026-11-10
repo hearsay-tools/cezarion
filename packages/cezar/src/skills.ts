@@ -6,6 +6,7 @@ import { teamSkillRefSchema, type TeamSkillRef } from '@open-mercato/cezar-contr
 import { getTeamSkillsCached, sourceKey } from './skills-remote.ts';
 import { readDisabledSkillsReposSync, type SkillsRepoRef } from './config.ts';
 import { readProjectUiState } from './ui-state.ts';
+import { projectPaths } from './project-paths.ts';
 
 /**
  * A skill is a Markdown file with optional YAML-ish frontmatter (`name`,
@@ -203,9 +204,9 @@ async function skillEntryPaths(
   return paths;
 }
 
-/** The path of a skill named `name` under `.ai/squawk/skills`, the fallback catalog; legacy wins it otherwise. */
+/** The path of a skill named `name` in the project's fallback catalog (`projectPaths(root).reads[1]`). */
 export async function fallbackSkillPath(repoRoot: string, name: string): Promise<string | undefined> {
-  return (await readMarkdownSkills(resolve(repoRoot, SKILL_DIRS[1]!.dir), 'cezar')).find(skill => skill.name === name)?.path;
+  return (await readMarkdownSkills(resolve(projectPaths(repoRoot).reads[1]!, 'skills'), 'cezar')).find(skill => skill.name === name)?.path;
 }
 
 async function readMarkdownSkills(dir: string, source: Skill['source']): Promise<Skill[]> {

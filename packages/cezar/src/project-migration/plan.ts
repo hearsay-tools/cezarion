@@ -5,7 +5,7 @@ import nodePath, { posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
-import { pathPresent } from '../project-paths.ts';
+import { pathPresent, projectMoveMarked, PROJECT_MOVED_FILE } from '../project-paths.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseUnsupportedSchemaError } from '../runs/run-database.ts';
 import { migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -51,6 +51,8 @@ export interface ProjectMigrationPlan {
   /** Shell commands, run from any directory, that move the tracked files for the user to commit. */
   gitMv: string[];
   notRewritten: readonly string[];
+  /** A completed migration marked the project moved: the plan moves and rewrites nothing. */
+  alreadyMoved: boolean;
 }
 
 const execFileAsync = promisify(execFile);
@@ -246,12 +248,13 @@ class Planner {
     const source = join(root, ...LEGACY_PROJECT_DIR.split('/'));
     this.plan = { repoRoot: root, source, destination: join(root, ...MIGRATED_PROJECT_DIR.split('/')),
       journal: migrationFencePaths(source)!.journal, moves: [], tracked: [], worktrees: [], rewrites: [], conflicts: [],
-      blockers: [], gitMv: [], notRewritten: NOT_REWRITTEN };
+      blockers: [], gitMv: [], notRewritten: NOT_REWRITTEN, alreadyMoved: false };
   }
 
   async build(): Promise<ProjectMigrationPlan> {
     const { plan } = this;
     if (pathPresent(plan.journal)) plan.blockers.push(`An unfinished project migration journal ${plan.journal} exists; resume it first`);
+    if (projectMoveMarked(this.root)) return this.moved();
     if (!pathPresent(plan.source)) return plan;
     if (!realDirectory(plan.source) || realpathSync(plan.source) !== plan.source) { plan.blockers.push(`${plan.source} is not a directory of this project`); return plan; }
     if (pathPresent(plan.destination) && !realDirectory(plan.destination)) {
@@ -280,6 +283,16 @@ class Planner {
     await this.receiptRewrites(map);
     this.rowRewrites(map);
     this.evidenceRewrites(map);
+    return plan;
+  }
+
+  /** A second migration of a moved project changes nothing; it lists the tracked files still to move. */
+  private async moved(): Promise<ProjectMigrationPlan> {
+    const { plan } = this;
+    plan.alreadyMoved = true;
+    const tracked = pathPresent(plan.source) ? await trackedPaths(this.root) : new Set<string>();
+    plan.tracked = [...tracked ?? []].sort().map(from => ({ from, to: MIGRATED_PROJECT_DIR + from.slice(LEGACY_PROJECT_DIR.length) }));
+    plan.gitMv = gitMvCommands(this.root, plan.tracked);
     return plan;
   }
 
@@ -429,6 +442,7 @@ export function describeProjectMigrationPlan(plan: ProjectMigrationPlan): string
   const section = (title: string, lines: readonly string[]) => lines.length ? [`${title}:`, ...lines.map(line => `  ${line}`)] : [`${title}: none`];
   return [
     `Project ${plan.repoRoot}: ${plan.source} -> ${plan.destination}`,
+    ...plan.alreadyMoved ? [`Already moved: ${join(plan.destination, PROJECT_MOVED_FILE)} marks a completed migration; nothing moves`] : [],
     ...section('Blockers', plan.blockers),
     ...section('Destination conflicts', plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)),
     ...section('Moves', plan.moves.map(move => `${move.from} -> ${move.to}`)),

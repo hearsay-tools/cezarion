@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync 
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
-import { pathPresent } from '../project-paths.ts';
+import { pathPresent, PROJECT_MOVED_FILE } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
 import { notRegularFile, outsideOf, receiptDirectory, runStoreFiles } from './containment.ts';
 import { replaceAtomically, settle } from './durable.ts';
@@ -274,6 +274,22 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
   }
 }
 
+/**
+ * The durable mark that the project is moved: `.ai/squawk/moved.json`, written once every other
+ * step is done and settled before the journal goes. From then on, with the release switch on,
+ * `projectPaths` writes the project under `.ai/squawk/`.
+ */
+function markMovedStep(journal: ProjectMigrationJournal): void {
+  const marker = join(journal.destination, PROJECT_MOVED_FILE);
+  contained('mark-moved', journal.destination, marker);
+  regularFile('mark-moved', marker);
+  createDirectories(journal.destination, journal.source, journal.destination);
+  if (!pathPresent(marker)) {
+    replaceAtomically(marker, `${JSON.stringify({ version: 1, from: journal.source }, null, 2)}\n`, 0o600);
+  }
+  settle(dirname(journal.destination), marker, { data: true });
+}
+
 /** The steps that run inside one hold of the Git common directory's worktree mutation lock. */
 export const GIT_MIGRATION_STEPS: readonly ProjectMigrationStep[] = ['lock-worktrees', 'move', 'repair-worktrees'];
 
@@ -284,4 +300,5 @@ export const MIGRATION_STEP_RUNNERS: Record<ProjectMigrationStep, (journal: Proj
   receipts: receiptStep,
   'run-store': runStoreStep,
   'run-files': runFilesStep,
+  'mark-moved': markMovedStep,
 };

@@ -1,4 +1,4 @@
-import { isFallbackProjectPath } from '../project-paths.ts';
+import { isFallbackProjectPath, projectPaths } from '../project-paths.ts';
 // Count-based worktree retention (#483). A busy cockpit leaves one full repo
 // checkout per finished task under `.ai/cezar/worktrees/<runId>`; nothing bounds
 // the total, so disk saturates. This module decides *which* finished worktrees
@@ -6,7 +6,6 @@ import { isFallbackProjectPath } from '../project-paths.ts';
 // recoverable) and the thin I/O enforcer that performs the reclaim. The selector
 // is pure and unit-testable; the enforcer never throws (helper discipline).
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { createWorktree } from '../git-worktree.ts';
@@ -170,7 +169,7 @@ export async function reclaimWorktrees(
   const selected = selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId));
   const readonly = (id: string) => Boolean(byId.get(id) && readOnlyWorktree(repoRoot, store, byId.get(id)!));
   const skipped = selected.filter(readonly).length;
-  if (skipped) console.info(`[cez] Worktree retention skipped ${skipped} read-only fallback item(s) under .ai/squawk/.`);
+  if (skipped) console.info(`[cez] Worktree retention skipped ${skipped} read-only fallback item(s) under ${projectPaths(repoRoot).reads[1]}.`);
   for (const id of selected.filter(id => !readonly(id))) {
     const run = byId.get(id);
     if (run && (await reclaimWorktree(repoRoot, store, run, opts))) reclaimed.push(id);
@@ -203,7 +202,7 @@ export async function reclaimWorktree(
   const assertSafe = () => {
     // Startup has no manager claim. Terminal execution can still have a retained
     // autosave writer, so recheck its durable proof before every destructive step.
-    if (autosaveCleanupBlocker(real.sourceDataDir?.(run.id) ?? join(repoRoot, '.ai/cezar'), run.id)) throw Error('Autosave cleanup is not confirmed');
+    if (autosaveCleanupBlocker(real.sourceDataDir?.(run.id) ?? projectPaths(repoRoot).write, run.id)) throw Error('Autosave cleanup is not confirmed');
     if (run.delegation?.role !== 'worker') return;
     // Structural test stores have no private execution machinery. Real stores must attest both
     // generation ownership and fresh resource holders, including after async evidence/preview.
