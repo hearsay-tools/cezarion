@@ -50,7 +50,8 @@ prints one JSON object to stdout and exits 0; a refusal or usage error prints
 `{ "error": "<text>" }` to stderr and exits 1; help exits 0. Its `<name>.<run>.log`,
 `<name>.<run>.exit` and `<name>.job.db` files are scratch state in `$TMPDIR` or `--dir`:
 deleting them loses only the record of that job. The `cezar_wait` description now names
-this command in place of the `sh -c '( … ) & echo $!'` recipe. A process wait on a PID
+this command in place of the `sh -c '( … ) & echo $!'` recipe, and the launch prompt gains a
+"Long commands" part after the artifact part. A process wait on a PID
 obtained another way still works. Its wake text for a PID that was already gone at
 registration changed from `exited, code unknown` to `PID N was not running when this wait
 was registered`; the stored outcome stays `exited`.

@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { processStartToken, startAndForget } from '../detached-process.ts';
 import { probeProcessWait } from '../process-wait/supervisor.ts';
 import { runJobCommand } from './cli.ts';
-import { jobStartCommand, ownCommand } from './command.ts';
+import { jobInstructions, ownCommand } from './command.ts';
 import { claimJob, jobPaths, jobStatus, startJob, superviseJob } from './job.ts';
 
 const run = promisify(execFile);
@@ -27,6 +27,8 @@ async function written(path: string): Promise<void> {
 }
 
 const posix = process.platform !== 'win32';
+// The command exactly as the launch prompt gives it to the agent.
+const startCommand = /start it with (.+ job start) <name>/.exec(jobInstructions())![1]!;
 const node = (script: string) => [process.execPath, '-e', script];
 
 it.runIf(posix)('a job started by a CLI process that has ended reports its real exit code to a process wait', async () => {
@@ -34,7 +36,7 @@ it.runIf(posix)('a job started by a CLI process that has ended reports its real 
   const gate = join(dir, 'gate');
   const script = `const fs=require('fs');console.log('out');console.error('err');const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(gate)})){clearInterval(t);process.exit(7)}},20)`;
   // The starting process is a real CLI process, and `execFile` resolves only after it has ended.
-  const { stdout } = await run('sh', ['-c', `${jobStartCommand()} build --dir "$1" -- "$2" -e "$3"`, 'sh', dir, process.execPath, script]);
+  const { stdout } = await run('sh', ['-c', `${startCommand} build --dir "$1" -- "$2" -e "$3"`, 'sh', dir, process.execPath, script]);
   const started = JSON.parse(stdout) as { name: string; pid: number; log: string; exitFile: string; replaced: boolean };
   pids.push(started.pid);
   expect(started).toMatchObject({ name: 'build', replaced: false });

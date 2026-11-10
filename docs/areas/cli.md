@@ -41,7 +41,9 @@ Inside a task they now resolve the default home because the cockpit's
 so it outlives the shell call, the turn and the agent session on every runner
 (hearsay-tools/cezarion#3097). `jobs/job.ts` owns the supervisor, its claim of the name and the
 `<name>.<run>.log`, `<name>.<run>.exit` and `<name>.job.db` files; they live in `$TMPDIR` unless
-`--dir` names another directory, and `$TMPDIR` goes when the task ends. Every answer is one JSON object. The rules are in
+`--dir` names another directory, and `$TMPDIR` goes when the task ends. The launch prompt's
+"Long commands" part (`jobs/command.ts`) gives agents the full command; the `cezar_wait`
+description names it only as `cez job start`, because the tool list also loads inside omp. Every answer is one JSON object. The rules are in
 [the unified waits spec](../../.ai/specs/2026-10-17-unified-waits.md#the-job-command-2026-11-10).
 
 ## Legacy home recovery (staged)

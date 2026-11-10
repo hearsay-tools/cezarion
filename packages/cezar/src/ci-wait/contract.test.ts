@@ -6,7 +6,6 @@ import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeRe
 import { type CezarWaitAnswer, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
 import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition, waitAnswerHint } from './tools.ts';
 import { waitInvalidInput } from './errors.ts';
-import { jobStartCommand } from '../jobs/command.ts';
 
 const OBSOLETE_HUMAN_WAIT_KIND = 'human';
 
@@ -225,7 +224,8 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   const description = waitToolDefinition.description;
   expect(description).toContain('Times in the answers, such as `deadline`, are UTC.');
   // hearsay-tools/cezarion#3097: the `sh -c '( … ) & echo $!'` recipe died with the shell call under Codex.
-  expect(description).toContain(`\`${jobStartCommand()} <name> -- <command> [args...]\``);
+  // The tool list also loads inside omp, a standalone binary: the description names no path of its own.
+  expect(description).toContain('`cez job start <name> -- <command> [args...]` (your instructions give the full command for this session under "Long commands")');
   expect(description).not.toContain('echo $!');
   expect(description).toContain('pass the `pid` and `exitFile` it prints as `pid` and `exit_file`');
   expect(description).toContain('the job outlives this session; Cezar does not stop it.');

@@ -4,7 +4,6 @@ import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { scheduleTaskRequestSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { z } from 'zod';
-import { jobStartCommand } from '../jobs/command.ts';
 import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop, callScheduleTask, callScheduledTasks } from './client.ts';
 
 /**
@@ -73,7 +72,7 @@ export const waitToolDefinition = {
     // hearsay-tools/cezarion#3097: Codex ends a command's process group when the command returns,
     // so a plain `&` job dies there, and `setsid … & echo $!` prints a dead PID under Claude.
     'kind "process" wakes you when a background command ends. To start one yourself, run ' +
-    `\`${jobStartCommand()} <name> -- <command> [args...]\` ` +
+    '`cez job start <name> -- <command> [args...]` (your instructions give the full command for this session under "Long commands") ' +
     'and pass the `pid` and `exitFile` it prints as `pid` and `exit_file`, so the wake reports the exit code. ' +
     'It writes the command\'s output to the `log` file it prints, refuses a name that still runs, and the job outlives this session; Cezar does not stop it. ' +
     'Its files are in $TMPDIR, which Cezar removes when the task ends: for a job that must outlive the task, add `--dir <a git-ignored directory in the worktree>` before `--`. ' +

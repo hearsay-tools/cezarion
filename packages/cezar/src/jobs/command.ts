@@ -9,11 +9,12 @@ export function ownCommand(): string[] {
 }
 
 /**
- * The `job start` command an agent types, shell-quoted. The tool list loads inside other programs
- * too (Pi's and omp's extension hosts), where a loader may not resolve this program's entry: the
- * plain command name is the answer there, never a failed load.
+ * The launch prompt's part that names the `job start` command in full. Cezar composes it in its own
+ * process, where `process.execPath` is the Node that runs Cezar. The tool list also loads inside
+ * other programs (omp is a standalone binary), so the `cezar_wait` description names the command
+ * only as `cez job start` and points here.
  */
-export function jobStartCommand(): string {
-  try { return `${ownCommand().map(shellQuote).join(' ')} job start`; }
-  catch { return 'cez job start'; }
+export function jobInstructions(): string {
+  const command = `${ownCommand().map(shellQuote).join(' ')} job start`;
+  return `## Long commands\nTo run a command that takes longer than one shell call (a full test run, a benchmark, a measurement), start it with ${command} <name> -- <command> [args...]. It prints JSON with a long-lived \`pid\`, a \`log\` path and an \`exitFile\` path, and the command keeps running after this shell call, this turn and this session end. Then call cezar_wait with kind "process", that \`pid\` and that \`exitFile\` as \`exit_file\`, and end your turn. Replace \`start\` with \`status\` to find a job by its name later.`;
 }

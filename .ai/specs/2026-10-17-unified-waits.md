@@ -1372,7 +1372,11 @@ The flat MCP schema gains `pid` and `exit_file`; `timeout_seconds` and `note` ga
 kind in their descriptions. The tool description tells the agent to start the command with
 `cez job start <name> -- <command> [args...]` and to pass the `pid` and `exitFile` it prints
 (hearsay-tools/cezarion#3097, [the job command](#the-job-command-2026-11-10)). It also says not to
-start a long command with `&`, `nohup`, `setsid` or a runner's own background-task tool.
+start a long command with `&`, `nohup`, `setsid` or a runner's own background-task tool. The
+description names the command only as `cez job start`: the tool list also loads inside Pi's and
+omp's own processes, and omp is a standalone binary, so `process.execPath` there is not the Node
+that runs Cezar. The launch prompt's "Long commands" part (`jobInstructions`, composed in
+Cezar's process after the artifact part) gives the full command.
 
 `$TMPDIR` is the run's Cezar temp directory, outside the worktree, so autosave
 never commits the log or the exit file. With `CEZ_AGENT_TMPDIR=0`, `$TMPDIR` is the host's and the
