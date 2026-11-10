@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { constants, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -12,8 +12,9 @@ import { ownCommand } from './command.ts';
  * A supervisor process leads a session of its own, so the command outlives the shell call, the turn
  * and the agent session on every runner: Codex ends a command's process group when the command
  * returns, and Cezar ends a session's group when the session ends. The supervisor writes the
- * command's output to `<name>.log` and its exit code to `<name>.exit`, and its own PID is the one a
- * process wait watches.
+ * command's output to a log file and its exit code to an exit file, and its own PID is the one a
+ * process wait watches. Each start has files of its own, `<name>.<run>.log` and `<name>.<run>.exit`:
+ * a process wait still open on an earlier start of the name never reads a later start's exit code.
  *
  * The supervisor, not its starter, claims the name: it is the process that lives as long as the
  * job, so no starter's death leaves a claim behind or a job unclaimed. The claim is one SQLite
@@ -27,8 +28,8 @@ const READY_TIMEOUT_MS = 30_000;
 /** How long one claimant waits for another's transaction, which holds a few statements. */
 const CLAIM_BUSY_MS = 10_000;
 
-export interface JobRecord { name: string; pid: number; start?: string; command: string[]; startedAt: string }
-export interface JobPaths { log: string; exitFile: string; record: string }
+export interface JobRecord { name: string; pid: number; start?: string; command: string[]; startedAt: string; log: string; exitFile: string }
+export interface JobPaths { record: string }
 export type JobStatus =
   | { name: string; state: 'running'; pid: number; log: string; exitFile: string }
   | { name: string; state: 'exited'; pid: number; exitCode?: number; log: string; exitFile: string };
@@ -41,7 +42,7 @@ export function jobDirectory(dir: string | undefined, env: NodeJS.ProcessEnv): s
 
 export function jobPaths(dir: string, name: string): JobPaths {
   if (!NAME.test(name)) throw new JobError(`Invalid job name ${JSON.stringify(name)}: use 1-64 letters, digits, ".", "_" or "-", starting with a letter or digit.`);
-  return { log: join(dir, `${name}.log`), exitFile: join(dir, `${name}.exit`), record: join(dir, `${name}.job.db`) };
+  return { record: join(dir, `${name}.job.db`) };
 }
 
 const damaged = (paths: JobPaths, why: string) => new JobError(`The job record ${paths.record} cannot be used (${why}). Check that no process of this job runs, then delete it or choose another name.`);
@@ -50,7 +51,7 @@ function parseRecord(paths: JobPaths, text: unknown): JobRecord {
   let value: Partial<JobRecord> | null = null;
   try { value = JSON.parse(String(text)) as Partial<JobRecord> | null; } catch { /* refused below */ }
   const pid = value?.pid;
-  if (!value || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 2 || typeof value.name !== 'string' || !Array.isArray(value.command) || (value.start !== undefined && typeof value.start !== 'string')) {
+  if (!value || typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 2 || typeof value.name !== 'string' || !Array.isArray(value.command) || (value.start !== undefined && typeof value.start !== 'string') || typeof value.log !== 'string' || typeof value.exitFile !== 'string') {
     throw damaged(paths, 'it holds no job record');
   }
   return value as JobRecord;
@@ -86,9 +87,9 @@ function readRecord(paths: JobPaths): JobRecord | undefined {
 }
 
 /** The first line of the exit file as an integer, when the supervisor has written it. */
-function readExit(paths: JobPaths): number | undefined {
+function readExit(record: JobRecord): number | undefined {
   try {
-    const line = readFileSync(paths.exitFile, 'utf8').split('\n', 1)[0]!.trim();
+    const line = readFileSync(record.exitFile, 'utf8').split('\n', 1)[0]!.trim();
     return /^-?\d+$/.test(line) ? Number(line) : undefined;
   } catch { return undefined; }
 }
@@ -102,19 +103,19 @@ export function jobStatus(dir: string, name: string): JobStatus {
   const paths = jobPaths(dir, name);
   const record = readRecord(paths);
   if (!record) throw new JobError(`No job named ${JSON.stringify(name)} in ${dir}.`);
-  const base = { name, pid: record.pid, log: paths.log, exitFile: paths.exitFile };
-  const exitCode = readExit(paths);
+  const base = { name, pid: record.pid, log: record.log, exitFile: record.exitFile };
+  const exitCode = readExit(record);
   if (exitCode !== undefined) return { ...base, state: 'exited', exitCode };
   return running(record) ? { ...base, state: 'running' } : { ...base, state: 'exited' };
 }
 
 /** What the supervisor tells its starter: it holds the name, or another supervisor does. */
-export type ClaimAnswer = { claimed: true; replaced: boolean } | { claimed: false; pid: number } | { claimed: false; error: string };
+export type ClaimAnswer = { claimed: true; replaced: boolean; log: string; exitFile: string } | { claimed: false; pid: number } | { claimed: false; error: string };
 
 /**
  * Claims `name` for this process, or answers who holds it. Read, decide and write are one write
  * transaction, so two claimants never both find the name free. A holder that has written its exit
- * file is done even while its process is still ending.
+ * file is done even while its process is still ending. Earlier starts' files stay as they are.
  */
 export function claimJob(paths: JobPaths, record: JobRecord): ClaimAnswer {
   return withRecords(paths, { readOnly: false }, (db) => {
@@ -126,12 +127,10 @@ export function claimJob(paths: JobPaths, record: JobRecord): ClaimAnswer {
       if (fresh) db.exec('CREATE TABLE job (id INTEGER PRIMARY KEY CHECK (id = 1), record TEXT NOT NULL)');
       const previous = selectRecord(paths, db);
       if (!fresh && previous === undefined) throw damaged(paths, 'it holds no job record');
-      if (previous && running(previous) && readExit(paths) === undefined) { db.exec('ROLLBACK'); return { claimed: false, pid: previous.pid }; }
-      // An exit file that stays would resolve the next process wait at once with the old code.
-      rmSync(paths.exitFile, { force: true });
+      if (previous && running(previous) && readExit(previous) === undefined) { db.exec('ROLLBACK'); return { claimed: false, pid: previous.pid }; }
       db.prepare('INSERT INTO job (id, record) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET record = excluded.record').run(JSON.stringify(record));
       db.exec('COMMIT');
-      return { claimed: true, replaced: previous !== undefined };
+      return { claimed: true, replaced: previous !== undefined, log: record.log, exitFile: record.exitFile };
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch { /* no transaction is open */ }
       throw error;
@@ -147,7 +146,7 @@ export async function startJob(options: StartOptions): Promise<StartedJob> {
   const { name, dir, command } = options;
   if (command.length === 0) throw new JobError('Give the command to run after "--".');
   mkdirSync(dir, { recursive: true });
-  const paths = jobPaths(dir, name);
+  jobPaths(dir, name);
   const [bin, ...prefix] = ownCommand();
   const { child } = await startOwnedGroup(bin!, [...prefix, 'job', SUPERVISE, dir, name, '--', ...command], {
     cwd: options.cwd ?? process.cwd(), env: options.env ?? process.env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
@@ -158,7 +157,7 @@ export async function startJob(options: StartOptions): Promise<StartedJob> {
   }
   child.disconnect();
   child.unref();
-  return { name, pid: child.pid!, log: paths.log, exitFile: paths.exitFile, replaced: answer.replaced };
+  return { name, pid: child.pid!, log: answer.log, exitFile: answer.exitFile, replaced: answer.replaced };
 }
 
 /** The supervisor's claim answer; a refusal when it ends or stays silent first. */
@@ -200,12 +199,16 @@ export function tellStarter(answer: ClaimAnswer): Promise<void> {
 export async function superviseJob(dir: string, name: string, command: string[], tell: (answer: ClaimAnswer) => Promise<void> = async () => {}): Promise<number> {
   const paths = jobPaths(dir, name);
   const start = processStartToken(process.pid);
-  const record: JobRecord = { name, pid: process.pid, ...(start === undefined ? {} : { start }), command, startedAt: new Date().toISOString() };
+  const startedAt = new Date();
+  // The run id is unique to this supervisor among the starts of one name in this directory.
+  const run = `${startedAt.getTime().toString(36)}-${process.pid}`;
+  const record: JobRecord = { name, pid: process.pid, ...(start === undefined ? {} : { start }), command, startedAt: startedAt.toISOString(),
+    log: join(dir, `${name}.${run}.log`), exitFile: join(dir, `${name}.${run}.exit`) };
   let answer: ClaimAnswer;
   try { answer = claimJob(paths, record); }
   catch (error) { answer = { claimed: false, error: error instanceof Error ? error.message : String(error) }; }
   if (!answer.claimed) { await tell(answer); return 1; }
-  const log = openSync(paths.log, 'w');
+  const log = openSync(record.log, 'w');
   // A hangup must not end the supervisor: its starter's terminal or session may close.
   const signals: Array<[NodeJS.Signals, () => void]> = [['SIGHUP', () => {}]];
   // A starter that died gets no answer; the job runs all the same, and `status` names it.
@@ -215,7 +218,8 @@ export async function superviseJob(dir: string, name: string, command: string[],
       for (const [signal, handler] of signals) process.off(signal, handler);
       if (note) writeFileSync(log, `${note}\n`);
       closeSync(log);
-      writeAtomic(paths.exitFile, `${code}\n`);
+      // The directory can be gone: Cezar removes a task's temp directory when the task ends.
+      try { writeAtomic(record.exitFile, `${code}\n`); } catch { /* no one can read it there */ }
       done(code);
     };
     const child = spawn(command[0]!, command.slice(1), { stdio: ['ignore', log, log] });

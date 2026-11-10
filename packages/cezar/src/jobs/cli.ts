@@ -6,15 +6,17 @@ const HELP = commandText(`Usage: cez job start <name> [--dir <dir>] -- <command>
        cez job status <name> [--dir <dir>]
 
 start   Run a long command so that it outlives this shell call, the turn and the
-        agent session. Writes its output to <dir>/<name>.log and its exit code to
-        <dir>/<name>.exit. Prints JSON with the long-lived "pid", "log" and
-        "exitFile": pass "pid" and "exitFile" to a process wait. Exits 1 and names
-        the running PID while a job of that name still runs. A name whose job
-        ended starts again and replaces its log and exit file.
-status  Print JSON: "state" is "running" or "exited", with "exitCode" when the
-        exit file holds one.
+        agent session. Writes its output to a log file and its exit code to an
+        exit file in <dir>; each start has files of its own. Prints JSON with
+        the long-lived "pid", "log" and "exitFile": pass "pid" and "exitFile"
+        to a process wait. Exits 1 and names the running PID while a job of
+        that name still runs. A name whose job ended starts again.
+status  Print JSON: "state" is "running" or "exited", with "pid", "log",
+        "exitFile", and "exitCode" when the exit file holds one.
 
---dir <dir>  Where the job's files live. Default: $TMPDIR.
+--dir <dir>  Where the job's files live. Default: $TMPDIR, the task's temp
+             directory, which Cezar removes when the task ends. For a job that
+             must outlive the task, name a git-ignored directory in the worktree.
 -h, --help   Show this help.
 
 The command runs without a shell. For a pipeline, pass: -- sh -c '<pipeline>'.`);

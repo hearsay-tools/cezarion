@@ -18,7 +18,10 @@ test('the packaged cez job start outlives its starter and records the exit code'
     // No --dir: the files go to $TMPDIR. `execFileSync` returns only after the starter has ended.
     const started = call('start', 'packaged', '--', process.execPath, '-e', script);
     pid = started.pid;
-    assert.deepEqual({ ...started, pid: 0 }, { name: 'packaged', pid: 0, log: join(dir, 'packaged.log'), exitFile: join(dir, 'packaged.exit'), replaced: false });
+    assert.deepEqual({ name: started.name, replaced: started.replaced }, { name: 'packaged', replaced: false });
+    assert.match(started.log, /packaged\.[0-9a-z]+-\d+\.log$/);
+    assert.match(started.exitFile, /packaged\.[0-9a-z]+-\d+\.exit$/);
+    assert.ok(started.log.startsWith(dir) && started.exitFile.startsWith(dir));
     assert.equal(call('status', 'packaged').state, 'running');
     assert.throws(() => call('start', 'packaged', '--', process.execPath, '-e', ''), new RegExp(`already running as PID ${pid}`));
     writeFileSync(gate, '');

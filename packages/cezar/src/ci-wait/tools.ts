@@ -75,7 +75,8 @@ export const waitToolDefinition = {
     'kind "process" wakes you when a background command ends. To start one yourself, run ' +
     `\`${jobStartCommand()} <name> -- <command> [args...]\` ` +
     'and pass the `pid` and `exitFile` it prints as `pid` and `exit_file`, so the wake reports the exit code. ' +
-    'It writes `<name>.log` and `<name>.exit` in $TMPDIR, refuses a name that still runs, and the job outlives this session; Cezar does not stop it. ' +
+    'It writes the command\'s output to the `log` file it prints, refuses a name that still runs, and the job outlives this session; Cezar does not stop it. ' +
+    'Its files are in $TMPDIR, which Cezar removes when the task ends: for a job that must outlive the task, add `--dir <a git-ignored directory in the worktree>` before `--`. ' +
     'Do not start a long command with `&`, `nohup`, `setsid` or your own background-task tool: it can end with the shell call or the session, or leave you a PID that is not the command\'s. ' +
     // A batch that writes its exit file outside $TMPDIR made agents start a watcher to copy it in.
     'For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out. ' +

@@ -1501,7 +1501,7 @@ depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longe
 
 | Case | What stops it | Behavior at shipped defaults |
 | --- | --- | --- |
-| Normal stop | The command exits | The supervisor writes `<name>.exit` with the code and exits with it. Nothing else stops it: not the shell call, the turn, the session, Stop or Finish. |
+| Normal stop | The command exits | The supervisor writes its exit file with the code and exits with it. Nothing else stops it: not the shell call, the turn, the session, Stop or Finish. |
 | Command ended by a signal | The signal | The exit file holds 128 plus the signal number. |
 | Command cannot be run | The spawn error | The log names the reason and the exit file holds 127. |
 | Supervisor gets SIGTERM or SIGINT | The signal's sender | The supervisor passes it to the command and then records the command's exit as above. |
@@ -1510,6 +1510,8 @@ depend on the runner's shell, so the omp reason for the `sh -c` wrapper no longe
 | Starter interrupted after the supervisor starts | Nothing stops the job | The supervisor claims the name and runs the command without a starter. No PID was printed: `status` gives it. A retry is refused and names the PID. |
 | Several starts of one name at once | Nothing | One supervisor claims the name. The others exit without running the command, and their starts are refused with the claimant's PID. |
 | Supervisor ends inside its claim | The kernel | The transaction rolls back, so the earlier record stands. The operating system drops the file lock. A first claim that ends this way leaves a database with nothing in it, which is a free name. |
+| The task ends (Finish, Stop, `cezar_done`) while a job with the default `<dir>` runs | Nothing stops the command | Cezar removes the task's temp directory with the record, the log and the place for the exit file. The command runs to its end and its output and exit code are lost. `--dir` avoids it. |
+| A name is started again while a process wait is open on its earlier start | Nothing | The earlier wait keeps its own exit file and reports the earlier start's code. |
 | Record deleted while the job runs | Nothing stops the job | `status` answers that no job has that name. A start of the name runs a second job beside the first and both write the same log: the record is the only handle. |
 | Record unreadable, not a database, another program's database, or without its job row (damaged or forged) | Nothing | `start` and `status` refuse and name the file; nothing is replaced. A human deletes it after checking that no process of the job runs. |
 | Record names a PID that another process has reused | Nothing | With a start identity the job reads as ended. Without one (Windows) the name reads as running until that process ends. |
@@ -1524,18 +1526,23 @@ starts nothing itself.
 - It starts a supervisor through `startOwnedGroup` (`detached-process.ts`). The supervisor leads a
   session of its own, which is what survives Codex's cleanup and Cezar's group signal at session
   close. macOS has no `setsid` binary, so the text recipe could not be made portable.
-- The supervisor writes the command's output to `<dir>/<name>.log`, then its exit code to
-  `<dir>/<name>.exit` by a rename, so a reader never sees a half-written file. `<dir>` defaults
-  to `$TMPDIR`. A command that cannot run exits 127; a signalled command exits 128 plus the signal.
+- The supervisor writes the command's output to `<dir>/<name>.<run>.log`, then its exit code to
+  `<dir>/<name>.<run>.exit` by a rename, so a reader never sees a half-written file. `<run>` is
+  new for each start: the process wait reads the exit file before the PID, so a wait still open
+  on an earlier start of the name must never find a later start's code in its file. A command
+  that cannot run exits 127; a signalled command exits 128 plus the signal.
+- `<dir>` defaults to `$TMPDIR`, the task's temp directory. Cezar removes it when the task ends
+  (`reapTerminalScratch`), so a job that must outlive the task takes `--dir` with a git-ignored
+  directory in the worktree, which a process wait also accepts for `exit_file`. The tool
+  description and the command's help say so.
 - It prints one JSON object: `name`, `pid` (the supervisor's), `log`, `exitFile`, `replaced`.
 - The supervisor, not its starter, claims the name: it is the process that lives as long as the
   job. The claim is one SQLite write transaction on `<dir>/<name>.job.db`, which records the
   supervisor's PID and start identity. The database serializes claimants and the operating system
   drops a dead claimant's file lock, so no claim is taken over by age. A supervisor that finds the
   recorded one running tells its starter and exits; the start exits 1 and names that PID. A
-  supervisor that finds it ended removes the old exit file, replaces the log and answers
-  `replaced: true`: a stale exit file would resolve the next wait at once. Without a start
-  identity (Windows) a live PID counts as running.
+  supervisor that finds it ended claims the name and answers `replaced: true`; the earlier
+  start's files stay. Without a start identity (Windows) a live PID counts as running.
 - `cez job status <name> [--dir <dir>]` answers `state: "running"` or `"exited"`, with `exitCode`
   when the exit file holds one. A later session finds a job by its name this way.
 - There is no `cez job stop`: ending a job belongs to process ownership

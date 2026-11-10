@@ -229,6 +229,7 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(description).not.toContain('echo $!');
   expect(description).toContain('pass the `pid` and `exitFile` it prints as `pid` and `exit_file`');
   expect(description).toContain('the job outlives this session; Cezar does not stop it.');
+  expect(description).toContain('Its files are in $TMPDIR, which Cezar removes when the task ends: for a job that must outlive the task, add `--dir <a git-ignored directory in the worktree>` before `--`.');
   expect(description).toContain('Do not start a long command with `&`, `nohup`, `setsid` or your own background-task tool');
   // An agent whose batch wrote its exit file outside $TMPDIR started a watcher to copy it in.
   expect(description).toContain('For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out.');

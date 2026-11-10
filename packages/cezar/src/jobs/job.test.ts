@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +37,9 @@ it.runIf(posix)('a job started by a CLI process that has ended reports its real 
   const { stdout } = await run('sh', ['-c', `${jobStartCommand()} build --dir "$1" -- "$2" -e "$3"`, 'sh', dir, process.execPath, script]);
   const started = JSON.parse(stdout) as { name: string; pid: number; log: string; exitFile: string; replaced: boolean };
   pids.push(started.pid);
-  expect(started).toMatchObject({ name: 'build', log: join(dir, 'build.log'), exitFile: join(dir, 'build.exit'), replaced: false });
+  expect(started).toMatchObject({ name: 'build', replaced: false });
+  expect([started.log, started.exitFile]).toEqual([expect.stringMatching(/build\.[0-9a-z]+-\d+\.log$/), expect.stringMatching(/build\.[0-9a-z]+-\d+\.exit$/)]);
+  expect(started.log.startsWith(dir) && started.exitFile.startsWith(dir)).toBe(true);
   // The supervisor leads its own session, which is what outlives a runner's group cleanup.
   const { stdout: ids } = await run('ps', ['-o', 'sid=,pgid=', '-p', String(started.pid)]);
   expect(ids.trim().split(/\s+/).map(Number)).toEqual([started.pid, started.pid]);
@@ -67,6 +69,10 @@ it.runIf(posix)('a second start of a running name refuses and names its PID; a n
   expect(second).toMatchObject({ replaced: true });
   expect(second.pid).not.toBe(first.pid);
   await written(second.exitFile);
+  // A process wait still open on the first start reads the first start's code, never the second's.
+  expect(second.exitFile).not.toBe(first.exitFile);
+  const firstWait = { pid: first.pid, exitFile: first.exitFile, deadline: new Date(Date.now() + 60_000).toISOString(), roots: { worktree: dir } };
+  expect(probeProcessWait(firstWait, Date.now())).toMatchObject({ outcome: 'exit_file', exitCode: 0 });
   expect(jobStatus(dir, 'bench')).toMatchObject({ state: 'exited', exitCode: 3, pid: second.pid });
 }, 30_000);
 
@@ -83,22 +89,29 @@ it('the supervisor records itself, writes the output and the exit code, and leav
   const dir = scratch();
   const before = process.listenerCount('SIGTERM');
   expect(await superviseJob(dir, 'inline', node("console.log('ran');process.exit(4)"))).toBe(4);
-  const paths = jobPaths(dir, 'inline');
-  expect(readFileSync(paths.log, 'utf8')).toBe('ran\n');
-  expect(readFileSync(paths.exitFile, 'utf8')).toBe('4\n');
+  const inline = jobStatus(dir, 'inline');
+  expect(readFileSync(inline.log, 'utf8')).toBe('ran\n');
+  expect(readFileSync(inline.exitFile, 'utf8')).toBe('4\n');
   expect(process.listenerCount('SIGTERM')).toBe(before);
   // The record names this live process, so only the exit file says the job ended.
   expect(jobStatus(dir, 'inline')).toMatchObject({ state: 'exited', exitCode: 4 });
   expect(await superviseJob(dir, 'killed', node("process.kill(process.pid,'SIGKILL')"))).toBe(137);
   expect(await superviseJob(dir, 'absent', [join(dir, 'no-such-binary')])).toBe(127);
+  // Cezar removes a task's temp directory when the task ends: the supervisor still ends with the code.
+  const gone = join(dir, 'gone');
+  mkdirSync(gone);
+  expect(await superviseJob(gone, 'late', node(`require('fs').rmSync(${JSON.stringify(gone)},{recursive:true});process.exit(2)`))).toBe(2);
+  expect(existsSync(gone)).toBe(false);
 });
 
-const dead = (name: string) => ({ name, pid: 2 ** 22 + 7, start: 'boot:1', command: ['x'], startedAt: new Date().toISOString() });
-const self = (name: string) => ({ name, pid: process.pid, start: processStartToken(process.pid)!, command: ['x'], startedAt: new Date().toISOString() });
+let runs = 0;
+const files = (dir: string, name: string) => { runs += 1; return { log: join(dir, `${name}.${runs}.log`), exitFile: join(dir, `${name}.${runs}.exit`) }; };
+const dead = (dir: string, name: string) => ({ name, pid: 2 ** 22 + 7, start: 'boot:1', command: ['x'], startedAt: new Date().toISOString(), ...files(dir, name) });
+const self = (dir: string, name: string) => ({ name, pid: process.pid, start: processStartToken(process.pid)!, command: ['x'], startedAt: new Date().toISOString(), ...files(dir, name) });
 
 it('status reads a record whose supervisor is gone and left no exit file as exited without a code', () => {
   const dir = scratch();
-  expect(claimJob(jobPaths(dir, 'lost'), dead('lost'))).toEqual({ claimed: true, replaced: false });
+  expect(claimJob(jobPaths(dir, 'lost'), dead(dir, 'lost'))).toMatchObject({ claimed: true, replaced: false });
   const status = jobStatus(dir, 'lost');
   expect(status).toMatchObject({ state: 'exited' });
   expect(status).not.toHaveProperty('exitCode');
@@ -107,14 +120,16 @@ it('status reads a record whose supervisor is gone and left no exit file as exit
 it.runIf(posix)('a claim is refused while the holder runs, and taken from a holder that is gone or has written its exit file', () => {
   const dir = scratch();
   const paths = jobPaths(dir, 'claim');
-  expect(claimJob(paths, self('claim'))).toEqual({ claimed: true, replaced: false });
-  expect(claimJob(paths, dead('claim'))).toEqual({ claimed: false, pid: process.pid });
-  expect(jobStatus(dir, 'claim')).toMatchObject({ state: 'running', pid: process.pid });
+  const holder = self(dir, 'claim');
+  expect(claimJob(paths, holder)).toEqual({ claimed: true, replaced: false, log: holder.log, exitFile: holder.exitFile });
+  expect(claimJob(paths, dead(dir, 'claim'))).toEqual({ claimed: false, pid: process.pid });
+  expect(jobStatus(dir, 'claim')).toMatchObject({ state: 'running', pid: process.pid, exitFile: holder.exitFile });
   // The holder wrote its exit file: it is done, though its process still ends.
-  writeFileSync(paths.exitFile, '0\n');
-  expect(claimJob(paths, dead('claim'))).toEqual({ claimed: true, replaced: true });
-  expect(existsSync(paths.exitFile)).toBe(false);
-  expect(claimJob(paths, self('claim'))).toEqual({ claimed: true, replaced: true });
+  writeFileSync(holder.exitFile, '0\n');
+  expect(claimJob(paths, dead(dir, 'claim'))).toMatchObject({ claimed: true, replaced: true });
+  // The earlier start's exit file stays for a wait that still reads it.
+  expect(readFileSync(holder.exitFile, 'utf8')).toBe('0\n');
+  expect(claimJob(paths, self(dir, 'claim'))).toMatchObject({ claimed: true, replaced: true });
 });
 
 it.runIf(posix)('of several starts of one name at once, exactly one runs the command', async () => {
@@ -138,17 +153,15 @@ it.runIf(posix)('a supervisor whose starter has ended still claims the name and 
   // No channel to a starter: the supervisor has no one to tell.
   const [bin, ...prefix] = ownCommand();
   expect(await startAndForget(bin!, [...prefix, 'job', '__supervise', dir, 'orphan', '--', ...node('process.exit(8)')], { settleMs: 0 })).toBe(true);
-  const paths = jobPaths(dir, 'orphan');
-  await written(paths.exitFile);
-  const status = jobStatus(dir, 'orphan');
-  pids.push(status.pid);
-  expect(status).toMatchObject({ state: 'exited', exitCode: 8 });
+  await vi.waitFor(() => { expect(jobStatus(dir, 'orphan')).toMatchObject({ state: 'exited', exitCode: 8 }); }, { timeout: 20_000, interval: 25 }); // bound: hang guard; the supervisor's own record and exit file are the signal
+  pids.push(jobStatus(dir, 'orphan').pid);
 }, 30_000);
 
 it.runIf(posix)('a record file that is not a record never counts as absent: start and status refuse, and nothing is replaced', async () => {
   const dir = scratch();
   const paths = jobPaths(dir, 'damaged');
-  writeFileSync(paths.log, 'earlier output\n');
+  const earlier = join(dir, 'damaged.1-1.log');
+  writeFileSync(earlier, 'earlier output\n');
   writeFileSync(paths.record, 'this is not a database, and it is long enough to be read as one: '.repeat(4));
   await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('cannot be used');
   expect(() => jobStatus(dir, 'damaged')).toThrow('cannot be used');
@@ -167,7 +180,7 @@ it.runIf(posix)('a record file that is not a record never counts as absent: star
     await expect(startJob({ name: 'damaged', dir, command: node('') })).rejects.toThrow('cannot be used');
     expect(() => jobStatus(dir, 'damaged')).toThrow('cannot be used');
   }
-  expect(readFileSync(paths.log, 'utf8')).toBe('earlier output\n');
+  expect(readFileSync(earlier, 'utf8')).toBe('earlier output\n');
   // A claimant that ended before its first commit leaves an empty file: that is a free name.
   writeFileSync(paths.record, '');
   expect(() => jobStatus(dir, 'damaged')).toThrow('No job named "damaged"');
