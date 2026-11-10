@@ -1,0 +1,47 @@
+import type { ProjectMigrationResult } from './engine.ts';
+import { describeProjectMigrationPlan, gitMvCommands, NOT_REWRITTEN, planProjectMigration } from './plan.ts';
+
+/** What `migrate-project` reports. */
+export interface ProjectMigrationAnswer {
+  dryRun: boolean;
+  /** Whether an unfinished migration journal was finished first. */
+  resumed: boolean;
+  /** What a journal finished first moved and rewrote, when one was; a dry run reports it too. */
+  recovered?: string;
+  /** The plan as printed (`describeProjectMigrationPlan`). */
+  report: string;
+  /** `git mv` commands for the tracked files the migration leaves in place, for the user to run. */
+  gitMv: string[];
+}
+
+/** A finished journal as the plan text: what it moved, repaired and rewrote. */
+function journalReport(result: ProjectMigrationResult): string {
+  const { journal } = result;
+  return describeProjectMigrationPlan({
+    ...journal, journal: '', conflicts: [], blockers: [], gitMv: gitMvCommands(journal.repoRoot, journal.tracked), notRewritten: NOT_REWRITTEN,
+  });
+}
+
+/** A dry run: the engine's whole plan, after any unfinished journal it had to finish first. */
+export async function dryRunAnswer(repoRoot: string, recovered: ProjectMigrationResult | undefined): Promise<ProjectMigrationAnswer> {
+  const plan = await planProjectMigration(repoRoot);
+  return { dryRun: true, resumed: recovered !== undefined, ...(recovered ? { recovered: journalReport(recovered) } : {}),
+    report: describeProjectMigrationPlan(plan), gitMv: plan.gitMv };
+}
+
+/** A finished migration (its journal removed): what it moved, repaired and rewrote. */
+export function migrationAnswer(result: ProjectMigrationResult): ProjectMigrationAnswer {
+  return { dryRun: false, resumed: result.resumed, report: journalReport(result), gitMv: result.gitMv };
+}
+
+/** The answer as the CLI prints it: what a finished journal did, the report, then what happened. */
+export function migrationAnswerText(answer: ProjectMigrationAnswer): string {
+  const lines = answer.recovered
+    ? ['An interrupted migration was found and completed first. It did this:', answer.recovered, 'The dry run of what remains:']
+    : [];
+  lines.push(answer.report);
+  if (answer.resumed && !answer.recovered) lines.push('An unfinished migration was finished first.');
+  if (answer.dryRun) lines.push(answer.recovered ? 'Dry run: planning changed nothing; the completed migration above did.' : 'Dry run: nothing was moved or rewritten.');
+  else lines.push(`Migration complete.${answer.gitMv.length ? ' Run the git mv commands above and commit them.' : ''}`);
+  return lines.join('\n');
+}

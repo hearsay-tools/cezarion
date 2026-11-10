@@ -29,7 +29,7 @@ it('re-checks the migration fence before each write that follows an await, so in
     const init = initCommand(root).then(() => undefined, (error: unknown) => error);
     await reached;
     // Another process takes and drains the fence while init scans the fallback workflows.
-    const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0 });
+    const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [] });
     resume();
     expect(await init).toBeInstanceOf(ProjectMigrationFencedError);
     expect(existsSync(join(dataDir, 'workflows', 'fix-and-verify.yaml'))).toBe(false);

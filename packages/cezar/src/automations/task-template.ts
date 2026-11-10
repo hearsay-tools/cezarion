@@ -10,7 +10,7 @@ import { AutomationCandidateChangedError, GithubPoller, type GithubCandidate } f
 import { stopOnceSchedule, type ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
 import { githubBaselineState } from './github-baseline.ts';
-import { holdProjectWork, ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
+import { ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { isGithubAutomation, isOnceSchedule } from './types.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
@@ -228,15 +228,14 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
     // a busy log lock must not undo a reconciliation that already held.
     if (!runId) {
       const { candidate } = receipt;
-      // Held work: a migration fence waits for it, and it writes only where admitted.
-      void holdProjectWork(automationStore.dataDir, () => automationStore.appendLog({
+      void automationStore.appendLog({
         automationId: receipt.automationId,
         revision: receipt.revision,
         result: 'failed',
         reason: error,
         receiptId: receipt.receiptId,
         ...(candidate ? { event: candidate.event, githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url } : {}),
-      })).catch(() => undefined);
+      }).catch(() => undefined);
     }
     reconciled++;
   }
@@ -293,7 +292,7 @@ export function rebaselineIdleAutomations(
     }
     if (!armed) continue;
     // The log write is best effort: a busy log lock must not undo a brake that already held.
-    void holdProjectWork(automationStore.dataDir, () => automationStore.appendLog({
+    void automationStore.appendLog({
       automationId: definition.id,
       revision: definition.revision,
       result: 'baseline',
@@ -302,7 +301,7 @@ export function rebaselineIdleAutomations(
         : idleDays === undefined
         ? 'Re-baselined at start: this automation had never polled successfully; the backlog is not launched.'
         : `Re-baselined at start after ${idleDays} day${idleDays === 1 ? '' : 's'} idle; the backlog is not launched.`,
-    })).catch(() => undefined);
+    }).catch(() => undefined);
     onChange?.(definition.id, definition.revision);
     rebaselined += 1;
   }

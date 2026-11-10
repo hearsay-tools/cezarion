@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -14,6 +14,7 @@ import { copyWorkspaceSeed } from '../delegation/workspace-seed.testkit.ts';
 import { createWorktree } from '../git-worktree.ts';
 import { seedHandoffFile } from '../handoff.ts';
 import { seedRuns } from '../runs/run-store.testkit.ts';
+import { PROJECT_MIGRATION_STEPS, writeProjectMigrationJournal } from './journal.ts';
 
 /**
  * A real project for the migration engine: a Git repository (the project root is the main checkout
@@ -157,4 +158,15 @@ export function projectSnapshot(project: MigrationProject, options: { databaseBy
 
 export function removeMigrationProject(project: MigrationProject): void {
   rmSync(project.base, { recursive: true, force: true });
+}
+
+/** An unfinished journal with every step marked done and nothing left to apply: a recovery only
+ *  removes it. The cheapest journal an entry point must finish before it reads the project. */
+export function writeSettledJournal(root: string): string {
+  const real = realpathSync(root);
+  const path = join(real, '.ai', 'squawk-migration.json');
+  mkdirSync(join(real, '.ai'), { recursive: true });
+  writeProjectMigrationJournal(path, { version: 1, id: randomUUID(), createdAt: new Date().toISOString(), repoRoot: real,
+    source: join(real, '.ai/cezar'), destination: join(real, '.ai/squawk'), done: [...PROJECT_MIGRATION_STEPS], moves: [], tracked: [], worktrees: [], rewrites: [] });
+  return path;
 }

@@ -2,21 +2,9 @@ import { githubBaselineState } from './github-baseline.ts';
 import type { AutomationCoordinator } from './coordinator.ts';
 import { AutomationCandidateChangedError, type GithubCandidate, type GithubPoller, type GithubPollResult } from './github-poller.ts';
 import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
-import { ProjectMigrationFencedError, withProjectAdmission } from '../server/cockpit-ownership.ts';
+import { ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
 import { isGithubAutomation, isScheduleAutomation, type AutomationDefinition, type AutomationRuntimeState, type GithubAutomationDefinition } from './types.ts';
-
-/**
- * A timer fire holds the project's admission lease until it ends, so a migration fence drains it.
- * A fenced project skips the fire like an unavailable store: nothing is reserved, advanced, logged
- * or counted, and the timer retries at its floor.
- */
-function admitted<T>(dataDir: string, fire: () => Promise<T>): Promise<T> {
-  return withProjectAdmission(dataDir, fire, (error) => {
-    console.warn(`[cez] automation fire deferred until the project migration ends: ${error.message}`);
-    throw new AutomationProjectUnavailableError(error.message, { cause: error });
-  });
-}
 
 export interface AutomationLaunchResult { runId: string; existing?: boolean }
 export type AutomationLauncher = (
@@ -468,7 +456,7 @@ export class WorkspaceAutomationScheduler {
       const key = `${projectId}:${definition.id}`;
       live.add(key);
       const at = Date.parse(store.state(definition.id)?.nextCheckAt ?? new Date().toISOString());
-      due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), fire: () => admitted(store.dataDir, () => scheduler.check(definition)) });
+      due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: Math.max(definition.intervalSeconds * 1_000, MIN_RETRY_MS), fire: () => scheduler.check(definition) });
     }
     return due;
   }
@@ -497,7 +485,7 @@ export class WorkspaceAutomationScheduler {
       live.add(key);
       // A rejected fire (a held lease included) re-arms at the floor; the schedule's own next
       // occurrence is the runner's business, not the timer's.
-      due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: MIN_RETRY_MS, fire: () => admitted(store.dataDir, () => runner.fire(definition)) });
+      due.push({ key, at: Math.max(at, this.retryAfter.get(key) ?? 0), retryAfterMs: MIN_RETRY_MS, fire: () => runner.fire(definition) });
     }
     return due;
   }
