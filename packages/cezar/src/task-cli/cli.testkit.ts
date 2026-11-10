@@ -1,7 +1,7 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { afterEach, beforeEach, expect } from 'vitest';
+import { afterEach, beforeEach, expect, vi } from 'vitest';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
@@ -76,4 +76,14 @@ export function taskCliFixture() {
     get discoveries() { return discoveries; },
     io, run, last, start, worker, withWebhook,
   };
+}
+
+/** Reload flag-table initializers for every argument case, including Stryker static mutants. */
+export function taskCliArgumentRun(io: (stdin?: string) => TaskIo) {
+  let runFlags: typeof runTaskCommand;
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ runTaskCommand: runFlags } = await import('./cli.ts'));
+  });
+  return (argv: string[], stdin?: string) => runFlags(argv, {}, io(stdin));
 }
