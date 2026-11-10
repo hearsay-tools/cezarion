@@ -485,6 +485,15 @@ export class PreviewHost implements PreviewHostLike {
     return this.deps.probe(port);
   }
 
+  /**
+   * A project migration fence: every run of `dataDir` stops its dev servers and closes its
+   * Chromium, awaited until each process has exited. Profiles stay; panes are told.
+   */
+  async releaseProject(dataDir: string): Promise<void> {
+    const entries = [...this.entries.values()].filter((entry) => entry.ctx.dataDir === dataDir);
+    await Promise.all(entries.map((entry) => this.releaseEntry(entry, true, true)));
+  }
+
   /** cezar shuts down: every run is released and every pane closed. */
   async close(): Promise<void> {
     this.download?.controller.abort();

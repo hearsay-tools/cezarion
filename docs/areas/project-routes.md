@@ -36,8 +36,10 @@ pid plus start-token liveness and token-checked release.
 - **Leases.** New project work enters through `withProjectAdmission(dataDir, work, refused)`:
   refused when fenced, otherwise counted until `work` settles. The lease travels with the
   async call chain (`AsyncLocalStorage`): everything the admitted work calls, a task start
-  or a context build included, passes admission while the lease is open, and the drain
-  then waits for what it started. Work that admitted or live work set going (webhook
+  or a context build included, passes this process's own fence while the lease is open,
+  and that fence's drain waits for what it started. A lease never passes a fence another
+  owner holds: that fence cannot count it, so admission always reads the fence file and
+  refuses there, admitted work included. Work that admitted or live work set going (webhook
   deliveries, preview releases) runs through `holdProjectWork`: counted, admitted for its
   whole length, never refused. A detached job (a manual automation check) opens its own
   `withProjectAdmission` span before its request answers. Entry points: every project route (409), finite
@@ -89,11 +91,25 @@ pid plus start-token liveness and token-checked release.
   10 s with backoff), a context build with recovery and one bounded archive or
   automation tick; short enough that no migration hangs. At the bound the migration stops
   by itself: the fence is released and the same error lists what is still live. An abort
-  signal releases it earlier. Inside the same bound and abort, the owning cockpit waits for
-  history compression and queued report scans (`settle`). The holder keeps the fence until
+  signal releases it earlier. Inside the same bound and abort, the owning cockpit stops the
+  project's dev servers and Chromium and waits until they have exited
+  (`PreviewHost.releaseProject`), and waits for history compression and queued report scans
+  (`settle`). The holder keeps the fence until
   `release()`, after the last rewrite.
+- **Run-scoped writers.** These write only for a run that is live or held, so their check is
+  that invariant: the preflight refuses while any run is live in either directory or held
+  by a live foreign claim, the drain waits for held runs and tracked work, and a headless
+  run is visible through its claim from its first write. `runs/agent-tmpdir.ts`,
+  `runs/history-file.ts`, `runs/transcript-facts.ts`, `workflows/run/attachment-writer.ts`,
+  `workflows/run/queued-input.ts`, `handoff.ts`, `autosave-cleanup.ts`,
+  `delegation/context.ts`, `delegation/workspace.ts`, task worktrees in `git-worktree.ts`,
+  `preview/dev-server.ts`, `preview/chromium.ts`, `preview/host.ts`,
+  `preview/agent-marker.ts`, `artifacts/lifecycle.ts`.
+- **Not owner-gated.** A cockpit that does not own a project still runs its automations;
+  under a fence the write backstop drops their writes. Their failing launches are
+  hearsay-tools/cezarion#3136.
 - **Holder duty (P4b2).** After the drain and before the first move, the holder disposes
-  the project's context with previews released and closes its store. `close()` saves once
+  the project's context and closes its store. `close()` saves once
   and leaves no save timer; later saves return without a database. It stops the
   transcript-facts queue and settles its jobs, so no sidecar is written later. A late
   repo-handle result finds no database and writes nothing (lazy contexts also abort it).

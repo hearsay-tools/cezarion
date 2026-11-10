@@ -494,6 +494,8 @@ export class AutomationStore {
     const deadline = Date.now() + 15_000;
     let lease: AutomationLease | undefined;
     while (!lease && Date.now() < deadline) {
+      // A fence taken while this waited: no lock, no guard, and every write inside skips.
+      if (projectWriteRefused(this.dataDir)) return operation();
       lease = this.tryAcquireLease(path, guardPath, 10 * 60_000, 0, false);
       if (!lease) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
@@ -517,6 +519,7 @@ export class AutomationStore {
     let lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     while (!lease && Date.now() < deadline) {
       Atomics.wait(SLEEP, 0, 0, 2);
+      if (projectWriteRefused(this.dataDir)) return operation();
       lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     }
     if (!lease) throw new Error(`automation ${lockName} is busy; retry shortly`);
@@ -525,6 +528,7 @@ export class AutomationStore {
   }
 
   private tryAcquireLease(path: string, guardPath: string, staleAfterMs: number, attempt: number, reclaiming: boolean): AutomationLease | undefined {
+    if (projectWriteRefused(this.dataDir)) return undefined;
     if (!reclaiming && existsSync(guardPath)) {
       const releaseGuard = this.acquireReclaimGuard(guardPath, staleAfterMs);
       if (!releaseGuard) return undefined;
@@ -566,6 +570,7 @@ export class AutomationStore {
 
   /** Only one process may inspect and remove an abandoned poll lock at a time. */
   private acquireReclaimGuard(path: string, staleAfterMs: number): (() => void) | undefined {
+    if (projectWriteRefused(this.dataDir)) return undefined;
     for (let attempt = 0; attempt <= 1; attempt++) {
       try {
         mkdirSync(path, { mode: 0o700 });
@@ -595,6 +600,7 @@ export class AutomationStore {
 
   /** Fresh live guards are respected; abandoned or aged-out guards are recoverable. */
   private retireAbandonedReclaimGuard(path: string, staleAfterMs: number): boolean {
+    if (projectWriteRefused(this.dataDir)) return false;
     const marker = join(path, '.reaping');
     let claimedToken: string | undefined;
     try {

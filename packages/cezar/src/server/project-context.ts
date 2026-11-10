@@ -189,15 +189,20 @@ export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'persistedLi
  * pinned by retention, publish or branch cleanup, the manager's tracked work) for a bounded time.
  * The caller holds it until every rewrite ends.
  */
-export async function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store' | 'manager'>, signal?: AbortSignal): Promise<ProjectMigrationFence> {
+export async function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store' | 'manager'>,
+  options: { signal?: AbortSignal | undefined; preview?: Pick<PreviewHost, 'releaseProject'> | undefined } = {}): Promise<ProjectMigrationFence> {
   const fence = await ownership.fenceProject(project.dataDir, {
     liveTasks: () => projectLiveTasks(project.store),
     inFlight: () => project.store.listRuns().length + project.manager.pendingWork(),
     // History compression and a reports scan write run files and the database; both end within
     // the bound. The rest of the store's own work ends when the holder closes the store.
-    // The last debounced save lands while the drain still admits it.
-    settle: async () => { await Promise.all([project.store.historyIdle(), project.store.reports.idle()]); project.store.flush(); },
-    signal,
+    // The project's dev servers and Chromium exit, history compression and report scans end,
+    // and the last debounced save lands, all while the drain still admits them.
+    settle: async () => {
+      await Promise.all([project.store.historyIdle(), project.store.reports.idle(), options.preview?.releaseProject(project.dataDir)]);
+      project.store.flush();
+    },
+    signal: options.signal,
   });
   return fence;
 }

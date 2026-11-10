@@ -131,11 +131,16 @@ export class ProjectMigrationFencedError extends Error {
  */
 export function projectAdmissionRefusal(dataDir: string): ProjectMigrationFencedError | undefined {
   const paths = migrationFencePaths(dataDir);
-  if (!paths || leased(paths.lock)) return undefined;
+  if (!paths) return undefined;
   if (pathPresent(paths.lock)) {
     const owner = readOwner(paths.lock);
     if (!owner && pathPresent(paths.lock)) return new ProjectMigrationFencedError('unreadable', paths.lock);
-    if (owner && alive(owner)) return new ProjectMigrationFencedError('migrating', paths.lock, owner);
+    if (owner && alive(owner)) {
+      // A lease or hold passes only this process's own fence, whose drain counts it. A fence
+      // another owner holds refuses everything here, admitted work included.
+      if (heldFences.get(paths.lock) === owner.token && leased(paths.lock)) return undefined;
+      return new ProjectMigrationFencedError('migrating', paths.lock, owner);
+    }
   }
   return pathPresent(paths.journal) ? new ProjectMigrationFencedError('journal', paths.journal) : undefined;
 }
@@ -183,6 +188,8 @@ export function assertProjectWritable(dataDir: string): void {
 
 /** Operations admitted per fence path in this process; a fence drains them to zero. */
 const admitted = new Map<string, number>();
+/** The token of every fence this process holds, by lock path. */
+const heldFences = new Map<string, string>();
 /** The open leases of the current async call chain: an operation admitted before a fence
  *  finishes, task starts included, and the drain waits for what it started. */
 const leases = new AsyncLocalStorage<ReadonlyArray<{ lock: string; open: boolean }>>();
@@ -376,10 +383,12 @@ export class CockpitOwnership {
     const owner: Owner = { ...newOwner(), ...(this.url ? { url: this.url } : {}) };
     if (!claim(paths.lock, owner)) throw projectAdmissionRefusal(dataDir) ?? new ProjectMigrationFencedError('migrating', paths.lock);
     this.fences.set(paths.lock, owner);
+    heldFences.set(paths.lock, owner.token);
     draining.add(paths.lock);
     const fence = { ...paths, release: () => {
       if (this.fences.get(paths.lock) !== owner) return;
       this.fences.delete(paths.lock);
+      if (heldFences.get(paths.lock) === owner.token) heldFences.delete(paths.lock);
       release(paths.lock, owner);
     } };
     try {
@@ -426,7 +435,10 @@ export class CockpitOwnership {
 
   /** Only at process exit: managers may still have asynchronous work after dispose. */
   releaseAll(): void {
-    for (const [path, owner] of this.fences) release(path, owner);
+    for (const [path, owner] of this.fences) {
+      if (heldFences.get(path) === owner.token) heldFences.delete(path);
+      release(path, owner);
+    }
     this.fences.clear();
     for (const [path, owner] of this.owned) release(path, owner);
     this.owned.clear();

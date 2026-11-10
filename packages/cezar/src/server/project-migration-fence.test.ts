@@ -285,6 +285,66 @@ describe('the write backstop over automation and artifact files', () => {
     } finally { warn.mockRestore(); }
   });
 
+  it('refuses an admitted timer fire once a fence of another process holds the project', async () => {
+    const { root, dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+      filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'issues');
+    store.setState(definition.id, (current) => ({ ...current, nextCheckAt: '2026-01-01T00:00:00.000Z' }));
+    let resume!: () => void;
+    const network = new Promise<void>((resolve) => { resume = resolve; });
+    let parked!: () => void;
+    const polling = new Promise<void>((resolve) => { parked = resolve; });
+    const poller = { poll: async () => { parked(); await network; return { candidates: [], truncated: false, pages: 1 }; }, matchesCurrentLabels: async () => true };
+    const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'p', root, status: 'not-git' }] });
+    const refreshed = vi.spyOn(coordinator, 'refresh');
+    // The production wrapper: the fire holds this process's lease while it waits on the network.
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator, handle: (_projectId, automations) => ({ projectId: 'p', store: automations, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: poller as never }, launch: vi.fn() }),
+    });
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await scheduler.start();
+      await polling;
+      const before = files();
+      // Another process (the owning cockpit) takes and drains its fence: it cannot see this lease.
+      const startToken = processStartToken(other.pid!);
+      writeFileSync(migrationFencePaths(dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
+      const calls = refreshed.mock.calls.length;
+      resume();
+      // bound: hang guard; the fire has ended when the scheduler re-arms through refresh.
+      await vi.waitFor(() => expect(refreshed.mock.calls.length).toBeGreaterThan(calls), { timeout: 5_000 });
+      expect(files()).toEqual(before);
+    } finally {
+      scheduler.stop();
+      warn.mockRestore();
+      other.kill('SIGKILL');
+    }
+  });
+
+  it('takes no automation lock or reclaim guard while another owner fences the project', async () => {
+    const { dataDir } = project();
+    const store = AutomationStore.open(dataDir);
+    const definition = store.create({ name: 'Issues', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
+      filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review' } }, 'issues');
+    // A stale reclaim guard would make the next lock attempt create its own guard and owner file.
+    mkdirSync(join(dataDir, 'automation-log.reclaim'), { recursive: true });
+    const fence = await owner().fenceProject(dataDir, none);
+    const before = readdirSync(dataDir).sort();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(store.acquireLease()).toBeUndefined();
+      await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: 'fenced' });
+      expect(readdirSync(dataDir).sort()).toEqual(before);
+      expect(readdirSync(join(dataDir, 'automation-log.reclaim'))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+      fence.release();
+    }
+  });
+
   it('leaves the publication lock candidate in place when the fence comes while the lock is awaited', async () => {
     const { root, dataDir } = project();
     const task = randomUUID();
@@ -410,6 +470,24 @@ describe('the owning cockpit', () => {
       expect((refusal as ProjectMigrationBusyError).tasks).toEqual([{ id, title: 'finalizing elsewhere', state: 'done' }]);
       expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
     } finally { closeClaimSession(fallbackOwner.session); }
+  });
+
+  it('stops the project\'s previews inside the drain bound', async () => {
+    const { dataDir, store } = cockpitStore();
+    const cockpit = owner();
+    await cockpit.acquire(dataDir);
+    let exited!: () => void;
+    const exit = new Promise<void>((resolve) => { exited = resolve; });
+    let asked!: () => void;
+    const releasing = new Promise<void>((resolve) => { asked = resolve; });
+    const preview = { releaseProject: vi.fn(async () => { asked(); await exit; }) };
+    let held = false;
+    const fencing = fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }, { preview }).then((fence) => { held = true; return fence; });
+    await releasing;
+    expect(preview.releaseProject).toHaveBeenCalledWith(dataDir);
+    expect(held).toBe(false);
+    exited();
+    (await fencing).release();
   });
 
   it('honours an abort that came before the claim or during a settled wait', async () => {
