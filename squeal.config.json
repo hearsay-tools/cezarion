@@ -37,7 +37,7 @@
   },
   "inputs": {
     ".ai/skills/check-code-quality/scripts/restart-wrapper.test.mjs": [
-      ".ai/skills/check-code-quality/references/pre-pr.md"
+      ".ai/skills/check-code-quality/references/tool.md"
     ],
     "packages/cezar/src/ast-grep-rules.test.ts": [
       "sgconfig.yml",

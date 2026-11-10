@@ -1,5 +1,9 @@
 # Bundled tool
 
+These scripts remain for requested code statistics, compatibility and the existing
+CI complexity gate. They are not the local pre-PR gate or a fallback for it.
+For pre-PR work, use [Before a PR](pre-pr.md), which requires Squeal.
+
 The skill owns the parser, CLI and change scanner in `scripts/`. Copy the whole
 skill directory to reuse them. They require Node 24.15 or newer. The changed-function
 check also requires Git; individual measurements work outside a Git repository.
@@ -106,7 +110,7 @@ for example, `--coverage-timeout 900000` allows fifteen minutes. It requires
 zero does not disable the bound. A timeout produces exit 2, names the effective
 limit and explains how to raise it. Temporary coverage is removed on failure;
 `--coverage <coverage-final.json>` requires a current Istanbul report collected
-separately (this repository's CI publishes one: see pre-pr.md, Coverage from CI). Failed tests produce exit 2 and no accepted verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
+separately (this repository's CI publishes one: see Coverage from CI below). Failed tests produce exit 2 and no accepted verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
 With Vitest it replaces the `testTimeout` of every selected project; hook
 timeouts keep their configured values. With Node it passes `--test-timeout` to
 `node --test`. Use it when tests time out under host load but pass alone. Missing, stale or unmatched function coverage remains incomplete. A
@@ -220,3 +224,235 @@ function set(key: string, value: string) {
 For a longer chain, give each unmatched stage its own explicit body. This is a
 mapping workaround, not a coverage exemption; every changed stage must still
 have a coverage result.
+
+## Legacy collection recipes
+
+Resolve the PR's target branch from the task or repository bindings. Fetch its
+remote ref. Select the relevant tests and their runner from the repository's
+test instructions. Run from the target repository root:
+
+```sh
+node <skill>/scripts/check.mjs --base <target-ref> \
+  --runner <vitest|node> --test <test-file> --output <report.md>
+```
+
+Select relevant import-graph tests and pass every changed test file with runtime
+functions, including type-focused tests and browser specs. Type-only imports do
+not exempt runtime `describe` or `it` callbacks from measurement; compile-time
+assertions still require the repository's typecheck. To find tests importing a
+changed testkit, replace the placeholder with its basename and inspect matches:
+
+```sh
+rg -l -F '<testkit basename>' packages --glob '*.test.ts'
+```
+
+Repeat `--test` for multiple files. With Vitest, select every project that runs
+a selected test using repeatable `--project`: a unit test file needs its unit
+project, a `*.e2e.ts` browser spec needs its browser project. Browser specs run and are
+measured through that project; passing them does not ask the check to skip them. Vitest uses the
+repository's own configuration, setup files, aliases and environment. With Node,
+pass repository setup modules through repeatable `--node-import`. For an existing
+current Istanbul report, replace runner and test options with
+`--coverage <coverage-final.json>`.
+
+CI still publishes Vitest coverage for the head you push. For an explicit
+legacy measurement request, that artifact can avoid a separate collection: see [Coverage from CI](#coverage-from-ci) below.
+
+A change with no changed JS or TS file (`.js`, `.jsx`, `.ts`, `.tsx`, or their
+`.cjs`, `.mjs`, `.cts` and `.mts` forms) measures nothing, so it needs no
+`--runner` or `--test`:
+
+```sh
+node <skill>/scripts/check.mjs --base <target-ref> --output <report.md>
+```
+
+It reports `Checked 0/0 changed functions` and exits 0.
+
+In this repository, a change with cockpit source, unit tests and browser specs
+takes one command. The `e2e` project's own global setup boots the test
+environment:
+
+```sh
+node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+  --project web --project e2e \
+  --test packages/web/src/routes/new-task-composer.test.tsx \
+  --test packages/web/e2e/completion-controls.e2e.ts \
+  --output .ai/qa/<issue>/code-quality.md
+```
+
+When Squeal is validating this worktree, it can hold the test-environment lease
+needed by the `e2e` coverage measurement. The check then exits 2 with
+`timed out waiting for test environment held by pid N (node squeal.mjs daemon …)`.
+This coverage measurement is separate from Squeal's ordinary test results.
+For this measurement only, stop this worktree's daemon and start it again even
+when the check fails. From the repository root, wrap the command above as follows
+(replace `<issue>` before running):
+
+```sh
+(
+  set -e
+  test -d "$PWD"
+  squeal stop "$PWD"
+  restore_validation() {
+    measurement_status=$?
+    trap - EXIT
+    if ! squeal start "$PWD"; then
+      if ! node --input-type=module - "$PWD" "$(command -v squeal)" <<'NODE'
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { setTimeout } from 'node:timers/promises';
+
+const root = realpathSync(process.argv[2]);
+const launcher = process.argv[3];
+// bound: allow 30 extra seconds for the seconds-late startup observed under
+// host load in hearsay-tools/squeal#94; this is not a startup-time guarantee.
+const deadline = performance.now() + 30000;
+process.exitCode = 1;
+while (performance.now() < deadline) {
+  const probe = spawnSync(launcher, ['status', '--json'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: Math.max(1, Math.min(5000, Math.ceil(deadline - performance.now()))),
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    // Test failures can make status nonzero; only daemon liveness matters here.
+    const status = JSON.parse(probe.stdout);
+    if (!probe.error && performance.now() < deadline && status.available === true &&
+        status.worktreeRoot === root && status.daemon?.state === 'alive') {
+      process.exitCode = 0;
+      break;
+    }
+  } catch {
+    // Missing or malformed status does not confirm that validation is restored.
+  }
+  await setTimeout(Math.max(0, Math.min(1000, deadline - performance.now())));
+}
+NODE
+      then
+        echo "Squeal restart failed after the status wait; restore validation with squeal start in this worktree" >&2
+        if [ "$measurement_status" -eq 0 ]; then measurement_status=1; fi
+      fi
+    fi
+    exit "$measurement_status"
+  }
+  trap restore_validation EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+    --project web --project e2e \
+    --test packages/web/src/routes/new-task-composer.test.tsx \
+    --test packages/web/e2e/completion-controls.e2e.ts \
+    --output .ai/qa/<issue>/code-quality.md
+)
+```
+
+Under Codex, replace each `squeal` command with the absolute launcher from its
+SQUEAL message when it is not on PATH, including the argument to `command -v`.
+After a failed start, the wrapper checks status about once per second for at most
+30 additional seconds; each probe gets at most five seconds or the remaining
+time. It accepts only an available status for this worktree with a live daemon,
+independently of test verdicts. A successful start adds no wait. A failed
+measurement keeps its exit code, including 130 for INT and 143 for TERM, even
+when restoration also fails. The wait observes the daemon already started;
+it does not start another daemon or run tests. Remove the extra status wait when
+[hearsay-tools/squeal#94](https://github.com/hearsay-tools/squeal/issues/94)
+lands and the installed Squeal version includes the startup fix.
+
+If no daemon is validating this worktree,
+use the original command without the wrapper. Do not remove the lease lock or
+start a duplicate ordinary test run. Remove this workaround when
+[hearsay-tools/squeal#78](https://github.com/hearsay-tools/squeal/issues/78)
+lands and the installed Squeal version releases the idle browser lease.
+
+Server changes use `--project server`. Root `scripts/*.test.mjs` and
+`.github/scripts/*.test.cjs` files use `--runner node` with
+`--node-import scripts/test-git-env.mjs`. Do not write a wrapper Vitest
+configuration or test entry files: the collector measures changed test
+functions itself.
+
+The command pins a merge-base, scans committed, staged, unstaged and untracked
+JS/TS changes, collects coverage once, matches changed functions and checks source
+hashes. It writes Markdown and JSON reports with scores, baseline complexity,
+source hashes and the reproduction command. Tests and bundled scripts stay in
+scope. Use its `base` SHA for every baseline comparison. Record unsupported
+changed languages as outside this tool's scope.
+
+| Exit | Meaning | Next action |
+| --- | --- | --- |
+| 0 | Every changed function passes, or there are no supported changed functions | Report the result |
+| 1 | At least one function exceeds a limit | Resolve every finding below |
+| 2 | Measurement is incomplete, including failed tests or missing coverage | Fix setup or coverage; rerun |
+
+A loaded host can make tests time out in the coverage run although each file
+passes alone. Add `--test-timeout 30000` to the same command and rerun it. Do
+not build a coverage command by hand. The flag sets the per-test timeout for
+the coverage run only; a test that fails for another reason still fails.
+
+The whole coverage collection defaults to 600000 ms, independently of
+`--test-timeout`. If collection exceeds that limit, rerun the same command with
+`--coverage-timeout 900000` (fifteen minutes), or a larger positive safe whole
+number of milliseconds. The timeout remains an incomplete check (exit 2).
+Alternatively, supply a separately collected current Istanbul report through
+`--coverage <coverage-final.json>` instead of `--test`; temporary reports from
+the stopped collection are removed.
+
+#### Coverage from CI
+
+CI's required `Vitest shard N/4` jobs collect V8 coverage during their single test run
+on eligible pull requests and dispatches. The optional `Merge Vitest coverage` job uploads one artifact for the head:
+`vitest-coverage-<head SHA>`, holding `coverage-final.json` (paths relative to the
+repository root, test files included) and `provenance.json`. It runs on every pull request
+and on a dispatch of `ci.yml`, and report publication is not a required check. This saves a local coverage
+run, which took about 10 minutes at high load on hearsay-tools/cezarion#1772.
+
+1. Get the run for the exact head you have checked out, with a clean tree:
+
+   ```sh
+   head=$(git rev-parse HEAD)
+   # After the PR exists:
+   gh run list --workflow ci.yml --event pull_request_target --commit "$head" --json databaseId,status,conclusion
+   # Before a PR exists: push the branch and dispatch CI on it, once per head.
+   gh workflow run ci.yml --ref <branch>
+   gh run list --workflow ci.yml --event workflow_dispatch --branch <branch> --commit "$head" --json databaseId,status
+   ```
+
+   No run for the head means CI has not seen it: push it, or dispatch.
+
+2. Wait for the `Merge Vitest coverage` job (about 10 to 15 minutes after the push). The
+   artifact exists as soon as that job ends, before the rest of the run does:
+
+   ```sh
+   gh run view <run-id> --json jobs --jq '.jobs[] | select(.name == "Merge Vitest coverage") | .status + " " + (.conclusion // "")'
+   ```
+
+3. Download it and run the check against it. `--coverage` replaces `--runner` and `--test`:
+
+   ```sh
+   gh run download <run-id> -n "vitest-coverage-$head" -D .ai/qa/<issue>/coverage
+   node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+     --coverage .ai/qa/<issue>/coverage/coverage-final.json --output .ai/qa/<issue>/code-quality.md
+   ```
+
+Limits, each with its fix:
+
+- The report is for the pushed head. A pull request run tests `refs/pull/<N>/merge`, not the
+  head itself, so bring the branch up to date with `origin/main` and push before you rely on
+  it. A local edit after the push needs a new push and a new artifact: the tool matches
+  functions by position, and `provenance.json` names the tested ref and the head SHA.
+- A pull request that only changes docs or infrastructure runs no coverage job. Neither does
+  the merge queue or a push to `main`.
+- Only Vitest's four unit projects are covered. Node `node:test` files and mock child
+  processes are not (hearsay-tools/cezarion#1711, hearsay-tools/cezarion#1696). Exit 2 names a
+  file the report lacks: collect that coverage with `--runner` and `--test` as above.
+- When a shard or the merge failed, no artifact exists. The `Merge Vitest coverage` job stays
+  green and shows a warning annotation and a summary line that name the missing shard or the
+  failed step. Use the local `--test` run then.
+
+A coverage run is a distinct measurement even when background validation passed.
+For dependencies, runner limits or a collection failure, read
+[tool.md](tool.md). Use the bundled command for collection, matching,
+verdicts and reports; keep that work in the tool instead of temporary scripts.
+
+Done when the command produced a complete report, or a stated measurement blocker.
