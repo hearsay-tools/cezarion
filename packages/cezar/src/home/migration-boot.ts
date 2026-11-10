@@ -40,7 +40,11 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
     return { kind: 'legacy', home: legacy };
   }
   if (deferFresh && !marker && !existsSync(legacy.root)) {
-    return { kind: 'fresh', prepare: () => { prepareMigrationHome(home, env, { enabled, legacy }); } };
+    return { kind: 'fresh', prepare: () => {
+      // A legacy server install or a staged group can appear before the first write. Never write the split home then.
+      if (prepareMigrationHome(home, env, { enabled, legacy }).kind === 'ready') return;
+      throw new Error(commandText(`[hsq] refusing to write home ${home.root}: a server install in ${legacy.root} must move first. Run hsq server-migrate.`));
+    } };
   }
   migrateLegacyHome(legacy, home, { env });
   finishDeferredAccounts(legacy, home);

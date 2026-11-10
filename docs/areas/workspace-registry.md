@@ -169,7 +169,11 @@ replacement (PENDING, stale HEAD) still reports, and no journal file changes.
 An absent legacy home leaves conditional entries read-only. Their first write
 commits the fresh decision before the registry mutation; serve, init, run and
 backup restore commit it at entry. Help, invalid commands and pure reads create
-no home. An existing empty legacy home keeps its migration decision at entry.
+no home. The deferred preparation runs once per entry, before the first write. When
+it selects another home (a legacy server install appeared, a rolled-back group or a
+staged group), the write fails with `Run hsq server-migrate.` and the split home stays
+unwritten; each later write fails the same way. An existing empty legacy home keeps
+its migration decision at entry.
 A fresh decision returns `fresh` and commits an explicit
 decision: a v1 record with `files: []` and `backup: ''`, then the marker with
 `migratedFrom` and `state: 'committed'`. A fresh home therefore carries

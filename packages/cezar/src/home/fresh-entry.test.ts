@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { resolveHome } from './resolve.ts'; // test-home-read: entry tests need unresolved scratch paths without a sandbox marker.
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
+import { rawJson } from './migration.testkit.ts';
 
 afterEach(() => { vi.doUnmock('./switch.ts'); vi.resetModules(); vi.restoreAllMocks(); cleanStoreRoots(); });
 
@@ -93,4 +94,22 @@ it('keeps a refusing deferred preparation armed for the next write', async () =>
   expect(write).toThrow('refused');
   expect(prepare).toHaveBeenCalledTimes(2);
   expect(readdirSync(f.dir)).toEqual([]);
+});
+
+it.each(['installed', 'rolled-back'])('refuses the deferred split write when an %s legacy server appears first', async state => {
+  const f = await fixture(true);
+  f.prepareOperatorHome(f.home, 'projects', f.env);
+  expect(readdirSync(f.dir)).toEqual([]);
+  // Another binary installs a server in the legacy home before this command's first write.
+  rawJson(f.legacy.serverState(), { schema: 1, instance: 'default', installed: true, platform: 'ubuntu-vps', primaryPort: 4321, steps: {} });
+  if (state === 'rolled-back') rawJson(join(f.home.config, 'install.json.failed'), { kind: 'live', state: 'pending' });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const { HomeStore } = await import('./store.ts');
+  const write = () => new HomeStore(f.home).writeJson(f.home.workspaceConfig, { projects: [], saved: true });
+  expect(write).toThrow(/Run hsq server-migrate/);
+  expect(write).toThrow(/Run hsq server-migrate/);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('hsq server-migrate'));
+  expect(existsSync(join(f.home.config, 'install.json'))).toBe(false);
+  expect(existsSync(f.home.workspaceConfig)).toBe(false);
+  expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
 });

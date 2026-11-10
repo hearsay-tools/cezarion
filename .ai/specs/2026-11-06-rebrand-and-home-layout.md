@@ -164,7 +164,8 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    migrate. With no legacy home, read-only and invalid commands write nothing.
    Only writer entries (serve, init, run, backup restore, or the first authorized
    registry write) record the fresh decision and write a `live` marker in the new
-   home. Never create the absent legacy directory to publish `MOVED.json`. An
+   home. A deferred first write that finds a legacy server install refuses and names
+   `hsq server-migrate`. Never create the absent legacy directory to publish `MOVED.json`. An
    existing empty legacy directory keeps the committed empty inventory and
    `MOVED.json`. Later legacy data reaches the canary and is never copied over
    the fresh home. Before a split marker exists, `hsq backup list` reads legacy
