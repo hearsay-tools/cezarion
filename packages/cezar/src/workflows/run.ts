@@ -262,12 +262,12 @@ export class RunManager {
   dispose(): void {
     this.#disposed = true;
     this.#modules.workerScratchCleanup.pause();
-    this.#modules.waitResolve.disposeWatches();
+    this.#modules.waitEngine.disposeWatches();
     this.#modules.waitRegistry.dispose();
-    this.#modules.waitResolve.disposeRetries();
+    this.#modules.waitEngine.disposeRetries();
     this.#modules.retries.dispose();
     // Wait records stay as they are: a later manager re-arms them from their deadlines.
-    this.#modules.waitResolve.dispose();
+    this.#modules.waitEngine.dispose();
     this.#modules.subagentWaits.dispose();
     this.#ciResources.release();
     this.#delegationProvisioner = undefined;
@@ -354,7 +354,7 @@ export class RunManager {
   async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.#modules.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
   cancelWait(runId: string, waitId: string, generation: string) { return this.#modules.waitRegistry.cancelWait(runId, waitId, generation); }
 
-  #disarmWait(waitId: string): void { this.#modules.waitResolve.disarmWait(waitId); }
+  #disarmWait(waitId: string): void { this.#modules.waitEngine.disarmWait(waitId); }
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {

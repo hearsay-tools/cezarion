@@ -568,8 +568,12 @@ export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
   return waits.flatMap(wait => WAIT_KINDS[wait.kind].deliveryLabel(wait)).sort((a, b) => a.priority - b.priority)[0]?.text;
 }
 
+/** The handler of each registration path. A new path fails typecheck until every router names it. */
+export type RegistrationRoutes<R> = { readonly [P in keyof RegistrationRequest]: (request: RegistrationRequest[P]) => R };
+
 /** Request dispatch follows the typed registration cell of its stored-kind row. */
-export function registersAs<R extends keyof RegistrationRequest>(request: CezarWaitRequest, registration: R,
-  row = waitRequestRow(request.kind)): request is RegistrationRequest[R] {
-  return row.registration === registration;
+export function routeRegistration<R>(request: CezarWaitRequest, routes: RegistrationRoutes<R>): R {
+  const path = waitRequestRow(request.kind).registration;
+  if (path === 'none') throw new Error('Unsupported wait registration');
+  return (routes[path] as (request: CezarWaitRequest) => R)(request);
 }
