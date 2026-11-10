@@ -56,7 +56,6 @@ interface RemoveOptions {
   activeBeforeLookup: boolean;
   checksActive: boolean;
   deletion: 'worktree' | 'record' | 'inline';
-  ignoresHold: true;
   nullClaimError: string;
 }
 
@@ -150,6 +149,7 @@ function removeCheckout({ store, manager }: RunCheckoutHost, id: string, options
   if (options.checksActive && !options.activeBeforeLookup && manager.isActive(id)) return active;
   const refused = removalRefusal(store, run, id, options.deletion);
   if (refused) return { status: 409, body: { error: refused } };
+  if (isUsageLimitHold(run)) return { status: 409, body: { error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry' } };
   // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
   const release = options.claim === 'reclaim' ? manager.claimWorktreeReclaim(run.id) : manager.claimForPublish(id);
   if (!release) return { status: 409, body: { error: options.nullClaimError } };

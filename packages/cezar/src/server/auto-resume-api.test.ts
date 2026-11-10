@@ -1,7 +1,7 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
@@ -34,6 +34,8 @@ describe('per-task auto-resume cancellation', () => {
       repoRoot,
       store,
       manager: {
+        isActive: () => false,
+        claimForPublish: () => () => {},
         cancelAutoResume: (id: string) => {
           cancelled.push(id);
           const run = store.getRun(id);
@@ -58,6 +60,22 @@ describe('per-task auto-resume cancellation', () => {
     setRunStatus(store, run.id, RUN_STATUS.waiting, { error: 'Claude AI usage limit reached|1785782478', autoResumeAt: '2026-08-03T18:41:48.000Z' });
     return run.id;
   }
+
+  it.each([
+    { method: 'POST', suffix: '/remove-worktree' },
+    { method: 'DELETE', suffix: '' },
+  ])('$method $suffix keeps a held run and its checkout', async ({ method, suffix }) => {
+    const id = limited();
+    const worktreePath = join(repoRoot, 'held-checkout');
+    mkdirSync(worktreePath);
+    store.updateRun(id, { worktreePath, branch: 'held-task' });
+    const res = await apiRequest(app, `/api/v1/runs/${id}${suffix}`, { method });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry' });
+    expect(store.getRun(id)).toMatchObject({ worktreePath, branch: 'held-task' });
+    expect(store.getRun(id)?.autoResumeAt).toBeDefined();
+    expect(existsSync(worktreePath)).toBe(true);
+  });
 
   it('retires the pending resume and answers cancelled', async () => {
     const id = limited();
