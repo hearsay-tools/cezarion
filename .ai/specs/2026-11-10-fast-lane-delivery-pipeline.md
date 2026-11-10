@@ -12,7 +12,7 @@ A successful change reaches `main` in minutes, and a release ships only what was
 | Agent says the code is done → PR open | 51 min | at most 5 min |
 | PR open → merged, successful PR | 69 min | about 5 to 7 min |
 | `main` red | no bound; 5 of 41 failure issues took over 12 h | detect in 20 min, green in 45 min, never over 12 h |
-| Release | weaker checks than a PR; publishes straight to `latest` | at most one a day; the published package is tested before `latest` moves |
+| Release | weaker checks than a PR; publishes straight to `latest` | at most one a day; a published candidate is tested before the stable version exists |
 
 The design moves each check to the cheapest place that still protects what it protects.
 A pull request no longer pays for release-grade verification twice. `main` may go red more
@@ -284,29 +284,36 @@ within 24 hours of the last one. No schedule starts a release.
    `main-verify` status exists there, so the release runs the same suite on that commit
    first. The suite is one reusable workflow that `main-verify.yml` and `release.yml` call.
 2. **Gates.** No open issue carries `release-blocker`. The last rehearsal (below) passed.
-3. **Stage.** Compute the version from the manifest and the registry: the next version
-   after the higher of the manifest version and the highest version that the registry holds
-   for another commit. Publish it under the `next` dist-tag. The version-bump PR opens after
-   the stage; a later release does not depend on its merge.
-4. **Test the published package**, installed from the registry, not built from the tree:
+3. **Stage.** Compute the stable version as today, from the manifest of the release line.
+   Publish a release candidate of the same commit, `<version>-rc.<n>`, under the `next`
+   dist-tag. `<n>` is the next free number on the registry. A stable version is not staged:
+   stable manifests pin their siblings with a caret range (`stampStableManifests`), and the
+   published `cezarion` alias depends on `@wjarka/cezarion` with one, so a stable version
+   reaches installs from the moment it is published, whatever its dist-tag. A caret range
+   does not match a prerelease.
+4. **Test the published candidate**, installed from the registry, not built from the tree:
    clean install, boot, cockpit smoke, upgrade from the current `latest` with existing state,
    the Node floor, the OS matrix, shuffled browser specs.
-5. **Promote.** Move `latest` to the tested version. The tested bytes are the released bytes.
-6. **Roll back.** One dispatch moves `latest` back to the previous version. Installed copies
-   that already updated do not move back; they need a patch release.
-
-A version is immutable on npm, and `scripts/release.mjs` refuses a version whose published
-`gitHead` differs from the source commit. So a failed step 4 uses up its version:
+5. **Promote.** Publish `<version>` from the same commit under `latest`, as the release does
+   today. It differs from the tested candidate only in the version stamp. Then install the
+   stable package through the alias and boot it, as a last check.
+6. **Roll back.** One dispatch releases the last good stable commit again as the next patch
+   version, through steps 3 to 5, without the 24-hour limit. Moving `latest` back is not a
+   rollback: caret ranges and installed copies take the highest version.
 
 | Case | Behaviour |
 | --- | --- |
-| Step 4 fails | The version stays on `next` and is deprecated on npm with the reason. `latest` does not move. No GitHub Release. The bump PR still merges. A `release-blocker` issue is filed |
-| The owner dispatches again after a fix | A new candidate. The registry holds the failed version for another commit, so the release takes the next one, whether or not the earlier bump PR merged. This attempt does not count against the 24-hour limit, because no stable release happened |
-| The same run is re-run after a transient failure | Same commit, same version: the publish step sees its own `gitHead` and continues at step 4, as the retry guard does today |
-| Step 5 fails after step 4 passed | Re-run the run; the promotion repeats safely |
+| Step 4 fails | The candidate stays on `next`. No stable version is published, so none is used up. `latest` does not move. No GitHub Release. A `release-blocker` issue is filed |
+| The owner dispatches again after a fix | A new candidate of the same stable version, with the next `rc` number. This attempt does not count against the 24-hour limit, because no stable release happened |
+| The same run is re-run after a transient failure | Same commit: the candidate and, after step 5, the stable version already carry its `gitHead`, so the run continues, as the retry guard does today |
+| The last check in step 5 fails | The stable version is public. The owner starts the rollback. A `release-blocker` issue is filed |
+| A maintenance release from `release/**` | The version comes from that branch's manifest, as today. Its candidate takes the `next` tag only when the branch is the newest line; otherwise it takes a tag named after the line, so `next` never moves backwards |
+
+The version-bump PR and the GitHub Release follow the promotion, as today.
 
 **Rehearsal.** `nightly.yml` becomes the rehearsal. Each night it publishes the newest
-verified commit under `nightly`, as today, and then runs step 4 against that package. A
+verified commit under `nightly`, as today, and then runs the tests of step 4 against that
+package. A
 failure files a `release-blocker` issue. The Cezar repair automation starts a task for it.
 
 Desktop and mobile releases keep their own workflows and cadence.
@@ -335,7 +342,7 @@ Desktop and mobile releases keep their own workflows and cadence.
 | `requireQueueRules` in `merge-queue-admission.cjs` refuses a ruleset without thread resolution | A queue entry cannot merge when the ruleset lost that protection | It requires the two status checks and the queue rule. The script reads each entry's review threads itself: it still refuses a guarded entry with an unresolved thread, and no longer refuses a fast-lane or revert entry for one |
 | Reviewer loop until clean | No PR opens with an active reviewer finding | Fast lane: no PR auto-merges with a finding scored 5 or more from round 1. Guarded lane: unchanged |
 | `dev` snapshot on every `main` push | `dev` follows `main` within minutes | `dev` follows each verified batch head. Every `dev` build passed the full suite |
-| Release verify job | Typecheck, unit tests and build pass on the release commit | The release reads the full `main-verify` proof and tests the published package |
+| Release verify job | Typecheck, unit tests and build pass on the release commit | The release reads the full `main-verify` proof and tests a published candidate of the same commit |
 | Nightly | `main` still passes against the calendar | The rehearsal does that and tests the published package |
 
 ## Owner actions
@@ -367,7 +374,7 @@ Each row is one issue. The safety net comes first; P3 to P6 do not start before 
 | P1.1 | `main-verify.yml`: the reusable suite, the rolling run, the rerun, the `main-verify` status, the flake issue, the `dev` snapshot from the verified commit, the failure reporter and the repair prompt for the new workflow. It runs beside today's `main` push CI for one week before that is removed | Owner action 6 |
 | P1.2 | Bisect, the revert bot, the revert lane and the hold | P1.1; owner actions 2, 3 |
 | P1.3 | `main-watch.yml`: the 60-minute mention, the 6-hour revert, the watchdog | P1.2 |
-| P2 | Release: once-a-day guard, gates, stage on `next`, test the published package, promote, roll back. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
+| P2 | Release: once-a-day guard, gates, a release candidate on `next`, tests of the published candidate, promote, roll back by a patch release. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
 | P3 | Lanes and merge path: the shared classifier, the auto-merge rules of D4, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check, `requireQueueRules` without thread resolution | P1; then owner action 1 |
 | P4 | Review placement: `Automated Code Review` per lane, the post-merge review workflow, the agent rule | P2, P3; owner actions 4, 5 |
 | P5 | Affected tests on the fast lane. Step 1: a shadow job records, for one week, the selection for each PR run and whether a failing test fell outside it. Step 2: the owner reads the report and decides the switch | P1, P3 |
@@ -384,8 +391,8 @@ P4 and P5 bring it to about 5 to 7 minutes for a PR whose reviewer round is clea
 - The 4-minute and 2-minute budgets are estimates from job step times. No run has shown them.
 - The miss rate of affected-only selection is unknown. An earlier pilot of 5 commits found no
   miss, but every commit was green. P5 step 1 measures it.
-- Not verified: that CodeRabbit posts its threads when a PR merges during its review; that
-  the publish identity can move a dist-tag. P4 and P2 check these first.
+- Not verified: that CodeRabbit posts its threads when a PR merges during its review. P4
+  checks this first.
 - The pre-PR timing comes from 28 tasks on one host in one week.
 - The review-value classification was done by subagents; hand checks covered 16 of 200 and
   6 of 250 findings.
