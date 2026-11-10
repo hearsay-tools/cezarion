@@ -55,6 +55,17 @@ describe('the Draft PR route', () => {
     return id;
   };
 
+  it('refuses a review run without a worktree or branch with 409', async () => {
+    const id = store.createRun({ title: 'publish', task: 'publish', workflow: 'quick-task', steps: [], worktree: false }).id;
+    setRunStatus(store, id, RUN_STATUS.review);
+    const before = structuredClone(store.getRun(id));
+    const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'no worktree/branch to publish — this task ran in the repo working tree' });
+    expect(store.getRun(id)).toEqual(before);
+    expect([claims, published]).toEqual([1, 0]);
+  });
+
   it('settles a review run done with the PR and a finishedAt', async () => {
     const id = seed(RUN_STATUS.review);
     const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
