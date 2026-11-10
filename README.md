@@ -722,7 +722,7 @@ The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
 Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,
 not settings to create or share. If the tool is unavailable or denied, its error
 is surfaced while ordinary tasks continue. See [the CI-wait protocol](AGENT_PROTOCOL.md#ci-wait-tool-contract-474)
-for limits and the executable harness verification required before release.
+for the owners of the limits and the harness evidence required before a runner ships.
 
 ## Discover runners and models
 

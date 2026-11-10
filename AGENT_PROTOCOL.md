@@ -106,7 +106,7 @@ holds the evidence.
 Cezar selects its unmanaged full-access sandbox only when `configRequirements/read`
 answers `requirements: null`. Managed requirements, unknown fields and failed or malformed
 discovery keep Codex's own permissions. Cezar never overrides the approval policy.
-`codex-permissions.test.ts` holds these rules.
+`packages/cezar/src/core/codex-permissions.test.ts` holds these rules.
 
 ### Codex approval routing
 
@@ -130,7 +130,7 @@ against the installed Codex in one paid turn. CI never runs it.
 
 An unscoped OpenCode `session.error` that names a `/SKILL.md` path is a skill-load
 warning: Cezar reports it as non-fatal and the turn continues. Every scoped error, and
-every other unscoped error, stays a failure (`opencode-session-error.ts`).
+every other unscoped error, stays a failure (`packages/cezar/src/core/opencode-session-error.ts`).
 
 ---
 
@@ -396,7 +396,7 @@ force, or force only in part. The item numbers are stable: code cites them.
     or cache files and never runs a model turn. An `unavailableReason` is a fixed one-line
     category: never raw stderr, a command line, environment or config content. Add the
     runner to `models-api.test.ts`.
-12. **Credentials** — the runner's entry in `BACKEND_ALLOW_PREFIXES` (`agent-env.ts`)
+12. **Credentials** — the runner's entry in `BACKEND_ALLOW_PREFIXES` (`core/agent-env.ts`)
     lists a prefix for every provider that its model ids can name. Never widen another
     backend's entry.
 
