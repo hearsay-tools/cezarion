@@ -968,8 +968,9 @@ describe('GitHub automation API', () => {
   });
 
   it('pages both log sources to the end with positive cursors while legacy entries are appended', async () => {
-    const legacy = join(projectPaths(root).write);
+    const legacy = join(root, '.ai/cezar');
     const fallback = join(root, '.ai/squawk');
+    mkdirSync(legacy, { recursive: true }); // Select the legacy project before seeding either log source.
     mkdirSync(fallback, { recursive: true });
     const rows = (automationId: string) => Array.from({ length: 4 }, (_, index) => JSON.stringify({
       automationId, revision: 1, seq: index + 1, ts: new Date().toISOString(), result: 'skipped', reason: `${automationId}-${index + 1}`,
