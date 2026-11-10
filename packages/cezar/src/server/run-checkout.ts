@@ -172,7 +172,7 @@ function openCheckout({ root, store }: RunCheckoutHost, id: string, options: Ope
     directory: () => worktreeOf(run) ?? root,
     get worktree() { return worktreeOf(run); },
     defaultWorktree() {
-      const worktree = this.worktree;
+      const worktree = worktreeOf(run);
       return worktree ?? (options.defaultTargetNeedsWorktree ? { status: 409, body: { error: NO_WORKTREE } } : root);
     },
     get resumeAllowed() { return options.ignoresEngineOwnership || !engineOwnsRun(run); },
