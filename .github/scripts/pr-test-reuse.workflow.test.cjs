@@ -40,8 +40,10 @@ for (const result of ['failure', 'cancelled', 'skipped', 'success']) {
     for (const id of suites) {
       const job = ci().jobs[id];
       assert.equal(evaluate(job.if, ctx), true, 'proof failure cannot skip the matrix');
-      const testStep = job.steps.find(s => s.run?.startsWith(id === 'vitest' ? 'npm test --' : 'set -o pipefail'));
+      // A merge group runs the Vitest shard under `squeal ci record` (the `record` step).
+      const testStep = job.steps.find(s => id === 'vitest' ? s.id === 'record' : s.run?.startsWith('set -o pipefail'));
       assert.equal(evaluate(testStep.if, ctx), !reused);
+      if (id === 'vitest') assert.equal(evaluate(job.steps.find(s => s.id === 'collect').if, ctx), false);
       assert.equal(evaluate(job.steps.find(s => s.uses?.startsWith('actions/checkout@')).if, ctx), !reused);
     }
   });

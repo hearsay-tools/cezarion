@@ -52,7 +52,7 @@ describe('crash recovery from the repair on', { timeout: TIMEOUT }, () => {
     expect(projectSnapshot(project)).toEqual(reference);
   });
 
-  it('keeps ordinary project reads out while a journal is unfinished, and admits them after recovery', async () => {
+  it('keeps ordinary project reads out while a journal is unfinished, and a lazy build finishes it before reading', async () => {
     project.restore();
     const crashed = await fence(project);
     await expect(migrateProject({ repoRoot: project.root, fence: crashed, fault: crashAt('receipts:after') })).rejects.toThrow(Crash);
@@ -62,12 +62,11 @@ describe('crash recovery from the repair on', { timeout: TIMEOUT }, () => {
     const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
       listProjects: async () => [{ id: 'p', root: project.root, status: 'not-git' as const }] });
     disposers.push(() => contexts.disposeAll());
-    await expect(contexts.context('p')).rejects.toBeInstanceOf(ProjectMigrationFencedError);
     await expect(ownership.acquire(project.newDir)).rejects.toBeInstanceOf(ProjectMigrationFencedError);
     expect(projectAdmissionRefusal(project.newDir)?.reason).toBe('journal');
-    const recovery = await fence(project);
-    try { await resumeProjectMigration({ repoRoot: project.root, fence: recovery }); } finally { recovery.release(); }
+    // Early recovery (hearsay-tools/cezarion#3089): the build finishes the journal first.
     const context = await contexts.context('p');
+    expect(projectAdmissionRefusal(project.newDir)).toBeUndefined();
     await context.store.reports.idle();
     expect(context.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
     expect(existsSync(join(project.dataDir, RUNS_DB_FILE))).toBe(false);

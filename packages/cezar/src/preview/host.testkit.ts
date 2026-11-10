@@ -50,7 +50,7 @@ export function setup(servers: PreviewServer[] = [server(5173)], launchError?: (
   const answering = new Set<number>();
   const devServers: FakeDevServer[] = [];
   const probe = vi.fn(async (port: number) => answering.has(port));
-  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; connectionFake: ReturnType<typeof fakeConnection>; exit(info: BrowserExit): void; kill: ReturnType<typeof vi.fn>; profileDir: string }> = [];
+  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; connectionFake: ReturnType<typeof fakeConnection>; exit(info: BrowserExit): void; profileDir: string }> = [];
   const host = new PreviewHost({ home: testHome(),
     probe,
     createServer: opts => {
@@ -66,7 +66,7 @@ export function setup(servers: PreviewServer[] = [server(5173)], launchError?: (
       let exit!: (info: BrowserExit) => void;
       const exited = new Promise<BrowserExit>(resolve => (exit = resolve));
       const connectionFake = fakeConnection();
-      const handle = { cdp: cdpFake.cdp, connection: connectionFake.connection, pageTargetId: 'PANE', exited, close: vi.fn(), kill: vi.fn(), cdpFake, connectionFake, exit, profileDir };
+      const handle = { cdp: cdpFake.cdp, connection: connectionFake.connection, pageTargetId: 'PANE', exited, close: vi.fn(), cdpFake, connectionFake, exit, profileDir };
       browsers.push(handle);
       return handle;
     },

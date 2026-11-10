@@ -36,6 +36,37 @@ the run lookup of a fenced project. `task`, `automation`, `webhook`, `worker`,
 cockpit, whose project routes refuse. `backup`, the managed install commands and
 `server-*` touch no project data. Git excludes also cover `.ai/squawk-migration.lock*`.
 
+Before that check, `serve`, `run`, `init`, the single-project `projects` listing,
+`artifact publish` and `versions` finish an unfinished migration journal
+([early recovery](project-routes.md#project-migration-command-and-early-recovery)); a
+journal that cannot finish ends the command with its cause, exit 1. No CLI write targets a
+path the migration moved: `artifact publish` refuses (exit 1, nothing written, never
+recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff file moved to
+`.ai/squawk/` (`movedProjectPath`); the task gets its new paths when it continues.
+
+## Staged `migrate-project`
+
+`migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is registered,
+listed in help and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it is an
+unknown command and its module is never loaded. Only the user runs it, and it runs
+offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner, or a live
+cockpit of the user's legacy or split home whose registry lists the project) or any task of it is live, and
+names each pid, URL, port or task to stop. It cannot see a cockpit of another home that
+lists the project but never opened it: stop such a cockpit yourself first (while the
+fence holds, the write backstop refuses its store and listed state writes). It then takes `cockpit.lock` and the migration
+fence, moves the state and releases both. A dry run first completes and reports an
+unfinished migration, if one exists. It then holds `cockpit.lock`, passes admission and
+plans; planning the remaining migration changes nothing. It prints the plan, then `Dry run:
+nothing was moved or rewritten.` (or, after such a recovery, `Dry run: planning changed
+nothing; the completed migration above did.`) or `Migration complete.`; it prints the `git mv` commands for
+tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted
+journal) print one message to stderr and exit 1. A cockpit with the switch on moves each
+registered project by itself at start, and a project added later when it is added, when
+nothing else is live and its plan has no blocker or conflict; otherwise the project stays
+in place
+([automatic move](project-routes.md#project-migration-command-and-early-recovery)); CLI
+entries (`run`, `init`, `artifact`, ...) only recover journals and never start a move.
+
 ## Rules
 
 Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. Headless `run` treats `review` as a terminal success status (exit 0). `serve` boots in a fixed order: bind the listener, open the boot store and build its `RunManager`, `recover()` the boot project, then `startServer`. So anything a recovered run needs (its cockpit address, for one) must reach the boot manager at construction, not from `startServer`. `init` never overwrites existing files. Keep `.ai/cezar/.gitignore` maintenance (`ensureDataGitignore`) in sync with any new state file.

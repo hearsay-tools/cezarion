@@ -16,130 +16,86 @@ Maintenance can read fallback history without recovery or a shadow legacy databa
 
 ## Project migration fence
 
-One claim file, `<root>/.ai/squawk-migration.lock`, fences a project during a
-migration (hearsay-tools/cezarion#3087). It sits beside both directory names, so a
-directory move never carries it and never creates a second owner. It uses the
-`CockpitOwnership` claim protocol: exclusive link-create, the `.reclaim` guard,
-pid plus start-token liveness and token-checked release.
+A project migration runs offline (hearsay-tools/cezarion#3089): it refuses while a cockpit it
+can see serves the project or a task of it is live. The fence and the journal stop only a
+binary that knows them; an older binary checks neither. One claim file, `<root>/.ai/squawk-migration.lock`,
+fences the project during the move (hearsay-tools/cezarion#3087). It sits beside both
+directory names, so a directory move never carries it and never creates a second owner. It
+uses the `CockpitOwnership` claim protocol: exclusive link-create, the `.reclaim` guard, pid
+plus start-token liveness and token-checked release.
 
-- **Who claims.** `CockpitOwnership.fenceProject(dataDir, { liveTasks })`. It first owns
-  `cockpit.lock` (an owning cockpit already does; a CLI with no cockpit takes it in
-  whichever project directory exists, so a resume after the move never recreates the old
-  name), then claims the fence. Only the `cockpit.lock` holder ever holds the fence, so
-  no other cockpit boots or serves the project meanwhile. A competing CLI meets the held
-  fence and fails at once. An owning cockpit calls `fenceProjectContext(ownership, context)`.
+- **Who claims.** `CockpitOwnership.fenceProject(dataDir, { liveTasks })`, called by the
+  offline migration and by early recovery, never by a cockpit for a project it serves. It
+  first owns `cockpit.lock` (taken in whichever project directory exists, so a resume after
+  the move never recreates the old name), so no cockpit boots on or builds the project, then
+  claims the fence, so no other process that checks admission is admitted. A competing CLI meets the held fence and
+  fails at once. Right after the claim, `liveTasks` runs as the holder; any live task
+  releases the fence and throws `ProjectMigrationBusyError` with each task's id, title and
+  state and the next step (finish or cancel each one).
+- **Anything live.** Before it claims, `migrateProjectOffline` refuses with
+  `ProjectInUseError` while a cockpit serves the project (`project-migration/live.ts`): the
+  `cockpit.lock` owner in either directory (any home, with its URL), and every live cockpit
+  of the user's legacy and split homes whose registry lists the project (the presence leases of
+  `home/leases.ts`: pid, port, instance), which covers a cockpit that does not own the project
+  but runs its automations (hearsay-tools/cezarion#3136). Live tasks are
+  `projectLiveTasks` over a read-only view (`readLiveTaskView`: each run store read quiescent,
+  from a private copy when it has a WAL file, and a `runs.json` no store imported yet read as
+  JSON), so a refusal writes nothing; a task marked live whose record cannot be read refuses too:
+  every non-terminal task (`isLiveRecord`: queued, running,
+  waiting on a human, a usage-limit auto-resume, a timer, a PR or a worker) persisted as live
+  in either directory, plus the runs of families another live store claims in `run_claims` (a
+  headless `cez run`, another binary), read from both physical claim tables so a stale legacy
+  claim never hides a live fallback one. An agent process belongs to a live task. Not seen: a
+  cockpit of another home that lists the project but never opened it. The user stops it; during
+  the move, admission and the write backstop refuse its project entries and its store and
+  listed state writes.
 - **Admission.** `projectAdmissionRefusal(dataDir)`: two `lstat` calls when dormant,
-  nothing written. It refuses a live fence (the process's own included), an unreadable
-  lock (the message names the file and when it is safe to remove it) and an existing
-  journal `.ai/squawk-migration.json`. A dead owner without a journal admits; the next
-  fence claim reclaims the file.
-- **Leases.** New project work enters through `withProjectAdmission(dataDir, work, refused)`:
-  refused when fenced, otherwise counted until `work` settles. The lease travels with the
-  async call chain (`AsyncLocalStorage`): everything the admitted work calls, a task start
-  or a context build included, passes this process's own fence while the lease is open,
-  and that fence's drain waits for what it started. A lease never passes a fence another
-  owner holds: that fence cannot count it, so admission always reads the fence file and
-  refuses there, admitted work included. Work that admitted or live work set going (webhook
-  deliveries, preview releases) runs through `holdProjectWork`: counted, admitted for its
-  whole length, never refused. A detached job (a manual automation check) opens its own
-  `withProjectAdmission` span before its request answers. Entry points: every project route (409), finite
-  run-event reads, lazy context builds, maintenance (`withMaintenanceStore`),
-  archive-on-merge and completion actions (`withStore`), automation timer fires, the
+  nothing written. It refuses a live fence, an unreadable lock (the message names the file
+  and when it is safe to remove it) and an existing journal `.ai/squawk-migration.json`. A
+  dead owner without a journal admits; the next fence claim reclaims the file. Only the fence
+  holder's own work, run inside `asFenceHolder`, passes its fence: the engine and the
+  holder's live-task check. Everything else in that process is refused too, so a cockpit
+  that recovers a journal still refuses its own other requests for the project meanwhile.
+  `withProjectAdmission(dataDir, work, refused)` is the check at each entry: every project
+  route (409), finite run-event reads, lazy context builds, maintenance
+  (`withMaintenanceStore`), archive-on-merge and completion actions (`withStore`), the
   preview leftover sweep. Point checks: `acquire` (before `mkdir` and after its claim),
   built contexts, warm-up, `AutomationCoordinator.store` and `refresh`, runs index and
-  search, the activity snapshot, socket upgrades and live feeds, `RunManager.startRun`
-  and `continueRun`, the artifact writer before each write. CLI points are in
+  search, the activity snapshot, socket upgrades and live feeds, `RunManager.startRun` and
+  `continueRun`, the artifact writer before each write. CLI points are in
   [the CLI area](cli.md#project-migration-fence).
 - **Write backstop.** Under every store write, claim and save, `projectWriteRefused` refuses
-  while a fence holds the project and the caller has no lease or hold, except in the
-  holder's own process while its drain runs (the work being drained lands, and the holder
-  flushes the store inside the drain). A refused save is skipped and its rows stay dirty
-  until the fence ends; a refused claim leaves the family unclaimed, so a new task or a
-  repair (a late repo-handle result) writes nothing; a durable commit writes nothing and
-  throws, as on a closed store. The same check guards the automation store: definition
-  and state writes throw before memory changes; receipts, logs and compaction skip; no
-  lock directory is recreated and a held lock is left in place. It also guards the artifact writer (cleanup in `finally` included), the data
-  `.gitignore` and the voice log (skipped), and config updates, project ui-state and the
-  launch key (they throw, nothing written). Each fence logs its first skipped write once. The holder's
-  own rewrites (P4b2) run inside `holdProjectWork`. Read-only paths skip while fenced:
-  health answers the last config it read (`healthConfig`), the activity publisher stops
-  its foreign-claim check.
-- **Automatic jobs.** A refusal inside an automatic job is a skip that writes nothing into
-  the fenced project: an automation fire becomes `AutomationProjectUnavailableError`
-  (nothing reserved, advanced, logged or counted; the timer retries at its floor), and the
-  coordinator arms no timer for a fenced project. The skip goes to the cockpit's process
-  log once per fence. The occurrence stays in the persisted state and fires after the
-  fence ends, once, through the scheduler's catch-up (24 h), also after a restart.
-  Maintenance and sweeps return nothing. An automatic resume or wait wake continues a run
-  that is already live, so `continueRun` never refuses it; it refuses only a run that is
-  not live.
-- **Live tasks (strict fence).** `projectLiveTasks(store)`: every non-terminal task
-  (`isLiveRecord`: queued, running, waiting on a human, a usage-limit auto-resume, a
-  timer, a PR or a worker), held by the store or persisted as live in either directory
-  (a row another process left behind), plus the runs of families another live store
-  claims in `run_claims` (a headless `cez run`, another binary), read from both physical
-  claim tables so a stale legacy claim never hides a live fallback one. Right after the claim, with no
-  wait in between, the fence refuses while any exists: it releases at once and throws
-  `ProjectMigrationBusyError` with each task's id, title and state and the next step
-  (finish or cancel each one). The preflight and the drain share this one notion of live.
-  Chosen over letting controls of live tasks through during a drain: a strict fence never
-  waits on a task that only a person can settle.
-- **Bounded drain.** After a clean preflight the holder drains work in flight: leases and
-  tracked work in its process, runs pinned by an active run, a Continue, retention,
-  publish or branch cleanup, and the manager's tracked async work. The bound is
-  `PROJECT_FENCE_DRAIN_MS`, 60 s: longer than one webhook delivery series (3 attempts of
-  10 s with backoff), a context build with recovery and one bounded archive or
-  automation tick; short enough that no migration hangs. At the bound the migration stops
-  by itself: the fence is released and the same error lists what is still live. An abort
-  signal releases it earlier. Inside the same bound and abort the owning cockpit settles,
-  each step after the work it covers: it stops the project's dev servers and Chromium and
-  waits until every one of their processes has exited, closed earlier included (a browser
-  gets SIGKILL 5 s after its close; `PreviewHost.releaseProject`), then waits for history
-  compression and queued report scans, then flushes the store (`settle`). A process that
-  never exits ends as a drain timeout, never as success. The holder keeps the fence until
-  `release()`, after the last rewrite.
-- **Run-scoped writers.** These write only for a run that is live or held, so their check is
-  that invariant: the preflight refuses while any run is live in either directory or held
-  by a live foreign claim, the drain waits for held runs and tracked work, and a headless
-  run is visible through its claim from its first write. `runs/agent-tmpdir.ts`,
-  `runs/history-file.ts`, `runs/transcript-facts.ts`, `workflows/run/attachment-writer.ts`,
-  `workflows/run/queued-input.ts`, `handoff.ts`, `autosave-cleanup.ts`,
-  `delegation/context.ts`, `delegation/workspace.ts`, task worktrees in `git-worktree.ts`,
-  `preview/dev-server.ts`, `preview/chromium.ts`, `preview/host.ts`,
-  `preview/agent-marker.ts`, `artifacts/lifecycle.ts`.
-- **Not owner-gated.** A cockpit that does not own a project still runs its automations;
-  under a fence the write backstop drops their writes. Their failing launches are
-  hearsay-tools/cezarion#3136.
-- **Holder duty (P4b2).** After the drain and before the first move, the holder disposes
-  the project's context and closes its store: `migrateProject`'s `closeProject` (an owning
-  cockpit passes `contexts.dispose(id, { releasePreviews: false })`). `close()` saves once
-  and leaves no save timer; later saves return without a database. It stops the
-  transcript-facts queue and settles its jobs, so no sidecar is written later. A late
-  repo-handle result finds no database and writes nothing (lazy contexts also abort it).
-  The reports index and history compression are drained before (`settle`); after close the
-  reports index starts no queued scan and checks `closed` before each write. While a fence
-  is held the reports index queues no new scan, so the drained `idle()` covers every scan. Branch sweeps
-  touch Git refs only.
+  while a fence or journal holds the project, outside the holder's own work. It stops the
+  writes of a process the offline check cannot see (a cockpit of another home that lists the
+  project, its automation store open). A refused save is skipped and its rows stay dirty
+  until the fence ends; a refused claim leaves the family unclaimed; a durable commit writes
+  nothing and throws, as on a closed store. The same check guards the automation store:
+  definition and state writes throw before memory changes; receipts, logs and compaction
+  skip; no lock directory is recreated. It also guards the artifact writer (cleanup in
+  `finally` included), the data `.gitignore` and the voice log (skipped), and config
+  updates, project ui-state and the launch key (they throw, nothing written). Each fence
+  logs its first skipped write once. Read-only paths skip while fenced: health answers the
+  last config it read (`healthConfig`), the activity publisher stops its foreign-claim
+  check. An automation fire that meets a refused state write is a skip, not a failure.
 - **Journal.** The journal blocks admission whether its owner lives or not; only the
-  fence holder passes. The engine removes it as its last step; the caller then calls `release()`. P4b3 adds
-  early recovery in front of admission.
-- **Residual window.** Leases are per process. A short CLI operation (`init`, a
-  single-project `projects` listing, `run` before its store opens) admitted just before
-  another process takes the fence can still read project files until it ends. Each CLI
-  write path re-checks admission right before its first project write, and a headless
-  run's claims keep the drain waiting. Long-lived event streams over an already open
-  store end when the holder closes that store.
+  fence holder's work passes. The engine removes it as its last step; the caller then calls
+  `release()`. Early recovery runs in front of admission
+  ([below](#project-migration-command-and-early-recovery)).
+- **No online move.** A cockpit never migrates a project it serves. P4b1 drained a serving
+  cockpit's work in flight under the fence (admission leases, `holdProjectWork`, a 60 s
+  bounded drain, preview and report settling, deferred automation starts); P4b3 removed all of
+  it, with hearsay-tools/cezarion#3142, which only that machinery could reach.
 
 ## Project state migration engine
 
 `packages/cezar/src/project-migration/` (P4b2, hearsay-tools/cezarion#3088) moves a
-project's runtime state from `.ai/cezar/` to `.ai/squawk/`. It is internal: no command,
-route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
-`resumeProjectMigration`; P5 enables the command.
+project's runtime state from `.ai/cezar/` to `.ai/squawk/`. P4b3 wires `migrateProject`
+into the offline `migrate-project`, behind `REBRAND_SWITCH`, and `resumeProjectMigration` into
+every project entry ([below](#project-migration-command-and-early-recovery)).
 
 - **Fence.** It runs only under a fence its own process holds (`holdsProjectFence`), and
-  all its work runs inside `holdProjectWork`, so its writes pass the backstop only as the
-  holder's.
+  all its work runs inside `asFenceHolder`, so its writes pass admission and the backstop
+  only as the holder's.
 - **Plan and dry run.** `planProjectMigration(repoRoot)` writes nothing: the run store is
   read immutable when it has no WAL file, and from a private copy when it has one, so no
   SQLite sidecar appears or changes. It lists every
@@ -174,6 +130,23 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
   holds the new one, so a resume after a crash between an effect and its mark changes
   nothing twice. A value that is neither stops the step; the journal stays and admission
   stays blocked.
+- **Untrusted journal.** A journal read back for a resume is untrusted input: a repository can
+  commit one. Before any step, `assertJournalContained` (`project-migration/containment.ts`)
+  refuses a journal whose `source` and `destination` are not exactly `<root>/.ai/cezar` and
+  `<root>/.ai/squawk`; a file it rewrites in place (each rewritten JSON file, each receipt, the
+  run store `runs.db` with its `-wal` and `-shm` in either directory) that is not a regular file,
+  a symlink included; a move or worktree that does not go from inside `source` to the same place
+  inside `destination`; a receipt or cleanup checkpoint outside `<git common dir>/cezar-owned-workspaces/`;
+  another rewritten file outside `<destination>/runs/`; a rewritten value that does not move a path
+  of this root's `.ai/cezar` to the same place under `.ai/squawk`; a tracked-file entry that is not a
+  relative `.ai/cezar/...` path; any existing directory on the way that resolves elsewhere (a
+  symlink out); and, before it is read, a journal file that is a symlink, not a regular file,
+  larger than 64 MiB or tracked by Git, or whose Git check cannot finish (one `git ls-files` call
+  at the journal's canonical path, only when a journal exists; the
+  shared excludes keep a real journal out of every ordinary add). A fresh plan passes the same
+  check before its journal is written. Each step checks its write target again right before it
+  writes, and opens or rewrites in place only a regular file. A refused journal changes nothing and stays for inspection; recovery reports it as a
+  recovery failure (boot ends, CLI exit 1, 409), and admission keeps refusing the project.
 - **Durability invariant.** One rule, enforced by `settle` in `project-migration/durable.ts`
   and stated there: (a) after every effect on an entry (created, renamed in or out,
   rewritten or removed, by the engine or by Git or SQLite for it), the entry's data when it
@@ -195,6 +168,71 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
 - **Limits.** Agent temp fallback directories outside the project are keyed by the data
   directory (hearsay-tools/cezarion#3146). Claude Code keys session history by working
   directory, so a moved worktree starts a new Claude session history.
+
+## Project migration command and early recovery
+
+P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
+
+- **Command.** `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is
+  registered, advertised and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it
+  is an unknown command. Only the user runs it, with the cockpit stopped: it covers CLI-only
+  users and projects the automatic move left in place. Tests pass the switch as a parameter
+  (`loadSubcommand`, `main`); the constant never changes.
+- **Offline run.** `migrateProjectOffline` (`project-migration/offline.ts`): refuse while
+  anything is live (above), finish an unfinished journal (and report it as the migration),
+  take `cockpit.lock` and the fence with the read-only live-task check, run `migrateProject`,
+  release both claims. A dry run holds only `cockpit.lock` (in the directory that exists),
+  passes admission and plans; when it finished an unfinished journal first, it reports what that
+  recovery moved and rewrote before the plan of what remains.
+- **Automatic move.** With `REBRAND_SWITCH` true, the cockpit moves an idle legacy project
+  itself (`moveProjectWhenIdle`, `project-migration/auto.ts`): at start for the boot project,
+  before the listener; right after the listener starts for every other registered project (the
+  post-listen preparation below), or earlier when a request, a lazy build or the warm-up reaches
+  it first; and for a project registered later when it is added. Each move runs before any
+  ordinary read or task start of that project, so a cockpit start moves every registered
+  project, opened or not, that passes the checks below. Journal recovery runs first. When `.ai/cezar/` holds
+  state to move and the plan has no blocker or conflict, the same live check as the command
+  runs, without counting the cockpit's own process (its `cockpit.lock` claim and its presence
+  lease): with nothing live, the offline move runs under the cockpit's own claim
+  (`moveUnderFence`). With anything live (another cockpit, a task from before the restart, a
+  headless run), nothing moves: the project is served from both folders as before, a log
+  notice names what blocks the move, and the next start tries again (one attempt per project
+  per cockpit run; a caller that comes while it runs waits for it). The notice of a finished
+  move lists the `git mv` commands for tracked files. Any failure before the journal exists
+  only delays the move; a failure after it leaves the journal, so admission refuses the
+  project until recovery finishes it. Every cockpit
+  path that touches a project before or without its context runs the same prepare step
+  (`prepareProject`: journal recovery, then the automatic move): the context build, the
+  post-listen preparation of every registered project (before the preview sweep, automation
+  discovery, the scheduler and the archive and completion ticks start; it stops between projects,
+  and those starts are skipped, once the cockpit is closing), the automation coordinator's
+  project list and a project added later, the ticks' project lists and the cold run index. A
+  project whose automation lease this cockpit holds is not moved (the move waits for the next
+  start). With the switch false it is the journal recovery of before.
+  CLI entries recover journals but never start a move. The switch must not turn on before the
+  per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
+  runs are fallback runs.
+- **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
+  (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
+  before the entry that finds it reads the project, in both switch states. Without a journal it costs one
+  `lstat`. It takes the fence without a live-task check: the journal has refused every admission
+  since it was written, and a migration starts only with no live task it can see. It leaves the journal
+  to a live cockpit that owns the project or a process that holds its fence; admission
+  refuses meanwhile. It uses the caller's claim when the caller owns the project or is about
+  to (`keep`), otherwise a temporary claim it releases. Concurrent calls in one process share
+  one recovery. A journal that cannot finish, or is refused as untrusted, throws
+  `ProjectMigrationRecoveryError` (409 on routes, exit 1 in the CLI, a failed boot): the
+  journal stays and admission keeps refusing.
+- **Entry points.** Cockpit boot (`serveCommand`, before its ownership claim and the listener;
+  boot keeps the claim), lazy context builds (`ProjectContexts.build`), the warm-up (a journal
+  alone no longer skips a project), the post-listen preparation of every registered project,
+  the archive and completion ticks (`prepareBeforeTicks`: each tick's project list, before the
+  tick's admission check), the cold workspace runs index and search (`prepareProjects` in
+  `projectRunSources`; a failure leaves the project out with a warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
+  module loaded only when a journal exists), `artifact publish` (which then refuses a task
+  context that names a moved path), `versions` checkout discovery (which lists the worktrees
+  again from the main checkout after a recovery moved them), and `migrate-project` itself
+  (`migrateProject` also resumes first). Other readers skip a refused project, as before.
 
 ## Rules
 

@@ -13,7 +13,7 @@ import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 
 // bound: each case restores a real repository and runs Git, a worktree-lock keeper and SQLite.
 export const TIMEOUT = 300_000;
-const none = { liveTasks: () => [], inFlight: () => 0 };
+const none = { liveTasks: () => [] };
 export const owners: CockpitOwnership[] = [];
 export const disposers: Array<() => void> = [];
 

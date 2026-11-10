@@ -2,21 +2,18 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, st
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { createRunner } from '../core/runner-factory.ts';
 import { removeOwnedWorkspace } from '../delegation/workspace.ts';
-import { testHome } from '../home/test-home.testkit.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
-import { CockpitOwnership, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
-import { fenceProjectContext, ProjectContexts } from '../server/project-context.ts';
+import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 import { migrateProject, resumeProjectMigration } from './engine.ts';
-import { Crash, crashAt, disposers, fence, migrate, moved, owners, TIMEOUT } from './engine.testkit.ts';
+import { Crash, crashAt, fence, migrate, moved, TIMEOUT } from './engine.testkit.ts';
 import { readProjectMigrationJournal } from './journal.ts';
 import { ProjectMigrationStepError } from './steps.ts';
-import { buildMigrationProject, git, removeMigrationProject, TASK, type MigrationProject } from './project-migration.testkit.ts';
+import { buildMigrationProject, git, removeMigrationProject, type MigrationProject } from './project-migration.testkit.ts';
 
 /** The fence holder's side of the project migration engine (hearsay-tools/cezarion#3088): a step
  *  that stops on an unexpected value, a redirect placed after planning, directory modes, worktree
- *  locks the user set, and the owning cockpit's dispose before the move. */
+ *  locks the user set. */
 /** A real cleanup checkpoint: the removal stops right after writing it, with the worktree in place. */
 async function checkpoint(root: string, workspace: WorkerWorkspace): Promise<void> {
   await removeOwnedWorkspace(root, workspace, undefined, async () => { throw new Error('stopped after the checkpoint'); }).catch(() => undefined);
@@ -92,27 +89,4 @@ describe('the holder', { timeout: TIMEOUT }, () => {
     expect(listed.match(/^locked.*$/gm)).toEqual(['locked mine, keep it']);
     expect(listed.split('\n\n').find(record => record.startsWith(`worktree ${moved(project, project.taskPath)}\n`))).toContain('locked mine, keep it');
   });
-
-  it('runs in an owning cockpit after its drain: the context is disposed first, then rebuilt on the moved state', async () => {
-    project.restore();
-    const ownership = new CockpitOwnership();
-    owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
-      listProjects: async () => [{ id: 'p', root: project.root, status: 'not-git' as const }] });
-    disposers.push(() => contexts.disposeAll());
-    const context = await contexts.context('p');
-    await context.store.reports.idle();
-    const held = await fenceProjectContext(ownership, context);
-    let closed = false;
-    try {
-      await migrateProject({ repoRoot: project.root, fence: held, closeProject: () => { closed = contexts.dispose('p', { releasePreviews: false }); } });
-    } finally { held.release(); }
-    expect(closed).toBe(true);
-    expect(contexts.ids()).toEqual([]);
-    const rebuilt = await contexts.context('p');
-    await rebuilt.store.reports.idle();
-    expect(rebuilt.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
-    expect(existsSync(join(project.dataDir, RUNS_DB_FILE))).toBe(false);
-  });
 });
-
