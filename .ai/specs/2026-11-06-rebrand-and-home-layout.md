@@ -83,7 +83,7 @@ Caw, Covey, Flock, Hatch, Nest.
 | npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/squawk`, unscoped alias `hsq` | matching old scoped and `cezarion` forwarding releases pin the new package exactly during the window; the dispatcher prints one notice; the last pair ships at window end, then `npm deprecate` (planner X4) |
 | CLI binary | `cezarion`, `cez` | `hsq` | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
 | Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `HSQ_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
-| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; automatic move at cockpit start for each registered project that is idle and has a clean plan, and `hsq migrate-project`, with the release switch (P4); a moved project (marker in the Git common directory, keyed by the project root) writes `.ai/squawk/` and reads `.ai/cezar/` as the fallback, a fresh project with no `.ai/cezar` path starts in `.ai/squawk/` and records the same marker before its first write; an existing legacy path keeps the migration rules (hearsay-tools/cezarion#3150) |
+| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; automatic move at cockpit start for each registered project that is idle and has a clean plan, and `hsq migrate-project`, with the release switch (P4); a moved project (marker in the Git common directory, keyed by the project root) writes `.ai/squawk/` and reads `.ai/cezar/` as the fallback, a fresh project with no `.ai/cezar` path and an absent or real `.ai/squawk` directory starts in `.ai/squawk/` and records the same marker before its first write; an existing legacy path keeps the migration rules (hearsay-tools/cezarion#3150) |
 | Home | `~/.cezar`, `~/.cache/cez` | section 3 layout | read once by the migration, then a canary |
 | GitHub repo | `hearsay-tools/cezarion` | `hearsay-tools/squawk` (GitHub redirects the old name) | old citations stay valid; the citation checker accepts both |
 | Docs | README, AGENTS.md, docs/, specs | new name; specs and ADRs keep history | — |
@@ -342,7 +342,7 @@ Every slice follows `BACKWARD_COMPATIBILITY.md` and updates `.env.example`, the 
 ### Switch fix: first project use
 
 With the switch on, no `.ai/cezar` path means a fresh project. Path reads select
-`.ai/squawk/` without writing. Project preparation and the first CLI write mark the
+`.ai/squawk/` without writing when it is absent or a real directory. Project preparation and the first CLI write mark the
 project in the Git common directory, so a later legacy path does not change its write
 root. An existing empty directory, tracked-only directory, symlink or unreadable path
 keeps the existing migration rules. With the switch off, all writes remain legacy.
@@ -352,7 +352,15 @@ refusal also lists live tasks from the read-only task view.
 | Case | Write root / result |
 | --- | --- |
 | Switch off, any marker or legacy path | `.ai/cezar/` |
-| Switch on, no legacy path | `.ai/squawk/`, marker before ordinary writes |
+| Switch on, no legacy path, destination absent or real directory | `.ai/squawk/`, marker before ordinary writes |
+| Switch on, no legacy path, destination is a symlink or file | `.ai/cezar/`, no fresh marker |
 | Switch on, existing unmarked legacy path | Existing P4 migration checks |
 | Switch on, marked project, legacy path later appears | `.ai/squawk/`, legacy fallback |
 | Cockpit and task live during offline migration | First refusal names both |
+| Cockpit known, live-task read fails | Refusal names cockpit and read failure; nothing moves |
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.

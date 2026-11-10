@@ -124,3 +124,9 @@ Product task-context reads accept `HSQ_*` first with permanent `CEZ_*` fallback.
 Generated child entries keep the legacy names with the release switch off; with
 it on they carry both names and the same value. Empty context values remain
 intentional clears. `core/product-env.ts` owns both selection and generation.
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.

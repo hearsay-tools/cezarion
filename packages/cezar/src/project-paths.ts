@@ -53,17 +53,32 @@ export function projectMoveMarked(repoRoot: string): boolean {
   } catch { return false; }
 }
 
+/** A directory entry itself must be a directory; never follow a symlink. */
+export function realDirectory(path: string): boolean {
+  try { return lstatSync(path).isDirectory(); } catch { return false; }
+}
+
+/** Shared by fresh writes and migration planning: an absent or real directory is safe. */
+export function projectDestinationAvailable(path: string): boolean {
+  return !pathPresent(path) || realDirectory(path);
+}
+
+/** Fresh selection never promotes an existing fallback symlink or file into a write root. */
+export function canStartFreshProject(root: string): boolean {
+  return !pathPresent(join(root, '.ai/cezar')) && projectDestinationAvailable(join(root, '.ai/squawk'));
+}
+
 /**
  * The one rule for a project's write root. With the release switch on, a moved project writes
  * `.ai/squawk/` and reads `.ai/cezar/` as its fallback. A fresh project (no legacy path) does
- * the same from its first use; every existing legacy project, and every project
+ * the same from its first use when the destination is absent or a real directory; every existing legacy project, and every project
  * with the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. With the
  * switch on: marker and legacy-path checks; none with it off. Reads never create a marker.
  */
 export function projectPaths(repoRoot: string) {
   const legacy = join(repoRoot, '.ai', 'cezar');
   const moved = join(repoRoot, '.ai', 'squawk');
-  const write = REBRAND_SWITCH && (projectMoveMarked(repoRoot) || !pathPresent(legacy)) ? moved : legacy;
+  const write = REBRAND_SWITCH && (projectMoveMarked(repoRoot) || canStartFreshProject(repoRoot)) ? moved : legacy;
   return { write, reads: [write, write === legacy ? moved : legacy] as readonly string[] };
 }
 

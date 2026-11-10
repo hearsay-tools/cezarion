@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,4 +88,29 @@ it('prints one switch-aware notice when a live task blocks the automatic move', 
     expect(warnings[0]).toMatch(/^\[hsq\] Project /);
     expect(warnings[0]).toContain('busy task');
   } finally { warn.mockRestore(); rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
+});
+
+it.each(['symlink', 'dangling symlink', 'file'])('keeps a fresh project on legacy paths when squawk is a %s', async kind => {
+  release.enabled = true;
+  const repo = mkdtempSync(join(tmpdir(), 'unsafe-fresh-project-'));
+  const outside = mkdtempSync(join(tmpdir(), 'outside-fresh-project-'));
+  try {
+    execFileSync('git', ['init', '-q', repo]);
+    mkdirSync(join(repo, '.ai'));
+    const destination = join(repo, '.ai/squawk');
+    if (kind === 'file') writeFileSync(destination, 'keep');
+    else symlinkSync(kind === 'symlink' ? outside : join(outside, 'missing'), destination, 'dir');
+    expect(projectPaths(repo).write).toBe(join(repo, '.ai/cezar'));
+    await initCommand(repo);
+    await moveProjectWhenIdle(repo, { homes: [] });
+    expect(projectMoveMarked(repo)).toBe(false);
+    expect(projectPaths(repo).write).toBe(join(repo, '.ai/cezar'));
+    expect(existsSync(join(repo, '.ai/cezar/workflows/fix-and-verify.yaml'))).toBe(true);
+    expect(existsSync(join(outside, 'workflows'))).toBe(false);
+    expect(existsSync(join(outside, 'skills'))).toBe(false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+    release.enabled = false;
+  }
 });
