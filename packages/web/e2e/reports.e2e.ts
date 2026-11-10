@@ -162,7 +162,10 @@ it('shows a deleted snapshot as missing and drops reports after snapshot or task
   let deletionBrowser: AgentBrowser | undefined
   try {
     const project = join(deletionRoot, 'project')
-    cpSync(join(root, 'project'), project, { recursive: true, filter: source => !['runs.db', 'cockpit.lock'].some(prefix => basename(source).startsWith(prefix)) })
+    // The copy gets its own fixture homes: a copied Home keeps the source's migration marker.
+    const fixtureHomes = ['.cez-home', '.server-home'].map(name => join(root, 'project', name))
+    cpSync(join(root, 'project'), project, { recursive: true, filter: source => !fixtureHomes.includes(source)
+      && !['runs.db', 'cockpit.lock'].some(prefix => basename(source).startsWith(prefix)) })
     const sourceData = projectPaths(join(root, 'project')).write
     const sourceDatabase = new DatabaseSync(join(sourceData, 'runs.db'), { readOnly: true })
     try {
