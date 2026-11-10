@@ -53,8 +53,10 @@ offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner
 cockpit of this home whose registry lists the project) or any task of it is live, and
 names each pid, URL, port or task to stop. It then takes `cockpit.lock` and the migration
 fence, moves the state and releases both. A dry run holds `cockpit.lock` and passes
-admission before it plans; it moves nothing. It prints the plan, then `Dry run: nothing
-was moved or rewritten.` or `Migration complete.`; it prints the `git mv` commands for
+admission before it plans. It first completes and reports an unfinished migration, if one
+exists; planning the remaining migration changes nothing. It prints the plan, then `Dry run:
+nothing was moved or rewritten.` (or, after such a recovery, `Dry run: planning changed
+nothing; the completed migration above did.`) or `Migration complete.`; it prints the `git mv` commands for
 tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted
 journal) print one message to stderr and exit 1. A cockpit with the switch on moves an idle
 project by itself at start or first open

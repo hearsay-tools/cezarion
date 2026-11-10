@@ -19,7 +19,8 @@ cockpit that serves the project and finish or cancel every task first; the comma
 names what is still running. Tracked files are never moved: the command prints the
 git mv commands to run and commit.
 
-    --dry-run     print every move, repair and rewrite; change nothing
+    --dry-run     print every move, repair and rewrite; only an unfinished
+                  migration is completed (and reported) first
     --repo <dir>  the project (default: the current directory)
 -h, --help        show this help`);
 
