@@ -1,7 +1,9 @@
 # Reclassify branches before atomic deletion
 
-Branch cleanup uses one server classifier and reclassifies at delete time. Active and
-non-task branches are protected. Merged or empty task branches can be removed in bulk;
+Branch cleanup uses one server classifier and reclassifies at delete time. Active branches
+are protected. Non-task branches are protected too, except the exact merged PR branch that a
+finished run recorded; the classifier marks that one merged. Merged or empty branches can be
+removed in bulk;
 not-landed or orphan work requires one branch and its typed name. The classifier is policy,
 not a promise that every permitted deletion preserves unlanded commits.
 

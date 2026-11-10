@@ -12,8 +12,11 @@ default-on post-listen warm-up also builds eligible registered projects one at a
 can resume work and spend tokens; it skips another live cockpit’s projects and is disabled in
 single-project mode or with `CEZ_PROJECT_WARMUP=0`.
 
-Read-only SQLite may still need WAL coordination files. Cezar accepts a permission failure
-rather than bypassing them with an immutable connection that could miss live commits.
+Read-only SQLite may still need WAL coordination files. Cold reads accept a permission failure
+rather than bypassing them with an immutable connection that could miss live commits. A
+project migration's dry run is the one exception: it opens immutable only when no WAL file
+exists, because then every commit is in the main file. With a WAL file it reads a private
+copy (`readOnlyTarget`, migration `plan.ts`).
 
 ## Considered Options
 

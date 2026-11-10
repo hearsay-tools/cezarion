@@ -23,4 +23,4 @@ about a dozen manager members waits until its dependencies have moved.
 
 Implementation: [run.ts](../../packages/cezar/src/workflows/run.ts), [2026-10-28-run-ts-decomposition.md](../../.ai/specs/2026-10-28-run-ts-decomposition.md).
 
-Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts), [run-active-pin.test.ts](../../packages/cezar/src/workflows/run-active-pin.test.ts), [file-length.test.ts](../../packages/cezar/src/file-length.test.ts), [ast-grep-rules.test.ts](../../packages/cezar/src/ast-grep-rules.test.ts).
+Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts), the [active-run-map-write](../../.ai/ast-grep/rules/active-run-map-write.yml) ast-grep rule, [file-length.test.ts](../../packages/cezar/src/file-length.test.ts), [ast-grep-rules.test.ts](../../packages/cezar/src/ast-grep-rules.test.ts).

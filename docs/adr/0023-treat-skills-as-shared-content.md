@@ -10,7 +10,8 @@ catalog reads.
 Team sources are optional; an absent `skillsRepos` setting supplies no team catalog. The
 project’s `disabledTeamSkills` list matches source repo and name. Read it for each catalog and
 provisioning pass, and apply it to roots and companions. Skills disabled during a run are not
-installed on later passes; existing copies stay until the task ends.
+installed on later passes. A later pass that provisions other skills removes cezar’s unchanged
+copies of the disabled ones. Without such a pass, existing copies stay until the task ends.
 
 Provision selected roots, the skills an agent step’s prompt names as a typed `/name`, and the
 catalog skills their bodies name into the run’s own worktree. The closure cap bounds those
