@@ -156,3 +156,19 @@ it('lists only legacy backups inside the legacy home', async () => {
   const listed: Array<{ file: string; path: string }> = JSON.parse(output.mock.calls[0]![0]);
   expect(listed).toEqual([expect.objectContaining({ file: 'config.json', path: join(f.legacy.backups, 'config.json', snapshot(inner)) })]);
 });
+
+it('takes the fresh decision before seeding split files that have no marker', async () => {
+  const f = await fixture(true);
+  // A split home whose install.json was deleted: registry data, no marker, no legacy home.
+  rawJson(f.home.workspaceConfig, { projects: [], saved: 'split' });
+  f.prepareOperatorHome(f.home, 'projects', f.env);
+  expect(JSON.parse(readFileSync(join(f.home.config, 'install.json'), 'utf8'))).toMatchObject({ state: 'committed', migratedFrom: f.legacy.root });
+  expect(existsSync(f.legacy.root)).toBe(false);
+  // An old binary then creates the legacy home: the canary reports it; boot does not refuse.
+  mkdirSync(f.legacy.root, { recursive: true }); // Intentional old-binary fixture.
+  writeFileSync(f.legacy.workspaceConfig, '{"oldWriter":true}'); // Intentional old-binary write.
+  f.prepareOperatorHome(f.home, 'serve', f.env);
+  expect(readFileSync(f.home.workspaceConfig, 'utf8')).not.toContain('oldWriter');
+  const { getHomeRecovery } = await import('./recovery.ts');
+  expect(getHomeRecovery(f.home, true).files.some(file => file.reason === 'legacy-change')).toBe(true);
+});

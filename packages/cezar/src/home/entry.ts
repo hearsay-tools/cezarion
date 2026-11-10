@@ -32,10 +32,12 @@ export function prepareOperatorHome(home: Home, command: string | undefined, env
   const boot = prepareMigrationHome(home, env, { ...migration, deferFresh: !unconditional });
   if (boot.kind === 'staged') return home;
   if (boot.kind === 'legacy') home = boot.home;
-  authorizeHomeEntry(home, command, markerKind(command, env), boot.kind === 'fresh' ? boot.prepare : undefined);
+  const beforeWrite = boot.kind === 'fresh' ? boot.prepare : undefined;
+  authorizeHomeEntry(home, command, markerKind(command, env), beforeWrite);
   try {
     if (unconditional || registryFiles(home).some(path => existsSync(path))) {
-      prepareHome(home, command as HomeEntry, env);
+      // Existing split files without a marker still take the fresh decision before seeding.
+      prepareHome(home, command as HomeEntry, env, beforeWrite);
     }
   } catch (error) {
     console.warn(`[cez] home registry unavailable (${error instanceof Error ? error.message : String(error)}) — continuing without it`);
@@ -48,8 +50,8 @@ function markerKind(entry: string, env: NodeJS.ProcessEnv) {
 }
 
 /** Explicit authorization at operator entry points. Resolution itself stays free of IO. */
-export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env): void {
-  authorizeHomeEntry(home, entry, markerKind(entry, env));
+export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env, beforeWrite?: () => void): void {
+  authorizeHomeEntry(home, entry, markerKind(entry, env), beforeWrite);
   new HomeStore(home).transaction(() => {});
 }
 
