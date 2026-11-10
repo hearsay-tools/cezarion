@@ -3605,7 +3605,7 @@ export function createApp(deps: ServerDeps) {
     // in the task's worktree when it still exists (spec 006).
     .post('/runs/:id/open-in-cli', async (c) => {
       const project = c.get('project');
-      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: true, defaultTargetNeedsWorktree: false });
+      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: true });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       // Hosted mode: there is no "my machine" to open a terminal on. The UI
       // hides the button when localHandoff is false — this is defense in depth.
@@ -3648,7 +3648,7 @@ export function createApp(deps: ServerDeps) {
     // Open a run's worktree (or the repo root) in the chosen local app.
     .post('/runs/:id/open-in', jsonZodValidator(openInSchema), async (c) => {
       const project = c.get('project');
-      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: false, defaultTargetNeedsWorktree: true });
+      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: false });
       if ('status' in checkout) return c.json(checkout.body, checkout.status);
       if (!capabilities().localHandoff) {
         return c.json(

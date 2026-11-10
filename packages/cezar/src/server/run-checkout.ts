@@ -41,7 +41,6 @@ type ReadHandle<Rule extends ReadDirectoryRule> = {
 
 interface OpenOptions {
   ignoresEngineOwnership: boolean;
-  defaultTargetNeedsWorktree: boolean;
 }
 type OpenHandle = {
   run: RunRecord;
@@ -174,8 +173,7 @@ function openCheckout({ root, store }: RunCheckoutHost, id: string, options: Ope
     directory: () => worktreeOf(run) ?? root,
     get worktree() { return worktreeOf(run); },
     defaultWorktree() {
-      const worktree = worktreeOf(run);
-      return worktree ?? (options.defaultTargetNeedsWorktree ? { status: 409, body: { error: NO_WORKTREE } } : root);
+      return workingDirectoryOf(run, root) ?? { status: 409, body: { error: NO_WORKTREE } };
     },
     get resumeAllowed() { return options.ignoresEngineOwnership || !engineOwnsRun(run); },
   };

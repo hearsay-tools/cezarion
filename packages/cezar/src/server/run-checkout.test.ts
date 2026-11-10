@@ -297,8 +297,8 @@ describe('reclaim failure detail after release', () => {
 });
 
 const openRoutes = [
-  { route: 'open-in-cli', ignoresEngineOwnership: true, defaultTargetNeedsWorktree: false },
-  { route: 'open-in', ignoresEngineOwnership: false, defaultTargetNeedsWorktree: true },
+  { route: 'open-in-cli', ignoresEngineOwnership: true },
+  { route: 'open-in', ignoresEngineOwnership: false },
 ] as const;
 
 describe.each(openRoutes)('open $route', (route) => {
@@ -316,7 +316,7 @@ describe.each(openRoutes)('open $route', (route) => {
     expect(result.run).toBe(state.run);
     expect(result.directory()).toBe(worktree ?? root);
     expect(result.worktree).toBe(worktree);
-    expect(result.defaultWorktree()).toEqual(worktree ?? (route.defaultTargetNeedsWorktree ? noWorktree : root));
+    expect(result.defaultWorktree()).toEqual(state.run.worktree === false ? root : worktree ?? noWorktree);
     expect(result.resumeAllowed).toBe(route.ignoresEngineOwnership || (state.name === 'usage hold' || !['running', 'queued', 'waiting'].includes(state.run.status)));
     expect(host.store.getRun).toHaveBeenCalledExactlyOnceWith(baseRun.id);
     expect(host.store.writeRefusal).not.toHaveBeenCalled();

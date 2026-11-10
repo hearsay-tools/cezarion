@@ -26,12 +26,12 @@ interface CliHandoffDeps {
 /** Open only a contained raster image: the OS launcher does not apply the browser's CSP. */
 export async function openRunDefaultApp(
   c: Context,
-  worktree: string,
+  directory: string,
   relPath: string | undefined,
   openFile: typeof openFileInDefaultApp,
 ) {
   if (!relPath) return c.json({ error: 'path required for the default-app target' }, 400);
-  const result = await readWorktreePath(worktree, relPath);
+  const result = await readWorktreePath(directory, relPath);
   if (result.kind !== 'file') {
     return c.json(
       {
@@ -61,7 +61,7 @@ export async function openRunDefaultApp(
       409,
     );
   }
-  const filePath = join(worktree, result.path);
+  const filePath = join(directory, result.path);
   const opened = await openFile(filePath);
   if (!opened) return c.json({ error: `could not open ${result.path}`, path: filePath }, 409);
   return c.json({ opened: true, path: filePath });
