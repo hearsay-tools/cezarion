@@ -25,6 +25,8 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const baseRun: RunRecord = makeRunRecord({ id: '43d2b279-0dd9-49b5-aecb-1060c3020b9b' });
 const notFound = { status: 404, body: { error: 'not found' } };
 const noWorktree = { status: 409, body: { error: 'no worktree — this task ran directly in the repo working tree' } };
+const fallbackError = { status: 409, body: { error: fallbackProjectWriteError(fallback)! } };
+const fallbackGone = join(root, '.ai', 'squawk', 'worktrees', 'gone');
 const autosave = { status: 409, body: { error: 'autosave cleanup pending' } };
 
 // One policy row for each Table A read and mutate route.
@@ -59,7 +61,9 @@ const states: State[] = [
   { name: 'no path', run: baseRun, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: root },
   { name: 'removed', run: { ...baseRun, worktreePath: gone }, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: gone },
   { name: 'reclaimed', run: { ...baseRun, worktreeReclaimedAt: '2026-11-10T01:00:00Z' }, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: root },
-  { name: 'fallback', run: { ...baseRun, worktreePath: fallback }, blocked: false, mutate: fallback, diff: fallback, working: fallback, fileLink: fallback },
+  { name: 'fallback', run: { ...baseRun, worktreePath: fallback }, blocked: false, mutate: fallbackError, diff: fallback, working: fallback, fileLink: fallback },
+  { name: 'fallback with autosave', run: { ...baseRun, worktreePath: fallback }, blocked: true, mutate: fallbackError, diff: fallback, working: fallback, fileLink: fallback },
+  { name: 'fallback removed', run: { ...baseRun, worktreePath: fallbackGone }, blocked: false, mutate: { status: 409, body: { error: fallbackProjectWriteError(fallbackGone)! } }, diff: null, working: noWorktree, fileLink: fallbackGone },
   { name: 'worker', run: { ...baseRun, worktreePath: live, delegation: {
     role: 'worker', parentRunId: '0869dc16-0d6e-48a1-a693-e32cafc02c3f', permissions: [],
     workspace: { ownerRunId: baseRun.id, resourceId: baseRun.id, kind: 'owned-isolated', path: live, branch: 'worker', baselineSha: 'a'.repeat(40) },
@@ -93,7 +97,7 @@ describe.each(routes)('$intent $route', (route) => {
     const result = route.intent === 'mutate'
       ? runCheckout(host, baseRun.id, 'mutate')
       : runCheckout(host, baseRun.id, 'read', route);
-    const checksAutosave = Boolean(state.run && route.checksAutosave);
+    const checksAutosave = Boolean(state.run && route.checksAutosave && !(route.intent === 'mutate' && state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
     const expected = checksAutosave && state.blocked ? autosave : state[route.column];
     expect(result).toEqual(typeof expected === 'object' && expected !== null
       ? expected
@@ -136,6 +140,8 @@ const claimedOutcomes: Record<string, readonly (string | null | 404)[]> = {
   removed: [null, null, null, null],
   reclaimed: [null, null, null, null],
   fallback: [fallbackRefusal, null, null, fallbackRefusal], // Removal middleware remains outside admission.
+  'fallback with autosave': [fallbackRefusal, null, null, fallbackRefusal],
+  'fallback removed': [fallbackProjectWriteError(fallbackGone)!, null, null, fallbackProjectWriteError(fallbackGone)!],
   worker: [null, workerRemove, recordRemove, null],
   'claim held elsewhere': [publishPending, cleanupPending, cleanupPending, reclaimPending],
   'foreign owner': [publishPending, cleanupPending, cleanupPending, RUN_IN_USE_ELSEWHERE],
@@ -159,7 +165,7 @@ function claimedHost(state: State) {
       getRun: vi.fn(() => { calls.push('lookup'); return state.run; }),
       updateRun: vi.fn(), sourceDataDir: vi.fn(),
       canDeleteRun: vi.fn(() => { calls.push('can-delete'); return state.run?.delegation?.role !== 'worker'; }),
-      fallbackDeleteError: vi.fn(() => { calls.push('fallback'); return state.run?.worktreePath === fallback ? fallbackRefusal : undefined; }),
+      fallbackDeleteError: vi.fn(() => { calls.push('fallback'); return state.run?.worktreePath ? fallbackProjectWriteError(state.run.worktreePath) : undefined; }),
       writeRefusal: vi.fn(() => { calls.push('owner'); return state.foreignOwner ? RUN_IN_USE_ELSEWHERE : undefined; }),
     },
     manager: {
