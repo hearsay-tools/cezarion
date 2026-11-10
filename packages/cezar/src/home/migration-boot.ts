@@ -15,7 +15,11 @@ import { listServerInstances } from '../server-install/state.ts';
 export interface MigrationBootOptions { enabled?: boolean; legacy?: Home }
 export type MigrationBootResult = { kind: 'ready' } | { kind: 'staged' } | { kind: 'legacy'; home: Home };
 
-/** A staged group reads the target without writes; a rolled-back server keeps its legacy home. */
+/**
+ * A staged group reads the target without writes. A legacy home that records an installed server
+ * keeps serving until `hsq server-migrate` commits the target: only that command stops the group,
+ * stages the home and rolls every instance back on failure (spec §4 "Server installs").
+ */
 export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
   enabled = REBRAND_SWITCH, legacy = enabled ? resolveHome({ purpose: 'cli', env, layout: 'legacy' }) : undefined,
 }: MigrationBootOptions = {}): MigrationBootResult {
@@ -29,9 +33,10 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
   // pending home without stagedAt, or a stale claim: restart it at step 4 (spec §4 step 3).
   if (marker?.state === 'pending' && !existsSync(join(legacy.root, '.migrating'))
     && readMigrationRecord(home)?.stagedAt !== undefined) return { kind: 'staged' };
-  if (marker?.state !== 'committed' && existsSync(join(home.config, 'install.json.failed'))
-    && listServerInstances(legacy).some(({ state }) => state.installed && !state.dryRun)) {
-    console.warn(commandText(`[hsq] server migration was rolled back; serving legacy home ${legacy.root}. Run hsq server-migrate to retry.`));
+  if (marker?.state !== 'committed' && listServerInstances(legacy).some(({ state }) => state.installed && !state.dryRun)) {
+    console.warn(commandText(existsSync(join(home.config, 'install.json.failed'))
+      ? `[hsq] server migration was rolled back; serving legacy home ${legacy.root}. Run hsq server-migrate to retry.`
+      : `[hsq] ${legacy.root} records a server install; using it until hsq server-migrate moves every instance and the home as one group. Run hsq server-migrate.`));
     return { kind: 'legacy', home: legacy };
   }
   migrateLegacyHome(legacy, home, { env });

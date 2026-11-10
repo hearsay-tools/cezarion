@@ -100,14 +100,18 @@ function prune(home: string | Home, file: BackupFile, now: Date): void {
   }
 }
 
+/** An install lock holds only the pid of a running installer: no data to recover, so no new snapshot. */
+const isInstallLock = (file: BackupFile) => file.endsWith('.install.lock');
+
 const warned = new Set<string>();
-/** Best effort before replacement or removal; raw lock bytes stay byte-for-byte restorable. */
+/** Best effort before replacement or removal. Older raw lock snapshots stay listed and byte-for-byte restorable. */
 export function backupBeforeWrite(path: string, next: unknown, options: { home?: Home | string; unavailable?: unknown; required?: boolean | undefined } = {}): void {
   // The optional fallback preserves the exported P0 helper for root-file callers.
   const home = options.home ?? dirname(path);
   const root = typeof home === 'string' ? home : home.state;
   const file = homePathLocation(home, path).file;
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
+  if (isInstallLock(file)) return;
   let raw: Buffer;
   try { raw = readFileSync(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
