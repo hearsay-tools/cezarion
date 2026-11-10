@@ -1769,7 +1769,7 @@ PR process. Ask explicitly for fresh coverage when needed.
 The local pre-PR gate uses Squeal 0.1.423's one-shot changed-function check:
 
 ```bash
-quality_report=$(mktemp "${TMPDIR:-/tmp}/code-quality.XXXXXXXX.json")
+quality_report=$(mktemp "${TMPDIR:-/tmp}/code-quality.XXXXXXXX") || exit 2
 squeal code --base origin/main --json > "$quality_report"
 quality_status=$?
 printf 'Report: %s; exit: %s\n' "$quality_report" "$quality_status"

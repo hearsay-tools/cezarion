@@ -13,7 +13,7 @@ the repository root, without path filters, so the report covers the whole change
 
 ```sh
 squeal --version
-quality_report=$(mktemp "${TMPDIR:-/tmp}/code-quality.XXXXXXXX.json")
+quality_report=$(mktemp "${TMPDIR:-/tmp}/code-quality.XXXXXXXX") || exit 2
 squeal code --base origin/main --json > "$quality_report"
 quality_status=$?
 printf 'Report: %s; exit: %s\n' "$quality_report" "$quality_status"
@@ -75,6 +75,9 @@ A local quality pass requires all of the following:
 - `verdict` is `pass`; every reported function is `pass`, with known complexity
   and CRAP within the limits. `counts.skipped` and `counts.incomplete` are zero.
   Skipped functions are not passing functions, even when Squeal exits 0.
+- Each function has matching `loaders.expected` and `loaders.measured` sets.
+  A CRAP upper bound from partial loader coverage does not supply complete
+  evidence, even when the function state is `pass`.
 - `uncounted` is empty and `budget.timedOut` is false. Every selected test file completed and no selected test
   failed: inspect `runs`, including `notFinished` and `failed`. Missing, stale,
   unknown, partial or unsupported required evidence cannot pass.
