@@ -117,7 +117,7 @@ function publishCheckout({ store, manager }: RunCheckoutHost, id: string): Check
 
 /** The caller holds publish admission's claim until all publish work finishes. */
 export async function preparePublishCheckout({ root, store }: RunCheckoutHost, id: string): Promise<
-  CheckoutRefusal | { status: 400; body: { error: string } } | { run: RunRecord }
+  CheckoutRefusal | { run: RunRecord }
 > {
   // Reclaim (open-mercato/cezar#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
   // offers this on exactly those rows: restore the checkout first, as Continue does.
@@ -125,7 +125,7 @@ export async function preparePublishCheckout({ root, store }: RunCheckoutHost, i
   const run = store.getRun(id);
   if (!run) return { status: 404, body: { error: 'not found' } };
   if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-    return { status: 400, body: { error: 'no worktree/branch to publish — this task ran in the repo working tree' } };
+    return { status: 409, body: { error: 'no worktree/branch to publish — this task ran in the repo working tree' } };
   }
   return { run };
 }
