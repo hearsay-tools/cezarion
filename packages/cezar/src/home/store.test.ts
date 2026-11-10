@@ -24,7 +24,7 @@ it('refuses every registry file with a live marker under the actual test process
   for (const path of files) expect(() => store.writeJson(path, {})).toThrow(/live home.*test runner/);
   await expect(enableRemoteSettings(4321, {}, new Date(), home)).rejects.toThrow(/live home/);
   await expect(mergeWriteWorkspaceConfig(() => ({} as never), home)).rejects.toThrow(/live home/);
-  expect(() => Home.seed(Home.sandbox(dir), home.workspaceConfig, {})).toThrow(/test install marker/);
+  expect(() => Home.seed(Home.sandbox(dir, { layout: home.layout }), home.workspaceConfig, {})).toThrow(/test install marker/);
   expect(readInstallMarker(dir)?.kind).toBe('live');
   expect(readdirSync(dir).sort()).toEqual(['.locks', '.versions', 'install.json']);
 });
@@ -54,7 +54,7 @@ it('refuses the project-probe fixture command before it can modify an inherited 
   const before = readFileSync(path);
   const script = fileURLToPath(new URL('../../scripts/benchmark-project-probes.mjs', import.meta.url));
   const result = spawnSync(process.execPath, ['--import', 'tsx', script, '--fixture-server'], {
-    env: childEnv({ CEZ_HOME: root }), encoding: 'utf8',
+    env: childEnv({ HSQ_HOME: root, CEZ_HOME: root }), encoding: 'utf8',
     timeout: 10_000, // bound: a regression may start a server that never exits instead of refusing.
   });
   expect(result.status).toBe(1);
