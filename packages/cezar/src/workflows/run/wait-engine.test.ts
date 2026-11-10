@@ -37,7 +37,7 @@ function fixture() {
   const host = unused<ConstructorParameters<typeof WaitEngine>[1]>('engine host', {
     active: () => undefined,
     canProceedWithRun: (_id, record): record is NonNullable<typeof record> => record?.status === RUN_STATUS.running,
-    ciSupervisor: () => unused('ci supervisor', { watch: (_request, signal) => { watchSignals.push(signal); return ci.promise; } }),
+    ciSupervisor: () => unused<ReturnType<ConstructorParameters<typeof WaitEngine>[1]['ciSupervisor']>>('ci supervisor', { watch: (_request, signal) => { watchSignals.push(signal); return ci.promise; } }),
     // The family reconcile, reduced to what it asks the engine: arm an open worker wait, or
     // resolve it with `timeout` once its deadline passed.
     reconcileWorkerWaits: () => {
