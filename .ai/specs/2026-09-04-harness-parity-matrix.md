@@ -287,7 +287,7 @@ The matrix IS the test. Two things about it need their own proof:
   a mock must fail the inverted assertion. Both are checked by hand during implementation, per
   AGENTS.md's "prove the regression test fails without the fix".
 - **Each new mock scenario must be wire-faithful.** Every addition cites the fixture or runner test it
-  was derived from, as `AGENT_PROTOCOL.md` §7 requires. A scenario invented from assumption is the
+  was derived from, as `AGENT_PROTOCOL.md` §8 requires of a fixture. A scenario invented from assumption is the
   open-mercato/cezar#443 failure repeating inside the very suite meant to prevent it.
 
 ## Cost

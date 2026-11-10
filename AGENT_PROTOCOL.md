@@ -109,9 +109,10 @@ tools. Read each fact from its owner:
   kind, with its deadline, slot, wake budget, resolvers, cancel paths and texts. A new kind is a
   new row ([ADR 0061](docs/adr/0061-one-wait-engine-executes-wait-kind-rows.md)).
 - `cezarTools` in `packages/cezar/src/ci-wait/tools.ts`: the one list of cezar tools, with the
-  descriptions that the agent reads. Every runner's adapter, extension, allow-list and forwarded
-  environment names read it. A new tool is one entry there. `errors.ts` beside it holds each
-  refusal message.
+  descriptions that the agent reads. Every runner's adapter, extension and allow-list read
+  it, and `cezarToolEnvNames` lists the environment names a harness forwards. A new tool is
+  one entry there. `errors.ts` beside it and `workflows/completion-policy.ts` hold the refusal
+  messages.
 - The `CI_*` constants in `packages/cezar/src/ci-wait/supervisor.ts` and `github.ts`: the PR
   watcher bounds. `packages/cezar/src/workflows/run/constants.ts`: the wake and delivery bounds.
 - `.ai/specs/2026-10-17-unified-waits.md`: the model (the turn-end rule, waking, slots and
@@ -180,17 +181,15 @@ Owners. Paths are relative to `packages/cezar/src/`.
 per-runner file and for regression coverage. Rules that no check holds:
 
 - A red cell is a runner bug until proven otherwise. Fix the runner. Do not weaken the row.
-- A new mock scenario is wire-faithful on the terms of §8: derive its frames from that
-  backend's real transcripts and cite the source.
+- A new mock scenario is wire-faithful, as §8 requires of a fixture.
 - A native mock matches `mock:<scenario>` over all the native user text it receives. That text
   includes what Cezar adds: in-thread system instructions, resume context and
   `<cezar-context>` blocks. A change that adds text to an opening message strips that text
   before the mock matches, in `packages/cezar/scripts/mock-session-context.mjs`. The mock
   still records the raw text, because tests assert what Cezar sent.
 
-Autosave process attribution is observation, not OS containment (`autosave-holders.ts`,
-`autosave-windows.ts`). It does not see a Git descendant that clears its environment and
-leaves the worktree before a scan.
+Autosave process attribution is observation, not OS containment: `autosave-holders.ts` and
+`autosave-windows.ts` say what it cannot see.
 
 ### Continue: session and step
 
@@ -207,8 +206,8 @@ control, the reason and the version inspected. The Owned workers part of `README
 the limits that a user meets, and § 11 of
 `.ai/specs/2026-10-27-task-communication-protocol.md` holds the probe evidence.
 
-A control applies to one launch. It adds no tool grant and writes no harness configuration
-file. The controls are cooperative same-user supervision, not isolation.
+A control adds no tool grant and writes no harness configuration file. The controls are
+cooperative same-user supervision, not isolation.
 
 ### Native cross-session messaging at shipped defaults (D3)
 
