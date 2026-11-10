@@ -39,6 +39,8 @@ export interface ProjectMigrationResult {
   resumed: boolean;
   /** Commands that move the tracked files the migration left in place, for the user to commit. */
   gitMv: string[];
+  /** A completed migration had marked the project moved: nothing was written, no journal either. */
+  alreadyMoved: boolean;
 }
 
 /** The plan had conflicts or blockers: nothing was written and no journal exists. */
@@ -80,7 +82,7 @@ async function runJournal(path: string, start: ProjectMigrationJournal, resumed:
   }
   for (const step of PROJECT_MIGRATION_STEPS) await run(step);
   removeProjectMigrationJournal(path);
-  return { journal, resumed, gitMv: gitMvCommands(journal.repoRoot, journal.tracked) };
+  return { journal, resumed, gitMv: gitMvCommands(journal.repoRoot, journal.tracked), alreadyMoved: false };
 }
 
 /** Complete an unfinished journal, for P4b3's recovery before any project read; undefined without one. */
@@ -121,6 +123,7 @@ export async function migrateProject(options: ProjectMigrationOptions & { closeP
     };
     // The same rule as a resume, before the journal exists, so a refused plan leaves nothing behind.
     await assertJournalContained(plan.journal, journal);
+    if (plan.alreadyMoved) return { journal, resumed: false, gitMv: plan.gitMv, alreadyMoved: true };
     const fault = options.fault ?? (() => undefined);
     fault('journal:before');
     writeProjectMigrationJournal(plan.journal, journal);
