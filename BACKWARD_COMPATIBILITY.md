@@ -85,3 +85,10 @@ this command in place of the `sh -c '( … ) & echo $!'` recipe, and the launch 
 obtained another way still works. Its wake text for a PID that was already gone at
 registration changed from `exited, code unknown` to `PID N was not running when this wait
 was registered`; the stored outcome stays `exited`.
+
+With the release switch on, a project with no `.ai/cezar` path starts in
+`.ai/squawk/` immediately. Preparation and CLI writes mark it in the Git common
+directory before ordinary writes. An existing legacy path, even empty or holding
+only tracked files, keeps the existing migration checks. Switch-off paths and help
+remain unchanged. A migration refusal for a running cockpit also lists live tasks
+in the same message; it still exits 1 without moving state.

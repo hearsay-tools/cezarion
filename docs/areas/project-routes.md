@@ -11,7 +11,10 @@
 `projectPaths(root)` is the one rule for the write root; no caller picks a folder itself.
 With `REBRAND_SWITCH` on, a moved project (a completed migration wrote
 the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` names the project's real root; `projectMovedMarker`) writes `.ai/squawk/` and reads `.ai/cezar/`
-as its fallback (hearsay-tools/cezarion#3150). Every other project, and every project with
+as its fallback (hearsay-tools/cezarion#3150). A fresh project with no `.ai/cezar` path
+also writes `.ai/squawk/` from its first use; preparation records its Git marker. An
+existing empty, tracked-only or unreadable legacy path keeps the normal P4 rules.
+Every other project, and every project with
 the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
 below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
 `isFallbackProjectPath` ask `projectPaths` too. Context `dataDir` is the write root.
@@ -43,7 +46,8 @@ plus start-token liveness and token-checked release.
   `cockpit.lock` owner in either directory (any home, with its URL), and every live cockpit
   of the user's legacy and split homes whose registry lists the project (the presence leases of
   `home/leases.ts`: pid, port, instance), which covers a cockpit that does not own the project
-  but runs its automations (hearsay-tools/cezarion#3136). Live tasks are
+  but runs its automations (hearsay-tools/cezarion#3136). That first refusal lists live
+  tasks too, so the user can stop everything before retrying. Live tasks are
   `projectLiveTasks` over a read-only view (`readLiveTaskView`: each run store read quiescent,
   from a private copy when it has a WAL file, and a `runs.json` no store imported yet read as
   JSON), so a refusal writes nothing; a task marked live whose record cannot be read refuses too:

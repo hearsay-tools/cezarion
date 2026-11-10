@@ -1,11 +1,15 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 const release = vi.hoisted(() => ({ enabled: false }));
 vi.mock('./home/switch.ts', () => ({ get REBRAND_SWITCH() { return release.enabled; } }));
-import { noticeLegacyProject, projectPaths } from './project-paths.ts';
+import { noticeLegacyProject, projectMoveMarked, projectPaths } from './project-paths.ts';
+import { moveProjectWhenIdle } from './project-migration/auto.ts';
+import { initCommand } from './project-commands.ts';
+import { CockpitOwnership } from './server/cockpit-ownership.ts';
 import { seedRuns } from './runs/run-store.testkit.ts';
 import { RunStore } from './runs/store.ts';
 
@@ -13,6 +17,7 @@ describe('project reads across the release switch', () => {
   it.each([false, true])('reads both trees and writes legacy, with notice gated by switch=%s', enabled => {
     release.enabled = enabled;
     const repo = mkdtempSync(join(tmpdir(), 'project-switch-'));
+    mkdirSync(join(repo, '.ai/cezar'), { recursive: true });
     const paths = projectPaths(repo);
     const old = makeRunRecord({ status: RUN_STATUS.done, title: 'legacy' });
     const fallback = makeRunRecord({ status: RUN_STATUS.done, title: 'fallback' });
@@ -24,6 +29,7 @@ describe('project reads across the release switch', () => {
       noticeLegacyProject(repo, { warn: line => warnings.push(line) });
       noticeLegacyProject(repo, { warn: line => warnings.push(line) });
       expect(warnings).toHaveLength(enabled ? 1 : 0);
+      if (enabled) expect(warnings[0]).toMatch(/^\[hsq\]/);
       store = RunStore.open(paths.write, { keepLive: true });
       expect(new Set(store.listRunIds())).toEqual(new Set([old.id, fallback.id]));
       const run = store.createRun({ title: 'new', task: 'new', workflow: 'quick-task', steps: [] });
@@ -32,4 +38,54 @@ describe('project reads across the release switch', () => {
       expect(existsSync(join(repo, '.ai/squawk-migration.json'))).toBe(false);
     } finally { store?.close(); rmSync(repo, { recursive: true, force: true }); }
   });
+});
+
+it('starts a fresh switch-on project in squawk without creating legacy state', async () => {
+  release.enabled = true;
+  const repo = mkdtempSync(join(tmpdir(), 'fresh-project-switch-'));
+  try {
+    execFileSync('git', ['init', '-q', repo]);
+    expect(projectPaths(repo).write).toBe(join(repo, '.ai/squawk'));
+    await initCommand(repo);
+    expect(existsSync(join(repo, '.ai/squawk/workflows/fix-and-verify.yaml'))).toBe(true);
+    expect(existsSync(join(repo, '.ai/cezar'))).toBe(false);
+    expect(projectMoveMarked(repo)).toBe(true);
+    mkdirSync(join(repo, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repo, '.ai/cezar/runs.json'), '[]');
+    expect(projectPaths(repo).write).toBe(join(repo, '.ai/squawk'));
+  } finally { rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
+});
+
+it('prepares a fresh cockpit project once before its first ownership claim', async () => {
+  release.enabled = true;
+  const repo = mkdtempSync(join(tmpdir(), 'fresh-cockpit-switch-'));
+  try {
+    execFileSync('git', ['init', '-q', repo]);
+    expect(await moveProjectWhenIdle(repo, { homes: [] })).toEqual({ status: 'nothing' });
+    expect(projectMoveMarked(repo)).toBe(true);
+    const ownership = new CockpitOwnership();
+    try {
+      await ownership.acquire(projectPaths(repo).write);
+      expect(existsSync(join(repo, '.ai/squawk/cockpit.lock'))).toBe(true);
+    } finally { ownership.releaseAll(); }
+    expect(projectPaths(repo).write).toBe(join(repo, '.ai/squawk'));
+    expect(existsSync(join(repo, '.ai/cezar'))).toBe(false);
+    expect(await moveProjectWhenIdle(repo, { homes: [] })).toEqual({ status: 'nothing' });
+  } finally { rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
+});
+
+it('prints one switch-aware notice when a live task blocks the automatic move', async () => {
+  release.enabled = true;
+  const repo = mkdtempSync(join(tmpdir(), 'busy-project-switch-'));
+  const warnings: string[] = [];
+  const warn = vi.spyOn(console, 'warn').mockImplementation(line => { warnings.push(String(line)); });
+  try {
+    execFileSync('git', ['init', '-q', repo]);
+    seedRuns(join(repo, '.ai/cezar'), [makeRunRecord({ status: RUN_STATUS.running, title: 'busy task' })]);
+    expect((await moveProjectWhenIdle(repo, { homes: [] })).status).toBe('blocked');
+    noticeLegacyProject(repo);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^\[hsq\] Project /);
+    expect(warnings[0]).toContain('busy task');
+  } finally { warn.mockRestore(); rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
 });

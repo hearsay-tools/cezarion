@@ -1,3 +1,4 @@
+import { productIdentity } from './home/identity.ts';
 import { REBRAND_SWITCH } from './home/switch.ts';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
@@ -54,14 +55,15 @@ export function projectMoveMarked(repoRoot: string): boolean {
 
 /**
  * The one rule for a project's write root. With the release switch on, a moved project writes
- * `.ai/squawk/` and reads `.ai/cezar/` as its fallback; every other project, and every project
+ * `.ai/squawk/` and reads `.ai/cezar/` as its fallback. A fresh project (no legacy path) does
+ * the same from its first use; every existing legacy project, and every project
  * with the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. With the
- * switch on: one `lstat` (and a small read once marked); none with it off.
+ * switch on: marker and legacy-path checks; none with it off. Reads never create a marker.
  */
 export function projectPaths(repoRoot: string) {
   const legacy = join(repoRoot, '.ai', 'cezar');
   const moved = join(repoRoot, '.ai', 'squawk');
-  const write = REBRAND_SWITCH && projectMoveMarked(repoRoot) ? moved : legacy;
+  const write = REBRAND_SWITCH && (projectMoveMarked(repoRoot) || !pathPresent(legacy)) ? moved : legacy;
   return { write, reads: [write, write === legacy ? moved : legacy] as readonly string[] };
 }
 
@@ -134,9 +136,13 @@ export function movedProjectPath(path: string): string | undefined {
 
 const noticedProjects = new Set<string>();
 /** Internal release seam; dual reads themselves do not depend on this flag. */
-export function noticeLegacyProject(repoRoot: string, options: { releaseEnabled?: boolean; warn?: (message: string) => void } = {}): void {
+export function noticeLegacyProject(repoRoot: string, options: { releaseEnabled?: boolean; reason?: string; warn?: (message: string) => void } = {}): void {
   const legacy = join(repoRoot, '.ai', 'cezar');
-  if (!(options.releaseEnabled ?? REBRAND_SWITCH) || noticedProjects.has(repoRoot) || projectPaths(repoRoot).write !== legacy || !pathPresent(legacy)) return;
+  if (!(options.releaseEnabled ?? REBRAND_SWITCH) || (noticedProjects.has(repoRoot) && !options.reason) || projectPaths(repoRoot).write !== legacy || !pathPresent(legacy)) return;
   noticedProjects.add(repoRoot);
-  (options.warn ?? console.warn)(`[cez] Legacy project directory ${legacy} is still in use; both project directories remain readable.`);
+  const prefix = productIdentity(options.releaseEnabled ?? REBRAND_SWITCH).command;
+  const message = options.reason
+    ? `Project ${repoRoot} keeps its state in .ai/cezar/ for now: ${options.reason}. It is served from both folders; the move runs again at the next start.`
+    : `Legacy project directory ${legacy} is still in use; both project directories remain readable.`;
+  (options.warn ?? console.warn)(`[${prefix}] ${message}`);
 }

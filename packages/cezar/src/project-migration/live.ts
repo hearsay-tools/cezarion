@@ -117,10 +117,10 @@ export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'per
   return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id) };
 }
 
-/** Refuse when a cockpit serves the project; live tasks are checked under the fence (`fenceProject`). */
+/** Refuse when a cockpit serves the project; include live tasks in that first refusal. The fence checks them again. */
 export async function assertNoProjectCockpit(root: string, homes: readonly Home[], self = process.pid): Promise<void> {
   const cockpits = await projectCockpits(root, homes, self);
-  if (cockpits.length > 0) throw new ProjectInUseError(root, cockpits, []);
+  if (cockpits.length > 0) throw new ProjectInUseError(root, cockpits, projectLiveTasksOffline(root));
 }
 
 /** The project's live tasks, read without writing anything: the fence's live-task check. */

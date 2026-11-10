@@ -244,6 +244,7 @@ describe('binary help and notices', () => {
       expect(help).toContain(`${rebrand ? 'Squawk' : 'cezar'} — local cockpit`);
       expect(help).toContain(`host ${rebrand ? 'Squawk' : 'cezar'} on a server`);
       expect(help).toContain(`resume ${rebrand ? 'Squawk' : 'Cezar'} workers`);
+      expect(help).toContain(`scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/`);
       expect(help).toContain('.ai/cezar/config.json');
       expect(help).toContain('~/.cezar/versions');
     }
