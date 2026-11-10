@@ -71,7 +71,9 @@ are a stated limit. An unconfirmed process claim expires after 30 seconds to rec
 from PID reuse. A confirmed live process token never expires. See ADR 0060 for
 the long-running-holder trade-off and cross-namespace lease collisions.
 
-Serve, init, run and backup restore prepare an install marker unconditionally.
+Serve, init, run and backup restore prepare an install marker unconditionally,
+after their arguments validate: `run` without a task, and `backup restore` with
+help, an unsupported file, extra arguments or an invalid `--at`, prepare nothing.
 Other authorized operator entries prepare existing registry files at entry. On an
 empty home, they record authorization in process memory and create nothing until
 the first write. That write creates the marker and seeds HEAD under the same lock.

@@ -10,6 +10,7 @@ import { holdCockpitLease } from './leases.ts';
 import { HomeStore, readHomeFile } from './store.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 import { authorizeHomeEntry, registryFiles } from './entry-authorization.ts';
+import { isValidRestore } from '../workspace/backups.ts';
 
 export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remote-settings'
   | 'install' | 'update' | 'use' | 'link' | 'unlink' | 'server-install' | 'server-deploy' | 'server-uninstall' | 'migrate'
@@ -18,9 +19,9 @@ export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remo
 const entries: readonly string[] = ['serve', 'init', 'run', 'projects', 'backup', 'remote-settings',
   'install', 'update', 'use', 'link', 'unlink', 'server-install', 'server-deploy', 'server-uninstall'];
 
-/** Backup listing is a pure read; restore retains its unconditional preparation. */
+/** Backup listing, help and invalid restore input are pure reads; a valid restore retains its unconditional preparation. */
 export function operatorHomeEntry(argv: readonly string[]): string | undefined {
-  return argv[0] === 'backup' && argv[1] !== 'restore' ? 'backup-read' : argv[0];
+  return argv[0] === 'backup' && !isValidRestore(argv.slice(1)) ? 'backup-read' : argv[0];
 }
 
 /** Boot must still work with a read-only home. Mutations retain their own throwing contracts. */

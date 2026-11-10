@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { homeFileLocation } from '../home/file-location.ts';
 import { HomeStore } from '../home/store.ts';
 import { parseArgs } from 'node:util';
-import { isBackupFile, listBackups, type BackupFile } from './backups.ts';
+import { isBackupFile, listBackups, restoreLimit, type BackupFile } from './backups.ts';
 import { storeSchema } from './agent-accounts.ts';
 import { workspaceConfigSchema } from './config.ts';
 import { resolveLegacyRecovery } from '../home/legacy-recovery.ts';
@@ -37,8 +37,7 @@ function resolveLegacyCommand(command: string | undefined, file: string | undefi
 
 export async function restoreBackup(file: BackupFile, at: string | undefined, home: Home): Promise<string> {
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
-  const utc = at === undefined || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at);
-  const limit = at === undefined ? Infinity : utc ? Date.parse(at) : NaN;
+  const limit = restoreLimit(at);
   if (Number.isNaN(limit)) throw new Error('Invalid --at time; use an ISO UTC time');
   const store = new HomeStore(home);
   if (at === undefined) {

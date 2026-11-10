@@ -50,11 +50,13 @@ it.each(conditional)('the %s entry seeds an existing install without changing it
   expect(readFileSync(home.agentAccounts, 'utf8')).toBe(bytes);
 });
 
-it('keeps backup listing read-only and restore unconditional', () => {
+it('keeps backup listing and invalid restore input read-only, and a valid restore unconditional', () => {
   const root = storeRoot();
   const home = homePaths(root, join(root, 'cache'), root);
   prepareOperatorHome(home, operatorHomeEntry(['backup', 'list']));
   expect(readdirSync(root)).toEqual([]);
   prepareOperatorHome(home, operatorHomeEntry(['backup', 'restore']));
+  expect(readdirSync(root)).toEqual([]);
+  prepareOperatorHome(home, operatorHomeEntry(['backup', 'restore', 'config.json']));
   expect(readInstallMarker(root)?.kind).toBe('test');
 });

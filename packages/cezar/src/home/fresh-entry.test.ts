@@ -115,6 +115,25 @@ it.each(['installed', 'rolled-back'])('refuses the deferred split write when an 
   expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
 });
 
+it.each([false, true])('invalid backup restore input prepares nothing (switch %s)', async enabled => {
+  const f = await fixture(enabled, true);
+  const invalid = [['restore'], ['restore', 'invalid.json'], ['restore', 'config.json', 'extra'],
+    ['restore', 'config.json', '--at', 'yesterday'], ['restore', 'config.json', '--unknown'], ['restore', '--help']];
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const { runSubcommand } = await import('../subcommands.ts');
+  for (const args of invalid) {
+    const argv = ['backup', ...args];
+    const entry = f.operatorHomeEntry(argv);
+    expect(entry, args.join(' ')).toBe('backup-read');
+    const exit = await runSubcommand(argv, f.env, () => f.prepareOperatorHome(f.home, entry, f.env));
+    expect(exit, args.join(' ')).toBe(args.includes('--help') ? 0 : 1);
+    expect(readdirSync(f.dir), args.join(' ')).toEqual([]);
+  }
+  expect(error).toHaveBeenCalled();
+  expect(f.operatorHomeEntry(['backup', 'restore', 'config.json', '--at', '2026-11-10T00:00:00Z'])).toBe('backup');
+});
+
 it('lists only legacy backups inside the legacy home', async () => {
   const f = await fixture(true);
   const outside = join(f.dir, 'outside');

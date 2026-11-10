@@ -103,6 +103,11 @@ async function admitProjectCommand(command: string, args: readonly string[], rep
   assertProjectAdmitted(dataDir);
 }
 
+/** `run` without a task is a usage error: runCommand prints usage, and Home stays unprepared. */
+function commandHomeEntry(command: string, task: string): string {
+  return command === 'run' && !task ? 'run-usage' : command;
+}
+
 export async function main(deps: CliDeps, rebrand = REBRAND_SWITCH): Promise<void> {
   const notice = oldCommandNotice(deps.process.argv[1], rebrand);
   if (notice) deps.console.error(notice);
@@ -163,7 +168,8 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
   }
 
   const command = positionals[0] ?? 'serve';
-  homeEntry = command;
+  const task = positionals.slice(1).join(' ').trim();
+  homeEntry = commandHomeEntry(command, task);
   const cwd = resolve(values.repo ?? deps.process.cwd());
   const repoInfo = await deps.getRepoInfo(cwd);
   const repoRoot = repoInfo?.root ?? cwd;
@@ -174,7 +180,7 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
       await deps.serveCommand(home(), repoRoot, Number(values.port), !values['no-open'], values['bind-host'], Boolean(values['restart-exact']));
       return;
     case 'run':
-      await deps.runCommand(home(), repoRoot, positionals.slice(1).join(' ').trim(), values.workflow, values.model,
+      await deps.runCommand(home(), repoRoot, task, values.workflow, values.model,
         { allowWorkers: !values['no-workers'], allowMessaging: !values['no-messaging'] });
       return;
     case 'init':

@@ -116,6 +116,8 @@ describe('main dispatch', () => {
     const f = fixture(['run']);
     await f.run();
     expect(f.deps.runCommand).toHaveBeenCalledWith(f.home, '/work', '', undefined, undefined, { allowWorkers: true, allowMessaging: true });
+    // A usage error is not a writer entry: preparation must not create the home.
+    expect(f.deps.prepareOperatorHome).toHaveBeenCalledExactlyOnceWith(f.home, 'run-usage');
   });
 
   it('prepares Home before scaffolding init', async () => {

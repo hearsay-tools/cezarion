@@ -2,6 +2,7 @@ import type { Home } from '../home/home.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomePaths } from '../home/boundary.ts';
 import { homeFileSchema } from '@open-mercato/cezar-contract/home-recovery';
@@ -13,6 +14,23 @@ export interface BackupEntry { file: BackupFile; time: string; path: string; }
 
 export function isBackupFile(value: string): value is BackupFile {
   return homeFileSchema.safeParse(value).success;
+}
+
+/** The newest allowed backup time for `--at`; NaN when the value is not an ISO UTC time. */
+export function restoreLimit(at: string | undefined): number {
+  if (at === undefined) return Infinity;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at) ? Date.parse(at) : NaN;
+}
+
+/** `restore <file> [--at <time>]` with valid input. Anything else is help or a usage error. */
+export function isValidRestore(argv: readonly string[]): boolean {
+  try {
+    const { values, positionals } = parseArgs({ args: [...argv], allowPositionals: true, options: {
+      at: { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    } });
+    const [command, file] = positionals;
+    return !values.help && command === 'restore' && positionals.length === 2 && isBackupFile(file!) && !Number.isNaN(restoreLimit(values.at));
+  } catch { return false; }
 }
 
 function backupRoot(home: string | Home): string {
