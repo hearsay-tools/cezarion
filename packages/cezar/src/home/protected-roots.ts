@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { basename, dirname, join, posix, resolve, sep, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
 import { nativePathPlatform, platformKindRoots } from './kind-roots.ts';
 
 /**
@@ -12,14 +12,31 @@ export function protectedRootsFor(accountHome: string, env: { TMPDIR?: string | 
   return [join(accountHome, '.cezar'), ...Object.values(platformKindRoots(accountHome, { TMPDIR: env.TMPDIR }, platform))];
 }
 
-/** The account's real cezar roots. HOME and a caller's env can name a sandbox, so the account home comes from the OS. */
+/**
+ * The account's real cezar roots. HOME and a caller's env can name a sandbox, so the account home
+ * comes from the OS. Throws when the OS gives no absolute home: relative roots would protect nothing.
+ */
 export function accountProtectedRoots(): string[] {
-  return protectedRootsFor(userInfo().homedir, { TMPDIR: process.env.TMPDIR }, nativePathPlatform);
+  const accountHome = userInfo().homedir;
+  return protectedRootsFor(accountHome, { TMPDIR: process.env.TMPDIR }, nativePathPlatform);
+}
+
+/**
+ * True when `destination` is `root` or below it. Windows and default macOS volumes ignore case, so
+ * there an absent `.CEZAR` still names `.cezar`. `scripts/test-install-marker.mjs` keeps a copy.
+ */
+export function insideRoot(destination: string, root: string, platform: NodeJS.Platform): boolean {
+  const ignoreCase = platform === 'win32' || platform === 'darwin';
+  const path = ignoreCase ? destination.toLowerCase() : destination;
+  const home = ignoreCase ? root.toLowerCase() : root;
+  const separator = platform === 'win32' ? '\\' : '/';
+  return path === home || path.startsWith(home.endsWith(separator) ? home : home + separator);
 }
 
 /**
  * Throws `refusal()` when `path` is, or is below, an account root. Existing ancestors and
- * symlink aliases are canonicalized, and an unreadable lookup or dangling link fails closed.
+ * symlink aliases are canonicalized. An unverifiable account home, an unreadable lookup or a
+ * dangling link fails closed.
  */
 export function assertOutsideAccountHome(path: string, refusal: () => Error): void {
   // Resolve existing ancestors too: the destination itself may not exist yet.
@@ -45,17 +62,19 @@ export function assertOutsideAccountHome(path: string, refusal: () => Error): vo
       ancestor = parent;
     }
   }
+  let roots: string[];
+  try { roots = accountProtectedRoots(); } catch { throw refusal(); }
   const destination = canonicalTarget(path);
-  for (const root of accountProtectedRoots()) {
-    const protectedHome = canonicalTarget(root, false);
-    if (destination === protectedHome || destination.startsWith(protectedHome + sep)) throw refusal();
+  for (const root of roots) {
+    if (insideRoot(destination, canonicalTarget(root, false), nativePathPlatform)) throw refusal();
   }
 }
 
 /** A test install marker belongs to a sandbox. Refuse an account root in every process, test runner or not. */
 export function assertTestHomeOutsideAccountHome(root: string): void {
   assertOutsideAccountHome(root, () => new Error(
-    `[cez] refusing to write a test install marker to ${root}: it is the account's real cezar home. ` +
+    `[cez] refusing to write a test install marker to ${root}: it is the account's real cezar home, ` +
+      'or the OS gives no account home to check it against. ' +
       'Use a sandbox directory for a test home.',
   ));
 }

@@ -77,3 +77,27 @@ test('the script refuses the account home and its symlink aliases before any rea
     rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+test('on macOS the script refuses an absent account root spelled in another case', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'cez-script-case-'));
+  const account = join(fixture, 'account');
+  const realInfo = os.userInfo;
+  const realType = os.type;
+  os.userInfo = (...args) => ({ ...realInfo(...args), homedir: account });
+  os.type = () => 'Darwin';
+  syncBuiltinESMExports();
+  try {
+    // A fresh instance reads the mocked platform at load.
+    const darwin = await import('./test-install-marker.mjs?darwin');
+    assert.equal(darwin.accountProtectedRoots()[0], join(account, '.cezar'), 'the account home mock must be active');
+    for (const root of [join(account, '.CEZAR'), join(account, 'Library', 'Caches', 'HEARSAY SQUAWK')]) {
+      assert.throws(() => darwin.ensureTestInstallMarker(root), /refusing to write a test install marker/);
+    }
+    assert.equal(existsSync(join(account, '.CEZAR')), false);
+  } finally {
+    os.userInfo = realInfo;
+    os.type = realType;
+    syncBuiltinESMExports();
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});

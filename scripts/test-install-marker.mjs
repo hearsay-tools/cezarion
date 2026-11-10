@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { type, userInfo } from 'node:os';
-import { basename, dirname, join, posix, resolve, sep, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, resolve, sep, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** Script-only sandbox bootstrap, before product imports or test-file mocks. */
@@ -37,14 +37,24 @@ export function protectedRootsFor(accountHome, env, platform) {
     posix.join(accountHome, '.local', 'share', 'hearsay-squawk'), posix.join(accountHome, '.cache', 'hearsay-squawk'), posix.join(state, 'run')];
 }
 
-/** The account's real roots. HOME can name a sandbox, so the account home comes from the OS. */
+/** The account's real roots. HOME can name a sandbox, so the account home comes from the OS; no absolute home throws. */
 export function accountProtectedRoots() {
-  return protectedRootsFor(userInfo().homedir, { TMPDIR: process.env.TMPDIR }, nativePlatform);
+  const accountHome = userInfo().homedir;
+  return protectedRootsFor(accountHome, { TMPDIR: process.env.TMPDIR }, nativePlatform);
 }
 
-/** Refuse a root that is, or is below, an account root, through symlink aliases; fail closed on lookup errors. */
+/** True when `destination` is `root` or below it; Windows and default macOS volumes ignore case. */
+export function insideRoot(destination, root, platform) {
+  const ignoreCase = platform === 'win32' || platform === 'darwin';
+  const path = ignoreCase ? destination.toLowerCase() : destination;
+  const home = ignoreCase ? root.toLowerCase() : root;
+  const separator = platform === 'win32' ? '\\' : '/';
+  return path === home || path.startsWith(home.endsWith(separator) ? home : home + separator);
+}
+
+/** Refuse a root that is, or is below, an account root, through symlink aliases; fail closed when unverifiable. */
 function assertOutsideAccountHome(root) {
-  const refusal = () => new Error(`[cez] refusing to write a test install marker to ${root}: it is the account's real cezar home. Use a sandbox directory for a test home.`);
+  const refusal = () => new Error(`[cez] refusing to write a test install marker to ${root}: it is the account's real cezar home, or the OS gives no account home to check it against. Use a sandbox directory for a test home.`);
   const canonicalTarget = (target, rejectDangling = true) => {
     let ancestor = resolve(target);
     const remaining = [];
@@ -66,10 +76,11 @@ function assertOutsideAccountHome(root) {
       ancestor = parent;
     }
   };
+  let roots;
+  try { roots = accountProtectedRoots(); } catch { throw refusal(); }
   const destination = canonicalTarget(root);
-  for (const protectedRoot of accountProtectedRoots()) {
-    const home = canonicalTarget(protectedRoot, false);
-    if (destination === home || destination.startsWith(home + sep)) throw refusal();
+  for (const protectedRoot of roots) {
+    if (insideRoot(destination, canonicalTarget(protectedRoot, false), nativePlatform)) throw refusal();
   }
 }
 

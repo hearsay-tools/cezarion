@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
-import { accountProtectedRoots, protectedRootsFor } from './protected-roots.ts';
+import { accountProtectedRoots, insideRoot, protectedRootsFor } from './protected-roots.ts';
 
 // The simulated account home lives in a temp directory: no probe can reach the real one.
 const account = vi.hoisted(() => ({ home: '' }));
@@ -104,4 +104,36 @@ it('the before-build marker script keeps the same account roots as the product g
       expect(script.protectedRootsFor(accountHome, env, platform)).toEqual(protectedRootsFor(accountHome, env, platform));
     }
   }
+});
+
+it('compares an account root without case on Windows and macOS, in the product and the script', async () => {
+  const script = await import('../../../../scripts/test-install-marker.mjs');
+  const cases: Array<[NodeJS.Platform, string, string, boolean]> = [
+    ['linux', '/home/a/.CEZAR', '/home/a/.cezar', false],
+    ['linux', '/home/a/.cezar/x', '/home/a/.cezar', true],
+    ['darwin', '/Users/a/.CEZAR', '/Users/a/.cezar', true],
+    ['darwin', '/Users/a/Library/Caches/HEARSAY SQUAWK/x', '/Users/a/Library/Caches/Hearsay Squawk', true],
+    ['darwin', '/Users/a/.cezar-other', '/Users/a/.cezar', false],
+    ['win32', 'C:\\Users\\A\\.CEZAR\\install.json', 'C:\\Users\\a\\.cezar', true],
+    ['win32', 'C:\\Users\\a\\.cezarx', 'C:\\Users\\a\\.cezar', false],
+    ['linux', '/anything', '/', true],
+  ];
+  for (const [platform, destination, root, inside] of cases) {
+    expect(insideRoot(destination, root, platform), `${platform} ${destination}`).toBe(inside);
+    expect(script.insideRoot(destination, root, platform), `script ${platform} ${destination}`).toBe(inside);
+  }
+});
+
+it('refuses an absent account root spelled in another case on a case-insensitive platform', async () => {
+  vi.resetModules();
+  vi.doMock('./kind-roots.ts', async original => ({ ...await original<typeof import('./kind-roots.ts')>(), nativePathPlatform: 'darwin' }));
+  try {
+    const darwin = await import('./home.ts');
+    const markers = await import('./install-marker.ts');
+    const upper = join(account.home, '.CEZAR');
+    expect(() => darwin.Home.sandbox(upper, { layout: 'legacy' })).toThrow(refusal);
+    expect(() => markers.createInstallMarker(upper, 'test')).toThrow(refusal);
+    expect(() => darwin.Home.sandbox(join(account.home, 'Library', 'Caches', 'HEARSAY SQUAWK'))).toThrow(refusal);
+    expect(existsSync(upper)).toBe(false);
+  } finally { vi.doUnmock('./kind-roots.ts'); vi.resetModules(); }
 });
