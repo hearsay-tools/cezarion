@@ -47,8 +47,8 @@ journal that cannot finish ends the command with its cause, exit 1.
 listed in help and dispatched only behind `PROJECT_MIGRATION_SWITCH`, false until P5.
 `REBRAND_SWITCH` never registers it. With the gate off it is an unknown command, and the
 command module is never loaded. With the gate on, a cockpit that owns the project runs
-the migration through its route; with no owner the CLI locks the project itself. It
-prints the plan, then `Dry run: nothing was moved or rewritten.` or `Migration
+the migration through its route; with no owner the CLI locks the project itself. A dry run
+holds `cockpit.lock` and passes admission before it plans; it moves nothing. It prints the plan, then `Dry run: nothing was moved or rewritten.` or `Migration
 complete.`; it prints the `git mv` commands for tracked files and never runs them.
 Refusals (live tasks, a held fence, another owner, conflicts) print one message to
 stderr and exit 1. hearsay-tools/cezarion#3142, hearsay-tools/cezarion#3146 and

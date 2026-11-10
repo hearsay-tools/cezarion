@@ -73,10 +73,3 @@ export async function recoverProjects<T extends { root: string; status?: string 
     })));
   return projects;
 }
-
-/** `work` after the project's unfinished journal finishes, before `work` opens its lease. A
- *  journal that cannot finish leaves admission to refuse inside `work`. */
-export async function afterProjectRecovery<T>(repoRoot: string, ownership: CockpitOwnership | undefined, work: () => Promise<T>): Promise<T> {
-  await recoverProjectMigration(repoRoot, { ownership }).catch(() => undefined);
-  return work();
-}

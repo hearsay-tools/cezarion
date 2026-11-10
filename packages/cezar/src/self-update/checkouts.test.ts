@@ -11,7 +11,7 @@ import { seedRuns } from '../runs/run-store.testkit.ts';
 import { buildCheckout, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { SelfUpdateService } from './service.ts';
 import { CockpitOwnership } from '../server/cockpit-ownership.ts';
-import { writeSettledJournal } from '../project-migration/project-migration.testkit.ts';
+import { migrateProject } from '../project-migration/engine.ts';
 import { activate, activeId, branchSlug, currentEntry, linkCheckout, linkId, listInstalled, listLinks, removeInstalled, versionDir, versionsDir } from './layout.ts';
 
 /** A built cezar monorepo checkout: packages/cezar with dist/index.js and web/dist/index.html. */
@@ -209,11 +209,22 @@ describe('linked checkouts', () => {
     expect((await discoverCheckouts(env, testHome(env))).find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run' });
   });
 
-  it('finishes an unfinished project migration before it reads the run store', async () => {
+  it('finishes an unfinished project migration, then lists the worktrees it moved', async () => {
     const repo = registeredTaskRepo();
-    const journal = writeSettledJournal(repo);
-    expect((await discoverCheckouts(env, testHome(env))).find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run' });
-    expect(existsSync(journal)).toBe(false);
+    const migrator = new CockpitOwnership();
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
+    try {
+      // A crash after the move and before the repair: Git still names the task worktree's old path.
+      await expect(migrateProject({ repoRoot: realpathSync(repo), fence, fault: point => { if (point === 'repair-worktrees:before') throw new Error(point); } }))
+        .rejects.toThrow('repair-worktrees:before');
+    } finally {
+      fence.release();
+      migrator.releaseAll();
+    }
+    const moved = join(realpathSync(repo), '.ai', 'squawk', 'worktrees', 'def67890-run');
+    const found = await discoverCheckouts(env, testHome(env));
+    expect(found.find((c) => c.branch === 'cez/def67890')).toMatchObject({ worktree: moved, task: { id: 'def67890-run' } });
+    expect(existsSync(join(repo, '.ai', 'squawk-migration.json'))).toBe(false);
   });
 
   // Retention reclaims a task's worktree directory; the branch still names its task.

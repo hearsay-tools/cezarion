@@ -206,17 +206,21 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine.
   or as `ServerDeps.projectMigration`; the constant never changes.
 - **Owner route.** `POST /api/v1/projects/:projectId/migration` (`server/project-migration-route.ts`)
   is a workspace route on purpose: a project route holds an admission lease for its whole
-  length, and the fence's drain would wait on its own caller. Gate off: 404 before any work.
-  Hosted: 403. A project another cockpit owns, a busy project (the body lists `liveTasks`), a
+  length, and the fence's drain would wait on its own caller. Gate off: the path is not served,
+  so every request answers as an unknown route does, before its body is parsed. Hosted: 403. A project another cockpit owns, a busy project (the body lists `liveTasks`), a
   refused plan, a held fence or a failed recovery: 409. The owner builds the context, takes
   `fenceProjectContext`, runs `migrateProject` with `closeProject` disposing the context, and
-  releases; the next request builds the context again over the moved state. The cockpit
+  releases; the next request builds the context again over the moved state. A dry run takes no
+  fence: it claims the project for this cockpit and plans inside an admission lease, so it is
+  refused while a fence or a journal holds the project. The cockpit
   refuses its own boot project (409): the boot context is not rebuilt after its store closes,
   so the user stops that cockpit and runs the command with no owner.
 - **CLI.** With a live owner the CLI finds the project id in the owner's `GET /projects` and
   posts to its route; it touches no project file. With no owner it takes `cockpit.lock` and
   the fence itself (`fenceProject`, live tasks read from a maintenance store), runs the
-  engine, closes that store as the holder duty, and releases both claims.
+  engine, closes that store as the holder duty, and releases both claims. A dry run holds only
+  `cockpit.lock` (in the directory that exists) and passes admission before it plans. When a
+  cockpit takes the project between the owner check and the claim, the CLI asks that cockpit.
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
   before anything reads the project. Without a journal it costs one `lstat`. It takes the
@@ -233,12 +237,13 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine.
   would wait on its own caller.
 - **Entry points.** Cockpit boot (`serveCommand`, before its ownership claim and the listener;
   boot keeps the claim), lazy context builds (`ProjectContexts.build`, before the lease), the
-  warm-up (a journal alone no longer skips a project), cold maintenance (`coldMaintenance`)
-  and the archive and completion stores (`withStore`, before their lease), the cold workspace
+  warm-up (a journal alone no longer skips a project), the archive and completion ticks
+  (`recoverBeforeTicks`: each tick's project list, before the tick's admission check and its
+  maintenance store lease), the cold workspace
   runs index and search (`projectRunSources`; a failure leaves the project out with a
   warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
-  module loaded only when a journal exists), `artifact publish`, `versions` checkout discovery,
-  and `migrate-project` itself (CLI and route; `migrateProject` also resumes first). Other
+  module loaded only when a journal exists), `artifact publish`, `versions` checkout discovery
+  (which lists the worktrees again after a recovery moved them), and `migrate-project` itself (CLI and route; `migrateProject` also resumes first). Other
   readers skip a refused project, as before.
 
 ## Rules

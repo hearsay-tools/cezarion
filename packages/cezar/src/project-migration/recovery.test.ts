@@ -15,9 +15,13 @@ import { Home } from '../home/home.ts';
 import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
-import { CockpitOwnership, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
+import { CockpitOwnership, projectAdmissionRefusal, withProjectAdmission } from '../server/cockpit-ownership.ts';
 import { apiRequest } from '../server/loopback-request.testkit.ts';
+import { ArchiveOnMergeCoordinator } from '../server/archive-on-merge.ts';
+import { CompletionActionCoordinator } from '../server/completion-actions.ts';
+import { recoverBeforeTicks } from '../server/project-migration-route.ts';
 import { ProjectContexts } from '../server/project-context.ts';
+import { projectPaths } from '../project-paths.ts';
 import { createApp } from '../server/server.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { writeSettledJournal } from './project-migration.testkit.ts';
@@ -139,18 +143,37 @@ describe('early recovery of an unfinished project migration', () => {
     expect(existsSync(journal)).toBe(false);
   });
 
-  it('finishes the journal in a lazy build, in the warm-up and in cold maintenance before their reads', async () => {
-    const lazy = journaled(), warm = journaled(), cold = journaled();
-    const contexts = contextsFor(owner(), { id: 'lazy', root: lazy.root }, { id: 'warm', root: warm.root }, { id: 'cold', root: cold.root });
+  it('finishes the journal in a lazy build and in the warm-up before their reads', async () => {
+    const lazy = journaled(), warm = journaled();
+    const contexts = contextsFor(owner(), { id: 'lazy', root: lazy.root }, { id: 'warm', root: warm.root });
     expect((await contexts.context('lazy')).store.getRun(TASK)?.title).toBe('kept');
     expect(existsSync(lazy.journal)).toBe(false);
     expect(await contexts.warmAll([{ id: 'warm', root: warm.root, status: 'not-git' }])).toEqual(['warm']);
     expect(existsSync(warm.journal)).toBe(false);
-    const seen = await contexts.withMaintenanceStore('cold', async (store) => {
-      expect(existsSync(cold.journal)).toBe(false);
-      return store.getRun(TASK)?.title;
+  });
+
+  it('finishes the journal before the archive and completion ticks check admission', async () => {
+    const archived = journaled(), completed = journaled();
+    const ownership = owner();
+    const ticks = (root: string, seen: string[]) => recoverBeforeTicks(ownership, {
+      projects: async () => { return [{ id: 'p', root }]; },
+      enabled: async () => { seen.push('admitted'); return false; },
+      repository: async () => undefined,
+      // As the cockpit's own store opener: refused under a fence or a journal.
+      withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, () => { return work(undefined as never, () => false, () => true); }, () => undefined),
+      lookup: async () => [],
     });
-    expect(seen).toBe('kept');
+    const archive: string[] = [];
+    await new ArchiveOnMergeCoordinator(ticks(archived.root, archive), 0).tick();
+    expect(archive).toEqual(['admitted']);
+    expect(existsSync(archived.journal)).toBe(false);
+
+    const completion: string[] = [];
+    const deps = ticks(completed.root, completion);
+    await new CompletionActionCoordinator({ projects: deps.projects, forge: async () => undefined, head: async () => undefined,
+      withStore: (project, work) => deps.withStore(project, (store, _active, valid) => { completion.push('store'); return work(store, valid); }) }, 0).tick();
+    expect(completion).toEqual(['store']);
+    expect(existsSync(completed.journal)).toBe(false);
   });
 
   it('finishes the journal before the cold workspace run index reads the project', async () => {

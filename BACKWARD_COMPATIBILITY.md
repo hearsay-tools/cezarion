@@ -49,7 +49,7 @@ The staged project command `hsq migrate-project [--dry-run] [--repo <dir>]` and 
 owner route `POST /api/v1/projects/:projectId/migration` stay closed behind their own
 P5 gate, `PROJECT_MIGRATION_SWITCH`, which is false. `REBRAND_SWITCH` never opens
 them. While the gate is off, help and dispatch omit the command (`cez migrate-project`
-is an unknown command, exit 1), the route answers 404 before any work, and every
+is an unknown command, exit 1), the route path is not served (an unknown route), and every
 ordinary write stays under `.ai/cezar/`. Early recovery is not gated: an entry that
 finds an unfinished `.ai/squawk-migration.json` finishes it before it reads the project,
 and a journal that cannot finish keeps the project refused with the cause. With the

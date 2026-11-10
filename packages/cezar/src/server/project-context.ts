@@ -328,10 +328,6 @@ export class ProjectContexts {
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
     if (ownedByAnotherCockpit(dataDir)) return undefined;
-    // An unfinished migration finishes before the lease and the first read; a failure skips.
-    try { await recoverProjectMigration(project.root, { ownership: this.deps.ownership }); }
-    catch { return undefined; }
-    if (!current()) return undefined;
     const maintain = this.maintainColdStore.bind(this);
     return withProjectAdmission(dataDir, function coldMaintenanceStore() {
       return maintain(project.root, dataDir, work, current, finish);

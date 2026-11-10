@@ -4,10 +4,10 @@ import { parseArgs } from 'node:util';
 import { projectMigrationErrorSchema, projectMigrationResponseSchema, type ProjectMigrationResponse } from '@open-mercato/cezar-contract/project-migration';
 import { projectsResponseSchema } from '@open-mercato/cezar-contract/projects';
 import { commandText } from '../home/command.ts';
-import { projectPaths } from '../project-paths.ts';
+import { pathPresent, projectPaths } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
-import { anotherCockpitOwner, assertProjectAdmitted, CockpitOwnership } from '../server/cockpit-ownership.ts';
+import { anotherCockpitOwner, assertProjectAdmitted, CockpitAlreadyRunningError, CockpitOwnership } from '../server/cockpit-ownership.ts';
 import { getRepoInfo } from '../server/git.ts';
 import { projectLiveTasks } from '../server/project-context.ts';
 import { dryRunAnswer, migrationAnswer, migrationAnswerText } from './answer.ts';
@@ -37,7 +37,7 @@ export interface MigrateProjectDeps {
   fetch: typeof fetch;
   /** The live cockpit that owns the project, other than this process. */
   owner: typeof anotherCockpitOwner;
-  /** Test seam: the engine's fault points (`MigrationFault`). */
+  /** Test seam: the engine's fault points (`MigrationFault`), and `plan:before` in a dry run. */
   fault?: MigrationFault;
   getRepoInfo: typeof getRepoInfo;
   cwd: () => string;
@@ -62,8 +62,14 @@ export async function runMigrateProjectCommand(argv: string[], _env: NodeJS.Proc
   const root = realpathSync((await deps.getRepoInfo(cwd))?.root ?? cwd);
   const dryRun = values['dry-run'] === true;
   try {
-    const owner = deps.owner(projectPaths(root).write);
-    const answer = owner ? await askOwner(root, owner, dryRun, deps) : await migrateWithoutOwner(root, dryRun, deps.fault);
+    const dataDir = projectPaths(root).write;
+    const owner = deps.owner(dataDir);
+    const answer = owner ? await askOwner(root, owner, dryRun, deps) : await migrateWithoutOwner(root, dryRun, deps.fault).catch((error: unknown) => {
+      // A cockpit took the project between the check and this claim: it runs the migration.
+      const appeared = error instanceof CockpitAlreadyRunningError ? deps.owner(dataDir) : undefined;
+      if (!appeared) throw error;
+      return askOwner(root, appeared, dryRun, deps);
+    });
     deps.log(migrationAnswerText(answer));
     return 0;
   } catch (error) {
@@ -95,8 +101,16 @@ async function migrateWithoutOwner(root: string, dryRun: boolean, fault: Migrati
   let store: RunStore | undefined;
   try {
     const recovered = await recoverProjectMigration(root, { ownership, keep: true });
+    if (dryRun) {
+      // An admitted read under `cockpit.lock`: no cockpit boots and no fence starts while the plan
+      // reads. The claim goes to the directory that exists; with neither there is nothing to read.
+      const existing = projectPaths(root).reads.find(pathPresent);
+      if (existing) await ownership.acquire(existing);
+      assertProjectAdmitted(dataDir);
+      fault?.('plan:before');
+      return await dryRunAnswer(root, recovered !== undefined);
+    }
     assertProjectAdmitted(dataDir);
-    if (dryRun) return await dryRunAnswer(root, recovered !== undefined);
     // The unfinished migration was this migration: it is complete now.
     if (recovered) return migrationAnswer(recovered);
     const fence = await ownership.fenceProject(dataDir, {

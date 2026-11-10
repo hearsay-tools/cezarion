@@ -279,7 +279,7 @@ import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forge
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
-import { createProjectMigrationRoutes, recoverBeforeStores, recoverProjects, type ProjectMigrationServerDeps } from './project-migration-route.ts';
+import { createProjectMigrationRoutes, recoverBeforeTicks, recoverProjects, type ProjectMigrationServerDeps } from './project-migration-route.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -5110,7 +5110,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
   });
-  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = recoverBeforeStores(deps.ownership, {
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = recoverBeforeTicks(deps.ownership, {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];

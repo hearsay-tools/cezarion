@@ -117,19 +117,23 @@ describe('the cockpit migration route', () => {
     const ctx = await contexts.context(bootId!);
     const app = createApp({ home: testHome(), repoRoot: boot!, store: ctx.store, manager: ctx.manager, ownership, contexts, bootProjectId: bootId!,
       version: '0.0.0-test', ...options });
-    const post = (id: string, dryRun = false) => apiRequest(app, `/api/v1/projects/${id}/migration`,
+    const request = (path: string, init: RequestInit) => apiRequest(app, path, init);
+    const post = (id: string, dryRun = false) => request(`/api/v1/projects/${id}/migration`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dryRun }) });
-    return { boot: boot!, target: target!, bootId: bootId!, targetId: targetId!, post };
+    return { boot: boot!, target: target!, bootId: bootId!, targetId: targetId!, post, request };
   }
 
-  it('answers 404 before any work while the gate is off, and writes nothing', async () => {
-    const { target, targetId, post } = await cockpit();
+  it('does not serve the route while the gate is off: every request answers as an unknown route, before parsing, and writes nothing', async () => {
+    const { target, targetId, post, request } = await cockpit();
     const before = readdirSync(target);
-    for (const dryRun of [false, true]) {
-      const response = await post(targetId, dryRun);
-      expect(response.status).toBe(404);
-      expect(await response.json()).toEqual({ error: 'Project migration is not available in this release' });
-    }
+    const unknown = await request(`/api/v1/projects/${targetId}/no-such-route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const expected = { status: unknown.status, body: await unknown.text() };
+    expect(expected.status).toBe(404);
+    const answers = [await post(targetId, false), await post(targetId, true),
+      await request(`/api/v1/projects/${targetId}/migration`, { method: 'POST' }),
+      await request(`/api/v1/projects/${targetId}/migration`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' }),
+      await request(`/api/v1/projects/${targetId}/migration`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"dryRun":"yes"}' })];
+    for (const answer of answers) expect({ status: answer.status, body: await answer.text() }).toEqual(expected);
     expect(readdirSync(target)).toEqual(before);
     expect(existsSync(join(target, '.ai'))).toBe(false);
   });

@@ -4,35 +4,34 @@ import { projectMigrationRequestSchema, type ProjectMigrationError, type Project
 import { projectPaths } from '../project-paths.ts';
 import { dryRunAnswer, migrationAnswer } from '../project-migration/answer.ts';
 import { migrateProject, ProjectMigrationRefusedError } from '../project-migration/engine.ts';
-import { afterProjectRecovery, ProjectMigrationRecoveryError, recoverProjectMigration } from '../project-migration/recovery.ts';
+import { ProjectMigrationRecoveryError, recoverProjectMigration, recoverProjects } from '../project-migration/recovery.ts';
 import type { ArchiveOnMergeDeps } from './archive-on-merge.ts';
 import { PROJECT_MIGRATION_SWITCH } from '../project-migration/switch.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import {
-  anotherCockpitOwner, assertProjectAdmitted, CockpitAlreadyRunningError, CockpitOwnership, ProjectMigrationBusyError, ProjectMigrationFencedError,
+  anotherCockpitOwner, CockpitAlreadyRunningError, CockpitOwnership, ProjectMigrationBusyError, ProjectMigrationFencedError, withProjectAdmission,
 } from './cockpit-ownership.ts';
 import { fenceProjectContext, ProjectContextError, type ProjectContexts } from './project-context.ts';
 import { jsonZodValidator } from './validators.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
 
-export { recoverProjects } from '../project-migration/recovery.ts';
+export { recoverProjects };
 
-/** The archive and completion stores, each opened only after the project's unfinished journal
- *  finishes: recovery runs before `withStore` opens its admission lease. */
-export function recoverBeforeStores(ownership: CockpitOwnership | undefined, deps: ArchiveOnMergeDeps): ArchiveOnMergeDeps {
-  return { ...deps, withStore: (project, work) => afterProjectRecovery(project.root, ownership, () => { return deps.withStore(project, work); }) };
+/** The archive and completion ticks: each tick's project list finishes every unfinished journal
+ *  first, before the tick's admission check and its lease (inside a lease the recovery fence's
+ *  drain would wait on its own caller). */
+export function recoverBeforeTicks(ownership: CockpitOwnership | undefined, deps: ArchiveOnMergeDeps): ArchiveOnMergeDeps {
+  return { ...deps, projects: async () => { return recoverProjects([...await deps.projects()], ownership); } };
 }
 
 /**
  * `POST /api/v1/projects/:projectId/migration` (hearsay-tools/cezarion#3089): the owning cockpit
- * migrates one of its projects itself, at the request of `migrate-project`. Off (404) until the P5
- * gate turns the command on. A workspace route on purpose: a project route holds an admission
+ * migrates one of its projects itself, at the request of `migrate-project`. Not served until the
+ * P5 gate turns the command on. A workspace route on purpose: a project route holds an admission
  * lease for its whole length, and the fence's drain would wait on it.
  */
 
 export interface ProjectMigrationRouteDeps {
-  /** The P5 gate (`PROJECT_MIGRATION_SWITCH`); tests pass true through `ServerDeps.projectMigration`. */
-  enabled: boolean;
   /** Hosted mode: the migration runs only from the host. */
   hosted: () => boolean;
   /** The project's registry entry, after the same id resolution as the other project routes. */
@@ -59,7 +58,6 @@ export function createProjectMigrationRoutes(options: {
 }) {
   const { deps, workspaceProjects } = options;
   const routeDeps: ProjectMigrationRouteDeps = {
-    enabled: deps.projectMigration ?? PROJECT_MIGRATION_SWITCH,
     hosted: options.hosted,
     project: async (raw) => {
       const resolved = await workspaceProjects.resolveProjectId(raw);
@@ -71,11 +69,15 @@ export function createProjectMigrationRoutes(options: {
     ownership: deps.ownership ?? new CockpitOwnership(),
     preview: deps.previewHost,
   };
-  return new Hono()
+  const routes = new Hono()
     .post('/projects/:projectId/migration', jsonZodValidator(projectMigrationRequestSchema), async (c) => {
       const answer = await answerProjectMigration(routeDeps, c.req.param('projectId'), c.req.valid('json'), c.req.raw.signal);
       return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, answer.status);
     });
+  // The P5 gate: while it is off the path is not served, so every request, a malformed body
+  // included, answers exactly as an unknown route does, before anything parses it. The contract
+  // and `AppType` keep the route's shape.
+  return (deps.projectMigration ?? PROJECT_MIGRATION_SWITCH) ? routes : new Hono() as unknown as typeof routes;
 }
 
 export type ProjectMigrationRouteAnswer =
@@ -88,7 +90,6 @@ function sameRoot(a: string, b: string): boolean {
 }
 
 export async function answerProjectMigration(deps: ProjectMigrationRouteDeps, projectId: string, request: ProjectMigrationRequest, signal?: AbortSignal): Promise<ProjectMigrationRouteAnswer> {
-  if (!deps.enabled) return { status: 404, body: { error: 'Project migration is not available in this release' } };
   if (deps.hosted()) return { status: 403, body: { error: 'Project migration runs only from the host the cockpit serves' } };
   const project = await deps.project(projectId);
   if (!project) return { status: 404, body: { error: `unknown project: ${projectId}` } };
@@ -109,8 +110,10 @@ export async function answerProjectMigration(deps: ProjectMigrationRouteDeps, pr
 async function migrate(deps: ProjectMigrationRouteDeps, project: { id: string; root: string }, dryRun: boolean, signal: AbortSignal | undefined): Promise<ProjectMigrationResponse> {
   const recovered = await recoverProjectMigration(project.root, { ownership: deps.ownership, keep: true });
   if (dryRun) {
-    assertProjectAdmitted(projectPaths(project.root).write);
-    return dryRunAnswer(project.root, recovered !== undefined);
+    // An admitted read under this cockpit's ownership: no fence can start while the plan reads.
+    const dataDir = projectPaths(project.root).write;
+    await deps.ownership.acquire(dataDir);
+    return withProjectAdmission(dataDir, () => { return dryRunAnswer(project.root, recovered !== undefined); }, (error) => { throw error; });
   }
   // The unfinished migration was this migration: it is complete now.
   if (recovered) return migrationAnswer(recovered);
