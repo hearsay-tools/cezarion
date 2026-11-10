@@ -88,6 +88,8 @@ export function runCheckout(
   const { root, store } = host;
   const run = store.getRun(id);
   if (!run) return { status: 404, body: { error: 'not found' } };
+  const refusal = intent === 'mutate' && run.worktreePath && fallbackProjectWriteError(run.worktreePath);
+  if (refusal) return { status: 409, body: { error: refusal } };
   if (options.checksAutosave) {
     const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
     if (blocker) return { status: 409, body: { error: blocker } };
