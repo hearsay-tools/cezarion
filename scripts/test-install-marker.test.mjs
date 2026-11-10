@@ -11,10 +11,17 @@ test('script sandboxes create a stable private marker and refuse an inherited li
   try {
     ensureTestInstallMarker(root);
     const before = readFileSync(path, 'utf8');
+    const splitPath = join(root, 'config', 'install.json');
+    const splitBefore = readFileSync(splitPath, 'utf8');
+    assert.equal(JSON.parse(splitBefore).kind, 'test');
     assert.equal(JSON.parse(before).kind, 'test');
     if (process.platform !== 'win32') assert.equal(statSync(path).mode & 0o777, 0o600);
     ensureTestInstallMarker(root);
     assert.equal(readFileSync(path, 'utf8'), before);
+    assert.equal(readFileSync(splitPath, 'utf8'), splitBefore);
+    writeFileSync(splitPath, JSON.stringify({ ...JSON.parse(splitBefore), kind: 'live' }));
+    assert.throws(() => ensureTestInstallMarker(root), /Refusing.*live install marker/);
+    writeFileSync(splitPath, splitBefore);
     const live = JSON.stringify({ ...JSON.parse(before), kind: 'live' });
     writeFileSync(path, live);
     assert.throws(() => ensureTestInstallMarker(root), /Refusing.*live install marker/);

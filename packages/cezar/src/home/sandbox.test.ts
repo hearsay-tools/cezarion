@@ -25,7 +25,7 @@ it('creates a test marker and contains all paths, including caches, in its direc
   const root = mkdtempSync(join(tmpdir(), 'cez-home-sandbox-'));
   try {
     const home = Home.sandbox(root);
-    const marker = JSON.parse(readFileSync(join(root, 'install.json'), 'utf8'));
+    const marker = JSON.parse(readFileSync(join(home.config, 'install.json'), 'utf8'));
     expect(marker).toEqual({ installId: expect.any(String), kind: 'test', createdAt: expect.any(String) });
     expect(marker.installId).toMatch(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/);
     expect(new Date(marker.createdAt).toISOString()).toBe(marker.createdAt);
@@ -36,6 +36,6 @@ it('creates a test marker and contains all paths, including caches, in its direc
     }
     expect(Object.isFrozen(home)).toBe(true);
     Home.sandbox(root);
-    expect(JSON.parse(readFileSync(join(root, 'install.json'), 'utf8'))).toEqual(marker);
+    expect(JSON.parse(readFileSync(join(home.config, 'install.json'), 'utf8'))).toEqual(marker);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

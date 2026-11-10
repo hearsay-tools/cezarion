@@ -72,7 +72,7 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
     // A store opened on the project reads the moved rows, artifacts, handoffs and receipts, and the
     // emptied legacy directory neither shadows them nor gains a run store.
-    const store = RunStore.open(project.dataDir);
+    const store = RunStore.open(REBRAND_SWITCH ? project.newDir : project.dataDir);
     try {
       expect(store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
       expect(store.sourceDataDir(TASK)).toBe(project.newDir);
@@ -149,9 +149,8 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
 
 describe('without a release', () => {
-  it('keeps the release switch off, starts a migration only behind the release switch, and refuses to run without the fence held by this process', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    expect(SUBCOMMAND_NAMES.some(name => /migrat/.test(name))).toBe(false);
+  it('registers migration only behind the release switch, and refuses to run without the fence held by this process', async () => {
+    expect(SUBCOMMAND_NAMES.some(name => /migrat/.test(name))).toBe(REBRAND_SWITCH);
     const src = join(import.meta.dirname, '..');
     const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter(path => path.endsWith('.ts') && !/\.(?:test|testkit)\.ts$/.test(path) && !path.startsWith('project-migration'))

@@ -1,3 +1,5 @@
+import { REBRAND_SWITCH } from '../../src/home/switch.ts';
+import { productName } from '../../src/home/display.ts';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { CiProbeScenario } from '../fixtures/installed-ci-probe.ts';
 import { emitProbe } from '../fixtures/emit-probe.ts';
@@ -90,7 +92,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
       cwd: consumerDir,
       maxBuffer: 10 * 1024 * 1024,
     });
-    assert.match(help.stdout, /cezar — local cockpit/);
+    assert.ok(help.stdout.includes(`${productName('cezar')} — local cockpit`));
     assert.match(help.stdout, /cez run "<task>"/);
     assert.match(help.stdout, /projects remove\|rm <id>/);
     assert.match(help.stdout, /projects tag <id> \[<tag>…\]/);
@@ -98,12 +100,12 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
     for (const args of [['worker', '--help'], ['worker', 'spawn', '--help']]) {
       const workerHelp = await execFile(process.execPath, [cliPath, ...args], {
         cwd: consumerDir,
-        env: { ...process.env, CEZ_DELEGATION_URL: '', CEZ_DELEGATION_TOKEN: '' },
+        env: Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(?:CEZ|HSQ)_/.test(name))),
       });
       assert.match(workerHelp.stdout, /Usage:/);
       assert.match(workerHelp.stdout, /cez worker/);
       assert.match(workerHelp.stdout, /--baseline/);
-      assert.equal(workerHelp.stderr, '');
+      assert.equal(workerHelp.stderr, REBRAND_SWITCH ? "[cez] 'cez' is deprecated; use 'hsq' instead.\n" : '');
     }
 
 
@@ -124,7 +126,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
     const cezHome = join(root, 'cez-home');
     const run = await execFile(process.execPath, [cliPath, 'run', 'mock:cezar-done', '--repo', fixtureRepo], {
       cwd: consumerDir,
-      env: { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: cezHome },
+      env: { ...process.env, CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_HOME: cezHome, HSQ_HOME: cezHome },
       timeout: 60_000,
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -141,7 +143,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
 
     // Boot wiring (spec 2026-07-20-multi-project-workspace, step 1.5): the
     // headless run migrated ~/.cezar and registered the boot repo.
-    const workspace = JSON.parse(await readFile(join(cezHome, 'config.json'), 'utf8')) as {
+    const workspace = JSON.parse(await readFile(Home.sandbox(cezHome).workspaceConfig, 'utf8')) as {
       schemaVersion: number;
       disabledProviders?: string[];
       projects: Array<{ name: string; root: string }>;
@@ -153,11 +155,11 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
     );
 
     workspace.disabledProviders = ['claude'];
-    Home.seed(Home.sandbox(cezHome), join(cezHome, 'config.json'), workspace);
+    Home.seed(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, workspace);
     await assert.rejects(
       execFile(process.execPath, [cliPath, 'run', 'mock:cezar-done must stay blocked', '--repo', fixtureRepo], {
         cwd: consumerDir,
-        env: { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: cezHome },
+        env: { ...process.env, CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_HOME: cezHome, HSQ_HOME: cezHome },
         timeout: 60_000,
         maxBuffer: 10 * 1024 * 1024,
       }),
@@ -171,7 +173,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
     const runsAfterDisabledAttempt = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
     assert.equal(runsAfterDisabledAttempt.length, 1, 'a disabled provider must not create a run');
     workspace.disabledProviders = [];
-    Home.seed(Home.sandbox(cezHome), join(cezHome, 'config.json'), workspace);
+    Home.seed(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, workspace);
 
     const claudeShim = join(root, 'claude-shim.mjs');
     await writeFile(
@@ -194,8 +196,8 @@ if (args.join(' ') === 'auth status --json') {
         cwd: consumerDir,
         env: {
           ...process.env,
-          CEZ_CLAUDE_BIN: claudeShim,
-          CEZ_HOME: cezHome,
+          CEZ_CLAUDE_BIN: claudeShim, HSQ_CLAUDE_BIN: claudeShim,
+          CEZ_HOME: cezHome, HSQ_HOME: cezHome,
         },
         timeout: 60_000,
         maxBuffer: 10 * 1024 * 1024,
@@ -221,7 +223,7 @@ if (args.join(' ') === 'auth status --json') {
     // running — the ssh-into-the-box view of Settings → Projects.
     const projects = await execFile(process.execPath, [cliPath, 'projects'], {
       cwd: consumerDir,
-      env: { ...process.env, CEZ_HOME: cezHome },
+      env: { ...process.env, CEZ_HOME: cezHome, HSQ_HOME: cezHome },
       timeout: 30_000,
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -233,7 +235,7 @@ if (args.join(' ') === 'auth status --json') {
     // CEZ_DRY_RUN performs no real sudo.
     assert.match(help.stdout, /cez server-install/);
     const serverHome = join(root, 'server-home');
-    const serverEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: serverHome };
+    const serverEnv = { ...process.env, CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_HOME: serverHome, HSQ_HOME: serverHome };
     const serverExec = { cwd: consumerDir, env: serverEnv, timeout: 60_000, maxBuffer: 10 * 1024 * 1024 } as const;
 
     await execFile(
@@ -241,7 +243,7 @@ if (args.join(' ') === 'auth status --json') {
       [cliPath, 'server-install', '--platform', 'ubuntu-vps', '--yes', '--repo', fixtureRepo],
       serverExec,
     );
-    const state = JSON.parse(await readFile(join(serverHome, 'server.json'), 'utf8')) as {
+    const state = JSON.parse(await readFile(Home.sandbox(serverHome).serverState(), 'utf8')) as {
       platform: string;
       installed: boolean;
       steps: Record<string, unknown>;
@@ -255,7 +257,7 @@ if (args.join(' ') === 'auth status --json') {
       [cliPath, 'server-uninstall', '--platform', 'ubuntu-vps', '--yes'],
       serverExec,
     );
-    const reversed = JSON.parse(await readFile(join(serverHome, 'server.json'), 'utf8')) as {
+    const reversed = JSON.parse(await readFile(Home.sandbox(serverHome).serverState(), 'utf8')) as {
       installed: boolean;
       steps: Record<string, unknown>;
     };
@@ -272,7 +274,7 @@ if (args.join(' ') === 'auth status --json') {
       [cliPath, 'server-install', '--platform', 'ubuntu-vps', '--yes', '--repo', fixtureRepo],
       serverExec,
     );
-    const resumedExternal = JSON.parse(await readFile(join(serverHome, 'server.json'), 'utf8')) as {
+    const resumedExternal = JSON.parse(await readFile(Home.sandbox(serverHome).serverState(), 'utf8')) as {
       externalProxy?: boolean;
       steps: Record<string, unknown>;
     };
@@ -349,7 +351,7 @@ try {
 } finally { store.close(); }
 `);
     const factsResult = await execFile(process.execPath, [factsSmoke], {
-      cwd: consumerDir, env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', CEZ_HOME: join(root, 'facts-home') },
+      cwd: consumerDir, env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', CEZ_HOME: join(root, 'facts-home'), HSQ_HOME: join(root, 'facts-home') },
       timeout: 30_000,
     });
     assert.match(factsResult.stdout, /"workers":1/);

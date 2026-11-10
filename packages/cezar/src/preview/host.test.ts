@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -1410,7 +1411,7 @@ describe('PreviewHost', () => {
       const grant = host.grantAgent(ctx.runId, () => ctx);
       const { client, link } = await connect(host, grant.token);
       (link as { fromClient(text: string): void }).fromClient(JSON.stringify({ id: 1, method: 'Target.closeTarget', params: { targetId: 'PANE' } }));
-      expect(client.sent).toEqual([{ id: 1, error: { code: -32000, message: "cezar refuses Target.closeTarget on the page the owner's preview pane shows." } }]);
+      expect(client.sent).toEqual([{ id: 1, error: { code: -32000, message: `${productName('cezar')} refuses Target.closeTarget on the page the owner's preview pane shows.` } }]);
     });
 
     it("opening the agent's page attaches the pane without navigating, and says agent-idle when no agent is connected", async () => {

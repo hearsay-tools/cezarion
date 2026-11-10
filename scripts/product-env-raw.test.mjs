@@ -74,3 +74,21 @@ for (const layout of ['legacy', 'split']) {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 }
+
+
+test('run-store benchmark child opens its isolated home in the selected layout', () => {
+  const root = mkdtempSync(join(tmpdir(), 'run-store-home-'));
+  const result = join(root, 'result.json');
+  try {
+    execFileSync(process.execPath, ['--import', 'tsx', new URL('../packages/cezar/scripts/benchmark-run-store.ts', import.meta.url).pathname,
+      '--child', '--size', '1', '--profile', 'legacy', '--samples', '1', '--budget-seconds', '1',
+      '--duration', '1', '--metrics', 'open', '--result', result], {
+      timeout: 30_000, // bound: one store-open sample plus fixture startup and teardown.
+      env: { ...process.env }, stdio: 'pipe',
+    });
+    const sample = JSON.parse(readFileSync(result, 'utf8'));
+    assert.equal(sample.size, 1);
+    assert.equal(sample.sync.open.length, 1);
+    assert.ok(sample.sync.open[0] >= 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

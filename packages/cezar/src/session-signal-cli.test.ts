@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from './runs/store.ts';
+import { projectPaths } from './project-paths.ts';
 import { requirePid } from './pid-file.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
@@ -46,7 +47,11 @@ const agents: number[] = [];
 const env = () => {
   const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'),
     CEZ_CLAUDE_BIN: join(root, 'stalling-agent.mjs') };
+  for (const [key, value] of Object.entries(vars)) {
+    if (key.startsWith('CEZ_')) vars[`HSQ_${key.slice(4)}`] = value;
+  }
   delete vars.CEZ_AUTOMATIONS;
+  delete vars.HSQ_AUTOMATIONS;
   return vars;
 };
 
@@ -63,7 +68,7 @@ function alive(pid: number): boolean {
 /** The agent, once it stalls in its task worktree. */
 async function agentPid(): Promise<number> {
   return vi.waitFor(() => {
-    const worktrees = join(root, '.ai/cezar/worktrees');
+    const worktrees = join(projectPaths(root).write, 'worktrees');
     const file = readdirSync(worktrees).map(id => join(worktrees, id, 'watchdog.pid')).find(existsSync);
     expect(file).toBeDefined();
     const pid = requirePid(file!);

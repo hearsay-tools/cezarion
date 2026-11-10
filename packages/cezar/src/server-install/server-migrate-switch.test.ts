@@ -135,3 +135,6 @@ describe('cockpit lease instance', () => {
     expect(serverInstanceForPort(home, 9999)).toBe('default');
   });
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import {
   RUN_STATUS,
@@ -353,7 +354,7 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
     renderHeader(run(status))
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    const settings = ['Archive when Done', 'Auto-merge PR', 'Allow cezar workers', 'Allow task messaging']
+    const settings = ['Archive when Done', 'Auto-merge PR', `Allow ${productName("cezar")} workers`, 'Allow task messaging']
     const deleteIndex = visible.indexOf('Delete task…')
     expect(names).toEqual(deleteIndex < 0 ? [...visible, ...settings] : [...visible.slice(0, deleteIndex), ...settings, ...visible.slice(deleteIndex)])
   })
@@ -390,7 +391,7 @@ describe('Mark unread (#775)', () => {
     renderHeader(readDone())
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive when Done', 'Auto-merge PR', 'Allow cezar workers', 'Allow task messaging', 'Delete task…'])
+    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive when Done', 'Auto-merge PR', `Allow ${productName("cezar")} workers`, 'Allow task messaging', 'Delete task…'])
   })
 
   it.each([
@@ -1274,14 +1275,14 @@ describe('task access settings (hearsay-tools/cezarion#2784)', () => {
   it('shows a legacy run without the fields as allowed', () => {
     stubFetch()
     renderHeader(run('done'))
-    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' }).getAttribute('aria-checked')).toBe('true')
+    expect(actionBar().getByRole('menuitemcheckbox', { name: `Allow ${productName("cezar")} workers` }).getAttribute('aria-checked')).toBe('true')
     expect(actionBar().getByRole('menuitemcheckbox', { name: 'Allow task messaging' }).getAttribute('aria-checked')).toBe('true')
   })
 
   it.each(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const)('lets a %s task turn workers off with a scoped PATCH', async status => {
     const sent = stubFetch()
     renderHeader(run(status), undefined, 'session', 'sample')
-    const workers = actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' })
+    const workers = actionBar().getByRole('menuitemcheckbox', { name: `Allow ${productName("cezar")} workers` })
     expect(workers.getAttribute('aria-describedby')).toBeTruthy()
     const described = workers.getAttribute('aria-describedby')!.split(' ').map(id => document.getElementById(id)?.textContent ?? '').join(' ')
     expect(described).toContain('separate paid agent session')
@@ -1304,15 +1305,15 @@ describe('task access settings (hearsay-tools/cezarion#2784)', () => {
   it('surfaces PATCH errors and keeps the saved setting', async () => {
     stubFetch({ '/api/v1/runs/r1': () => jsonResponse({ error: 'Cannot save task access' }, 409) })
     renderHeader(run('done'))
-    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' }))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: `Allow ${productName("cezar")} workers` }))
     expect(await screen.findByText('Cannot save task access')).toBeTruthy()
-    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Allow cezar workers' }).getAttribute('aria-checked')).toBe('true')
+    expect(actionBar().getByRole('menuitemcheckbox', { name: `Allow ${productName("cezar")} workers` }).getAttribute('aria-checked')).toBe('true')
   })
 
   it('hides both items for an owned worker', () => {
     stubFetch()
     renderHeader(workerRun())
-    expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Allow cezar workers' })).toBeNull()
+    expect(actionBar().queryByRole('menuitemcheckbox', { name: `Allow ${productName("cezar")} workers` })).toBeNull()
     expect(actionBar().queryByRole('menuitemcheckbox', { name: 'Allow task messaging' })).toBeNull()
     expect(actionBar().getByRole('menuitemcheckbox', { name: 'Archive when Done' })).toBeTruthy()
   })

@@ -1,5 +1,5 @@
+import { homeFileLocation } from './file-location.ts';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { HomeOutsideWriteError, HomeStore } from './store.ts';
@@ -56,7 +56,7 @@ it.each(['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json
   'server.install.lock', 'remote-settings/4321.json', 'server-instances/named.json', 'server-instances/named.install.lock'])(
   'keeps deletion enforcement for %s without a loader-proven recovery base', file => {
     const home = Home.sandbox(storeRoot());
-    const path = join(home.root, file);
+    const path = homeFileLocation(home, file).path;
     Home.seed(home, path, { original: true });
     rmSync(path); // Every family still refuses a normal save over outside deletion.
     expect(() => new HomeStore(home).writeJson(path, { next: true })).toThrow(HomeOutsideWriteError);

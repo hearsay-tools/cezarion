@@ -5,7 +5,7 @@ import { storeRoot } from './store.testkit.ts';
 
 export function migrationFixture() {
   const directory = storeRoot();
-  const legacy = Home.sandbox(join(directory, 'legacy'));
+  const legacy = Home.sandbox(join(directory, 'legacy'), { layout: 'legacy' });
   const target = Home.sandbox(join(directory, 'new'), { layout: 'split' });
   Home.seed(legacy, legacy.workspaceConfig, { projects: [], saved: 'original' });
   return { directory, legacy, target, env: { HOME: directory, SHELL: '/bin/bash' } };

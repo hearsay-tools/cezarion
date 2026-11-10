@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -65,10 +66,11 @@ describe('GitHub automation API', () => {
     home = mkdtempSync(join(tmpdir(), 'cezar-automation-home-'));
     useTestHome(home ? Home.sandbox(home) : undefined);
     process.env.CEZ_AUTOMATIONS = '1';
-    mkdirSync(join(root, '.ai/cezar'), { recursive: true });
-    store = RunStore.open(join(root, '.ai/cezar'));
+    mkdirSync(join(projectPaths(root).write), { recursive: true });
+    store = RunStore.open(join(projectPaths(root).write));
   });
   afterEach(() => {
+    vi.unstubAllEnvs();
     store.flush();
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -104,7 +106,7 @@ describe('GitHub automation API', () => {
   });
 
   it('counts persisted tasks and variants beyond recent logs, compaction and restart', async () => {
-    const dataDir = join(root, '.ai/cezar');
+    const dataDir = join(projectPaths(root).write);
     const automationStore = AutomationStore.open(dataDir);
     const definition = automationStore.create({ ...input, enabled: false }, 'counter-test');
     const scheduled = automationStore.create({ ...scheduleInput, enabled: false }, 'scheduled-counter');
@@ -170,7 +172,7 @@ describe('GitHub automation API', () => {
 
   it.each(['create', 'enable', 'update'] as const)('arms the bounded history window through %s and preserves receipts', async (entry) => {
     withGithubRemote(root);
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const filters = { ...input.filters, includeExisting: true };
     const started = Date.now();
@@ -193,12 +195,12 @@ describe('GitHub automation API', () => {
     expect(Date.parse(state.baselineAt!)).toBeLessThanOrEqual(Date.now() - 7 * 86_400_000);
     expect(state.cursor).toEqual({ timestamp: state.baselineAt });
     expect(automationStore.latestReceipts().size).toBe(1);
-    expect(AutomationStore.open(join(root, '.ai/cezar')).get(automation.id)?.filters?.includeExisting).toBe(true);
+    expect(AutomationStore.open(join(projectPaths(root).write)).get(automation.id)?.filters?.includeExisting).toBe(true);
   });
 
   it('preserves progress on ordinary edits and re-establishes the cutoff when history is disabled', async () => {
     withGithubRemote(root);
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const filters = { ...input.filters, includeExisting: true };
     const created = await apiRequest(server, '/api/v1/automations', json({ ...input, filters, enable: true }));
@@ -217,7 +219,7 @@ describe('GitHub automation API', () => {
 
   it.each([undefined, false])('preserves future-only activation with includeExisting=%s', async (includeExisting) => {
     withGithubRemote(root);
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const started = Date.now();
     const response = await apiRequest(app({ automationStore }), '/api/v1/automations', json({ ...input, filters: { ...input.filters, ...(includeExisting === undefined ? {} : { includeExisting }) }, enable: true }));
     expect(response.status).toBe(201);
@@ -250,6 +252,7 @@ describe('GitHub automation API', () => {
     withGithubRemote(root);
     const savedDry = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
+    vi.stubEnv('HSQ_DRY_RUN', '1');
     try {
       const res = await apiRequest(app(), '/api/v1/automations');
       expect(((await res.json()) as any)).toMatchObject({ available: true });
@@ -286,7 +289,7 @@ describe('GitHub automation API', () => {
   it('runs preview checks asynchronously without writing receipts', async () => {
     // Created in the store, not through the API: the checkout has no GitHub remote, which is the
     // failure this check has to report.
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const created = automationStore.create({ ...input, events: ['issue.opened'] });
     const queued = await apiRequest(server, `/api/v1/automations/${created.id}/check`, json({ mode: 'preview' }));
@@ -303,7 +306,7 @@ describe('GitHub automation API', () => {
     expect(check.status).toBe('error');
     const list = await apiRequest(server, '/api/v1/automations');
     expect(((await list.json()) as any).automations).toHaveLength(1);
-    expect(readFileOrEmpty(join(root, '.ai/cezar/automation-receipts.ndjson'))).toBe('');
+    expect(readFileOrEmpty(join(projectPaths(root).write, 'automation-receipts.ndjson'))).toBe('');
   });
 
   it('shares API mutations with the workspace scheduler store', async () => {
@@ -401,7 +404,7 @@ describe('GitHub automation API', () => {
     const bus = new WorkspaceEventBus();
     const changes: unknown[] = [];
     bus.on((event, data) => { if (event === 'automation-change') changes.push(data); });
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const manager = recordingManager();
     const server = app({ automationStore, manager, workspaceEvents: bus });
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
@@ -432,11 +435,11 @@ describe('GitHub automation API', () => {
   });
 
   it('POST /automations/:id/run answers 404 and launches nothing when another process deleted the schedule', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const manager = recordingManager();
     const server = app({ automationStore, manager });
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
-    AutomationStore.open(join(root, '.ai/cezar')).delete(created.id);
+    AutomationStore.open(join(projectPaths(root).write)).delete(created.id);
     const ran = await apiRequest(server, `/api/v1/automations/${created.id}/run`, { method: 'POST' });
     expect(ran.status).toBe(404);
     expect(((await ran.json()) as any).error).toBe('not found');
@@ -452,7 +455,7 @@ describe('GitHub automation API', () => {
   });
 
   it('enable arms nextRunAt for a schedule and the list answers timeZone and nextRunAt', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
     const before = Date.now();
@@ -542,7 +545,7 @@ describe('GitHub automation API', () => {
   }
 
   it('enable never shows another process the enabled schedule beside its stale nextRunAt', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const { created } = pausedWithStaleInstant(automationStore);
     const before = Date.now();
@@ -557,7 +560,7 @@ describe('GitHub automation API', () => {
   });
 
   it('a PUT that resumes a schedule never shows another process the new definition beside its stale nextRunAt', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const { created } = pausedWithStaleInstant(automationStore);
     const schedule = { type: 'weekdays', hour: 9, minute: 0 } as const;
@@ -581,7 +584,7 @@ describe('GitHub automation API', () => {
   }
 
   it('a PUT that pauses a schedule never shows another process the enabled definition beside a due nextRunAt', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const created = enabledWithDueInstant(automationStore);
     const { response, launches, copies } = await launchesMidRoute(automationStore, created.id, () =>
@@ -594,7 +597,7 @@ describe('GitHub automation API', () => {
   });
 
   it('the pause route never shows another process the enabled definition beside a due nextRunAt', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const created = enabledWithDueInstant(automationStore);
     const { response, launches, copies } = await launchesMidRoute(automationStore, created.id, () =>
@@ -602,21 +605,21 @@ describe('GitHub automation API', () => {
     expect(response.status).toBe(200);
     expect(copies).toBeGreaterThanOrEqual(2);
     expect(launches).toBe(0);
-    expect(AutomationStore.open(join(root, '.ai/cezar')).state(created.id)).not.toHaveProperty('nextRunAt');
+    expect(AutomationStore.open(join(projectPaths(root).write)).state(created.id)).not.toHaveProperty('nextRunAt');
     expect(automationStore.get(created.id)?.enabled).toBe(false);
   });
 
   it('a PUT that loses the revision race leaves the armed nextRunAt alone', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const { created, stale } = pausedWithStaleInstant(automationStore);
     const conflict = await apiRequest(server, `/api/v1/automations/${created.id}`, json({ ...scheduleInput, enabled: true, expectedRevision: created.revision + 5 }, 'PUT'));
     expect(conflict.status).toBe(409);
-    expect(AutomationStore.open(join(root, '.ai/cezar')).state(created.id)?.nextRunAt).toBe(stale);
+    expect(AutomationStore.open(join(projectPaths(root).write)).state(created.id)?.nextRunAt).toBe(stale);
   });
 
   it('enable and pause toggle the current revision when another store edited the definition', async () => {
-    const dir = join(root, '.ai/cezar');
+    const dir = join(projectPaths(root).write);
     const stale = AutomationStore.open(dir);
     const other = AutomationStore.open(dir);
     const server = app({ automationStore: stale });
@@ -634,7 +637,7 @@ describe('GitHub automation API', () => {
   });
 
   it('enable and pause answer 409, never 500, when the write races another edit', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const server = app({ automationStore });
     const created = automationStore.create({ ...scheduleInput, enabled: false } as never);
     for (const action of ['enable', 'pause']) {
@@ -650,7 +653,7 @@ describe('GitHub automation API', () => {
   });
 
   it('a stale-route retry releases the issue receipt without creating a run', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const rule = automationStore.create({ ...input, enabled: false,
       filters: { ...input.filters, requireCurrentLabels: true, allLabels: ['friction-auto'] },
     });
@@ -671,7 +674,7 @@ describe('GitHub automation API', () => {
   });
 
   it('retry fires a launch-error schedule receipt', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const manager = recordingManager();
     const server = app({ automationStore, manager });
     const created = ((await (await apiRequest(server, '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
@@ -840,7 +843,7 @@ describe('GitHub automation API', () => {
   // #779: a boot project whose run store cannot open launches nothing. Each fire used to throw in
   // the launcher, three in a row paused the automation, and the pause outlived the fixed store.
   it('a past-due schedule on a boot project whose run store cannot open fires nothing and counts nothing', async () => {
-    const dataDir = join(root, '.ai/cezar');
+    const dataDir = join(projectPaths(root).write);
     const occurrenceAt = new Date(Date.now() - 3 * 60_000).toISOString();
     const created = new Date(Date.now() - 86_400_000).toISOString();
     writeFileSync(join(dataDir, 'automations.json'), JSON.stringify({
@@ -884,6 +887,7 @@ describe('GitHub automation API', () => {
   it('the first launch in a non-boot project whose context is not built yet logs no failure', async () => {
     const savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
+    vi.stubEnv('HSQ_DRY_RUN', '1');
     const other = mkdtempSync(join(tmpdir(), 'cezar-automation-other-'));
     const gitInit = (dir: string) => {
       execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, stdio: 'ignore' });
@@ -945,7 +949,7 @@ describe('GitHub automation API', () => {
   }, 30_000);
 
   it('the list tallies count schedule launches as launched and failed launches as errors', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     const created = ((await (await apiRequest(app({ automationStore }), '/api/v1/automations', json(scheduleInput))).json()) as any).automation;
     for (const trigger of ['schedule', 'manual', 'catch-up'] as const) {
       const run = store.createRun({ title: trigger, workflow: 'quick-task', task: 'Go', steps: [] });
@@ -964,7 +968,7 @@ describe('GitHub automation API', () => {
   });
 
   it('pages both log sources to the end with positive cursors while legacy entries are appended', async () => {
-    const legacy = join(root, '.ai/cezar');
+    const legacy = join(projectPaths(root).write);
     const fallback = join(root, '.ai/squawk');
     mkdirSync(fallback, { recursive: true });
     const rows = (automationId: string) => Array.from({ length: 4 }, (_, index) => JSON.stringify({
@@ -994,7 +998,7 @@ describe('GitHub automation API', () => {
   });
 
   it('accepts preview as an automation-log result filter', async () => {
-    const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+    const automationStore = AutomationStore.open(join(projectPaths(root).write));
     await automationStore.appendLog({
       automationId: 'previewed',
       revision: 1,
@@ -1046,7 +1050,7 @@ describe('GitHub automation API', () => {
     };
 
     it('create enabled once in the future arms nextRunAt to the instant', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const definition = onceInput();
       const created = await create(server, { ...definition, enable: true });
@@ -1091,7 +1095,7 @@ describe('GitHub automation API', () => {
     });
 
     it('cancel archives with outcome cancelled, enabled false, and list hides it; ?archived=only shows it', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const { automation } = await body(await create(server, { ...onceInput(), enable: true }));
       const cancelled = await apiRequest(server, `/api/v1/automations/${automation.id}/cancel`, { method: 'POST' });
@@ -1110,7 +1114,7 @@ describe('GitHub automation API', () => {
 
     // Review of #1469: the scheduler status describes the whole project, not the filtered page.
     it('?archived=only still reports the scheduler as scheduled with the next due time of the active schedules', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const { automation: gone } = await body(await create(server, { ...onceInput(), enable: true }));
       await apiRequest(server, `/api/v1/automations/${gone.id}/cancel`, { method: 'POST' });
@@ -1122,7 +1126,7 @@ describe('GitHub automation API', () => {
     });
 
     it('cancel while the lease is held answers 409 in-progress and changes nothing', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const { automation } = await body(await create(server, { ...onceInput(), enable: true }));
       const held = automationStore.acquireLease();
@@ -1138,7 +1142,7 @@ describe('GitHub automation API', () => {
     });
 
     it('edit after a launched receipt with no archive heals and answers 409 archived', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const { automation } = await body(await create(server, onceInput()));
       const reserved = automationStore.reserveReceipt({ automationId: automation.id, revision: 1, eventId: `once:${automation.schedule.at}|UTC`, occurrenceAt: new Date().toISOString() })!;
@@ -1150,7 +1154,7 @@ describe('GitHub automation API', () => {
     });
 
     it('run now on a waiting once answers 202, archives with trigger manual', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const manager = recordingManager();
       const server = app({ automationStore, manager });
       const { automation } = await body(await create(server, { ...onceInput(), enable: true }));
@@ -1165,7 +1169,7 @@ describe('GitHub automation API', () => {
     });
 
     it('enable from missed answers 400 due-time-passed', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const definition = automationStore.create({ ...onceInput(-86_400_000), enabled: false } as never);
       automationStore.setState(definition.id, (current) => ({ ...current, onceOutcome: 'missed' }));
@@ -1176,7 +1180,7 @@ describe('GitHub automation API', () => {
     });
 
     it('edit from failed clears onceOutcome and reports onceStatus paused', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       const server = app({ automationStore });
       const { automation } = await body(await create(server, onceInput()));
       automationStore.setState(automation.id, (current) => ({ ...current, onceOutcome: 'failed' }));
@@ -1197,7 +1201,7 @@ describe('GitHub automation API', () => {
 
     // The session tools reach the same service through the boot manager.
     it('hands the boot manager schedule tools that create through the service', async () => {
-      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const automationStore = AutomationStore.open(join(projectPaths(root).write));
       let tools: AutomationToolService | undefined;
       app({ automationStore, manager: { setAutomationTools: (value: AutomationToolService | undefined) => { tools = value; } } as unknown as RunManager });
       const answer = await tools!.scheduleTask({ name: 'Check', prompt: 'Check it', delay: '1d' });

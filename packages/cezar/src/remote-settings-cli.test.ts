@@ -1,3 +1,4 @@
+import { Home } from './home/home.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,7 +31,7 @@ describe('cez remote-settings', () => {
   it('enable --port grants that cockpit and prints the host-command warning', async () => {
     const { code, body } = await run(['enable', '--port', '4322']);
     expect(code).toBe(0);
-    expect(body).toMatchObject({ ok: true, port: 4322, path: join(home, 'remote-settings'), warning: REMOTE_SETTINGS_WARNING });
+    expect(body).toMatchObject({ ok: true, port: 4322, path: Home.sandbox(home).remoteSettings, warning: REMOTE_SETTINGS_WARNING });
     expect(ports()).toEqual([4322]);
   });
 

@@ -30,7 +30,7 @@ describe('workspace migrations', () => {
   afterEach(() => {
     if (originalHome === undefined) useTestHome(undefined);
     else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
-    chmodSync(home, 0o700); // undo the unwritable-home test before cleanup
+    chmodSync(testHome().config, 0o700); // undo the unwritable-home test before cleanup
     rmSync(home, { recursive: true, force: true });
     rmSync(repoRoot, { recursive: true, force: true });
     vi.restoreAllMocks();
@@ -136,11 +136,11 @@ describe('workspace migrations', () => {
 
   it('an unwritable home degrades with ONE warning and never throws', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    chmodSync(home, 0o500); // read-only home dir → the atomic write fails
+    chmodSync(testHome().config, 0o500); // read-only home dir → the atomic write fails
     await expect(runMigrations({ home: testHome(), bootRepoRoot: null })).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain('001-workspace-config');
-    chmodSync(home, 0o700);
+    chmodSync(testHome().config, 0o700);
     expect(existsSync(workspaceConfigPath(undefined, testHome()))).toBe(false);
   });
 

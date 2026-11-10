@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { homeFileLocation } from '../home/file-location.ts';
 import { mkdirSync, readFileSync, rmSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -17,7 +18,7 @@ const locks = ['server.install.lock', 'server-instances/other.install.lock'] as 
 it.each(files)('backs up changed and removed %s under its home-relative key', file => {
   const home = Home.sandbox(storeRoot());
   const store = new HomeStore(home);
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const before = Buffer.from('original bytes\n');
   const next = Buffer.from('next bytes\n');
   store.replace(path, before);
@@ -59,9 +60,9 @@ it.each(locks)('still lists and restores an older snapshot of %s byte for byte',
 it('discovers nested backups after the live files and their directories are removed', () => {
   const home = Home.sandbox(storeRoot());
   const store = new HomeStore(home);
-  for (const file of ['remote-settings/4321.json', 'server-instances/other.json']) {
-    store.writeJson(join(home.root, file), { first: true });
-    store.writeJson(join(home.root, file), { second: true });
+  for (const file of ['remote-settings/4321.json', 'server-instances/other.json'] as const) {
+    store.writeJson(homeFileLocation(home, file).path, { first: true });
+    store.writeJson(homeFileLocation(home, file).path, { second: true });
   }
   rmSync(home.remoteSettings, { recursive: true }); // Deliberate outside deletion; listing must stay read-only.
   rmSync(home.serverInstances, { recursive: true });
@@ -79,9 +80,9 @@ it.each(['../config.json', '/config.json', 'remote-settings/../config.json', 're
 });
 
 it('uses the Home backup root for nested files and reads the old named-instance location', () => {
-  const home = Home.sandbox(storeRoot());
+  const home = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const file = 'server-instances/config.json';
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const store = new HomeStore(home);
   store.writeJson(path, { first: true });
   store.writeJson(path, { second: true });
@@ -112,7 +113,7 @@ it('lists config.json.bak first and uses it for an unflagged restore', async () 
 
 it.each(['remote-settings/4321.json', 'server-instances/other.json'])('restores %s byte for byte through the CLI helper', async file => {
   const home = Home.sandbox(storeRoot());
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const store = new HomeStore(home);
   const previous = Buffer.from('{ "unknown": "preserved" }');
   store.replace(path, previous);
@@ -126,6 +127,7 @@ it('keeps backup failures auxiliary for nested file writes', () => {
   const path = join(home.remoteSettings, '4321.json');
   const store = new HomeStore(home);
   store.writeJson(path, { first: true });
+  mkdirSync(home.state, { recursive: true });
   writeFileSync(home.backups, 'unavailable'); // Deliberate obstruction of auxiliary storage.
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   store.writeJson(path, { next: true });

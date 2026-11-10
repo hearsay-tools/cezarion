@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -111,7 +112,7 @@ describe('automation CLI input boundaries', () => {
   it.each(['help', '-h'])('prints help with the default output for %s', async flag => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     expect(await runAutomationCommand([flag], {})).toBe(EXIT.ok);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('cez automation'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`${productIdentity().command} automation`));
   });
 
   it.each([false, true])('reads default stdin with isTTY=%s', async isTTY => {

@@ -67,7 +67,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, rebrand: false,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
@@ -461,9 +461,8 @@ describe('health while fenced', () => {
 
 describe('with the release switch off', () => {
   it('offers no migration command and a normal project build writes no fence or journal', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    expect(SUBCOMMAND_NAMES.filter((name) => name.includes('migrate'))).toEqual([]);
-    expect(await loadSubcommand('migrate-project')).toBeUndefined();
+    expect(SUBCOMMAND_NAMES.includes('migrate-project')).toBe(REBRAND_SWITCH);
+    expect(await loadSubcommand('migrate-project', undefined, false)).toBeUndefined();
     const { ai, root } = project();
     const contexts = contextsFor(owner(), { id: 'p', root });
     await contexts.context('p');

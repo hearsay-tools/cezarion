@@ -1,3 +1,4 @@
+import { productIdentity } from './home/identity.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
@@ -82,7 +83,7 @@ describe('runHeadless', () => {
     f.state.final = final;
     await f.run();
     expect(f.fakeProcess.exitCode).toBe(exitCode);
-    expect(f.output.log).toHaveBeenCalledWith(`\nrun ${final} — 42 tokens — details in the cockpit: npx cezarion`);
+    expect(f.output.log).toHaveBeenCalledWith(`\nrun ${final} — 42 tokens — details in the cockpit: npx ${productIdentity().npmAlias}`);
     expect(f.trace).toEqual([
       'workspace', 'openStore', 'watch', 'refresh', 'startRun listeners=0',
       'off SIGINT', 'off SIGTERM', 'off SIGHUP', 'delegation.close', 'abort', 'store.close',
@@ -101,8 +102,8 @@ describe('runHeadless', () => {
     await f.run();
     expect(f.output.log.mock.calls).toEqual([
       ['task output'],
-      ['\n  changes ready for review on branch ? — inspect them in the cockpit: npx cezarion'],
-      ['\nrun review — 0 tokens — details in the cockpit: npx cezarion'],
+      [ `\n  changes ready for review on branch ? — inspect them in the cockpit: npx ${productIdentity().npmAlias}` ],
+      [ `\nrun review — 0 tokens — details in the cockpit: npx ${productIdentity().npmAlias}` ],
     ]);
   });
 

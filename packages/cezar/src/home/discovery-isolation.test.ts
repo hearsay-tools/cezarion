@@ -5,7 +5,6 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync,
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { resolveHome } from './resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { currentEntry, linkCheckout, readManifest, writeManifest } from '../self-update/layout.ts';
 import { SelfUpdateService } from '../self-update/service.ts';
 import { RegistryCache } from '../self-update/registry.ts';
@@ -33,19 +32,19 @@ function checkout(root: string, branch: string): string {
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-discovery-home-')); roots.push(root);
-  const selected = resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'selected') } }); // test-home-read: resolve the temporary fixture CEZ_HOME
-  const ambient = resolveHome({ purpose: 'cli', env: { CEZ_HOME: join(root, 'ambient') } }); // test-home-read: resolve the temporary fixture CEZ_HOME
+  const selected = Home.sandbox(join(root, 'selected')); // test-home-read: resolve the temporary fixture CEZ_HOME
+  const ambient = Home.sandbox(join(root, 'ambient')); // test-home-read: resolve the temporary fixture CEZ_HOME
   const selectedRegistry = checkout(join(root, 'selected-registry'), 'registry');
   const selectedLink = checkout(join(root, 'selected-link'), 'main');
   const ambientRegistry = checkout(join(root, 'ambient-registry'), 'registry');
   const ambientLink = checkout(join(root, 'ambient-link'), 'main');
-  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { projects: [{ id: 'selected', root: selectedRegistry }] });
-  Home.seed(Home.sandbox(ambient.root), ambient.workspaceConfig, { projects: [{ id: 'ambient', root: ambientRegistry }] });
+  Home.seed(selected, selected.workspaceConfig, { projects: [{ id: 'selected', root: selectedRegistry }] });
+  Home.seed(ambient, ambient.workspaceConfig, { projects: [{ id: 'ambient', root: ambientRegistry }] });
   linkCheckout(selectedLink, 'main', process.env, undefined, selected);
   linkCheckout(ambientLink, 'main', process.env, undefined, ambient);
   // This ambient install must not force a suffix on the selected registry checkout's id.
   writeManifest('1.2.3+registry', { version: '1.2.3', source: 'local', installedAt: '' }, process.env, ambient);
-  useTestHome(ambient.root ? Home.sandbox(ambient.root) : undefined);
+  useTestHome(ambient);
   return { selected, ambient, selectedRegistry, selectedLink, ambientLink };
 }
 

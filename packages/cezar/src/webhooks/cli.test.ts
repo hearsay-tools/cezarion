@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -87,13 +88,13 @@ describe('cez webhook', () => {
   // bound: one cold `tsx` start of the whole CLI entry, which loads no server.
   it('is dispatched by the CLI entry before the cockpit flags are parsed', async () => {
     const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../index.ts', import.meta.url)), 'webhook', '--help']);
-    expect(stdout).toContain('cez webhook');
+    expect(stdout).toContain(`${productIdentity().command} webhook`);
     expect(stdout).not.toContain('start the cockpit');
   }, 15_000);
 
   it('prints usage for --help', async () => {
     const h = harness(() => sent(true));
     expect(await runWebhookCommand(['--help'], ENV, h.io)).toBe(0);
-    expect(h.lines[0]).toContain('cez webhook');
+    expect(h.lines[0]).toContain(`${productIdentity().command} webhook`);
   });
 });

@@ -44,7 +44,7 @@ setInterval(() => {}, 1000);
       'run', 'mock:cezar-done', '--repo', root,
     ], {
       cwd: fileURLToPath(new URL('../', import.meta.url)),
-      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home') },
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'), HSQ_HOME: join(root, 'home') },
       timeout: CLI_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
     }).catch((error: Error & { killed?: boolean; stdout?: string }) => {

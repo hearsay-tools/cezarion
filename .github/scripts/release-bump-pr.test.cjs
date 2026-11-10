@@ -1,3 +1,4 @@
+const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 'use strict';
 
 const test = require('node:test');
@@ -19,7 +20,7 @@ const MANIFEST = [
   'packages/contract/package.json',
   'packages/api-client/package.json',
   'packages/web/package.json',
-  'alias-cezarion/package.json',
+  `${productIdentity().npmAliasDirectory}/package.json`,
   'pnpm-lock.yaml',
 ];
 

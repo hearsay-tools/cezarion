@@ -1,3 +1,5 @@
+import { prepareOperatorHome } from '../../src/home/entry.ts';
+import { Home } from '../../src/home/home.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
@@ -47,6 +49,9 @@ async function storeSnapshot(dataDir: string): Promise<string> {
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'cez-serve-port-')));
+  const homeRoot = join(root, 'home');
+  // Prepare migration once. These tests measure concurrent port admission.
+  prepareOperatorHome(Home.sandbox(homeRoot), 'serve', { CEZ_HOME: homeRoot, HSQ_HOME: homeRoot });
   const children: ChildProcess[] = [];
   const occupants: Server[] = [];
   const repo = async (name: string) => {
@@ -68,7 +73,7 @@ async function fixture() {
   const start = (directory: string, args: string[] = []) => {
     const child = spawn(process.execPath, [...cliArgs, ...args, '--no-open'], {
       cwd: directory,
-      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0', CEZ_REMOTE: '0' },
+      env: { ...process.env, CEZ_HOME: join(root, 'home'), HSQ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_AUTONAME: '0', HSQ_AUTONAME: '0', CEZ_REMOTE: '0', HSQ_REMOTE: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     children.push(child);
@@ -129,13 +134,13 @@ test('busy cockpit port from a different cwd refuses before recovery or startup 
     const orphan = join(dataDir, 'worktrees', 'orphan-sentinel');
     await mkdir(orphan, { recursive: true });
     await writeFile(join(orphan, 'sentinel'), 'preserve');
-    const homeConfig = await readFile(join(f.root, 'home', 'config.json'), 'utf8');
+    const homeConfig = await readFile(Home.sandbox(join(f.root, 'home')).workspaceConfig, 'utf8');
 
     refused(await f.start(secondRepo, ['serve', '--port', String(port)]).outcome(), port);
     assert.equal(await storeSnapshot(dataDir), index, 'rejected boot must not recover runs');
     assert.deepEqual(await readdir(join(dataDir, 'runs')), [], 'no recovery event or agent resources');
     assert.equal(await readFile(join(orphan, 'sentinel'), 'utf8'), 'preserve', 'no startup pruning');
-    assert.equal(await readFile(join(f.root, 'home', 'config.json'), 'utf8'), homeConfig, 'no registry mutation');
+    assert.equal(await readFile(Home.sandbox(join(f.root, 'home')).workspaceConfig, 'utf8'), homeConfig, 'no registry mutation');
     assert.equal(existsSync(join(dataDir, 'cockpit.lock')), false, 'rejection must release ownership');
     assert.equal((await localGet(`${first.url}/api/v1/health`)).status, 200, 'existing cockpit remains healthy');
 
@@ -157,7 +162,7 @@ for (const host of ['127.0.0.1', '127.0.0.2']) for (const restartExact of [false
     const { port } = await f.occupy(0, host);
     refused(await f.start(repo, ['--bind-host', host, '--port', String(port), ...(restartExact ? ['--restart-exact'] : [])]).outcome(), port);
     assert.equal(existsSync(join(repo, '.ai/cezar/runs')), false, 'no store initialized');
-    assert.equal(existsSync(join(f.root, 'home', 'config.json')), false, 'no workspace initialized');
+    assert.equal(existsSync(Home.sandbox(join(f.root, 'home')).workspaceConfig), false, 'no workspace initialized');
     assert.equal(existsSync(join(repo, '.ai/cezar/cockpit.lock')), false);
     assert.equal((await localGet(`http://${host}:${port}`)).text, 'ordinary server');
   } finally { await f.close(); }

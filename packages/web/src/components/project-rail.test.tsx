@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -77,7 +78,7 @@ describe('ProjectRail layout', () => {
     // Desktop only: the rail is `hidden` below md.
     expect(nav.className).toContain('hidden')
     expect(nav.className).toContain('md:flex')
-    expect(within(nav).getByAltText('Cezarion v0.15.0').getAttribute('src')).toBe('/cezarion-mark-dark.svg')
+    expect(within(nav).getByAltText(`${productName("Cezarion")} v0.15.0`).getAttribute('src')).toBe('/cezarion-mark-dark.svg')
     expect([...document.querySelectorAll('[data-slot="rail-project"]')].map((el) => el.getAttribute('data-project-id'))).toEqual([
       'toolkit-dev',
       'open_mercato',
@@ -90,7 +91,7 @@ describe('ProjectRail layout', () => {
 
   it('names the app without a version until health has one', () => {
     renderRail({ version: null })
-    expect(screen.getByAltText('Cezarion')).toBeTruthy()
+    expect(screen.getByAltText(`${productName("Cezarion")}`)).toBeTruthy()
   })
 
   it('shows two lower-case letters per project and links each mark to its project', () => {
@@ -135,7 +136,7 @@ describe('ProjectRail single-project capability', () => {
     renderRail({ projects: [project('toolkit-dev'), project('other')], singleProject: true })
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'All projects' })).toBeNull()
-    expect(screen.getByAltText('Cezarion v0.15.0')).toBeTruthy()
+    expect(screen.getByAltText(`${productName("Cezarion")} v0.15.0`)).toBeTruthy()
     expect(document.querySelectorAll('[data-slot="rail-project"]')).toHaveLength(2)
     expect(screen.getByRole('link', { name: 'Global settings' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Theme:/ })).toBeTruthy()
@@ -379,7 +380,7 @@ describe('ProjectRail expanded rows (#711)', () => {
   it('shows the identity, the Projects label, a labelled Add project and the labelled bottom rows', () => {
     renderExpanded()
     const rail = screen.getByRole('navigation', { name: 'Projects' })
-    expect(within(rail).getByText('Cezarion')).toBeTruthy()
+    expect(within(rail).getByText(`${productName("Cezarion")}`)).toBeTruthy()
     expect(within(rail).getByText('v0.15.0')).toBeTruthy()
     expect(within(rail).getByText('Projects')).toBeTruthy()
     expect(within(rail).getByRole('button', { name: 'Add project' }).textContent).toBe('Add project')

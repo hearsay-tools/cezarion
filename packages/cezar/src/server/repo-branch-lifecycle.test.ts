@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,8 +57,8 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
     return { runs, forge: fakeForge({ prs: [mergedPr(7, 'cez/bbbbbbbb', squashTip, squash)] }).forge };
   }
 
-  describe('the base `origin`', () => {
-    it('resolves to the branch origin/HEAD names, with the same commit and PR base as `main`', async () => {
+  describe('the base 'origin'', () => {
+    it('resolves to the branch origin/HEAD names, with the same commit and PR base as 'main'', async () => {
       const { runs, forge } = await landedOnOrigin();
       const viaOrigin = await classesOf({ configuredBase: 'origin', runs, forge });
       const viaMain = await classesOf({ configuredBase: 'main', runs, forge });
@@ -181,7 +182,7 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
         expect(cls['fix/y'], label).toBe('other');
       }
       const result = await deleteBranches(input({ runs: cases[0]!.runs, forge: fakeForge({ prs: [cases[0]!.pr] }).forge }), ['fix/y']);
-      expect(result.refused).toEqual([{ name: 'fix/y', reason: 'not a cezar task branch' }]);
+      expect(result.refused).toEqual([{ name: 'fix/y', reason: `not a ${productName('cezar')} task branch` }]);
     });
 
     it('matches a recorded PR URL despite whitespace, case and multiple trailing slashes', async () => {

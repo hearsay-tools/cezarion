@@ -121,7 +121,7 @@ it('T1: after a fresh boot, an older binary that writes legacy config.json does 
 
 it('step 1: a .bak-only legacy home recovers through the loader and merge writer before migrating', () => {
   const root = storeRoot();
-  const legacy = Home.sandbox(join(root, 'legacy'));
+  const legacy = Home.sandbox(join(root, 'legacy'), { layout: 'legacy' });
   const target = Home.sandbox(join(root, 'new'), { layout: 'split' });
   Home.seed(legacy, `${legacy.workspaceConfig}.bak`, { projects: [{ id: 'kept', root: '/kept' }], unknown: 'preserved' });
   expect(migrateLegacyHome(legacy, target).status).toBe('migrated');

@@ -1,6 +1,6 @@
+import { homeFileLocation } from './file-location.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { HomeOutsideWriteError, HomeStore } from './store.ts';
@@ -19,15 +19,15 @@ afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 
 it('shows no recovery banner during an ordinary session', () => {
   const home = Home.sandbox(storeRoot());
-  for (const file of files) Home.seed(home, join(home.root, file), { saved: true });
-  for (const { file, key, entry } of registries) Home.seed(home, join(home.root, file), { [key]: [entry] });
+  for (const file of files) Home.seed(home, homeFileLocation(home, file).path, { saved: true });
+  for (const { file, key, entry } of registries) Home.seed(home, homeFileLocation(home, file).path, { [key]: [entry] });
   expect(getHomeRecovery(home)).toEqual({ files: [] });
   expect(getHomeRecovery(home)).toEqual({ files: [] });
 });
 
 it.each(registries)('pins the previous $key when a write empties $file, and restores it', async ({ file, key, entry }) => {
   const home = Home.sandbox(storeRoot());
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const store = new HomeStore(home);
   Home.seed(home, path, { [key]: [entry], preserved: 'previous' });
   const previous = readFileSync(path);
@@ -45,7 +45,7 @@ it.each(registries)('pins the previous $key when a write empties $file, and rest
 
 it.each(files)('blocks every write method for outside changes to %s until restore or accept', async file => {
   const home = Home.sandbox(storeRoot());
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const store = new HomeStore(home);
   Home.seed(home, path, { original: true });
   const original = readFileSync(path);

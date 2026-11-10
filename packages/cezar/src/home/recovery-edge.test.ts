@@ -1,3 +1,4 @@
+import { homeFileLocation } from './file-location.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,7 +18,7 @@ it('leaves absent optional files untracked during repeated recovery snapshots', 
   expect(getHomeRecovery(home)).toEqual({ files: [] });
   expect(getHomeRecovery(home)).toEqual({ files: [] });
   for (const file of ['agent-accounts.json', 'ui-state.json', 'server.json', 'server.install.lock']) {
-    expect(existsSync(join(home.root, '.versions', file))).toBe(false);
+    expect(existsSync(join(homeFileLocation(home, file).root, '.versions', file))).toBe(false);
   }
 });
 
@@ -98,7 +99,7 @@ it.each(['missing', 'corrupt'] as const)('invalidates cached restore availabilit
   writeFileSync(home.workspaceUiState, '{"outside":true}'); // Deliberate outside writer creates the recovery incident.
   expect(getHomeRecovery(home).files).toContainEqual(expect.objectContaining({ file: 'ui-state.json', canRestore: true }));
   getHomeRecovery(home); // Cache the available pinned target before changing its bytes.
-  const directory = join(home.root, '.versions', 'ui-state.json');
+  const directory = join(home.state, '.versions', 'ui-state.json');
   const flag = JSON.parse(readFileSync(join(directory, 'OUTSIDE'), 'utf8')) as { restoreHash: string };
   const pinned = join(directory, flag.restoreHash);
   if (fault === 'missing') rmSync(pinned);
@@ -153,8 +154,8 @@ it('publishes acceptance from another process when only its journal changes', as
     await ready;
     const before = statSync(home.workspaceUiState).mtimeMs;
     execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e',
-      'const { HomeStore } = await import(process.argv[1]); new HomeStore(process.argv[2]).acceptOutsideWrite(process.argv[3]);',
-      new URL('./store.ts', import.meta.url).href, home.root, home.workspaceUiState]);
+      'const { HomeStore } = await import(process.argv[1]); const { Home } = await import(process.argv[4]); new HomeStore(Home.sandbox(process.argv[2])).acceptOutsideWrite(process.argv[3]);',
+      new URL('./store.ts', import.meta.url).href, home.rootOverride ?? home.root, home.workspaceUiState, new URL('./home.ts', import.meta.url).href]);
     await Promise.race([resolved, new Promise<never>((_, reject) => {
       // bound: fs.watch must publish the other process's completed journal-only acceptance; the timeout guards a missing signal.
       timeout = setTimeout(() => reject(new Error('No journal-only acceptance signal')), 5000);

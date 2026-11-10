@@ -19,7 +19,7 @@ afterEach(async () => {
 
 describe('remote settings grants', () => {
   it('grant nothing when the host file does not exist', () => {
-    expect(readRemoteSettings(env, testHome(env))).toEqual({ grants: [], path: join(home, 'remote-settings') });
+    expect(readRemoteSettings(env, testHome(env))).toEqual({ grants: [], path: Home.sandbox(home).remoteSettings });
     expect(isPortGranted(env, 4321, testHome(env))).toBe(false);
   });
 

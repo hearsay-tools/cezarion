@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { HomeStore } from './store.ts';
+import { homePathLocation } from './file-location.ts';
 import * as files from './private-files.ts';
 import * as boundary from './boundary.ts';
 import { cleanStoreRoots, storeChild, storeRoot } from './store.testkit.ts';
@@ -15,8 +16,9 @@ it.each(['remote-settings', 'server-instances', '.versions', '.locks'])('refuses
   const victim = storeRoot();
   storeChild(victim, 'prepare', 'run');
   storeChild(victim, 'write', '{"keep":"live"}');
-  const path = join(home.root, name);
+  const path = join(name === 'server-instances' ? home.state : home.config, name);
   rmSync(path, { force: true, recursive: true });
+  mkdirSync(dirname(path), { recursive: true });
   symlinkSync(victim, path, 'dir');
   const directory = vi.spyOn(files, 'privateDirectory');
   const target = name === 'remote-settings' || name === 'server-instances' ? join(path, 'config.json') : home.workspaceConfig;
@@ -51,7 +53,7 @@ it.each(['backups', 'backups/config.json', 'backups/agent-accounts.json', 'backu
   const victimDirectory = join(victim, 'backups', name === 'backups' ? '' : target.endsWith('agent-accounts.json') ? 'agent-accounts.json' : 'config.json');
   mkdirSync(victimDirectory, { recursive: true });
   const before = readdirSync(victim, { recursive: true }).sort();
-  const path = join(home.root, name);
+  const path = join(home.backups, name === 'backups' ? '' : name.slice('backups/'.length));
   mkdirSync(dirname(path), { recursive: true });
   rmSync(path, { recursive: true, force: true });
   symlinkSync(victimDirectory, path, 'dir');
@@ -61,7 +63,7 @@ it.each(['backups', 'backups/config.json', 'backups/agent-accounts.json', 'backu
   const store = new HomeStore(home);
   store.writeJson(target, { changed: 1 });
   store.writeJson(target, { changed: 2 });
-  const backupPath = join(home.backups, relative(home.root, target));
+  const backupPath = join(home.backups, homePathLocation(home, target).file);
   const check = preflight.mock.calls.findIndex(([, paths]) => paths.includes(backupPath));
   expect(check).toBeGreaterThanOrEqual(0);
   expect(preflight.mock.invocationCallOrder[check]).toBeLessThan(directory.mock.invocationCallOrder[0]!);
@@ -74,6 +76,7 @@ it.each(['backups', 'backups/config.json', 'backups/agent-accounts.json', 'backu
 it('skips a dangling backup directory and warns once while saving the primary', () => {
   const home = Home.sandbox(storeRoot());
   Home.seed(home, home.workspaceConfig, { saved: true });
+  mkdirSync(dirname(home.backups), { recursive: true });
   symlinkSync(join(storeRoot(), 'missing'), home.backups, 'dir');
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const store = new HomeStore(home);
