@@ -178,11 +178,7 @@ export class SubagentWaits {
   private refreshWait(runId: string, state: ActiveRun, wait: SubagentWaitEntry): boolean {
     const children = this.children(state);
     const next: SubagentWaitEntry = { ...wait, deadline: this.deadline(), children: children.length ? children : wait.children };
-    try { this.context.store.commitWait(runId, next); }
-    catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
-    this.host.waitEngine.disarmWait(wait.id);
-    this.host.waitEngine.armWait(runId, next);
-    return true;
+    return this.host.waitEngine.refresh(runId, wait, next, { log: '[cez] subagent wait checkpoint failed' });
   }
 
   /** Every child ended: unless the runner starts a parent turn first, the wait resolves `settled`. */

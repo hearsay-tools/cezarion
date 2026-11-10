@@ -12,7 +12,7 @@ one function, withdraws Cezar's human waits, commits, arms and parks. Each regis
 the steps it runs today, their order and its failure policy: the open operation reads the arm,
 the park guard and the returned entry from the row, and the path chooses the rest.
 The engine resolves a wait (budget check, commit with its input, queue the wake),
-re-arms it after a restart, cancels it (commit, then disarm every watch kind) and forgets a
+re-arms it after a restart, refreshes a changed open wait (commit, then re-arm), cancels it (commit, then disarm every watch kind) and forgets a
 deleted run's watches. In `packages/cezar`, only the engine, the table, the watch adapters, the
 read-time upgrade of old rows and the boundary views branch on a wait's kind; other code asks the
 engine.

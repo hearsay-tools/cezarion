@@ -62,7 +62,7 @@ function fixture() {
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
     withdrawCezarHumanWaits: id => host.humanWaits.withdrawCezarHumanWaits(id),
   }), 10);
-  const engine = { armWait: vi.spyOn(waitEngine, 'armWait').mockImplementation((_id: string, _wait: Wait) => { log.push('armWait'); }) };
+  const engine = { armWait: vi.spyOn(waitEngine as unknown as { armWait(id: string, wait: Wait): void }, 'armWait').mockImplementation((_id: string, _wait: Wait) => { log.push('armWait'); }) };
   vi.spyOn(waitEngine, 'cancelAll').mockImplementation(() => { log.push('cancelWaits'); });
   const settler = new TurnSettler(context, { ...host, waitEngine } as unknown as Host, 60_000, 10, 'wait for workers', 3600);
   log.length = 0;

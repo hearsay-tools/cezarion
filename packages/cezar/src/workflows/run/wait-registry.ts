@@ -1,6 +1,5 @@
 import { warnRegistrationRefused, type WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS, routeRegistration } from './wait-kinds.ts';
-import { WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { registrationIdentity, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
@@ -97,11 +96,7 @@ export class WaitRegistry {
     const now = Date.now();
     const target = workerWaitTarget(request, getRun);
     const entry = WAIT_KINDS.worker.entry(request, via, now, state.waitIdentity.ensureCiTurn(), target);
-    try { return this.host.waitEngine.open(runId, state, entry, { withdraw: true, receipt: registration, park: true }).wait!; }
-    catch (error) {
-      if (error instanceof WaitCapacityError) throw waitCapacityPolicyError();
-      throw error;
-    }
+    return this.host.waitEngine.open(runId, state, entry, { withdraw: true, receipt: registration, onCommitFailure: { capacity: waitCapacityPolicyError }, park: true }).wait!;
   }
 
   /** Cezar waits on live workers or open requests without adding a deadline of its own. */
@@ -329,12 +324,9 @@ export class WaitRegistry {
     if (!this.host.waitEngine.hasRoom(run)) refuse('capacity');
     const now = Date.now();
     const wait = processWaitEntry(request, via, turnId, now, startToken, exitFile);
-    const opened = this.host.waitEngine.open(runId, active, wait, OPEN_REGISTERED(registration)).wait!;
-    if (!live) {
-      this.host.waitEngine.disarmWait(wait.id);
-      this.host.waitEngine.settleWait(runId, wait.id, probeProcessWait({ pid: wait.pid, deadline: wait.deadline, roots, ...(exitFile === undefined ? {} : { exitFile }) }, now));
-    }
-    return opened;
+    // A PID already gone resolves at once from its exit file, or as exited: no watch arms.
+    const settled = live ? {} : { result: probeProcessWait({ pid: wait.pid, deadline: wait.deadline, roots, ...(exitFile === undefined ? {} : { exitFile }) }, now) };
+    return this.host.waitEngine.open(runId, active, wait, { ...OPEN_REGISTERED(registration), ...settled }).wait!;
   }
 
   /**

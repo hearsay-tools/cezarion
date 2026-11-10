@@ -54,11 +54,16 @@ interface OpenOptions {
   /** Withdraw Cezar's human waits after the compare, before the commit. */
   withdraw: boolean;
   receipt?: RegistrationIdentity | undefined;
-  /** Absent: the commit error escapes as it is. */
-  onCommitFailure?: 'persistence' | { log: string };
+  onCommitFailure?: CommitFailure;
   /** Park when the run is at its turn boundary or parked. */
   park: boolean;
+  /** Present: the caller already holds the result (undefined takes the row's default), so the
+   *  wait arms nothing and resolves with it at once. */
+  result?: WaitResult | undefined;
 }
+/** Absent: the commit error escapes as it is. `persistence`: the tool's coded `capacity` or
+ *  `persistence` error. `log`: warn and refuse. `capacity`: a full list throws the path's own error. */
+type CommitFailure = 'persistence' | { log: string } | { capacity: () => Error };
 export type OpenResult<W extends Wait> = { status: 'opened'; wait: W } | { status: 'refused'; wait?: undefined };
 
 type Watch = WaitKindRow<Wait['kind']>['watch'];
@@ -67,14 +72,14 @@ interface CancelWaitsOptions { onCommitFailure?: 'throw' | 'skip'; superseded?: 
 /** Executes the wait-kind rows behind the run facade: open, arm, resolve, re-arm, cancel and forget. */
 export class WaitEngine {
   /** One CI watch per open CI wait, keyed by wait id. */
-  readonly ciWatches = new Map<string, { runId: string; abort: AbortController }>();
+  private readonly ciWatches = new Map<string, { runId: string; abort: AbortController }>();
   /** A resolution whose checkpoint failed, retried by wait id. */
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** Process waits' watches (hearsay-tools/cezarion#1446), by wait id. */
   private readonly processWatches = new Map<string, { runId: string; abort: AbortController }>();
   private readonly workerResolveRetries = new Set<string>();
   /** One timer per open timer wait, keyed by wait id. */
-  readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
+  private readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
 
   /** The watch adapter each row names. */
   private readonly watches: { readonly [W in Watch]: (runId: string, wait: Wait) => void } = {
@@ -101,29 +106,50 @@ export class WaitEngine {
     }
   }
 
-  /** Commit, arm and (at a boundary) park on a newly registered wait. */
+  /** Commit, arm and (at a boundary) park on a newly registered wait. A wait opened with the
+   *  result its caller already holds arms nothing and resolves with it after the park. */
   open<W extends Wait>(runId: string, state: ActiveRun | undefined, wait: W, options: OpenOptions): OpenResult<W> {
     if (options.withdraw) this.host.withdrawCezarHumanWaits(runId);
-    if (!this.commitOpened(runId, wait, options)) return { status: 'refused' };
-    const run = this.context.store.getRun(runId);
-    if (WAIT_KINDS[wait.kind].watch === 'worker') {
-      // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
-      this.host.reconcileWorkerWaits(familyOf(run!));
-      // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
-      // Cezar's completion wait tells its own workers; an agent's wait tells its family.
-      this.host.noticeParkedWorkers(wait.source === 'cezar' ? runId : familyOf(run!));
-    } else this.armWait(runId, wait);
+    if (!this.commitOpened(runId, wait, options.onCommitFailure, options.receipt)) return { status: 'refused' };
+    const settled = 'result' in options;
+    if (!settled) this.armOpened(runId, wait);
     if (options.park) this.park(runId, state, wait);
-    return { status: 'opened', wait: this.openedEntry(runId, wait) };
+    // The answer is the wait as opened, even when the result resolves it at once.
+    const opened = this.openedEntry(runId, wait);
+    if (settled) this.settleWait(runId, wait.id, options.result);
+    return { status: 'opened', wait: opened };
   }
 
-  private commitOpened(runId: string, wait: Wait, options: OpenOptions): boolean {
+  private armOpened(runId: string, wait: Wait): void {
+    if (WAIT_KINDS[wait.kind].watch !== 'worker') { this.armWait(runId, wait); return; }
+    const run = this.context.store.getRun(runId)!;
+    // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
+    this.host.reconcileWorkerWaits(familyOf(run));
+    // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
+    // Cezar's completion wait tells its own workers; an agent's wait tells its family.
+    this.host.noticeParkedWorkers(wait.source === 'cezar' ? runId : familyOf(run));
+  }
+
+  /**
+   * Commit a changed open wait, then arm it. A moved deadline disarms the old one first; an
+   * unchanged one keeps what is armed, including a checkpoint retry. False when the commit failed
+   * under a `log` policy: the saved wait and what is armed stay as they were.
+   */
+  refresh(runId: string, previous: Wait, next: Wait, onCommitFailure?: { log: string }): boolean {
+    if (next !== previous && !this.commitOpened(runId, next, onCommitFailure)) return false;
+    const deadline = (wait: Wait) => 'deadline' in wait ? wait.deadline : undefined;
+    if (deadline(next) !== deadline(previous)) this.disarmWait(previous.id);
+    this.armWait(runId, next);
+    return true;
+  }
+
+  private commitOpened(runId: string, wait: Wait, policy: CommitFailure | undefined, receipt?: RegistrationIdentity): boolean {
     try {
-      if (options.receipt) this.context.store.commitWait(runId, wait, undefined, registrationReceipt(options.receipt, wait));
+      if (receipt) this.context.store.commitWait(runId, wait, undefined, registrationReceipt(receipt, wait));
       else this.context.store.commitWait(runId, wait);
       return true;
     } catch (error) {
-      const policy = options.onCommitFailure;
+      if (typeof policy === 'object' && 'capacity' in policy) throw error instanceof WaitCapacityError ? policy.capacity() : error;
       if (typeof policy === 'object') {
         console.warn(`${policy.log}: ${error instanceof Error ? error.message : String(error)}`);
         return false;
@@ -163,7 +189,7 @@ export class WaitEngine {
 
   /** Start what resolves an open wait: the watch adapter its row names. An overdue deadline
    *  (restart) resolves at once. */
-  armWait(runId: string, wait: Wait): void {
+  private armWait(runId: string, wait: Wait): void {
     if (this.context.disposed() || wait.phase !== 'open') return;
     this.watches[WAIT_KINDS[wait.kind].watch](runId, wait);
   }
@@ -224,7 +250,7 @@ export class WaitEngine {
   }
 
   /** Stop everything that could still resolve this wait. */
-  disarmWait(waitId: string): void {
+  private disarmWait(waitId: string): void {
     this.ciWatches.get(waitId)?.abort.abort(); this.ciWatches.delete(waitId);
     const timer = this.waitTimers.get(waitId); if (timer) clearTimeout(timer.timer); this.waitTimers.delete(waitId);
     const retry = this.ciRetries.get(waitId); if (retry) clearTimeout(retry.timer); this.ciRetries.delete(waitId);

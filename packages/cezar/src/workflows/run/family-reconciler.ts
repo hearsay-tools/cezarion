@@ -279,8 +279,7 @@ export class FamilyReconciler {
       } else if (reason) {
         if (!this.host.waitEngine.resolveWorkerWait(parent.id, entry, { ...next, result: { reason } })) continue;
       } else {
-        if (next !== entry) this.context.store.commitWait(parent.id, next);
-        this.host.waitEngine.armWait(parent.id, next);
+        this.host.waitEngine.refresh(parent.id, entry, next);
       }
       const recorded = this.context.store.transcriptFacts(parent.id).workerOutcomeKeys;
       for (const outcome of next.outcomes ?? []) {

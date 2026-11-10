@@ -67,12 +67,16 @@ At the baseline:
      commit, arm the watch, park. The paths differ today in which of these steps they run, in
      what order, and how they fail (Table E). `open` reads the arm, the park guard and the
      returned entry from the row (the `worker` row reconciles its family; every other row arms its
-     watch). A path chooses only the withdraw, the receipt, the commit-failure policy and the park;
+     watch). A path chooses only the withdraw, the receipt, the commit-failure policy, the park,
+     and a result it already holds (a process wait on a PID already gone opens resolved and arms
+     no watch);
      a step only one path runs (the compare, a check for an open human wait) stays at that call
      site, in the same order (hearsay-tools/cezarion#3153). 3.1 changes no path. A path that compares the limit twice today (the PR wait, before and after
      its lookup) still compares it twice;
    - `resolve`: budget check, commit the result with its input, queue the wake;
    - `rearm`: arm every open wait of a recovered run;
+   - `refresh`: commit a changed open wait, then arm it; a moved deadline disarms the old one
+     first (a subagent wait's new children, a worker wait's observations);
    - `cancel` and `cancelAll`: commit, then disarm every watch kind;
    - `forgetRun`: disarm what a deleted run left in memory;
    - `dispose`: clear memory, keep the records.
