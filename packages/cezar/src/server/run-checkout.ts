@@ -8,7 +8,7 @@ import type { RunRecord, RunStore } from '../runs/store.ts';
 // protected surface). Isolated runs read their worktree; worktree-off runs
 // read the repo checkout they executed in. Every predictable git failure
 // degrades to 409 + human-readable reason, 404 only for unknown ids.
-export const worktreeOf = (run: RunRecord): string | null =>
+const worktreeOf = (run: RunRecord): string | null =>
   run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : null;
 export const workingDirectoryOf = (run: RunRecord, repoRoot: string): string | null =>
   run.worktree === false
@@ -34,7 +34,7 @@ type ReadHandle<Rule extends ReadDirectoryRule> = {
   directory: Rule extends 'existing-worktree' ? string | null : string;
 };
 
-/** Read admission is synchronous and never claims, adopts or rebuilds a checkout. */
+/** Read and mutate admission is synchronous and never claims, adopts or rebuilds a checkout. */
 export function runCheckout<Rule extends ReadDirectoryRule>(
   host: RunCheckoutHost,
   id: string,
@@ -42,10 +42,15 @@ export function runCheckout<Rule extends ReadDirectoryRule>(
   options: ReadOptions<Rule>,
 ): CheckoutRefusal | ReadHandle<Rule>;
 export function runCheckout(
+  host: RunCheckoutHost,
+  id: string,
+  intent: Extract<CheckoutIntent, 'mutate'>,
+): CheckoutRefusal | ReadHandle<'working-directory'>;
+export function runCheckout(
   { root, store }: RunCheckoutHost,
   id: string,
-  _intent: Extract<CheckoutIntent, 'read'>,
-  options: ReadOptions<ReadDirectoryRule>,
+  intent: Extract<CheckoutIntent, 'read' | 'mutate'>,
+  options: ReadOptions<ReadDirectoryRule> = { checksAutosave: true, directory: 'existing-worktree' },
 ): CheckoutRefusal | ReadHandle<ReadDirectoryRule> {
   const run = store.getRun(id);
   if (!run) return { status: 404, body: { error: 'not found' } };
@@ -57,7 +62,7 @@ export function runCheckout(
     return { run, directory: run.worktreePath ?? root };
   }
   const directory = options.directory === 'existing-worktree' ? worktreeOf(run) : workingDirectoryOf(run, root);
-  if (!directory && options.directory === 'working-directory') {
+  if (!directory && (intent === 'mutate' || options.directory === 'working-directory')) {
     return { status: 409, body: { error: NO_WORKTREE } };
   }
   return { run, directory };
