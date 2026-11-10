@@ -1,375 +1,116 @@
 # Before a PR
 
-Run after implementation and repeat after a source or test change that can affect
-the result. Resolve `<skill>` to the skill directory, then follow all steps below.
+Use Squeal's one-shot changed-function gate. This local-first rollout replaces
+both daemon snapshot inspection and the bundled pre-PR fallback. CI and requested
+code statistics still use their existing paths until the remaining work in
+[hearsay-tools/squeal#167](https://github.com/hearsay-tools/squeal/issues/167) ships.
+CI passing does not replace this local check.
 
-Before planning a split of a file with cross-file clones, check its committed
-baseline with `node .github/scripts/check-clones.cjs --base origin/main --head HEAD`
-after a local commit. The checker scans committed HEAD only; working-tree edits
-are not measured. Repeat it after committing the split. The per-pair token rule
-and unchanged cross-package/same-file guards are defined in
-[`docs/sdlc/ci.md`](../../../../docs/sdlc/ci.md#clone-comparison).
+## 1. Collect the gate report
 
-## 1. Select the local evidence
-
-Use current Squeal measurements first when Squeal is validating this worktree.
-Keep the bundled check below as the complete fallback. CI's gates do not change.
-
-Resolve and fetch the PR target branch, then inventory changed functions:
+Resolve and fetch the PR target branch from the repository bindings. Run from
+the repository root, without path filters, so the report covers the whole change:
 
 ```sh
-node <skill>/scripts/changed-functions.mjs --base <target-ref> > <inventory.json>
+squeal --version
+squeal code --base origin/main --json > /tmp/code-quality.json
 ```
 
-The inventory includes committed, staged, unstaged and untracked changes against
-its pinned merge-base. Use that base for comparisons. An empty function inventory
-needs no coverage run; use the bundled check's 0/0 path below to record it.
+Replace `origin/main` when the PR targets another branch. Use a report path outside
+tracked source inputs. Keep the command's exit status and stderr as evidence;
+saving stdout does not turn a failed command into a pass. Under Codex, replace
+`squeal` with the absolute launcher named in the session's SQUEAL message.
 
-For a nonempty inventory, wait for the affected tests through Squeal's installed
-instructions, then inspect every changed file with:
+Squeal 0.1.423 supplies this interface. Record the actual runtime version and
+require the supported `squeal-code-gate/1` report. A missing command, unavailable
+capability or unknown report format blocks the check. Do not silently install or
+upgrade Squeal, or use another calculator as a fallback. A pinned runtime for CI
+remains a later Squeal slice; this procedure does not provide one.
 
-```sh
-squeal code <changed-file> --json
-```
+The command runs once without an agent session or daemon. It inventories changed
+JS/TS functions against the merge base, including test callbacks and nested
+functions, and selects tests through Vitest and node:test. Repeatable `--test`
+can add relevant test files; it does not excuse missing evidence elsewhere.
+Do not substitute per-path daemon reports or a filtered function selection.
 
-Under Codex, use the absolute Squeal launcher from its session message when it is
-not on PATH. Accept Squeal evidence only when all of these hold:
+The command reads limits and exclusions from the base commit's configuration.
+The policy limits are complexity 20 and CRAP 30; equality passes. Do not loosen
+limits or add exclusions to get a pass. If the base policy differs, report the
+mismatch before claiming this repository's check passed.
 
-- Every inventoried function matches one measured function by file, location and
-  identity, including nested callbacks and functions already over a limit before
-  this session. If names or locations cannot be matched reliably, use the fallback.
-- The measurements describe the current files and affected tests have current,
-  passing results. Record the Squeal revision and head or uncommitted diff. An edit
-  after inspection invalidates the evidence for affected functions.
-- Every changed function has numeric complexity and CRAP measurements with known
-  outcomes. The limits remain complexity > 20 and CRAP > 30; equality passes.
-  Missing, disabled, unknown, stale or excluded measurements cannot pass.
-- Every finding is resolved under step 2 below, including inherited findings.
+Collection has one 600-second default budget across the selected runners. The
+one-shot option `--timeout 900` sets a fifteen-minute budget, in **seconds**.
+It differs from the legacy collector's millisecond timeout flags. Use a larger
+budget only when needed to complete the selected evidence. Preserve configured
+project timeouts; test failures remain blockers.
 
-Inspect per-path output, not only `--changed`, `--told`, an empty failure list or
-`Known failures: 0`: those do not inventory all changed functions or prove their
-quality. Squeal excludes test functions and can omit large or ignored files. Code
-run only in child processes can lack coverage. Any gap, unavailable Squeal, or
-uncertain freshness requires the complete bundled check for the whole PR; do not
-claim completeness by combining partial Squeal and bundled results.
+This release performs a distinct coverage run; background passing tests do not
+replace it. Follow Squeal's installed guidance for resource conflicts. Do not
+remove lease locks, create custom collector wrappers or duplicate concurrent
+coverage runs. A runner or environment that cannot supply the evidence is a
+named blocker, not permission to switch calculators.
 
-When Squeal supplies complete evidence, skip local bundled coverage collection
-and go to steps 2 and 3. Otherwise follow the fallback below, including the CI
-coverage option when applicable.
+## 2. Require complete evidence
 
-### Bundled fallback
+Inspect the full report, not only the exit code or a count of known failures:
 
-Resolve the PR's target branch from the task or repository bindings. Fetch its
-remote ref. Select the relevant tests and their runner from the repository's
-test instructions. Run from the target repository root:
-
-```sh
-node <skill>/scripts/check.mjs --base <target-ref> \
-  --runner <vitest|node> --test <test-file> --output <report.md>
-```
-
-Select relevant import-graph tests and pass every changed test file with runtime
-functions, including type-focused tests and browser specs. Type-only imports do
-not exempt runtime `describe` or `it` callbacks from measurement; compile-time
-assertions still require the repository's typecheck. To find tests importing a
-changed testkit, replace the placeholder with its basename and inspect matches:
-
-```sh
-rg -l -F '<testkit basename>' packages --glob '*.test.ts'
-```
-
-Repeat `--test` for multiple files. With Vitest, select every project that runs
-a selected test using repeatable `--project`: a unit test file needs its unit
-project, a `*.e2e.ts` browser spec needs its browser project. Browser specs run and are
-measured through that project; passing them does not ask the check to skip them. Vitest uses the
-repository's own configuration, setup files, aliases and environment. With Node,
-pass repository setup modules through repeatable `--node-import`. For an existing
-current Istanbul report, replace runner and test options with
-`--coverage <coverage-final.json>`.
-
-In this repository, CI already collects Vitest coverage for the head you push. For a
-change whose functions and tests run under `npm test`, download it instead of running
-the tests again: see [Coverage from CI](#coverage-from-ci) below.
-
-A change with no changed JS or TS file (`.js`, `.jsx`, `.ts`, `.tsx`, or their
-`.cjs`, `.mjs`, `.cts` and `.mts` forms) measures nothing, so it needs no
-`--runner` or `--test`:
-
-```sh
-node <skill>/scripts/check.mjs --base <target-ref> --output <report.md>
-```
-
-It reports `Checked 0/0 changed functions` and exits 0.
-
-In this repository, a change with cockpit source, unit tests and browser specs
-takes one command. The `e2e` project's own global setup boots the test
-environment:
-
-```sh
-node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
-  --project web --project e2e \
-  --test packages/web/src/routes/new-task-composer.test.tsx \
-  --test packages/web/e2e/completion-controls.e2e.ts \
-  --output .ai/qa/<issue>/code-quality.md
-```
-
-When Squeal is validating this worktree, it can hold the test-environment lease
-needed by the `e2e` coverage measurement. The check then exits 2 with
-`timed out waiting for test environment held by pid N (node squeal.mjs daemon …)`.
-This coverage measurement is separate from Squeal's ordinary test results.
-For this measurement only, stop this worktree's daemon and start it again even
-when the check fails. From the repository root, wrap the command above as follows
-(replace `<issue>` before running):
-
-```sh
-(
-  set -e
-  test -d "$PWD"
-  squeal stop "$PWD"
-  restore_validation() {
-    measurement_status=$?
-    trap - EXIT
-    if ! squeal start "$PWD"; then
-      if ! node --input-type=module - "$PWD" "$(command -v squeal)" <<'NODE'
-import { spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { setTimeout } from 'node:timers/promises';
-
-const root = realpathSync(process.argv[2]);
-const launcher = process.argv[3];
-// bound: allow 30 extra seconds for the seconds-late startup observed under
-// host load in hearsay-tools/squeal#94; this is not a startup-time guarantee.
-const deadline = performance.now() + 30000;
-process.exitCode = 1;
-while (performance.now() < deadline) {
-  const probe = spawnSync(launcher, ['status', '--json'], {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: Math.max(1, Math.min(5000, Math.ceil(deadline - performance.now()))),
-    killSignal: 'SIGKILL',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  try {
-    // Test failures can make status nonzero; only daemon liveness matters here.
-    const status = JSON.parse(probe.stdout);
-    if (!probe.error && performance.now() < deadline && status.available === true &&
-        status.worktreeRoot === root && status.daemon?.state === 'alive') {
-      process.exitCode = 0;
-      break;
-    }
-  } catch {
-    // Missing or malformed status does not confirm that validation is restored.
-  }
-  await setTimeout(Math.max(0, Math.min(1000, deadline - performance.now())));
-}
-NODE
-      then
-        echo "Squeal restart failed after the status wait; restore validation with squeal start in this worktree" >&2
-        if [ "$measurement_status" -eq 0 ]; then measurement_status=1; fi
-      fi
-    fi
-    exit "$measurement_status"
-  }
-  trap restore_validation EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
-    --project web --project e2e \
-    --test packages/web/src/routes/new-task-composer.test.tsx \
-    --test packages/web/e2e/completion-controls.e2e.ts \
-    --output .ai/qa/<issue>/code-quality.md
-)
-```
-
-Under Codex, replace each `squeal` command with the absolute launcher from its
-SQUEAL message when it is not on PATH, including the argument to `command -v`.
-After a failed start, the wrapper checks status about once per second for at most
-30 additional seconds; each probe gets at most five seconds or the remaining
-time. It accepts only an available status for this worktree with a live daemon,
-independently of test verdicts. A successful start adds no wait. A failed
-measurement keeps its exit code, including 130 for INT and 143 for TERM, even
-when restoration also fails. The wait observes the daemon already started;
-it does not start another daemon or run tests. Remove the extra status wait when
-[hearsay-tools/squeal#94](https://github.com/hearsay-tools/squeal/issues/94)
-lands and the installed Squeal version includes the startup fix.
-
-If no daemon is validating this worktree,
-use the original command without the wrapper. Do not remove the lease lock or
-start a duplicate ordinary test run. Remove this workaround when
-[hearsay-tools/squeal#78](https://github.com/hearsay-tools/squeal/issues/78)
-lands and the installed Squeal version releases the idle browser lease.
-
-Server changes use `--project server`. Root `scripts/*.test.mjs` and
-`.github/scripts/*.test.cjs` files use `--runner node` with
-`--node-import scripts/test-git-env.mjs`. Do not write a wrapper Vitest
-configuration or test entry files: the collector measures changed test
-functions itself.
-
-The command pins a merge-base, scans committed, staged, unstaged and untracked
-JS/TS changes, collects coverage once, matches changed functions and checks source
-hashes. It writes Markdown and JSON reports with scores, baseline complexity,
-source hashes and the reproduction command. Tests and bundled scripts stay in
-scope. Use its `base` SHA for every baseline comparison. Record unsupported
-changed languages as outside this tool's scope.
-
-| Exit | Meaning | Next action |
+| Exit | Meaning | Action |
 | --- | --- | --- |
-| 0 | Every changed function passes, or there are no supported changed functions | Report the result |
-| 1 | At least one function exceeds a limit | Resolve every finding below |
-| 2 | Measurement is incomplete, including failed tests or missing coverage | Fix setup or coverage; rerun |
+| 0 | Squeal's verdict is pass; skipped functions can still be present | Check completeness below |
+| 1 | At least one violation; incomplete evidence can coexist | Resolve violations and every evidence gap |
+| 3 | Incomplete measurement | Repair the named gap and rerun |
+| 2 | Usage or setup error | Fix the command or setup and rerun |
+| Other | Interrupted or unexpected failure | Report the failure; no pass |
 
-A loaded host can make tests time out in the coverage run although each file
-passes alone. Add `--test-timeout 30000` to the same command and rerun it. Do
-not build a coverage command by hand. The flag sets the per-test timeout for
-the coverage run only; a test that fails for another reason still fails.
+A local quality pass requires all of the following:
 
-The whole coverage collection defaults to 600000 ms, independently of
-`--test-timeout`. If collection exceeds that limit, rerun the same command with
-`--coverage-timeout 900000` (fifteen minutes), or a larger positive safe whole
-number of milliseconds. The timeout remains an incomplete check (exit 2).
-Alternatively, supply a separately collected current Istanbul report through
-`--coverage <coverage-final.json>` instead of `--test`; temporary reports from
-the stopped collection are removed.
+- The report format, runtime and measurement versions are known. Record
+  `versions`, `base`, `head` and `budget`, including dirty state and path blob hashes.
+- The report covers the full current change against the fetched target. Its
+  head, source hashes and policy describe the tree being submitted. An affected
+  source, test or policy edit after collection requires fresh evidence.
+- `verdict` is `pass`; every reported function is `pass`, with known complexity
+  and CRAP within the limits. `counts.skipped` and `counts.incomplete` are zero.
+  Skipped functions are not passing functions, even when Squeal exits 0.
+- `uncounted` is empty and `budget.timedOut` is false. Every selected test file completed and no selected test
+  failed: inspect `runs`, including `notFinished` and `failed`. Missing, stale,
+  unknown, partial or unsupported required evidence cannot pass.
 
-### Coverage from CI
+A report with no changed supported functions may pass, for example for a
+Markdown-only change. State the zero count; it is not a test-suite pass.
+Preserve useful measured rows on an incomplete run and state the exact gaps.
+No mapped test means unknown, not a fabricated zero-coverage measurement.
+Compile-only runtime callbacks, browser-only paths and child-process-only code
+can expose unsupported evidence in this release; do not exempt them by hand.
 
-CI's required `Vitest shard N/4` jobs collect V8 coverage during their single test run
-on eligible pull requests and dispatches. The optional `Merge Vitest coverage` job uploads one artifact for the head:
-`vitest-coverage-<head SHA>`, holding `coverage-final.json` (paths relative to the
-repository root, test files included) and `provenance.json`. It runs on every pull request
-and on a dispatch of `ci.yml`, and report publication is not a required check. This saves a local coverage
-run, which took about 10 minutes at high load on hearsay-tools/cezarion#1772.
+## 3. Resolve findings
 
-1. Get the run for the exact head you have checked out, with a clean tree:
+Read each changed function and its tests. Fix violations within the approved
+scope, then collect a fresh report. If the fix needs a larger design, report the
+blocker before opening the PR. Keep decisions visible rather than moving them
+to a helper merely to lower one score.
 
-   ```sh
-   head=$(git rev-parse HEAD)
-   # After the PR exists:
-   gh run list --workflow ci.yml --event pull_request_target --commit "$head" --json databaseId,status,conclusion
-   # Before a PR exists: push the branch and dispatch CI on it, once per head.
-   gh workflow run ci.yml --ref <branch>
-   gh run list --workflow ci.yml --event workflow_dispatch --branch <branch> --commit "$head" --json databaseId,status
-   ```
+Squeal 0.1.423 does not implement inherited-refactor deferrals or owner-approved
+exceptions. A baseline comparison, linked issue, manual bound or CI growth
+approval cannot turn a local violation into a pass. Name the blocker and wait
+for the supported exception path or resolve the finding. Do not fall back to
+the bundled checker or combine partial results from different engines.
 
-   No run for the head means CI has not seen it: push it, or dispatch.
+## 4. Preserve reviewable evidence
 
-2. Wait for the `Merge Vitest coverage` job (about 10 to 15 minutes after the push). The
-   artifact exists as soon as that job ends, before the rest of the run does:
+In the PR's validation section, state the verdict, passing/expected function
+counts, runtime and report versions, pinned base, head or dirty-tree identity,
+limits, test completion and any measurement gaps. Include the reproduction
+command. A complete report with zero functions needs no coverage claim.
 
-   ```sh
-   gh run view <run-id> --json jobs --jq '.jobs[] | select(.name == "Merge Vitest coverage") | .status + " " + (.conclusion // "")'
-   ```
+Publish the JSON report with the task's artifact command when available. An
+ignored local path is not a reviewable report link. In GitHub, use an absolute
+artifact URL only when the cockpit origin is verified and accessible to the
+reviewer; never invent an origin or paste a cockpit-relative path under GitHub.
+When publication or an accessible origin is unavailable, put the verdict, counts,
+versions, base/head identity and each finding with its action in the PR body.
 
-3. Download it and run the check against it. `--coverage` replaces `--runner` and `--test`:
-
-   ```sh
-   gh run download <run-id> -n "vitest-coverage-$head" -D .ai/qa/<issue>/coverage
-   node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
-     --coverage .ai/qa/<issue>/coverage/coverage-final.json --output .ai/qa/<issue>/code-quality.md
-   ```
-
-Limits, each with its fix:
-
-- The report is for the pushed head. A pull request run tests `refs/pull/<N>/merge`, not the
-  head itself, so bring the branch up to date with `origin/main` and push before you rely on
-  it. A local edit after the push needs a new push and a new artifact: the tool matches
-  functions by position, and `provenance.json` names the tested ref and the head SHA.
-- A pull request that only changes docs or infrastructure runs no coverage job. Neither does
-  the merge queue or a push to `main`.
-- Only Vitest's four unit projects are covered. Node `node:test` files and mock child
-  processes are not (hearsay-tools/cezarion#1711, hearsay-tools/cezarion#1696). Exit 2 names a
-  file the report lacks: collect that coverage with `--runner` and `--test` as above.
-- When a shard or the merge failed, no artifact exists. The `Merge Vitest coverage` job stays
-  green and shows a warning annotation and a summary line that name the missing shard or the
-  failed step. Use the local `--test` run then.
-
-A coverage run is a distinct measurement even when background validation passed.
-For dependencies, runner limits or a collection failure, read
-[tool.md](tool.md). Use the bundled command for collection, matching,
-verdicts and reports; keep that work in the tool instead of temporary scripts.
-
-Done when the command produced a complete report, or a stated measurement blocker.
-
-## 2. Resolve scores above the limits
-
-Use `thresholds` from the generated report, or the same limits (complexity 20,
-CRAP 30) for complete Squeal evidence. Flag a function when either score is
-**strictly greater** than its limit. Equality passes. For each flagged function,
-read its diff and baseline source, then choose an action:
-
-| Finding | Action |
-| --- | --- |
-| A small change can bring it within the limits | Make the change and verify behavior. Remeasure. |
-| This task introduced or worsened the problem | Fix it in this task. If a larger design decision is needed, report the blocker before opening the PR. |
-| The problem existed before this task, and a fix needs a larger refactor | File or reuse a code quality issue as described below. Keep the PR focused. |
-
-To plan a split along a flagged function's decision points, list them with
-`node <skill>/scripts/metrics.mjs <file> --function <name> --breakdown` (add
-`--line <line>` for a repeated name, and `--column <column>` when another function starts on that line). Each `line kind` row is one counted
-point, so the rows plus one equal the complexity.
-
-CI runs a looser ratchet on the same functions:
-`node <skill>/scripts/complexity-gate.mjs --base <target-ref> --head HEAD` refuses only a
-changed function over 20 that is new or more complex than at the merge base. A change that
-lowers such a function but leaves it above 20 passes CI, and the gate lists it as a notice.
-This check still flags every changed function above a limit, so a clean report here implies
-a pass there. A pass there does not imply a clean report here.
-
-A small change stays within the function or an immediate helper, preserves its
-contract and needs no new architecture. Prefer simpler control flow and useful
-missing tests. Keep decisions visible; moving all of them to a new helper to
-lower one score does not resolve the problem.
-
-Baseline complexity alone cannot prove inherited CRAP. Compare the changed
-branches and tests too. When CRAP attribution is uncertain, measure baseline
-coverage with the same relevant tests in a disposable checkout of the pinned
-SHA. Keep baseline and current reports separate. An uncertain origin remains an
-unresolved finding; it does not qualify for an inherited-refactor issue.
-
-For each inherited larger refactor, read [issues.md](issues.md).
-Filing that issue, including creating its label, is part of this check. A filing
-failure remains a blocker with its prepared issue text and exact error.
-
-Refresh the selected evidence path after source or test changes; use the bundled
-fallback whenever complete Squeal evidence is no longer available. Done when every flagged
-function has verified scores within the limits, a linked inherited-refactor
-issue, or a stated blocker. Any blocker means the
-pre-PR check is incomplete.
-
-## 3. Report before opening the PR
-
-For complete Squeal evidence, put the pinned base, head or uncommitted diff,
-Squeal revision, checked/expected function count, per-function complexity and CRAP
-scores, measurement limits, and each finding's action in the PR's validation
-section. Preserve baseline evidence for inherited findings as step 2 requires.
-No bundled report is required on this path. State that Squeal supplied the local
-quality evidence; do not describe it as a bundled-check pass.
-
-For the bundled fallback, make the report available from the PR's validation section. An ignored path such
-as `.ai/qa/<issue>/code-quality.md` is not a report link a reviewer can open.
-
-- In a Cezar task, publish the generated report with the session-provided
-  task-artifact command: `… artifact publish <report.md>` (or
-  `cez artifact publish <report.md>` when `cez` is on PATH). It uses the task's
-  `CEZ_ARTIFACTS_DIR` and `CEZ_TASK_ID`. The returned JSON's `link` is a
-  root-relative cockpit path. In a GitHub PR, prefix that exact path with the
-  verified cockpit origin that reviewers can access; for example, an origin
-  `https://cockpit.example` and returned `/p/…/files?artifact=…` form
-  `https://cockpit.example/p/…/files?artifact=…`. Use that absolute URL as the
-  report link in the validation section. Do not invent an origin or reconstruct
-  the artifact path. Pasting the returned `markdown` unchanged into GitHub
-  resolves its path under github.com and does not reach the cockpit. This is a
-  local snapshot, not a public GitHub attachment. It survives worktree cleanup
-  until task history is deleted.
-- When the artifact command, task context or a reviewer-accessible cockpit
-  origin is unavailable, put the verdict,
-  checked function count, measurement limits and every flagged report row in
-  the PR's validation section, with each row's action and any applicable issue
-  link. This keeps the review evidence available without a cockpit link.
-
-In either case, state the verdict, checked function count and any measurement
-limits in the validation section. For exit 1, add an action and issue link for
-every deferred finding; open the PR only when all findings qualify for the
-inherited-refactor exception above. Exit 2 blocks opening the PR.
-These issues are follow-up work; use `Refs`, rather than a closing keyword,
-when linking them from the current PR.
+State that the **Squeal one-shot gate** supplied the local quality evidence.
+Do not call it a bundled-check pass or a daemon measurement. Only complete
+passing evidence permits the PR to open. CI and independent review remain
+separate gates. Keep hearsay-tools/cezarion#3096 open for the remaining migration.
