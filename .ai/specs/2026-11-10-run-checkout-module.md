@@ -2,7 +2,7 @@
 
 Decision record: [ADR 0062](../../docs/adr/0062-one-module-decides-run-checkout-access.md).
 Glossary: [Run checkout](../../GLOSSARY.md#run-checkout), [Checkout intent](../../GLOSSARY.md#checkout-intent).
-Epic: not filed yet; the coordinator adds its number when it files the drafts.
+Epic: hearsay-tools/cezarion#3158.
 Baseline: `main` at `c1ba6f5bf`. The owner approved the plan on 2026-11-10 (planner task
 ccaba06a), with B4 in the form Decision 6 states. The rules of
 [the worktree retention spec](2026-07-18-worktree-retention.md) and
