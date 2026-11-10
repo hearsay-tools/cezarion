@@ -399,3 +399,5 @@ from ordinary HSQ-first operator settings (coordinator decision D11).
   dynamic paths through unrecognized objects, reflection and `eval` are not followed.
 
 These limits need code review. They do not permit new baseline allowances.
+
+`wait-kind-literal-outside-engine` confines production wait-kind comparisons, case labels and entry literals to the reasoned Table F allow-list (hearsay-tools/cezarion#3133); its stale-entry test rejects an exception with no match.
