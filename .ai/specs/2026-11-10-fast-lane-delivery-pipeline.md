@@ -196,9 +196,9 @@ exact-commit proof for the fast lane.
 
 One workflow, `main-verify.yml`, verifies `main`.
 
-1. **Trigger.** A push to `main`, a 30-minute schedule and a manual dispatch. One run at a
-   time; a waiting run is replaced by a newer one; a running run is never cancelled. Each
-   run verifies the newest commit, so one run covers a batch of merges.
+1. **Trigger.** A push to `main` and a dispatch. One run at a time; a waiting run is
+   replaced by a newer one; a running run is never cancelled. Each run verifies the newest
+   commit, so one run covers a batch of merges. A job time limit ends a run that hangs.
 2. **Scope.** Everything a guarded PR run executes today: the full Vitest suite with
    coverage, the full browser suite, build, packaged CLI E2E and the Node floor.
 3. **Verdict record.** A commit status `main-verify` on the verified commit: `success`,
@@ -211,22 +211,32 @@ One workflow, `main-verify.yml`, verifies `main`.
    commit between the last green commit and the verified one. The first commit that fails is
    the cause.
 6. **Revert.** The bot opens a PR that reverts the cause, with the label `main-revert` and
-   auto-merge armed. It uses the release App token, so the PR starts CI. CI proves that the
-   PR tree equals a plain `git revert` of the named commit; such a PR needs no review round.
-   The bot comments on the reverted PR with the failing tests and the run link.
-7. **Hold.** While the verdict is `failure`, the pull request check of every other PR
-   reports "main is red" and does not pass. Entries already in the queue finish. The
-   workflow re-runs the held checks when `main` is green.
-8. **Snapshot.** The `dev` npm snapshot publishes from the verified commit, after `success`.
+   auto-merge armed. It uses the release App token, so the PR starts CI. The bot comments on
+   the reverted PR with the failing tests and the run link.
+7. **Revert lane.** CI proves that the PR tree equals a plain `git revert` of the named
+   commits on the current `main`. Such a PR takes its own lane, whatever paths it touches,
+   and this lane exists from P1.2, before the fast lane does. Its pull request check runs
+   typecheck, lint, build, the guard tests and the files that failed on `main`. Its
+   `Automated Code Review` check passes without CodeRabbit admission. Its queue run is the
+   check of § Queue check. `pr-readiness.yml` does not return it to draft. A PR with the
+   label whose tree is not a plain revert fails its check.
+8. **Hold.** While the verdict is `failure`, the pull request check of every other PR
+   reports "main is red" and does not pass. Two kinds of PR are not held: a verified revert,
+   and a repair PR, which is a PR with a closing reference to an open `main-ci-failure`
+   summary. A repair PR runs the normal checks of its lane. Entries already in the queue
+   finish. The workflow re-runs the held checks when `main` is green.
+9. **Snapshot.** The `dev` npm snapshot publishes from the verified commit, after `success`.
 
-Clocks, on GitHub's scheduler:
+Clocks run in a second workflow, `main-watch.yml`, on a 30-minute schedule. It has its own
+concurrency group and never waits for a verification run, so a stuck run cannot block the
+alert.
 
 | When | Action |
 | --- | --- |
 | A real failure is confirmed | The existing reporter files the `main-ci-failure` summary. It gets `release-blocker` |
 | 60 min after the first confirmed failure, `main` not green | A comment on the summary mentions the owner |
 | 6 h, `main` not green | The bot reverts every commit after the last green one, in one PR |
-| Every 30 min | The scheduled run checks that the newest commit on `main` is verified or in progress. If not, it starts verification. If no run has finished for 90 min, it files the same alert |
+| Every 30 min | `main-watch.yml` checks that the newest commit on `main` is verified or has a run in progress. If not, it dispatches verification. If commits wait and no verification run has finished for 90 min, it files the same alert |
 
 Expected time red: 20 min to detect, 5 to classify, 5 to bisect, 7 to revert.
 
@@ -245,22 +255,39 @@ Cases:
 | A new push lands while the bisect runs | It joins the next batch. The bisect range does not change |
 | The App token is missing | The workflow fails visibly. The watchdog alert fires. Nothing is reverted |
 | The 6-hour revert: the last green commit is older than 50 commits | No revert. The owner is mentioned. The limit keeps one bad status from undoing a day of work |
+| A repair task's PR while `main` is red | Not held, because it closes the open failure summary. It merges through its lane |
+| A verification run hangs | Its job time limit ends it. `main-watch.yml` alerts at 90 min in any case |
 
 ### Release
 
 The owner starts a release, as today (D5). The workflow refuses a second stable release
 within 24 hours of the last one. No schedule starts a release.
 
-1. **Candidate.** The newest commit on `main` with `main-verify` `success`. The release does
-   not repeat that suite; it reads the status of the exact commit.
+1. **Candidate.** On `main`: the newest commit with `main-verify` `success`. The release
+   does not repeat that suite; it reads the status of the exact commit. On a `release/**`
+   branch (a maintenance release, as `release.yml` allows today): the branch head. No
+   `main-verify` status exists there, so the release runs the same suite on that commit
+   first. The suite is one reusable workflow that `main-verify.yml` and `release.yml` call.
 2. **Gates.** No open issue carries `release-blocker`. The last rehearsal (below) passed.
-3. **Stage.** Publish the version under the `next` dist-tag.
+3. **Stage.** Compute the version as today and publish it under the `next` dist-tag. The
+   version-bump PR opens after the stage, not after the promotion, so the next release
+   always computes a new version.
 4. **Test the published package**, installed from the registry, not built from the tree:
    clean install, boot, cockpit smoke, upgrade from the current `latest` with existing state,
    the Node floor, the OS matrix, shuffled browser specs.
 5. **Promote.** Move `latest` to the tested version. The tested bytes are the released bytes.
 6. **Roll back.** One dispatch moves `latest` back to the previous version. Installed copies
    that already updated do not move back; they need a patch release.
+
+A version is immutable on npm, and `scripts/release.mjs` refuses a version whose published
+`gitHead` differs from the source commit. So a failed step 4 uses up its version:
+
+| Case | Behaviour |
+| --- | --- |
+| Step 4 fails | The version stays on `next` and is deprecated on npm with the reason. `latest` does not move. No GitHub Release. The bump PR still merges. A `release-blocker` issue is filed |
+| The owner dispatches again after a fix | A new candidate, the next version. This attempt does not count against the 24-hour limit, because no stable release happened |
+| The same run is re-run after a transient failure | Same commit, same version: the publish step sees its own `gitHead` and continues at step 4, as the retry guard does today |
+| Step 5 fails after step 4 passed | Re-run the run; the promotion repeats safely |
 
 **Rehearsal.** `nightly.yml` becomes the rehearsal. Each night it publishes the newest
 verified commit under `nightly`, as today, and then runs step 4 against that package. A
@@ -276,6 +303,7 @@ Desktop and mobile releases keep their own workflows and cadence.
 | Label `release-blocker` | The failure reporter, the post-merge review workflow, the rehearsal | The issue is closed | The release workflow | The label does not exist in the repository: the release workflow fails before it publishes |
 | Lane | The shared classifier | Per head commit | `ci.yml`, `npm run prepr`, the auto-merge decision | The classifier throws or cannot read the base: guarded |
 | Label `main-revert` | The revert bot | The PR is merged or closed | The pull request check (admit while red, verify plain revert) | A PR with the label whose tree is not a plain revert fails the check |
+| Closing reference to a `main-ci-failure` summary | The repair task, in its PR body | The PR is merged or closed | The pull request check (admit while red) | The referenced issue is closed, or lacks the label: the PR is held like any other |
 
 ### Guarantees that change
 
@@ -288,6 +316,7 @@ Desktop and mobile releases keep their own workflows and cadence.
 | Draft until checks pass (`pr-readiness.yml`) | A ready PR has green checks; the board shows review state | Fast lane: opened ready; the board card moves at open. Guarded lane: unchanged |
 | 180 s settle after the first ready event | CodeRabbit cannot be skipped by a fast enqueue | Fast lane: CodeRabbit does not block, so the wait has no purpose. Guarded lane: unchanged |
 | CodeRabbit admission and resolved threads | No PR merges with an unresolved finding | Fast lane: findings become follow-up issues; Major and Critical ones block the release. Guarded lane: unchanged |
+| `requireQueueRules` in `merge-queue-admission.cjs` refuses a ruleset without thread resolution | A queue entry cannot merge when the ruleset lost that protection | It requires the two status checks and the queue rule. Thread resolution for the guarded lane is proved by the `Automated Code Review` check on the PR head, which the admission already reads |
 | Reviewer loop until clean | No PR opens with an active reviewer finding | Fast lane: no PR auto-merges with a finding scored 5 or more from round 1. Guarded lane: unchanged |
 | `dev` snapshot on every `main` push | `dev` follows `main` within minutes | `dev` follows each verified batch head. Every `dev` build passed the full suite |
 | Release verify job | Typecheck, unit tests and build pass on the release commit | The release reads the full `main-verify` proof and tests the published package |
@@ -298,7 +327,9 @@ Desktop and mobile releases keep their own workflows and cadence.
 Only the owner can make these changes. Each phase lists the ones it needs.
 
 1. Ruleset `Protect main`: turn off required review-thread resolution. The
-   `Automated Code Review` check keeps enforcing it for the guarded lane.
+   `Automated Code Review` check keeps enforcing it for the guarded lane. Do this only after
+   the P3 change to `requireQueueRules` is on `main`: today that function fails every queue
+   entry when the ruleset lacks thread resolution.
 2. Create the labels `release-blocker` and `main-revert`.
 3. Allow the release App to open and merge revert PRs.
 4. Replace the "Pre-PR review" rule in the Cezar prompt with: run one reviewer round on the
@@ -310,14 +341,16 @@ Only the owner can make these changes. Each phase lists the ones it needs.
 
 ## Phases
 
-Each row is one issue. The safety net comes first; no later phase starts before P1 is live.
+Each row is one issue. The safety net comes first; P3 to P6 do not start before P1 is live.
 
 | Phase | Content | Needs |
 | --- | --- | --- |
 | P0 | This spec | |
-| P1 | `main-verify.yml`: rolling full run, rerun, status, bisect, revert bot, hold, clocks, watchdog, `dev` snapshot from the verified commit. It runs beside today's `main` push CI for one week before that is removed | Owner actions 2, 3 |
+| P1.1 | `main-verify.yml`: the reusable suite, the rolling run, the rerun, the `main-verify` status, the flake issue, the `dev` snapshot from the verified commit. It runs beside today's `main` push CI for one week before that is removed | |
+| P1.2 | Bisect, the revert bot, the revert lane and the hold | P1.1; owner actions 2, 3 |
+| P1.3 | `main-watch.yml`: the 60-minute mention, the 6-hour revert, the watchdog | P1.2 |
 | P2 | Release: once-a-day guard, gates, stage on `next`, test the published package, promote, roll back. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
-| P3 | Lanes and merge path: the shared classifier, the auto-merge rules of D4, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check | P1; owner action 1 |
+| P3 | Lanes and merge path: the shared classifier, the auto-merge rules of D4, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check, `requireQueueRules` without thread resolution | P1; then owner action 1 |
 | P4 | Review placement: `Automated Code Review` per lane, the post-merge review workflow, the agent rule | P2, P3; owner actions 4, 5 |
 | P5 | Affected tests on the fast lane. Step 1: a shadow job records, for one week, the selection for each PR run and whether a failing test fell outside it. Step 2: the owner reads the report and decides the switch | P1, P3 |
 | P6 | Local gate: `npm run prepr`, the 2-minute bound, the shorter list of duties in `AGENTS.md` and the skills | P3 |
