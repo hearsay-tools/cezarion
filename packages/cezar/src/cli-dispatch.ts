@@ -124,9 +124,19 @@ function printCliMetadata(deps: CliDeps, values: { version?: boolean; help?: boo
   return false;
 }
 
+/** Help stays available even when the host cannot resolve a user's home. */
+function cliVersionsPath(deps: CliDeps, rebrand: boolean): string | undefined {
+  if (!rebrand) return;
+  try {
+    return deps.resolveCliHome().versions;
+  } catch {
+    return "the data folder's versions directory";
+  }
+}
+
 async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
   // Help reads resolved paths only. Task commands and version output never need a Home.
-  const help = () => commandText(cliHelp(rebrand, rebrand ? deps.resolveCliHome().versions : undefined), deps.process.argv[1], rebrand);
+  const help = () => commandText(cliHelp(rebrand, cliVersionsPath(deps, rebrand)), deps.process.argv[1], rebrand);
   let resolvedHome: Home | undefined;
   let homeEntry = deps.operatorHomeEntry(deps.process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.

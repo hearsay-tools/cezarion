@@ -137,5 +137,7 @@ Every binary name accepts `--version` and `-v`. Both print the package version t
 stdout and exit 0 without resolving or preparing a home. With the release switch
 on, old names still print their notice only to stderr. Top-level help shows the
 resolved home's versions directory with the switch on; reading this path does
-not prepare or migrate the home. Switch-off help keeps `~/.cezar/versions`.
+not prepare or migrate the home. If resolution fails, help describes the data
+folder without a path and still exits successfully. Switch-off help keeps
+`~/.cezar/versions`.
 Discovery's missing-cockpit hint uses the switch-aware preferred command.
