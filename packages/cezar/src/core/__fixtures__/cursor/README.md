@@ -3,7 +3,8 @@
 Cursor print qualification for fork #590 is recorded in
 [`print-qualification.md`](print-qualification.md). CLI
 `2026.10.01-e373342` auto-skips native questions; the revised design accepts
-that visible limit and uses Cezar `CEZ:ASK` for its own questions. The
+that visible limit, and Cezar's own questions use the `cezar_ask` tool. The
+`CEZ:ASK` marker that the qualification record names is no longer read. The
 per-invocation native tool allowlist passed a harmless live control. The
 qualification record contains the remaining live probes. `print-mcp.json` and
 `print-portable-ask.json` record fresh/resume bindings; `print-plugins.json`

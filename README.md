@@ -664,15 +664,15 @@ deadline. A checks wait and a merge wait on the same PR are two waits.
 The agent asks you with `cezar_ask`, a card of one to four questions in the ask
 format. A question with two to four options shows them as choices; a question without
 options is open, and the card shows a text box for your answer. The task reads Needs
-you once the turn ends, and your next message answers it. `cezar_wait` takes PR waits,
-worker waits and timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
+you once the turn ends, and your next message answers it. `cezar_wait` takes PR, worker, request,
+peer, process and timer waits only, and points an agent that asks it for a human wait to `cezar_ask`. A run
 has one question to you at a time, and the agent cannot cancel it once you have seen
 it. A native question opens the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
-written as a note. `cezar_done` refuses while owned workers are live or uncollected,
-a worker question is unanswered, a question to you is still pending, or the step is not
-the workflow's last, and says what to do first. An
+written as a note. In a workflow step that is not the last, `cezar_done` finishes that step
+and Cezarion starts the next one. `cezar_done` refuses while owned workers are live or uncollected,
+a worker question is unanswered or a question to you is still pending, and says what to do first. An
 autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the
