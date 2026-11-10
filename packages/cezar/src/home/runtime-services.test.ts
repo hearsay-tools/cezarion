@@ -69,7 +69,7 @@ it('opens a fresh terminal CLI with the selected account', async () => {
     const app = new Hono().get('/', c => openRunCli(c, run, 'claude', root, root, {
       home: selected, providerActionError: async () => null, resumeCommand: () => null,
       handoffEnv: async () => ({ env: {} }), handoffFallbackCommand: () => 'claude', openTerminal,
-    }));
+    }, { resumeAllowed: false }));
     expect((await app.request('/')).status).toBe(200);
     expect(openTerminal).toHaveBeenCalledWith(root, 'claude', { CLAUDE_CONFIG_DIR: join(root, 'selected-account') });
   } finally { store.close(); }
