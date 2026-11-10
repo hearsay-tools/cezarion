@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { RunManager } from '../workflows/run.ts';
+import type { AutomationToolService, RunManager } from '../workflows/run.ts';
 import type { ProjectContext } from './project-context.ts';
 
 vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: true }));
@@ -153,7 +153,7 @@ it('replaces a handle opened before a move at lookup and refresh', async () => {
 });
 
 
-it('writes boot API automation state to the moved directory and reads it back', async () => {
+it('writes boot API state after the move and refuses scheduled-task tools under a fence', async () => {
   const home = Home.sandbox(directory());
   const root = repository();
   const legacy = join(root, '.ai/cezar');
@@ -166,8 +166,9 @@ it('writes boot API automation state to the moved directory and reads it back', 
   const project = await registerProject(root, undefined, home);
   const ownership = new CockpitOwnership();
   const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+  let tools: AutomationToolService | undefined;
   const server = startServer({ home, repoRoot: root, bootProjectId: project.id, store: runs,
-    manager: { isActive: () => false } as unknown as RunManager, ownership, version: 'test',
+    manager: { isActive: () => false, setAutomationTools: (value: AutomationToolService) => { tools = value; } } as unknown as RunManager, ownership, version: 'test',
     modelCatalog: new RunnerModelCatalog({ adapters: {} }),
     providerAuth: new ProviderAuthService({ runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }) }) }, 0);
   try {
@@ -188,6 +189,12 @@ it('writes boot API automation state to the moved directory and reads it back', 
     const read = await fetch(url);
     expect(read.status).toBe(200);
     expect(await read.json()).toMatchObject({ automation: { enabled: false, revision: 2 } });
+    expect(tools).toBeDefined();
+    const fence = await ownership.fenceProject(projectPaths(root).write, { liveTasks: () => [] });
+    try {
+      await expect(tools!.scheduledTasks({ action: 'list' })).resolves.toMatchObject({ ok: false, code: 'conflict', message: expect.stringContaining('migration') });
+      await expect(tools!.scheduleTask({ name: 'Later', prompt: 'Task', delay: '1h' })).resolves.toMatchObject({ ok: false, code: 'conflict' });
+    } finally { fence.release(); }
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
     ownership.releaseAll();
