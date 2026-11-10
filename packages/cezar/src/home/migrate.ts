@@ -222,6 +222,7 @@ function assertNoAbandonedCopy(target: Home): void {
  *  writes by older binaries then belong to the canary (P2b-2), never to another migration. */
 function recordFreshDecision(legacy: Home, target: Home, plan: MigrationPlan, env: NodeJS.ProcessEnv | undefined): MigrationRecord {
   assertNoAbandonedCopy(target);
+  const legacyExisted = existsSync(legacy.root);
   createInstallMarker(target.config, underTestRunner() ? 'test' : 'live');
   const record: MigrationRecord = { ...migrationRecordFor(plan), files: [], backup: '', deferredAccounts: [], notMoved: [] };
   // The record publishes before the committed marker: a committed home always has a record.
@@ -229,7 +230,7 @@ function recordFreshDecision(legacy: Home, target: Home, plan: MigrationPlan, en
     writeMigrationRecord(target, record);
     writeMigrationMarker(target.config, resolve(legacy.root), 'committed');
   }));
-  if (existsSync(legacy.root)) commitLegacyMigration(target, env);
+  if (legacyExisted) commitLegacyMigration(target, env);
   return record;
 }
 

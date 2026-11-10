@@ -44,8 +44,12 @@ export class HomeStore {
   /** Synchronous transactions never retain the filesystem lock over an event-loop yield. */
   transaction<T>(operation: (reportOnly?: boolean) => T, writePaths: readonly string[] = [], readOnly = false): T {
     if (!readOnly && this.writeDepth === 0) assertNoMigration(this.root);
-    const marker = readInstallMarker(this.root);
     const authorization = homeEntryAuthorization(this.root);
+    if (!readOnly && authorization?.beforeWrite) {
+      authorization.beforeWrite();
+      authorization.beforeWrite = undefined;
+    }
+    const marker = readInstallMarker(this.root);
     const entry = authorization && (!marker || !authorization.seeded) ? authorization : undefined;
     if (readOnly) assertHomeReadable(this.root);
     if (!readOnly && (marker || !entry)) assertHomeWritable(this.root);

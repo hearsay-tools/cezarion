@@ -6,6 +6,7 @@
 
 import type { Home } from './home/home.ts';
 import { resolveHome } from './home/resolve.ts';
+import { readInstallMarker } from './home/install-marker.ts';
 import { REBRAND_SWITCH } from './home/switch.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
@@ -23,7 +24,10 @@ export async function loadSubcommand(name: string | undefined, home: (env: NodeJ
   };
   switch (name) {
     case 'backup': return async (argv, env) => {
-      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, home(env));
+      const selected = home(env);
+      const source = rebrand && selected.layout === 'split' && argv[0] === 'list' && !readInstallMarker(selected.config)
+        ? resolveHome({ purpose: 'cli', env, layout: 'legacy' }) : selected;
+      return (await import('./workspace/backup-cli.ts')).runBackupCommand(argv, env, source);
     };
     case 'discover': return (await import('./discovery/cli.ts')).runDiscoverCommand;
     case 'artifact': return (await import('./artifacts/cli.ts')).runArtifactCommand;

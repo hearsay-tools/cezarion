@@ -27,12 +27,13 @@ export function operatorHomeEntry(argv: readonly string[]): string | undefined {
 export function prepareOperatorHome(home: Home, command: string | undefined, env = process.env, migration?: MigrationBootOptions): Home {
   command ??= 'serve';
   if (!entries.includes(command)) return home;
-  const boot = prepareMigrationHome(home, env, migration);
+  const unconditional = ['serve', 'init', 'run', 'backup'].includes(command);
+  const boot = prepareMigrationHome(home, env, { ...migration, deferFresh: !unconditional });
   if (boot.kind === 'staged') return home;
   if (boot.kind === 'legacy') home = boot.home;
-  authorizeHomeEntry(home, command, markerKind(command, env));
+  authorizeHomeEntry(home, command, markerKind(command, env), boot.kind === 'fresh' ? boot.prepare : undefined);
   try {
-    if (['serve', 'init', 'run', 'backup'].includes(command) || registryFiles(home).some(path => existsSync(path))) {
+    if (unconditional || registryFiles(home).some(path => existsSync(path))) {
       prepareHome(home, command as HomeEntry, env);
     }
   } catch (error) {
