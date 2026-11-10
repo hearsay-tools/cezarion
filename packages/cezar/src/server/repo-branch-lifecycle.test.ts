@@ -57,8 +57,8 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
     return { runs, forge: fakeForge({ prs: [mergedPr(7, 'cez/bbbbbbbb', squashTip, squash)] }).forge };
   }
 
-  describe('the base 'origin'', () => {
-    it('resolves to the branch origin/HEAD names, with the same commit and PR base as 'main'', async () => {
+  describe('the base `origin`', () => {
+    it('resolves to the branch origin/HEAD names, with the same commit and PR base as `main`', async () => {
       const { runs, forge } = await landedOnOrigin();
       const viaOrigin = await classesOf({ configuredBase: 'origin', runs, forge });
       const viaMain = await classesOf({ configuredBase: 'main', runs, forge });

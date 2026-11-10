@@ -1,4 +1,3 @@
-const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -29,7 +28,7 @@ async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source
     fs.writeFileSync(path.join(cwd, file), typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`);
   };
   write('package.json', { name: 'release-fixture', private: true, workspaces: ['packages/*'] });
-  const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', `${productIdentity().npmAliasDirectory}/package.json`];
+  const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', 'alias-cezarion/package.json'];
   for (const [i, file] of manifests.entries()) write(file, { name: `fixture-${i}`, version: '0.12.0', private: i !== 0, ...(i === 3 ? { dependencies: { 'fixture-1': '^0.12.0' } } : {}) });
   write('pnpm-workspace.yaml', 'packages:\n  - packages/*\nlinkWorkspacePackages: true\n');
   const pnpm = () => execFileSync('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--offline', '--no-frozen-lockfile'], { cwd, stdio: 'pipe' });
@@ -219,7 +218,7 @@ test('retry after a pushed branch and denied PR reuses the original commit', asy
   assert.equal(f.outputs.bump_pr.status, 'created');
   assert.equal(f.state.prs.length, 1);
   const head = pushed.split(/\s/)[0];
-  for (const file of ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', `${productIdentity().npmAliasDirectory}/package.json`]) {
+  for (const file of ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', 'alias-cezarion/package.json']) {
     assert.equal(JSON.parse(f.git('show', `${head}:${file}`)).version, '0.12.1');
   }
   const lock = require('yaml').parseAllDocuments(f.git('show', `${head}:pnpm-lock.yaml`)).at(-1).toJSON();
@@ -326,7 +325,7 @@ test('repeated GitHub finalization reuses the matching release and annotated tag
   await f.run(releaseStep);
   assert.equal(f.outputs.github_release.status, 'reused');
   assert.deepEqual(f.state.release, original);
-  assert.match(original.body, /\| `@wjarka\/cezarion` \| '0.12.1' \|/);
+  assert.match(original.body, /\| `@wjarka\/cezarion` \| `0.12.1` \|/);
   assert.match(original.body, /npx cezarion@0.12.1/);
   assert.doesNotMatch(original.body, /api-client/);
 });
@@ -346,7 +345,7 @@ test('release changelog includes only commits after the previous stable ancestor
   assert.ok(body.includes(`/commit/${f.sha}`));
   assert.match(body, /source/);
   assert.doesNotMatch(body, /initial history|preview|v0\.13\.0|unrelated-tag/);
-  assert.match(body, /\| `@wjarka\/cezarion` \| '0.12.1' \|/);
+  assert.match(body, /\| `@wjarka\/cezarion` \| `0.12.1` \|/);
   assert.match(body, /npx cezarion@0.12.1/);
 });
 
@@ -391,7 +390,7 @@ test('matching legacy release metadata is reused without rewriting old releases'
   f.state.release = {
     tag_name: 'v0.12.1', name: 'v0.12.1', draft: false, prerelease: false,
     html_url: 'https://github.com/example/project/releases/tag/v0.12.1',
-    body: '## Published packages\n\n| Package | Version |\n|---|---|\n| `@wjarka/cezarion` | '0.12.1' |\n| 'cezarion' | '0.12.1' |\n\n### Install\n\n''`bash\nnpx cezarion@0.12.1\n`''',
+    body: '## Published packages\n\n| Package | Version |\n|---|---|\n| `@wjarka/cezarion` | `0.12.1` |\n| `cezarion` | `0.12.1` |\n\n### Install\n\n```bash\nnpx cezarion@0.12.1\n```',
   };
   const original = structuredClone(f.state.release);
   await f.run(releaseStep);

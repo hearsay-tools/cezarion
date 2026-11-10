@@ -37,7 +37,7 @@ const HEALTH: HealthResponse = {
   repo: { root: '/home/me/cezar', branch: 'main' },
   defaultRunner: 'claude',
   checks: [
-    { name: 'claude', available: true, version: '2.0.44', hint: 'if not authenticated, run 'claude' once and log in' },
+    { name: 'claude', available: true, version: '2.0.44', hint: 'if not authenticated, run `claude` once and log in' },
     { name: 'gh', available: true, version: '2.62.0' },
     { name: 'git', available: true, version: '2.43.0' },
     {
@@ -140,12 +140,12 @@ describe('toolsBlocker', () => {
     expect(toolsBlocker({ ...HEALTH, defaultRunner: 'opencode' })).toBeNull()
   })
 
-  it('counts every runner the contract knows — a 'pi'-only host can start tasks', () => {
+  it('counts every runner the contract knows — a `pi`-only host can start tasks', () => {
     expect(toolsBlocker(PI_ONLY)).toBeNull()
     expect(toolsTooltip(PI_ONLY)).toBe(`${productName("cezar")} v0.1.3 · optional: claude, codex not installed`)
   })
 
-  it('names 'pi' when it is the configured default and the missing one', () => {
+  it('names `pi` when it is the configured default and the missing one', () => {
     expect(toolsBlocker(PI_DEFAULT_DOWN)).toBe('default runner (pi) not found')
   })
 })

@@ -1090,7 +1090,7 @@ describe('the composer runner pill carries the account', () => {
     expect(postedBody()).not.toHaveProperty('agentProfile')
   })
 
-  it('sends 'default' explicitly when the repo points elsewhere — not an absent key', async () => {
+  it('sends `default` explicitly when the repo points elsewhere — not an absent key', async () => {
     // The one case where "follow the repo" and "the discovered account" differ. An absent key would
     // run the task on Klaudiusz, which is the opposite of what picking `claude · Default` says.
     serve({
