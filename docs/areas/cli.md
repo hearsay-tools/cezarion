@@ -10,7 +10,7 @@
 
 Project entry points use `projectPaths`: the write root is the first read root, the
 other directory is the fallback. The write root is `.ai/cezar/`, or `.ai/squawk/` for a
-moved project with the release switch on (a completed migration's marker in the Git common directory,
+fresh or moved project with the release switch on (a completed migration's marker in the Git common directory,
 hearsay-tools/cezarion#3150). Dual reads work with the release switch off. `init`,
 generated task paths, task state and config writes go to the write root; `init` skips a
 starter whose workflow or skill name already exists in the fallback.
@@ -18,7 +18,11 @@ Singleton config/context files use whole-file presence precedence. Reads never
 create a fallback directory or an empty legacy run store that hides its data.
 Git excludes cover both runtime trees and `.ai/squawk-migration.json`; tracked
 workflows, skills and `context.yaml` keep their existing committable paths.
-Only the release switch enables the legacy-directory notice; boot does not migrate.
+Only the release switch enables the legacy-directory notice. A blocked automatic move prints
+one detailed notice; later readers omit the generic notice for that cause. Fresh means no
+`.ai/cezar` path, including no empty directory. Such a project starts in `.ai/squawk/`
+and preparation or its first CLI write records the same Git marker as a completed move.
+`init` help names `.ai/squawk/` with the switch on; switch-off help stays unchanged.
 
 ## Project migration fence
 
@@ -120,3 +124,9 @@ Product task-context reads accept `HSQ_*` first with permanent `CEZ_*` fallback.
 Generated child entries keep the legacy names with the release switch off; with
 it on they carry both names and the same value. Empty context values remain
 intentional clears. `core/product-env.ts` owns both selection and generation.
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.

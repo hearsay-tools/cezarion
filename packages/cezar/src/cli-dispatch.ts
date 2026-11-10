@@ -37,7 +37,7 @@ function cliHelp(rebrand: boolean): string {
 Usage:
   cez                       start the cockpit (server + GUI) for the current repo
   cez run "<task>"          run a task headless in the terminal
-  cez init                  scaffold .ai/cezar/ (example workflow + skill)
+  cez init                  scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/ (example workflow + skill)
   cez projects              list the projects this cockpit serves
                             (also: projects add [<dir>] · projects remove|rm <id> ·
                              projects tag <id> [<tag>…])

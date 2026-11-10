@@ -11,7 +11,10 @@
 `projectPaths(root)` is the one rule for the write root; no caller picks a folder itself.
 With `REBRAND_SWITCH` on, a moved project (a completed migration wrote
 the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` names the project's real root; `projectMovedMarker`) writes `.ai/squawk/` and reads `.ai/cezar/`
-as its fallback (hearsay-tools/cezarion#3150). Every other project, and every project with
+as its fallback (hearsay-tools/cezarion#3150). A fresh project with no `.ai/cezar` path
+also writes `.ai/squawk/` from its first use; preparation records its Git marker. An
+existing empty, tracked-only or unreadable legacy path keeps the normal P4 rules.
+Every other project, and every project with
 the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
 below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
 `isFallbackProjectPath` ask `projectPaths` too. Context `dataDir` is the write root.
@@ -43,7 +46,8 @@ plus start-token liveness and token-checked release.
   `cockpit.lock` owner in either directory (any home, with its URL), and every live cockpit
   of the user's legacy and split homes whose registry lists the project (the presence leases of
   `home/leases.ts`: pid, port, instance), which covers a cockpit that does not own the project
-  but runs its automations (hearsay-tools/cezarion#3136). Live tasks are
+  but runs its automations (hearsay-tools/cezarion#3136). That first refusal lists live
+  tasks too, so the user can stop everything before retrying. Live tasks are
   `projectLiveTasks` over a read-only view (`readLiveTaskView`: each run store read quiescent,
   from a private copy when it has a WAL file, and a `runs.json` no store imported yet read as
   JSON), so a refusal writes nothing; a task marked live whose record cannot be read refuses too:
@@ -258,3 +262,9 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
 One `{store, manager, dataDir, launchKey}` context per registered project, built on first touch or by the background warm-up after listen (`warmAll`, off with `CEZ_PROJECT_WARMUP=0`, hearsay-tools/cezarion#667), disposed on removal; a `missing` root is never instantiated (unknown id → 404, gone root → 409). Every project route is registered **once** in a chained family builder and mounted under both `/api/v1/<path>` (bound to the boot project) and `/api/v1/p/:projectId/<path>` — `route-parity.test.ts` walks the exported route manifest and asserts `/api/v1/x`, `/api/v1/p/<boot>/x` and `/api/v1/p/default/x` answer byte-identically, so a new scoped route without its alias fails the suite. `default` is the reserved boot alias and is never an allocated slug. Workspace-level routes (`/projects`, `/workspace/*`, `/fs/browse`) are single-mount and never scope-prefixed. The cockpit mirrors the split: every view lives under `/p/:projectId/`, flat legacy PAGE paths redirect to the boot project, and global settings sit outside the scope at `/settings/global`. Add each route to its family's chain ([the HTTP API](http-api.md)); `versioned-surface.test.ts` fails on any route outside `/api/v1`.
 
 **Warm-up is an owner-approved exception to [zero config](../../AGENTS.md#zero-config):** project warm-up is default-on (hearsay-tools/cezarion#667). After the server listens it builds every other registered project's context one at a time, which runs recovery and so may resume interrupted runs and spend tokens in projects not yet opened; it skips projects another live cockpit owns and single-project mode, claims each warmed project's `cockpit.lock` for the process lifetime, and `CEZ_PROJECT_WARMUP=0` restores purely lazy builds.
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.

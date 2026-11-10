@@ -185,6 +185,8 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
   });
 
   it('refuses at once, writing nothing, while another process owns the project or holds its fence', async () => {
+    const store = RunStore.open(project.dataDir, { keepLive: true });
+    try { setRunStatus(store, TASK, 'running'); store.updateRun(TASK, { title: 'live migration task' }); store.flush(); } finally { store.close(); }
     const before = projectSnapshot(project, { databaseBytes: true });
     const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
     try {
@@ -194,7 +196,8 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
       writeFileSync(cockpitLock, JSON.stringify({ ...JSON.parse(claim), url: 'http://127.0.0.1:4999' }));
       for (const args of [[], ['--dry-run']]) {
         expect(await cli(args)).toMatchObject({ code: 1, err: `Cannot migrate ${project.root} while it is in use. Stop what is listed, then retry:\n`
-          + `- cockpit pid ${other.pid} at http://127.0.0.1:4999: stop it` });
+          + `- cockpit pid ${other.pid} at http://127.0.0.1:4999: stop it\n`
+          + `- task ${TASK} live migration task (running): finish or cancel it` });
       }
       rmSync(cockpitLock);
       writeFileSync(migrationFencePaths(project.dataDir)!.lock, claim);
@@ -230,6 +233,22 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
     } finally { release(); }
     expect(projectSnapshot(project, { databaseBytes: true })).toEqual(before);
     expect((await cli([], { self: -1 })).code).toBe(0);
+  });
+
+  it('keeps the cockpit details when its older database prevents a live-task read', async () => {
+    await registerProject(project.root, undefined, testHome());
+    const release = holdCockpitLease(testHome(), 4998, 'older-store');
+    const db = new DatabaseSync(join(project.dataDir, 'runs.db'));
+    try { db.exec('PRAGMA user_version = 0'); } finally { db.close(); }
+    const before = projectSnapshot(project, { databaseBytes: true });
+    try {
+      const refused = await cli([], { self: -1 });
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain(`- cockpit pid ${process.pid} on port 4998`);
+      expect(refused.err).toContain('live tasks could not be read:');
+      expect(refused.err).toContain('schema');
+      expect(projectSnapshot(project, { databaseBytes: true })).toEqual(before);
+    } finally { release(); }
   });
 
   it('refuses while a task is live, lists it with the next step, and migrates once the task ends', async () => {

@@ -85,3 +85,16 @@ this command in place of the `sh -c '( … ) & echo $!'` recipe, and the launch 
 obtained another way still works. Its wake text for a PID that was already gone at
 registration changed from `exited, code unknown` to `PID N was not running when this wait
 was registered`; the stored outcome stays `exited`.
+
+With the release switch on, a project with no `.ai/cezar` path starts in
+`.ai/squawk/` immediately when that destination is absent or a real directory. Preparation and CLI writes mark it in the Git common
+directory before ordinary writes. An existing legacy path, even empty or holding
+only tracked files, keeps the existing migration checks. Switch-off paths and help
+remain unchanged. A migration refusal for a running cockpit also lists live tasks
+in the same message; it still exits 1 without moving state.
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.
