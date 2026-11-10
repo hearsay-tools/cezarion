@@ -1,3 +1,4 @@
+import { WaitCancellation } from './wait-cancellation.ts';
 import { seedWaits } from '../../runs/run-store.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeWorkerWait, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -21,6 +22,7 @@ it.each([true, false])('destroyed worker receipts retire only during an executin
   if (atBoundary) transitionTurnBoundary(f.state, { kind: 'turn-end', phase: 'ui-completed', session: f.wire });
   type Host = ConstructorParameters<typeof FamilyReconciler>[1];
   const reconciler = new FamilyReconciler(f.context, unused<Host>('family host', {
+    waitCancellation: new WaitCancellation(f.context, unused<ConstructorParameters<typeof WaitCancellation>[1]>('cancellation', { disarmWait: () => {} })),
     active: id => f.active.get(id), isActive: id => f.active.has(id), recoveringRun: () => false,
     retireSettledQuestions: () => undefined,
     resolveWorkerWait: () => true,

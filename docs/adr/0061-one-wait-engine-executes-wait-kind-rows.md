@@ -44,7 +44,8 @@ ADR 0021 still holds: waits are durable, an outcome commits with what it depends
 
 Implementation: [2026-11-09-wait-kind-table-and-engine.md](../../.ai/specs/2026-11-09-wait-kind-table-and-engine.md),
 `packages/cezar/src/workflows/run/wait-kinds.ts`, `packages/cezar/src/workflows/run/wait-engine.ts` and
-`packages/cezar/src/workflows/run/wait-resolve.ts` (created by the spec's slices), [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
+`packages/cezar/src/workflows/run/wait-resolve.ts` and
+`packages/cezar/src/workflows/run/wait-cancellation.ts` (created by the spec's slices), [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
 [wait-registration-write.ts](../../packages/cezar/src/runs/wait-registration-write.ts).
 
 Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts),
