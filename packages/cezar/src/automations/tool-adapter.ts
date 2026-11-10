@@ -16,6 +16,8 @@ import {
   type ScheduledTasksRequest,
 } from '@open-mercato/cezar-contract/scheduled-tasks';
 import type { AutomationToolService } from '../workflows/run/types.ts';
+import { projectPaths } from '../project-paths.ts';
+import { withProjectAdmission } from '../server/cockpit-ownership.ts';
 import { onceStatus, type AutomationService, type AutomationServiceProject } from './service.ts';
 import { isOnceSchedule, type AutomationDefinition } from './types.ts';
 
@@ -85,7 +87,7 @@ export function createAutomationToolService(
   const settled = (result: { ok: true; automation: AutomationDefinition } | { ok: false; status: 400 | 404 | 409; error: string }) =>
     result.ok ? { ok: true as const, task: view(result.automation) } : fromStatus(result);
 
-  return {
+  const tools: AutomationToolService = {
     async scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer> {
       const schedule = scheduleOf(request);
       if (isRefusal(schedule)) return schedule;
@@ -134,5 +136,12 @@ export function createAutomationToolService(
         }
       }
     },
+  };
+  // Session tools do not pass through the HTTP route admission middleware.
+  return {
+    scheduleTask: request => withProjectAdmission(projectPaths(project.root).write,
+      () => tools.scheduleTask(request), error => refuse('conflict', error.message)),
+    scheduledTasks: request => withProjectAdmission(projectPaths(project.root).write,
+      () => tools.scheduledTasks(request), error => refuse('conflict', error.message)),
   };
 }

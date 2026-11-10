@@ -27,6 +27,7 @@ import { ProjectContexts } from './project-context.ts';
 import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
+import { projectPaths } from '../project-paths.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
 // Server prewarming outlives the HTTP response. Keep unrelated host discovery
@@ -699,6 +700,7 @@ describe('GitHub automation API', () => {
   const bootIdlePoll = async (remote: boolean) => {
     const savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
+    vi.stubEnv('HSQ_DRY_RUN', '1');
     if (remote) withGithubRemote(root);
     else {
       execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root, stdio: 'ignore' });
@@ -707,7 +709,7 @@ describe('GitHub automation API', () => {
     const DAY = 86_400_000;
     const stale = new Date(Date.now() - 30 * DAY).toISOString();
     // A pre-schedule file: no `kind`, enabled, last polled a month ago.
-    writeFileSync(join(root, '.ai/cezar/automations.json'), JSON.stringify({
+    writeFileSync(join(projectPaths(root).write, 'automations.json'), JSON.stringify({
       version: 1,
       automations: [{
         id: 'idle-poll', revision: 1, name: 'Old poll', enabled: true, events: ['issue.opened'], intervalSeconds: 300,
@@ -715,7 +717,7 @@ describe('GitHub automation API', () => {
         createdAt: stale, updatedAt: stale,
       }],
     }));
-    writeFileSync(join(root, '.ai/cezar/automation-state.json'), JSON.stringify({
+    writeFileSync(join(projectPaths(root).write, 'automation-state.json'), JSON.stringify({
       version: 1,
       states: { 'idle-poll': { revision: 1, baselineAt: stale, cursor: { timestamp: stale }, lastSuccessAt: stale, nextCheckAt: stale } },
     }));
@@ -738,6 +740,7 @@ describe('GitHub automation API', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       vi.restoreAllMocks();
+      vi.unstubAllEnvs();
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
     }
@@ -747,7 +750,7 @@ describe('GitHub automation API', () => {
     const booted = await bootIdlePoll(true);
     expect(booted.launches).toBe(0);
     expect(booted.poll).toBe(0);
-    const automations = AutomationStore.open(join(root, '.ai/cezar'));
+    const automations = AutomationStore.open(projectPaths(root).write);
     expect(automations.logs({ automationId: 'idle-poll' })[0]).toMatchObject({ result: 'baseline', reason: expect.stringContaining('30 days idle') });
     const state = automations.state('idle-poll')!;
     expect(Date.parse(state.cursor!.timestamp)).toBeGreaterThan(Date.now() - 60_000);
@@ -760,7 +763,7 @@ describe('GitHub automation API', () => {
     const booted = await bootIdlePoll(false);
     expect(booted.launches).toBe(0);
     expect(booted.poll).toBe(0);
-    const automations = AutomationStore.open(join(root, '.ai/cezar'));
+    const automations = AutomationStore.open(projectPaths(root).write);
     expect(automations.logs({ automationId: 'idle-poll' })).toEqual([]);
     expect(automations.state('idle-poll')?.cursor?.timestamp).toBe(booted.stale);
   }, 20_000);
@@ -771,12 +774,13 @@ describe('GitHub automation API', () => {
   it('boot fires a past-due schedule on a project without a remote, once across two boots', async () => {
     const savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
+    vi.stubEnv('HSQ_DRY_RUN', '1');
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root, stdio: 'ignore' });
     execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: root, stdio: 'ignore' });
     const created = new Date(Date.now() - 86_400_000).toISOString();
     // Inside the 10-minute grace window, so this is an on-time `schedule` fire, not a catch-up.
     const occurrenceAt = new Date(Date.now() - 3 * 60_000).toISOString();
-    writeFileSync(join(root, '.ai/cezar/automations.json'), JSON.stringify({
+    writeFileSync(join(projectPaths(root).write, 'automations.json'), JSON.stringify({
       version: 1,
       automations: [{
         id: 'nightly', revision: 1, kind: 'schedule', name: 'Nightly deps', enabled: true,
@@ -787,7 +791,7 @@ describe('GitHub automation API', () => {
     const pastDue = () => {
       // Read-modify-write: keep whatever else the first boot persisted (a crash between the
       // launch and the state write is what leaves `nextRunAt` behind).
-      const path = join(root, '.ai/cezar/automation-state.json');
+      const path = join(projectPaths(root).write, 'automation-state.json');
       const current = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as { states?: Record<string, object> } : {};
       writeFileSync(path, JSON.stringify({ version: 1, states: { ...current.states, nightly: { ...current.states?.nightly, revision: 1, nextRunAt: occurrenceAt } } }));
     };
@@ -801,7 +805,7 @@ describe('GitHub automation API', () => {
         await new Promise<void>((resolve) => server.once('listening', () => resolve()));
         await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
         await vi.waitFor(() => {
-          const rows = AutomationStore.open(join(root, '.ai/cezar')).logs({ automationId: 'nightly' });
+          const rows = AutomationStore.open(projectPaths(root).write).logs({ automationId: 'nightly' });
           expect(rows.some((row) => row.result === awaited)).toBe(true);
         }, { timeout: 15_000, interval: 20 });
       } finally {
@@ -815,7 +819,7 @@ describe('GitHub automation API', () => {
       expect(launched).toHaveLength(1);
       expect(launched[0]!.automationTrigger).toMatchObject({ automationId: 'nightly', automationRevision: 1, trigger: 'schedule', occurrenceAt });
       expect(launched[0]!.task).toContain('Scheduled run context');
-      const automations = AutomationStore.open(join(root, '.ai/cezar'));
+      const automations = AutomationStore.open(projectPaths(root).write);
       expect(automations.latestReceipts().get(`nightly:schedule:${occurrenceAt}`)).toMatchObject({ status: 'launched', runId: launched[0]!.id });
       expect(Date.parse(automations.state('nightly')!.nextRunAt!)).toBeGreaterThan(Date.now());
 
@@ -824,9 +828,10 @@ describe('GitHub automation API', () => {
       await boot('duplicate');
       expect(store.listRuns().filter((run) => run.automationTrigger)).toHaveLength(1);
       expect(manager.startRun).toHaveBeenCalledTimes(1);
-      expect(AutomationStore.open(join(root, '.ai/cezar')).logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'duplicate' });
+      expect(AutomationStore.open(projectPaths(root).write).logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'duplicate' });
     } finally {
       vi.restoreAllMocks();
+      vi.unstubAllEnvs();
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
       else process.env.CEZ_DRY_RUN = savedDryRun;
     }

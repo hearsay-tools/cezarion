@@ -29,3 +29,13 @@ records remain readable from their source and are never copied by compaction.
 Log compaction retains the newest 10,000 legacy rows plus durable retry rows.
 `AutomationStoreOptions.logRetentionCount` is a test-only override so paging
 regressions can cross the compaction boundary with small fixtures.
+
+## Project moves at startup
+
+The boot context resolves its automation store when used. It must not retain a
+store opened before automatic project preparation. The coordinator compares each
+cached store's directory with `projectPaths(root).write`, both during refresh and
+at lookup, and replaces a handle whose directory changed. Initial discovery and
+late registration prepare projects before braking idle polls and arming schedules.
+A busy project keeps its legacy write root and its existing automation state.
+Baselines, cursors, schedule state, receipts and logs follow the same write root.
