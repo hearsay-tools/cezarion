@@ -17,9 +17,13 @@ import { RunStore } from '../runs/store.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
 import { CockpitOwnership, migrationFencePaths, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
-import { ProjectContexts } from '../server/project-context.ts';
+import { ProjectContexts, sweepRegisteredPreviewLeftovers } from '../server/project-context.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
+import { AutomationStore } from '../automations/store.ts';
+import { ArchiveOnMergeCoordinator } from '../server/archive-on-merge.ts';
+import { CompletionActionCoordinator } from '../server/completion-actions.ts';
+import { WorkspaceEventBus } from '../server/server.ts';
 import { startServer } from '../server/server.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { moveProjectWhenIdle } from './auto.ts';
@@ -32,6 +36,13 @@ import { buildMigrationProject, removeMigrationProject, TASK, type MigrationProj
  * test seam: at cockpit start and at a project's first open, an idle legacy project moves before
  * anything serves it; anything else live keeps it where it is, with a notice, until the next start.
  */
+
+// The preview sweep runs right after the post-listen preparation, in every version: the signal that
+// the preparation's continuation ran.
+vi.mock('../server/project-context.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../server/project-context.ts')>();
+  return { ...actual, sweepRegisteredPreviewLeftovers: vi.fn(actual.sweepRegisteredPreviewLeftovers) };
+});
 
 async function checkpoint(root: string, workspace: WorkerWorkspace): Promise<void> {
   await removeOwnedWorkspace(root, workspace, undefined, async () => { throw new Error('stopped after the checkpoint'); }).catch(() => undefined);
@@ -55,6 +66,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     clearProjectProbeCache();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dispose of disposers.splice(0)) dispose();
     for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
     useTestHome(savedHome ? Home.sandbox(savedHome) : undefined);
@@ -240,6 +252,84 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       warn.mockRestore();
       vi.unstubAllEnvs();
     }
+  });
+
+  /** A cockpit server over a boot repo, with warm-up off and the release switch seam on. */
+  async function server(options: { workspaceEvents?: WorkspaceEventBus } = {}) {
+    vi.stubEnv('CEZ_PROJECT_WARMUP', '0');
+    const boot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-auto-move-boot-'));
+    temporary.push(boot);
+    execFileSync('git', ['init', '-q', boot]);
+    const bootId = (await registerProject(boot, undefined, testHome())).id!;
+    const ownership = new CockpitOwnership();
+    owners.push(ownership);
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, rebrand: true, listProjects: () => listProjects(undefined, testHome()) });
+    // The boot project's store lives outside it, so the boot project holds no legacy state to move:
+    // the legacy project is the preparation's last real work.
+    const bootData = mkdtempSync(join(realpathSync(tmpdir()), 'cez-auto-move-boot-data-'));
+    temporary.push(bootData);
+    const bootStore = RunStore.open(bootData, { keepLive: true });
+    const started = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership, legacyCanary: true,
+      manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts, ...options }, 0);
+    disposers.push(() => { started.close(); contexts.disposeAll(); bootStore.close(); vi.unstubAllEnvs(); });
+    return started;
+  }
+
+  it('starts no archive or completion job once the cockpit closed during the preparation', async () => {
+    await registerProject(project.root, undefined, testHome());
+    const archive = vi.spyOn(ArchiveOnMergeCoordinator.prototype, 'start');
+    const completion = vi.spyOn(CompletionActionCoordinator.prototype, 'start');
+    const lines: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((line: string) => { lines.push(String(line)); });
+    let cockpit: Awaited<ReturnType<typeof server>> | undefined;
+    // The cockpit closes in the middle of the legacy project's move.
+    const fence = CockpitOwnership.prototype.fenceProject;
+    vi.spyOn(CockpitOwnership.prototype, 'fenceProject').mockImplementation(function (this: CockpitOwnership, ...args) {
+      cockpit?.close();
+      return fence.apply(this, args);
+    });
+    vi.mocked(sweepRegisteredPreviewLeftovers).mockClear();
+    try {
+      cockpit = await server();
+      // bound: hang guard; the preparation's continuation runs once the move that was running ends.
+      await vi.waitFor(() => expect(sweepRegisteredPreviewLeftovers).toHaveBeenCalled(), { timeout: 15_000 });
+      expect(lines.some(line => line.startsWith('[hsq] Moved the state of'))).toBe(true);
+      expect(archive).not.toHaveBeenCalled();
+      expect(completion).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      vi.mocked(CockpitOwnership.prototype.fenceProject).mockRestore();
+    }
+  });
+
+  it('prepares a project registered after start before the automation coordinator opens its state', async () => {
+    const events = new WorkspaceEventBus();
+    const movedWhenOpened: boolean[] = [];
+    const store = AutomationCoordinator.prototype.store;
+    vi.spyOn(AutomationCoordinator.prototype, 'store').mockImplementation(function (this: AutomationCoordinator, id: string, root?: string) {
+      if (root === project.root) movedWhenOpened.push(movedState());
+      return store.call(this, id, root);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const cockpit = await server({ workspaceEvents: events });
+      if (!cockpit.listening) await once(cockpit, 'listening');
+      const added = await registerProject(project.root, undefined, testHome());
+      events.emit('project-added', { project: { id: added.id, root: project.root, status: 'ok' } });
+      // bound: hang guard; the late project's automation store opens once it is prepared.
+      await vi.waitFor(() => expect(movedWhenOpened.length).toBeGreaterThan(0), { timeout: 15_000 });
+      expect(movedWhenOpened[0]).toBe(true);
+    } finally { warn.mockRestore(); }
+  });
+
+  it('does not move a project while an automation of this cockpit holds its lease', async () => {
+    const lease = AutomationStore.open(project.dataDir).acquireLease();
+    expect(lease).toBeDefined();
+    try {
+      const result = await moveProjectWhenIdle(project.root, { ownership: cockpit(true).ownership, homes: [], rebrand: true, log: () => undefined });
+      expect(result).toEqual({ status: 'blocked', reason: 'an automation of this cockpit holds its lease' });
+      expect(movedState()).toBe(false);
+    } finally { lease?.release(); }
   });
 
   it('moves nothing with the release switch off, as shipped', async () => {

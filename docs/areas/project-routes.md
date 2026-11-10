@@ -198,8 +198,11 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   path that touches a project before or without its context runs the same prepare step
   (`prepareProject`: journal recovery, then the automatic move): the context build, the
   post-listen preparation of every registered project (before the preview sweep, automation
-  discovery, the scheduler and the archive and completion ticks start), the ticks' project
-  lists and the cold run index. With the switch false it is the journal recovery of before.
+  discovery, the scheduler and the archive and completion ticks start; it stops between projects,
+  and those starts are skipped, once the cockpit is closing), the automation coordinator's
+  project list and a project added later, the ticks' project lists and the cold run index. A
+  project whose automation lease this cockpit holds is not moved (the move waits for the next
+  start). With the switch false it is the journal recovery of before.
   CLI entries recover journals but never start a move. The switch must not turn on before the
   per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
   runs are fallback runs.

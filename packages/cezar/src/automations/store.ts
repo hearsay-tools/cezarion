@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 import {
   automationDefinitionSchema,
@@ -825,13 +825,22 @@ function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino:
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+/** The lease files this process holds, so a project move never renames one from under its holder. */
+const heldLeases = new Set<string>();
+
+/** Whether this process holds an automation lease under `dataDir`. */
+export function automationLeaseHeld(dataDir: string): boolean {
+  const inside = resolve(dataDir) + sep;
+  return [...heldLeases].some(path => path.startsWith(inside));
+}
+
 export class AutomationLease {
   private released = false;
 
   constructor(
     private readonly path: string,
     private readonly fd: number,
-  ) {}
+  ) { heldLeases.add(resolve(path)); }
 
   isCurrent(): boolean {
     try { return sameFile(fstatSync(this.fd), statSync(this.path)); }
@@ -841,6 +850,7 @@ export class AutomationLease {
   release(): void {
     if (this.released) return;
     this.released = true;
+    heldLeases.delete(resolve(this.path));
     try {
       if (this.isCurrent()) unlinkSync(this.path);
     } catch {

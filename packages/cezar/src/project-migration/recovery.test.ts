@@ -25,7 +25,7 @@ import { createApp } from '../server/server.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { writeSettledJournal } from './project-migration.testkit.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
-import { prepareBeforeTicks } from './auto.ts';
+import { prepareBeforeTicks, prepareProjects } from './auto.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 
 /**
@@ -169,6 +169,19 @@ describe('early recovery of an unfinished project migration', () => {
     expect(existsSync(lazy.journal)).toBe(false);
     expect(await contexts.warmAll([{ id: 'warm', root: warm.root, status: 'not-git' }])).toEqual(['warm']);
     expect(existsSync(warm.journal)).toBe(false);
+  });
+
+  it('stops preparing projects once the cockpit is closing', async () => {
+    const first = journaled(), second = journaled();
+    let closing = false;
+    await prepareProjects([{ root: first.root }, { root: second.root }], { homes: [], stopped: () => {
+      // The cockpit closes while the first project is prepared.
+      const answer = closing;
+      closing = true;
+      return answer;
+    } });
+    expect(existsSync(first.journal)).toBe(false);
+    expect(existsSync(second.journal)).toBe(true);
   });
 
   it('finishes the journal before the archive and completion ticks check admission', async () => {

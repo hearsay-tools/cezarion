@@ -8,6 +8,7 @@ import { moveUnderFence } from './offline.ts';
 import { planProjectMigration } from './plan.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
 import type { ArchiveOnMergeDeps } from '../server/archive-on-merge.ts';
+import { automationLeaseHeld } from '../automations/store.ts';
 import type { MigrationFault } from './steps.ts';
 
 /**
@@ -44,6 +45,8 @@ async function blocker(root: string, homes: readonly Home[], self: number): Prom
   const cockpits = await projectCockpits(root, homes, self);
   const tasks = projectLiveTasksOffline(root);
   const reasons = [
+    // A lease this process holds would be renamed from under its holder (a schedule fire opening the project).
+    ...(automationLeaseHeld(projectPaths(root).write) ? ['an automation of this cockpit holds its lease'] : []),
     ...cockpits.map(cockpit => `cockpit pid ${cockpit.pid}${cockpit.url ? ` at ${cockpit.url}` : cockpit.port ? ` on port ${cockpit.port}` : ''} serves it`),
     ...tasks.map(task => `task ${task.id} ${task.title} is live (${task.state})`),
   ];
@@ -142,11 +145,13 @@ export async function prepareProject(root: string, options: {
 }
 
 /** Prepare `projects` one after another; a project whose recovery fails or whose move fails after
- *  its journal exists is logged and stays refused by admission, and never stops the others. */
+ *  its journal exists is logged and stays refused by admission, and never stops the others. Once
+ *  `stopped` answers true (the cockpit is closing), no further project is prepared. */
 export async function prepareProjects<T extends { root: string; status?: string }>(projects: T[], options: {
-  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; rebrand?: boolean | undefined;
+  ownership?: CockpitOwnership | undefined; homes: readonly Home[]; rebrand?: boolean | undefined; stopped?: () => boolean;
 }): Promise<T[]> {
   for (const project of projects) {
+    if (options.stopped?.()) break;
     if (project.status === 'missing') continue;
     await prepareProject(project.root, options).catch((error: unknown) => {
       console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
@@ -159,4 +164,12 @@ export async function prepareProjects<T extends { root: string; status?: string 
  *  tick's admission check and its maintenance store. */
 export function prepareBeforeTicks(options: Parameters<typeof prepareProjects>[1], deps: ArchiveOnMergeDeps): ArchiveOnMergeDeps {
   return { ...deps, projects: async () => { return prepareProjects([...await deps.projects()], options); } };
+}
+
+/** Whether a cockpit server is closing: set when its `close` is called and by `stop`, before anything closes. */
+export function closingSignal(server: { close: (...args: never[]) => unknown }): { stopped: () => boolean; stop: () => void } {
+  let closing = false;
+  const close = server.close.bind(server);
+  server.close = ((...args: never[]) => { closing = true; return close(...args); }) as typeof server.close;
+  return { stopped: () => { return closing; }, stop: () => { closing = true; } };
 }
