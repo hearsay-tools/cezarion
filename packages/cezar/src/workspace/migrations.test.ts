@@ -28,9 +28,9 @@ describe('workspace migrations', () => {
   });
 
   afterEach(() => {
+    chmodSync(testHome().config, 0o700); // undo the unwritable-home test before cleanup
     if (originalHome === undefined) useTestHome(undefined);
     else useTestHome(originalHome ? Home.sandbox(originalHome) : undefined);
-    chmodSync(testHome().config, 0o700); // undo the unwritable-home test before cleanup
     rmSync(home, { recursive: true, force: true });
     rmSync(repoRoot, { recursive: true, force: true });
     vi.restoreAllMocks();

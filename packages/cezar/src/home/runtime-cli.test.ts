@@ -29,6 +29,7 @@ it('keeps init command generation inside the CLI home boundary', async () => {
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const root = mkdtempSync(join(tmpdir(), 'cli-init-'));
+  const expectedWriteRoot = projectPaths(root).write;
   const argv = process.argv;
   let completed!: () => void;
   const done = new Promise<void>(resolve => { completed = resolve; });
@@ -41,7 +42,7 @@ it('keeps init command generation inside the CLI home boundary', async () => {
     await import('../index.ts');
     await done;
     expect(log).toHaveBeenCalledWith(`\nDone. Start the cockpit with: npx ${productIdentity().npmAlias}`);
-    expect(readFileSync(join(projectPaths(root).write, 'workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
+    expect(readFileSync(join(expectedWriteRoot, 'workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
   } finally {
     process.argv = argv;
     vi.restoreAllMocks();

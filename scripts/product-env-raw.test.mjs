@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
@@ -41,7 +42,7 @@ test('project-probe benchmark isolates its child home despite an inherited prefe
   const root = mkdtempSync(join(tmpdir(), 'project-probe-env-'));
   try {
     // bound: one repeat includes nine real five-second cache expirations plus fixture setup.
-    await promisify(execFile)(process.execPath, ['--import', 'tsx', new URL('../packages/cezar/scripts/benchmark-project-probes.mjs', import.meta.url).pathname, '--repeats', '1', '--out', join(root, 'results.json')], {
+    await promisify(execFile)(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../packages/cezar/scripts/benchmark-project-probes.mjs', import.meta.url)), '--repeats', '1', '--out', join(root, 'results.json')], {
       timeout: 120_000, env: {...process.env, HSQ_HOME: join(root, 'wrong-inherited-home')},
     });
     const results = JSON.parse(readFileSync(join(root, 'results.json'), 'utf8'));
@@ -80,7 +81,7 @@ test('run-store benchmark child opens its isolated home in the selected layout',
   const root = mkdtempSync(join(tmpdir(), 'run-store-home-'));
   const result = join(root, 'result.json');
   try {
-    execFileSync(process.execPath, ['--import', 'tsx', new URL('../packages/cezar/scripts/benchmark-run-store.ts', import.meta.url).pathname,
+    execFileSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../packages/cezar/scripts/benchmark-run-store.ts', import.meta.url)),
       '--child', '--size', '1', '--profile', 'legacy', '--samples', '1', '--budget-seconds', '1',
       '--duration', '1', '--metrics', 'open', '--result', result], {
       timeout: 30_000, // bound: one store-open sample plus fixture startup and teardown.

@@ -1,3 +1,4 @@
+import { projectPaths } from '../../src/project-paths.ts';
 import { REBRAND_SWITCH } from '../../src/home/switch.ts';
 import { productName } from '../../src/home/display.ts';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -111,6 +112,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
 
     const fixtureRepo = join(root, 'fixture-repo');
     await mkdir(fixtureRepo);
+    const expectedDataDir = projectPaths(fixtureRepo).write;
     await execFile('git', ['init', '--initial-branch=main'], { cwd: fixtureRepo });
     await writeFile(join(fixtureRepo, 'README.md'), '# E2E fixture\n', 'utf8');
     await execFile('git', ['add', 'README.md'], { cwd: fixtureRepo });
@@ -132,13 +134,13 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
     });
     assert.match(run.stdout, /run (done|review)/);
 
-    const runs = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
+    const runs = readPersistedRuns(expectedDataDir);
     assert.equal(runs.length, 1);
     assert.ok(['done', 'review'].includes(runs[0]?.status ?? ''), 'the dry-run workflow should finish successfully');
     // The run database and its sidecars stay out of the user's repository history.
-    const dataIgnore = (await readFile(join(fixtureRepo, '.ai', 'cezar', '.gitignore'), 'utf8')).split('\n');
+    const dataIgnore = (await readFile(join(expectedDataDir, '.gitignore'), 'utf8')).split('\n');
     for (const entry of ['runs.db', 'runs.db-wal', 'runs.db-shm', 'runs.json.pre-sqlite.bak', 'runs.json.pre-sqlite.*']) {
-      assert.ok(dataIgnore.includes(entry), `.ai/cezar/.gitignore should list ${entry}`);
+      assert.ok(dataIgnore.includes(entry), `${expectedDataDir}/.gitignore should list ${entry}`);
     }
 
     // Boot wiring (spec 2026-07-20-multi-project-workspace, step 1.5): the
@@ -170,7 +172,7 @@ await probe({ Client, StdioClientTransport, CiToolController, createRunner, piEx
       },
       'headless run must honor the global provider preference',
     );
-    const runsAfterDisabledAttempt = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
+    const runsAfterDisabledAttempt = readPersistedRuns(expectedDataDir);
     assert.equal(runsAfterDisabledAttempt.length, 1, 'a disabled provider must not create a run');
     workspace.disabledProviders = [];
     Home.seed(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, workspace);
@@ -203,12 +205,12 @@ if (args.join(' ') === 'auth status --json') {
         maxBuffer: 10 * 1024 * 1024,
       },
     ).catch(() => undefined);
-    const runsAfterAuthFailure = readPersistedRuns(join(fixtureRepo, '.ai', 'cezar'));
+    const runsAfterAuthFailure = readPersistedRuns(expectedDataDir);
     assert.equal(runsAfterAuthFailure.length, 2, 'the runtime-auth fixture creates exactly one run');
     const authFailureRun = runsAfterAuthFailure.at(0);
     assert.ok(authFailureRun, 'the auth-failure fixture creates a run');
     const authFailureEvents = (await readFile(
-      join(fixtureRepo, '.ai', 'cezar', 'runs', `${authFailureRun.id}.ndjson`),
+      join(expectedDataDir, 'runs', `${authFailureRun.id}.ndjson`),
       'utf8',
     )).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
     assert.ok(

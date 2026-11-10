@@ -150,7 +150,9 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
 describe('without a release', () => {
   it('registers migration only behind the release switch, and refuses to run without the fence held by this process', async () => {
-    expect(SUBCOMMAND_NAMES.some(name => /migrat/.test(name))).toBe(REBRAND_SWITCH);
+    for (const name of ['migrate', 'server-migrate', 'migrate-project']) {
+      expect(SUBCOMMAND_NAMES.includes(name)).toBe(REBRAND_SWITCH);
+    }
     const src = join(import.meta.dirname, '..');
     const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter(path => path.endsWith('.ts') && !/\.(?:test|testkit)\.ts$/.test(path) && !path.startsWith('project-migration'))

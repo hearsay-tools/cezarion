@@ -1,3 +1,4 @@
+import { projectPaths } from '../../src/project-paths.ts';
 import { prepareOperatorHome } from '../../src/home/entry.ts';
 import { Home } from '../../src/home/home.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -158,12 +159,13 @@ for (const host of ['127.0.0.1', '127.0.0.2']) for (const restartExact of [false
   const f = await fixture();
   try {
     const repo = await f.repo('repo');
+    const expectedDataDir = projectPaths(repo).write;
     // A loopback-only probe on 127.0.0.1 would miss the 127.0.0.2 occupant.
     const { port } = await f.occupy(0, host);
     refused(await f.start(repo, ['--bind-host', host, '--port', String(port), ...(restartExact ? ['--restart-exact'] : [])]).outcome(), port);
-    assert.equal(existsSync(join(repo, '.ai/cezar/runs')), false, 'no store initialized');
+    assert.equal(existsSync(join(expectedDataDir, 'runs')), false, 'no store initialized');
     assert.equal(existsSync(Home.sandbox(join(f.root, 'home')).workspaceConfig), false, 'no workspace initialized');
-    assert.equal(existsSync(join(repo, '.ai/cezar/cockpit.lock')), false);
+    assert.equal(existsSync(join(expectedDataDir, 'cockpit.lock')), false);
     assert.equal((await localGet(`http://${host}:${port}`)).text, 'ordinary server');
   } finally { await f.close(); }
 });

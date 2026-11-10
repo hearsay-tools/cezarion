@@ -1,3 +1,4 @@
+import { projectPaths } from '../../src/project-paths.ts';
 import { REBRAND_SWITCH } from '../../src/home/switch.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -47,6 +48,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
     assert.equal(shell.code, 1); assert.equal(JSON.parse(shell.stdout).code, 'unavailable_transport');
 
     const repo = join(root, 'repo'); await mkdir(repo);
+    const expectedDataDir = projectPaths(repo).write;
     await execFile('git', ['init', '-q', '-b', 'main'], { cwd: repo });
     await execFile('git', ['config', 'gc.auto', '0'], { cwd: repo });
     await execFile('git', ['config', 'maintenance.auto', 'false'], { cwd: repo });
@@ -55,7 +57,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
       cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
     });
     assert.match(run.stdout, /run (done|review)/);
-    const records = readPersistedRuns(join(repo, '.ai/cezar'));
+    const records = readPersistedRuns(expectedDataDir);
     assert.equal(records.length, 1); assert.equal(records[0].delegation.role, 'root');
     assert.deepEqual(records[0].delegation.receipts, []);
     assert.doesNotMatch(JSON.stringify(records), /CEZ_DELEGATION_TOKEN|CEZ_DELEGATION_URL/);
