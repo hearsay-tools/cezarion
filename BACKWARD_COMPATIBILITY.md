@@ -46,7 +46,12 @@ honoring a startup acknowledgement; it refuses conflicting destination data.
 System-package installs keep a working old app and a manual move notice.
 
 The staged project command `hsq migrate-project [--dry-run] [--repo <dir>]` is registered,
-advertised and runs exactly when `REBRAND_SWITCH` is true. With the switch false, as
+advertised and runs exactly when `REBRAND_SWITCH` is true. With the switch true, a cockpit
+also moves an idle legacy project by itself at start or at the project's first open; with
+anything else live it leaves the project in place, serves it from both folders, logs what
+blocks the move and tries again at the next start. The switch must not turn on before the
+per-project write root follows moved state (hearsay-tools/cezarion#3150): until then a moved
+project's runs are read-only fallback runs. With the switch false, as
 shipped, help and dispatch omit it (`cez migrate-project` is an unknown command, exit 1), no
 route or setting exposes it, and every ordinary write stays under `.ai/cezar/`. Only the user
 runs it, offline: it refuses while a cockpit serves the project or a task is live and names

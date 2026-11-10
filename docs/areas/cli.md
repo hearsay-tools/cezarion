@@ -56,7 +56,10 @@ fence, moves the state and releases both. A dry run holds `cockpit.lock` and pas
 admission before it plans; it moves nothing. It prints the plan, then `Dry run: nothing
 was moved or rewritten.` or `Migration complete.`; it prints the `git mv` commands for
 tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted
-journal) print one message to stderr and exit 1.
+journal) print one message to stderr and exit 1. A cockpit with the switch on moves an idle
+project by itself at start or first open
+([automatic move](project-routes.md#project-migration-command-and-early-recovery)); CLI
+entries (`run`, `init`, `artifact`, ...) only recover journals and never start a move.
 
 ## Rules
 

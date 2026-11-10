@@ -173,7 +173,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
 
 - **Command.** `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is
   registered, advertised and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it
-  is an unknown command. Only the user runs it. Tests pass the switch as a parameter
+  is an unknown command. Only the user runs it, with the cockpit stopped: it covers CLI-only
+  users and projects the automatic move left in place. Tests pass the switch as a parameter
   (`loadSubcommand`, `main`); the constant never changes.
 - **Offline run.** `migrateProjectOffline` (`project-migration/offline.ts`): refuse while
   anything is live (above), finish an unfinished journal (and report it as the migration),
@@ -181,6 +182,21 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   release both claims. A dry run holds only `cockpit.lock` (in the directory that exists),
   passes admission and plans; when it finished an unfinished journal first, it reports what that
   recovery moved and rewrote before the plan of what remains.
+- **Automatic move.** With `REBRAND_SWITCH` true, the cockpit moves an idle legacy project
+  itself (`moveProjectWhenIdle`, `project-migration/auto.ts`): at start for the boot project,
+  before the listener, and at the first open of every other project (lazy build and warm-up),
+  before any ordinary read or task start. Journal recovery runs first. When `.ai/cezar/` holds
+  state to move and the plan has no blocker or conflict, the same live check as the command
+  runs, without counting the cockpit's own process (its `cockpit.lock` claim and its presence
+  lease): with nothing live, the offline move runs under the cockpit's own claim
+  (`moveUnderFence`). With anything live (another cockpit, a task from before the restart, a
+  headless run), nothing moves: the project is served from both folders as before, a log
+  notice names what blocks the move, and the next start tries again (one attempt per project
+  per cockpit run). The notice of a finished move lists the `git mv` commands for tracked
+  files. A move that fails after its journal exists closes the project through recovery. CLI
+  entries recover journals but never start a move. The switch must not turn on before the
+  per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
+  runs are fallback runs.
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
   before anything reads the project, in both switch states. Without a journal it costs one

@@ -149,18 +149,20 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
 
 describe('without a release', () => {
-  it('keeps the release switch off, starts a migration only from the switch-gated command, and refuses to run without the fence held by this process', async () => {
+  it('keeps the release switch off, starts a migration only behind the release switch, and refuses to run without the fence held by this process', async () => {
     expect(REBRAND_SWITCH).toBe(false);
     expect(SUBCOMMAND_NAMES.some(name => /migrat/.test(name))).toBe(false);
     const src = join(import.meta.dirname, '..');
     const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter(path => path.endsWith('.ts') && !/\.(?:test|testkit)\.ts$/.test(path) && !path.startsWith('project-migration'))
       .map(path => ({ path, text: readFileSync(join(src, path), 'utf8') }));
-    // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry, and the one switch-gated start.
+    // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry, and the switch-gated starts.
     expect(sources.filter(({ text }) => /project-migration\//.test(text)).map(({ path }) => path).sort()).toEqual([
       'artifacts/cli.ts', 'cli-dispatch.ts', 'self-update/checkouts.ts', 'serve-command.ts', 'server/project-context.ts',
       'server/server.ts', 'server/workspace-projects.ts', 'subcommands.ts']);
-    expect(sources.filter(({ text }) => /\bmigrateProject(?:Offline)?\(|project-migration\/cli\.ts/.test(text)).map(({ path }) => path)).toEqual(['subcommands.ts']);
+    // The command, and the cockpit's automatic move at start and first open, each behind the release switch.
+    expect(sources.filter(({ text }) => /\bmigrateProject(?:Offline)?\(|\bmoveProjectWhenIdle\(|project-migration\/cli\.ts/.test(text)).map(({ path }) => path).sort())
+      .toEqual(['serve-command.ts', 'server/project-context.ts', 'subcommands.ts']);
     const root = join(import.meta.dirname, 'nowhere');
     const unheld = { lock: join(root, '.ai/squawk-migration.lock'), journal: join(root, '.ai/squawk-migration.json'), release: () => undefined };
     await expect(migrateProject({ repoRoot: root, fence: unheld })).rejects.toThrow(/needs the project's migration fence/);

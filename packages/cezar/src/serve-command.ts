@@ -24,10 +24,11 @@ import { openUrl } from './open-url.ts';
 import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner, stopServe } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 import { recoverProjectMigration } from './project-migration/recovery.ts';
+import { moveProjectWhenIdle } from './project-migration/auto.ts';
 import { acquireServeListener, onTerminal, ignoreHangupOffTerminal, waitForHealth } from './serve-listener.ts';
 
 export const defaultServeDeps = {
-  CockpitOwnership, recoverProjectMigration, acquireServeListener, WorkspaceSemaphore, TaskWebhooks, previewToolEnabled, PreviewHost,
+  CockpitOwnership, recoverProjectMigration, moveProjectWhenIdle, acquireServeListener, WorkspaceSemaphore, TaskWebhooks, previewToolEnabled, PreviewHost,
   cockpitOriginFor, ToolActivityTracker, RunManager, createRunner, sweepMergedBranches, DelegationController,
   ProviderAuthService, createHostDiscovery, WorkspaceEventBus, ProviderRuntimeAuthObserver, detectEnvironment,
   getRepoInfo, reconcileServeWorktrees, recoverServeProject, checkForUpdate, warnServeBind, createServeSelfUpdate,
@@ -56,6 +57,8 @@ export async function serveCommand(
   // An unfinished project migration finishes before anything reads the project; the claim it
   // takes is the one boot keeps. A failure ends the boot with why.
   await deps.recoverProjectMigration(repoRoot, { ownership, keep: true });
+  // With the release switch, an idle legacy project moves to .ai/squawk/ before anything serves it.
+  await deps.moveProjectWhenIdle(repoRoot, { ownership, homes: [home] });
   await ownership.acquire(projectPaths(repoRoot).write);
   // Hold the real listener before workspace writes, recovery or background resources.
   // A probe followed by a later bind would allow another cwd to win in between.

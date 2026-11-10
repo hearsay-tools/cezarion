@@ -33,12 +33,21 @@ export async function migrateProjectOffline(root: string, options: {
     }
     if (recovered) return migrationAnswer(recovered);
     assertProjectAdmitted(dataDir);
-    // The live-task check reads the run stores without writing: a refusal writes nothing.
-    const fence = await ownership.fenceProject(dataDir, { liveTasks: () => projectLiveTasksOffline(root) });
-    try {
-      return migrationAnswer(await migrateProject({ repoRoot: root, fence, ...(options.fault ? { fault: options.fault } : {}) }));
-    } finally { fence.release(); }
+    return await moveUnderFence(root, ownership, options.fault);
   } finally {
     ownership.releaseAll();
   }
+}
+
+/**
+ * The move itself, shared by the command and the cockpit's automatic move: take the fence with
+ * `ownership` (which owns, or then owns, `cockpit.lock`), refuse while any task is live (the check
+ * reads the run stores without writing, so a refusal writes nothing), run the engine, release the
+ * fence. The caller keeps or releases `cockpit.lock`.
+ */
+export async function moveUnderFence(root: string, ownership: CockpitOwnership, fault?: MigrationFault): Promise<ProjectMigrationAnswer> {
+  const fence = await ownership.fenceProject(projectPaths(root).write, { liveTasks: () => projectLiveTasksOffline(root) });
+  try {
+    return migrationAnswer(await migrateProject({ repoRoot: root, fence, ...(fault ? { fault } : {}) }));
+  } finally { fence.release(); }
 }

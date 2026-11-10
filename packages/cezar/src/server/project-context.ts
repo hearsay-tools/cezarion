@@ -28,6 +28,7 @@ import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, 
 import { isLiveRecord } from '../runs/run-row.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { recoverProjectMigration } from '../project-migration/recovery.ts';
+import { moveProjectWhenIdle } from '../project-migration/auto.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -101,6 +102,8 @@ export interface ProjectContextDeps {
   toolActivity?: ToolActivityTracker | undefined;
   /** Builds each manager's runners: the entry point's choice (hearsay-tools/cezarion#2939). */
   createRunner: RunnerFactory;
+  /** Test seam for the release switch of the automatic project move; production uses `REBRAND_SWITCH`. */
+  rebrand?: boolean | undefined;
 }
 
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
@@ -493,6 +496,9 @@ export class ProjectContexts {
     const dataDir = projectPaths(project.root).write;
     // An unfinished migration finishes first, before any read; this build then keeps the claim it took.
     await recoverProjectMigration(project.root, { ownership: this.deps.ownership, keep: true });
+    // With the release switch, an idle legacy project moves before its first read or task start.
+    await moveProjectWhenIdle(project.root, { ownership: this.deps.ownership, homes: [this.deps.home],
+      ...(this.deps.rebrand === undefined ? {} : { rebrand: this.deps.rebrand }) });
     if (stale()) throw new ProjectContextsClosedError();
     return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
   }
