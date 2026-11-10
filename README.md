@@ -1766,25 +1766,27 @@ Ask an agent to measure a file, function or module for a scoped stats report.
 That path uses available coverage and reports missing CRAP without starting the
 PR process. Ask explicitly for fresh coverage when needed.
 
-The skill's pre-PR path selects changed functions, fixes small problems, and files larger
-inherited refactors as `code-quality-improvement` issues. The scan report defines
-the limits: CRAP 30 and complexity 20. Scores equal to a limit pass. Copy the
-whole skill directory to use the tool in another repository.
-
-Run the complete pre-PR measurement with the bundled command:
+The local pre-PR gate uses Squeal 0.1.423's one-shot changed-function check:
 
 ```bash
-node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
-  --runner node --test scripts/metrics.test.mjs --test scripts/changed-functions.test.mjs \
-  --test scripts/quality-check.test.mjs --node-import scripts/test-git-env.mjs \
-  --output .ai/analysis/code-quality.md
+squeal code --base origin/main --json > /tmp/code-quality.json
 ```
 
-Select relevant tests for the changes. For Vitest, use `--runner vitest` and
-`--project` where needed. The command collects coverage once for all changed
-functions and writes Markdown plus JSON. Exit codes distinguish a pass (0),
-exceeded limits (1), and incomplete measurement (2). See the skill for how to
-resolve findings before opening a PR.
+It checks changed JS/TS functions, including test callbacks and nested functions,
+with complexity at most 20 and CRAP at most 30. Equality passes. The default
+budget is 600 seconds. The base commit supplies the policy.
+
+A pass requires complete evidence: no skipped, incomplete or uncounted functions,
+failed or unfinished tests, or exhausted budget. Exit 0 alone is insufficient
+because a report can contain skipped functions. Exits 1, 3 and 2 mean violations,
+incomplete measurement and usage/setup errors. Missing Squeal or unsupported
+evidence blocks the PR. There is no bundled fallback or inherited-refactor
+deferral. See the [pre-PR procedure](.ai/skills/check-code-quality/references/pre-pr.md)
+for report identity, completeness checks and reviewable evidence.
+
+CI and explicit statistics commands keep their existing paths during this
+local-first rollout. CI artifact reuse and supported exceptions await the
+remaining work in hearsay-tools/squeal#167.
 
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
