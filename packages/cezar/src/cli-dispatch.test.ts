@@ -84,7 +84,10 @@ describe('main dispatch', () => {
     expect(help).toContain('      --no-workers');
     expect(help).toContain('      --no-messaging');
     expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
-    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    // With the switch on, help names the selected Home's paths: path resolution only.
+    if (REBRAND_SWITCH) expect(f.deps.resolveCliHome).toHaveBeenCalledBefore(f.deps.console.log);
+    else expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
     expect(f.processStub.exitCode).toBeUndefined();
   });
 
