@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertTestHomeOutsideAccountHome } from './protected-roots.ts';
 import { replacePrivate } from './private-files.ts';
 import { withHomeLock } from './write-lock.ts';
 import { assertHomeMetadata } from './boundary.ts';
@@ -52,8 +53,12 @@ export function writeMigrationMarker(root: string, migratedFrom: string, state: 
   });
 }
 
-/** Only sandbox construction and marker-creating entry points call this. Never downgrades live. */
+/**
+ * Only sandbox construction and marker-creating entry points call this. Never downgrades live.
+ * A test request refuses an account root in every process, before it can return an existing marker.
+ */
 export function createInstallMarker(root: string, kind: InstallMarker['kind']): InstallMarker {
+  if (kind === 'test') assertTestHomeOutsideAccountHome(root);
   assertCezarHomeWriteIsSandboxed(root);
   const marker = readInstallMarker(root);
   if (marker) return marker;

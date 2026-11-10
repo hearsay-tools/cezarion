@@ -1,10 +1,9 @@
-import { homedir, userInfo } from 'node:os';
-import { lstatSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
 import { isOmpProfileName } from './core/agent-profiles.ts';
 
-import { nativePathPlatform, platformKindRoots } from './home/kind-roots.ts';
+import { assertOutsideAccountHome } from './home/protected-roots.ts';
 import type { Home } from './home/home.ts';
 
 /**
@@ -16,40 +15,10 @@ export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.Proce
   const testing = process.env.VITEST || process.env.NODE_TEST_CONTEXT || process.env.JEST_WORKER_ID
     || Object.keys(process.env).some((key) => key.startsWith('STRYKER_'));
   if (!testing) return;
-  const accountHome = userInfo().homedir;
-  const protectedRoots = [join(accountHome, '.cezar'), ...Object.values(platformKindRoots(accountHome, { TMPDIR: process.env.TMPDIR }, nativePathPlatform))];
-  const refusal = () => new Error(
+  assertOutsideAccountHome(path, () => new Error(
     `[cez] refusing to write ${path} from a test run — CEZ_HOME is not pinned to a sandbox. ` +
       'Pin it to a test sandbox so the suite never touches the real cezar home.',
-  );
-  // Resolve existing ancestors too: the destination itself may not exist yet.
-  function canonicalTarget(target: string, rejectDangling = true): string {
-    let ancestor = resolve(target);
-    const remaining: string[] = [];
-    for (;;) {
-      try { return join(realpathSync(ancestor), ...remaining); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
-      }
-      // A dangling link has no canonical target; fail closed instead of treating it as a missing directory.
-      try {
-        if (lstatSync(ancestor).isSymbolicLink()) {
-          if (!rejectDangling) return resolve(target);
-          throw refusal();
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw refusal();
-      }
-      const parent = dirname(ancestor);
-      if (parent === ancestor) throw refusal();
-      remaining.unshift(basename(ancestor));
-      ancestor = parent;
-    }
-  }
-  const destination = canonicalTarget(path);
-  for (const root of protectedRoots) {
-    const protectedHome = canonicalTarget(root, false);
-    if (destination === protectedHome || destination.startsWith(protectedHome + sep)) throw refusal();
-  }
+  ));
 }
 
 /**
