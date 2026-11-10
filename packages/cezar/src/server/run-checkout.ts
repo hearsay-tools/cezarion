@@ -1,3 +1,4 @@
+import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { fallbackProjectWriteError } from '../project-paths.ts';
 import { rematerializeReclaimedWorktree } from '../runs/retention.ts';
@@ -18,7 +19,7 @@ const workingDirectoryOf = (run: RunRecord, repoRoot: string): string | null =>
   run.worktree === false
     ? repoRoot
     : worktreeOf(run);
-export const NO_WORKTREE = 'no worktree — this task ran directly in the repo working tree';
+const NO_WORKTREE = 'no worktree — this task ran directly in the repo working tree';
 
 export type CheckoutIntent = 'read' | 'mutate' | 'publish' | 'remove' | 'open';
 export interface RunCheckoutHost {
@@ -38,6 +39,18 @@ type ReadHandle<Rule extends ReadDirectoryRule> = {
   directory: Rule extends 'existing-worktree' ? string | null : string;
 };
 
+interface OpenOptions {
+  ignoresEngineOwnership: boolean;
+  defaultTargetNeedsWorktree: boolean;
+}
+type OpenHandle = {
+  run: RunRecord;
+  directory: () => string;
+  readonly worktree: string | null;
+  defaultWorktree: () => string | CheckoutRefusal;
+  readonly resumeAllowed: boolean;
+};
+
 type ClaimedHandle = { run: RunRecord; release: () => void };
 interface RemoveOptions {
   claim: 'publish' | 'reclaim';
@@ -48,6 +61,7 @@ interface RemoveOptions {
   nullClaimError: string;
 }
 
+export function runCheckout(host: RunCheckoutHost, id: string, intent: 'open', options: OpenOptions): CheckoutRefusal | OpenHandle;
 /** Admission stays synchronous: no yield between lookup and claim. */
 export function runCheckout(host: RunCheckoutHost, id: string, intent: 'publish'): CheckoutRefusal | ClaimedHandle;
 export function runCheckout(host: RunCheckoutHost, id: string, intent: 'remove', options: RemoveOptions): CheckoutRefusal | ClaimedHandle;
@@ -65,10 +79,11 @@ export function runCheckout(
 export function runCheckout(
   host: RunCheckoutHost,
   id: string,
-  intent: Exclude<CheckoutIntent, 'open'>,
-  options: ReadOptions<ReadDirectoryRule> | RemoveOptions = { checksAutosave: true, directory: 'existing-worktree' },
-): CheckoutRefusal | ReadHandle<ReadDirectoryRule> | ClaimedHandle {
+  intent: CheckoutIntent,
+  options: ReadOptions<ReadDirectoryRule> | RemoveOptions | OpenOptions = { checksAutosave: true, directory: 'existing-worktree' },
+): CheckoutRefusal | ReadHandle<ReadDirectoryRule> | ClaimedHandle | OpenHandle {
   if (intent === 'publish') return publishCheckout(host, id);
+  if ('ignoresEngineOwnership' in options) return openCheckout(host, id, options);
   if ('claim' in options) return removeCheckout(host, id, options);
   const { root, store } = host;
   const run = store.getRun(id);
@@ -147,4 +162,19 @@ export async function reclaimCheckoutError(run: RunRecord): Promise<string> {
   return dirty > 0
     ? `the worktree has ${dirty} uncommitted file${dirty === 1 ? '' : 's'} that exist nowhere else — commit or discard them first`
     : 'the worktree directory could not be removed';
+}
+
+function openCheckout({ root, store }: RunCheckoutHost, id: string, options: OpenOptions): CheckoutRefusal | OpenHandle {
+  const run = store.getRun(id);
+  if (!run) return { status: 404, body: { error: 'not found' } };
+  return {
+    run,
+    directory: () => worktreeOf(run) ?? root,
+    get worktree() { return worktreeOf(run); },
+    defaultWorktree() {
+      const worktree = worktreeOf(run);
+      return worktree ?? (options.defaultTargetNeedsWorktree ? { status: 409, body: { error: NO_WORKTREE } } : root);
+    },
+    get resumeAllowed() { return options.ignoresEngineOwnership || !engineOwnsRun(run); },
+  };
 }

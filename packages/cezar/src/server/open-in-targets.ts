@@ -1,10 +1,8 @@
 import type { Home } from '../home/home.ts';
 import { fallbackProjectWriteError } from '../project-paths.ts';
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Context } from 'hono';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
-import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
@@ -28,16 +26,12 @@ interface CliHandoffDeps {
 /** Open only a contained raster image: the OS launcher does not apply the browser's CSP. */
 export async function openRunDefaultApp(
   c: Context,
-  run: RunRecord,
+  worktree: string,
   relPath: string | undefined,
   openFile: typeof openFileInDefaultApp,
-  NO_WORKTREE: string,
 ) {
-  if (!run.worktreePath || !existsSync(run.worktreePath)) {
-    return c.json({ error: NO_WORKTREE }, 409);
-  }
   if (!relPath) return c.json({ error: 'path required for the default-app target' }, 400);
-  const result = await readWorktreePath(run.worktreePath, relPath);
+  const result = await readWorktreePath(worktree, relPath);
   if (result.kind !== 'file') {
     return c.json(
       {
@@ -67,7 +61,7 @@ export async function openRunDefaultApp(
       409,
     );
   }
-  const filePath = join(run.worktreePath, result.path);
+  const filePath = join(worktree, result.path);
   const opened = await openFile(filePath);
   if (!opened) return c.json({ error: `could not open ${result.path}`, path: filePath }, 409);
   return c.json({ opened: true, path: filePath });
@@ -92,13 +86,14 @@ export async function openRunCli(
   dir: string,
   repoRoot: string,
   { providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal, home }: CliHandoffDeps,
+  checkout: { readonly resumeAllowed: boolean },
 ) {
   const refusal = fallbackProjectWriteError(dir);
   if (refusal) return c.json({ error: refusal }, 409);
   const blocked = await providerActionError([cliRunner]);
   if (blocked) return c.json({ error: blocked }, 409);
   // A usage-limit hold has no session until its resume (hearsay-tools/cezarion#1236), so it resumes.
-  const sessionStep = engineOwnsRun(run) ? undefined : [...run.steps].reverse().find((s) => s.sessionId);
+  const sessionStep = !checkout.resumeAllowed ? undefined : [...run.steps].reverse().find((s) => s.sessionId);
   const sessionId = sessionStep?.sessionId;
   // An id resumeCommand refuses (open-mercato/cezar#431) degrades to a fresh CLI in the worktree,
   // exactly like a run that never recorded a session.

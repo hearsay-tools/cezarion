@@ -289,3 +289,47 @@ describe('reclaim failure detail after release', () => {
     expect(await reclaimCheckoutError({ ...baseRun, worktreePath: live })).toBe('the worktree directory could not be removed');
   });
 });
+
+const openRoutes = [
+  { route: 'open-in-cli', ignoresEngineOwnership: true, defaultTargetNeedsWorktree: false },
+  { route: 'open-in', ignoresEngineOwnership: false, defaultTargetNeedsWorktree: true },
+] as const;
+
+describe.each(openRoutes)('open $route', (route) => {
+  it.each([...states, ...(['queued', 'waiting'] as const).map((status) => ({
+    ...states[1]!, name: status, run: { ...baseRun, status, worktreePath: live },
+  }))])('$name keeps the current open policy without a claim', (state) => {
+    const host = fakeHost(state);
+    const result = runCheckout(host, baseRun.id, 'open', route);
+    if (!state.run) {
+      expect(result).toEqual(notFound);
+      return;
+    }
+    if ('status' in result) throw new Error('expected an open handle');
+    const worktree = state.diff === live || state.diff === fallback ? state.diff : null;
+    expect(result.run).toBe(state.run);
+    expect(result.directory()).toBe(worktree ?? root);
+    expect(result.worktree).toBe(worktree);
+    expect(result.defaultWorktree()).toEqual(worktree ?? (route.defaultTargetNeedsWorktree ? noWorktree : root));
+    expect(result.resumeAllowed).toBe(route.ignoresEngineOwnership || (state.name === 'usage hold' || !['running', 'queued', 'waiting'].includes(state.run.status)));
+    expect(host.store.getRun).toHaveBeenCalledExactlyOnceWith(baseRun.id);
+    expect(host.store.writeRefusal).not.toHaveBeenCalled();
+    expect(host.store.sourceDataDir).not.toHaveBeenCalled();
+    expect(host.manager.claimForPublish).not.toHaveBeenCalled();
+    expect(host.manager.claimWorktreeReclaim).not.toHaveBeenCalled();
+  });
+});
+
+it('resolves the open directory at call time after lookup', () => {
+  const path = join(root, 'lazy');
+  mkdirSync(path);
+  const host = fakeHost({ ...states[1]!, run: { ...baseRun, worktreePath: path } });
+  const result = runCheckout(host, baseRun.id, 'open', openRoutes[1]);
+  if ('status' in result) throw new Error('expected an open handle');
+  rmSync(path, { recursive: true });
+  expect(result.directory()).toBe(root);
+  expect(result.worktree).toBeNull();
+  mkdirSync(path);
+  expect(result.directory()).toBe(path);
+  expect(result.worktree).toBe(path);
+});

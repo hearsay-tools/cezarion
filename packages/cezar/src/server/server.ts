@@ -1,4 +1,4 @@
-import { runCheckout, preparePublishCheckout, reclaimCheckoutError, NO_WORKTREE } from './run-checkout.ts';
+import { runCheckout, preparePublishCheckout, reclaimCheckoutError } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
@@ -3604,10 +3604,9 @@ export function createApp(deps: ServerDeps) {
     // "Open in terminal" (spec 003): hand the session off to a real terminal —
     // in the task's worktree when it still exists (spec 006).
     .post('/runs/:id/open-in-cli', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
+      const project = c.get('project');
+      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: true, defaultTargetNeedsWorktree: false });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
       // Hosted mode: there is no "my machine" to open a terminal on. The UI
       // hides the button when localHandoff is false — this is defense in depth.
       if (!capabilities().localHandoff) {
@@ -3619,13 +3618,13 @@ export function createApp(deps: ServerDeps) {
           409,
         );
       }
-      const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
+      const sessionStep = [...checkout.run.steps].reverse().find((s) => s.sessionId);
       const sessionId = sessionStep?.sessionId;
       if (!sessionId) return c.json({ error: 'no agent session to resume' }, 409);
-      const backend = sessionStep?.backend ?? run.runner ?? 'claude';
+      const backend = sessionStep?.backend ?? checkout.run.runner ?? 'claude';
       const blocked = await providerActionError([backend]);
       if (blocked) return c.json({ error: blocked }, 409);
-      const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
+      const cwd = checkout.directory();
       const refusal = fallbackProjectWriteError(cwd);
       if (refusal) return c.json({ error: refusal }, 409);
       const command = resumeCommand(backend, sessionId);
@@ -3648,10 +3647,9 @@ export function createApp(deps: ServerDeps) {
 
     // Open a run's worktree (or the repo root) in the chosen local app.
     .post('/runs/:id/open-in', jsonZodValidator(openInSchema), async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
+      const project = c.get('project');
+      const checkout = runCheckout(project, c.req.param('id'), 'open', { ignoresEngineOwnership: false, defaultTargetNeedsWorktree: true });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
       if (!capabilities().localHandoff) {
         return c.json(
           {
@@ -3662,18 +3660,19 @@ export function createApp(deps: ServerDeps) {
       }
       // Follows the safeParse convention (#429); the downstream allowlist match is the real
       // injection guard, this just validates the shape.
-      const parsedBody = { data: c.req.valid('json') };
-      const { target, path: relPath } = parsedBody.data;
-      const dir = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
+      const { target, path: relPath } = c.req.valid('json');
+      const dir = checkout.directory();
 
       if (target === 'default') {
-        return openRunDefaultApp(c, run, relPath, openFile, NO_WORKTREE);
+        const worktree = checkout.defaultWorktree();
+        if (typeof worktree !== 'string') return c.json(worktree.body, worktree.status);
+        return openRunDefaultApp(c, worktree, relPath, openFile);
       }
       const cliRunner = agentCliRunner(target);
       if (cliRunner) {
-        return openRunCli(c, run, cliRunner, dir, repoRoot, { home: deps.home,
+        return openRunCli(c, checkout.run, cliRunner, dir, project.root, { home: deps.home,
           providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal,
-        });
+        }, checkout);
       }
       return openRunApp(c, target, dir, openApp);
     })
