@@ -1,3 +1,4 @@
+import { WaitCancellation } from './wait-cancellation.ts';
 import { WaitEngine } from './wait-engine.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { MemoryGuard } from './memory-guard.ts';
@@ -87,6 +88,7 @@ export interface RunModules {
   waitResolve: WaitResolve;
   waitRegistry: WaitRegistry;
   waitEngine: WaitEngine;
+  waitCancellation: WaitCancellation;
   subagentWaits: SubagentWaits;
   humanWaits: HumanWaits;
   sessionHelperHost: sessionEvents.SessionHelperHost;
@@ -269,7 +271,8 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     updatePendingHumanAsk: (id, value) => { const state = host.active.get(id); if (state) transitionTurnBoundary(state, { kind: 'human-wait-opened', phase: 'refresh-question', session: state.liveSession.session, pending: value }); },
   }, MAX_AUTO_CONTINUES);
   modules.familyReconciler = new FamilyReconciler(context, {
-    reapTerminalScratch: id => modules.runSettlement.reapTerminalScratch(id), cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id),
+    get waitCancellation() { return modules.waitCancellation; },
+    reapTerminalScratch: id => modules.runSettlement.reapTerminalScratch(id), cancelOpenWaits: id => modules.waitCancellation.cancelAll(id),
     resolvePeerWaits: runs => modules.waitResolve.resolvePeerWaits(runs),
     active: id => host.active.get(id), isActive: id => host.isActive(id), recoveringRun: run => modules.recovery.recoveringRun(run),
     cancel: id => host.cancel(id), armWait: (id, wait) => modules.waitResolve.armWait(id, wait),
@@ -289,6 +292,16 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     subagentSessionLive: id => modules.subagentWaits.sessionLive(id),
     interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
   }, MAX_AUTO_CONTINUES);
+  modules.waitCancellation = new WaitCancellation(context, {
+    disarmWait: id => host.disarmWait(id),
+    abortRegistrations: id => modules.waitRegistry.abortRegistrations(id),
+    disarmRun: id => modules.waitResolve.disarmRun(id),
+    forgetRetries: id => modules.retries.forget(id),
+    resetWakeDelivery: id => modules.wakeAdmission.resetWakeDelivery(id),
+    removeWake: (id, active) => modules.line.removeWake(id, active),
+    retireAdmission: id => modules.line.retireAdmission(id),
+    hasActive: id => host.active.has(id),
+  });
   modules.waitEngine = new WaitEngine(context, {
     reconcileWorkerWaits: family => host.reconcileWorkerWaits(family),
     noticeParkedWorkers: id => modules.workerQuestions.noticeParkedWorkers(id),
@@ -298,6 +311,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     parkOnWaits: (id, state) => modules.wakeAdmission.parkOnWaits(id, state),
   });
   modules.waitRegistry = new WaitRegistry(context, {
+    waitCancellation: modules.waitCancellation,
     waitEngine: modules.waitEngine,
     active: id => host.active.get(id), workerExecutionStopped: id => host.workerExecutionStopped(id),
     executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), ciSupervisor: () => host.ciSupervisor,
@@ -307,6 +321,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     settleWait: (id, waitId, result) => modules.waitResolve.settleWait(id, waitId, result),
   }, MAX_AUTO_CONTINUES);
   modules.subagentWaits = new SubagentWaits(context, {
+    waitCancellation: modules.waitCancellation,
     waitEngine: modules.waitEngine,
     active: host.active, isParked: id => modules.line.isParked(id), isAdmitted: id => modules.line.isAdmitted(id),
     settleWait: (id, waitId, result) => modules.waitResolve.settleWait(id, waitId, result),
@@ -429,7 +444,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
       answerRoutedQuestion: (...args) => modules.inputDelivery.answerRoutedQuestion(...args),
       queueWaitWake: (...args) => modules.wakeAdmission.queueWaitWake(...args),
       owesWake: (...args) => modules.wakeAdmission.owesWake(...args),
-      cancelOpenWaits: (...args) => modules.wakeAdmission.cancelOpenWaits(...args),
+      cancelOpenWaits: (...args) => modules.waitCancellation.cancelAll(...args),
       settleOrphanedWorkerExecution: (...args) => host.settleOrphanedWorkerExecution(...args),
       settleRequestedRootFinish: (...args) => modules.runFinish.settleRequestedRootFinish(...args),
       settleSuccess: (...args) => modules.runSettlement.settleSuccess(...args),
@@ -438,6 +453,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
       recover: (...args) => host.recover(...args),
     }, RESTART_CONTINUATION_PROMPT);
   modules.wakeAdmission = new WakeAdmission(context, {
+    waitCancellation: modules.waitCancellation,
     active: host.active, retries: modules.retries, line: modules.line, waitResolve: modules.waitResolve, waitRegistry: modules.waitRegistry,
     inboxClaims: modules.inboxClaims, workerQuestions: modules.workerQuestions, humanWaits: modules.humanWaits,
     isActive: id => host.isActive(id), move: (...args) => host.move(...args),
@@ -514,7 +530,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     humanWaits: modules.humanWaits, line: modules.line, waitRegistry: modules.waitRegistry,
     workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost, subagentWaits: modules.subagentWaits,
     move: (...args) => host.move(...args), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),
-    cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
+    cancelOpenWaits: id => modules.waitCancellation.cancelAll(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
     workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),
     submitAgentInput: (id, state, content) => modules.inputDelivery.submitAgentInput(id, state, content), flushAgentInputs: id => modules.inputDelivery.flushAgentInputs(id),
     hasQueuedAgentInputs: (id, except) => modules.inputDelivery.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => modules.inputDelivery.armUnreadInputTimer(id, state),
@@ -528,13 +544,13 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
   modules.runFinish = new RunFinish(context, modules.completionGateHost, modules.runSettlement, modules.turnSettler, modules.turnNudges, modules.line, {
     move: (...args) => host.move(...args), dropActive: id => host.dropActive(id),
-    cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
+    cancelOpenWaits: id => modules.waitCancellation.cancelAll(id), reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
     executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), hasUnansweredHumanAsk: id => host.hasUnansweredHumanAsk(id),
   });
-  modules.runCancel = new RunCancel(context, modules.line, modules.workerExecutions, modules.wakeAdmission, modules.turnNudges, {
+  modules.runCancel = new RunCancel(context, modules.line, modules.workerExecutions, modules.waitCancellation, modules.turnNudges, {
     active: host.active, cancel: id => host.cancel(id), isActive: id => host.isActive(id),
     cancelAutoResume: id => host.cancelAutoResume(id), rootFinishRequested: id => host.rootFinishRequested(id),
-    historyDeletionPending: id => host.historyDeletionPending(id), disarmWait: id => host.disarmWait(id),
+    waitCancellation: modules.waitCancellation, historyDeletionPending: id => host.historyDeletionPending(id), disarmWait: id => host.disarmWait(id),
     move: (id, exit, patch) => host.move(id, exit, patch),
   });
   modules.inputDelivery = new InputDelivery(context, {

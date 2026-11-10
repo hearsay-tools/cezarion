@@ -1,6 +1,6 @@
 import { warnRegistrationRefused, type WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS, waitRequestRow, registersAs } from './wait-kinds.ts';
-import { cancelWaits } from './wait-cancel.ts';
+import type { WaitCancellation } from './wait-cancellation.ts';
 import { registrationIdentity, replayRegistration, repeatRegistration, type RegistrationIdentity } from './wait-registration.ts';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
@@ -40,6 +40,7 @@ Object.freeze(WaitGroup);
 export function createWaitGroup(): WaitGroup { return new WaitGroup(); }
 
 interface WaitRegistryHost {
+  waitCancellation: WaitCancellation;
   waitEngine: WaitEngine;
   active(id: string): ActiveRun | undefined;
   workerExecutionStopped(id: string): boolean;
@@ -158,7 +159,7 @@ export class WaitRegistry {
     if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || rootFinishRequested(this.context.store, runId) || historyDeletionPending(this.context.store, runId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a peer wait');
     }
-    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
+    this.host.waitCancellation.cancel(runId, [waitId]);
     return peerWaitOf(this.context.store.getRun(runId), waitId);
   }
 
@@ -341,7 +342,7 @@ export class WaitRegistry {
     if (!wait) return { cancelled: false, code: 'not_found' };
     if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
     if (WAIT_KINDS[wait.kind].cancellable === 'unshown' && 'askSeq' in wait && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
-    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, [waitId]);
+    this.host.waitCancellation.cancel(runId, [waitId]);
     return { cancelled: true };
   }
 

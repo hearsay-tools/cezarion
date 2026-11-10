@@ -1,5 +1,5 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { cancelWaits } from './wait-cancel.ts';
+import type { WaitCancellation } from './wait-cancellation.ts';
 import { holdsOwedResults } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunModuleContext } from './types.ts';
@@ -14,6 +14,7 @@ import { workerOutcome } from '../../runs/delegation-state.ts';
 import { workerOutcomeKey } from '../../runs/transcript-facts.ts';
 
 interface FamilyReconcilerHost {
+  waitCancellation: WaitCancellation;
   resolveWorkerWait(id: string, entry: WorkerWaitEntry, observed: WorkerWaitEntry): boolean;
   reapTerminalScratch(id: string): void;
   cancelOpenWaits(id: string): void;
@@ -208,7 +209,7 @@ export class FamilyReconciler {
     if (['queued', 'running', 'waiting'].includes(parent.status)) return false;
     if (recovering) return true;
     const stale = WAIT_KINDS.worker.select(parent.waits ?? []).filter(wait => wait.phase === 'open' || wait.phase === 'resolved').map(wait => wait.id);
-    if (stale.length) cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, stale);
+    if (stale.length) this.host.waitCancellation.cancel(parent.id, stale);
     this.host.closeRoutedQuestions(parent.id);
     for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
       if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
@@ -279,7 +280,7 @@ export class FamilyReconciler {
       }
       const { entry: next, reason } = reconcileWorkerEntry(selected, outcomes, now, requests);
       if (reason && destroyed(next)) {
-        cancelWaits(this.context.store, id => this.host.disarmWait(id), parent.id, [entry.id]);
+        this.host.waitCancellation.cancel(parent.id, [entry.id]);
       } else if (reason) {
         if (!this.host.resolveWorkerWait(parent.id, entry, { ...next, result: { reason } })) continue;
       } else {
