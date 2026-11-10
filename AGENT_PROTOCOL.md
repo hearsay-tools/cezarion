@@ -124,14 +124,6 @@ user's Codex config. When Codex still asks before a Cezar tool, the request reac
 you; Cezar never answers it silently. `.ai/scripts/probe-approvals.ts` checks this routing
 against the installed Codex in one paid turn. CI never runs it.
 
-<a id="recoverable-opencode-skill-discovery-723"></a>
-
-### Recoverable OpenCode skill discovery
-
-An unscoped OpenCode `session.error` that names a `/SKILL.md` path is a skill-load
-warning: Cezar reports it as non-fatal and the turn continues. Every scoped error, and
-every other unscoped error, stays a failure (`packages/cezar/src/core/opencode-session-error.ts`).
-
 ---
 
 ## 5. The tool display model (`packages/contract/src/tool-display.ts`)
