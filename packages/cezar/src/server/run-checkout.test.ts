@@ -227,9 +227,9 @@ describe('claim check order', () => {
 describe('publish preparation under the caller claim', () => {
   it.each([
     { name: 'missing record', run: undefined, status: 404 },
-    { name: 'missing path', run: baseRun, status: 400 },
-    { name: 'removed directory', run: { ...baseRun, worktreePath: gone, branch: 'task' }, status: 400 },
-    { name: 'missing branch', run: { ...baseRun, worktreePath: live }, status: 400 },
+    { name: 'missing path', run: baseRun, status: 409 },
+    { name: 'removed directory', run: { ...baseRun, worktreePath: gone, branch: 'task' }, status: 409 },
+    { name: 'missing branch', run: { ...baseRun, worktreePath: live }, status: 409 },
     { name: 'restored checkout', run: { ...baseRun, worktreePath: live, branch: 'task' }, status: null },
   ])('$name reads the fresh record after rebuilding', async ({ run, status }) => {
     const { host, calls, release } = claimedHost(states[1]!);
