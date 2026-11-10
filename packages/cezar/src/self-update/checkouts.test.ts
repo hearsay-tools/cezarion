@@ -177,9 +177,8 @@ describe('linked checkouts', () => {
     expect(found[1]).toMatchObject({ task: null, commit: { subject: 'init' }, stale: false });
   });
 
-  // A project under a migration fence (hearsay-tools/cezarion#3087) is not read: no cold run lookup.
-  /** A registered checkout with one task worktree, named by its run. */
-  function registeredTaskRepo(): string {
+  /** A cezar checkout with one task worktree, named by its run; registered unless `register` is false. */
+  function registeredTaskRepo(register = true): string {
     const repo = join(home, 'repo');
     fakeCheckout(repo);
     git(repo, 'init', '-q', '-b', 'main');
@@ -191,10 +190,24 @@ describe('linked checkouts', () => {
     fakeCheckout(task);
     seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', branch: 'cez/def67890' })]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'),
+      Buffer.from(JSON.stringify({ projects: register ? [{ id: 'cezar', root: realpathSync(repo) }] : [] })));
     return repo;
   }
 
+  /** A project migration of `repo` that stops at `point`, as a crash would, leaving its journal. */
+  async function interruptMigration(repo: string, point: string): Promise<void> {
+    const migrator = new CockpitOwnership();
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
+    try {
+      await expect(migrateProject({ repoRoot: realpathSync(repo), fence, fault: at => { if (at === point) throw new Error(at); } })).rejects.toThrow(point);
+    } finally {
+      fence.release();
+      migrator.releaseAll();
+    }
+  }
+
+  // A project under a migration fence (hearsay-tools/cezarion#3087) is not read: no cold run lookup.
   it('lists a fenced project\'s checkouts without reading its run store', async () => {
     const repo = registeredTaskRepo();
     const migrator = new CockpitOwnership();
@@ -211,19 +224,22 @@ describe('linked checkouts', () => {
 
   it('finishes an unfinished project migration, then lists the worktrees it moved', async () => {
     const repo = registeredTaskRepo();
-    const migrator = new CockpitOwnership();
-    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [], inFlight: () => 0 });
-    try {
-      // A crash after the move and before the repair: Git still names the task worktree's old path.
-      await expect(migrateProject({ repoRoot: realpathSync(repo), fence, fault: point => { if (point === 'repair-worktrees:before') throw new Error(point); } }))
-        .rejects.toThrow('repair-worktrees:before');
-    } finally {
-      fence.release();
-      migrator.releaseAll();
-    }
+    // A crash after the move and before the repair: Git still names the task worktree's old path.
+    await interruptMigration(repo, 'repair-worktrees:before');
     const moved = join(realpathSync(repo), '.ai', 'squawk', 'worktrees', 'def67890-run');
     const found = await discoverCheckouts(env, testHome(env));
     expect(found.find((c) => c.branch === 'cez/def67890')).toMatchObject({ worktree: moved, task: { id: 'def67890-run' } });
+    expect(existsSync(join(repo, '.ai', 'squawk-migration.json'))).toBe(false);
+  });
+
+  it('lists a repository reached only through a linked task checkout that the recovery moves', async () => {
+    const repo = registeredTaskRepo(false);
+    linkCheckout(cezarPackageRoot(join(repo, '.ai', 'cezar', 'worktrees', 'def67890-run'))!, 'cez/def67890', env, undefined, testHome(env));
+    // Interrupted before its move: the recovery moves the linked checkout away from under the listing.
+    await interruptMigration(repo, 'move:before');
+    const found = await discoverCheckouts(env, testHome(env));
+    expect(found.map((c) => [c.branch, c.worktree])).toEqual(expect.arrayContaining([
+      ['main', realpathSync(repo)], ['cez/def67890', join(realpathSync(repo), '.ai', 'squawk', 'worktrees', 'def67890-run')]]));
     expect(existsSync(join(repo, '.ai', 'squawk-migration.json'))).toBe(false);
   });
 
