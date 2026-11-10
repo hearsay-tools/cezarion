@@ -1,6 +1,6 @@
 # Delivery pipeline: fast lane, main verification and tested releases
 
-Status: **draft**. Owner decisions D1–D3 recorded 2026-11-10. D4 is open (§ Owner decisions).
+Status: **approved** by the owner on 2026-11-10. Owner decisions recorded 2026-11-10.
 Implementation follows in separate issues (§ Phases).
 
 ## Goal
@@ -25,7 +25,8 @@ often than today, but for minutes, and a bot reverts the cause.
 | D1 | Where model review sits | One local reviewer round, beside CI. A finding scored 5 or more blocks. CodeRabbit reviews after the merge on the fast lane. The guarded lane keeps the full loop and both reviewers blocking |
 | D2 | What runs before merge | Affected tests. The full suite runs on `main` in batches. A one-week shadow measurement comes first |
 | D3 | Who reverts a confirmed failure on `main` | A bot opens and merges the revert. After 6 hours red it reverts to the last green commit |
-| D4 | Which pull requests merge without the owner | **Open.** Proposal in § Lanes |
+| D4 | Which pull requests merge without the owner | Every fast-lane PR. The path and content rules decide the lane. The size limit and the `feat` rule go |
+| D5 | How a stable release starts | The owner's dispatch, at most once in 24 hours. Nightly is the rehearsal. No scheduled release |
 
 Raising the lane limits, or changing a clock in § Main verification, needs a change to this spec first.
 
@@ -120,12 +121,11 @@ gain the paths that produced defects a revert would not undo: `packages/cezar/sr
 classifier moves to `.github/scripts/` as one module that `check.mjs` and
 `change-surface.cjs` both import, so the two cannot disagree.
 
-**Proposal for D4.** A fast-lane PR merges on its own. The size limit (10 files, 400 lines)
-and the `feat` rule leave the auto-merge decision; the path and content rules stay. Every
-other rule in the skill stays: the owner's pause (`allow_auto_merge`), a user's request to
-review first, and complete `Closes` references. On the last 330 PRs this raises the share
-that merges without the owner from 34% to 58%. Until the owner answers D4, the size limit
-and the `feat` rule put a PR in the guarded lane.
+A fast-lane PR merges on its own (D4). The size limit (10 files, 400 lines) and the `feat`
+rule leave the auto-merge decision; the path and content rules stay. Every other rule in
+the skill stays: the owner's pause (`allow_auto_merge`), a user's request to review first,
+and complete `Closes` references. On the last 330 PRs this raises the share that merges
+without the owner from 34% to 58%.
 
 `needs-qa` keeps its meaning: such a PR needs `qa-approved` before merge (`SDLC.md`). It
 takes the guarded lane. 7 of 320 PRs carried it.
@@ -248,8 +248,8 @@ Cases:
 
 ### Release
 
-The owner starts a release, as today. The workflow refuses a second stable release within 24
-hours of the last one.
+The owner starts a release, as today (D5). The workflow refuses a second stable release
+within 24 hours of the last one. No schedule starts a release.
 
 1. **Candidate.** The newest commit on `main` with `main-verify` `success`. The release does
    not repeat that suite; it reads the status of the exact commit.
@@ -317,7 +317,7 @@ Each row is one issue. The safety net comes first; no later phase starts before 
 | P0 | This spec | |
 | P1 | `main-verify.yml`: rolling full run, rerun, status, bisect, revert bot, hold, clocks, watchdog, `dev` snapshot from the verified commit. It runs beside today's `main` push CI for one week before that is removed | Owner actions 2, 3 |
 | P2 | Release: once-a-day guard, gates, stage on `next`, test the published package, promote, roll back. Nightly becomes the rehearsal | P1; owner actions 2, 5 |
-| P3 | Lanes and merge path: the shared classifier, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check | P1; D4; owner action 1 |
+| P3 | Lanes and merge path: the shared classifier, the auto-merge rules of D4, open ready, auto-merge, `pr-readiness.yml` for the guarded lane only, no preflight chain, the light queue check | P1; owner action 1 |
 | P4 | Review placement: `Automated Code Review` per lane, the post-merge review workflow, the agent rule | P2, P3; owner actions 4, 5 |
 | P5 | Affected tests on the fast lane. Step 1: a shadow job records, for one week, the selection for each PR run and whether a failing test fell outside it. Step 2: the owner reads the report and decides the switch | P1, P3 |
 | P6 | Local gate: `npm run prepr`, the 2-minute bound, the shorter list of duties in `AGENTS.md` and the skills | P3 |
