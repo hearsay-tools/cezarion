@@ -137,3 +137,7 @@ opening frames.
 Terminating crash recipes record the leader's exit code or signal; clean crash
 diagnostics end on the native turn end. Held-pipe children keep their inherited
 stdio; only the mock's own writes and its leader exit enter that transcript.
+
+Dry-run backend version banners use the release identity's environment prefix:
+`mock (CEZ_DRY_RUN=1)` with the switch off and `mock (HSQ_DRY_RUN=1)` with it on.
+This display change does not change the accepted environment aliases.

@@ -130,3 +130,14 @@ symlink or file keeps legacy writes and is never marked fresh. The destination
 check is shared with migration planning. If a cockpit is known but its live tasks
 cannot be read, migration still refuses and lists both the cockpit and the read
 failure. It does not treat the failed read as an empty task list.
+
+## CLI metadata
+
+Every binary name accepts `--version` and `-v`. Both print the package version to
+stdout and exit 0 without resolving or preparing a home. With the release switch
+on, old names still print their notice only to stderr. Top-level help shows the
+resolved home's versions directory with the switch on; reading this path does
+not prepare or migrate the home. If resolution fails, help describes the data
+folder without a path and still exits successfully. Switch-off help keeps
+`~/.cezar/versions`.
+Discovery's missing-cockpit hint uses the switch-aware preferred command.
