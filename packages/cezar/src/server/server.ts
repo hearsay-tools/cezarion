@@ -245,7 +245,7 @@ import {
   type ResolvedAgentProfile,
 } from '../workspace/agent-profiles.ts';
 import { PROFILE_CAPABLE_PROVIDERS, profileAgentDir, profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
-import { quoteExecutable, withEnvPrefix } from '../core/shell-env.ts';
+import { quoteExecutable, shellQuote, withEnvPrefix } from '../core/shell-env.ts';
 import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
 import {
@@ -1341,10 +1341,10 @@ export function createApp(deps: ServerDeps) {
   };
 
   /** The copy-paste fallback shown when no terminal could be opened — same account, spelled for
-   *  this platform's shell. `null` when the dir cannot be embedded safely, which is a refusal. */
+   *  this platform's shell. `null` when the account environment cannot be embedded safely. */
   const handoffFallbackCommand = (cwd: string, command: string, env: Record<string, string>): string | null => {
     const prefixed = withEnvPrefix(command, env, process.platform);
-    return prefixed === null ? null : `cd '${cwd}' && ${prefixed}`;
+    return prefixed === null ? null : `cd ${shellQuote(cwd)} && ${prefixed}`;
   };
 
   /** A registered project's realpath'd root, or null when the id is unknown. */
