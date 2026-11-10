@@ -111,7 +111,8 @@ pid plus start-token liveness and token-checked release.
   under a fence the write backstop drops their writes. Their failing launches are
   hearsay-tools/cezarion#3136.
 - **Holder duty (P4b2).** After the drain and before the first move, the holder disposes
-  the project's context and closes its store. `close()` saves once
+  the project's context and closes its store: `migrateProject`'s `closeProject` (an owning
+  cockpit passes `contexts.dispose(id, { releasePreviews: false })`). `close()` saves once
   and leaves no save timer; later saves return without a database. It stops the
   transcript-facts queue and settles its jobs, so no sidecar is written later. A late
   repo-handle result finds no database and writes nothing (lazy contexts also abort it).
@@ -120,7 +121,7 @@ pid plus start-token liveness and token-checked release.
   is held the reports index queues no new scan, so the drained `idle()` covers every scan. Branch sweeps
   touch Git refs only.
 - **Journal.** The journal blocks admission whether its owner lives or not; only the
-  fence holder passes. P4b2 removes it as its last step before `release()`. P4b3 adds
+  fence holder passes. The engine removes it as its last step; the caller then calls `release()`. P4b3 adds
   early recovery in front of admission.
 - **Residual window.** Leases are per process. A short CLI operation (`init`, a
   single-project `projects` listing, `run` before its store opens) admitted just before
@@ -128,6 +129,45 @@ pid plus start-token liveness and token-checked release.
   write path re-checks admission right before its first project write, and a headless
   run's claims keep the drain waiting. Long-lived event streams over an already open
   store end when the holder closes that store.
+
+## Project state migration engine
+
+`packages/cezar/src/project-migration/` (P4b2, hearsay-tools/cezarion#3088) moves a
+project's runtime state from `.ai/cezar/` to `.ai/squawk/`. It is internal: no command,
+route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
+`resumeProjectMigration`; P5 enables the command.
+
+- **Fence.** It runs only under a fence its own process holds (`holdsProjectFence`), and
+  all its work runs inside `holdProjectWork`, so its writes pass the backstop only as the
+  holder's.
+- **Plan and dry run.** `planProjectMigration(repoRoot)` writes nothing (the run store is
+  read immutable when it has no WAL file, so no SQLite sidecar appears). It lists every
+  move, tracked file with its quoted `git mv`, worktree repair, path rewrite, destination
+  conflict and blocker, and the paths left alone on purpose (`NOT_REWRITTEN`).
+  `describeProjectMigrationPlan` prints it. Any conflict or blocker refuses the migration
+  before the journal exists.
+- **Move units.** Each top-level entry of `.ai/cezar/` except the `cockpit.lock*` claims. A
+  directory that holds tracked files is entered; tracked files never move. A directory
+  that already exists under `.ai/squawk/` is merged item by item; any other existing
+  destination is a conflict. A Git worktree is one unit.
+- **Journal.** `.ai/squawk-migration.json` holds the whole plan and the steps done. Steps:
+  `move` (rename), `repair-worktrees` (`git worktree repair` under the worktree mutation
+  lock, then a check that Git lists each new path), `receipts` (`workspace.path` of each
+  receipt and `.cleanup.json` under `gitCommonDir(root)/cezar-owned-workspaces` that names
+  a moved worktree), `run-store` (one `RunDatabase.transaction` for every affected row:
+  record fields, the summary's `worktreePath` and the `worktree_path` column), `run-files`
+  (worker execution, autosave cleanup, worker results, artifact metadata and the seeded
+  `**Worktree:**` line of each handoff). Each item is applied only while it holds its old
+  value and skipped when it holds the new one, so a resume after a crash between an effect
+  and its mark changes nothing twice. A value that is neither stops the step; the journal
+  stays and admission stays blocked.
+- **After a migration** `.ai/cezar/` keeps only tracked files (until the user runs the
+  printed `git mv`) and the `cockpit.lock*` claims. It holds no `runs.db`, so P4a's reads
+  find every run, artifact and handoff under `.ai/squawk/`; opening the store creates no
+  legacy database. Until P5 changes the write root, the moved runs are fallback runs.
+- **Limits.** Agent temp fallback directories outside the project are keyed by the data
+  directory (hearsay-tools/cezarion#3146). Claude Code keys session history by working
+  directory, so a moved worktree starts a new Claude session history.
 
 ## Rules
 

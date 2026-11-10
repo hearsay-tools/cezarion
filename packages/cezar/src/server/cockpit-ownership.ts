@@ -198,6 +198,14 @@ function leased(lock: string): boolean {
   return leases.getStore()?.some((lease) => lease.open && lease.lock === lock) ?? false;
 }
 
+/** Whether this process holds the live migration fence of `dataDir`'s project: the project
+ *  migration engine runs only under a fence its own process holds. */
+export function holdsProjectFence(dataDir: string): boolean {
+  const lock = migrationFencePaths(dataDir)?.lock;
+  const token = lock ? heldFences.get(lock) : undefined;
+  return token !== undefined && readOwner(lock!)?.token === token;
+}
+
 /** Admit one operation until the returned release runs; throws `ProjectMigrationFencedError`. */
 export function admitProject(dataDir: string): () => void {
   assertProjectAdmitted(dataDir);
