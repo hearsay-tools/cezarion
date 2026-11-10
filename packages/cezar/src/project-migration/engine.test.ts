@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { readArtifact, artifactDirectory } from '../artifacts/store.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -14,6 +14,7 @@ import { CockpitOwnership, ProjectMigrationFencedError, projectAdmissionRefusal,
 import { fenceProjectContext, ProjectContexts } from '../server/project-context.ts';
 import { SUBCOMMAND_NAMES } from '../subcommands.ts';
 import { migrateProject, ProjectMigrationRefusedError, resumeProjectMigration } from './engine.ts';
+import { durable } from './durable.ts';
 import { readProjectMigrationJournal } from './journal.ts';
 import { ProjectMigrationStepError } from './steps.ts';
 import { describeProjectMigrationPlan, NOT_REWRITTEN, planProjectMigration } from './plan.ts';
@@ -298,6 +299,45 @@ describe('the holder', { timeout: TIMEOUT }, () => {
     expect(readdirSync(outside)).toEqual([]);
     expect(existsSync(join(project.dataDir, 'workflows/local.yaml'))).toBe(true);
     expect(projectAdmissionRefusal(project.dataDir)?.reason).toBe('journal');
+  });
+
+  it('creates new parents with the permission bits of their source counterparts and keeps moved items\' bits', async () => {
+    project.restore();
+    chmodSync(project.dataDir, 0o750);
+    chmodSync(join(project.dataDir, 'workflows'), 0o700);
+    chmodSync(join(project.dataDir, 'runs'), 0o700);
+    await migrate(project);
+    const mode = (path: string) => statSync(path).mode & 0o777;
+    expect(mode(project.newDir)).toBe(0o750);
+    expect(mode(join(project.newDir, 'workflows'))).toBe(0o700);
+    expect(mode(join(project.newDir, 'runs'))).toBe(0o700);
+  });
+
+  it('makes every rename, creation and rewritten link durable before the step that made it is marked done', async () => {
+    project.restore();
+    const events: string[] = [];
+    const directory = vi.spyOn(durable, 'directory').mockImplementation((path) => { events.push(`dir:${path}`); });
+    const file = vi.spyOn(durable, 'file').mockImplementation((path) => { events.push(`file:${path}`); });
+    let result;
+    try { result = await migrate(project, point => { events.push(point); }); }
+    finally { directory.mockRestore(); file.mockRestore(); }
+    const { journal } = result;
+    const ai = join(project.root, '.ai');
+    const before = (point: string) => events.slice(0, events.indexOf(point));
+    for (const [index, move] of journal.moves.entries()) {
+      expect(before(`move:item:${index}`).slice(-2)).toEqual([`dir:${dirname(move.to)}`, `dir:${dirname(move.from)}`]);
+    }
+    for (const worktree of journal.worktrees) expect(before('repair-worktrees:after')).toContain(`file:${join(worktree.to, '.git')}`);
+    const receipts = journal.rewrites.filter(rewrite => rewrite.kind === 'receipt' || rewrite.kind === 'cleanup-checkpoint');
+    // One rewrite per receipt file, so each file is one item.
+    for (const index of receipts.keys()) expect(before(`receipts:item:${index}`).at(-1)).toMatch(/^dir:.*cezar-owned-workspaces$/);
+    expect(before('run-store:after').slice(-2)).toEqual([`file:${join(project.newDir, RUNS_DB_FILE)}`, `dir:${project.newDir}`]);
+    for (const [index, point] of events.entries()) {
+      if (point.startsWith('run-files:item:')) expect(events[index - 1]).toMatch(/^dir:/);
+      // The journal's done mark, written between a step's effect and its marked point, is durable too.
+      if (point.endsWith(':marked')) expect(events.slice(events.lastIndexOf(point.replace(':marked', ':after'), index), index)).toContain(`dir:${ai}`);
+    }
+    expect(events.at(-1)).toBe(`dir:${ai}`);
   });
 
   it('runs in an owning cockpit after its drain: the context is disposed first, then rebuilt on the moved state', async () => {

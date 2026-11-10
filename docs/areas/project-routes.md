@@ -165,6 +165,13 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
   value and skipped when it holds the new one, so a resume after a crash between an effect
   and its mark changes nothing twice. A value that is neither stops the step; the journal
   stays and admission stays blocked.
+- **Durability order.** Within a step: each rename, creation or removal, then an fsync of
+  its parent directory (`durable.directory`); each file Git or SQLite rewrote (the worktree
+  `.git` link and admin `gitdir`, `runs.db` after the close's checkpoint) gets a file fsync.
+  Only then is the journal rewritten with the step done (temp file, fsync, rename, directory
+  fsync). New destination parents take the permission bits of their source counterparts
+  (private when none), so no move exposes private data. Git-tracked run state (`runs.db*`,
+  `runs.json`, `runs/`) blocks the plan.
 - **After a migration** `.ai/cezar/` keeps only tracked files (until the user runs the
   printed `git mv`) and the `cockpit.lock*` claims. It holds no `runs.db`, so P4a's reads
   find every run, artifact and handoff under `.ai/squawk/`; opening the store creates no

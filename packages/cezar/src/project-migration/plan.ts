@@ -152,27 +152,30 @@ function evidenceKind(relativeToRuns: string): { kind: Extract<PathRewrite, { fi
 
 const HANDOFF_WORKTREE = '**Worktree:** ';
 
-/** The index of the seeded worktree line of a handoff, before its `## Goal`: the only part a migration edits. */
+/**
+ * The index of the worktree line `seedHandoffFile` wrote: the header's title, a blank line,
+ * `**Task id:**`, `**Workflow:**`, an optional `**Branch:**`, then `**Worktree:**`. Only that
+ * position counts, with LF or CRLF endings; a line anywhere else is the agent's prose.
+ */
 function handoffWorktreeIndex(lines: readonly string[]): number {
-  for (const [index, line] of lines.entries()) {
-    if (line === '## Goal') return -1;
-    if (line.startsWith(HANDOFF_WORKTREE)) return index;
-  }
-  return -1;
+  const bare = (index: number) => (lines[index] ?? '').replace(/\r$/, '');
+  if (!bare(0).startsWith('# Handoff') || bare(1) !== '' || !bare(2).startsWith('**Task id:** ') || !bare(3).startsWith('**Workflow:** ')) return -1;
+  const at = bare(4).startsWith('**Branch:** ') ? 5 : 4;
+  return bare(at).startsWith(HANDOFF_WORKTREE) ? at : -1;
 }
 
 export function handoffWorktreeLine(text: string): string | undefined {
   const lines = text.split('\n');
   const index = handoffWorktreeIndex(lines);
-  return index < 0 ? undefined : lines[index]!.slice(HANDOFF_WORKTREE.length);
+  return index < 0 ? undefined : lines[index]!.replace(/\r$/, '').slice(HANDOFF_WORKTREE.length);
 }
 
 /** `text` with its seeded worktree line naming `to`, when it still names `from`; else unchanged. */
 export function rewriteHandoffWorktreeLine(text: string, from: string, to: string): string {
   const lines = text.split('\n');
   const index = handoffWorktreeIndex(lines);
-  if (index < 0 || lines[index] !== HANDOFF_WORKTREE + from) return text;
-  lines[index] = HANDOFF_WORKTREE + to;
+  if (index < 0 || lines[index]!.replace(/\r$/, '') !== HANDOFF_WORKTREE + from) return text;
+  lines[index] = HANDOFF_WORKTREE + to + (lines[index]!.endsWith('\r') ? '\r' : '');
   return lines.join('\n');
 }
 
@@ -232,6 +235,12 @@ class Planner {
     const tracked = await trackedPaths(this.root);
     if (!tracked) { plan.blockers.push(`Git cannot list the tracked files of ${this.root}`); return plan; }
     this.trackedFiles = tracked;
+    // The run store and run evidence are read and rewritten after the move: a tracked copy would stay behind.
+    const runtime = [...tracked].filter(path => /^\.ai\/cezar\/(?:runs\.db(?:-wal|-shm)?|runs\.json|runs\/.+)$/.test(path)).sort();
+    if (runtime.length > 0) {
+      plan.blockers.push(`Git tracks run state the migration must move: ${runtime.join(', ')}. Remove it from the index (git rm --cached) and commit first`);
+      return plan;
+    }
     for (const file of tracked) {
       for (let parent = posix.dirname(file); parent !== '.' && parent !== '/'; parent = posix.dirname(parent)) this.trackedDirectories.add(parent);
     }

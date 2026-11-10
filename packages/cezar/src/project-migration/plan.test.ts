@@ -67,13 +67,20 @@ describe('the path mapping', () => {
     ]);
   });
 
-  it('edits only the seeded worktree line of a handoff, and only while it names the old path', () => {
-    const text = '# Handoff — has **Worktree:** /old in its title\n\n**Task id:** x\n**Worktree:** /old\n\n## Goal\n\n**Worktree:** /old\n';
-    expect(handoffWorktreeLine(text)).toBe('/old');
-    expect(rewriteHandoffWorktreeLine(text, '/old', '/new')).toBe(text.replace('**Task id:** x\n**Worktree:** /old', '**Task id:** x\n**Worktree:** /new'));
-    expect(rewriteHandoffWorktreeLine(text, '/elsewhere', '/new')).toBe(text);
-    expect(handoffWorktreeLine('# Handoff\n\n## Goal\n\n**Worktree:** /old\n')).toBeUndefined();
-    expect(rewriteHandoffWorktreeLine('# Handoff\n\n## Goal\n\n**Worktree:** /old\n', '/old', '/new')).toBe('# Handoff\n\n## Goal\n\n**Worktree:** /old\n');
+  it('edits only the seeded worktree line of a handoff, with LF or CRLF, and never prose', () => {
+    const seeded = '# Handoff — has **Worktree:** /old in its title\n\n**Task id:** x\n**Workflow:** w\n**Branch:** b\n**Worktree:** /old\n\n## Goal\n\n**Worktree:** /old\n';
+    expect(handoffWorktreeLine(seeded)).toBe('/old');
+    expect(rewriteHandoffWorktreeLine(seeded, '/old', '/new')).toBe(seeded.replace('**Branch:** b\n**Worktree:** /old', '**Branch:** b\n**Worktree:** /new'));
+    expect(rewriteHandoffWorktreeLine(seeded, '/elsewhere', '/new')).toBe(seeded);
+    const crlf = seeded.replace('**Branch:** b\n', '').replaceAll('\n', '\r\n');
+    expect(handoffWorktreeLine(crlf)).toBe('/old');
+    expect(rewriteHandoffWorktreeLine(crlf, '/old', '/new')).toBe(crlf.replace('**Workflow:** w\r\n**Worktree:** /old\r\n', '**Workflow:** w\r\n**Worktree:** /new\r\n'));
+    // No seeded worktree line (a task without a worktree): the same text in prose, before or after Goal, stays.
+    for (const prose of ['# Handoff — t\r\n\r\n**Task id:** x\r\n**Workflow:** w\r\n\r\n## Goal\r\n\r\n**Worktree:** /old\r\n',
+      '# Handoff — t\n\n**Task id:** x\n**Workflow:** w\n\n**Worktree:** /old\n## Goal\n', '# Notes\n**Worktree:** /old\n']) {
+      expect(handoffWorktreeLine(prose)).toBeUndefined();
+      expect(rewriteHandoffWorktreeLine(prose, '/old', '/new')).toBe(prose);
+    }
   });
 });
 
@@ -181,5 +188,17 @@ describe('the planner', () => {
     expect(existsSync(join(source, `${RUNS_DB_FILE}-shm`))).toBe(false);
     expect(plan.blockers).toEqual([]);
     expect(plan.rewrites.filter(rewrite => rewrite.kind === 'run-row').map(rewrite => rewrite.from)).toEqual([second, second, second]);
+  });
+  it('blocks when Git tracks the run store or run evidence, before any write', async () => {
+    for (const path of ['runs.db', 'runs/1.handoff.md']) {
+      const { root, source } = repository();
+      mkdirSync(join(source, 'runs'), { recursive: true });
+      if (path === 'runs.db') RunDatabase.open(join(source, RUNS_DB_FILE)).close();
+      else writeFileSync(join(source, path), '# Handoff');
+      execFileSync('git', ['add', '-f', `.ai/cezar/${path}`], { cwd: root });
+      const plan = await planProjectMigration(root);
+      expect(plan.blockers).toEqual([expect.stringContaining(`Git tracks run state the migration must move: .ai/cezar/${path}`)]);
+      expect(plan.moves).toEqual([]);
+    }
   });
 });

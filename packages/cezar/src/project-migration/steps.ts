@@ -1,11 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import { closeSync, fchmodSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, posix, relative, sep } from 'node:path';
+import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
-import { syncDirectory } from '../home/private-files.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
+import { durable, replaceDurably } from './durable.ts';
 import type { PathRewrite, ProjectMigrationJournal, ProjectMigrationStep } from './journal.ts';
 import { gitOutput, gitReportedPath, redirectedComponent, rewriteHandoffWorktreeLine, trackedPaths, valueAt } from './plan.ts';
 
@@ -48,16 +47,28 @@ function serializeLike(original: string, value: unknown): string {
   return JSON.stringify(value, null, indent) + (original.endsWith('\n') ? '\n' : '');
 }
 
-/** Durable atomic replacement that keeps the file's permission bits. */
+/** Atomic replacement that keeps the file's permission bits. */
 function replaceKeepingMode(path: string, content: string): void {
-  const mode = statSync(path).mode & 0o777;
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  const fd = openSync(temporary, 'wx', mode);
-  try {
-    try { fchmodSync(fd, mode); writeFileSync(fd, content); fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(temporary, path);
-    syncDirectory(dirname(path));
-  } finally { rmSync(temporary, { force: true }); }
+  replaceDurably(path, content, statSync(path).mode & 0o777);
+}
+
+/**
+ * Create the missing directories from `root` down to `path`, each with the permission bits of its
+ * counterpart under `sourceRoot` (private when it has none), so a move never exposes private data
+ * through a new parent; each creation is made durable in its parent.
+ */
+function createDirectories(root: string, sourceRoot: string, path: string): void {
+  const parts = path === root ? [] : path.slice(root.length + 1).split(sep);
+  let current = root;
+  let counterpart = sourceRoot;
+  for (const part of ['', ...parts]) {
+    if (part) { current = join(current, part); counterpart = join(counterpart, part); }
+    if (pathPresent(current)) continue;
+    const mode = pathPresent(counterpart) ? statSync(counterpart).mode & 0o777 : 0o700;
+    mkdirSync(current, { mode });
+    chmodSync(current, mode);
+    durable.directory(dirname(current));
+  }
 }
 
 function byFile<T extends { file: string }>(rewrites: readonly T[]): Map<string, T[]> {
@@ -84,10 +95,10 @@ async function moveStep(journal: ProjectMigrationJournal, fault: MigrationFault)
     // Checked again here: a symlink placed after planning must not redirect the rename.
     const redirected = redirectedComponent(dirname(journal.destination), dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
     if (redirected) throw new ProjectMigrationStepError('move', `${redirected} is not a directory of this project`);
-    mkdirSync(dirname(move.to), { recursive: true });
+    createDirectories(journal.destination, journal.source, dirname(move.to));
     renameSync(move.from, move.to);
-    syncDirectory(dirname(move.to));
-    syncDirectory(dirname(move.from));
+    durable.directory(dirname(move.to));
+    durable.directory(dirname(move.from));
     fault(`move:item:${index}`);
   }
 }
@@ -106,6 +117,10 @@ async function repairStep(journal: ProjectMigrationJournal): Promise<void> {
     if (!listed.has(path) && !listed.has(real) || !top || realpathSync(gitReportedPath(top)) !== real) {
       throw new ProjectMigrationStepError('repair-worktrees', `Git does not see the worktree ${path} after repair`);
     }
+    // Git writes both links in place without an fsync: make them durable before the mark.
+    const link = join(path, '.git');
+    const admin = resolve(path, gitReportedPath(readFileSync(link, 'utf8').replace(/^gitdir: /, '').trim()));
+    for (const file of [link, join(admin, 'gitdir')]) { durable.file(file); durable.directory(dirname(file)); }
   }
 }
 
@@ -116,7 +131,10 @@ async function receiptStep(journal: ProjectMigrationJournal, fault: MigrationFau
   for (const [file, fields] of byFile(rewrites)) {
     const text = await readOwnedWorkspaceRecord(file);
     const value: unknown = JSON.parse(text);
-    if (applyFields('receipts', file, value, fields)) await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
+    if (applyFields('receipts', file, value, fields)) {
+      await replaceOwnedWorkspaceRecord(file, serializeLike(text, value));
+      durable.directory(dirname(file));
+    }
     fault(`receipts:item:${index++}`);
   }
 }
@@ -126,7 +144,8 @@ function runStoreStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
   const rewrites = journal.rewrites.filter((rewrite): rewrite is Extract<PathRewrite, { kind: 'run-row' }> => rewrite.kind === 'run-row');
   if (rewrites.length === 0) return;
   const ids = [...new Set(rewrites.map(rewrite => rewrite.runId))];
-  const db = RunDatabase.open(join(journal.destination, RUNS_DB_FILE));
+  const path = join(journal.destination, RUNS_DB_FILE);
+  const db = RunDatabase.open(path);
   try {
     const rows = new Map(db.getMany(ids).map(row => [row.id, row]));
     const upserts: RunRowInput[] = [];
@@ -151,6 +170,9 @@ function runStoreStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
     }
     if (upserts.length > 0) db.transaction({ upserts, deletes: [], beforeCommit: () => { fault('run-store:commit'); } });
   } finally { db.close(); }
+  // The last connection's close checkpoints the WAL into the database; make that durable before the mark.
+  durable.file(path);
+  durable.directory(journal.destination);
 }
 
 /** File-backed evidence SQLite cannot transact: each file is replaced atomically on its own. */
