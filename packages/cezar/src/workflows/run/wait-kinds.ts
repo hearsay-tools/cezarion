@@ -481,6 +481,12 @@ function workerWaitResultText(wait: WorkerWaitEntry, workerStatus: (workerId: st
     })))}. Outcomes (summaries abbreviated): ${JSON.stringify(outcomes)}`;
 }
 
+/** Whether a process wait found no process at its PID when it was registered: it then carries no
+ *  start identity and was settled by registration's own check, at the registration instant. */
+export function processNotRunningAtRegistration(wait: Pick<ProcessWaitEntry, 'startToken' | 'registeredAt' | 'result'>): boolean {
+  return wait.result?.outcome === 'exited' && wait.startToken === undefined && wait.result.observedAt === wait.registeredAt;
+}
+
 /** A process wait's result (hearsay-tools/cezarion#1446). Only the outcome and an integer exit code
  *  come from Cezar; the agent reads the command's own output with its tools. */
 function processWaitResultText(wait: ProcessWaitEntry): string {
@@ -488,7 +494,12 @@ function processWaitResultText(wait: ProcessWaitEntry): string {
   const read = "Read the command's output with your own tools.";
   const result = wait.result;
   if (result?.outcome === 'exit_file') return `${head}: ${result.exitCode === undefined ? 'exit file present, not an exit code' : `exited with code ${result.exitCode}`}. ${read}`;
-  if (result?.outcome === 'exited') return `${head}: exited, code unknown. ${read}`;
+  if (result?.outcome === 'exited') {
+    // hearsay-tools/cezarion#3097: a launcher's PID (`setsid … & echo $!`) is gone before the wait
+    // opens while the command still runs, and read as a finished command it was started again.
+    if (processNotRunningAtRegistration(wait)) return `${head}: PID ${wait.pid} was not running when this wait was registered. If the command should still run, this is not its PID: find the command before you start it again. ${read}`;
+    return `${head}: exited, code unknown. ${read}`;
+  }
   if (result?.outcome === 'error') return `${head}: could not be checked (${result.diagnostic ?? 'unknown error'}). Check it with your own tools.`;
   return `${head}: still running at the deadline. Register another wait if you still need it.`;
 }

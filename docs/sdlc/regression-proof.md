@@ -87,6 +87,10 @@ node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts \
   --out ~/.cache/cez/mutants/result.json
 ```
 
+A whole-file run takes 20 minutes to 3 hours. In a Cezar task, start it with the `job start`
+command that the `cezar_wait` tool description names, and wait for it with a process wait. A job
+started with `&`, `nohup` or a runner's background tool can end with the shell call or the session.
+
 The command creates and removes its own standalone checkout of `HEAD`, with no remote and no
 `CEZ_*` variables, so Stryker never edits the worktree that Squeal validates and a mutant cannot reach
 the live repository or cockpit. Contract files also run their direct server and web consumer tests; add

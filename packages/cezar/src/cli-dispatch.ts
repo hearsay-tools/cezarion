@@ -50,6 +50,7 @@ Usage:
   cez automation            create and manage automations from a task (see: automation --help)
   cez webhook               list and send to the project webhooks open to agents (see: webhook --help)
   cez artifact publish <path> publish a local task artifact (see: artifact --help)
+  cez job start <name> -- <cmd> run a long command that outlives the agent session (see: job --help)
   cez server-install        interactive wizard to host ${productName('cezar', rebrand)} on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install

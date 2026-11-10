@@ -9,7 +9,7 @@ import { resolveHome } from './home/resolve.ts';
 import { REBRAND_SWITCH } from './home/switch.ts';
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
-export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate', 'server-migrate', 'migrate-project'] : [])] as const;
+export const SUBCOMMAND_NAMES = ['backup', 'discover', 'artifact', 'job', 'task', 'automation', 'webhook', 'worker', 'message', 'remote-settings', ...(REBRAND_SWITCH ? ['migrate', 'server-migrate', 'migrate-project'] : [])] as const;
 
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
 export async function loadSubcommand(name: string | undefined, home: (env: NodeJS.ProcessEnv) => Home = env => resolveHome({ purpose: 'cli', env }), rebrand = REBRAND_SWITCH): Promise<SubcommandRunner | undefined> {
@@ -27,6 +27,7 @@ export async function loadSubcommand(name: string | undefined, home: (env: NodeJ
     };
     case 'discover': return (await import('./discovery/cli.ts')).runDiscoverCommand;
     case 'artifact': return (await import('./artifacts/cli.ts')).runArtifactCommand;
+    case 'job': return (await import('./jobs/cli.ts')).runJobCommand;
     case 'task': return (await import('./task-cli/cli.ts')).runTaskCommand;
     case 'automation': return (await import('./automations/automation-cli.ts')).runAutomationCommand;
     case 'webhook': return (await import('./webhooks/cli.ts')).runWebhookCommand;

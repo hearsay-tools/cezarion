@@ -22,7 +22,7 @@ vi.mock('../workspace/config.ts', () => ({
 }));
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
-it.each(['artifact', 'message', 'worker', 'task', 'automation', 'webhook', 'discover'])(
+it.each(['artifact', 'job', 'message', 'worker', 'task', 'automation', 'webhook', 'discover'])(
   'does not resolve or pass Home to the task command %s', async command => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -226,7 +226,11 @@ function processOutcome(wait: ProcessWait) {
       ? `PID ${wait.pid} exited with code ${result.exitCode}`
       : `PID ${wait.pid} wrote an exit file that is not an exit code`
   }
-  if (result.outcome === 'exited') return `PID ${wait.pid} exited, code unknown`
+  if (result.outcome === 'exited') {
+    // The agent's wake text says the same: the PID was already gone, so it may not be the command's.
+    if (wait.startToken === undefined && result.observedAt === wait.registeredAt) return `PID ${wait.pid} was not running when the wait was registered`
+    return `PID ${wait.pid} exited, code unknown`
+  }
   if (result.outcome === 'deadline') return `PID ${wait.pid} still running at the deadline`
   return `PID ${wait.pid} could not be checked`
 }

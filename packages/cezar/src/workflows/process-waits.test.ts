@@ -66,14 +66,14 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     expect(store.getRun(run.id)?.waits?.filter(wait => wait.kind === 'process')).toEqual([]);
   });
 
-  it('a PID already gone registers and resolves exited at once; its watch is aborted', async () => {
+  it('a PID already gone registers and resolves at once as not running at registration; its watch is aborted', async () => {
     const external = processes();
     const run = await waitingParent();
     const proc = spawn('true'); await new Promise(resolve => proc.once('exit', resolve));
     const wait = await register(run.id, { pid: proc.pid!, note: 'fast' });
     expect(wait.startToken).toBeUndefined();
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
-    expect(inputsFor(run.id, wait.id).map(input => input.text)).toEqual([expect.stringContaining(`PID ${proc.pid} (fast): exited, code unknown`)]);
+    expect(inputsFor(run.id, wait.id).map(input => input.text)).toEqual([expect.stringContaining(`PID ${proc.pid} (fast): PID ${proc.pid} was not running when this wait was registered`)]);
     expect(external.watches.every(watch => watch.signal.aborted)).toBe(true);
   });
 

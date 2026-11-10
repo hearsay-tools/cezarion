@@ -77,7 +77,7 @@ Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. 
 
 `CEZ_HOME` and `HSQ_HOME` stay in the cockpit. No child receives either, including with
 `CEZ_AGENT_ENV_FULL=1` or `CEZ_ENV_PASSTHROUGH=CEZ_HOME,HSQ_HOME`. Task commands
-(`artifact`, `message`, `worker`, `task`, `automation`, `webhook`, `discover`)
+(`artifact`, `job`, `message`, `worker`, `task`, `automation`, `webhook`, `discover`)
 do not read the cockpit home. Artifact links use the supplied `CEZ_PROJECT_ID`;
 without it they keep the unprefixed task link.
 
@@ -85,6 +85,17 @@ Operator commands (`projects`, nested `run`, `remote-settings`, `backup`,
 `install`, `update`, `versions`, `use`, `link`, `unlink`) retain their home access.
 Inside a task they now resolve the default home because the cockpit's
 `CEZ_HOME` override is absent. Their command behavior is otherwise unchanged.
+
+## Long commands (`cez job`)
+
+`cez job start <name> -- <command>` runs a command under a supervisor that leads its own session,
+so it outlives the shell call, the turn and the agent session on every runner
+(hearsay-tools/cezarion#3097). `jobs/job.ts` owns the supervisor, its claim of the name and the
+`<name>.<run>.log`, `<name>.<run>.exit` and `<name>.job.db` files; they live in `$TMPDIR` unless
+`--dir` names another directory, and `$TMPDIR` goes when the task ends. The launch prompt's
+"Long commands" part (`jobs/command.ts`) gives agents the full command; the `cezar_wait`
+description names it only as `cez job start`, because the tool list also loads inside omp. A result is one JSON object on stdout and an error is one on stderr; `--help` prints text. The rules are in
+[the unified waits spec](../../.ai/specs/2026-10-17-unified-waits.md#the-job-command-2026-11-10).
 
 ## Legacy home recovery (staged)
 
