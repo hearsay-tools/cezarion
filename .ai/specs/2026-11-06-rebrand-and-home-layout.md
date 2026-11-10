@@ -126,7 +126,9 @@ Resolved once, at the process entry point, from the platform. No setting is requ
      or `HOME` says;
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
-   custom env objects cannot hide the live home.
+   custom env objects cannot hide the live home. A `test` marker is never written to the
+   account's real home: a test marker request (`Home.sandbox`, `scripts/test-install-marker.mjs`)
+   refuses the account's legacy and platform roots in every process, test runner or not.
 4. **Presence leases and write lock.** Two kinds of file in `<config>/.locks/`. They sit in
    the config dir, which identifies the home, not in the runtime dir, which depends on each
    process's `XDG_RUNTIME_DIR`; so a server and a CLI that share a home always share them. Each serving
