@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -20,7 +21,7 @@ import { waitForConfig } from './poll'
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
 const sessionId = `e2e-settings-resources-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
-const dataDir = resolve(servedRoot(), '.ai/cezar')
+const dataDir = projectPaths(servedRoot()).write
 const configFile = resolve(dataDir, 'config.json')
 
 let browser: AgentBrowser

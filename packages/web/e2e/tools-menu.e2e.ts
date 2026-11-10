@@ -1,3 +1,4 @@
+import { productName } from './product'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -74,7 +75,7 @@ describe('tools menu', () => {
 
     const blocker = blockerFor(live)
     const missing = live.checks.filter((c) => !c.available).map((c) => c.name)
-    let expectedTitle = `cezar v${live.version}`
+    let expectedTitle = `${productName('cezar')} v${live.version}`
     if (blocker) expectedTitle += ` · ${blocker}`
     else if (missing.length > 0) expectedTitle += ` · optional: ${missing.join(', ')} not installed`
     expect(browser.evaluate(`document.querySelector('${TRIGGER}').getAttribute('title')`)).toBe(expectedTitle)

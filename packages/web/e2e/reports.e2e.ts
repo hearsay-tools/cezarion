@@ -1,3 +1,5 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
+import { productCommand } from './product'
 import { Home } from '../../cezar/src/home/home.ts';
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -27,12 +29,16 @@ beforeAll(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-reports-browser-')))
   const project = join(root, 'project'), empty = join(root, 'empty')
   for (const folder of [project, empty]) execFileSync('git', ['init', '-q', '-b', 'main', folder])
+  // seedRuns writes the legacy `.ai/cezar` import file, so the project is a legacy one from the
+  // start in both switch states; the CLI publish below must not open a fresh `.ai/squawk` first.
+  const dir = join(project, '.ai/cezar/runs')
+  mkdirSync(dir, { recursive: true })
   const env = fixtureServeEnv(project)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }, { id: 'empty', root: empty }] })))
+  const home = Home.sandbox(env.CEZ_HOME!)
+  Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }, { id: 'empty', root: empty }] })))
   const source = join(root, 'quarterly.html')
   writeFileSync(source, '<title>Quarterly report</title><h1>Published results</h1>')
-  const dir = join(project, '.ai/cezar/runs')
   const publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
     cwd: project, env: { ...env, CEZ_PROJECT_ID: 'shelf', CEZ_TASK_ID: runIds[0], CEZ_ARTIFACTS_DIR: join(dir, `${runIds[0]}-artifacts`) }, encoding: 'utf8',
   })) as { artifact: { sha256: string; size: number }; id: string }
@@ -114,7 +120,7 @@ it('shows no matches, clears search, and isolates an empty project', () => {
   browser.goto(baseUrl + '/p/empty/reports')
   browser.waitForFunction(`document.body.textContent.includes('No published reports yet')`)
   expect(browser.waitForValue(`document.querySelectorAll('${ROW}').length`)).toBe(0)
-  expect(browser.waitForValue(`document.querySelector('[data-route="reports"]').textContent`)).toContain('cez artifact publish')
+  expect(browser.waitForValue(`document.querySelector('[data-route="reports"]').textContent`)).toContain(`${productCommand} artifact publish`)
 })
 
 it('opens the same reader from a conversation card and the shelf, then returns to each source', () => {
@@ -157,21 +163,23 @@ it('shows a deleted snapshot as missing and drops reports after snapshot or task
   try {
     const project = join(deletionRoot, 'project')
     cpSync(join(root, 'project'), project, { recursive: true, filter: source => !['runs.db', 'cockpit.lock'].some(prefix => basename(source).startsWith(prefix)) })
-    const sourceDatabase = new DatabaseSync(join(root, 'project/.ai/cezar/runs.db'), { readOnly: true })
+    const sourceData = projectPaths(join(root, 'project')).write
+    const sourceDatabase = new DatabaseSync(join(sourceData, 'runs.db'), { readOnly: true })
     try {
-      await backup(sourceDatabase, join(project, '.ai/cezar/runs.db'))
+      await backup(sourceDatabase, join(project, '.ai', basename(sourceData), 'runs.db'))
     } finally {
       sourceDatabase.close()
     }
     const env = fixtureServeEnv(project)
     mkdirSync(env.CEZ_HOME!, { recursive: true })
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }] })))
+    const home = Home.sandbox(env.CEZ_HOME!)
+    Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }] })))
     deletionServer = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
     const browser = deletionBrowser = AgentBrowser.open(`report-deletion-${process.pid}`)
     const baseUrl = await waitForFixtureServer(deletionServer)
     browser.goto(baseUrl + path)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 25`)
-    rmSync(join(deletionRoot, 'project/.ai/cezar/runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
+    rmSync(join(projectPaths(project).write, 'runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
     browser.click(`[data-report-id="${ids[0]}"]`)
     browser.waitForFunction(`document.body.textContent.includes('Report missing or deleted')`)
     browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
