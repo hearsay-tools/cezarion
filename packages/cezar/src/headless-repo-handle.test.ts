@@ -1,3 +1,4 @@
+import { projectPaths } from './project-paths.ts';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -62,7 +63,7 @@ setInterval(() => {}, 1000);
       expect(Number(readFileSync(stopped, 'utf8')) - Number(readFileSync(started, 'utf8')),
         'CLI must cancel discovery before the 15-second GitHub timeout').toBeLessThan(DISCOVERY_CANCEL_TIMEOUT_MS);
     }
-    const records = readPersistedRuns(join(root, '.ai/cezar'));
+    const records = readPersistedRuns(projectPaths(root).write);
     expect(records).toHaveLength(1);
     expect(['done', 'review']).toContain(records[0].status);
   } finally {

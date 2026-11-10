@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
@@ -111,7 +112,7 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
     store.updateRun(run.id, { task: 'mock:cezar-done', runner: 'claude', model: 'sonnet', systemPrompt: 'Recovered inherited instruction', startedAt: '2022-01-01T00:00:00.000Z',
       workflowDef: { name: 'not-worker-workflow', source: 'built-in', steps: [{ id: 'task', command: 'exit 99' }] } });
     store.close(); // a restart: the old store must not still own the queued run
-    const recoveredStore = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); stores.push(recoveredStore);
+    const recoveredStore = RunStore.open(projectPaths(root).write, { keepLive: true }); stores.push(recoveredStore);
     await managerFor(recoveredStore, root).recover();
     await finished(recoveredStore, run.id);
     expect(['done', 'review']).toContain(recoveredStore.getRun(run.id)?.status);

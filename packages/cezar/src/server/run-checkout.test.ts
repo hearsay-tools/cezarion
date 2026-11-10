@@ -19,6 +19,7 @@ const live = join(root, 'live');
 const gone = join(root, 'gone');
 mkdirSync(live);
 const fallback = join(root, '.ai', 'squawk', 'worktrees', 'fallback');
+mkdirSync(join(root, '.ai/cezar'), { recursive: true }); // Exercise fallback admission in both states.
 mkdirSync(fallback, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 

@@ -1366,3 +1366,44 @@ Rebased onto origin/main efcfb0e39 (including F1, F4, F7). The backups-home-file
 Post-rebase switch-off changed Vitest: 124 files and 3463 tests pass. Root typecheck and lint pass. Switch-on G1 focused files pass; the first conflict-file run exposed the four lock fixture failures above (520 tests passed, 4 failed across five files). Switch-off release-finalization and marker tests: 36 tests pass. Final lock-fixture results follow below.
 
 Final post-rebase lock fixtures: 24 tests pass with the constant false and 24 pass with it true. The switch was restored false after the two runs. The four repaired G1 Vitest files pass with the switch on. Both owner-pending release files remain reverted.
+
+
+## Final rebase checkpoint and fresh-project fixture repairs (2026-11-10)
+
+Rebased onto 13582fdd7c41b3b5bcc31f193e1348bb8aae1035, including hearsay-tools/cezarion#3192. Five automations boot conflicts keep main's F9 fixtures and `projectPaths(root).write`, plus the both-state fixtures and the G2 paging fix. Removed a duplicated projectPaths import after typecheck. The owner approved both exact release alias fixture changes; those are committed. One further release-finalization assertion remains unchanged pending approval.
+
+Full switch-on Vitest through Squeal hold, eight workers: 23 failed / 1604 passed / 2 skipped files; 62 failed / 27023 passed / 1 expected failure / 14 skipped tests. The full failure output is in /tmp/f2-final-failure-detail.txt. All 62 failures were classified as test fixture or expectation errors after the fresh-project rule; the coordinator accepted that classification. No product code changed for these failures.
+
+Failed files:
+
+- `packages/cezar/src/data-gitignore.test.ts`
+- `packages/cezar/src/git-worktree-race.test.ts`
+- `packages/cezar/src/headless-repo-handle.test.ts`
+- `packages/cezar/src/index-project-paths.test.ts`
+- `packages/cezar/src/project-paths.test.ts`
+- `packages/cezar/src/project-worktree-writes.test.ts`
+- `packages/cezar/src/serve-command.test.ts`
+- `packages/cezar/src/session-signal-cli.test.ts`
+- `packages/cezar/src/delegation/workspace-diff.test.ts`
+- `packages/cezar/src/delegation/workspace-manager-recovery.test.ts`
+- `packages/cezar/src/delegation/workspace.test.ts`
+- `packages/cezar/src/jobs/job.test.ts`
+- `packages/cezar/src/home/runtime-cli.test.ts`
+- `packages/cezar/src/runs/project-run-sources.test.ts`
+- `packages/cezar/src/runs/retention-enforce.test.ts`
+- `packages/cezar/src/server/cockpit-ownership.test.ts`
+- `packages/cezar/src/server/fallback-run-controls.test.ts`
+- `packages/cezar/src/server/project-context.test.ts`
+- `packages/cezar/src/server/project-migration-fence.test.ts`
+- `packages/cezar/src/server/run-checkout.test.ts`
+- `packages/cezar/src/server/single-project-registry-boundary.test.ts`
+- `packages/cezar/src/workflows/delegation-reconcile.test.ts`
+- `packages/cezar/src/preview/host.test.ts`
+
+Fresh-project readers now use `projectPaths(root).write`. Legacy precedence and fallback cases create the legacy directory before seeding. The owned-workspace helper no longer creates a legacy store after planning a fresh Squawk workspace. Fallback assertions still require refusal and unchanged source data; empty legacy fixture directories must remain empty until an explicit write. The switch-off migration-fence case pins false before importing its dependencies. Job usage assertions use the release command identity.
+
+Focused switch-on verification through Squeal hold: all 24 files and 649 tests pass, including automations-api. The initial focused pass exposed one second fixed command spelling in the help assertion; the final focused pass includes its correction. Root typecheck, lint and citations pass. All 169 changed JavaScript/TypeScript files parse through esbuild. Switch-off focused verification follows. The full suite has not been rerun after these fixture changes; CI owns that gate per coordinator instruction.
+
+Final focused switch-off verification through Squeal hold: 24 files and 649 tests pass. The switch and generated mobile identity are restored to false. Root typecheck passes after restoration. Switch-on test:unit: package node:test 137/137 pass; root node:test 1869/1870 pass. The sole failure is the owner-pending release-finalization test “retry after a pushed branch and denied PR reuses the original commit”: its git-show assertion still names alias-cezarion/package.json at line 223. This assertion remains unchanged until the coordinator relays approval.
+
+Final restored-state parse audit: all 168 changed JavaScript/TypeScript files parse; the earlier 169-file count included the temporary switch edit.

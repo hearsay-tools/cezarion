@@ -30,6 +30,8 @@ describe('project run sources', () => {
     createdAt: '2026-11-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...extra,
   });
   function seed(name: string, runs: RunRecord[], json = false) {
+    // These fixtures exercise Squawk as fallback, including when the release switch is on.
+    if (name === 'squawk') mkdirSync(root('cezar'), { recursive: true });
     const directory = root(name);
     mkdirSync(join(directory, 'runs'), { recursive: true });
     if (json) writeFileSync(join(directory, 'runs.json'), JSON.stringify(runs));
@@ -64,7 +66,7 @@ describe('project run sources', () => {
     expect(store.readWorkerProcesses(run.id, randomUUID())).toBe('absent');
     expect(readRunIndexFromDisk(root('cezar')).runs.map(item => item.id)).toEqual([run.id]);
     expect(searchRunIndexFromDisk(root('cezar'), 'fallback', { limit: 10 }).runs.map(item => item.id)).toEqual([run.id]);
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
     expect(readdirSync(source).filter(name => !['runs.db-wal', 'runs.db-shm'].includes(name)).sort()).toEqual(before);
     if (databaseBytes) expect(readFileSync(join(source, 'runs.db'))).toEqual(databaseBytes);
   });
@@ -105,11 +107,11 @@ describe('project run sources', () => {
     writeFileSync(history, bytes);
     writeFileSync(join(source, 'runs', `${run.id}.handoff.md`), '# preserved');
     const store = open();
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
     expect(() => store.appendEvent(run.id, { type: 'text', text: 'automatic' })).toThrow(/\.ai\/squawk.*binary that migrated/);
     expect(store.updateRun(run.id, { title: 'automatic' })).toBeUndefined();
     expect(store.writeRefusal(run.id)).toMatch(/\.ai\/squawk/);
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
     expect(store.adoptFallbackFamily(run.id)).toBe(true);
     store.appendEvent(run.id, { type: 'text', text: 'new' });
     store.updateRun(run.id, { title: 'changed' });
@@ -127,7 +129,7 @@ describe('project run sources', () => {
     const store = open();
     expect(store.canDeleteRun(run.id)).toBe(false);
     expect(() => store.deleteRun(run.id)).toThrow(/\.ai\/squawk.*binary that migrated/);
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
     expect(store.getRun(run.id)?.title).toBe('fallback');
   });
 
@@ -162,7 +164,7 @@ describe('project run sources', () => {
     expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(store.listRuns()).toEqual([]);
     expect(store.runOwnership(run.id)).toBe('fallback');
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
   });
 
   it.each([0, 999])('degrades unsupported fallback schema %s to one warning without creating a legacy database', version => {
@@ -177,7 +179,7 @@ describe('project run sources', () => {
     expect(open().listRunIds()).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toContain(path);
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
     expect(readFileSync(path)).toEqual(bytes);
   });
 
@@ -191,7 +193,7 @@ describe('project run sources', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toContain(reason);
     expect(readFileSync(path)).toEqual(before);
-    expect(existsSync(root('cezar'))).toBe(false);
+    expect(readdirSync(root('cezar'))).toEqual([]);
   });
 
   it('keeps live foreign fallback families readable but refuses an explicit write before creating legacy state', () => {
@@ -207,7 +209,7 @@ describe('project run sources', () => {
       expect(store.updateRun(run.id, { title: 'unsafe' })).toBeUndefined();
       expect(() => store.adoptFallbackFamily(run.id)).toThrow('in use by another process');
       expect(store.getRun(run.id)?.title).toBe('foreign');
-      expect(existsSync(root('cezar'))).toBe(false);
+      expect(readdirSync(root('cezar'))).toEqual([]);
       expect(db.get(run.id)?.data).toContain('foreign');
     } finally { db.close(); closeClaimSession(owner.session); }
   });
@@ -351,13 +353,14 @@ describe('project run sources', () => {
     finally { source.close(); }
   });
 
-  it('creates new state only under legacy when neither directory exists', () => {
+  it('creates new state only under the selected root when neither directory exists', () => {
+    const paths = projectPaths(repo);
     const store = open();
     expect(store.listRunIds()).toEqual([]);
     store.createRun({ title: 'new', task: 'new', workflow: 'quick-task', steps: [] });
     store.flush();
-    expect(existsSync(join(root('cezar'), 'runs.db'))).toBe(true);
-    expect(existsSync(root('squawk'))).toBe(false);
+    expect(existsSync(join(paths.write, 'runs.db'))).toBe(true);
+    expect(existsSync(paths.reads[1]!)).toBe(false);
   });
 
   it('rolls back preserved sidecars and records when a family write fails', () => {

@@ -1,3 +1,4 @@
+import { projectPaths } from './project-paths.ts';
 import { productName } from './home/display.ts';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
@@ -72,7 +73,7 @@ describe('serveCommand', () => {
   it('holds ownership and the actual listener before workspace writes, then recovers before serving', async () => {
     const f = fixture();
     await f.run();
-    expect(f.ownership.acquire).toHaveBeenCalledWith('/repo/.ai/cezar');
+    expect(f.ownership.acquire).toHaveBeenCalledWith(projectPaths('/repo').write);
     expect(f.ownership.acquire).toHaveBeenCalledBefore(f.effects.acquireServeListener);
     expect(f.effects.acquireServeListener).toHaveBeenCalledWith(0, undefined);
     expect(f.effects.acquireServeListener).toHaveBeenCalledBefore(f.effects.initWorkspace);

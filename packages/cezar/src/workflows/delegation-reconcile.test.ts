@@ -64,6 +64,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   it('leaves fallback conversation families readable and unchanged during boot recovery', async () => {
     manager.dispose(); store.close();
     renameSync(join(root, '.ai/cezar'), join(root, '.ai/squawk'));
+    mkdirSync(join(root, '.ai/cezar'), { recursive: true }); // Keep Squawk as fallback.
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     manager = new RunManager(store, root, { createRunner, home: testHome() });
     const writes = vi.spyOn(store, 'commitConversation');

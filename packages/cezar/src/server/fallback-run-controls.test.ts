@@ -42,7 +42,10 @@ function seedFamily(mixed: boolean, live = true) {
   const moved = new Set(mixed ? [family.workerId] : [family.parentId, family.workerId]);
   seedRuns(primary, records.filter(run => !moved.has(run.id)));
   seedRuns(fallback, records.filter(run => moved.has(run.id)));
-  if (!mixed) rmSync(primary, { recursive: true, force: true });
+  if (!mixed) {
+    rmSync(primary, { recursive: true, force: true });
+    mkdirSync(primary, { recursive: true }); // Keep the project legacy while its history is fallback-only.
+  }
   return family;
 }
 function start() {

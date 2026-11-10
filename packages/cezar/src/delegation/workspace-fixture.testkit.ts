@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { copyWorkspaceSeed } from './workspace-seed.testkit.ts';
@@ -37,7 +38,7 @@ export async function fixture() {
   return { root, parentPath, first, second };
 }
 export function durableRun(root: string, workspace: WorkerWorkspace) {
-  const store = RunStore.open(join(root, '.ai/cezar'));
+  const store = RunStore.open(projectPaths(root).write);
   stores.push(store);
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
   store.updateRun(parent.id, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });

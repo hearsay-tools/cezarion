@@ -1,3 +1,4 @@
+import { projectPaths } from './project-paths.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ describe('ensureDataGitignore', () => {
 
   it('ignores the voice decision log', () => {
     ensureDataGitignore(repo);
-    const read = () => readFileSync(join(repo, '.ai/cezar/.gitignore'), 'utf8');
+    const read = () => readFileSync(join(projectPaths(repo).write, '.gitignore'), 'utf8');
     const first = read();
     expect(first.split('\n')).toContain('voice/');
     ensureDataGitignore(repo);
@@ -32,6 +33,7 @@ it('uses the common Git exclude in linked worktrees and leaves authored inputs c
     git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-m', 'fixture');
     const linked = join(root, 'linked');
     git('worktree', 'add', '-b', 'linked', linked);
+    mkdirSync(join(linked, '.ai/cezar'), { recursive: true });
     ensureDataGitignore(linked);
     expect(existsSync(join(linked, '.ai/squawk'))).toBe(false);
     const exclude = readFileSync(join(root, '.git/info/exclude'), 'utf8');

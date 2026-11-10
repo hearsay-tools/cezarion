@@ -27,8 +27,9 @@ describe('PreviewHost', () => {
   };
 
   it('refuses a preview server start in a fallback worktree without spawning a server', async () => {
-    const { host, ctx, devServers } = make();
-    ctx.worktreePath = '/repo/.ai/squawk/worktrees/task';
+    const { host, ctx, devServers, dataDir } = make();
+    mkdirSync(join(dataDir, '.ai/cezar'), { recursive: true });
+    ctx.worktreePath = join(dataDir, '.ai/squawk/worktrees/task');
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { port: 5173 });
     await host.run(ctx.runId, 5173);

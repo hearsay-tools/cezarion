@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { productIdentity } from './identity.ts';
 import { productName } from './display.ts';
 import { expect, it, vi } from 'vitest';
@@ -40,7 +41,7 @@ it('keeps init command generation inside the CLI home boundary', async () => {
     await import('../index.ts');
     await done;
     expect(log).toHaveBeenCalledWith(`\nDone. Start the cockpit with: npx ${productIdentity().npmAlias}`);
-    expect(readFileSync(join(root, '.ai/cezar/workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
+    expect(readFileSync(join(projectPaths(root).write, 'workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
   } finally {
     process.argv = argv;
     vi.restoreAllMocks();

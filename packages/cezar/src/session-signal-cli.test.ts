@@ -1,3 +1,4 @@
+import { projectPaths } from './project-paths.ts';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +9,6 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from './runs/store.ts';
-import { projectPaths } from './project-paths.ts';
 import { requirePid } from './pid-file.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
@@ -165,7 +165,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     await exited;
     await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
     // keepLive: read the run as serve left it, before any reader reconciles a live run as failed.
-    const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+    const store = RunStore.open(projectPaths(root).write, { keepLive: true });
     try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
   }, 60_000);
 
@@ -204,7 +204,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
       terminal.hangUp();
       await terminal.ended;
       await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
-      const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+      const store = RunStore.open(projectPaths(root).write, { keepLive: true });
       try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
     }, 60_000);
 
