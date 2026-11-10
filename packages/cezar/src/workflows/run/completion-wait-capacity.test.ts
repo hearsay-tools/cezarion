@@ -1,3 +1,4 @@
+import { WaitEngine } from './wait-engine.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeWorkerWait, RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_SOURCE, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { seedWaits } from '../../runs/run-store.testkit.ts';
@@ -21,7 +22,8 @@ function fixture(count: number) {
   const reconcileWorkerWaits = vi.fn();
   const noticeParkedWorkers = vi.fn();
   const registry = new WaitRegistry(f.context, unused<Host>('registry', {
-    active: id => f.active.get(id), reconcileWorkerWaits, noticeParkedWorkers,
+    active: id => f.active.get(id), reconcileWorkerWaits,
+    waitEngine: new WaitEngine(f.context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', { reconcileWorkerWaits, noticeParkedWorkers })),
   }), 10);
   const commit = vi.spyOn(f.store, 'commitWait');
   return { ...f, worker, registry, commit, reconcileWorkerWaits, noticeParkedWorkers };

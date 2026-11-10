@@ -115,13 +115,13 @@ describe('project build failure policies', () => {
 
   it('preserves boot identity for HTTP and upgrades but canonicalizes live identity', async () => {
     const projects = workspace();
-    const boot = { home: testHome(), id: 'default' } as ProjectContext;
+    const boot = { home: testHome(), id: 'default', dataDir: '/repos/boot/.ai/cezar' } as ProjectContext;
     const context = vi.fn();
     projects.bindContexts(boot, { context });
     expect(await projects.resolveProject('default')).toBe(boot);
     expect(await projects.resolveProject(undefined)).toBe(boot);
     expect(await projects.lookupProject('boot')).toBe(boot);
-    expect(await projects.resolveLiveProject('default')).toEqual({ home: boot.home, id: 'boot' });
+    expect(await projects.resolveLiveProject('default')).toEqual({ home: boot.home, dataDir: boot.dataDir, id: 'boot' });
     expect(context).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,7 @@ import { AutomationCandidateChangedError, GithubPoller, type GithubCandidate } f
 import { stopOnceSchedule, type ScheduleOccurrence } from './schedule-runner.ts';
 import type { AutomationStore } from './store.ts';
 import { githubBaselineState } from './github-baseline.ts';
+import { ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { isGithubAutomation, isOnceSchedule } from './types.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
@@ -273,7 +274,8 @@ export function rebaselineIdleAutomations(
     const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : Number.NaN;
     const idleDays = Number.isFinite(lastSuccess) ? Math.round((now - lastSuccess) / 86_400_000) : undefined;
     let armed = false;
-    automationStore.setState(definition.id, (current) => {
+    try {
+      automationStore.setState(definition.id, (current) => {
       // An editor or successful poll can land after the idle snapshot. Check again under
       // the state lock; a stale recovery must never roll that revision or progress back.
       if (current.revision !== undefined && current.revision !== definition.revision) return current;
@@ -282,7 +284,12 @@ export function rebaselineIdleAutomations(
       if (freshInstants.length && now - Math.max(...freshInstants) <= lookbackMs) return current;
       armed = true;
       return { ...current, ...githubBaselineState(definition, now) };
-    });
+      });
+    } catch (error) {
+      // A migration fence refused the write: this automation keeps its state and the boot goes on.
+      if (error instanceof ProjectMigrationFencedError) continue;
+      throw error;
+    }
     if (!armed) continue;
     // The log write is best effort: a busy log lock must not undo a brake that already held.
     void automationStore.appendLog({

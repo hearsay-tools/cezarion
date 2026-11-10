@@ -23,6 +23,7 @@ dist/
 /.ai/squawk/*
 !/.ai/squawk/context.yaml
 /.ai/squawk-migration.json
+/.ai/squawk-migration.lock*
 /*/**/.ai/cezar/
 /*/**/.ai/squawk/
 

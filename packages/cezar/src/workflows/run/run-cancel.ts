@@ -1,5 +1,5 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { cancelWaits } from './wait-cancel.ts';
+import type { WaitCancellation } from './wait-cancellation.ts';
 import type { WorkerStopResult, WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { workerWaitEntryToLegacy, isUsageLimitHold, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
@@ -11,17 +11,16 @@ import { WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE } from './constants.ts';
 import type { RunModuleContext } from './types.ts';
 import type { RunLine } from './run-line.ts';
 import type { WorkerExecutions } from './worker-executions.ts';
-import type { WakeAdmission } from './wake-admission.ts';
 import type { TurnNudges } from './turn-nudges.ts';
 
 interface RunCancelHost {
+  waitCancellation: WaitCancellation;
   active: Map<string, ActiveRun>;
   cancel(id: string): boolean;
   isActive(id: string): boolean;
   cancelAutoResume(id: string): boolean;
   rootFinishRequested(id: string): boolean;
   historyDeletionPending(id: string): boolean;
-  disarmWait(id: string): void;
   move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
 }
 
@@ -30,7 +29,7 @@ const CANCELLED_WHILE_QUEUED = 'cancelled while queued';
 
 export class RunCancel {
   constructor(private readonly context: RunModuleContext, private readonly line: RunLine,
-    private readonly workerExecutions: WorkerExecutions, private readonly wakeAdmission: WakeAdmission,
+    private readonly workerExecutions: WorkerExecutions, private readonly waitCancellation: WaitCancellation,
     private readonly turnNudges: TurnNudges, private readonly host: RunCancelHost) {}
 
   cancel(runId: string): boolean {
@@ -38,7 +37,7 @@ export class RunCancel {
     if (this.context.store.writeRefusal(runId)) return false;
     this.cancelWorkerExecution(runId);
     const hadWaits = !!this.context.store.getRun(runId)?.waits?.length;
-    this.wakeAdmission.cancelOpenWaits(runId);
+    this.waitCancellation.cancelAll(runId);
     const retiredRefusal = this.turnNudges.retireCompletionRefusal(runId);
     const cancelledFinish = !!this.context.store.move(runId, 'cancel-root');
     // Still waiting in the queue: just drop it there.
@@ -128,7 +127,7 @@ export class RunCancel {
     if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || this.host.rootFinishRequested(parentId) || this.host.historyDeletionPending(parentId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
-    const settled = cancelWaits(this.context.store, id => this.host.disarmWait(id), parentId, [waitId]);
+    const settled = this.host.waitCancellation.cancel(parentId, [waitId]);
     const cancelled = WAIT_KINDS.worker.select(settled).find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && WAIT_KINDS.worker.hasDeadline(wait));
     if (!cancelled) throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
     return workerWaitEntryToLegacy(cancelled);

@@ -1,0 +1,47 @@
+id: wait-kind-literal-outside-engine
+language: typescript
+severity: warning
+message: >-
+  Branch on a wait's kind only in the wait engine, the wait-kind table, the watch adapters, the
+  read-time upgrade and the boundary views (ADR 0061, hearsay-tools/cezarion#3079). Elsewhere read
+  the row (WAIT_KINDS[wait.kind].<fact>), select one kind's waits with its row's selector
+  (WAIT_KINDS.<kind>.select, .selectOpen, .is), or ask the engine.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+  - packages/cezar/src/activity/wait.ts # Table F row 1: ActivityWait boundary view.
+  - packages/cezar/src/delegation/service.ts # Table F row 3: stored-kind CLI cancellation boundary.
+  - packages/cezar/src/runs/legacy-waits.ts # Table F row 5: read-time upgrade of old wait rows.
+  - packages/cezar/src/server/forge/github.ts # Table F row 29: GitHub item kinds, not wait kinds.
+  - packages/cezar/src/subcommands.ts # Table F row 30: CLI subcommands, not wait kinds.
+  - packages/cezar/src/workflows/run/wait-kinds.ts # Table F row 31: the wait-kind table.
+utils:
+  wait-kind-string:
+    kind: string
+    has: { kind: string_fragment, regex: '^(pr|timer|process|human|worker|peer|subagent|ci)$' }
+  wait-kind-literal:
+    any:
+      - matches: wait-kind-string
+      - { kind: as_expression, has: { matches: wait-kind-string } }
+      - { kind: satisfies_expression, has: { matches: wait-kind-string } }
+  kind-ref:
+    any:
+      - { kind: member_expression, has: { field: property, regex: '^kind$' } }
+      - { kind: identifier, regex: '^kind$' }
+rule:
+  any:
+    - all:
+        - kind: binary_expression
+        - has: { field: operator, regex: '^(===|!==|==|!=)$' }
+        - any:
+            - all: [{ has: { field: left, matches: kind-ref } }, { has: { field: right, matches: wait-kind-literal } }]
+            - all: [{ has: { field: right, matches: kind-ref } }, { has: { field: left, matches: wait-kind-literal } }]
+    - all:
+        - kind: switch_case
+        - has: { field: value, matches: wait-kind-literal }
+    - all:
+        - kind: pair
+        - has: { field: key, regex: '^kind$' }
+        - has: { field: value, matches: wait-kind-literal }

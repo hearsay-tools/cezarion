@@ -283,6 +283,11 @@ export class DelegationService {
   }
   /** Called only after manager recovery, when persisted destroy intents may be retried. */
   armDestroyRetries(projectId: string): void { this.cleanups.get(projectId)?.armAfterRecovery(); }
+  /** The data directory of the caller's project, for the listener's migration admission. */
+  projectDataDir(caller: Caller): string | undefined {
+    const project = isAuthenticatedCaller(caller) ? this.projects.get(caller.projectId) : undefined;
+    return project ? projectPaths(project.root).write : undefined;
+  }
   private context(caller: Caller) {
     const project = isAuthenticatedCaller(caller) ? this.projects.get(caller.projectId) : undefined;
     if (!project) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');

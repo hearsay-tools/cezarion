@@ -45,6 +45,29 @@ state and binds its private journal to the source, target and payload before
 honoring a startup acknowledgement; it refuses conflicting destination data.
 System-package installs keep a working old app and a manual move notice.
 
+The staged project command `hsq migrate-project [--dry-run] [--repo <dir>]` is registered,
+advertised and runs exactly when `REBRAND_SWITCH` is true. With the switch true, a cockpit
+also moves each registered legacy project by itself at start (and a project added later when
+it is added), opened or not, when nothing else is live and its plan has no blocker or
+conflict; an older binary then stops seeing that project's earlier tasks. A project with
+anything else live, or with a plan blocker or conflict, stays in place: the cockpit serves it
+from both folders, logs what blocks the move and tries again at the next start. The switch must not turn on before the
+per-project write root follows moved state (hearsay-tools/cezarion#3150): until then a moved
+project's runs are read-only fallback runs. With the switch false, as
+shipped, help and dispatch omit it (`cez migrate-project` is an unknown command, exit 1), no
+route or setting exposes it, and every ordinary write stays under `.ai/cezar/`. Only the user
+runs it, offline: it refuses while a cockpit it can see serves the project or a task is live,
+and names what to stop; a cockpit of another home that lists the project but never opened it
+is not seen, so the user stops it. An older binary checks neither the fence nor the journal
+and opens `.ai/cezar/` directly: on a moved project it sees no earlier task but loses no data. Early
+recovery runs in both switch states: an entry that finds an unfinished
+`.ai/squawk-migration.json` finishes it before it reads the project, and a journal that
+cannot finish keeps the project refused with the cause. A journal that names anything
+outside the project's own state, or that Git tracks, is refused unchanged before any step.
+The command prints the plan text and a closing line, exits 0, and prints the `git mv`
+commands for tracked files without running them; a refusal prints one message to stderr
+and exits 1.
+
 `cez job start|status` is an additive task command (hearsay-tools/cezarion#3097). Success
 prints one JSON object to stdout and exits 0; a refusal or usage error prints
 `{ "error": "<text>" }` to stderr and exits 1; help exits 0. Its `<name>.<run>.log`,

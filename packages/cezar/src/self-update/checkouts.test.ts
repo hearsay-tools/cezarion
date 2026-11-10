@@ -10,6 +10,8 @@ import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-fac
 import { seedRuns } from '../runs/run-store.testkit.ts';
 import { buildCheckout, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { SelfUpdateService } from './service.ts';
+import { CockpitOwnership } from '../server/cockpit-ownership.ts';
+import { migrateProject } from '../project-migration/engine.ts';
 import { activate, activeId, branchSlug, currentEntry, linkCheckout, linkId, listInstalled, listLinks, removeInstalled, versionDir, versionsDir } from './layout.ts';
 
 /** A built cezar monorepo checkout: packages/cezar with dist/index.js and web/dist/index.html. */
@@ -173,6 +175,72 @@ describe('linked checkouts', () => {
       stale: true,
     });
     expect(found[1]).toMatchObject({ task: null, commit: { subject: 'init' }, stale: false });
+  });
+
+  /** A cezar checkout with one task worktree, named by its run; registered unless `register` is false. */
+  function registeredTaskRepo(register = true): string {
+    const repo = join(home, 'repo');
+    fakeCheckout(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    writeFileSync(join(repo, '.gitignore'), 'dist\nweb/dist\n.ai\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-q', '-m', 'init');
+    const task = join(repo, '.ai', 'cezar', 'worktrees', 'def67890-run');
+    git(repo, 'worktree', 'add', '-q', '-b', 'cez/def67890', task);
+    fakeCheckout(task);
+    seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', branch: 'cez/def67890' })]);
+    mkdirSync(env.CEZ_HOME!, { recursive: true });
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'),
+      Buffer.from(JSON.stringify({ projects: register ? [{ id: 'cezar', root: realpathSync(repo) }] : [] })));
+    return repo;
+  }
+
+  /** A project migration of `repo` that stops at `point`, as a crash would, leaving its journal. */
+  async function interruptMigration(repo: string, point: string): Promise<void> {
+    const migrator = new CockpitOwnership();
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [] });
+    try {
+      await expect(migrateProject({ repoRoot: realpathSync(repo), fence, fault: at => { if (at === point) throw new Error(at); } })).rejects.toThrow(point);
+    } finally {
+      fence.release();
+      migrator.releaseAll();
+    }
+  }
+
+  // A project under a migration fence (hearsay-tools/cezarion#3087) is not read: no cold run lookup.
+  it('lists a fenced project\'s checkouts without reading its run store', async () => {
+    const repo = registeredTaskRepo();
+    const migrator = new CockpitOwnership();
+    const fence = await migrator.fenceProject(join(repo, '.ai', 'cezar'), { liveTasks: () => [] });
+    try {
+      const found = await discoverCheckouts(env, testHome(env));
+      expect(found.map((c) => [c.branch, c.task])).toEqual(expect.arrayContaining([['cez/def67890', null], ['main', null]]));
+    } finally {
+      fence.release();
+      migrator.releaseAll();
+    }
+    expect((await discoverCheckouts(env, testHome(env))).find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run' });
+  });
+
+  it('finishes an unfinished project migration, then lists the worktrees it moved', async () => {
+    const repo = registeredTaskRepo();
+    // A crash after the move and before the repair: Git still names the task worktree's old path.
+    await interruptMigration(repo, 'repair-worktrees:before');
+    const moved = join(realpathSync(repo), '.ai', 'squawk', 'worktrees', 'def67890-run');
+    const found = await discoverCheckouts(env, testHome(env));
+    expect(found.find((c) => c.branch === 'cez/def67890')).toMatchObject({ worktree: moved, task: { id: 'def67890-run' } });
+    expect(existsSync(join(repo, '.ai', 'squawk-migration.json'))).toBe(false);
+  });
+
+  it('lists a repository reached only through a linked task checkout that the recovery moves', async () => {
+    const repo = registeredTaskRepo(false);
+    linkCheckout(cezarPackageRoot(join(repo, '.ai', 'cezar', 'worktrees', 'def67890-run'))!, 'cez/def67890', env, undefined, testHome(env));
+    // Interrupted before its move: the recovery moves the linked checkout away from under the listing.
+    await interruptMigration(repo, 'move:before');
+    const found = await discoverCheckouts(env, testHome(env));
+    expect(found.map((c) => [c.branch, c.worktree])).toEqual(expect.arrayContaining([
+      ['main', realpathSync(repo)], ['cez/def67890', join(realpathSync(repo), '.ai', 'squawk', 'worktrees', 'def67890-run')]]));
+    expect(existsSync(join(repo, '.ai', 'squawk-migration.json'))).toBe(false);
   });
 
   // Retention reclaims a task's worktree directory; the branch still names its task.

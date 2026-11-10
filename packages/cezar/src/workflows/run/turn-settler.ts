@@ -1,5 +1,6 @@
+import type { WaitCancellation } from './wait-cancellation.ts';
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { waitCapacityAvailable } from '../../runs/wait-capacity.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
 import { TIMER_MIN_SECONDS, type HumanWaitEntry, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
@@ -20,7 +21,6 @@ import { monitorsLiveWorkers, type CompletionGateHost } from './completion-gate.
 import type { RunModuleContext, SettledTurn } from './types.ts';
 import type { HumanWaits } from './human-waits.ts';
 import type { RunLine } from './run-line.ts';
-import type { WaitWatches } from './wait-watches.ts';
 import type { WaitRegistry } from './wait-registry.ts';
 import { openSubagentWaitOf, type SubagentWaits } from './subagent-waits.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
@@ -28,10 +28,11 @@ import type { WorkerQuestions } from './worker-questions.ts';
 
 
 interface TurnSettlerHost {
-  humanWaits: HumanWaits; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
+  waitEngine: WaitEngine;
+  humanWaits: HumanWaits; line: RunLine; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
   subagentWaits: SubagentWaits;
   move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
-  cancelOpenWaits(id: string): void; countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
+  waitCancellation: WaitCancellation; countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
   submitAgentInput(id: string, state: ActiveRun, content: ContentBlock[]): boolean; flushAgentInputs(id: string): boolean; hasQueuedAgentInputs(id: string, except?: readonly string[]): boolean;
   armUnreadInputTimer(id: string, state: ActiveRun): void; armHeldHumanInputTimer(id: string, state: ActiveRun): void;
   parkOnWaits(id: string, state: ActiveRun): boolean; queueWaitWake(id: string): void; leaveMonitoringPool(id: string): void; chargeAutomaticWake(id: string): number;
@@ -68,7 +69,7 @@ export class TurnSettler {
     transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'completed', session: state.liveSession.session, stepId: state.liveSession.currentStepId });
     if (close?.summary) this.context.store.appendEvent(runId, { type: 'note', message: close.summary });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'cezar_done' });
-    this.host.cancelOpenWaits(runId);
+    this.host.waitCancellation.cancelAll(runId);
     session?.end();
   }
 
@@ -463,13 +464,13 @@ export class TurnSettler {
       this.host.humanWaits.openHumanAlias(runId, state, 'budget');
       return;
     }
-    if (!waitCapacityAvailable(run)) return;
+    if (!this.host.waitEngine.compare(run, 'silent')) return;
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
     const wait = WAIT_KINDS.timer.monitoringEntry(via, now, delay, minutes, state.waitIdentity.ciTurnId ?? 'monitoring');
-    this.host.humanWaits.withdrawCezarHumanWaits(runId);
-    try { this.context.store.commitWait(runId, wait); }
-    catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
-    this.host.waitWatches.armWait(runId, wait);
+    this.host.waitEngine.open(runId, state, wait, {
+      withdraw: 'before-commit', onCommitFailure: { log: '[cez] monitoring timer checkpoint failed' },
+      arm: 'watch', park: 'none', return: 'none',
+    });
   }
 }

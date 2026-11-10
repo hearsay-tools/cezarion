@@ -1,6 +1,8 @@
 import { basename } from 'node:path';
 import type { LiveActivitySource } from '../activity/publisher.ts';
 import type { CiProgressSource } from '../activity/read-model.ts';
+import { projectPaths } from '../project-paths.ts';
+import { projectAdmissionRefusal } from './cockpit-ownership.ts';
 import type { ProjectContext } from './project-context.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
 
@@ -20,14 +22,18 @@ export interface ActivitySourceDeps {
  * context, which would recover its runs: a project this process has not loaded has no store.
  */
 export function createActivitySources({ bootContext, contexts, workspaceProjects, ciOf }: ActivitySourceDeps) {
-  /** A store that cannot open never reads as empty (docs/areas/runs-store.md): it carries the failure. */
-  const loadedSource = (project: LoadedProject, name: string): LiveActivitySource => ({
-    projectId: project.id,
-    name,
-    ...(project.store.unavailable
-      ? { unavailable: workspaceProjects.projectFailure(project.store.unavailable, project.id) }
-      : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId), ci: ciOf?.(project) } }),
-  });
+  /** A store that cannot open, or a project under a migration fence, never reads as empty
+   *  (docs/areas/runs-store.md): it carries the failure. */
+  const loadedSource = (project: LoadedProject, name: string): LiveActivitySource => {
+    const failure = project.store.unavailable ?? projectAdmissionRefusal(projectPaths(project.root).write);
+    return {
+      projectId: project.id,
+      name,
+      ...(failure
+        ? { unavailable: workspaceProjects.projectFailure(failure, project.id) }
+        : { loaded: { store: project.store, isActive: (runId: string) => project.manager.isActive(runId), ci: ciOf?.(project), dataDir: projectPaths(project.root).write } }),
+    };
+  };
   /** The registry, or undefined when it cannot be read. */
   const visibleProjects = () => workspaceProjects.listVisibleProjects().catch(() => undefined);
   const projectName = (projects: readonly { id: string; name: string }[] | undefined, id: string, root: string) =>

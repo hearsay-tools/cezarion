@@ -16,7 +16,8 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 import {
   automationDefinitionSchema,
   automationDefinitionsFileSchema,
@@ -478,17 +479,23 @@ export class AutomationStore {
   }
 
   acquireLease(staleAfterMs = 10 * 60_000): AutomationLease | undefined {
+    // Under a migration fence the poll lease reads as held: the check is skipped, nothing written.
+    if (projectWriteRefused(this.dataDir)) return undefined;
     mkdirSync(this.dataDir, { recursive: true });
     return this.tryAcquireLease(join(this.dataDir, POLL_LOCK), join(this.dataDir, POLL_RECLAIM), staleAfterMs, 0, false);
   }
 
   private async withLogLease<T>(operation: () => T): Promise<T> {
+    // Under a migration fence no lock is taken (no directory is recreated); every write inside skips.
+    if (projectWriteRefused(this.dataDir)) return operation();
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, LOG_LOCK);
     const guardPath = join(this.dataDir, LOG_RECLAIM);
     const deadline = Date.now() + 15_000;
     let lease: AutomationLease | undefined;
     while (!lease && Date.now() < deadline) {
+      // A fence taken while this waited: no lock, no guard, and every write inside skips.
+      if (projectWriteRefused(this.dataDir)) return operation();
       lease = this.tryAcquireLease(path, guardPath, 10 * 60_000, 0, false);
       if (!lease) await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
@@ -504,6 +511,9 @@ export class AutomationStore {
    * throws rather than write unserialized and lose the other process's keys.
    */
   private withWriteLock<T>(lockName: string, reclaimName: string, operation: () => T): T {
+    // Definition and state writes report what they persisted: a migration fence refuses them
+    // before memory changes, as a closed store refuses a durable commit.
+    assertProjectWritable(this.dataDir);
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, lockName);
     const guardPath = join(this.dataDir, reclaimName);
@@ -511,6 +521,7 @@ export class AutomationStore {
     let lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     while (!lease && Date.now() < deadline) {
       Atomics.wait(SLEEP, 0, 0, 2);
+      assertProjectWritable(this.dataDir);
       lease = this.tryAcquireLease(path, guardPath, WRITE_LOCK_STALE_MS, 0, false);
     }
     if (!lease) throw new Error(`automation ${lockName} is busy; retry shortly`);
@@ -519,6 +530,7 @@ export class AutomationStore {
   }
 
   private tryAcquireLease(path: string, guardPath: string, staleAfterMs: number, attempt: number, reclaiming: boolean): AutomationLease | undefined {
+    if (projectWriteRefused(this.dataDir)) return undefined;
     if (!reclaiming && existsSync(guardPath)) {
       const releaseGuard = this.acquireReclaimGuard(guardPath, staleAfterMs);
       if (!releaseGuard) return undefined;
@@ -560,6 +572,7 @@ export class AutomationStore {
 
   /** Only one process may inspect and remove an abandoned poll lock at a time. */
   private acquireReclaimGuard(path: string, staleAfterMs: number): (() => void) | undefined {
+    if (projectWriteRefused(this.dataDir)) return undefined;
     for (let attempt = 0; attempt <= 1; attempt++) {
       try {
         mkdirSync(path, { mode: 0o700 });
@@ -589,6 +602,7 @@ export class AutomationStore {
 
   /** Fresh live guards are respected; abandoned or aged-out guards are recoverable. */
   private retireAbandonedReclaimGuard(path: string, staleAfterMs: number): boolean {
+    if (projectWriteRefused(this.dataDir)) return false;
     const marker = join(path, '.reaping');
     let claimedToken: string | undefined;
     try {
@@ -746,7 +760,9 @@ export class AutomationStore {
     return rows;
   }
 
+  /** The write backstop: a project under a migration fence takes no automation file write. */
   private atomicJson(filename: string, value: unknown): void {
+    if (projectWriteRefused(this.dataDir)) return;
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, filename);
     const temporary = `${path}.tmp`;
@@ -755,6 +771,7 @@ export class AutomationStore {
   }
 
   private appendNdjson(filename: string, value: unknown): void {
+    if (projectWriteRefused(this.dataDir)) return;
     mkdirSync(this.dataDir, { recursive: true });
     const path = join(this.dataDir, filename);
     const fd = openSync(path, 'a', 0o600);
@@ -766,6 +783,7 @@ export class AutomationStore {
   }
 
   private rewriteNdjson(filename: string, rows: unknown[]): void {
+    if (projectWriteRefused(this.dataDir)) return;
     const path = join(this.dataDir, filename);
     const temporary = `${path}.tmp`;
     writeFileSync(temporary, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), {
@@ -807,13 +825,22 @@ function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino:
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+/** The lease files this process holds, so a project move never renames one from under its holder. */
+const heldLeases = new Set<string>();
+
+/** Whether this process holds an automation lease under `dataDir`. */
+export function automationLeaseHeld(dataDir: string): boolean {
+  const inside = resolve(dataDir) + sep;
+  return [...heldLeases].some(path => path.startsWith(inside));
+}
+
 export class AutomationLease {
   private released = false;
 
   constructor(
     private readonly path: string,
     private readonly fd: number,
-  ) {}
+  ) { heldLeases.add(resolve(path)); }
 
   isCurrent(): boolean {
     try { return sameFile(fstatSync(this.fd), statSync(this.path)); }
@@ -823,6 +850,7 @@ export class AutomationLease {
   release(): void {
     if (this.released) return;
     this.released = true;
+    heldLeases.delete(resolve(this.path));
     try {
       if (this.isCurrent()) unlinkSync(this.path);
     } catch {

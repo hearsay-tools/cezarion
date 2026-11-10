@@ -28,6 +28,15 @@ const PR_UNTIL_TEXT = {
 
 const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
 
+type RegistrationRequest = {
+  timer: Extract<CezarWaitRequest, { kind: 'timer' }>;
+  pr: Extract<CezarWaitRequest, { kind: 'pr' }>;
+  process: Extract<CezarWaitRequest, { kind: 'process' }>;
+  peer: Extract<CezarWaitRequest, { kind: 'peer' }>;
+  'worker-list': Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>;
+};
+type RegistrationPath = { pr: 'pr'; timer: 'timer'; process: 'process'; peer: 'peer'; worker: 'worker-list'; human: 'none'; subagent: 'none' };
+
 export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   is: (wait: Wait) => wait is Extract<Wait, { kind: K }>;
   select: (waits: readonly Wait[]) => Extract<Wait, { kind: K }>[];
@@ -44,6 +53,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   watch: 'ci' | 'process' | 'none' | 'worker' | 'peer' | 'subagent' | 'timer';
   answerKind: (wait: Wait) => Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' | undefined;
   hasDeadline: (wait: Wait) => boolean;
+  registration: RegistrationPath[K];
   requestKinds: readonly CezarWaitRequest['kind'][];
   delegation: boolean;
 
@@ -120,7 +130,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     requestedTimeout: request => 'timeout_seconds' in request ? request.timeout_seconds : undefined,
     answerKind: () => 'pr',
     hasDeadline: () => true,
-    requestKinds: ['pr'],
+    registration: 'pr', requestKinds: ['pr'],
     delegation: false,
     userAnswers: false, holdsConversationInput: true, runnerResumeCancels: [],
     chargesWake: false, refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
@@ -155,7 +165,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicateMonitoring: (waits, via) => waits.some(wait => wait.phase === 'open' && wait.kind === 'timer' && wait.via === via),
     answerKind: () => 'timer',
     hasDeadline: () => true,
-    requestKinds: ['timer'],
+    registration: 'timer', requestKinds: ['timer'],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: ['open'],
     chargesWake: true, refusesSpentBudget: true, holdsSession: false, cancellable: true, timersDisabled: true,
@@ -180,7 +190,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     requestedTimeout: request => 'timeout_seconds' in request ? request.timeout_seconds : undefined,
     answerKind: () => 'process',
     hasDeadline: () => true,
-    requestKinds: ['process'],
+    registration: 'process', requestKinds: ['process'],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: true, refusesSpentBudget: true, holdsSession: false, cancellable: true, timersDisabled: true,
@@ -206,7 +216,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     requestedTimeout: () => undefined,
     answerKind: () => undefined,
     hasDeadline: () => true,
-    requestKinds: [],
+    registration: 'none', requestKinds: [],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: ['open', 'resolved'],
     chargesWake: 'timeout', refusesSpentBudget: false, holdsSession: true, cancellable: true, timersDisabled: false,
@@ -234,7 +244,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicatePeer: identicalPeerWait,
     answerKind: () => 'peer',
     hasDeadline: () => true,
-    requestKinds: ['peer'],
+    registration: 'peer', requestKinds: ['peer'],
     delegation: true,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: true, refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
@@ -264,7 +274,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicateWorker: identicalWorkerWait,
     answerKind: wait => 'requestIds' in wait && wait.requestIds ? 'request' : 'worker',
     hasDeadline: wait => 'deadline' in wait && wait.deadline !== undefined,
-    requestKinds: ['worker', 'request'],
+    registration: 'worker-list', requestKinds: ['worker', 'request'],
     delegation: true,
     workerListTarget: request => ({ ...(request.kind === 'worker' ? { workerIds: request.worker_ids } : { requestIds: request.request_ids }), ...(request.mode === undefined ? {} : { mode: request.mode }), timeoutSeconds: request.timeout_seconds }),
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
@@ -296,7 +306,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     duplicateAsk: (waits, answering) => WAIT_KINDS.human.selectOpen(waits).find(wait => wait.source !== 'cezar' && (answering === undefined || wait.askSeq !== answering)),
     answerKind: () => undefined,
     hasDeadline: () => false,
-    requestKinds: [],
+    registration: 'none', requestKinds: [],
     delegation: false,
     userAnswers: true, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: false, refusesSpentBudget: false, holdsSession: false, cancellable: 'unshown', timersDisabled: false,
@@ -567,4 +577,10 @@ export function sessionlessWakePrompt(resolved: ReturnType<typeof resolvedWaits>
 /** The first budgeted wait label, with monitoring timers ahead of ordinary timers, processes and peers. */
 export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
   return waits.flatMap(wait => WAIT_KINDS[wait.kind].deliveryLabel(wait)).sort((a, b) => a.priority - b.priority)[0]?.text;
+}
+
+/** Request dispatch follows the typed registration cell of its stored-kind row. */
+export function registersAs<R extends keyof RegistrationRequest>(request: CezarWaitRequest, registration: R,
+  row = waitRequestRow(request.kind)): request is RegistrationRequest[R] {
+  return row.registration === registration;
 }

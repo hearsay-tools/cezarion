@@ -6,11 +6,12 @@ import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { loadWorkspaceConfig, PROJECT_ID_RE, type WorkspaceProject } from '../workspace/config.ts';
 import { allocateProjectSlug, listProjects } from '../workspace/projects.ts';
 import { resolveCapabilities } from './capabilities.ts';
-import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
+import { assertProjectAdmitted, CockpitAlreadyRunningError, projectAdmissionRefusal, ProjectMigrationFencedError } from './cockpit-ownership.ts';
+import { ProjectMigrationRecoveryError } from '../project-migration/recovery.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
-type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home'> & {
+type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home' | 'legacyCanary'> & {
   /** Every project's manager builds runners the way the boot manager does. */
   manager: Pick<ServerDeps['manager'], 'createRunner'>;
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
@@ -35,6 +36,7 @@ export function createWorkspaceProjectContexts(
     semaphore: deps.semaphore,
     preview: deps.previewHost,
     toolActivity: deps.toolActivity,
+    rebrand: deps.legacyCanary,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       options.addressManager?.(project);
@@ -61,6 +63,8 @@ const projectIdSchema = z.union([z.literal('default'), z.string().regex(PROJECT_
 
 function classifyProjectBuildFailure(error: unknown) {
   if (error instanceof CockpitAlreadyRunningError) return { kind: 'cockpit-owned', error } as const;
+  if (error instanceof ProjectMigrationFencedError) return { kind: 'migrating', error } as const;
+  if (error instanceof ProjectMigrationRecoveryError) return { kind: 'migrating', error } as const;
   if (error instanceof RunStoreOpenError) return { kind: 'store-unavailable', error } as const;
   if (error instanceof ProjectContextError) return { kind: error.reason, error } as const;
   return { kind: 'unexpected', error } as const;
@@ -134,13 +138,17 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
   };
   const lookupProject = async (raw: string | undefined) => {
     // Upgrades suppress all build failures; HTTP and live feeds answer them through projectFailure.
-    if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return boundBoot;
+    // A boot project under a migration fence takes no new upgrade; lazy contexts refuse in `context`.
+    if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return projectAdmissionRefusal(boundBoot.dataDir) ? undefined : boundBoot;
     if (!validProjectId(raw)) return undefined;
     return boundContexts.context(raw).catch(() => undefined);
   };
   const resolveLiveProject = async (id: string) => {
     const bootId = await resolveBootProject();
-    if (id === 'default' || id === bootId) return { ...boundBoot, id: bootId };
+    if (id === 'default' || id === bootId) {
+      assertProjectAdmitted(boundBoot.dataDir);
+      return { ...boundBoot, id: bootId };
+    }
     return boundContexts.context(id);
   };
   // One answer per context failure for HTTP and live feeds (hearsay-tools/cezarion#2321).

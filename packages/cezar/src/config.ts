@@ -1,4 +1,5 @@
-import { readDataPath, readProjectPath } from './project-paths.ts';
+import { projectPaths, readDataPath, readProjectPath } from './project-paths.ts';
+import { assertProjectWritable, projectAdmissionRefusal } from './server/cockpit-ownership.ts';
 import type { Home } from './home/home.ts';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -171,6 +172,23 @@ export async function loadConfig(repoRoot: string, home: Home): Promise<CezConfi
   return parseLeniently(withMachineDefaults(raw, machine));
 }
 
+/** The last config each health read saw, by repo root. */
+const healthConfigs = new Map<string, CezConfig>();
+
+/**
+ * The project config health shows: read as `loadConfig` reads it, except while a migration fence
+ * holds the project. Then the last value read (the defaults before any) stands in and the project
+ * is not read.
+ */
+export async function healthConfig(repoRoot: string, home: Home): Promise<CezConfig> {
+  if (projectAdmissionRefusal(projectPaths(repoRoot).write)) {
+    return healthConfigs.get(repoRoot) ?? parseLeniently(withMachineDefaults({}, (await loadWorkspaceConfig(home.workspaceConfig)).agentDefaults));
+  }
+  const config = await loadConfig(repoRoot, home);
+  healthConfigs.set(repoRoot, config);
+  return config;
+}
+
 /** Most bad values one file can hold before the parse gives up and answers the defaults. */
 const MAX_REPAIRS = 64;
 
@@ -275,6 +293,7 @@ export function updateConfigFile<T>(
   const next = previous.catch(() => undefined).then(async () => {
     const outcome = change(await readRawConfig(dataDir));
     if ('refuse' in outcome) return outcome.refuse;
+    assertProjectWritable(dataDir);
     await mkdir(dataDir, { recursive: true });
     const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
     try {

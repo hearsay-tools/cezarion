@@ -15,6 +15,7 @@ import type { Viewer } from '../preview/session.ts';
 import { createPreviewSocket, type PreviewSocket, type PreviewSocketHost } from './preview-socket.ts';
 import { startServer, verifyWsUpgrade } from './server.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
+import { CockpitOwnership } from './cockpit-ownership.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -64,7 +65,7 @@ const runs = () => new Map<string, { id: string; title: string; worktreePath?: s
   ['gone', { id: 'gone', title: 'Old task', worktreePath: join(worktree, 'removed') }],
 ]);
 
-async function boot(opts: { host?: PreviewSocketHost; log?: (line: string) => void } = {}) {
+async function boot(opts: { host?: PreviewSocketHost; log?: (line: string) => void; dataDir?: string } = {}) {
   const records = runs();
   const store = { getRun: (id: string) => records.get(id), appendEvent: () => undefined } as unknown as RunContext['store'];
   const server = createServer((_req, res) => {
@@ -74,7 +75,7 @@ async function boot(opts: { host?: PreviewSocketHost; log?: (line: string) => vo
   const socket = createPreviewSocket({
     host: opts.host,
     verify: req => verifyWsUpgrade(req),
-    resolveProject: async projectId => (projectId === undefined || projectId === 'proj' ? { store, dataDir: join(worktree, 'data') } : undefined),
+    resolveProject: async projectId => (projectId === undefined || projectId === 'proj' ? { store, dataDir: opts.dataDir ?? join(worktree, 'data') } : undefined),
     ...(opts.log ? { log: opts.log } : {}),
   });
   attachUpgradeRouter(server, [socket.route]);
@@ -128,6 +129,26 @@ describe('the preview WebSocket', () => {
     expect((await connect(url('/api/v1/p/other/runs/run-1/preview/ws'))).status).toBe(404);
     expect((await connect(url('/api/v1/p/proj/runs/nope/preview/ws'))).status).toBe(404);
     expect((await connect(url('/api/v1/p/Bad_Slug!/runs/run-1/preview/ws'))).status).toBe(404);
+  });
+
+  it('closes an open pane instead of acting while its project is under a migration fence', async () => {
+    const { host, calls } = fakeHost();
+    const dataDir = join(worktree, 'repo', '.ai', 'cezar');
+    const { url } = await boot({ host, dataDir });
+    const { status, ws } = await connect(url(SCOPED));
+    expect(status).toBe('open');
+    const migrator = new CockpitOwnership();
+    const fence = await migrator.fenceProject(dataDir, { liveTasks: () => [] });
+    try {
+      const closed = once(ws, 'close');
+      ws.send(JSON.stringify({ t: 'ping', ts: 1 }));
+      const [code] = await closed;
+      expect(code).toBe(1013);
+      expect(calls).toEqual([]);
+    } finally {
+      fence.release();
+      migrator.releaseAll();
+    }
   });
 
   it('serves the boot alias', async () => {
