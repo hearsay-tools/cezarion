@@ -4,7 +4,7 @@ import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
 import {
   SUBAGENT_WAIT_CHILD_LIMIT, SUBAGENT_WAIT_DEADLINE_SECONDS, SUBAGENT_WAIT_GRACE_SECONDS,
-  type SubagentChild, type SubagentWaitEntry, type SubagentWaitResult, type Wait,
+  type SubagentChild, type SubagentWaitEntry,
 } from '@open-mercato/cezar-contract/waits';
 import type { UiEvent, UiToolItem } from '../../core/ui-events.ts';
 import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';

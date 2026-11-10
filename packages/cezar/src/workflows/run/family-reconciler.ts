@@ -5,7 +5,7 @@ import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { CommitSource, RunRecord } from '../../runs/store.ts';
-import type { Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import type { WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { historyDeletionPending, executionBlockedByRootFinish } from './run-guards.ts';
 import { repairFailedRootFinish } from '../completion-policy.ts';
 import { reconcileConversationState, projectConversationEvents, settledRunFamilies } from '../../delegation/conversations.ts';
