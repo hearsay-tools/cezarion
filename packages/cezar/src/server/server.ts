@@ -1,3 +1,4 @@
+import { worktreeOf, workingDirectoryOf, NO_WORKTREE } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
@@ -4076,13 +4077,7 @@ export function createApp(deps: ServerDeps) {
   // protected surface). Isolated runs read their worktree; worktree-off runs
   // read the repo checkout they executed in. Every predictable git failure
   // degrades to 409 + human-readable reason, 404 only for unknown ids.
-  const worktreeOf = (run: RunRecord): string | null =>
-    run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : null;
-  const workingDirectoryOf = (run: RunRecord, repoRoot: string): string | null =>
-    run.worktree === false
-      ? repoRoot
-      : worktreeOf(run);
-  const NO_WORKTREE = 'no worktree — this task ran directly in the repo working tree';
+
 
   // ---- chained family: worktrees (project-scoped) ----
   const worktreesRoutes = new Hono<ProjectApiEnv>()
