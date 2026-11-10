@@ -210,11 +210,14 @@ One workflow, `main-verify.yml`, verifies `main`.
 5. **Bisect.** A second failure is real. Its failing units are the failing test files when
    the failed job names them. A job that names none (build, a coverage threshold, setup, a
    time limit) is one failing unit as a whole. A matrix job runs only the failing units on
-   each commit between the last green commit and the verified one. The first commit that
-   fails is the cause.
-6. **Revert.** The bot opens a PR that reverts the cause, with the label `main-revert` and
-   auto-merge armed. It uses the release App token, so the PR starts CI. The bot comments on
-   the reverted PR with the failing tests and the run link.
+   each commit between the last green commit and the verified one. The cause of a failing
+   unit is the newest commit where the unit fails and passes on the parent. An older break
+   that a later commit of the batch already repaired is not a cause.
+6. **Revert.** The bot opens one PR per confirmed failure. It reverts every cause that the
+   bisect named, newest first, with the label `main-revert` and auto-merge armed. One PR
+   keeps two causes from blocking each other's check, as the one-repair-per-run-attempt
+   rule in `docs/sdlc/main-ci-repair.md` does for repairs. It uses the release App token, so the PR starts CI. The bot comments on
+   each reverted PR with the failing tests and the run link.
 7. **Revert lane.** CI proves that the PR tree equals a plain `git revert` of the named
    commits on the current `main`. Such a PR takes its own lane, whatever paths it touches,
    and this lane exists from P1.2, before the fast lane does. Its pull request check runs
@@ -260,9 +263,11 @@ Cases:
 | Rerun passes | Flake issue. Verdict `success`. No revert |
 | Failing files fail on the last green commit too | Environment or time. No revert. The summary says so, and the owner is mentioned at once |
 | Failing files pass on every single commit of the batch | Interaction or flake. No revert. The repair automation starts a task, as today |
-| Bisect names one commit; the revert applies | Revert PR, fast lane |
-| Bisect names one commit; the revert conflicts | No partial revert. The repair automation starts a task. The 60-minute and 6-hour clocks still run |
-| Two commits in one batch break different tests | One bisect per failing file set; one revert PR per cause |
+| Bisect names one commit; the revert applies | Revert PR, revert lane |
+| Bisect names the causes; a revert conflicts | No partial revert. The repair automation starts a task. The 60-minute and 6-hour clocks still run |
+| Two commits in one batch break different tests | The bisect names both. One revert PR reverts both, and its check runs every failed unit |
+| A commit breaks a unit, a later commit of the batch repairs it, a still later one breaks it again | The cause is the last commit. The first one is not reverted |
+| The revert PR's check still fails a unit that failed on `main` | The bisect was wrong. The PR does not merge. The repair automation starts a task |
 | The cause is a guarded-lane commit | Same revert. A revert of code is safe; state that the commit already wrote is not undone, and the comment says so |
 | The revert PR fails its own check | The repair automation starts a task. The clocks still run |
 | A new push lands while the bisect runs | It joins the next batch. The bisect range does not change |
