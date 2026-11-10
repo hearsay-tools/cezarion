@@ -140,7 +140,7 @@ last. P4.2 needs 1.2 and edits
 
 **Exit on integrated `main`:** one function compares the limit, called at each site that compares
 today (the PR path twice, before and after its lookup); every cancel goes through
-the engine; the kind-literal rule passes with the 8 files of Table F's allow-list (28 files branch
+the engine; the kind-literal rule passes with the 6 files of Table F's allow-list (28 files branch
 on a wait's kind at the baseline); the inbound legacy round trip is deleted;
 `npm run test:parity` and CI pass.
 
@@ -390,17 +390,17 @@ pattern over production files of `packages/cezar/src` (a `kind` compared with `=
 | 21 | `run/wait-registration-tool.ts` | `:10` human, subagent | 2.2 answer kind |
 | 22 | `run/wait-registration.ts` | `:12` pr; `:16` worker, request; `:30` timer | 2.2 duplicate defaults and the timeout field a repeat compares |
 | 23 | `run/wait-registry.ts` | `:107`, `:131`, `:242` entries; `:124` worker; `:189` peer; `:238` human; `:264`, `:266`, `:269`, `:297`, `:312`, `:343` request dispatch; `:380` human | entries 2.2; `:124`, `:189`, `:238` 2.5 selectors; the request dispatch 3.1 (`open` dispatches through the row's registration facts); `:380` 2.1 `cancellable` |
-| 24 | `run/wait-watches.ts` | `:50-60` | allow-list: watch adapters. After 2.3 `armWait` dispatches through the row; each adapter serves one kind |
+| 24 | `run/wait-watches.ts` | `:50-60` | no exception needed: the watch adapters hold no kind literal; `armWait` dispatches through the row |
 | 25 | `run/wake-admission.ts` | `:63` process, peer, subagent; `:172` human; `:291` worker; `:410` subagent | `:63` 2.4 cap note; `:172`, `:291` 2.5 selectors; `:410` 2.1 `holdsSession` |
 | 26 | `run/wake-ledger.ts` | `:84` human | 2.5 human selector |
 | 27 | `workflows/wait-scope.ts` | `:62` entry; `:69`, `:94` peer; `:98-106` request kinds | `:62` 2.2 entry builder; `:69`, `:94` 2.5 peer selector; `:98-106` 2.2 request kinds per row |
 | 28 | `workflows/waits.ts` | `:38-40`, `:58`, `:69-70`, `:86`, `:99-107`, `:120`, `:136-160`, `:166`, `:178-189`, `:261-267`, `:278-279`, `:288`, `:291-306`, `:316-324` | 2.1 `:69-70` budget, `:278-279` `userAnswers` and `cancellable`, `:288` `holdsConversationInput`; 2.2 `:38-40` answer kind, `:120` deadline rule, `:136-160` duplicates, `:291-306` builders; 2.3 `:166` input id, `:316-324` results; 2.4 `:58` monitoring timer, `:99-107`, `:178-189`, `:261-267` text; 2.5 `:86` human selector |
 | 29 | `server/forge/github.ts` | many | allow-list: not a wait kind. Its `kind` is a GitHub item kind (`pr` or `issue`) |
 | 30 | `subcommands.ts` | `:31` | allow-list: not a wait kind. Its `case 'worker'` is a CLI subcommand |
-| 31 | `run/wait-engine.ts`, `run/wait-kinds.ts` | new | allow-list: the engine and the table |
+| 31 | `run/wait-engine.ts`, `run/wait-resolve.ts`, `run/wait-cancellation.ts`, `run/wait-kinds.ts` | new | allow-list: the table only. The three engine files hold no kind literal and need no exception |
 
-The allow-list at the end of the epic holds 8 files: rows 1, 3, 5, 24, 29, 30 and the two files
-of row 31.
+The allow-list at the end of the epic holds 6 files: rows 1, 3, 5, 29, 30 and the table
+of row 31. Only files with a kind-literal match have an exception; the stale-entry test enforces this.
 
 ### Table G: test fixtures 3.4a migrates
 
