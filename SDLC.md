@@ -7,8 +7,9 @@ it. Add a rule only when its absence causes a real failure.
 ## Labels
 
 Issue intake labels each new issue with a type and an area when it is
-confident. Apply only a label that `gh label list -R hearsay-tools/cezarion`
-shows. Do not create a label; the maintainer owns the label set.
+confident. Apply only a label that
+`gh label list -R hearsay-tools/cezarion --limit 1000` shows. Do not create a label;
+the maintainer owns the label set.
 
 ## The QA gate
 
