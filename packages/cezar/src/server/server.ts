@@ -210,11 +210,10 @@ import {
 } from './git-changes.ts';
 import { healthConfig, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
-import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
 import { readAgentModelDefaults } from '../agent-config/models.ts';
 import { listAgentConfig } from '../agent-config/service.ts';
-import { listConfigFiles, type AgentHomePaths } from '../agent-config/catalog.ts';
+import { findConfigFile, listConfigFiles, type AgentHomePaths } from '../agent-config/catalog.ts';
 import { readAccountIdentity } from '../agent-config/account-identity.ts';
 import {
   defaultWorkspaceConfig,
@@ -280,7 +279,7 @@ import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forge
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
-import { afterProjectRecovery, createProjectMigrationRoutes, recoverProjects, type ProjectMigrationServerDeps } from './project-migration-route.ts';
+import { createProjectMigrationRoutes, recoverBeforeStores, recoverProjects, type ProjectMigrationServerDeps } from './project-migration-route.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -5111,7 +5110,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
   });
-  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = {
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = recoverBeforeStores(deps.ownership, {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
@@ -5121,12 +5120,13 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;
     },
-    withStore: (project, work) => afterProjectRecovery(project.root, deps.ownership, () => withProjectAdmission(projectPaths(project.root).write, function admittedStore() {
+    withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, function admittedStore() {
       if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
-      return sharedContexts.withMaintenanceStore(project.id, (store, valid) => work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
-    }, () => undefined)),
+      return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
+        work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
+    }, () => undefined),
     lookup: (root, identities, signal) => resolveForgeRoot(root, deps.forgeFactory).mergedPullRequests(identities, signal),
-  };
+  });
   const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);
   const completionActions = new CompletionActionCoordinator({
     projects: archiveDeps.projects,

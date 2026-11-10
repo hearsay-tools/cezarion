@@ -4,7 +4,8 @@ import { projectMigrationRequestSchema, type ProjectMigrationError, type Project
 import { projectPaths } from '../project-paths.ts';
 import { dryRunAnswer, migrationAnswer } from '../project-migration/answer.ts';
 import { migrateProject, ProjectMigrationRefusedError } from '../project-migration/engine.ts';
-import { ProjectMigrationRecoveryError, recoverProjectMigration } from '../project-migration/recovery.ts';
+import { afterProjectRecovery, ProjectMigrationRecoveryError, recoverProjectMigration } from '../project-migration/recovery.ts';
+import type { ArchiveOnMergeDeps } from './archive-on-merge.ts';
 import { PROJECT_MIGRATION_SWITCH } from '../project-migration/switch.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import {
@@ -14,7 +15,13 @@ import { fenceProjectContext, ProjectContextError, type ProjectContexts } from '
 import { jsonZodValidator } from './validators.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
 
-export { afterProjectRecovery, recoverProjects } from '../project-migration/recovery.ts';
+export { recoverProjects } from '../project-migration/recovery.ts';
+
+/** The archive and completion stores, each opened only after the project's unfinished journal
+ *  finishes: recovery runs before `withStore` opens its admission lease. */
+export function recoverBeforeStores(ownership: CockpitOwnership | undefined, deps: ArchiveOnMergeDeps): ArchiveOnMergeDeps {
+  return { ...deps, withStore: (project, work) => afterProjectRecovery(project.root, ownership, () => { return deps.withStore(project, work); }) };
+}
 
 /**
  * `POST /api/v1/projects/:projectId/migration` (hearsay-tools/cezarion#3089): the owning cockpit

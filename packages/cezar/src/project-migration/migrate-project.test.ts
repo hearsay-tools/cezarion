@@ -65,7 +65,7 @@ describe('migrate-project behind the P5 gate', { timeout: TIMEOUT }, () => {
   async function cli(args: string[], deps: Partial<MigrateProjectDeps> = {}) {
     const out: string[] = [], err: string[] = [];
     const code = await runMigrateProjectCommand([...args, '--repo', project.root], {}, {
-      fetch, owner: () => undefined, getRepoInfo: async () => ({ root: project.root }) as never, cwd: () => project.root,
+      fetch, owner: () => undefined, getRepoInfo: async () => { return { root: project.root } as never; }, cwd: () => project.root,
       log: line => out.push(line), error: line => err.push(line), ...deps,
     });
     return { code, out: out.join('\n'), err: err.join('\n') };

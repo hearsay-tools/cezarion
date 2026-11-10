@@ -27,12 +27,6 @@ const NOTHING_LIVE = { liveTasks: () => [], inFlight: () => 0 };
 /** Recoveries in flight in this process, by journal path: concurrent entries share one. */
 const recovering = new Map<string, Promise<ProjectMigrationResult | undefined>>();
 
-/** Whether `repoRoot` has an unfinished migration journal. One `lstat`. */
-export function hasUnfinishedProjectMigration(repoRoot: string): boolean {
-  const journal = migrationFencePaths(projectPaths(repoRoot).write)?.journal;
-  return journal !== undefined && pathPresent(journal);
-}
-
 /**
  * Finish the project's unfinished migration journal under the exclusive fence; undefined without
  * one (one `lstat`), or when another live cockpit or fence holder has the project: that holder

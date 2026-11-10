@@ -156,7 +156,7 @@ describe('early recovery of an unfinished project migration', () => {
   it('finishes the journal before the cold workspace run index reads the project', async () => {
     const boot = journaled(), cold = journaled();
     rmSync(boot.journal);
-    const [bootId] = await Promise.all([boot.root, cold.root].map(async (root) => (await registerProject(root, undefined, testHome())).id!));
+    const [bootId] = await Promise.all([boot.root, cold.root].map(async (root) => { return (await registerProject(root, undefined, testHome())).id!; }));
     const ownership = owner();
     const contexts = contextsFor(ownership, { id: bootId!, root: boot.root });
     const ctx = await contexts.context(bootId!);
@@ -204,7 +204,7 @@ describe('a journal that cannot finish', () => {
 
     const boot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-recovery-boot-'));
     roots.push(boot);
-    const [bootId, brokenId] = await Promise.all([boot, root].map(async (dir) => (await registerProject(dir, undefined, testHome())).id!));
+    const [bootId, brokenId] = await Promise.all([boot, root].map(async (dir) => { return (await registerProject(dir, undefined, testHome())).id!; }));
     const ownership = owner();
     const contexts = contextsFor(ownership, { id: bootId!, root: boot }, { id: brokenId!, root });
     const ctx = await contexts.context(bootId!);

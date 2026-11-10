@@ -108,7 +108,7 @@ describe('the cockpit migration route', () => {
       roots.push(root);
       return root;
     });
-    const [bootId, targetId] = await Promise.all([boot!, target!].map(async (root) => (await registerProject(root, undefined, testHome())).id!));
+    const [bootId, targetId] = await Promise.all([boot!, target!].map(async (root) => { return (await registerProject(root, undefined, testHome())).id!; }));
     const ownership = new CockpitOwnership();
     owners.push(ownership);
     const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
