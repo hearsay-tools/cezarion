@@ -12,6 +12,7 @@ import { CredentialRegistry, type Caller } from './credentials.ts';
 import type { DelegationService } from './service.ts';
 import { DelegationPolicyError } from './policy.ts';
 import { RunWriteRefusedError } from '../runs/store.ts';
+import { withProjectAdmission } from '../server/cockpit-ownership.ts';
 
 type Env = { Variables: { caller: Caller } };
 export function delegationFailure(error: unknown) {
@@ -42,7 +43,11 @@ export function createDelegationRoutes(service: DelegationService, credentials: 
     const caller = token ? credentials.authenticate(token) : undefined;
     if (!caller) return c.json({ code: 'unauthenticated' as const, error: 'Delegation authentication required' }, 401);
     c.set('caller', caller);
-    await next();
+    // The private listener is a second entry into the project: each request holds its migration
+    // admission lease until it answers, so a fence refuses or drains it like a cockpit route.
+    const dataDir = service.projectDataDir(caller);
+    if (!dataDir) return next();
+    return withProjectAdmission(dataDir, next, (error) => c.json({ code: 'incompatible_state' as const, error: error.message }, 409));
   };
   const invalid = { code: 'invalid_input', message: 'Invalid delegation input' } as const;
   return new Hono<Env>()

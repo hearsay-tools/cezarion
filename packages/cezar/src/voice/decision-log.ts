@@ -1,4 +1,5 @@
 import { dataReadDirs } from '../project-paths.ts';
+import { projectWriteRefused } from '../server/cockpit-ownership.ts';
 import { mergeAppendOnly } from '../merged-streams.ts';
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,6 +31,7 @@ export type VoiceLogLine =
   | { type: 'outcome'; at: string; decisionId: string; outcome: VoiceOutcome };
 
 export function appendVoiceLog(dataDir: string, line: VoiceLogLine): void {
+  if (projectWriteRefused(dataDir)) return;
   try {
     const dir = join(dataDir, 'voice');
     mkdirSync(dir, { recursive: true });

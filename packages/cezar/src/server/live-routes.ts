@@ -6,6 +6,7 @@ import { HistoryCursorError } from '../runs/event-history.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
 import type { ProjectContext } from './project-context.ts';
 import { jsonZodValidator } from './validators.ts';
+import { withProjectAdmission } from './cockpit-ownership.ts';
 import { LiveFeedReset, readFiniteRunFeed, subscribeRunFeed } from './run-event-feed.ts';
 
 type ResolvedProject = Pick<ProjectContext, 'id' | 'store' | 'dataDir'>;
@@ -64,7 +65,12 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
           demand = resolved.demand;
           if (!resolved.project.store.getRun(demand.runId)) {
             results.push({ projectId: demand.projectId, runId: demand.runId, type: 'error', status: 404, error: 'run not found' });
-          } else results.push(await readFiniteRunFeed(resolved.project, demand, c.req.raw.signal));
+          } else {
+            // Admitted until the history scan ends, so a migration fence drains it.
+            results.push(await withProjectAdmission(resolved.project.dataDir, async () => {
+              return readFiniteRunFeed(resolved.project, demand, c.req.raw.signal);
+            }, (error) => failure(demand, new ProjectSetupFailure(projectFailure(error, demand.projectId)))));
+          }
         } catch (error) {
           c.req.raw.signal.throwIfAborted();
           results.push(failure(demand, error));

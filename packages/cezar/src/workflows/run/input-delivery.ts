@@ -1,4 +1,4 @@
-import { WAIT_KINDS } from './wait-kinds.ts';
+import { WAIT_KINDS, waitDeliveryLabel } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
@@ -12,7 +12,7 @@ import { writeInput, type ActiveRun } from '../active-run.ts';
 import type { PastedContent } from '../pasted-content.ts';
 import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
-import { chargesBudget, hasPrWait, isMonitoringTimer, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
+import { chargesBudget, hasPrWait, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import { enqueueAgentInput, agentInputBatch } from '../../delegation/input.ts';
@@ -33,7 +33,7 @@ import type { RunSkills } from './run-skills.ts';
 import type { AttachmentWriter } from './attachment-writer.ts';
 import type { HumanWaits } from './human-waits.ts';
 import type { QuestionAnswerSource, WorkerQuestions } from './worker-questions.ts';
-import type { WaitRegistry } from './wait-registry.ts';
+import type { WaitResolve } from './wait-resolve.ts';
 
 // The flight keeps its identity across asynchronous acknowledgement. Only this module can
 // change the reservation or attach the settled promise; readers receive getters only.
@@ -200,7 +200,7 @@ export const HELD_HUMAN_INPUT_RECHECK_MS = 250;
 interface InputDeliveryHost {
   active: ReadonlyMap<string, ActiveRun>;
   line: RunLine; workerExecutions: WorkerExecutions; runSkills: RunSkills; attachments: AttachmentWriter;
-  humanWaits: HumanWaits; workerQuestions: WorkerQuestions; waitRegistry: WaitRegistry;
+  humanWaits: HumanWaits; workerQuestions: WorkerQuestions; waitResolve: WaitResolve;
   inputReceiptHost: inputReceipts.InputReceiptsHost;
   isActive(id: string): boolean; move(id: string, exit: RunExitId): unknown;
   workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
@@ -277,7 +277,7 @@ export class InputDelivery {
     // Only the parent's reply to a routed question answers it (#505), through the answer seam.
     // An answer already executing keeps its checkpoint until turn-end but holds no input (#935).
     if (this.host.hasUnansweredHumanAsk(runId)) this.answerRoutedQuestion(runId);
-    this.host.waitRegistry.resolvePeerWaits([runId]); // The one exception: a named peer's message ends a peer wait (hearsay-tools/cezarion#1995).
+    this.host.waitResolve.resolvePeerWaits([runId]); // The one exception: a named peer's message ends a peer wait (hearsay-tools/cezarion#1995).
     // Messages are not waits (hearsay-tools/cezarion#1235): one the run has not received wakes it
     // through the wait list's admission, beside every open wait and a pending question, and ends
     // none of them. A turn in progress takes it at once, as steering.
@@ -584,7 +584,7 @@ export class InputDelivery {
     const { session } = flight;
     if (spent !== undefined) {
       flightWrites.reserve(flight, false);
-      const kind = !timers.length && peers.length ? 'peer message' : timers.some(isMonitoringTimer) ? 'monitoring' : (['timer', 'process', 'peer'] as const).find(k => timers.some(wait => wait.kind === k));
+      const kind = !timers.length && peers.length ? 'peer message' : waitDeliveryLabel(timers);
       this.context.store.appendEvent(runId, { type: 'note', message: `automatic ${kind} wake-up (${spent}/${this.maxAutoContinues})` });
     }
     // A wake of results always spends its admission; a wake of messages alone, only one it holds.
@@ -662,7 +662,7 @@ export class InputDelivery {
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
     const admitted = this.host.line.isAdmitted(runId) && state.boundary.atTurnBoundary === state.liveSession.session;
     if (resolved.length && admitted) {
-      const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.context.store.getRun(id)), { workerStatus: this.host.waitRegistry.workerStatus });
+      const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.context.store.getRun(id)), { workerStatus: this.host.waitResolve.workerStatus });
       if (!batch) return false;
       return this.host.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputIds, beforeHumanReset);
     }

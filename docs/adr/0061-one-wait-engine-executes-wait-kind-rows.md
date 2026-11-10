@@ -43,8 +43,9 @@ ADR 0021 still holds: waits are durable, an outcome commits with what it depends
 `RunManager` owns waits at its public surface. ADR 0053 and ADR 0056 still hold.
 
 Implementation: [2026-11-09-wait-kind-table-and-engine.md](../../.ai/specs/2026-11-09-wait-kind-table-and-engine.md),
-`packages/cezar/src/workflows/run/wait-kinds.ts` and `packages/cezar/src/workflows/run/wait-engine.ts`
-(created by the spec's slices), [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
+`packages/cezar/src/workflows/run/wait-kinds.ts`, `packages/cezar/src/workflows/run/wait-engine.ts` and
+`packages/cezar/src/workflows/run/wait-resolve.ts` and
+`packages/cezar/src/workflows/run/wait-cancellation.ts` (created by the spec's slices), [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
 [wait-registration-write.ts](../../packages/cezar/src/runs/wait-registration-write.ts).
 
 Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts),

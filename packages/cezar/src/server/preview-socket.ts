@@ -8,6 +8,7 @@ import type { PreviewHost, RunContext } from '../preview/host.ts';
 import type { Viewer } from '../preview/session.ts';
 import { PROJECT_ID_RE } from '../workspace/config.ts';
 import { matchPath, type UpgradeRoute } from './upgrade-router.ts';
+import { withProjectAdmission } from './cockpit-ownership.ts';
 import type { WsUpgradeVerdict } from './ws.ts';
 
 /**
@@ -111,7 +112,13 @@ export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
         warned = true;
         return;
       }
-      void deps.host?.handle(ctx, viewer, msg.data).catch(() => undefined);
+      const host = deps.host;
+      if (!host) return;
+      // Each action (open a pane, start a dev server or Chromium) holds the project's migration
+      // admission until it ends; a fenced project closes the pane instead.
+      void withProjectAdmission(ctx.dataDir, function previewAction() {
+        return host.handle(ctx, viewer, msg.data);
+      }, () => { ws.close(1013, 'project migration in progress'); }).catch(() => undefined);
     });
   };
 

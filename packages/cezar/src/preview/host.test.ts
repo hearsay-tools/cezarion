@@ -889,6 +889,58 @@ describe('PreviewHost', () => {
     expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'worktree-removed' });
   });
 
+  it('releaseProject stops every run of one project and waits until its Chromium has exited', async () => {
+    const { host, ctx, devServers, browsers } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+    await host.releaseProject(join(ctx.dataDir, 'another-project'));
+    expect(devServers[0]!.stop).not.toHaveBeenCalled();
+    let released = false;
+    const releasing = host.releaseProject(ctx.dataDir).then(() => { released = true; });
+    await flush();
+    expect(devServers[0]!.stop).toHaveBeenCalledWith('release');
+    expect(released).toBe(false);
+    browsers[0]!.exit({ stderrTail: '' });
+    await releasing;
+    expect(host.portOwner(5173)).toBeUndefined();
+  });
+
+  it('releaseProject waits for a browser that ignores SIGTERM until it exits, with SIGKILL after the grace', async () => {
+    const { host, ctx, browsers } = make();
+    await host.open(ctx, fakeViewer(), { url: 'http://localhost:3000/' });
+    await flush();
+    let released = false;
+    const releasing = host.releaseProject(ctx.dataDir).then(() => { released = true; });
+    await flush();
+    expect(browsers[0]!.close).toHaveBeenCalled();
+    // Past the bounded profile wait: still pending, and the browser gets SIGKILL.
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(released).toBe(false);
+    expect(browsers[0]!.kill).toHaveBeenCalled();
+    browsers[0]!.exit({ signal: 'SIGKILL', stderrTail: '' });
+    await releasing;
+    expect(released).toBe(true);
+  });
+
+  it('releaseProject also waits for a browser the idle timer closed earlier', async () => {
+    const { host, ctx, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    await flush();
+    host.detach(ctx.runId, viewer);
+    await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS);
+    expect(browsers[0]!.close).toHaveBeenCalled();
+    let released = false;
+    const releasing = host.releaseProject(ctx.dataDir).then(() => { released = true; });
+    await flush();
+    expect(released).toBe(false);
+    browsers[0]!.exit({ stderrTail: '' });
+    await releasing;
+    expect(released).toBe(true);
+  });
+
   it('a Chromium exit reports browser-exited and relaunches only on retryBrowser, at the last URL', async () => {
     const { host, ctx, devServers, browsers } = make();
     const viewer = fakeViewer();

@@ -1,8 +1,8 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { cancelWaits } from './wait-cancel.ts';
+import type { WaitCancellation } from './wait-cancellation.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
-import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
+import { computeWaitingOn, isUsageLimitHold, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord } from '../../runs/store.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { rootsAwaitingPeer } from '../../delegation/conversations.ts';
@@ -10,7 +10,7 @@ import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import { parseUsageLimit } from '../../core/usage-limit.ts';
 import { sessionlessWakePrompt } from '../run-scheduling.ts';
 import { atTaskHead } from './launch-read-resolver.ts';
-import { chargesBudgetMessage, isMonitoringTimer, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
+import { chargesBudgetMessage, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunExitId, ExitCall, RunPatch } from '../../runs/run-exits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
@@ -23,21 +23,21 @@ import * as stepDecisions from './step-decisions.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WakeRetries } from './wake-retries.ts';
 import type { RunLine } from './run-line.ts';
-import type { WaitWatches } from './wait-watches.ts';
-import type { WaitRegistry } from './wait-registry.ts';
+import type { WaitResolve } from './wait-resolve.ts';
 import type { InboxClaims } from './inbox-claims.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
 import type { HumanWaits } from './human-waits.ts';
 
 type HumanAnswerBudget = { spent: number };
 interface WakeAdmissionHost {
+  waitCancellation: WaitCancellation;
   active: ReadonlyMap<string, ActiveRun>;
-  retries: WakeRetries; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry;
+  retries: WakeRetries; line: RunLine; waitResolve: WaitResolve;
   inboxClaims: InboxClaims; workerQuestions: WorkerQuestions; humanWaits: HumanWaits;
   isActive(id: string): boolean; move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown;
   recoveringRun(run: RunRecord | string | undefined): boolean;
   continueRun(id: string, opts: ContinueRunOptions, defer: boolean): { ok: boolean; error?: string };
-  disarmWait(id: string): void; reconcileWorkerWaits(id?: string): void; releaseSlot(): void;
+  reconcileWorkerWaits(id?: string): void; releaseSlot(): void;
   parkForUser(id: string, state: ActiveRun, step: string | undefined): void;
   armIdleTimer(id: string, state: ActiveRun): void; flushAgentInputs(id: string): void;
   answerRoutedQuestion(id: string, flush: boolean): void; queueWaitWake(id: string): void;
@@ -59,11 +59,9 @@ export class WakeAdmission {
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
     if (!waits.length) return;
-    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waits.map(wait => wait.id));
+    this.host.waitCancellation.cancel(runId, waits.map(wait => wait.id));
     for (const wait of waits) {
-      this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer' || wait.kind === 'subagent'
-        ? `automatic ${wait.kind} wake-up cap reached (${this.maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`
-        : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${this.maxAutoContinues}); timer ${wait.id} cancelled` });
+      this.context.store.appendEvent(runId, { type: 'note', message: WAIT_KINDS[wait.kind].capNote(wait, this.maxAutoContinues) });
     }
   }
 
@@ -170,7 +168,7 @@ export class WakeAdmission {
   parkOnWaits(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
     if (!run?.waits?.length || !state.liveSession.session?.open || state.liveSession.cancelled || state.boundary.pendingHumanAsk) return false;
-    const human = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    const human = WAIT_KINDS.human.select(openWaits(run))[0];
     if (human) {
       this.host.humanWaits.surfaceHumanWait(runId, state, human);
       this.host.parkForUser(runId, state, state.liveSession.currentStepId);
@@ -289,10 +287,10 @@ export class WakeAdmission {
   restoreWorkerWaitInputs(runId: string): void {
     const run = this.context.store.getRun(runId);
     for (const wait of resolvedWaits(run ?? {})) {
-      if (!run || wait.kind !== 'worker' || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
+      if (!run || !WAIT_KINDS.worker.is(wait) || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
       if ((this.context.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.context.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
-        text: waitResultText(wait, { workerStatus: this.host.waitRegistry.workerStatus }) });
+        text: waitResultText(wait, { workerStatus: this.host.waitResolve.workerStatus }) });
     }
   }
 
@@ -345,35 +343,10 @@ export class WakeAdmission {
     this.host.retries.stopRetry(runId);
   }
 
-  /**
-   * Cancel every open or resolved wait of a run without waking the agent: stop, Finish, cancel,
-   * deletion, DONE and any terminal status. Human input cancels none (hearsay-tools/cezarion#1233).
-   * A failed commit leaves the record as a crash would and never stops the disarm, so Stop still
-   * reaches the session when the store is closed or broken (hearsay-tools/cezarion#1234).
-   */
-  cancelOpenWaits(runId: string): void {
-    const before = this.context.store.getRun(runId)?.waits ?? [];
-    const remaining = (this.context.store.getRun(runId)?.waits ?? []).map(wait => wait.id);
-    try { if (remaining.length) this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: remaining }); }
-    catch (error) { console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`); }
-    for (const wait of before) this.host.disarmWait(wait.id);
-    this.disarmRunWaits(runId);
-  }
-
-  /** Stop every watch, timer, retry and queued wake a run's waits hold in memory. */
-  disarmRunWaits(runId: string): void {
-    this.host.waitRegistry.abortRegistrations(runId);
-    this.host.waitWatches.disarmRun(runId);
-    this.host.retries.forget(runId);
-    this.resetWakeDelivery(runId);
-    this.host.line.removeWake(runId, this.host.active.has(runId));
-    this.host.line.retireAdmission(runId);
-  }
-
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
   readonly onRunDeleted = (runId: string): void => {
-    this.disarmRunWaits(runId);
-    if (!this.context.disposed()) this.host.waitRegistry.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
+    this.host.waitCancellation.forgetRun(runId);
+    if (!this.context.disposed()) this.host.waitResolve.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
     if (this.context.disposed()) return;

@@ -1,3 +1,4 @@
+import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 import { HUMAN_ASK_EVENT_TYPES, askRequestSchema, type AskQuestion } from '@open-mercato/cezar-contract/ask';
 import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunEvent, RunRecord } from '@open-mercato/cezar-contract';
@@ -38,8 +39,7 @@ export function readPendingHumanAsk(
     const events = readHumanAskEvents(dataDir, run.id);
     const pending = events === undefined ? undefined : pendingAskOf(events);
     if (pending === undefined) return undefined;
-    const elsewhere = run.waits?.some(wait =>
-      wait.kind === 'human' && wait.phase === 'open' && wait.askSeq !== undefined && wait.askSeq !== pending.seq);
+    const elsewhere = WAIT_KINDS.human.selectOpen(run.waits ?? []).some(wait => wait.askSeq !== undefined && wait.askSeq !== pending.seq);
     if (elsewhere) return undefined;
     const parsed = askRequestSchema.safeParse({ questions: pending.questions });
     return parsed.success ? { requestId: pending.requestId, questions: parsed.data.questions } : undefined;

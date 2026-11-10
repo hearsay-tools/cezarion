@@ -1,5 +1,6 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import { cancelWaits } from './wait-cancel.ts';
+import type { WaitCancellation } from './wait-cancellation.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
 import {
@@ -47,6 +48,8 @@ const INTERRUPT_RETRY_MS = 60_000;
 type ChildEvent = { id: string; status: SubagentStatus; background: boolean };
 
 interface SubagentWaitsHost {
+  waitCancellation: WaitCancellation;
+  waitEngine: WaitEngine;
   active: ReadonlyMap<string, ActiveRun>;
   isParked(id: string): boolean;
   isAdmitted(id: string): boolean;
@@ -88,7 +91,7 @@ export function liveSubagents(state: ActiveRun): number {
 
 /** The run's open subagent wait, if it has one. */
 export function openSubagentWaitOf(run: Pick<RunRecord, 'waits'> | undefined): SubagentWaitEntry | undefined {
-  return openWaits(run ?? {}).find((wait): wait is SubagentWaitEntry => wait.kind === 'subagent');
+  return WAIT_KINDS.subagent.select(openWaits(run ?? {}))[0];
 }
 
 export class SubagentWaits {
@@ -172,9 +175,10 @@ export class SubagentWaits {
    *  alias it would have opened before. */
   private openSubagentWait(runId: string, state: ActiveRun): void {
     const wait = WAIT_KINDS.subagent.entry(state.waitIdentity.ciTurnId ?? 'subagents', this.deadline(), this.children(state));
-    try { this.context.store.commitWait(runId, wait); }
-    catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
-    this.host.armWait(runId, wait);
+    this.host.waitEngine.open(runId, state, wait, {
+      withdraw: 'none', onCommitFailure: { log: '[cez] subagent wait checkpoint failed' },
+      arm: 'watch', park: 'none', return: 'none',
+    });
   }
 
   /** Save the children and move the deadline, then re-arm it. False when the checkpoint failed:
@@ -229,7 +233,7 @@ export class SubagentWaits {
 
   private supersede(runId: string, waitIds: readonly string[]): void {
     this.clearGrace(runId);
-    cancelWaits(this.context.store, id => this.host.disarmWait(id), runId, waitIds, { onCommitFailure: 'skip', superseded: true });
+    this.host.waitCancellation.cancel(runId, waitIds, { onCommitFailure: 'skip', superseded: true });
   }
 
   /** The run left the live registry: its session, and the children it held, are gone. An open

@@ -73,7 +73,7 @@ export function peerWaitEntry(run: RunRecord, request: { peerIds: string[]; time
 
 /** The run's peer wait `waitId`, open or settled, for `cez message cancel-wait`. */
 export function peerWaitOf(run: RunRecord | undefined, waitId: string): PeerWaitEntry {
-  const entry = [...run?.waits ?? [], ...run?.lastWaits ?? []].find((wait): wait is PeerWaitEntry => wait.id === waitId && wait.kind === 'peer');
+  const entry = WAIT_KINDS.peer.select([...run?.waits ?? [], ...run?.lastWaits ?? []]).find(wait => wait.id === waitId);
   if (!entry) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
   return entry;
 }
@@ -98,7 +98,7 @@ export function peerWaitResult(run: RunRecord, wait: PeerWaitEntry, peers: { get
 export function runsAwaitingPeer(peer: RunRecord | string, runs: () => readonly RunRecord[]): string[] {
   if (typeof peer !== 'string' && LIVE.includes(peer.status)) return [];
   const peerId = typeof peer === 'string' ? peer : peer.id;
-  const names = (wait: Wait) => wait.kind === 'peer' && wait.peerIds.includes(peerId);
+  const names = (wait: Wait) => WAIT_KINDS.peer.is(wait) && wait.peerIds.includes(peerId);
   return runs().filter(run => openWaits(run).some(names)).map(run => run.id);
 }
 

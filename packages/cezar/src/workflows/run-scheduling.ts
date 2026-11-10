@@ -4,7 +4,6 @@ import type { RunRecord } from '../runs/store.ts';
 import type { AccountHolds } from '../workspace/semaphore.ts';
 import type { StartRunInput } from './run/types.ts';
 import type { WorkflowDef } from './types.ts';
-import type { resolvedWaits } from './waits.ts';
 
 /**
  * A deadline hold blocks all work on its account. An in-flight resume holds fresh work only;
@@ -41,17 +40,7 @@ export function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttemp
   );
 }
 
-/** Fixed opening turn; the queued results themselves are delivered after its turn end. */
-export function sessionlessWakePrompt(resolved: ReturnType<typeof resolvedWaits>): string {
-  return resolved.some(wait => wait.kind === 'pr')
-    ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
-    : resolved.some(wait => wait.kind === 'worker')
-      ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
-      : resolved.some(wait => wait.kind === 'subagent')
-        ? 'Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so Cezar can deliver it.'
-      : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
-        : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
-}
+export { sessionlessWakePrompt } from './run/wait-kinds.ts';
 
 /** Resume the persisted pending tail instead of replaying completed agents. */
 export function queuedStartAt(run: RunRecord, workflow: WorkflowDef): number {

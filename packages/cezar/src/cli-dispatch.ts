@@ -10,6 +10,8 @@ import { runManagedCommand } from './self-update/cli.ts';
 import { runSubcommand } from './subcommands.ts';
 import { getRepoInfo } from './server/git.ts';
 import { runProjectsCommand } from './workspace/projects-cli.ts';
+import { projectPaths } from './project-paths.ts';
+import { assertProjectAdmitted } from './server/cockpit-ownership.ts';
 import type { serverCommand } from './server-command.ts';
 import type { TaskAccess } from './headless-run.ts';
 
@@ -88,6 +90,13 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 workflows in .ai/cezar/workflows/.`;
 }
 
+/** Project commands refuse a project under a migration fence before they touch it; each re-checks
+ *  right before its first project write. `serve` checks in its ownership claim. */
+function admitProjectCommand(command: string, args: readonly string[], repoRoot: string, singleProject: boolean): void {
+  const projectList = command === 'projects' && singleProject && (args.length === 0 || args[0] === 'list');
+  if (command === 'run' || command === 'init' || projectList) assertProjectAdmitted(projectPaths(repoRoot).write);
+}
+
 export async function main(deps: CliDeps, rebrand = REBRAND_SWITCH): Promise<void> {
   const notice = oldCommandNotice(deps.process.argv[1], rebrand);
   if (notice) deps.console.error(notice);
@@ -152,6 +161,7 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
   const cwd = resolve(values.repo ?? deps.process.cwd());
   const repoInfo = await deps.getRepoInfo(cwd);
   const repoRoot = repoInfo?.root ?? cwd;
+  admitProjectCommand(command, positionals.slice(1), repoRoot, deps.productEnv('SINGLE_PROJECT') === '1');
 
   switch (command) {
     case 'serve':
