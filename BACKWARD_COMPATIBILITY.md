@@ -98,3 +98,10 @@ symlink or file keeps legacy writes and is never marked fresh. The destination
 check is shared with migration planning. If a cockpit is known but its live tasks
 cannot be read, migration still refuses and lists both the cockpit and the read
 failure. It does not treat the failed read as an empty task list.
+
+
+All CLI names add `--version` and `-v`: the package version plus a newline goes
+to stdout, with exit 0 and no home access. Old-name notices remain on stderr
+only with the release switch on. Switch-on help uses the resolved versions
+path, and missing-cockpit hints and dry-run banners use the new preferred names.
+Switch-off paths and display names keep their shipped spelling.

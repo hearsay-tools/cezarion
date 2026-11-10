@@ -49,6 +49,7 @@ Options:
       --yes                   server-install: accept safe defaults (never auto-sudo)
       --reconfigure <ids>     server-install: force re-run of step id(s), comma-separated
       --reinstall             server-install: force re-run of every step (full reinstall)
+  -v, --version               show the package version
   -h, --help                  show this help
 
 Zero config: uses your logged-in `claude` CLI (and `gh` for GitHub bits).

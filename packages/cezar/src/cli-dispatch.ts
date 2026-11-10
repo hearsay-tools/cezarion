@@ -31,7 +31,7 @@ export type CliDeps = typeof defaultCliDeps & {
   initWorkspace: (root: string, home: Home) => Promise<string | undefined>;
 };
 
-function cliHelp(rebrand: boolean): string {
+function cliHelp(rebrand: boolean, versions = '~/.cezar/versions'): string {
   return `${productName('cezar', rebrand)} — local cockpit for AI agent tasks in your repo
 
 Usage:
@@ -55,7 +55,7 @@ Usage:
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
 ${rebrand ? '  hsq migrate [--dry-run]  migrate the legacy home into the split layout\n  hsq migrate --resolve-legacy <file> restore|accept  resolve legacy recovery first\n' : ''}${rebrand ? '  hsq migrate-project [--dry-run] move this project\'s state from .ai/cezar/ to .ai/squawk/, offline\n' : ''}  cez remote-settings       enable|status|disable remote edits of agent config and worktree setup
-  cez install | update      manage the desktop installation under ~/.cezar/versions
+  cez install | update      manage the desktop installation under ${versions}
   cez versions | use <id>   list or switch managed versions
   cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
 
@@ -83,6 +83,7 @@ Options:
       --yes                   server-install: accept safe defaults (never auto-sudo)
       --reconfigure <ids>     server-install: force re-run of step id(s), comma-separated
       --reinstall             server-install: force re-run of every step (full reinstall)
+  -v, --version               show the package version
   -h, --help                  show this help
 
 Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
@@ -109,8 +110,23 @@ export async function main(deps: CliDeps, rebrand = REBRAND_SWITCH): Promise<voi
   return dispatch(deps, rebrand);
 }
 
+/** Metadata exits before project admission or home preparation. */
+function printCliMetadata(deps: CliDeps, values: { version?: boolean; help?: boolean }, help: () => string): boolean {
+  if (values.version) {
+    deps.console.log(deps.readOwnVersion());
+    deps.process.exitCode = 0;
+    return true;
+  }
+  if (values.help) {
+    deps.console.log(help());
+    return true;
+  }
+  return false;
+}
+
 async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
-  const help = commandText(cliHelp(rebrand), deps.process.argv[1], rebrand);
+  // Help reads resolved paths only. Task commands and version output never need a Home.
+  const help = () => commandText(cliHelp(rebrand, rebrand ? deps.resolveCliHome().versions : undefined), deps.process.argv[1], rebrand);
   let resolvedHome: Home | undefined;
   let homeEntry = deps.operatorHomeEntry(deps.process.argv.slice(2));
   // Dispatch task commands without invoking this factory or giving them a Home.
@@ -144,6 +160,7 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
       reconfigure: { type: 'string' },
       reinstall: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
+      version: { type: 'boolean', short: 'v', default: false },
       'restart-exact': { type: 'boolean', default: false },
     },
     allowPositionals: true,
@@ -157,10 +174,7 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
     .slice(2)
     .some((a) => a === '-p' || a === '--port' || a.startsWith('--port=') || a.startsWith('-p='));
 
-  if (values.help) {
-    deps.console.log(help);
-    return;
-  }
+  if (printCliMetadata(deps, values, help)) return;
 
   const command = positionals[0] ?? 'serve';
   homeEntry = command;
@@ -219,7 +233,7 @@ async function dispatch(deps: CliDeps, rebrand: boolean): Promise<void> {
       return;
     default:
       deps.console.error(`unknown command: ${command}\n`);
-      deps.console.log(help);
+      deps.console.log(help());
       deps.process.exitCode = 1;
   }
 }
