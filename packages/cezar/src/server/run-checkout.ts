@@ -4,7 +4,7 @@ import type { RunManager } from '../workflows/run.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 
 // ---- session git view (redesign R5 Step 1.2 — §"Git/session API additions").
-// Structured sibling of the text-blob /diff above (which stays untouched —
+// Structured sibling of the text-blob /diff route in server.ts (which stays untouched —
 // protected surface). Isolated runs read their worktree; worktree-off runs
 // read the repo checkout they executed in. Every predictable git failure
 // degrades to 409 + human-readable reason, 404 only for unknown ids.
