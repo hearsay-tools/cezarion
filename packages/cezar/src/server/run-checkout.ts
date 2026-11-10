@@ -42,6 +42,7 @@ type ClaimedHandle = { run: RunRecord; release: () => void };
 interface RemoveOptions {
   claim: 'publish' | 'reclaim';
   activeBeforeLookup: boolean;
+  checksActive: boolean;
   deletion: 'worktree' | 'record' | 'inline';
   ignoresHold: true;
   nullClaimError: string;
@@ -127,10 +128,10 @@ function removalRefusal(store: RunCheckoutHost['store'], run: RunRecord, id: str
 
 function removeCheckout({ store, manager }: RunCheckoutHost, id: string, options: RemoveOptions): CheckoutRefusal | ClaimedHandle {
   const active = { status: 409, body: { error: 'run is active — cancel it first' } } as const;
-  if (options.activeBeforeLookup && manager.isActive(id)) return active;
+  if (options.checksActive && options.activeBeforeLookup && manager.isActive(id)) return active;
   const run = store.getRun(id);
   if (!run) return { status: 404, body: { error: 'not found' } };
-  if (!options.activeBeforeLookup && options.deletion !== 'inline' && manager.isActive(id)) return active;
+  if (options.checksActive && !options.activeBeforeLookup && manager.isActive(id)) return active;
   const refused = removalRefusal(store, run, id, options.deletion);
   if (refused) return { status: 409, body: { error: refused } };
   // Claimed, not merely checked: the claim holds Continue off until the directory is gone.

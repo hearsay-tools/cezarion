@@ -5,8 +5,13 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { RUN_IN_USE_ELSEWHERE, type RunRecord } from '../runs/store.ts';
 import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
-import { runCheckout, type RunCheckoutHost } from './run-checkout.ts';
+import { fallbackProjectWriteError } from '../project-paths.ts';
+import { rematerializeReclaimedWorktree } from '../runs/retention.ts';
+import { getStatus } from './git.ts';
+import { preparePublishCheckout, reclaimCheckoutError, runCheckout, type RunCheckoutHost } from './run-checkout.ts';
 
+vi.mock('../runs/retention.ts', () => ({ rematerializeReclaimedWorktree: vi.fn() }));
+vi.mock('./git.ts', () => ({ getStatus: vi.fn() }));
 vi.mock('../autosave-cleanup.ts', () => ({ autosaveCleanupBlocker: vi.fn() }));
 
 const root = mkdtempSync(join(tmpdir(), 'cez-run-checkout-'));
@@ -102,5 +107,185 @@ describe.each(routes)('$intent $route', (route) => {
     if (checksAutosave) {
       expect(autosaveCleanupBlocker).toHaveBeenCalledWith(join(root, 'source'), baseRun.id);
     }
+  });
+});
+
+const cleanupPending = 'worktree cleanup pending — retry after cleanup is confirmed';
+const publishPending = 'its worktree or branch is being cleaned up — retry in a moment';
+const reclaimPending = "this worktree is in use or already reclaimed — only a finished task's worktree can be reclaimed";
+const activeRemove = 'run is active — cancel it first';
+const activePublish = 'run is still active — wait for the review gate';
+const workerRemove = 'owned resources require verified worker cleanup';
+const recordRemove = 'owned resources require verified worker cleanup and explicit child history deletion first';
+const holdPublish = 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR';
+const fallbackRefusal = fallbackProjectWriteError(fallback)!;
+const claimedRoutes = [
+  { route: 'pr', intent: 'publish' },
+  { route: 'remove-worktree', intent: 'remove', claim: 'publish', activeBeforeLookup: false, checksActive: true, deletion: 'worktree', ignoresHold: true, nullClaimError: cleanupPending },
+  { route: 'DELETE', intent: 'remove', claim: 'publish', activeBeforeLookup: true, checksActive: true, deletion: 'record', ignoresHold: true, nullClaimError: cleanupPending },
+  { route: 'reclaim', intent: 'remove', claim: 'reclaim', activeBeforeLookup: false, checksActive: false, deletion: 'inline', ignoresHold: true, nullClaimError: reclaimPending },
+] as const;
+// Each tuple is pr / remove-worktree / DELETE / reclaim. null means admitted.
+const claimedOutcomes: Record<string, readonly (string | null | 404)[]> = {
+  unknown: [404, 404, 404, 404],
+  live: [null, null, null, null],
+  'worktree off': [null, null, null, null],
+  'worktree off with recorded path': [null, null, null, null],
+  'empty recorded path': [null, null, null, null],
+  'no path': [null, null, null, null],
+  removed: [null, null, null, null],
+  reclaimed: [null, null, null, null],
+  fallback: [fallbackRefusal, null, null, fallbackRefusal], // Removal middleware remains outside admission.
+  worker: [null, workerRemove, recordRemove, null],
+  'claim held elsewhere': [publishPending, cleanupPending, cleanupPending, reclaimPending],
+  'foreign owner': [publishPending, cleanupPending, cleanupPending, RUN_IN_USE_ELSEWHERE],
+  running: [activePublish, activeRemove, activeRemove, reclaimPending],
+  'usage hold': [holdPublish, null, null, null],
+  'autosave with live path': [null, null, null, null],
+  'autosave with removed path': [null, null, null, null],
+  'autosave with unknown id': [404, 404, 404, 404],
+};
+
+function claimedHost(state: State) {
+  const calls: string[] = [];
+  const release = vi.fn(() => { calls.push('release'); });
+  const claim = (kind: string) => {
+    calls.push(kind);
+    return state.claimHeld || state.foreignOwner ? null : release;
+  };
+  const host: RunCheckoutHost = {
+    root,
+    store: {
+      getRun: vi.fn(() => { calls.push('lookup'); return state.run; }),
+      updateRun: vi.fn(), sourceDataDir: vi.fn(),
+      canDeleteRun: vi.fn(() => { calls.push('can-delete'); return state.run?.delegation?.role !== 'worker'; }),
+      fallbackDeleteError: vi.fn(() => { calls.push('fallback'); return state.run?.worktreePath === fallback ? fallbackRefusal : undefined; }),
+      writeRefusal: vi.fn(() => { calls.push('owner'); return state.foreignOwner ? RUN_IN_USE_ELSEWHERE : undefined; }),
+    },
+    manager: {
+      isActive: vi.fn(() => { calls.push('active'); return state.run?.status === RUN_STATUS.running; }),
+      claimForPublish: vi.fn(() => claim('publish')),
+      claimWorktreeReclaim: vi.fn(() => {
+        if (state.run?.status === RUN_STATUS.running) { calls.push('reclaim'); return null; }
+        return claim('reclaim');
+      }),
+    },
+  };
+  return { host, calls, release };
+}
+
+function admitClaimed(host: RunCheckoutHost, route: typeof claimedRoutes[number]) {
+  return route.intent === 'publish'
+    ? runCheckout(host, baseRun.id, 'publish')
+    : runCheckout(host, baseRun.id, 'remove', route);
+}
+
+describe.each(claimedRoutes)('$intent $route', (route) => {
+  it.each(states)('$name keeps synchronous admission and claim policy', (state) => {
+    const { host, calls, release } = claimedHost(state);
+    vi.mocked(autosaveCleanupBlocker).mockClear();
+    const result = admitClaimed(host, route);
+    const expected = claimedOutcomes[state.name]![claimedRoutes.indexOf(route)];
+    expect(result).toEqual(expected === null ? { run: state.run, release }
+      : { status: expected === 404 ? 404 : 409, body: { error: expected === 404 ? 'not found' : expected } });
+    expect(calls[0]).toBe(route.route === 'DELETE' ? 'active' : 'lookup');
+    expect(autosaveCleanupBlocker).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    const claims = calls.filter(call => call === 'publish' || call === 'reclaim');
+    expect(claims.length).toBe(Number(expected === null || [publishPending, cleanupPending, reclaimPending].includes(String(expected))));
+    if (expected === null) expect(calls.at(-1)).toBe(route.route === 'reclaim' ? 'reclaim' : 'publish');
+  });
+});
+
+describe('claim check order', () => {
+  it.each(claimedRoutes)('$route keeps its full order before claiming', route => {
+    const { host, calls } = claimedHost(states[1]!);
+    admitClaimed(host, route);
+    const orders = {
+      pr: ['lookup', 'active', 'publish'],
+      'remove-worktree': ['lookup', 'active', 'can-delete', 'publish'],
+      DELETE: ['active', 'lookup', 'can-delete', 'publish'],
+      reclaim: ['lookup', 'fallback', 'owner', 'reclaim'],
+    };
+    expect(calls).toEqual(orders[route.route]);
+  });
+
+  it('DELETE refuses an active unknown id before lookup', () => {
+    const { host, calls } = claimedHost(states[0]!);
+    vi.mocked(host.manager.isActive).mockImplementation(() => { calls.push('active'); return true; });
+    expect(admitClaimed(host, claimedRoutes[2])).toEqual({ status: 409, body: { error: activeRemove } });
+    expect(calls).toEqual(['active']);
+  });
+
+  it('reclaim fallback refusal wins over foreign ownership and claiming', () => {
+    const { host, calls } = claimedHost({ ...states[8]!, foreignOwner: true });
+    expect(admitClaimed(host, claimedRoutes[3])).toEqual({ status: 409, body: { error: fallbackRefusal } });
+    expect(calls).toEqual(['lookup', 'fallback']);
+  });
+});
+
+describe('publish preparation under the caller claim', () => {
+  it.each([
+    { name: 'missing record', run: undefined, status: 404 },
+    { name: 'missing path', run: baseRun, status: 400 },
+    { name: 'removed directory', run: { ...baseRun, worktreePath: gone, branch: 'task' }, status: 400 },
+    { name: 'missing branch', run: { ...baseRun, worktreePath: live }, status: 400 },
+    { name: 'restored checkout', run: { ...baseRun, worktreePath: live, branch: 'task' }, status: null },
+  ])('$name reads the fresh record after rebuilding', async ({ run, status }) => {
+    const { host, calls, release } = claimedHost(states[1]!);
+    const checkout = runCheckout(host, baseRun.id, 'publish');
+    expect(checkout).toHaveProperty('release', release);
+    vi.mocked(rematerializeReclaimedWorktree).mockImplementationOnce(async () => {
+      calls.push('rebuild');
+      vi.mocked(host.store.getRun).mockImplementation(() => { calls.push('lookup'); return run; });
+      return true;
+    });
+    const result = await preparePublishCheckout(host, baseRun.id);
+    expect(calls).toEqual(['lookup', 'active', 'publish', 'rebuild', 'lookup']);
+    expect(rematerializeReclaimedWorktree).toHaveBeenLastCalledWith(root, host.store, baseRun.id);
+    expect(result).toEqual(status === null ? { run } : { status, body: { error: status === 404 ? 'not found' : 'no worktree/branch to publish — this task ran in the repo working tree' } });
+    expect(release).not.toHaveBeenCalled();
+    release();
+  });
+
+  it('propagates rebuild failure to the caller finally', async () => {
+    const { host, release } = claimedHost(states[1]!);
+    const checkout = runCheckout(host, baseRun.id, 'publish');
+    if ('status' in checkout) throw new Error('expected admission');
+    const failure = new Error('rebuild failed');
+    vi.mocked(rematerializeReclaimedWorktree).mockRejectedValueOnce(failure);
+    await expect((async () => {
+      try { await preparePublishCheckout(host, baseRun.id); } finally { checkout.release(); }
+    })()).rejects.toBe(failure);
+    expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('reclaim failure detail after release', () => {
+  it.each([
+    { count: 0, error: 'the worktree directory could not be removed' },
+    { count: 1, error: 'the worktree has 1 uncommitted file that exist nowhere else — commit or discard them first' },
+    { count: 2, error: 'the worktree has 2 uncommitted files that exist nowhere else — commit or discard them first' },
+  ])('reports $count dirty files after the caller releases', async ({ count, error }) => {
+    const { host, release } = claimedHost(states[1]!);
+    const checkout = admitClaimed(host, claimedRoutes[3]);
+    if ('status' in checkout) throw new Error('expected admission');
+    vi.mocked(getStatus).mockImplementationOnce(async () => {
+      expect(release).toHaveBeenCalledOnce();
+      return Array.from({ length: count }, () => ({ path: 'file', status: '??' }));
+    });
+    await Promise.resolve(null).finally(checkout.release);
+    expect(await reclaimCheckoutError(checkout.run)).toBe(error);
+  });
+
+  it.each([undefined, gone])('does not ask git for an absent directory (%s)', async worktreePath => {
+    vi.mocked(getStatus).mockClear();
+    expect(await reclaimCheckoutError({ ...baseRun, worktreePath })).toBe('the worktree directory could not be removed');
+    expect(getStatus).not.toHaveBeenCalled();
+  });
+
+  it('keeps the removal message when git status fails', async () => {
+    vi.mocked(getStatus).mockRejectedValueOnce(new Error('git failed'));
+    expect(await reclaimCheckoutError({ ...baseRun, worktreePath: live })).toBe('the worktree directory could not be removed');
   });
 });
