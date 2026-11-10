@@ -342,10 +342,11 @@ describe('the write backstop over automation and artifact files', () => {
     const gate = new Promise<void>((resolve) => { resume = resolve; });
     let parked!: () => void;
     const launching = new Promise<void>((resolve) => { parked = resolve; });
+    let refuse = launch === 'is refused';
     const launchSchedule = vi.fn(async () => {
       parked();
       await gate;
-      if (launch === 'is refused') throw new ProjectMigrationFencedError('migrating', migrationFencePaths(dataDir)!.lock);
+      if (refuse) throw new ProjectMigrationFencedError('migrating', migrationFencePaths(dataDir)!.lock);
       return { runId: 'nightly-run' };
     });
     const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'p', root, status: 'not-git' }] });
@@ -369,6 +370,26 @@ describe('the write backstop over automation and artifact files', () => {
       // A refused launch is a skip: no launch-error receipt is even attempted.
       if (launch === 'is refused') expect(receipts.mock.calls.filter(([receipt]) => receipt.status === 'launch-error')).toEqual([]);
       receipts.mockRestore();
+      if (launch === 'is refused') {
+        // The fence ends: the same occurrence launches on the next fire, not as a duplicate.
+        scheduler.stop();
+        const exited = once(other, 'exit');
+        other.kill('SIGKILL');
+        await exited;
+        refuse = false;
+        // The poll lease the fenced fire could not unlink stays until it ages out: a declined,
+        // fence-only limitation tracked in hearsay-tools/cezarion#3142. Removed here so this test
+        // shows only that the released reservation launches.
+        rmSync(join(dataDir, 'automation-poll.lock'), { force: true });
+        const next = new WorkspaceAutomationScheduler({ coordinator, handle: (_projectId, automations) => ({ projectId: 'p', store: automations, timeZone: 'UTC', launchSchedule }) });
+        try {
+          await next.start();
+          // bound: hang guard while the due occurrence fires again.
+          await vi.waitFor(() => expect(launchSchedule).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+          // bound: hang guard while the launched receipt is written after the launch returns.
+          await vi.waitFor(() => expect(readFileSync(join(dataDir, 'automation-receipts.ndjson'), 'utf8')).toContain('"runId":"nightly-run"'), { timeout: 5_000 });
+        } finally { next.stop(); }
+      }
     } finally {
       scheduler.stop();
       warn.mockRestore();

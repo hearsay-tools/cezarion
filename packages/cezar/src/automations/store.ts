@@ -83,6 +83,8 @@ export interface AutomationStoreOptions {
 }
 
 export class AutomationStore {
+  /** Releases a migration fence kept off disk, by receipt key: the next reservation writes each. */
+  private readonly fencedReleases = new Map<string, AutomationReceipt>();
   private definitionsFile: DefinitionsFile = { version: 1, automations: [] };
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
@@ -364,6 +366,8 @@ export class AutomationStore {
   }
 
   appendReceipt(receipt: AutomationReceipt): void {
+    // A release a migration fence keeps off disk is written by the occurrence's next reservation.
+    if (receipt.status === 'released' && projectWriteRefused(this.dataDir)) this.fencedReleases.set(receipt.receiptKey, receipt);
     const key = resolve(this.dataDir);
     const pending = inFlightReservations.get(key) ?? new Set<string>();
     try {
@@ -392,6 +396,11 @@ export class AutomationStore {
     occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
+    const fenced = this.fencedReleases.get(receiptKey);
+    if (fenced && this.latestReceipts().get(receiptKey)?.receiptId === fenced.receiptId) {
+      this.fencedReleases.delete(receiptKey);
+      this.appendReceipt(fenced);
+    }
     const previous = this.latestReceipts().get(receiptKey);
     if (previous && previous.status !== 'released') return undefined;
     const now = this.now().toISOString();
