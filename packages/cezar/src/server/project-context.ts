@@ -27,6 +27,7 @@ import { getRepoInfo } from './git.ts';
 import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, holdProjectWork, withProjectAdmission, CockpitOwnership, type LiveProjectTask, type ProjectMigrationFence } from './cockpit-ownership.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
+import { recoverProjectMigration } from '../project-migration/recovery.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -327,6 +328,8 @@ export class ProjectContexts {
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
     if (ownedByAnotherCockpit(dataDir)) return undefined;
+    // An unfinished migration finishes before the lease and the first read; a failure skips.
+    if (!await recoverProjectMigration(project.root, { ownership: this.deps.ownership }).then(() => current(), () => false)) return undefined;
     const maintain = this.maintainColdStore.bind(this);
     return withProjectAdmission(dataDir, function coldMaintenanceStore() {
       return maintain(project.root, dataDir, work, current, finish);
@@ -381,7 +384,8 @@ export class ProjectContexts {
       if (generation !== this.generation) break;
       if (project.status === 'missing' || this.contexts.has(project.id) || this.building.has(project.id)) continue;
       const dataDir = projectPaths(project.root).write;
-      if (ownedByAnotherCockpit(dataDir) || projectAdmissionRefusal(dataDir)) continue;
+      // An unfinished migration journal alone does not skip: the build finishes it first.
+      if (ownedByAnotherCockpit(dataDir) || (projectAdmissionRefusal(dataDir)?.reason ?? 'journal') !== 'journal') continue;
       try {
         await this.context(project.id);
         warmed.push(project.id);
@@ -516,6 +520,10 @@ export class ProjectContexts {
 
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
+    // An unfinished migration finishes first, before the lease (its fence would drain this build)
+    // and before any read; this build then keeps the claim it took.
+    await recoverProjectMigration(project.root, { ownership: this.deps.ownership, keep: true });
+    if (stale()) throw new ProjectContextsClosedError();
     // Admitted until recovery ends, so a migration fence drains this build before it moves anything.
     return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
   }

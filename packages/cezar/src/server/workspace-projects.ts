@@ -7,6 +7,7 @@ import { loadWorkspaceConfig, PROJECT_ID_RE, type WorkspaceProject } from '../wo
 import { allocateProjectSlug, listProjects } from '../workspace/projects.ts';
 import { resolveCapabilities } from './capabilities.ts';
 import { assertProjectAdmitted, CockpitAlreadyRunningError, projectAdmissionRefusal, ProjectMigrationFencedError } from './cockpit-ownership.ts';
+import { ProjectMigrationRecoveryError } from '../project-migration/recovery.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
@@ -62,6 +63,7 @@ const projectIdSchema = z.union([z.literal('default'), z.string().regex(PROJECT_
 function classifyProjectBuildFailure(error: unknown) {
   if (error instanceof CockpitAlreadyRunningError) return { kind: 'cockpit-owned', error } as const;
   if (error instanceof ProjectMigrationFencedError) return { kind: 'migrating', error } as const;
+  if (error instanceof ProjectMigrationRecoveryError) return { kind: 'migrating', error } as const;
   if (error instanceof RunStoreOpenError) return { kind: 'store-unavailable', error } as const;
   if (error instanceof ProjectContextError) return { kind: error.reason, error } as const;
   return { kind: 'unexpected', error } as const;

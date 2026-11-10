@@ -23,10 +23,11 @@ import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { openUrl } from './open-url.ts';
 import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner, stopServe } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
+import { recoverProjectMigration } from './project-migration/recovery.ts';
 import { acquireServeListener, onTerminal, ignoreHangupOffTerminal, waitForHealth } from './serve-listener.ts';
 
 export const defaultServeDeps = {
-  CockpitOwnership, acquireServeListener, WorkspaceSemaphore, TaskWebhooks, previewToolEnabled, PreviewHost,
+  CockpitOwnership, recoverProjectMigration, acquireServeListener, WorkspaceSemaphore, TaskWebhooks, previewToolEnabled, PreviewHost,
   cockpitOriginFor, ToolActivityTracker, RunManager, createRunner, sweepMergedBranches, DelegationController,
   ProviderAuthService, createHostDiscovery, WorkspaceEventBus, ProviderRuntimeAuthObserver, detectEnvironment,
   getRepoInfo, reconcileServeWorktrees, recoverServeProject, checkForUpdate, warnServeBind, createServeSelfUpdate,
@@ -52,6 +53,9 @@ export async function serveCommand(
 ): Promise<void> {
   const ownership = new deps.CockpitOwnership();
   deps.process.once('exit', () => ownership.releaseAll());
+  // An unfinished project migration finishes before anything reads the project; the claim it
+  // takes is the one boot keeps. A failure ends the boot with why.
+  await deps.recoverProjectMigration(repoRoot, { ownership, keep: true });
   await ownership.acquire(projectPaths(repoRoot).write);
   // Hold the real listener before workspace writes, recovery or background resources.
   // A probe followed by a later bind would allow another cwd to win in between.

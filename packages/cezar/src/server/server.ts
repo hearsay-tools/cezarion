@@ -279,7 +279,11 @@ import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resol
 import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
-import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
+import { CockpitOwnership, projectAdmissionRefusal, withProjectAdmission } from './cockpit-ownership.ts';
+import { answerProjectMigration } from './project-migration-route.ts';
+import { recoverProjectMigration } from '../project-migration/recovery.ts';
+import { PROJECT_MIGRATION_SWITCH } from '../project-migration/switch.ts';
+import { projectMigrationRequestSchema } from '@open-mercato/cezar-contract/project-migration';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -324,6 +328,9 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   forgeFactory?: ForgeFactory;
   /** CLI lifetime ownership, shared with secondary project contexts. */
   ownership?: CockpitOwnership;
+  /** Explicit fixture seam for the P5 gate of the project migration route; production uses
+   *  `PROJECT_MIGRATION_SWITCH`, which stays false. */
+  projectMigration?: boolean | undefined;
   /** The task-webhook subscribers (#589). Boot creates it and attaches the boot store BEFORE
    *  `manager.recover()`, so recovery's transitions are reported; `startServer` sets its origin
    *  from the port it binds. Absent (tests, embedded apps), `createApp` makes its own. */
@@ -2007,6 +2014,20 @@ export function createApp(deps: ServerDeps) {
     }
   };
 
+  const projectMigrationDeps = {
+    enabled: deps.projectMigration ?? PROJECT_MIGRATION_SWITCH,
+    hosted: isHostedMode,
+    project: async (raw: string) => {
+      const resolved = await workspaceProjects.resolveProjectId(raw);
+      if ('error' in resolved) return undefined;
+      return (await workspaceProjects.listVisibleProjects()).find((project) => project.id === resolved.id);
+    },
+    bootRoot,
+    contexts,
+    ownership: deps.ownership ?? new CockpitOwnership(),
+    preview: deps.previewHost,
+  };
+
   // ---- chained family: project registry (workspace-level) ----
   const projectsRoutes = new Hono<ProjectApiEnv>()
     .get('/projects', async (c) => {
@@ -2263,6 +2284,12 @@ export function createApp(deps: ServerDeps) {
       if (!webhook) return c.json({ error: `unknown webhook: ${webhookId}` }, 404);
       const body: TestProjectWebhookResponse = await sendTestDelivery(entry.id, webhook);
       return c.json(body);
+    })
+
+    // `migrate-project` asks the owning cockpit to migrate a project itself (hearsay-tools/cezarion#3089).
+    .post('/projects/:projectId/migration', jsonZodValidator(projectMigrationRequestSchema), async (c) => {
+      const answer = await answerProjectMigration(projectMigrationDeps, c.req.param('projectId'), c.req.valid('json'), c.req.raw.signal);
+      return answer.status === 200 ? c.json(answer.body, 200) : c.json(answer.body, answer.status);
     })
 
     .get('/projects/checkout/:checkoutId/progress', paramZodValidator(checkoutProgressParamsSchema), c => c.json({ progress: checkoutProgress.get(c.req.valid('param').checkoutId) }))
@@ -4916,6 +4943,12 @@ export function createApp(deps: ServerDeps) {
     coldRepoHandles.retainRoots(new Set(projects
       .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
       .map((project) => project.root)));
+    // An unfinished migration finishes before its project is read (one `lstat` without one); a
+    // failure leaves the project out, and admission keeps refusing it.
+    await Promise.all(projects.filter((project) => project.status !== 'missing').map((project) =>
+      recoverProjectMigration(project.root, { ownership: deps.ownership }).catch((error: unknown) => {
+        console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
+      })));
     // No folder or a migration fence: no runs to read. `not-git` still has an `.ai/cezar` worth indexing.
     return projects.filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
       const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
@@ -5120,11 +5153,13 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;
     },
-    withStore: (project, work) => withProjectAdmission(projectPaths(project.root).write, function admittedStore() {
-      if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
-      return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
-        work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
-    }, () => undefined),
+    // An unfinished migration finishes before the lease; when it cannot, admission refuses.
+    withStore: async (project, work) => recoverProjectMigration(project.root, { ownership: deps.ownership }).catch(() => undefined)
+      .then(() => withProjectAdmission(projectPaths(project.root).write, function admittedStore() {
+        if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
+        return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
+          work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
+      }, () => undefined)),
     lookup: (root, identities, signal) => resolveForgeRoot(root, deps.forgeFactory).mergedPullRequests(identities, signal),
   };
   const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);

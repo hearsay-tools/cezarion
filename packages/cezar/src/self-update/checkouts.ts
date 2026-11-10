@@ -134,11 +134,16 @@ export async function branchOf(worktree: string): Promise<string> {
   return worktree.split(/[\\/]/).filter(Boolean).pop() ?? 'checkout';
 }
 
-/** The main checkout's data directory, which names task worktrees. A project under a migration
- *  fence is not read: its checkouts show without their tasks. */
-function taskDataDir(trees: ReadonlyArray<{ path: string }>): string | null {
+/** The main checkout's data directory, which names task worktrees. An unfinished migration
+ *  finishes first; a project under a migration fence is not read: its checkouts show without
+ *  their tasks. */
+async function taskDataDir(trees: ReadonlyArray<{ path: string }>): Promise<string | null> {
   const dataDir = trees.length > 0 ? projectPaths(trees[0]!.path).write : null;
-  return dataDir && !projectAdmissionRefusal(dataDir) ? dataDir : null;
+  if (!dataDir) return null;
+  if (projectAdmissionRefusal(dataDir)?.reason === 'journal') {
+    await (await import('../project-migration/recovery.ts')).recoverProjectMigration(trees[0]!.path).catch(() => undefined);
+  }
+  return projectAdmissionRefusal(dataDir) ? null : dataDir;
 }
 
 /**
@@ -156,7 +161,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env, ho
     if (!existsSync(root) || !cezarPackageRoot(root)) continue;
     const trees = await worktreesOf(root);
     // Task worktrees live under the main checkout, whose run store names them.
-    const dataDir = taskDataDir(trees);
+    const dataDir = await taskDataDir(trees);
     for (const tree of trees) {
       const worktree = real(tree.path);
       if (seen.has(worktree)) continue;
