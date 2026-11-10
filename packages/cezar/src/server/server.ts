@@ -1,4 +1,4 @@
-import { runCheckout, worktreeOf, NO_WORKTREE } from './run-checkout.ts';
+import { runCheckout, NO_WORKTREE } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
@@ -48,7 +48,6 @@ import type {
 export type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
 import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
 import { runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract/events';
-import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createWorkspaceLiveRoutes } from './workspace-live-routes.ts';
@@ -3897,28 +3896,20 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs/:id/git/commit', jsonZodValidator(gitCommitSchema), async (c) => {
-      const { store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-      const worktree = worktreeOf(run);
-      if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'mutate');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
       const parsed = { data: c.req.valid('json') };
-      const result = await commitAll(worktree, parsed.data.message);
+      const result = await commitAll(checkout.directory, parsed.data.message);
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json({ committed: true, sha: result.sha });
     })
 
     .post('/runs/:id/git/push', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-      const worktree = worktreeOf(run);
-      if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
-      const result = await pushCurrentBranch(worktree);
+      const { root: repoRoot } = c.get('project');
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'mutate');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run } = checkout;
+      const result = await pushCurrentBranch(checkout.directory);
       if (!result.ok) return c.json({ error: result.error }, 409);
       const repoBase = forgeWebRoot((await getRepoInfo(repoRoot))?.remote) ?? undefined;
       resolveForgeRoot(repoRoot, deps.forgeFactory).branchPushed(ownPullRequestNumbers(run, repoBase));

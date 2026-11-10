@@ -22,14 +22,16 @@ const notFound = { status: 404, body: { error: 'not found' } };
 const noWorktree = { status: 409, body: { error: 'no worktree — this task ran directly in the repo working tree' } };
 const autosave = { status: 409, body: { error: 'autosave cleanup pending' } };
 
-// One policy row for each Table A read route. Other intents join this table in later slices.
+// One policy row for each Table A read and mutate route.
 const routes = [
-  { route: 'diff', checksAutosave: true, directory: 'existing-worktree', column: 'diff' },
-  { route: 'changes', checksAutosave: true, directory: 'working-directory', column: 'working' },
-  { route: 'commits', checksAutosave: false, directory: 'working-directory', column: 'working' },
-  { route: 'commit/:sha', checksAutosave: false, directory: 'working-directory', column: 'working' },
-  { route: 'files', checksAutosave: false, directory: 'working-directory', column: 'working' },
-  { route: 'file-link', checksAutosave: false, directory: 'recorded-path-or-root', column: 'fileLink' },
+  { intent: 'read', route: 'diff', checksAutosave: true, directory: 'existing-worktree', column: 'diff' },
+  { intent: 'read', route: 'changes', checksAutosave: true, directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'commits', checksAutosave: false, directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'commit/:sha', checksAutosave: false, directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'files', checksAutosave: false, directory: 'working-directory', column: 'working' },
+  { intent: 'read', route: 'file-link', checksAutosave: false, directory: 'recorded-path-or-root', column: 'fileLink' },
+  { intent: 'mutate', route: 'git/commit', checksAutosave: true, column: 'mutate' },
+  { intent: 'mutate', route: 'git/push', checksAutosave: true, column: 'mutate' },
 ] as const;
 type Expected = string | null | typeof notFound;
 interface State {
@@ -41,32 +43,33 @@ interface State {
   diff: Expected;
   working: Expected;
   fileLink: Expected;
+  mutate: Expected;
 }
 const states: State[] = [
-  { name: 'unknown', run: undefined, blocked: false, diff: notFound, working: notFound, fileLink: notFound },
-  { name: 'live', run: { ...baseRun, worktreePath: live }, blocked: false, diff: live, working: live, fileLink: live },
-  { name: 'worktree off', run: { ...baseRun, worktree: false }, blocked: false, diff: null, working: root, fileLink: root },
-  { name: 'worktree off with recorded path', run: { ...baseRun, worktree: false, worktreePath: live }, blocked: false, diff: live, working: root, fileLink: live },
-  { name: 'empty recorded path', run: { ...baseRun, worktreePath: '' }, blocked: false, diff: null, working: noWorktree, fileLink: '' },
-  { name: 'no path', run: baseRun, blocked: false, diff: null, working: noWorktree, fileLink: root },
-  { name: 'removed', run: { ...baseRun, worktreePath: gone }, blocked: false, diff: null, working: noWorktree, fileLink: gone },
-  { name: 'reclaimed', run: { ...baseRun, worktreeReclaimedAt: '2026-11-10T01:00:00Z' }, blocked: false, diff: null, working: noWorktree, fileLink: root },
-  { name: 'fallback', run: { ...baseRun, worktreePath: fallback }, blocked: false, diff: fallback, working: fallback, fileLink: fallback },
+  { name: 'unknown', run: undefined, blocked: false, mutate: notFound, diff: notFound, working: notFound, fileLink: notFound },
+  { name: 'live', run: { ...baseRun, worktreePath: live }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'worktree off', run: { ...baseRun, worktree: false }, blocked: false, mutate: noWorktree, diff: null, working: root, fileLink: root },
+  { name: 'worktree off with recorded path', run: { ...baseRun, worktree: false, worktreePath: live }, blocked: false, mutate: live, diff: live, working: root, fileLink: live },
+  { name: 'empty recorded path', run: { ...baseRun, worktreePath: '' }, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: '' },
+  { name: 'no path', run: baseRun, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: root },
+  { name: 'removed', run: { ...baseRun, worktreePath: gone }, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: gone },
+  { name: 'reclaimed', run: { ...baseRun, worktreeReclaimedAt: '2026-11-10T01:00:00Z' }, blocked: false, mutate: noWorktree, diff: null, working: noWorktree, fileLink: root },
+  { name: 'fallback', run: { ...baseRun, worktreePath: fallback }, blocked: false, mutate: fallback, diff: fallback, working: fallback, fileLink: fallback },
   { name: 'worker', run: { ...baseRun, worktreePath: live, delegation: {
     role: 'worker', parentRunId: '0869dc16-0d6e-48a1-a693-e32cafc02c3f', permissions: [],
     workspace: { ownerRunId: baseRun.id, resourceId: baseRun.id, kind: 'owned-isolated', path: live, branch: 'worker', baselineSha: 'a'.repeat(40) },
-  } }, blocked: false, diff: live, working: live, fileLink: live },
-  { name: 'claim held elsewhere', run: { ...baseRun, worktreePath: live }, blocked: false, claimHeld: true, diff: live, working: live, fileLink: live },
-  { name: 'foreign owner', run: { ...baseRun, worktreePath: live }, blocked: false, foreignOwner: true, diff: live, working: live, fileLink: live },
-  { name: 'running', run: { ...baseRun, status: RUN_STATUS.running, worktreePath: live }, blocked: false, diff: live, working: live, fileLink: live },
-  { name: 'usage hold', run: { ...baseRun, status: RUN_STATUS.waiting, autoResumeAt: '2026-11-11T00:00:00Z', worktreePath: live }, blocked: false, diff: live, working: live, fileLink: live },
-  { name: 'autosave with live path', run: { ...baseRun, worktreePath: live }, blocked: true, diff: live, working: live, fileLink: live },
-  { name: 'autosave with removed path', run: { ...baseRun, worktreePath: gone }, blocked: true, diff: null, working: noWorktree, fileLink: gone },
-  { name: 'autosave with unknown id', run: undefined, blocked: true, diff: notFound, working: notFound, fileLink: notFound },
+  } }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'claim held elsewhere', run: { ...baseRun, worktreePath: live }, blocked: false, claimHeld: true, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'foreign owner', run: { ...baseRun, worktreePath: live }, blocked: false, foreignOwner: true, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'running', run: { ...baseRun, status: RUN_STATUS.running, worktreePath: live }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'usage hold', run: { ...baseRun, status: RUN_STATUS.waiting, autoResumeAt: '2026-11-11T00:00:00Z', worktreePath: live }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'autosave with live path', run: { ...baseRun, worktreePath: live }, blocked: true, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'autosave with removed path', run: { ...baseRun, worktreePath: gone }, blocked: true, mutate: noWorktree, diff: null, working: noWorktree, fileLink: gone },
+  { name: 'autosave with unknown id', run: undefined, blocked: true, mutate: notFound, diff: notFound, working: notFound, fileLink: notFound },
 ];
 
 function fakeHost({ run, claimHeld, foreignOwner }: State): RunCheckoutHost {
-  const forbidden = () => { throw new Error('a read must not check ownership, claim or write'); };
+  const forbidden = () => { throw new Error('read or mutate must not check ownership, claim or write'); };
   return {
     root,
     store: {
@@ -78,11 +81,13 @@ function fakeHost({ run, claimHeld, foreignOwner }: State): RunCheckoutHost {
   };
 }
 
-describe.each(routes)('read $route', (route) => {
+describe.each(routes)('$intent $route', (route) => {
   it.each(states)('$name keeps admission order and directory policy', (state) => {
     const host = fakeHost(state);
     vi.mocked(autosaveCleanupBlocker).mockReset().mockReturnValue(state.blocked ? autosave.body.error : undefined);
-    const result = runCheckout(host, baseRun.id, 'read', route);
+    const result = route.intent === 'mutate'
+      ? runCheckout(host, baseRun.id, 'mutate')
+      : runCheckout(host, baseRun.id, 'read', route);
     const checksAutosave = Boolean(state.run && route.checksAutosave);
     const expected = checksAutosave && state.blocked ? autosave : state[route.column];
     expect(result).toEqual(typeof expected === 'object' && expected !== null
