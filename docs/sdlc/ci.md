@@ -176,10 +176,11 @@ failure and the fixed result, including lease and checkout isolation.
 Required verification has ten verification jobs, plus the complexity and clone
 gates. Typecheck, workflow lint, citations, classification and policy ratchets
 feed the `Review preflight` gate. On PRs into main, the other nine jobs start after
-preflight and run beside the protected review result; `verify` requires both. Other events keep their existing test inventory. Eight test jobs use the current Node LTS; typecheck and build/package use
+preflight and run beside the protected review result; `verify` requires both. Other events keep their existing test inventory. The four Vitest shards use the exact Node version in
+`.node-version`, the four cockpit browser shards the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
-- Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
+- Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results).
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
@@ -461,6 +462,36 @@ optional publication and artifact shape. `.github/scripts/vitest-coverage-tests.
 checks real Vitest exit codes when report generation or writing fails, with passing and
 failing tests. Coverage remains opt-in locally and keeps test files in the report.
 Like any `ci.yml` edit, prove the final workflow with a dispatch (§ Proving a `ci.yml` change).
+
+### Squeal shared results
+
+Merge groups publish their Vitest results for Squeal, so a new worktree at a main commit
+can import those passes instead of running the same test files again
+(hearsay-tools/squeal spec 018, D8, D9, D13 and D17).
+
+- In a merge group, each `Vitest shard N/4` job fetches the pinned Squeal release (tag and
+  commit in the `Fetch the Squeal release` step) and runs its unchanged `npm test` command
+  under `squeal ci record --out "$RUNNER_TEMP/squeal-parts" --`. The command's output and
+  exit code are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3
+  days. If the fetch fails, the shard runs the plain command with a warning. Other events run
+  the command exactly as before.
+- The `Publish Squeal shared results` job (`squeal-results`) runs after all four shards pass
+  in a merge group. It checks out `merge_group.head_sha` with full history, installs
+  dependencies, builds the server, downloads the parts, runs `squeal ci export` and then
+  `squeal ci publish --keep 100`, which pushes `refs/squeal/<sha>` and deletes refs beyond the
+  newest 100 main commits. It is the only job with `contents: write`, keeps the checkout's
+  token for that push, and runs no tests.
+- The job is outside `verify.needs` and the merge-queue roster: its failure never blocks a
+  merge. With `shared.ref` in `squeal.config.json`, developers' Squeal daemons fetch the
+  nearest published ref.
+- The shards and the export job read Node from `.node-version` (one exact version), so the
+  published results carry the environment developers run. Recording assumes nothing changes
+  the tests' input files while the command runs.
+
+`.github/scripts/ci-squeal-results.workflow.test.cjs` pins the event selection, the
+unchanged command and exit code, the job's permissions and its absence from required checks.
+To move to another Squeal release, change `SQUEAL_TAG` and `SQUEAL_COMMIT` in the vitest job's
+`Fetch the Squeal release` step; the export job reuses it.
 
 ### Upstream scan PRs
 
