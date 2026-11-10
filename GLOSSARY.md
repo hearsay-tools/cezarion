@@ -138,7 +138,8 @@ consume those frames in parity tests.
 
 The directory a cockpit route uses for a run's files and Git state: the run's
 worktree, or the repository root for a `worktree: false` run. One server
-module decides it. A route names its checkout intent and gets back either a
+module decides it for each route that hearsay-tools/cezarion#3158 has migrated;
+the other routes still decide it in their handlers. A route names its checkout intent and gets back either a
 refusal with a status and an `{ error }` body, or the run, the directory and,
 when the intent claims the run, the release. Artifact routes read the data
 directory and use no run checkout.

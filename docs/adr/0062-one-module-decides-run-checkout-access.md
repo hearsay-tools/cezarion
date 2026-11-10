@@ -7,6 +7,9 @@ requires in a fixed order, takes the intent's claim, and returns either a refusa
 status and an `{ error }` body) or a handle (the run, the directory to use, and for `publish`
 and `remove` the claim's release). The handler answers a refusal with `c.json(body, status)`.
 It calls the release in `finally`, after all of its async work. The module holds no route.
+Each route follows this record once a slice of hearsay-tools/cezarion#3158 has migrated it;
+until then it keeps its own handler checks, and a change to it follows its row in the spec's
+Table A.
 
 Before this record, 14 handlers in `server/server.ts` each chose a directory and a guard set by
 hand: 22 direct guard calls, five rules for a directory to read, write or open and three more to
@@ -32,7 +35,7 @@ handlers. The extraction keeps every status code, refusal text, extra field and 
 Where routes disagree today, the module takes a named per-route option. A behavior change
 deletes its option in its own pull request, with a red test first. One such change is fixed
 here: `git/commit` and `git/push` refuse a run whose `status` is `running`, and still accept
-`queued` and `waiting` runs.
+`queued` and `waiting` runs. They check the status once, at admission, and take no claim.
 
 ADR 0002 (the text `/diff` stays a protected surface), ADR 0003, ADR 0006, ADR 0009, ADR 0016,
 ADR 0032, ADR 0043 and ADR 0053 still hold.
