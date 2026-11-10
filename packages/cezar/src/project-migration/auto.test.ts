@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,7 +18,10 @@ import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command
 import { CockpitOwnership, migrationFencePaths, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { ProjectContexts } from '../server/project-context.ts';
-import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
+import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
+import { AutomationCoordinator } from '../automations/coordinator.ts';
+import { startServer } from '../server/server.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { moveProjectWhenIdle } from './auto.ts';
 import { crashAt, moved, owners, TIMEOUT } from './engine.testkit.ts';
 import { ProjectMigrationRecoveryError } from './recovery.ts';
@@ -146,6 +149,20 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     expect(projectAdmissionRefusal(project.dataDir)?.reason).toBe('journal');
   });
 
+  it('waits, with a notice, on any failure before the journal exists, and serves the project as before', async () => {
+    const run = cockpit(true);
+    const lines: string[] = [];
+    const result = await moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], rebrand: true, fault: crashAt('journal:before'),
+      log: line => lines.push(line) });
+    expect(result).toEqual({ status: 'blocked', reason: 'journal:before' });
+    expect(lines).toEqual([`[hsq] Project ${project.root} keeps its state in .ai/cezar/ for now: journal:before. It is served from both folders; the move runs again at the next start.`]);
+    expect(projectAdmissionRefusal(project.dataDir)).toBeUndefined();
+    expect(movedState()).toBe(false);
+    const context = await run.contexts.context('p');
+    expect(context.store.getRun(TASK)?.worktreePath).toBe(project.taskPath);
+    await context.store.reports.idle();
+  });
+
   it('waits, with a notice, when another process holds the project\'s fence at the moment of the move', async () => {
     const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
     try {
@@ -162,6 +179,66 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       other.kill('SIGKILL');
       await exited;
       rmSync(migrationFencePaths(project.dataDir)!.lock, { force: true });
+    }
+  });
+
+  it('makes a request that comes while the project is being prepared wait for the move, never read first', async () => {
+    const run = cockpit(true);
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'warn').mockImplementation((line: string) => { lines.push(line); });
+    try {
+      // Whether the move had finished when the request's build first opened the project's run store.
+      const movedAtOpen: boolean[] = [];
+      const open = RunStore.open;
+      vi.spyOn(RunStore, 'open').mockImplementation((dataDir, options) => {
+        if (dataDir === project.dataDir) movedAtOpen.push(movedState());
+        return open.call(RunStore, dataDir, options);
+      });
+      // The post-listen preparation's move and a first request for the project, at once.
+      const preparing = moveProjectWhenIdle(project.root, { ownership: run.ownership, homes: [], rebrand: true });
+      const opening = run.contexts.context('p');
+      const [, context] = await Promise.all([preparing, opening]);
+      expect(movedAtOpen).toEqual([true]);
+      expect(movedState()).toBe(true);
+      expect(context.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
+      expect(lines.filter(line => line.startsWith('[hsq] Moved the state of'))).toHaveLength(1);
+      await context.store.reports.idle();
+    } finally { log.mockRestore(); vi.mocked(RunStore.open).mockRestore(); }
+  });
+
+  it('prepares every project, with warm-up off, before automation discovery opens its state', async () => {
+    vi.stubEnv('CEZ_PROJECT_WARMUP', '0');
+    const boot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-auto-move-boot-'));
+    temporary.push(boot);
+    execFileSync('git', ['init', '-q', boot]);
+    const bootId = (await registerProject(boot, undefined, testHome())).id!;
+    const projectId = (await registerProject(project.root, undefined, testHome())).id!;
+    // Whether the legacy project had moved when automation discovery first opened its store.
+    const movedWhenOpened: boolean[] = [];
+    const store = AutomationCoordinator.prototype.store;
+    vi.spyOn(AutomationCoordinator.prototype, 'store').mockImplementation(function (this: AutomationCoordinator, id: string, root?: string) {
+      if (id === projectId) movedWhenOpened.push(movedState());
+      return store.call(this, id, root);
+    });
+    const ownership = new CockpitOwnership();
+    owners.push(ownership);
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, rebrand: true,
+      listProjects: () => listProjects(undefined, testHome()) });
+    const bootStore = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const server = startServer({ home: testHome(), repoRoot: boot, bootProjectId: bootId, store: bootStore, ownership, legacyCanary: true,
+      manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts }, 0);
+    try {
+      // bound: hang guard; discovery opens the project's automation store once it is prepared.
+      await vi.waitFor(() => expect(movedWhenOpened.length).toBeGreaterThan(0), { timeout: 15_000 });
+      expect(movedWhenOpened[0]).toBe(true);
+      expect(contexts.peek(projectId)).toBeUndefined();
+    } finally {
+      await new Promise<void>(resolve => { server.close(() => resolve()); });
+      contexts.disposeAll();
+      bootStore.close();
+      warn.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 

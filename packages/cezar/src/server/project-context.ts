@@ -27,8 +27,7 @@ import { getRepoInfo } from './git.ts';
 import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, withProjectAdmission, CockpitOwnership, type LiveProjectTask } from './cockpit-ownership.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
-import { recoverProjectMigration } from '../project-migration/recovery.ts';
-import { moveProjectWhenIdle } from '../project-migration/auto.ts';
+import { prepareProject } from '../project-migration/auto.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -495,10 +494,8 @@ export class ProjectContexts {
     noticeLegacyProject(project.root);
     const dataDir = projectPaths(project.root).write;
     // An unfinished migration finishes first, before any read; this build then keeps the claim it took.
-    await recoverProjectMigration(project.root, { ownership: this.deps.ownership, keep: true });
-    // With the release switch, an idle legacy project moves before its first read or task start.
-    await moveProjectWhenIdle(project.root, { ownership: this.deps.ownership, homes: [this.deps.home],
-      ...(this.deps.rebrand === undefined ? {} : { rebrand: this.deps.rebrand }) });
+    // With the release switch, an idle legacy project then moves before its first read or task start.
+    await prepareProject(project.root, { ownership: this.deps.ownership, homes: [this.deps.home], rebrand: this.deps.rebrand, keep: true });
     if (stale()) throw new ProjectContextsClosedError();
     return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
   }

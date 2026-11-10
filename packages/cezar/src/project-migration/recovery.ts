@@ -1,7 +1,6 @@
 import { projectPaths, pathPresent } from '../project-paths.ts';
 import { anotherCockpitOwner, CockpitAlreadyRunningError, CockpitOwnership, migrationFencePaths, ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import { resumeProjectMigration, type ProjectMigrationResult } from './engine.ts';
-import type { ArchiveOnMergeDeps } from '../server/archive-on-merge.ts';
 
 /**
  * Early recovery of an unfinished project migration (P4b3, hearsay-tools/cezarion#3089). Every
@@ -63,20 +62,4 @@ async function recover(repoRoot: string, dataDir: string, journal: string, optio
   try { return await resumeProjectMigration({ repoRoot, fence }); }
   catch (error) { throw new ProjectMigrationRecoveryError(journal, repoRoot, error); }
   finally { fence.release(); done(); }
-}
-
-/** Finish the unfinished journals of `projects` before they are read; a project whose journal
- *  cannot finish is logged and stays refused by admission. Answers `projects` unchanged. */
-export async function recoverProjects<T extends { root: string; status?: string }>(projects: T[], ownership: CockpitOwnership | undefined): Promise<T[]> {
-  await Promise.all(projects.filter((project) => project.status !== 'missing').map((project) =>
-    recoverProjectMigration(project.root, { ownership }).catch((error: unknown) => {
-      console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
-    })));
-  return projects;
-}
-
-/** The archive and completion ticks: each tick's project list finishes every unfinished journal
- *  first, before the tick's admission check and its maintenance store. */
-export function recoverBeforeTicks(ownership: CockpitOwnership | undefined, deps: ArchiveOnMergeDeps): ArchiveOnMergeDeps {
-  return { ...deps, projects: async () => { return recoverProjects([...await deps.projects()], ownership); } };
 }

@@ -24,7 +24,8 @@ import { projectPaths } from '../project-paths.ts';
 import { createApp } from '../server/server.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { writeSettledJournal } from './project-migration.testkit.ts';
-import { ProjectMigrationRecoveryError, recoverBeforeTicks, recoverProjectMigration } from './recovery.ts';
+import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
+import { prepareBeforeTicks } from './auto.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 
 /**
@@ -173,7 +174,7 @@ describe('early recovery of an unfinished project migration', () => {
   it('finishes the journal before the archive and completion ticks check admission', async () => {
     const archived = journaled(), completed = journaled();
     const ownership = owner();
-    const ticks = (root: string, seen: string[]) => recoverBeforeTicks(ownership, {
+    const ticks = (root: string, seen: string[]) => prepareBeforeTicks({ ownership, homes: [] }, {
       projects: async () => { return [{ id: 'p', root }]; },
       enabled: async () => { seen.push('admitted'); return false; },
       repository: async () => undefined,

@@ -279,7 +279,7 @@ import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forge
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
-import { recoverBeforeTicks, recoverProjects } from '../project-migration/recovery.ts';
+import { prepareBeforeTicks, prepareProjects } from '../project-migration/auto.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -4917,7 +4917,7 @@ export function createApp(deps: ServerDeps) {
       .filter((project) => project.status !== 'missing' && project.id !== bootId && !contexts.peek(project.id))
       .map((project) => project.root)));
     // An unfinished migration finishes first. No folder or a fence: no runs. `not-git` still has an `.ai/cezar` worth indexing.
-    return (await recoverProjects(projects, deps.ownership)).filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
+    return (await prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })).filter((project) => project.status !== 'missing' && !projectAdmissionRefusal(projectPaths(project.root).write)).map((project) => {
       const owned = project.id === bootId ? bootContext : contexts.peek(project.id);
       // A cold project's repository identity only: asking for an owned one starts a discovery
       // nothing reads.
@@ -5110,7 +5110,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
   });
-  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = recoverBeforeTicks(deps.ownership, {
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = prepareBeforeTicks({ ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary }, {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
@@ -5305,11 +5305,11 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   });
   const startBackgroundServices = () => {
     if (!deps.store.unavailable) deps.store.reports.start();
-    archiveOnMerge.start();
-    completionActions.start();
-    void visibleProjects().then((projects) => {
+    void visibleProjects().then(async (projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
+      await prepareProjects(all, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary }); // recovery, then the move, before any touch below
+      archiveOnMerge.start(); completionActions.start();
       // #781: every registered project's preview leftovers, not only the boot project's.
       void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #667: build every other project's context now, so the first click on one does not pay

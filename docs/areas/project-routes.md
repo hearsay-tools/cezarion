@@ -192,9 +192,15 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   (`moveUnderFence`). With anything live (another cockpit, a task from before the restart, a
   headless run), nothing moves: the project is served from both folders as before, a log
   notice names what blocks the move, and the next start tries again (one attempt per project
-  per cockpit run). The notice of a finished move lists the `git mv` commands for tracked
-  files. A move that fails after its journal exists closes the project through recovery. CLI
-  entries recover journals but never start a move. The switch must not turn on before the
+  per cockpit run; a caller that comes while it runs waits for it). The notice of a finished
+  move lists the `git mv` commands for tracked files. Any failure before the journal exists
+  only delays the move; a failure after it closes the project through recovery. Every cockpit
+  path that touches a project before or without its context runs the same prepare step
+  (`prepareProject`: journal recovery, then the automatic move): the context build, the
+  post-listen preparation of every registered project (before the preview sweep, automation
+  discovery, the scheduler and the archive and completion ticks start), the ticks' project
+  lists and the cold run index. With the switch false it is the journal recovery of before.
+  CLI entries recover journals but never start a move. The switch must not turn on before the
   per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
   runs are fallback runs.
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
@@ -210,10 +216,10 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   journal stays and admission keeps refusing.
 - **Entry points.** Cockpit boot (`serveCommand`, before its ownership claim and the listener;
   boot keeps the claim), lazy context builds (`ProjectContexts.build`), the warm-up (a journal
-  alone no longer skips a project), the archive and completion ticks (`recoverBeforeTicks`:
-  each tick's project list, before the tick's admission check), the cold workspace runs index
-  and search (`recoverProjects` in `projectRunSources`; a failure leaves the project out with
-  a warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
+  alone no longer skips a project), the post-listen preparation of every registered project,
+  the archive and completion ticks (`prepareBeforeTicks`: each tick's project list, before the
+  tick's admission check), the cold workspace runs index and search (`prepareProjects` in
+  `projectRunSources`; a failure leaves the project out with a warning), CLI `run`, `init` and the single-project `projects` listing (`cli-dispatch.ts`,
   module loaded only when a journal exists), `artifact publish` (which then refuses a task
   context that names a moved path), `versions` checkout discovery (which lists the worktrees
   again from the main checkout after a recovery moved them), and `migrate-project` itself
