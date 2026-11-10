@@ -49,7 +49,7 @@ describe('createDraftPr pre-PR autosave (#471 follow-up)', () => {
   it.each(['0', '1'])('strips the cockpit home but preserves git push env with full-env=%s', async (full) => {
     vi.stubEnv('CEZ_DRY_RUN', '0');
     vi.stubEnv('GIT_TERMINAL_PROMPT', '1');
-    useTestHome(Home.sandbox(testHome().root));
+    useTestHome(Home.sandbox(testHome().rootOverride ?? testHome().root));
     vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
     vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
     vi.stubEnv('PUSH_SECRET', 'preserved');

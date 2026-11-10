@@ -28,7 +28,7 @@ try {
   const { resolveHome } = await import(new URL('home/resolve.js', runtime.url));
   const home = resolveHome({ purpose: 'cli' });
   const { Home } = await import(new URL('home/home.js', runtime.url));
-  Home.sandbox(home.root);
+  Home.sandbox(home.rootOverride ?? home.root);
   // Keep git discovery away from the user's parent repository, even if TMPDIR
   // was set inside a cezar worktree. This repo contains only the experiment.
   execFileSync('git', ['init', '--initial-branch=main'], { cwd: root, stdio: 'ignore' });

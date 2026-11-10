@@ -1,3 +1,8 @@
+import { tsImport } from 'tsx/esm/api';
+const { benchmarkHome } = await tsImport('../packages/cezar/scripts/benchmark-home.ts', import.meta.url);
+const { homePaths, kindHomePaths } = await tsImport('../packages/cezar/src/home/home.ts', import.meta.url);
+const { nativePathPlatform, oneRootKinds } = await tsImport('../packages/cezar/src/home/kind-roots.ts', import.meta.url);
+const { readInstallMarker } = await tsImport('../packages/cezar/src/home/install-marker.ts', import.meta.url);
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -55,3 +60,17 @@ test('health measurement pins its isolated home and dry-run under both names', (
   });
   assert.deepEqual(JSON.parse(result), ['/sandbox/home', '/sandbox/home', '1', '1']);
 });
+
+for (const layout of ['legacy', 'split']) {
+  test(`benchmark home prepares the selected config root in ${layout} layout`, () => {
+    const root = mkdtempSync(join(tmpdir(), 'benchmark-base-'));
+    const home = layout === 'split'
+      ? kindHomePaths(oneRootKinds(root, nativePathPlatform), layout, nativePathPlatform, root)
+      : homePaths(root, join(root, '.cache'), root);
+    try {
+      assert.equal(benchmarkHome(home), home);
+      assert.equal(readInstallMarker(home.config)?.kind, 'test');
+      assert.equal(readInstallMarker(join(home.config, 'config')), undefined);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
