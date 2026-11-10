@@ -86,7 +86,7 @@ holds that area's rules.
 | Web UI (cockpit) | [`docs/areas/web-ui.md`](docs/areas/web-ui.md) |
 | Agent config files (Settings → Agent config) | [`docs/areas/agent-config.md`](docs/areas/agent-config.md) |
 | Cockpit e2e specs, the browser seam, a flaky shard | [`packages/web/e2e/README.md`](packages/web/e2e/README.md) |
-| Feature specs / design history | `.ai/specs/`: read the feature's spec, and keep new work consistent with it or update it |
+| Feature specs / design history | `.ai/specs/` says why a feature took its shape. Code, tests and ADRs win; only an open PR's plan binds |
 | Upstream drift: what open-mercato/cezar shipped, ported, declined | [`.ai/upstream/README.md`](.ai/upstream/README.md); fetch upstream into `refs/cez-upstream/main`, as its scan does |
 
 ## Validation
@@ -151,7 +151,7 @@ row's value when the thing it names changes, rather than its label.
 | Automated reviewer | CodeRabbit App (`347564`, `coderabbitai`), automatic draft/incremental reviews via `.coderabbit.yaml`. The native `Automated Code Review` job requires fresh admission and resolved threads; see `docs/sdlc/ci.md`. |
 | Review recovery | Missing check: request `@coderabbitai full review`, then let reconciliation retry. Dispatch `Reconcile CodeRabbit admission` with `pr_number` after thread changes or missed events. Other recovery: `docs/sdlc/ci.md`. |
 | Commit convention | Conventional Commits |
-| Specs and plans | `.ai/specs/`, `.ai/specs/` (tracked; new files are `YYYY-MM-DD-<slug>.md`, and plans end in `-plan.md`) |
+| Specs and plans | `.ai/specs/` (tracked; new files are `YYYY-MM-DD-<slug>.md`, and plans end in `-plan.md`) |
 | Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. An unverified head returns it to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
 | Auto-merge | Read `.ai/skills/auto-merge/SKILL.md` before you open a pull request into `main`, and after each push, CI result, review round or draft/ready change on one you opened with the `auto-merge` label. It decides whether the PR merges without owner review; every merge it makes is a squash. |
 | Code quality | Read `.ai/skills/check-code-quality/SKILL.md` for file/function/module quality stats and before opening a pull request. Use its measurement path for requested stats and its Squeal-first pre-PR path, with complete bundled fallback, for changed-function checks and findings. |
