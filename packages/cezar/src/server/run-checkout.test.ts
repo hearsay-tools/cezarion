@@ -101,7 +101,11 @@ describe.each(routes)('$intent $route', (route) => {
     const expected = checksMutationAutosave && state.blocked ? autosave : state[route.column];
     expect(result).toEqual(typeof expected === 'object' && expected !== null
       ? expected
-      : { run: state.run, directory: expected });
+      : {
+        run: state.run,
+        directory: expected,
+        ...(route.intent === 'read' ? { beforeLiveIndex: expect.any(Function), diff: expect.any(Function) } : {}),
+      });
     expect(host.store.writeRefusal).not.toHaveBeenCalled();
     expect(host.manager.claimForPublish).not.toHaveBeenCalled();
     expect(host.manager.claimWorktreeReclaim).not.toHaveBeenCalled();

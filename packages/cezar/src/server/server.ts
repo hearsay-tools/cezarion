@@ -1,4 +1,3 @@
-import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { runCheckout, preparePublishCheckout, reclaimCheckoutError } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
@@ -192,7 +191,7 @@ import { listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../workflows/run.ts';
 import type { PastedContent } from '../workflows/run/types.ts';
-import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
+import { worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
@@ -3721,16 +3720,8 @@ export function createApp(deps: ServerDeps) {
     .get('/runs/:id/diff', async (c) => {
       const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'existing-worktree' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
-      const { run, directory: workingDirectory } = checkout;
-      if (!workingDirectory) {
-        return c.text('(no worktree — this task ran directly in the repo working tree)');
-      }
-      const result = await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD', undefined,
-        () => autosaveCleanupBlocker(c.get('project').store.sourceDataDir(run.id), run.id));
-      if (typeof result !== 'string') {
-        const { error } = result;
-        return c.json({ error }, 409);
-      }
+      const result = await checkout.diff();
+      if (typeof result !== 'string') return c.json({ error: result.error }, 409);
       return c.text(result);
     })
 
@@ -3739,7 +3730,7 @@ export function createApp(deps: ServerDeps) {
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const result = await collectChanges(workingDirectory, run.baseBranch ?? 'HEAD', {
-        beforeLiveIndex: () => autosaveCleanupBlocker(c.get('project').store.sourceDataDir(run.id), run.id),
+        beforeLiveIndex: checkout.beforeLiveIndex,
         taskBranch: run.branch,
         // Anchors a repointed worktree at the branch as this run found it (#751).
         runStartedAt: run.startedAt,

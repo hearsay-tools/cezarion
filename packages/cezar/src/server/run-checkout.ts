@@ -1,3 +1,5 @@
+import { worktreeDiff } from '../git-worktree.ts';
+import type { LiveIndexCheck, DiffRefusal } from '../git-private-index.ts';
 import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { fallbackProjectWriteError } from '../project-paths.ts';
@@ -38,6 +40,11 @@ type ReadHandle<Rule extends ReadDirectoryRule> = {
   directory: Rule extends 'existing-worktree' ? string | null : string;
 };
 
+interface ReadActions {
+  beforeLiveIndex: LiveIndexCheck;
+  diff: () => Promise<string | DiffRefusal>;
+}
+
 interface OpenOptions {
   ignoresEngineOwnership: boolean;
   defaultTargetNeedsWorktree: boolean;
@@ -69,7 +76,7 @@ export function runCheckout<Rule extends ReadDirectoryRule>(
   id: string,
   _intent: Extract<CheckoutIntent, 'read'>,
   options: ReadOptions<Rule>,
-): CheckoutRefusal | ReadHandle<Rule>;
+): CheckoutRefusal | (ReadHandle<Rule> & ReadActions);
 export function runCheckout(
   host: RunCheckoutHost,
   id: string,
@@ -94,13 +101,25 @@ export function runCheckout(
     if (blocker) return { status: 409, body: { error: blocker } };
   }
   if (options.directory === 'recorded-path-or-root') {
-    return { run, directory: run.worktreePath ?? root };
+    return readCheckoutHandle(host, run, run.worktreePath ?? root);
   }
   const directory = options.directory === 'existing-worktree' ? worktreeOf(run) : workingDirectoryOf(run, root);
   if (!directory && (intent === 'mutate' || options.directory === 'working-directory')) {
     return { status: 409, body: { error: NO_WORKTREE } };
   }
-  return { run, directory };
+  return intent === 'read' ? readCheckoutHandle(host, run, directory) : { run, directory };
+}
+
+function readCheckoutHandle(host: RunCheckoutHost, run: RunRecord, directory: string | null): ReadHandle<ReadDirectoryRule> & ReadActions {
+  const beforeLiveIndex = () => autosaveCleanupBlocker(host.store.sourceDataDir(run.id), run.id);
+  return {
+    run,
+    directory,
+    beforeLiveIndex,
+    diff: () => directory
+      ? worktreeDiff(directory, run.baseBranch ?? 'HEAD', undefined, beforeLiveIndex)
+      : Promise.resolve('(no worktree — this task ran directly in the repo working tree)'),
+  };
 }
 
 function publishCheckout({ store, manager }: RunCheckoutHost, id: string): CheckoutRefusal | ClaimedHandle {
