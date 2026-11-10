@@ -186,3 +186,19 @@ it('lists the split home when its install marker is unreadable', async () => {
   const listed: Array<{ path: string }> = JSON.parse(output.mock.calls[0]![0]);
   expect(listed.every(entry => !entry.path.startsWith(f.legacy.root))).toBe(true);
 });
+
+it('refuses the deferred split write when another process stages a server group first', async () => {
+  const f = await fixture(true);
+  f.prepareOperatorHome(f.home, 'projects', f.env);
+  expect(readdirSync(f.dir)).toEqual([]);
+  // hsq server-migrate stages the copy (commit:false) before this command's first write.
+  rawJson(f.legacy.workspaceConfig, { projects: [], saved: 'legacy' });
+  const { migrateLegacyHome } = await import('./migrate.ts');
+  migrateLegacyHome(f.legacy, f.home, { commit: false, env: f.env });
+  const staged = readFileSync(f.home.workspaceConfig);
+  const { HomeStore } = await import('./store.ts');
+  const write = () => new HomeStore(f.home).writeJson(f.home.workspaceConfig, { projects: [], saved: 'split' });
+  expect(write).toThrow(/Run hsq server-migrate/);
+  expect(readFileSync(f.home.workspaceConfig)).toEqual(staged);
+  expect(JSON.parse(readFileSync(join(f.home.config, 'install.json'), 'utf8')).state).toBe('pending');
+});
