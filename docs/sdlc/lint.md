@@ -208,6 +208,16 @@ literal, case labels with one, and `kind:` entry literals, including `as const` 
 Its exceptions are the reasoned allow-list in the rule's `ignores`, kept current by the stale-entry test.
 It does not follow kinds held in variables, indexes or types, and excludes the request kind `request`.
 
+### `ChildProcess.killed` reads (`child-killed-read`)
+
+The ast-grep rule checks production `.ts` files in `packages/cezar/src`; it ignores tests and
+testkits (open-mercato/cezar#844). It reports a `.killed` member read on any receiver and a
+`killed` key in a destructuring pattern. `ChildProcess.killed` says a signal was delivered, not
+that the child ended; a watchdog asks `trackChildExit(child)` in `core/agent-runner.ts`.
+The rule knows no type. It leaves out a receiver whose name ends in `error`, `err` or `failure`,
+because the error of an exec call carries its own `killed`. It also leaves out a computed key.
+It has no baseline.
+
 ## Add a rule
 
 For a safety guard, first apply [New safety guards](#new-safety-guards) and document
