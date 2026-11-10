@@ -1,3 +1,4 @@
+import type { WaitCancellation } from './wait-cancellation.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -15,6 +16,7 @@ import type { RunModuleContext } from './types.ts';
 
 export interface HumanWaitsHost {
   waitEngine: WaitEngine;
+  waitCancellation: WaitCancellation;
   routeWorkerQuestion(runId: string): void;
 }
 
@@ -134,8 +136,7 @@ export class HumanWaits {
   withdrawCezarHumanWaits(runId: string): void {
     const ids = openWaits(this.context.store.getRun(runId) ?? {}).filter(isCezarHumanWait).map(wait => wait.id);
     if (!ids.length) return;
-    try { this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: ids }); }
-    catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+    this.host.waitCancellation.cancel(runId, ids, { onCommitFailure: 'skip', log: '[cez] human wait checkpoint failed' });
   }
 
   /** Whether a closing session leaves the run waits to park on. Cezar's own human waits end with the

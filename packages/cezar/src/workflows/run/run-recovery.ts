@@ -1,3 +1,4 @@
+import type { WaitCancellation } from './wait-cancellation.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { atContinue } from './launch-read-resolver.ts';
@@ -32,7 +33,7 @@ interface RunRecoveryHost {
   requeueInterruptedRun(run: RunRecord, step: RunRecord['currentStepId']): boolean;
   checkpointRestartContext(run: RunRecord): RunRecord;
   deliverConversationInput(id: string): void; answerRoutedQuestion(id: string): void;
-  queueWaitWake(id: string): void; owesWake(run: RunRecord): boolean; cancelOpenWaits(id: string): void;
+  queueWaitWake(id: string): void; owesWake(run: RunRecord): boolean; waitCancellation: WaitCancellation;
   settleOrphanedWorkerExecution(id: string): boolean; settleRequestedRootFinish(id: string): Promise<void>;
   settleSuccess(id: string): Promise<void>; reconcileWorkerWaits(family?: string): void;
   pump(): Promise<void>; recover(family?: string): Promise<void>;
@@ -412,7 +413,7 @@ export class RunRecovery {
       // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
       // that owes results keeps them for a human, and its open waits still resolve without a wake.
       if (run.waits?.length && holdsOwedResults(run)) this.host.waitResolve.rearm(run);
-      else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.host.cancelOpenWaits(run.id);
+      else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.host.waitCancellation.cancelAll(run.id);
       else if (run.waits?.length) this.host.queueWaitWake(run.id);
       // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).
       else if (['running', 'waiting', 'queued'].includes(run.status) && this.host.owesWake(run)) this.host.queueWaitWake(run.id);

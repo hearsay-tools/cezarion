@@ -21,7 +21,6 @@ interface RunCancelHost {
   cancelAutoResume(id: string): boolean;
   rootFinishRequested(id: string): boolean;
   historyDeletionPending(id: string): boolean;
-  disarmWait(id: string): void;
   move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
 }
 

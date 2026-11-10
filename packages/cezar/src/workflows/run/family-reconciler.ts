@@ -14,17 +14,15 @@ import { workerOutcome } from '../../runs/delegation-state.ts';
 import { workerOutcomeKey } from '../../runs/transcript-facts.ts';
 
 interface FamilyReconcilerHost {
-  waitCancellation: WaitCancellation;
   resolveWorkerWait(id: string, entry: WorkerWaitEntry, observed: WorkerWaitEntry): boolean;
   reapTerminalScratch(id: string): void;
-  cancelOpenWaits(id: string): void;
+  waitCancellation: WaitCancellation;
   resolvePeerWaits(runs: readonly string[]): void;
   active(id: string): ActiveRun | undefined;
   isActive(id: string): boolean;
   recoveringRun(run: RunRecord | string | undefined): boolean;
   cancel(id: string): void;
   armWait(id: string, wait: Wait): void;
-  disarmWait(id: string): void;
   retireSettledQuestions(id: string): void;
   closeRoutedQuestions(id: string): void;
   reconcileWorkerWaits(id?: string): void;
@@ -38,7 +36,7 @@ export class FamilyReconciler {
     // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
     if (source === 'live-release') return;
     if (!this.context.disposed() && source === undefined) this.host.reapTerminalScratch(run.id);
-    if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.cancelOpenWaits(run.id);
+    if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.waitCancellation.cancelAll(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.host.active(run.id)?.liveSession.revokeDelegation?.();
     if (this.context.disposed() || this.host.recoveringRun(run)) return;
     // A destroy retry changes nothing the family reconcile reads (#880).
@@ -265,7 +263,7 @@ export class FamilyReconciler {
     });
     // A result still owed for workers the executing turn has since destroyed is no longer news.
     const retired = entries.filter(entry => entry.phase === 'resolved' && destroyed(entry)).map(entry => entry.id);
-    if (retired.length) this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: retired });
+    if (retired.length) this.host.waitCancellation.cancel(parent.id, retired);
     for (const entry of entries.filter(wait => wait.phase === 'open')) {
       let selected = entry;
       if (entry.workerIds) {

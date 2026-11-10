@@ -61,5 +61,4 @@ export class WaitCancellation {
     this.host.removeWake(runId, this.host.hasActive(runId));
     this.host.retireAdmission(runId);
   }
-
 }
