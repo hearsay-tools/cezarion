@@ -222,11 +222,11 @@ describe('claim check order', () => {
     expect(calls).toEqual(orders[route.route]);
   });
 
-  it('DELETE refuses an active unknown id before lookup', () => {
+  it('DELETE refuses an unknown id before checking activity', () => {
     const { host, calls } = claimedHost(states[0]!);
     vi.mocked(host.manager.isActive).mockImplementation(() => { calls.push('active'); return true; });
-    expect(admitClaimed(host, claimedRoutes[2])).toEqual({ status: 409, body: { error: activeRemove } });
-    expect(calls).toEqual(['active']);
+    expect(admitClaimed(host, claimedRoutes[2])).toEqual({ status: 404, body: { error: 'not found' } });
+    expect(calls).toEqual(['lookup']);
   });
 
   it('reclaim fallback refusal wins over foreign ownership and claiming', () => {
