@@ -246,7 +246,7 @@ describe('binary help and notices', () => {
       expect(help).toContain(`resume ${rebrand ? 'Squawk' : 'Cezar'} workers`);
       expect(help).toContain(`scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/`);
       expect(help).toContain('.ai/cezar/config.json');
-      expect(help).toContain('~/.cezar/versions');
+      expect(help).toContain(rebrand ? f.home.versions : '~/.cezar/versions');
     }
   });
   it('prints the notice before a managed command can return', async () => {
