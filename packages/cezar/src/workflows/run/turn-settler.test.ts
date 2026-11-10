@@ -43,13 +43,12 @@ function fixture() {
     openHumanAlias: call('humanAlias', { source: WAIT_SOURCE.cezar }), showCezarHumanWait: call('show', undefined),
     surfaceHumanWait: call('surface', undefined),
   };
-  const waitResolve = { armWait: vi.fn((_id: string, _wait: Wait) => { log.push('armWait'); }) };
   const host = {
     humanWaits, line: { isParked: call('isParked', false), inPool: call('inPool', false), park: call('parkLine', undefined) },
     waitRegistry: { registerCompletionWait: call('completionWait', undefined) },
     workerQuestions: { askParentForWorker: call('askParent', undefined) }, completionGateHost: { parentCompletionBlockers: () => [] },
     move: call('move', undefined), releaseSlot: call('release', undefined), completionGate: call('gate', 'accept' as 'accept' | 'held' | CompletionRefusal),
-    waitCancellation: unused<Host['waitCancellation']>('cancellation', { cancelAll: call('cancelWaits', undefined) }), countAutomaticWakes: call('wakes', 0), workerExecutionStopped: () => false,
+    countAutomaticWakes: call('wakes', 0), workerExecutionStopped: () => false,
     executionBlockedByRootFinish: () => false, submitAgentInput: call('submit', true), flushAgentInputs: call('input', false),
     hasQueuedAgentInputs: call('queued', false), armUnreadInputTimer: call('unread', undefined), armHeldHumanInputTimer: call('held', undefined),
     parkOnWaits: call('parkWaits', true), queueWaitWake: call('wake', undefined), leaveMonitoringPool: call('leavePool', undefined),
@@ -62,11 +61,12 @@ function fixture() {
   const context = { store, semaphore } as unknown as RunModuleContext;
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
     withdrawCezarHumanWaits: id => host.humanWaits.withdrawCezarHumanWaits(id),
-    armWait: (id, wait) => waitResolve.armWait(id, wait),
-  }));
+  }), 10);
+  const engine = { armWait: vi.spyOn(waitEngine as unknown as { armWait(id: string, wait: Wait): void }, 'armWait').mockImplementation((_id: string, _wait: Wait) => { log.push('armWait'); }) };
+  vi.spyOn(waitEngine, 'cancelAll').mockImplementation(() => { log.push('cancelWaits'); });
   const settler = new TurnSettler(context, { ...host, waitEngine } as unknown as Host, 60_000, 10, 'wait for workers', 3600);
   log.length = 0;
-  return { log, state, session, run, host, waitResolve, store, semaphore, settler };
+  return { log, state, session, run, host, engine, store, semaphore, settler };
 }
 
 type Fixture = ReturnType<typeof fixture>;
@@ -176,7 +176,7 @@ describe('turn settler entry orders', () => {
   it('take-input notes refusal before flushing, opens monitoring after a refused flush, then reads new facts', () => {
     const f = fixture();
     const spy = decide({ kind: 'take-input', refused: true }, { kind: 'park', refused: true });
-    f.waitResolve.armWait.mockImplementation(() => { f.log.push('armWait'); expect(spy).toHaveBeenCalledTimes(1); });
+    f.engine.armWait.mockImplementation(() => { f.log.push('armWait'); expect(spy).toHaveBeenCalledTimes(1); });
     f.settler.settleTurn('run', f.state, 'turn-end', { ...turn, done: true, monitoring: true }, refusal);
     order(f, ['queued', 'event:note', 'input', 'withdraw', 'commitWait', 'armWait', 'queued', 'unread', 'parkWaits', 'outcome']);
   });
@@ -389,7 +389,7 @@ describe('turn settler monitoring alias orders', () => {
     f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
     order(f, [...(reason === 'budget' ? ['boundary:turn-end/monitoring-cap'] : []), 'event:note', 'humanAlias', 'parkWaits', 'outcome']);
     expect(f.store.commitWait).not.toHaveBeenCalled();
-    expect(f.waitResolve.armWait).not.toHaveBeenCalled();
+    expect(f.engine.armWait).not.toHaveBeenCalled();
   });
 
   it('failed timer checkpoint leaves it unarmed before carrying out the park', () => {
@@ -399,7 +399,7 @@ describe('turn settler monitoring alias orders', () => {
     decide({ kind: 'park' });
     f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
     order(f, ['withdraw', 'commitWait', 'queued', 'parkWaits', 'outcome']);
-    expect(f.waitResolve.armWait).not.toHaveBeenCalled();
+    expect(f.engine.armWait).not.toHaveBeenCalled();
   });
 
 });

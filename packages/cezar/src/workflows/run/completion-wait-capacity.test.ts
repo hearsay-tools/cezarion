@@ -23,7 +23,7 @@ function fixture(count: number) {
   const noticeParkedWorkers = vi.fn();
   const registry = new WaitRegistry(f.context, unused<Host>('registry', {
     active: id => f.active.get(id), reconcileWorkerWaits,
-    waitEngine: new WaitEngine(f.context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', { reconcileWorkerWaits, noticeParkedWorkers })),
+    waitEngine: new WaitEngine(f.context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', { reconcileWorkerWaits, noticeParkedWorkers }), 10),
   }), 10);
   const commit = vi.spyOn(f.store, 'commitWait');
   return { ...f, worker, registry, commit, reconcileWorkerWaits, noticeParkedWorkers };

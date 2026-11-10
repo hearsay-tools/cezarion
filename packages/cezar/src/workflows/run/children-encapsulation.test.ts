@@ -32,10 +32,8 @@ it('keeps a live read view, immutable child records and independent owner state'
   // This observation-only case calls no wait/line policy. A read of one fails the test.
   const owner = new SubagentWaits({ createRunner: noRunners, home: testHome(), store, repoRoot: root, dataDir: root,
     semaphore: new WorkspaceSemaphore({ home: testHome() }), work: new TrackedWork(), disposed: () => false }, {
-    get waitCancellation(): ConstructorParameters<typeof SubagentWaits>[1]['waitCancellation'] { throw new Error('unused wait cancellation'); },
     get waitEngine(): ConstructorParameters<typeof SubagentWaits>[1]['waitEngine'] { return unused(); },
-    active: new Map(), isParked: unused, isAdmitted: unused, settleWait: unused,
-    armWait: unused, disarmWait: unused, releaseHeldPark: unused,
+    active: new Map(), isParked: unused, isAdmitted: unused, releaseHeldPark: unused,
   });
   const view = state.children.backgroundChildren;
   owner.trackEvent('run', state, event('running'));

@@ -194,7 +194,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('a child end whose checkpoint fails starts no grace, so no wake settles a stale snapshot', async () => {
-    const deadline = observationClock(() => /WaitResolve\.armWait/.test(new Error().stack ?? ''));
+    const deadline = observationClock(() => /WaitEngine\.armWait/.test(new Error().stack ?? ''));
     const { id, wait } = await parkedOnSubagents();
     const commit = vi.spyOn(store, 'commitWait').mockImplementationOnce(() => { throw Error('injected: disk full'); });
     endChild(id, 'toolu_bg_01');
@@ -207,7 +207,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('a runner resume whose cancellation fails keeps every wait open and armed', async () => {
-    const deadline = observationClock(() => /WaitResolve\.armWait/.test(new Error().stack ?? ''));
+    const deadline = observationClock(() => /WaitEngine\.armWait/.test(new Error().stack ?? ''));
     const { id, wait } = await parkedOnSubagents();
     const real = store.commitOutcome.bind(store);
     const commit = vi.spyOn(store, 'commitOutcome').mockImplementation((runId, outcome, ...rest) => {

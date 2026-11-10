@@ -65,11 +65,18 @@ At the baseline:
    its public methods. Operations:
    - `open`: compare the limit through the one capacity function, withdraw Cezar's human waits,
      commit, arm the watch, park. The paths differ today in which of these steps they run, in
-     what order, and how they fail (Table E). `open` takes these as per-path options, so 3.1
-     changes no path. A path that compares the limit twice today (the PR wait, before and after
+     what order, and how they fail (Table E). `open` reads the arm, the park guard and the
+     returned entry from the row (the `worker` row reconciles its family; every other row arms its
+     watch). A path chooses only the withdraw, the receipt, the commit-failure policy, the park,
+     and a result it already holds (a process wait on a PID already gone opens resolved and arms
+     no watch);
+     a step only one path runs (the compare, a check for an open human wait) stays at that call
+     site, in the same order (hearsay-tools/cezarion#3153). 3.1 changes no path. A path that compares the limit twice today (the PR wait, before and after
      its lookup) still compares it twice;
    - `resolve`: budget check, commit the result with its input, queue the wake;
    - `rearm`: arm every open wait of a recovered run;
+   - `refresh`: commit a changed open wait, then arm it; a moved deadline disarms the old one
+     first (a subagent wait's new children, a worker wait's observations);
    - `cancel` and `cancelAll`: commit, then disarm every watch kind;
    - `forgetRun`: disarm what a deleted run left in memory;
    - `dispose`: clear memory, keep the records.
@@ -397,7 +404,7 @@ pattern over production files of `packages/cezar/src` (a `kind` compared with `=
 | 28 | `workflows/waits.ts` | `:38-40`, `:58`, `:69-70`, `:86`, `:99-107`, `:120`, `:136-160`, `:166`, `:178-189`, `:261-267`, `:278-279`, `:288`, `:291-306`, `:316-324` | 2.1 `:69-70` budget, `:278-279` `userAnswers` and `cancellable`, `:288` `holdsConversationInput`; 2.2 `:38-40` answer kind, `:120` deadline rule, `:136-160` duplicates, `:291-306` builders; 2.3 `:166` input id, `:316-324` results; 2.4 `:58` monitoring timer, `:99-107`, `:178-189`, `:261-267` text; 2.5 `:86` human selector |
 | 29 | `server/forge/github.ts` | many | allow-list: not a wait kind. Its `kind` is a GitHub item kind (`pr` or `issue`) |
 | 30 | `subcommands.ts` | `:31` | allow-list: not a wait kind. Its `case 'worker'` is a CLI subcommand |
-| 31 | `run/wait-engine.ts`, `run/wait-resolve.ts`, `run/wait-cancellation.ts`, `run/wait-kinds.ts` | new | allow-list: the table only. The three engine files hold no kind literal and need no exception |
+| 31 | `run/wait-engine.ts`, `run/wait-kinds.ts` | new | allow-list: the table only. The engine holds no kind literal and needs no exception. hearsay-tools/cezarion#3153 merged `run/wait-resolve.ts` and `run/wait-cancellation.ts` into the engine |
 
 The allow-list at the end of the epic holds 6 files: rows 1, 3, 5, 29, 30 and the table
 of row 31. Only files with a kind-literal match have an exception; the stale-entry test enforces this.

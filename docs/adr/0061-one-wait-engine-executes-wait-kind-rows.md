@@ -9,9 +9,10 @@ kind, so a new kind fails typecheck until its row exists.
 
 One **wait engine** executes the rows. It opens a wait: it compares the open-wait limit through
 one function, withdraws Cezar's human waits, commits, arms and parks. Each registration path keeps
-the steps it runs today, their order and its failure policy, as options of the open operation.
+the steps it runs today, their order and its failure policy: the open operation reads the arm,
+the park guard and the returned entry from the row, and the path chooses the rest.
 The engine resolves a wait (budget check, commit with its input, queue the wake),
-re-arms it after a restart, cancels it (commit, then disarm every watch kind) and forgets a
+re-arms it after a restart, refreshes a changed open wait (commit, then re-arm), cancels it (commit, then disarm every watch kind) and forgets a
 deleted run's watches. In `packages/cezar`, only the engine, the table, the watch adapters, the
 read-time upgrade of old rows and the boundary views branch on a wait's kind; other code asks the
 engine.
@@ -43,9 +44,8 @@ ADR 0021 still holds: waits are durable, an outcome commits with what it depends
 `RunManager` owns waits at its public surface. ADR 0053 and ADR 0056 still hold.
 
 Implementation: [2026-11-09-wait-kind-table-and-engine.md](../../.ai/specs/2026-11-09-wait-kind-table-and-engine.md),
-`packages/cezar/src/workflows/run/wait-kinds.ts`, `packages/cezar/src/workflows/run/wait-engine.ts` and
-`packages/cezar/src/workflows/run/wait-resolve.ts` and
-`packages/cezar/src/workflows/run/wait-cancellation.ts` (created by the spec's slices), [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
+`packages/cezar/src/workflows/run/wait-kinds.ts` and `packages/cezar/src/workflows/run/wait-engine.ts`
+(created by the spec's slices; hearsay-tools/cezarion#3153 merged the resolve and cancel classes into the engine), [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
 [wait-registration-write.ts](../../packages/cezar/src/runs/wait-registration-write.ts).
 
 Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts),

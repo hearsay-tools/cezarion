@@ -3011,7 +3011,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
             fixture.manager.enqueueOwnedRun(fixture.runId);
             await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && !!timerWakeOf(fixture.store.getRun(fixture.runId)));
             clearRecording(dir);
-            const wakeClock = observationClock(() => /WaitResolve\.armWait/.test(new Error().stack ?? ''));
+            const wakeClock = observationClock(() => /WaitEngine\.armWait/.test(new Error().stack ?? ''));
             const { manager } = await fixture.restart();
             // hearsay-tools/cezarion#1233: recovery re-arms the park's persisted monitoring timer
             // instead of resuming at once; its wake starts the recovered session.
@@ -3029,7 +3029,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       // ScheduleWakeup and the live-workers timer).
       it(`${backend} R39 a timer wake delivers its result and next-step instruction on the native message channel`, async () => {
         await recording(async dir => {
-          const wakeClock = observationClock(() => /WaitResolve\.armWait/.test(new Error().stack ?? ''));
+          const wakeClock = observationClock(() => /WaitEngine\.armWait/.test(new Error().stack ?? ''));
           await driveRun(backend, 'cezar-wait', record => record?.status === 'waiting' && !!timerWakeOf(record), 30_000,
             async ({ store, runId }) => {
               const waitId = openTimerWait(store.getRun(runId))!.id;
