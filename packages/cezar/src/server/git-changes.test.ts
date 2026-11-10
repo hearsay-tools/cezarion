@@ -1,7 +1,7 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
@@ -97,6 +97,47 @@ describe('collectChanges — structured diff vs base', () => {
     expect(status.map((file) => file.path).sort()).toEqual(expectedPaths);
     expect(status.filter((file) => file.status === '??')).toHaveLength(2);
     if (mixed) expect(status.find((file) => file.path === 'tracked.txt')?.status).toBe('MM');
+  });
+
+  it('keeps staged membership and older intent-to-add entries in the real index', async () => {
+    writeFileSync(join(dir, '.gitignore'), 'ignored.txt\n');
+    writeFileSync(join(dir, 'tracked.txt'), 'base\n');
+    g(dir, 'add', '-A');
+    g(dir, 'commit', '-m', 'base');
+    writeFileSync(join(dir, 'ignored.txt'), 'forced\n');
+    g(dir, 'add', '-f', 'ignored.txt');
+    writeFileSync(join(dir, 'tracked.txt'), 'staged\n');
+    g(dir, 'add', 'tracked.txt');
+    writeFileSync(join(dir, 'tracked.txt'), 'unstaged\n');
+    writeFileSync(join(dir, 'older.txt'), 'older\n');
+    g(dir, 'add', '-N', 'older.txt');
+    writeFileSync(join(dir, 'new.txt'), 'new\n');
+    const index = join(dir, '.git', 'index');
+    const before = readFileSync(index);
+
+    const result = await collectChanges(dir, 'main');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changes.files.map((file) => file.path).sort()).toEqual([
+      'ignored.txt', 'new.txt', 'older.txt', 'tracked.txt',
+    ]);
+    expect(result.changes.files.find((file) => file.path === 'tracked.txt')?.patch).toContain('+unstaged');
+    expect(readFileSync(index)).toEqual(before);
+  });
+
+  it('seeds a missing index privately without creating a real index', async () => {
+    writeFileSync(join(dir, 'tracked.txt'), 'base\n');
+    g(dir, 'add', '-A');
+    g(dir, 'commit', '-m', 'base');
+    const index = join(dir, '.git', 'index');
+    rmSync(index);
+    writeFileSync(join(dir, 'new.txt'), 'new\n');
+
+    const result = await collectChanges(dir, 'main');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changes.files.map((file) => file.path)).toEqual(['new.txt']);
+    expect(existsSync(index)).toBe(false);
   });
 
   it('reports modified, added, deleted, renamed and binary files with counts and patches', async () => {
@@ -275,7 +316,7 @@ describe('collectChanges — structured diff vs base', () => {
     if (withAdd.ok) expect(withAdd.changes.files.some((f) => f.path === 'untracked.txt')).toBe(true);
   });
 
-  it('intentToAdd:false leaves the real index untouched on a repointed HEAD too', async () => {
+  it.each([false, undefined])('leaves the real index untouched on a repointed HEAD (intentToAdd: %s)', async (intentToAdd) => {
     // Choosing between the two repointed anchors compares them with `git diff --shortstat`,
     // and `git diff` REWRITES the index it reads (a stat refresh). Those probes must run on
     // the scratch index like every other diff here, or a read-only GET against the user's own
@@ -299,7 +340,7 @@ describe('collectChanges — structured diff vs base', () => {
     const indexBefore = readFileSync(join(dir, '.git', 'index'));
 
     const result = await collectChanges(dir, 'main', {
-      intentToAdd: false,
+      intentToAdd,
       taskBranch: 'cez/task1234',
       runStartedAt: '2026-06-01T00:00:00Z',
     });
@@ -596,6 +637,26 @@ describe('session git API routes', () => {
     expect(body.stat).toEqual({ adds: 1, dels: 0, files: 1 });
 
     expect((await apiRequest(app, '/api/v1/runs/nope/changes')).status).toBe(404);
+  });
+
+  it.each([false, true])('GET /changes preserves the real index bytes and mtime (linked worktree: %s)', async (linked) => {
+    if (linked) {
+      worktree = join(repoRoot, 'linked');
+      g(repoRoot, 'worktree', 'add', '-b', 'linked-task', worktree);
+      store.updateRun(run.id, { worktreePath: worktree, branch: 'linked-task' });
+    }
+    writeFileSync(join(worktree, 'new.txt'), 'untracked\n');
+    const index = g(worktree, 'rev-parse', '--path-format=absolute', '--git-path', 'index').trim();
+    const before = readFileSync(index);
+    const mtime = statSync(index).mtimeMs;
+
+    const res = await apiRequest(app, `/api/v1/runs/${run.id}/changes`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ChangesPayload).files).toEqual([
+      expect.objectContaining({ path: 'new.txt', status: 'added' }),
+    ]);
+    expect(readFileSync(index)).toEqual(before);
+    expect(statSync(index).mtimeMs).toBe(mtime);
   });
 
   it('GET /changes uses the persisted task branch to detect a repointed HEAD', async () => {
