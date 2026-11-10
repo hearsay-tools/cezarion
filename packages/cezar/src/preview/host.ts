@@ -8,6 +8,7 @@ import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, Previ
 import type { RunStore } from '../runs/store.ts';
 import { recordAgentBrowser } from './agent-marker.ts';
 import { attachedSchema, ChromiumMissingError, launchBrowser, readOsRelease, waitForExit, type BrowserExit, type BrowserHandle } from './browser-launch.ts';
+import { ProjectExits } from './project-exits.ts';
 import { AgentCdpLink, type AgentClient } from './cdp-proxy.ts';
 import { ChromiumError, downloadChromium, downloadTarget, installCommand } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
@@ -123,6 +124,7 @@ function sameOrigin(a: string, b: string): boolean {
 
 export class PreviewHost implements PreviewHostLike {
   private readonly stopping = new Map<DevServerLike, Promise<void>>();
+  private readonly exits = new ProjectExits();
   private readonly entries = new Map<string, RunEntry>();
   private readonly grants = new Map<string, GrantEntry>();
   private readonly deps: Required<Omit<PreviewHostDeps, 'env' | 'platform' | 'arch' | 'home'>> & { env: NodeJS.ProcessEnv; platform: string; arch: string };
@@ -227,6 +229,7 @@ export class PreviewHost implements PreviewHostLike {
     try { this.recordState(entry, port, 'starting', dev); }
     catch (error) { return this.tell(entry, { t: 'state', stage: 'server-exited', server, exitCode: null, logTail: error instanceof Error ? error.message : String(error) }); }
     entry.servers.set(port, dev);
+    this.exits.server(dev, entry.ctx.dataDir);
     entry.approvals.set(port, { ...server });
     entry.startedAt.set(port, new Date().toISOString());
     entry.port = port;
@@ -492,6 +495,8 @@ export class PreviewHost implements PreviewHostLike {
   async releaseProject(dataDir: string): Promise<void> {
     const entries = [...this.entries.values()].filter((entry) => entry.ctx.dataDir === dataDir);
     await Promise.all(entries.map((entry) => this.releaseEntry(entry, true, true)));
+    // Then to the real end of every process, browsers closed earlier and stops in flight included.
+    await this.exits.idle(dataDir, this.stopping);
   }
 
   /** cezar shuts down: every run is released and every pane closed. */
@@ -814,13 +819,13 @@ export class PreviewHost implements PreviewHostLike {
         quality: () => entry.quality,
       });
     } catch (error) {
-      browser.close();
+      this.exits.closeBrowser(browser, entry.ctx.dataDir);
       this.launchFailed(entry, error);
       return undefined;
     }
     if (entry.released || entry.browserGen !== generation) {
       session.close();
-      browser.close();
+      this.exits.closeBrowser(browser, entry.ctx.dataDir);
       // A release waiting on this launch deletes the profile next: the browser must be gone first.
       if (entry.released) await waitForExit(browser);
       return undefined;
@@ -947,7 +952,7 @@ export class PreviewHost implements PreviewHostLike {
     this.closeAgents(entry, 1001, 'The preview browser closed');
     followed?.close();
     session?.close();
-    browser?.close();
+    if (browser) this.exits.closeBrowser(browser, entry.ctx.dataDir);
     return browser;
   }
 

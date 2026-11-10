@@ -91,10 +91,12 @@ pid plus start-token liveness and token-checked release.
   10 s with backoff), a context build with recovery and one bounded archive or
   automation tick; short enough that no migration hangs. At the bound the migration stops
   by itself: the fence is released and the same error lists what is still live. An abort
-  signal releases it earlier. Inside the same bound and abort, the owning cockpit stops the
-  project's dev servers and Chromium and waits until they have exited
-  (`PreviewHost.releaseProject`), and waits for history compression and queued report scans
-  (`settle`). The holder keeps the fence until
+  signal releases it earlier. Inside the same bound and abort the owning cockpit settles,
+  each step after the work it covers: it stops the project's dev servers and Chromium and
+  waits until every one of their processes has exited, closed earlier included (a browser
+  gets SIGKILL 5 s after its close; `PreviewHost.releaseProject`), then waits for history
+  compression and queued report scans, then flushes the store (`settle`). A process that
+  never exits ends as a drain timeout, never as success. The holder keeps the fence until
   `release()`, after the last rewrite.
 - **Run-scoped writers.** These write only for a run that is live or held, so their check is
   that invariant: the preflight refuses while any run is live in either directory or held

@@ -490,6 +490,23 @@ describe('the owning cockpit', () => {
     (await fencing).release();
   });
 
+  it('stops previews before it waits for history compression, and refuses when a preview never exits', async () => {
+    const { dataDir, store } = cockpitStore();
+    const cockpit = owner();
+    await cockpit.acquire(dataDir);
+    const order: string[] = [];
+    const historyIdle = store.historyIdle.bind(store);
+    vi.spyOn(store, 'historyIdle').mockImplementation(() => { order.push('history-idle'); return historyIdle(); });
+    // Stopping a dev server records an event that can queue compression: the idle wait must come after.
+    const preview = { releaseProject: vi.fn(async () => { order.push('preview-start'); await Promise.resolve(); order.push('preview-exited'); }) };
+    (await fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }, { preview })).release();
+    expect(order).toEqual(['preview-start', 'preview-exited', 'history-idle']);
+    const stuck = { releaseProject: vi.fn(() => new Promise<void>(() => undefined)) };
+    const refusal = await fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }, { preview: stuck, drainMs: 100 }).catch((error: unknown) => error);
+    expect((refusal as ProjectMigrationBusyError).reason).toBe('drain-timeout');
+    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
+  });
+
   it('honours an abort that came before the claim or during a settled wait', async () => {
     const { dataDir } = project();
     const cockpit = owner();
