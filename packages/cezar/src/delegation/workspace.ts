@@ -61,12 +61,15 @@ async function verifyBranch(repoRoot: string, workspace: WorkerWorkspace, receip
   return { sha: await checkedGit(repoRoot, ['rev-parse', '--verify', `refs/heads/${workspace.branch}`]), log };
 }
 async function writeCleanup(path: string, value: Cleanup, assertCurrent?: () => void): Promise<void> {
+  return replaceIdentityFile(path, JSON.stringify(value), assertCurrent);
+}
+async function replaceIdentityFile(path: string, content: string, assertCurrent?: () => void): Promise<void> {
   assertCurrent?.();
-  if (windowsIdentities) { windowsWriteIdentity(path, JSON.stringify(value), true); return; }
+  if (windowsIdentities) { windowsWriteIdentity(path, content, true); return; }
   if (await exists(path)) await readIdentityFile(path, RECEIPT_CAP);
   assertCurrent?.();
   const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeIdentityFile(temporary, JSON.stringify(value));
+  await writeIdentityFile(temporary, content);
   try { assertCurrent?.(); await rename(temporary, path); } finally { await rm(temporary, { force: true }); }
 }
 
@@ -147,10 +150,13 @@ function workerWorkspace(run: RunRecord): WorkerWorkspace {
 }
 
 async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, create = false): Promise<string> {
+  return join(await receiptDirectory(repoRoot, create), `${workspace.resourceId}.json`);
+}
+async function receiptDirectory(repoRoot: string, create: boolean): Promise<string> {
   const dir = join(await gitCommonDir(repoRoot), 'cezar-owned-workspaces');
   if (windowsIdentities) {
     windowsIdentityDirectory(dir, create);
-    return join(dir, `${workspace.resourceId}.json`);
+    return dir;
   }
   if (create) await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'EEXIST') throw error;
@@ -161,7 +167,22 @@ async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, cre
       throw new Error('Unsafe owned workspace receipt directory');
     }
   }
-  return join(dir, `${workspace.resourceId}.json`);
+  return dir;
+}
+/** The receipt and cleanup checkpoint files in the repository's shared receipt directory, checked
+ *  as `receiptLocation` checks it; none when it does not exist. The project migration rewrites them. */
+export async function ownedWorkspaceRecordFiles(repoRoot: string): Promise<string[]> {
+  const dir = await receiptDirectory(repoRoot, false);
+  if (!await exists(dir)) return [];
+  return (await readdir(dir)).filter(name => name.endsWith('.json')).sort().map(name => join(dir, name));
+}
+/** One receipt or cleanup checkpoint, read with the identity-file checks. */
+export function readOwnedWorkspaceRecord(path: string): Promise<string> {
+  return readIdentityFile(path, RECEIPT_CAP);
+}
+/** Replace one receipt or cleanup checkpoint atomically and privately, as cleanup checkpoints are. */
+export function replaceOwnedWorkspaceRecord(path: string, content: string): Promise<void> {
+  return replaceIdentityFile(path, content);
 }
 async function readIdentityFile(path: string, cap: number, privateParent = true): Promise<string> {
   if (windowsIdentities) return windowsReadIdentity(path, cap, privateParent);

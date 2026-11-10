@@ -74,7 +74,9 @@ boot copy, whole-tree copy, move or symlink occurs.
 | Legacy-only project | Existing reads, writes, imports, recovery and deletion |
 
 No tombstone or new setting is added. Legacy-directory notices start only with
-the release switch. Project migration and path rewriting belong to P4b/P5.
+the release switch. The project migration engine (P4b2) rewrites the stored paths of
+every affected row in one transaction; see
+[project routes](project-routes.md#project-state-migration-engine). P4b3 and P5 wire and enable it.
 
 ## Rules
 
