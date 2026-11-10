@@ -7,8 +7,8 @@ import { stateOf } from '../workflows/run-states.ts';
 
 /**
  * What a cezar from before hearsay-tools/cezarion#1995 does with a stored `peer` wait (spec
- * 2026-10-27-task-communication-protocol, Migration; AGENT_PROTOCOL.md § Waits). Its wait union has
- * no `peer` arm, so this file loads the store and the contract with that union in place of today's.
+ * 2026-10-27-task-communication-protocol, Migration). Its wait union has no `peer` arm, so this
+ * file loads the store and the contract with that union in place of today's.
  * hearsay-tools/cezarion#1993 relies on this test for the downgrade note.
  */
 vi.mock('@open-mercato/cezar-contract/waits', async importOriginal => {

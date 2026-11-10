@@ -212,7 +212,7 @@ row whose scenario runs runner code (`provider-error`, a native ask, native suba
 failure control names `provider-error-controlled` instead, which S44 holds on every runner, so it
 runs on the derived set.
 The classification table in that file names each family's class and these rows; its guards are
-listed in `AGENT_PROTOCOL.md` §7.
+listed in `docs/areas/runners.md`.
 
 | Row | Scenario | Asserts | Group |
 |---|---|---|---|

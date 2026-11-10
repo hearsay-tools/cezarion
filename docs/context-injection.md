@@ -145,5 +145,6 @@ confirmed it.
 A runner that resumes its own native session keeps that session's history. Context injected at
 an earlier launch stays in the history, and native compaction can summarize or drop it; Cezarion
 does not add it again until the next launch. Claude keeps the system prompt of a session's first
-launch when it resumes (see `AGENT_PROTOCOL.md`), so a session that started before this feature
+launch when it resumes (see `SystemPromptOnResume` in
+`packages/cezar/src/core/agent-runner.ts`), so a session that started before this feature
 can still be told to read the handoff file. Both instructions are safe: the file is the same one.

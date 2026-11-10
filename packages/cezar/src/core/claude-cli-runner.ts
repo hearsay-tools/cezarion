@@ -900,7 +900,7 @@ function handleAssistantBlocks(msg: ClaudeStreamMessage, ctx: ClaudeMessageCtx):
   // agentic turn. Claude's terminal result frame already aggregates those
   // calls, so adding both sources inflates the run total (#716). Keep these
   // frames presentation-only; the result branch below is authoritative,
-  // matching the v2 `usage.updated` mapping in AGENT_PROTOCOL.md.
+  // matching the v2 `usage.updated` mapping in `claude-ui-mapper.ts`.
   return 0;
 }
 
