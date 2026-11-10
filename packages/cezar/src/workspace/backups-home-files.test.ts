@@ -37,7 +37,7 @@ it.each(files)('backs up changed and removed %s under its home-relative key', fi
 it.each(locks)('keeps no rotating snapshot of %s, which holds only an installer pid', file => {
   const home = Home.sandbox(storeRoot());
   const store = new HomeStore(home);
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   store.replace(path, Buffer.from('12345\n'));
   store.replace(path, Buffer.from('67890\n'));
   store.replace(path, null);
@@ -51,10 +51,10 @@ it.each(locks)('still lists and restores an older snapshot of %s byte for byte',
   const sha = createHash('sha256').update(previous).digest('hex').slice(0, 8);
   mkdirSync(join(home.backups, file), { recursive: true });
   writeFileSync(join(home.backups, file, `2026-11-01T10-00-00.000Z-${sha}.json`), previous); // A snapshot an older version wrote.
-  new HomeStore(home).replace(join(home.root, file), Buffer.from('current'));
+  new HomeStore(home).replace(homeFileLocation(home, file).path, Buffer.from('current'));
   expect(listBackups(undefined, home).map(entry => entry.file)).toContain(file);
   await restoreBackup(file, undefined, home);
-  expect(readFileSync(join(home.root, file))).toEqual(previous);
+  expect(readFileSync(homeFileLocation(home, file).path)).toEqual(previous);
 });
 
 it('discovers nested backups after the live files and their directories are removed', () => {

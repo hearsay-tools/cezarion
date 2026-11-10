@@ -901,13 +901,25 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 - cez task > shared flag positions (hearsay-tools/cezarion#554) > rejects missing or option-shaped leading values in [ '--repo=', 'list' ]
 - cez task > shared flag positions (hearsay-tools/cezarion#554) > reports missing operation after [ '--url', 'http://127.0.0.1:1' ]
 - cez task > shared flag positions (hearsay-tools/cezarion#554) > reports missing operation after [ '--repo=checkout' ]
-- cez task > default output and help (#572, #573, #574) > teaches steer, answer and resume in "send"
-- cez task > default output and help (#572, #573, #574) > teaches steer, answer and resume in "--help"
+
+```text
+cez task > default output and help (#572, #573, #574) > teaches steer, answer and resume in "send"
+```
+
+
+```text
+cez task > default output and help (#572, #573, #574) > teaches steer, answer and resume in "--help"
+```
+
 - cez task > send > refuses agent input before discovery with []
 - cez task > send > refuses agent input before discovery with ["--resume"]
 - cez task > send > refuses agent input before discovery with ["--notify"]
 - cez task > send > refuses to reopen a closed session without --resume and names the next command
-- cez task > archive, stop, finish, diff, open > notify on a worker is a usage error naming the parent, and subscribes nothing (#635)
+
+```text
+cez task > archive, stop, finish, diff, open > notify on a worker is a usage error naming the parent, and subscribes nothing (#635)
+```
+
 - cez task > argument contract (hearsay-tools/cezarion#2352) > 'start' --'task-file' needs a string value
 - cez task > argument contract (hearsay-tools/cezarion#2352) > 'start' --'request-id' needs a string value
 - cez task > argument contract (hearsay-tools/cezarion#2352) > 'start' --'workflow' needs a string value
@@ -959,17 +971,61 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 - cez task > argument contract (hearsay-tools/cezarion#2352) > 'diff' documents and enforces its positional arguments
 - cez task > argument contract (hearsay-tools/cezarion#2352) > 'open' documents and enforces its positional arguments
 - cez task > usage > prints help text without discovering a cockpit
-- cez task > usage > documents safe task input in ["--help"] (#568)
-- cez task > usage > documents safe task input in ["start","--help"] (#568)
-- cez task > usage > states the attention contract and the wait default in ["--help"] (#553, #609)
-- cez task > usage > states the attention contract and the wait default in ["wait","--help"] (#553, #609)
-- cez task > usage > states the attention contract and the wait default in ["start","--help"] (#553, #609)
-- cez task > usage > states the attention contract and the wait default in ["status","--help"] (#553, #609)
-- cez task > usage > states the attention contract and the wait default in ["list","--help"] (#553, #609)
-- cez task > usage > states the attention contract and the wait default in ["log","--help"] (#553, #609)
-- cez task > usage > documents the log --follow default in ["--help"] (#931)
-- cez task > usage > documents the log --follow default in ["log","--help"] (#931)
-- cez task > usage > describes the webhook flags and the notify operation (#589)
+
+```text
+cez task > usage > documents safe task input in ["--help"] (#568)
+```
+
+
+```text
+cez task > usage > documents safe task input in ["start","--help"] (#568)
+```
+
+
+```text
+cez task > usage > states the attention contract and the wait default in ["--help"] (#553, #609)
+```
+
+
+```text
+cez task > usage > states the attention contract and the wait default in ["wait","--help"] (#553, #609)
+```
+
+
+```text
+cez task > usage > states the attention contract and the wait default in ["start","--help"] (#553, #609)
+```
+
+
+```text
+cez task > usage > states the attention contract and the wait default in ["status","--help"] (#553, #609)
+```
+
+
+```text
+cez task > usage > states the attention contract and the wait default in ["list","--help"] (#553, #609)
+```
+
+
+```text
+cez task > usage > states the attention contract and the wait default in ["log","--help"] (#553, #609)
+```
+
+
+```text
+cez task > usage > documents the log --follow default in ["--help"] (#931)
+```
+
+
+```text
+cez task > usage > documents the log --follow default in ["log","--help"] (#931)
+```
+
+
+```text
+cez task > usage > describes the webhook flags and the notify operation (#589)
+```
+
 
 ### `packages/cezar/src/workflows/agent-profile-wiring.test.ts`
 
@@ -977,13 +1033,29 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 
 ### `packages/cezar/src/workflows/team-skill-materialize.test.ts`
 
-- team directory skills never land in the main checkout (#1024) > a worktree-off run reads the skill files from the cache, not the main checkout (AC1)
-- team directory skills never land in the main checkout (#1024) > a worktree whose agent dirs all link out of it gets the cache copy instead
-- team directory skills never land in the main checkout (#1024) > a worktree-off /name opening prompt names the cache copy (#1118)
+
+```text
+team directory skills never land in the main checkout (#1024) > a worktree-off run reads the skill files from the cache, not the main checkout (AC1)
+```
+
+
+```text
+team directory skills never land in the main checkout (#1024) > a worktree whose agent dirs all link out of it gets the cache copy instead
+```
+
+
+```text
+team directory skills never land in the main checkout (#1024) > a worktree-off /name opening prompt names the cache copy (#1118)
+```
+
 
 ### `packages/cezar/src/workflows/worker-destroy-orphaned-generation.test.ts`
 
-- worker termination barrier > orphaned generation after a controller crash (#469) > a live foreign controller keeps the generation: nothing is finalized or signalled
+
+```text
+worker termination barrier > orphaned generation after a controller crash (#469) > a live foreign controller keeps the generation: nothing is finalized or signalled
+```
+
 
 ### `packages/cezar/src/workspace/backups.test.ts`
 
@@ -1002,10 +1074,26 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 
 ### `packages/web/src/api/client.test.ts`
 
-- history responses are validated at the boundary (#827) > rejects a /run-summaries/archived answer that is not its shape (#864), never handing the view an array
-- history responses are validated at the boundary (#827) > rejects a /workspace/runs-search answer that is not its shape (#864), never handing the view an array
-- history responses are validated at the boundary (#827) > rejects a 200 whose page body is the catch-all empty object
-- history responses are validated at the boundary (#827) > rejects a 200 whose context body is the catch-all empty object
+
+```text
+history responses are validated at the boundary (#827) > rejects a /run-summaries/archived answer that is not its shape (#864), never handing the view an array
+```
+
+
+```text
+history responses are validated at the boundary (#827) > rejects a /workspace/runs-search answer that is not its shape (#864), never handing the view an array
+```
+
+
+```text
+history responses are validated at the boundary (#827) > rejects a 200 whose page body is the catch-all empty object
+```
+
+
+```text
+history responses are validated at the boundary (#827) > rejects a 200 whose context body is the catch-all empty object
+```
+
 - new-project calls (spec 2026-10-15-create-new-project) > rejects an owners answer that is not its shape, never handing the dialog owner-less data
 
 ### `packages/web/src/components/app-error-boundary.test.tsx`
@@ -1047,7 +1135,11 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 - ProjectRail layout > is a labelled nav with the app mark, a mark per project in registry order, and the bottom group
 - ProjectRail layout > names the app without a version until health has one
 - ProjectRail single-project capability > drops Add project and All projects, and keeps the rest, when the capability is on
-- ProjectRail expanded rows (#711) > shows the identity, the Projects label, a labelled Add project and the labelled bottom rows
+
+```text
+ProjectRail expanded rows (#711) > shows the identity, the Projects label, a labelled Add project and the labelled bottom rows
+```
+
 
 ### `packages/web/src/components/self-update-dialog.test.tsx`
 
@@ -1139,9 +1231,21 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 
 ### `packages/web/src/routes/settings/bookmarklets-section.test.tsx`
 
-- BookmarkletPanel repo-name labels (#422) > stamps the repo name (the sidebar chip basename) into the generic and per-skill labels
-- BookmarkletPanel repo-name labels (#422) > falls back to the plain, repo-less label while health is unknown
-- BookmarkletPanel repo-name labels (#422) > falls back to the plain label outside a git repository
+
+```text
+BookmarkletPanel repo-name labels (#422) > stamps the repo name (the sidebar chip basename) into the generic and per-skill labels
+```
+
+
+```text
+BookmarkletPanel repo-name labels (#422) > falls back to the plain, repo-less label while health is unknown
+```
+
+
+```text
+BookmarkletPanel repo-name labels (#422) > falls back to the plain label outside a git repository
+```
+
 - BookmarkletPanel project scoping (multi-project spec, step 3.6) > bakes the ACTIVE project's URL prefix and that project's own launch key
 
 ### `packages/web/src/routes/settings/provider-settings.test.tsx`
@@ -1150,9 +1254,21 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 
 ### `packages/web/src/routes/settings/worktrees-section.test.tsx`
 
-- Project settings → Worktrees: worktree setup commands (#917) > remote mode names the active host project config, rather than the boot project
-- Project settings → Worktrees: worktree setup commands (#917) > a hosted cockpit shows the field read-only
-- Project settings → Worktrees: worktree setup commands (#917) > a remote cockpit with remote settings administration edits the field and warns about host commands
+
+```text
+Project settings → Worktrees: worktree setup commands (#917) > remote mode names the active host project config, rather than the boot project
+```
+
+
+```text
+Project settings → Worktrees: worktree setup commands (#917) > a hosted cockpit shows the field read-only
+```
+
+
+```text
+Project settings → Worktrees: worktree setup commands (#917) > a remote cockpit with remote settings administration edits the field and warns about host commands
+```
+
 
 ### `packages/web/src/routes/task-thread/conversation-presentation.test.ts`
 
@@ -1177,7 +1293,11 @@ Full `squeal hold -- npm test -- --maxWorkers=8`: 40 failed, 1582 passed, 2 skip
 - action bar visibility per status (the legacy rules, rendered) > 'done' → [ 'Notes / handoff', 'Open in…', …(3) ]
 - action bar visibility per status (the legacy rules, rendered) > 'failed' → [ 'Notes / handoff', 'Open in…', …(3) ]
 - action bar visibility per status (the legacy rules, rendered) > 'cancelled' → [ 'Notes / handoff', 'Open in…', …(3) ]
-- Mark unread (#775) > offers the control for a read, finished run — between Open in… and Pin
+
+```text
+Mark unread (#775) > offers the control for a read, finished run — between Open in… and Pin
+```
+
 - task access settings (hearsay-tools/cezarion#2784) > shows a legacy run without the fields as allowed
 - task access settings (hearsay-tools/cezarion#2784) > lets a queued task turn workers off with a scoped PATCH
 - task access settings (hearsay-tools/cezarion#2784) > lets a running task turn workers off with a scoped PATCH
@@ -1232,3 +1352,17 @@ The coordinator waived the local full switch-off Vitest run because other tasks 
 Owner approval: the coordinator obtained approval on 2026-11-10 for the single `packages/cezar/vitest.setup.ts` selector change to `home?.rootOverride ?? home?.root`. No other setup line changed.
 
 Final review cleanup restored original quote style for static test literals without changing their values. The full switch-on run preceded this quote-only cleanup.
+
+## Pre-PR review round 1 correction
+
+The late quote cleanup in ed98863f3 invalidated the earlier READY claim. It damaged syntax and Markdown literals after the earlier successful tests. Restored the corrupted lines in repo-branch-lifecycle (2), task-cli/cli (2), tools-menu (3), and new-task-composer (1). Restored release-finalization.test.cjs entirely to the baseline (including its three corrupted lines). Safe static quote-style reductions keep their original string values. All 149 changed JavaScript/TypeScript files now parse; JavaScript used node --check and TypeScript also passed root typecheck.
+
+Both protected release test files are reverted pending owner approval. The owner-path checker on the rebased patch finds only the already approved vitest.setup.ts selector line. Proposed release fixture repairs select productIdentity().npmAliasDirectory rather than the fixed legacy alias directory; they are not applied. With the switch on, release-finalization.test.cjs has 12 downstream failures because git add cannot find alias-hsq/package.json in its fixture. The child release hook does not apply to its inline workflow execution. The coordinator has the exact proposed diff and will ask the owner.
+
+The marker helper now validates base and config markers before writing either marker. The new split-only live-marker regression failed before the fix (base/install.json was created) and passed after it. Both marker tests pass.
+
+Rebased onto origin/main efcfb0e39 (including F1, F4, F7). The backups-home-files import conflict retains both main's createHash import and the fixture homeFileLocation import. The four new F1 install-lock tests used legacy home.root paths; the approved repair uses homeFileLocation for all three lock path expressions, preserving the state-root invariant and all assertions.
+
+Post-rebase switch-off changed Vitest: 124 files and 3463 tests pass. Root typecheck and lint pass. Switch-on G1 focused files pass; the first conflict-file run exposed the four lock fixture failures above (520 tests passed, 4 failed across five files). Switch-off release-finalization and marker tests: 36 tests pass. Final lock-fixture results follow below.
+
+Final post-rebase lock fixtures: 24 tests pass with the constant false and 24 pass with it true. The switch was restored false after the two runs. The four repaired G1 Vitest files pass with the switch on. Both owner-pending release files remain reverted.
