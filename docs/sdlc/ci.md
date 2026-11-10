@@ -442,8 +442,10 @@ runs keep their existing skips.
 The optional `Merge Vitest coverage` job uploads `vitest-coverage-<head SHA>`, holding
 `coverage-final.json` (Istanbul, paths relative to the repository root, test files included)
 and `provenance.json` (tested ref, head and base SHA, run ID and attempt), kept 14 days.
-The pre-PR code-quality check downloads this artifact instead of running the tests again;
-see `.ai/skills/check-code-quality/references/pre-pr.md` § Coverage from CI.
+The legacy statistics collector can use this artifact; see
+`.ai/skills/check-code-quality/references/tool.md`. The local pre-PR gate runs
+Squeal's one-shot check and requires its complete report. It does not reuse this
+CI artifact yet; see `.ai/skills/check-code-quality/references/pre-pr.md`.
 
 Test failures, unhandled errors, coverage startup failures and worker failures still fail the
 required shard. The coverage-only reporter catches errors from report conversion and writing

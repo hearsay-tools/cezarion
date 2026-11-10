@@ -5,8 +5,9 @@ description: Measure complexity and CRAP for a requested JavaScript or TypeScrip
 
 # Check code quality
 
-Use the scripts bundled beside this file. Resolve `<skill>` to this directory's
-absolute path. Choose the path from the current task:
+Use Squeal for the local pre-PR gate and the bundled scripts for requested
+statistics. Resolve `<skill>` to this directory's absolute path. Choose the path
+from the current task:
 
 | Request | Path |
 | --- | --- |
@@ -14,8 +15,8 @@ absolute path. Choose the path from the current task:
 | Prepare a PR or recheck its changed functions | Read [Before a PR](references/pre-pr.md) |
 
 A measurement request ends with the requested stats and any coverage limits.
-The pre-PR path accepts complete current Squeal measurements or the bundled
-check, as its reference defines, and requires resolved findings. During PR work,
-a measurement of selected code does not replace that check.
+The pre-PR path requires the complete Squeal one-shot report, as its reference
+defines, and has no bundled fallback. During PR work, a measurement of selected
+code does not replace that check.
 
 For dependency setup or a tool error, read [Bundled tool](references/tool.md).

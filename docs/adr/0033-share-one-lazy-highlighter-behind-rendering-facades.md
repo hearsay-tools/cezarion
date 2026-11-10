@@ -11,8 +11,8 @@ The Diff facade owns its props and lazy-loads the local renderer. A plain patch 
 uses the same props when the chunk fails. Markdown uses a plugin over the shared highlighter
 instead of adding another highlighting pipeline. Consumers do not import a diff engine directly.
 
-Historical context: the implementation comment records an evaluation of `@pierre/diffs` 1.2.12
-that rejected its separate highlighter and theme pipeline. That explains the local renderer;
+Historical context: the original implementation comment recorded an evaluation of
+`@pierre/diffs` 1.2.12 that rejected its separate highlighter and theme pipeline. That explains the local renderer;
 it is not a claim about current versions of that library. The earlier technology research
 proposed that library before the implementation evaluation.
 
