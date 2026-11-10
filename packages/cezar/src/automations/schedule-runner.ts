@@ -74,6 +74,11 @@ export class ScheduleLeaseHeldError extends Error {
 
 /** The project cannot launch a task now: its run store cannot open (#779). Not a launch failure,
  *  so it never counts towards the auto-pause or a poll's backoff; the timer retries at its floor. */
+/** The log row of a launch that failed. */
+function failedLaunchEntry(definition: ScheduleAutomationDefinition, receipt: AutomationReceipt, reason: string, started: number): Parameters<AutomationStore['appendLog']>[0] {
+  return { automationId: definition.id, revision: definition.revision, result: 'failed', reason, receiptId: receipt.receiptId, durationMs: Date.now() - started };
+}
+
 export class AutomationProjectUnavailableError extends Error {
   constructor(message: string, options: { cause?: unknown } = {}) {
     super(message, options);
@@ -279,28 +284,43 @@ export class ScheduleRunner {
     return reserved;
   }
 
+  /** The launch's run, or why it failed. */
+  private async tryLaunch(launch: ScheduleLauncher, definition: ScheduleAutomationDefinition, occurrence: ScheduleOccurrence,
+    receipt: AutomationReceipt): Promise<{ runId: string } | { error: string }> {
+    try { return { runId: (await launch(definition, occurrence, receipt.receiptId)).runId }; }
+    catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+  }
+
+  /** Settle `receipt` as launched, with its run. */
+  private launchedReceipt(receipt: AutomationReceipt, runId: string): void {
+    this.handle.store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
+  }
+
+  /** Settle `receipt` as a failed launch. */
+  private launchError(receipt: AutomationReceipt, error: string, at = this.now()): void {
+    this.handle.store.appendReceipt({ ...receipt, status: 'launch-error', error, updatedAt: new Date(at).toISOString() });
+  }
+
   /** Receipt first, archive second: the order the archive invariant relies on. */
   private async launchOnce(definition: OnceScheduleDefinition, occurrence: ScheduleOccurrence, receipt: AutomationReceipt): Promise<ScheduleFireOutcome> {
     const { store } = this.handle;
     if (!this.handle.launch) {
       this.stopOnce(definition.id, 'failed');
-      store.appendReceipt({ ...receipt, status: 'launch-error', error: 'This cockpit cannot launch tasks.', updatedAt: new Date(this.now()).toISOString() });
+      this.launchError(receipt, 'This cockpit cannot launch tasks.');
       return { result: 'detection-only', occurrenceAt: occurrence.at };
     }
     const started = Date.now();
-    let runId: string;
-    try {
-      ({ runId } = await this.handle.launch(definition, occurrence, receipt.receiptId));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    const launched = await this.tryLaunch(this.handle.launch, definition, occurrence, receipt);
+    if ('error' in launched) {
       // The stop before the receipt: a launch-error receipt then always means a stopped schedule,
       // and a crash between the two leaves `reserved`, which reconciliation settles as Failed.
       this.stopOnce(definition.id, 'failed');
-      store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
-      await this.logOnce({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
+      this.launchError(receipt, launched.error);
+      await this.logOnce(failedLaunchEntry(definition, receipt, launched.error, started));
       return { result: 'failed', occurrenceAt: occurrence.at };
     }
-    store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
+    const { runId } = launched;
+    this.launchedReceipt(receipt, runId);
     const result = occurrence.trigger === 'schedule' ? 'launched' : occurrence.trigger === 'late' ? 'catch-up' : 'manual';
     const trigger: AutomationArchive['trigger'] = occurrence.trigger === 'catch-up' ? 'late' : occurrence.trigger;
     const archived = store.archive(definition.id, { at: new Date(this.now()).toISOString(), outcome: 'launched', runId, receiptId: receipt.receiptId, trigger });
@@ -399,26 +419,24 @@ export class ScheduleRunner {
   ): Promise<ScheduleFireOutcome> {
     const { store } = this.handle;
     if (!this.handle.launch) {
-      store.appendReceipt({ ...receipt, status: 'launch-error', error: 'This cockpit cannot launch tasks.', updatedAt: new Date(now).toISOString() });
+      this.launchError(receipt, 'This cockpit cannot launch tasks.', now);
       if (advance) this.advance(definition, Date.parse(occurrence.at), now, advance);
       return { result: 'detection-only', occurrenceAt: occurrence.at };
     }
     const started = Date.now();
     // Repeating schedules never carry the once-only `late` and `retry` triggers.
     const result: 'launched' | 'catch-up' | 'manual' = occurrence.trigger === 'schedule' ? 'launched' : occurrence.trigger === 'catch-up' ? 'catch-up' : 'manual';
-    let runId: string;
-    try {
-      ({ runId } = await this.handle.launch(definition, occurrence, receipt.receiptId));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
-      await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
+    const launched = await this.tryLaunch(this.handle.launch, definition, occurrence, receipt);
+    if ('error' in launched) {
+      this.launchError(receipt, launched.error);
+      await store.appendLog(failedLaunchEntry(definition, receipt, launched.error, started));
       // Only the timer counts towards the auto-pause: Run now and Retry leave `enabled` alone.
       if (advance) await this.recordFailure(definition, occurrence, now, advance);
       else this.handle.onChange?.(definition.id, definition.revision);
       return { result: 'failed', occurrenceAt: occurrence.at };
     }
-    store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
+    const { runId } = launched;
+    this.launchedReceipt(receipt, runId);
     await store.appendLog({
       automationId: definition.id, revision: definition.revision, result,
       reason: reasonFor(occurrence, this.handle.timeZone),
