@@ -1,3 +1,4 @@
+import { runCheckout, worktreeOf, NO_WORKTREE } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
@@ -3720,25 +3721,19 @@ export function createApp(deps: ServerDeps) {
 
     // Task diff (spec 006): what this run changed — its worktree vs its base.
     .get('/runs/:id/diff', async (c) => {
-      const { store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-      if (!run.worktreePath || !existsSync(run.worktreePath)) {
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: true, directory: 'existing-worktree' });
+      if ('body' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, directory: workingDirectory } = checkout;
+      if (!workingDirectory) {
         return c.text('(no worktree — this task ran directly in the repo working tree)');
       }
-      return c.text(await worktreeDiff(run.worktreePath, run.baseBranch ?? 'HEAD'));
+      return c.text(await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD'));
     })
 
     .get('/runs/:id/changes', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-      const workingDirectory = workingDirectoryOf(run, repoRoot);
-      if (!workingDirectory) return c.json({ error: NO_WORKTREE }, 409);
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: true, directory: 'working-directory' });
+      if ('body' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, directory: workingDirectory } = checkout;
       const result = await collectChanges(workingDirectory, run.baseBranch ?? 'HEAD', {
         taskBranch: run.branch,
         // Anchors a repointed worktree at the branch as this run found it (#751).
@@ -3752,11 +3747,9 @@ export function createApp(deps: ServerDeps) {
 
     // The run's own commits (<base>..HEAD on the worktree branch) — the Commits tab.
     .get('/runs/:id/commits', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const workingDirectory = workingDirectoryOf(run, repoRoot);
-      if (!workingDirectory) return c.json({ error: NO_WORKTREE }, 409);
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      if ('body' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, directory: workingDirectory } = checkout;
       const result = await collectRunCommits(workingDirectory, run.baseBranch ?? 'HEAD');
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json({ commits: result.commits });
@@ -3764,11 +3757,9 @@ export function createApp(deps: ServerDeps) {
 
     // One of the run's commits, structured like the Changes tab (reuses collectCommitChanges).
     .get('/runs/:id/commit/:sha', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const workingDirectory = workingDirectoryOf(run, repoRoot);
-      if (!workingDirectory) return c.json({ error: NO_WORKTREE }, 409);
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      if ('body' in checkout) return c.json(checkout.body, checkout.status);
+      const { directory: workingDirectory } = checkout;
       const result = await collectCommitChanges(workingDirectory, c.req.param('sha'));
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json(result.commit);
@@ -3776,10 +3767,11 @@ export function createApp(deps: ServerDeps) {
 
     .get('/runs/:id/file-link', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), queryZodValidator(fileLinkQuerySchema), async (c) => {
       const { root, store } = c.get('project');
-      const run = store.getRun(c.req.valid('param').id);
-      if (!run) return c.json({ error: 'not found' }, 404);
+      const checkout = runCheckout(c.get('project'), c.req.valid('param').id, 'read', { checksAutosave: false, directory: 'recorded-path-or-root' });
+      if ('body' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, directory: workingDirectory } = checkout;
       const query = c.req.valid('query');
-      const loaded = await loadFileLink({ dataDir: store.sourceDataDir(run.id), runId: run.id, projectRoot: root, workingDirectory: run.worktreePath ?? root, path: query.path });
+      const loaded = await loadFileLink({ dataDir: store.sourceDataDir(run.id), runId: run.id, projectRoot: root, workingDirectory, path: query.path });
       if (query.raw === '1') {
         if (!loaded.imageBytes || loaded.preview.type !== 'file') return c.json({ error: 'Only bounded raster images can be served inline.' }, 409);
         return c.body(new Uint8Array(loaded.imageBytes).buffer, 200, {
@@ -3848,17 +3840,15 @@ export function createApp(deps: ServerDeps) {
     // what an `<img>` sends — while the flag still wins whenever it is present and `*<slash>*`
     // (every `fetch`) still gets the JSON listing. See `negotiate`.
     .get('/runs/:id/files', queryZodValidator(worktreeFilesQuerySchema), async (c) => {
-      const { root: repoRoot, store } = c.get('project');
       const query = c.req.valid('query');
       c.header('vary', 'Accept');
       const wantsRaw =
         query.raw !== undefined
           ? query.raw === '1'
           : negotiate(c.req.header('accept'), FILE_FORMATS) === 'image/*';
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const workingDirectory = workingDirectoryOf(run, repoRoot);
-      if (!workingDirectory) return c.json({ error: NO_WORKTREE }, 409);
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      if ('body' in checkout) return c.json(checkout.body, checkout.status);
+      const { directory: workingDirectory } = checkout;
       const result = await readWorktreePath(workingDirectory, query.path ?? '');
       if (result.kind === 'invalid' || result.kind === 'missing') {
         return c.json({ error: result.error }, 409);
@@ -4071,19 +4061,6 @@ export function createApp(deps: ServerDeps) {
     txt: 'text/plain; charset=utf-8',
     md: 'text/plain; charset=utf-8',
   };
-  // ---- session git view (redesign R5 Step 1.2 — §"Git/session API additions").
-  // Structured sibling of the text-blob /diff above (which stays untouched —
-  // protected surface). Isolated runs read their worktree; worktree-off runs
-  // read the repo checkout they executed in. Every predictable git failure
-  // degrades to 409 + human-readable reason, 404 only for unknown ids.
-  const worktreeOf = (run: RunRecord): string | null =>
-    run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : null;
-  const workingDirectoryOf = (run: RunRecord, repoRoot: string): string | null =>
-    run.worktree === false
-      ? repoRoot
-      : worktreeOf(run);
-  const NO_WORKTREE = 'no worktree — this task ran directly in the repo working tree';
-
   // ---- chained family: worktrees (project-scoped) ----
   const worktreesRoutes = new Hono<ProjectApiEnv>()
     .get('/worktrees', async (c) => {
