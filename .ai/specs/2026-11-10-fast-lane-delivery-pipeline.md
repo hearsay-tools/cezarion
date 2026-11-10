@@ -173,8 +173,10 @@ Fast lane:
    follow-up issue, keyed by the thread, so a repeated run files nothing twice. A thread
    labelled Major or Critical also gets `release-blocker`. A Cezar automation starts a task
    for each follow-up issue, as the main CI repair automation does today.
-7. The release reads the same state (§ Release, Gates): a merged fast-lane PR in the release
-   range whose head has no finished CodeRabbit review blocks the release.
+7. The workflow marks a merged PR as processed only after it filed every follow-up issue
+   for the finished review. The release reads that mark (§ Release, Gates): a merged
+   fast-lane PR in the release range without it blocks the release. So neither a review
+   that still runs nor a finished review whose issues are not filed yet lets a release pass.
 
 Guarded lane: unchanged. The reviewer loop runs until a round has no active finding, and the
 `Automated Code Review` check requires CodeRabbit admission and resolved threads.
@@ -315,8 +317,8 @@ within 24 hours of the last one. No schedule starts a release.
    branch (a maintenance release, as `release.yml` allows today): the branch head. No
    `main-verify` status exists there, so the release runs the same suite on that commit
    first. The suite is one reusable workflow that `main-verify.yml` and `release.yml` call.
-2. **Gates.** No open issue carries `release-blocker`. No merged fast-lane PR in the release
-   range waits for its CodeRabbit review. The last rehearsal (below) passed.
+2. **Gates.** No open issue carries `release-blocker`. Every merged fast-lane PR in the
+   release range carries the processed mark of § Review. The last rehearsal (below) passed.
 3. **Stage.** Compute the stable version as today, from the manifest of the release line.
    Publish a release candidate of the same commit, `<version>-rc.<n>`, under the `next`
    dist-tag. `<n>` is the next free number on the registry. A stable version is not staged:
@@ -331,9 +333,10 @@ within 24 hours of the last one. No schedule starts a release.
    commit under `latest`, as the release does today. It differs from the tested candidate only in the version stamp. Then install the
    stable package through the alias and boot it, as a last check.
 6. **Roll back.** One dispatch releases the last good stable commit again as the next patch
-   version, through steps 3 to 5, without the 24-hour limit and without the gates of
-   step 2. Those gates concern new commits on `main`; the rollback commit was released
-   before, and the blocker that the failed release filed must not stop its own rollback.
+   version, through steps 3 to 5, without the 24-hour limit. The blocker that the failed
+   release filed does not stop its own rollback. Every other open `release-blocker` still
+   does, unless the owner names it in the dispatch as not affecting the rollback commit:
+   most blockers concern newer commits on `main`, but one can concern the old commit too.
    Moving `latest` back is not a rollback: caret ranges and installed copies take the
    highest version.
 
