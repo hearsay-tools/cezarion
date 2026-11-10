@@ -48,9 +48,10 @@ describe.each([false, true])('CLI hints (switch %s)', rebrand => {
   it('uses the preferred command in the missing cockpit hint', async () => {
     vi.resetModules();
     vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: rebrand }));
-    const { discoverCockpit } = await import('../task-cli/discovery.ts');
+    const { checkoutRoot, discoverCockpit } = await import('../task-cli/discovery.ts');
+    const root = await checkoutRoot('/tmp');
     await expect(discoverCockpit({ repoDir: '/tmp', ports: [] })).rejects.toMatchObject({
-      body: { hint: `start the cockpit in /tmp with: ${rebrand ? 'hsq' : 'cez'}` },
+      body: { hint: `start the cockpit in ${root} with: ${rebrand ? 'hsq' : 'cez'}` },
     });
   });
 });
