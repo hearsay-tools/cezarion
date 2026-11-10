@@ -159,7 +159,8 @@ Owners. Paths are relative to `packages/cezar/src/`.
   `PARITY_FILES` in `core/parity-classes.testkit.ts` maps every parity test file to its
   family.
 - **Exemptions and their kinds:** `PARITY_EXEMPTIONS` and `ExemptionKind` in
-  `core/harness-parity-core.testkit.ts`. The wait rows use the same table.
+  `core/harness-parity-core.testkit.ts`. The wait rows use the same table, except the
+  subagent wait rows: `SUBAGENT_EXEMPTIONS` in `workflows/waits-subagents-rows.testkit.ts`.
 - **Tiers:** `driveSeam` (`core/harness-parity-core.testkit.ts`) drives a real runner class
   against its own offline mock. `driveRun` (`core/workflow-parity-core.testkit.ts`) drives a
   real `RunManager` run in a temp git repo.
@@ -280,20 +281,18 @@ force, or force only in part. The item numbers are stable: code cites them.
 8. **Harness parity** — add the runner to `HARNESS_ADAPTERS`
    (`core/harness-parity-core.testkit.ts`) and make its offline mock a wire encoder over
    `packages/cezar/scripts/mock-scenario.mjs`. That module owns scenario selection and scripts; the mock
-   emits the backend's native frames. A wire gap is a `PARITY_EXEMPTIONS` entry that names
-   the wire limit. Never use `it.skip`, and never give "not implemented yet" as the reason.
+   emits the backend's native frames. A wire gap is a `PARITY_EXEMPTIONS` entry; the guard
+   tests of the matrix hold what an entry may say.
    Choose the ask path: `cezar_ask` alone, or also a native bridge onto `ask.requested`. A
    native bridge keeps its pending request in the session and routes the next human answer
    back through it. It answers a malformed native request with an error and never leaves
    the turn blocked. Each native ask kind that a human can answer needs an entry in
    `askResumeCases`. Prove the Cezar tools as
    [Waits](#ci-wait-tool-contract-474) requires.
-9. **Plumbing** — Settings → Agent config ships with the runner: one `AGENT_DESCRIPTORS`
-   entry (`packages/web/src/routes/settings/agent-descriptors.ts`) and the vendor's
-   documented config files in `packages/cezar/src/agent-config/catalog.ts`. A vendor that
-   documents no editable file still gets its tab, with `empty` copy that says why and what
-   to try. Add the composer presets and the Settings → Agents entry. Keep every change
-   additive, so that old run records still parse.
+9. **Plumbing** — Settings → Agent config ships with the runner: the doc comment of
+   `packages/web/src/routes/settings/agent-descriptors.ts` holds the rules. Add the composer
+   presets and the Settings → Agents entry. Keep every change additive, so that old run
+   records still parse.
 10. **Model selection** — `BACKEND_MODEL_MAP` and `core/model-identity.test.ts` hold the
     rules.
 11. **Host model discovery** — ships in the runner's PR. `model-discovery-guard.test.ts`
