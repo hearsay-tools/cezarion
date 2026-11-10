@@ -82,10 +82,8 @@ holds the evidence.
 
 ### Codex managed permissions
 
-Cezar selects its unmanaged full-access sandbox only when `configRequirements/read`
-answers `requirements: null`. Managed requirements, unknown fields and failed or malformed
-discovery keep Codex's own permissions. Cezar never overrides the approval policy.
-`packages/cezar/src/core/codex-permissions.test.ts` holds these rules.
+`packages/cezar/src/core/codex-permissions.test.ts` holds the rules: when Cezar selects its
+own sandbox, and when Codex's managed permissions stay.
 
 ### Codex approval routing
 
@@ -115,13 +113,11 @@ notifications must show the same line.
 
 ## 6. Backend parity — the hard rule (`packages/cezar/src/core/ui-parity.test.ts`)
 
-> Every capability in the parity matrix MUST be emitted by **every**
-> backend, so the GUI degrades **per-capability, never per-backend**.
-
-`ui-parity.test.ts` holds the matrix. It asserts each capability over each backend's
-golden-fixture expected output. A new backend produces every row its wire supports. A real
-upstream gap takes a named exemption in that file, with the version surveyed and an
-inverse assertion. A missing implementation is never a wire gap.
+`ui-parity.test.ts` holds the matrix and its rule: every backend emits every capability, so
+the GUI degrades per capability, never per backend. It asserts each capability over each
+backend's golden-fixture expected output. A real upstream gap takes a named exemption in
+that file, with the version surveyed and an inverse assertion. A missing implementation is
+never a wire gap.
 
 §6 covers what a mapper emits. §7 covers what a runner does. A backend satisfies both.
 
@@ -250,7 +246,7 @@ Trust and known limitations:
   another session directly, for example with `opencode run --session <id>`.
 - Custom tools are not controlled. A pi extension or an opt-in OMP tool can reach another
   session, and Cezar cannot discover its name as messaging.
-- Native subagents are not Cezar tasks. Cezar does not own, collect, wait on or clean them up.
+- Native subagents are not Cezar tasks. Cezar does not own, collect or clean them up.
 - Claude has no outbound control, because `SendMessage` and `ListAgents` also reach the session's
   own subagents. A session that Cezar starts can list and message Claude sessions that Cezar did
   not start, and sessions on other machines.
