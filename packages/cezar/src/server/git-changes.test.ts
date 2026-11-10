@@ -1,7 +1,7 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
@@ -596,6 +596,21 @@ describe('session git API routes', () => {
     expect(body.stat).toEqual({ adds: 1, dels: 0, files: 1 });
 
     expect((await apiRequest(app, '/api/v1/runs/nope/changes')).status).toBe(404);
+  });
+
+  it('GET /changes preserves the real index bytes and mtime with untracked files', async () => {
+    writeFileSync(join(worktree, 'new.txt'), 'untracked\n');
+    const index = g(worktree, 'rev-parse', '--path-format=absolute', '--git-path', 'index').trim();
+    const before = readFileSync(index);
+    const mtime = statSync(index).mtimeMs;
+
+    const res = await apiRequest(app, `/api/v1/runs/${run.id}/changes`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ChangesPayload).files).toEqual([
+      expect.objectContaining({ path: 'new.txt', status: 'added' }),
+    ]);
+    expect(readFileSync(index)).toEqual(before);
+    expect(statSync(index).mtimeMs).toBe(mtime);
   });
 
   it('GET /changes uses the persisted task branch to detect a repointed HEAD', async () => {
