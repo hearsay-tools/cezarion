@@ -199,9 +199,18 @@ authority. Word each new result text as data, not as an instruction.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
-The harness matrix drives each real runner class through its native mock
-(`HARNESS_ADAPTERS`). Below, `core/harness-parity.test.ts` names this whole matrix.
-Paths are relative to `packages/cezar/src/`.
+The harness matrix drives each real runner class through its native mock. Every criterion
+holds for every runner, or carries a `PARITY_EXEMPTIONS` entry whose reason names the wire
+limitation. A row that tests Cezar's shared logic above the seam runs on the derived runner
+set instead.
+
+Print every row with its exemptions:
+
+```bash
+node packages/cezar/scripts/parity-rows.ts [--row <id>] [--runner <id>]
+```
+
+Owners. Paths are relative to `packages/cezar/src/`.
 
 - **Rows** (`{ id, name, scenario }`): the `*_CRITERIA` tables in
   `core/harness-parity-core.testkit.ts`, the row lists in
@@ -211,27 +220,22 @@ Paths are relative to `packages/cezar/src/`.
   `workflows/waits-parity-cells.testkit.ts` and the testkit of each other family.
   `PARITY_FILES` in `core/parity-classes.testkit.ts` maps every parity test file to its
   family.
-- **Exemptions**, each with its reason: `PARITY_EXEMPTIONS` in
+- **Exemptions and their kinds:** `PARITY_EXEMPTIONS` and `ExemptionKind` in
   `core/harness-parity-core.testkit.ts`. The wait rows use the same table.
+- **Tiers:** `driveSeam` (`core/harness-parity-core.testkit.ts`) drives a real runner class
+  against its own offline mock. `driveRun` (`core/workflow-parity-core.testkit.ts`) drives a
+  real `RunManager` run in a temp git repo.
+- **Scenario catalog:** `SCENARIOS` and `HARNESS_ADAPTERS` in
+  `core/harness-parity-core.testkit.ts`. The steps of each scenario are in
+  `packages/cezar/scripts/mock-scenario.mjs`.
+- **Row classes and the derived runner set:** `SHARED_RUNNERS` in
+  `core/parity-classes.testkit.ts`.
+- **Spec-support rows:** `SPEC_FIELD_PROBES` in `core/harness-parity-cells.testkit.ts`.
 - **Per-runner files:** `core/harness-<runner>-<part>-parity.test.ts`
   (`harnessParityFile`) and `workflows/waits-<runner>-<part>-parity.test.ts`
   (`WAIT_PARITY_FILES`, `WAIT_PARITY_FAMILIES`).
 - **Matrix guards and single-runner cells:** `core/harness-parity.test.ts` and
   `workflows/waits-parity.test.ts`.
-
-[docs/areas/runners.md](docs/areas/runners.md) holds the rules for a parity row and for a
-per-runner file.
-
-### Continue: session and step
-
-A Continue makes two separate choices: which step it continues, and which session it resumes.
-The first never depends on the second. `continuedSessionId` and `resumableSessionId` in
-`workflows/run/launch-read-resolver.ts` own the two choices.
-`workflows/native-session-continue.test.ts` drives every runner through them.
-
-Every criterion in the harness parity matrix holds for every runner, or carries a
-`PARITY_EXEMPTIONS` entry whose reason names the wire limitation. A row that tests Cezar's
-shared logic above the seam runs on the derived runner set instead.
 
 Rules that no check holds:
 
@@ -239,8 +243,7 @@ Rules that no check holds:
   parity row in the same PR. Prove that the row fails without the fix.
   [docs/areas/runners.md](docs/areas/runners.md#runner-regressions-ship-with-shared-coverage)
   says where the row runs.
-- A red cell is a runner bug until proven otherwise. Fix the runner. Do not weaken the row, and
-  do not add an exemption for "not implemented yet".
+- A red cell is a runner bug until proven otherwise. Fix the runner. Do not weaken the row.
 - A new mock scenario is wire-faithful on the terms of §8: derive its frames from that
   backend's real transcripts and cite the source.
 - A native mock matches `mock:<scenario>` over all the native user text it receives. That text
@@ -249,22 +252,17 @@ Rules that no check holds:
   before the mock matches, in `packages/cezar/scripts/mock-session-context.mjs`. The mock
   still records the raw text, because tests assert what Cezar sent.
 
-Owners:
-
-- Tiers: `driveSeam` (`core/harness-parity-core.testkit.ts`) drives a real runner class against
-  its own offline mock. `driveRun` (`core/workflow-parity-core.testkit.ts`) drives a real
-  `RunManager` run in a temp git repo.
-- Scenario catalog: `SCENARIOS` and `HARNESS_ADAPTERS` in `core/harness-parity-core.testkit.ts`.
-  The steps of each scenario are in `packages/cezar/scripts/mock-scenario.mjs`.
-- Exemptions and their kinds: `PARITY_EXEMPTIONS` and `ExemptionKind` in the same file.
-- Seam contract rows: `core/seam-contract.testkit.ts`.
-- Row classes and the derived runner set: `SHARED_RUNNERS` in `core/parity-classes.testkit.ts`.
-- Spec-support rows: `SPEC_FIELD_PROBES` in `core/harness-parity-cells.testkit.ts`.
-
 Autosave process attribution is observation, not OS containment. It does not see a Git
 descendant that clears its environment and leaves the worktree before a scan. On Windows, an
 intermediate process that exits between snapshots hides its descendants
 (`autosave-holders.ts`, `autosave-windows.ts`).
+
+### Continue: session and step
+
+A Continue makes two separate choices: which step it continues, and which session it resumes.
+The first never depends on the second. `continuedSessionId` and `resumableSessionId` in
+`workflows/run/launch-read-resolver.ts` own the two choices.
+`workflows/native-session-continue.test.ts` drives every runner through them.
 
 ### Governed delegation controls (D1)
 
@@ -380,8 +378,8 @@ force, or force only in part. The item numbers are stable: code cites them.
    native bridge keeps its pending request in the session and routes the next human answer
    back through it. It answers a malformed native request with an error and never leaves
    the turn blocked. Each native ask kind that a human can answer needs an entry in
-   `askResumeCases`. Prove the Cezar tools by discovery and by a real call on fresh,
-   resumed and recovered sessions. An argv or config snapshot is not transport proof.
+   `askResumeCases`. Prove the Cezar tools as
+   [Waits](#ci-wait-tool-contract-474) requires.
 9. **Plumbing** — Settings → Agent config ships with the runner: one `AGENT_DESCRIPTORS`
    entry (`packages/web/src/routes/settings/agent-descriptors.ts`) and the vendor's
    documented config files in `packages/cezar/src/agent-config/catalog.ts`. A vendor that
