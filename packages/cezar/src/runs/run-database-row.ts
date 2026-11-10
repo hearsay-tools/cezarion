@@ -81,7 +81,8 @@ export function validateChanges(changes: RunDatabaseChanges): void {
  * What a read-only open opens. `quiescent` (a project migration's dry run, which must leave no
  * trace) also requires this build's exact schema, and reads a database with no WAL file (no
  * connection is open and every commit is in the main file) as immutable, so no -wal or -shm is
- * created. With a WAL file present it coordinates as any reader does.
+ * created. With a WAL file present it coordinates as any reader does, which writes shared-memory
+ * state: a caller that must write nothing reads a private copy (the migration planner does).
  */
 export function readOnlyTarget(path: string, quiescent: boolean): string {
   return quiescent && !existsSync(`${path}-wal`) ? `${pathToFileURL(path).href}?immutable=1` : path;

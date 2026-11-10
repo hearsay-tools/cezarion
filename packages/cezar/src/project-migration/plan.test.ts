@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
+import { makeRunRecord } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
-import { gitMvCommands, handoffWorktreeLine, pathMapper, planProjectMigration, rewriteHandoffWorktreeLine } from './plan.ts';
+import { seedRuns } from '../runs/run-store.testkit.ts';
+import { gitMvCommands, gitReportedPath, handoffWorktreeLine, pathMapper, planProjectMigration, redirectedComponent, rewriteHandoffWorktreeLine } from './plan.ts';
 
 /** The read-only planner and its path rules (hearsay-tools/cezarion#3088). */
 
@@ -75,6 +77,25 @@ describe('the path mapping', () => {
   });
 });
 
+describe('paths Git reports and paths a move passes through', () => {
+  it('reads Git for Windows forward slashes in the native form', () => {
+    expect(gitReportedPath('C:/repo/.ai/cezar/worktrees/a', win32)).toBe('C:\\repo\\.ai\\cezar\\worktrees\\a');
+    expect(gitReportedPath('/repo/.ai/cezar/worktrees/a')).toBe('/repo/.ai/cezar/worktrees/a');
+  });
+
+  it('finds the first component that is not a real directory', () => {
+    const base = scratch();
+    mkdirSync(join(base, 'a/b'), { recursive: true });
+    mkdirSync(join(base, 'outside'));
+    symlinkSync(join(base, 'outside'), join(base, 'a/link'));
+    writeFileSync(join(base, 'a/file'), '');
+    expect(redirectedComponent(base, join(base, 'a/b/missing/deeper'))).toBeUndefined();
+    expect(redirectedComponent(base, join(base, 'a/link/x'))).toBe(join(base, 'a/link'));
+    expect(redirectedComponent(base, join(base, 'a/file/x'))).toBe(join(base, 'a/file'));
+    expect(redirectedComponent(join(base, 'a'), join(base, 'outside'))).toBe(join(base, 'outside'));
+  });
+});
+
 describe('the planner', () => {
   it('has nothing to do for a project without the legacy directory', async () => {
     const root = scratch();
@@ -119,5 +140,46 @@ describe('the planner', () => {
     const legacyOnly = repository();
     writeFileSync(join(legacyOnly.source, 'runs.json'), '[]');
     expect((await planProjectMigration(legacyOnly.root)).blockers).toEqual([expect.stringContaining('has not been imported into a run store')]);
+  });
+  it('refuses a destination directory under a tracked parent that is a symlink or a file', async () => {
+    const { root, source } = repository();
+    mkdirSync(join(source, 'workflows'));
+    writeFileSync(join(source, 'workflows/flow.yaml'), 'tracked');
+    execFileSync('git', ['add', '-f', '.ai/cezar/workflows/flow.yaml'], { cwd: root });
+    writeFileSync(join(source, 'workflows/local.yaml'), 'untracked');
+    const outside = join(scratch(), 'outside');
+    mkdirSync(outside);
+    mkdirSync(join(root, '.ai/squawk'));
+    symlinkSync(outside, join(root, '.ai/squawk/workflows'));
+    const plan = await planProjectMigration(root);
+    expect(plan.conflicts).toEqual([{ path: join(root, '.ai/squawk/workflows'), reason: expect.stringContaining('nothing may move through it') }]);
+    expect(plan.moves.map(move => move.from)).not.toContain(join(source, 'workflows/local.yaml'));
+
+    const moved = repository();
+    rmSync(join(moved.root, '.ai'), { recursive: true });
+    mkdirSync(join(moved.root, 'elsewhere/cezar'), { recursive: true });
+    symlinkSync(join(moved.root, 'elsewhere'), join(moved.root, '.ai'));
+    expect((await planProjectMigration(moved.root)).blockers).toEqual([expect.stringContaining('is not a directory of this project')]);
+  });
+
+  it('reads a run store whose writer left a WAL file from a private copy, and leaves both files as they were', async () => {
+    const { root, source } = repository();
+    const staging = scratch();
+    const first = join(source, 'worktrees/a');
+    seedRuns(staging, [makeRunRecord({ id: 'r1', worktreePath: first })]);
+    const writer = new DatabaseSync(join(staging, RUNS_DB_FILE));
+    writer.exec('PRAGMA wal_autocheckpoint = 0');
+    const second = join(source, 'worktrees/b');
+    writer.prepare("UPDATE runs SET worktree_path = ?, data = json_set(data, '$.worktreePath', ?), summary = json_set(summary, '$.worktreePath', ?)").run(second, second, second);
+    // A crashed writer: the database and its WAL, no shared-memory file.
+    for (const name of [RUNS_DB_FILE, `${RUNS_DB_FILE}-wal`]) copyFileSync(join(staging, name), join(source, name));
+    writer.close();
+    const files = () => Object.fromEntries(readdirSync(source).map(name => [name, readFileSync(join(source, name)).toString('base64')]));
+    const before = files();
+    const plan = await planProjectMigration(root);
+    expect(files()).toEqual(before);
+    expect(existsSync(join(source, `${RUNS_DB_FILE}-shm`))).toBe(false);
+    expect(plan.blockers).toEqual([]);
+    expect(plan.rewrites.filter(rewrite => rewrite.kind === 'run-row').map(rewrite => rewrite.from)).toEqual([second, second, second]);
   });
 });

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
-import { lstatSync, readdirSync, readFileSync, realpathSync, type Dirent } from 'node:fs';
-import { posix, join, resolve, sep } from 'node:path';
+import { copyFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, type Dirent } from 'node:fs';
+import { tmpdir } from 'node:os';
+import nodePath, { posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
@@ -183,6 +184,26 @@ function realDirectory(path: string): boolean {
   try { return lstatSync(path).isDirectory(); } catch { return false; }
 }
 
+/**
+ * The first existing component from `base` down to `path`, both included, that is not a real
+ * directory (a symlink, a file); undefined when there is none. A move never passes through one,
+ * so no rename can land outside the project.
+ */
+export function redirectedComponent(base: string, path: string): string | undefined {
+  if (!inside(path, base)) return path;
+  let current = base;
+  for (const part of path === base ? [''] : ['', ...path.slice(base.length + 1).split(sep)]) {
+    current = part ? join(current, part) : current;
+    if (pathPresent(current) && !realDirectory(current)) return current;
+  }
+  return undefined;
+}
+
+/** A path Git printed, in this platform's form: Git for Windows prints forward slashes. */
+export function gitReportedPath(path: string, api: Pick<typeof nodePath, 'normalize'> = nodePath): string {
+  return api.normalize(path);
+}
+
 function sortedEntries(path: string): Dirent[] {
   return readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 }
@@ -203,7 +224,7 @@ class Planner {
     const { plan } = this;
     if (pathPresent(plan.journal)) plan.blockers.push(`An unfinished project migration journal ${plan.journal} exists; resume it first`);
     if (!pathPresent(plan.source)) return plan;
-    if (!realDirectory(plan.source)) { plan.blockers.push(`${plan.source} is not a directory`); return plan; }
+    if (!realDirectory(plan.source) || realpathSync(plan.source) !== plan.source) { plan.blockers.push(`${plan.source} is not a directory of this project`); return plan; }
     if (pathPresent(plan.destination) && !realDirectory(plan.destination)) {
       plan.blockers.push(`${plan.destination} exists and is not a directory`);
       return plan;
@@ -238,7 +259,12 @@ class Planner {
         continue;
       }
       const kind = moveKind(entry);
-      if (kind === 'directory' && this.trackedDirectories.has(path)) { this.walk(source, target, path, false); continue; }
+      if (kind === 'directory' && this.trackedDirectories.has(path)) {
+        // Untracked items move into this directory: it must be a real one, or absent.
+        if (pathPresent(target) && !realDirectory(target)) this.plan.conflicts.push({ path: target, reason: `${target} is not a directory; nothing may move through it` });
+        else this.walk(source, target, path, false);
+        continue;
+      }
       if (pathPresent(target)) {
         // Merge into an existing directory, item by item; a Git worktree is one unit.
         if (kind === 'directory' && realDirectory(target) && !pathPresent(join(source, '.git'))) { this.walk(source, target, path, false); continue; }
@@ -254,7 +280,7 @@ class Planner {
     if (listed === undefined) { this.plan.blockers.push(`Git cannot list the worktrees of ${this.root}`); return; }
     for (const entry of listed.split('\0')) {
       if (!entry.startsWith('worktree ')) continue;
-      const path = entry.slice('worktree '.length);
+      const path = gitReportedPath(entry.slice('worktree '.length));
       const to = map(path);
       // A registration whose directory is gone has nothing to carry; Git's own prune handles it.
       if (to && pathPresent(join(path, '.git'))) this.plan.worktrees.push({ from: path, to });
@@ -282,8 +308,12 @@ class Planner {
       return;
     }
     let db: RunDatabase | null = null;
+    // A WAL file (a live writer, or one that crashed) is read from a private copy: even a read-only
+    // connection writes shared-memory state beside the database it reads.
+    const copy = pathPresent(`${path}-wal`) ? mkdtempSync(join(tmpdir(), 'cez-migration-plan-')) : undefined;
     try {
-      db = RunDatabase.openReadOnly(path, RUN_DATABASE_SCHEMA_VERSION, { quiescent: true })!;
+      if (copy) for (const suffix of ['', '-wal']) copyFileSync(`${path}${suffix}`, join(copy, `${RUNS_DB_FILE}${suffix}`));
+      db = RunDatabase.openReadOnly(copy ? join(copy, RUNS_DB_FILE) : path, RUN_DATABASE_SCHEMA_VERSION, { quiescent: true })!;
       if (legacyIndex && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
         this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into ${path}; open the project with this build first`);
         return;
@@ -298,7 +328,10 @@ class Planner {
       this.plan.blockers.push(error instanceof RunDatabaseUnsupportedSchemaError
         ? `The run store ${path} is not at this build's schema ${RUN_DATABASE_SCHEMA_VERSION}; open the project with this build first`
         : `Cannot read the run store ${path}: ${(error as Error).message}`);
-    } finally { db?.close(); }
+    } finally {
+      db?.close();
+      if (copy) rmSync(copy, { recursive: true, force: true });
+    }
   }
 
   private rowField(runId: string, field: Extract<PathRewrite, { kind: 'run-row' }>['field'], from: unknown, map: (path: string) => string | undefined): void {

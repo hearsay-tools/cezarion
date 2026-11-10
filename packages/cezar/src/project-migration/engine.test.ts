@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
@@ -283,6 +283,20 @@ describe('the holder', { timeout: TIMEOUT }, () => {
       await expect(resumeProjectMigration({ repoRoot: project.root, fence: recovery })).rejects.toBeInstanceOf(ProjectMigrationStepError);
     } finally { recovery.release(); }
     expect(readProjectMigrationJournal(join(project.root, '.ai/squawk-migration.json'))?.done).toEqual(['move', 'repair-worktrees']);
+    expect(projectAdmissionRefusal(project.dataDir)?.reason).toBe('journal');
+  });
+
+  it('refuses a symlink that appears on a destination path between the plan and the move', async () => {
+    project.restore();
+    const outside = join(project.base, 'outside');
+    mkdirSync(outside, { recursive: true });
+    const held = await fence(project);
+    const plant = (at: string) => { if (at === 'move:before') { mkdirSync(project.newDir, { recursive: true }); symlinkSync(outside, join(project.newDir, 'workflows')); } };
+    try {
+      await expect(migrateProject({ repoRoot: project.root, fence: held, fault: plant })).rejects.toThrow(/workflows is not a directory of this project/);
+    } finally { held.release(); }
+    expect(readdirSync(outside)).toEqual([]);
+    expect(existsSync(join(project.dataDir, 'workflows/local.yaml'))).toBe(true);
     expect(projectAdmissionRefusal(project.dataDir)?.reason).toBe('journal');
   });
 

@@ -7,7 +7,7 @@ import { syncDirectory } from '../home/private-files.ts';
 import { pathPresent } from '../project-paths.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
 import type { PathRewrite, ProjectMigrationJournal, ProjectMigrationStep } from './journal.ts';
-import { gitOutput, rewriteHandoffWorktreeLine, trackedPaths, valueAt } from './plan.ts';
+import { gitOutput, gitReportedPath, redirectedComponent, rewriteHandoffWorktreeLine, trackedPaths, valueAt } from './plan.ts';
 
 /**
  * The steps of a project migration. Each one reads the state of every item first and applies only
@@ -81,6 +81,9 @@ async function moveStep(journal: ProjectMigrationJournal, fault: MigrationFault)
     if (!from && to) continue;
     if (from && to) throw new ProjectMigrationStepError('move', `both ${move.from} and ${move.to} exist`);
     if (!from) throw new ProjectMigrationStepError('move', `${move.from} and ${move.to} are both missing`);
+    // Checked again here: a symlink placed after planning must not redirect the rename.
+    const redirected = redirectedComponent(dirname(journal.destination), dirname(move.to)) ?? redirectedComponent(dirname(journal.source), dirname(move.from));
+    if (redirected) throw new ProjectMigrationStepError('move', `${redirected} is not a directory of this project`);
     mkdirSync(dirname(move.to), { recursive: true });
     renameSync(move.from, move.to);
     syncDirectory(dirname(move.to));
@@ -95,11 +98,12 @@ async function repairStep(journal: ProjectMigrationJournal): Promise<void> {
   const paths = journal.worktrees.map(worktree => worktree.to);
   const repaired = await withWorktreeMutation(journal.repoRoot, git => git(journal.repoRoot, ['worktree', 'repair', '--', ...paths]));
   if (!repaired.ok) throw new ProjectMigrationStepError('repair-worktrees', `git worktree repair failed: ${repaired.stderr.trim()}`);
-  const listed = (await gitOutput(journal.repoRoot, ['worktree', 'list', '--porcelain', '-z']))?.split('\0') ?? [];
+  const listed = new Set(((await gitOutput(journal.repoRoot, ['worktree', 'list', '--porcelain', '-z']))?.split('\0') ?? [])
+    .flatMap(entry => entry.startsWith('worktree ') ? [gitReportedPath(entry.slice('worktree '.length))] : []));
   for (const path of paths) {
     const real = realpathSync(path);
     const top = (await gitOutput(path, ['rev-parse', '--show-toplevel']))?.trim();
-    if (!listed.includes(`worktree ${path}`) && !listed.includes(`worktree ${real}`) || !top || realpathSync(top) !== real) {
+    if (!listed.has(path) && !listed.has(real) || !top || realpathSync(gitReportedPath(top)) !== real) {
       throw new ProjectMigrationStepError('repair-worktrees', `Git does not see the worktree ${path} after repair`);
     }
   }

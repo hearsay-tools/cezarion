@@ -140,8 +140,9 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
 - **Fence.** It runs only under a fence its own process holds (`holdsProjectFence`), and
   all its work runs inside `holdProjectWork`, so its writes pass the backstop only as the
   holder's.
-- **Plan and dry run.** `planProjectMigration(repoRoot)` writes nothing (the run store is
-  read immutable when it has no WAL file, so no SQLite sidecar appears). It lists every
+- **Plan and dry run.** `planProjectMigration(repoRoot)` writes nothing: the run store is
+  read immutable when it has no WAL file, and from a private copy when it has one, so no
+  SQLite sidecar appears or changes. It lists every
   move, tracked file with its quoted `git mv`, worktree repair, path rewrite, destination
   conflict and blocker, and the paths left alone on purpose (`NOT_REWRITTEN`).
   `describeProjectMigrationPlan` prints it. Any conflict or blocker refuses the migration
@@ -149,7 +150,10 @@ route or boot hook calls it. P4b3 wires `migrateProject` and the recovery entry
 - **Move units.** Each top-level entry of `.ai/cezar/` except the `cockpit.lock*` claims. A
   directory that holds tracked files is entered; tracked files never move. A directory
   that already exists under `.ai/squawk/` is merged item by item; any other existing
-  destination is a conflict. A Git worktree is one unit.
+  destination is a conflict. A Git worktree is one unit. No move passes through a
+  component that is not a real directory (a symlink, a file): the plan reports it as a
+  conflict, and the move step checks every source and destination component again before
+  each rename. Paths Git prints are read in the platform's form (`gitReportedPath`).
 - **Journal.** `.ai/squawk-migration.json` holds the whole plan and the steps done. Steps:
   `move` (rename), `repair-worktrees` (`git worktree repair` under the worktree mutation
   lock, then a check that Git lists each new path), `receipts` (`workspace.path` of each
