@@ -21,7 +21,7 @@ status  Print JSON: "state" is "running" or "exited", with "pid", "log",
 
 The command runs without a shell. For a pipeline, pass: -- sh -c '<pipeline>'.`);
 
-/** `cez job`: every answer is one JSON object, on stdout for a result and on stderr for an error. */
+/** `cez job`: one JSON object on stdout for a result and on stderr for an error; help is text. */
 export async function runJobCommand(argv: string[], env: NodeJS.ProcessEnv): Promise<number> {
   if (argv[0] === SUPERVISE) return superviseJob(argv[1]!, argv[2]!, argv.slice(4), tellStarter);
   const split = argv.indexOf('--');

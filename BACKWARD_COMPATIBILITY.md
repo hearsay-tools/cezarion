@@ -76,7 +76,10 @@ already moved. With the switch false the marker is ignored and writes stay under
 prints one JSON object to stdout and exits 0; a refusal or usage error prints
 `{ "error": "<text>" }` to stderr and exits 1; help exits 0. Its `<name>.<run>.log`,
 `<name>.<run>.exit` and `<name>.job.db` files are scratch state in `$TMPDIR` or `--dir`:
-deleting them loses only the record of that job. The `cezar_wait` description now names
+deleting them after the job ended loses only the record of that job. Do not delete them
+while the job runs: without `<name>.job.db` the name is free, so a later start runs a second
+copy beside the first, and without the directory the log and the exit code are lost. Cezar
+removes `$TMPDIR` when the task ends, so a job that must outlive its task takes `--dir`. The `cezar_wait` description now names
 this command in place of the `sh -c '( … ) & echo $!'` recipe, and the launch prompt gains a
 "Long commands" part after the artifact part. A process wait on a PID
 obtained another way still works. Its wake text for a PID that was already gone at
