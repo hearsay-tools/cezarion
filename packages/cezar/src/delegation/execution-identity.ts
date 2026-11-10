@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { z } from 'zod';
 import { profileEnv, supportsProfiles } from '../core/agent-profiles.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { namedAccountUnavailable, type ResolvedAgentProfile } from '../workspace/agent-profiles.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { workflowDefSchema, QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
@@ -25,7 +26,7 @@ const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolute).refine
 
 /** Internal durable evidence, never a public environment override or credential snapshot. */
 export const workerAccountBindingSchema = z.object({
-  provider: z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']),
+  provider: z.enum(RUNNER_IDS),
   profileId: z.string().min(1).max(64),
   homePath: absolutePathSchema.optional(),
   // Identical config directories can have different state/login files depending on invocation.

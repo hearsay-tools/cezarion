@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { oxlintBin, oxlintProblems, staleEntries } from './run.ts';
 import { DESIGN_SAMPLES } from './design-guardian.testkit.ts';
 import { RULES } from './plugin.ts';
+import { declaredRunnerIds } from './runner-id-branch.ts';
 import { repoRoot } from './source-rule.ts';
 
 /**
@@ -57,6 +58,9 @@ function fixtureCases(cases: [string, string][]): [string, string][] {
 }
 const findingsFor = (file: string): string[] => fixtureFindings.filter(problem => problem.startsWith(`${file}:`));
 
+/** Every runner id as array elements, read from the roster so a fixture never restates it. */
+const ROSTER = declaredRunnerIds().map(id => `'${id}'`).join(', ');
+
 const VIOLATIONS: Record<string, [string, string]> = {
   'product-env-read': ['packages/cezar/src/env-reader.ts', 'const flag = process.env.CEZ_DRY_RUN;\n'],
   'test-home-write': ['packages/web/src/ambient-home.test.ts', "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}');\n"],
@@ -74,6 +78,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
   'run-history-reader': ['packages/cezar/src/raw-history.ts', 'const text = readFileSync(historyPaths(dir, id).plain);\n'],
   'runner-fact-combination': ['packages/cezar/src/workflows/run/fact-pair.ts', "function f(runner, id) {\n  return runner.systemPromptOnResume === 'resent' && RUNNER_FACTS[id].nativeAsk === 'none';\n}\n"],
   'runner-id-branch': ['packages/web/src/routes/runner-branch.ts', "export const held = (runner: string) => runner === 'cursor';\n"],
+  'runner-roster-literal': ['packages/web/src/lib/runner-roster.test.ts', `const all = [${ROSTER}];\n`],
   'undocumented-env-name': ['packages/cezar/scripts/e.mjs', "process.env.CEZ_NOT_DOCUMENTED_ANYWHERE = '1';\n"],
 };
 
@@ -114,6 +119,10 @@ const APPROVED: Record<string, string> = {
   'packages/cezar/src/core/runner-pick.ts': "const print = backend === 'cursor';\n",
   'packages/web/src/routes/runner-branch.test.ts': "const print = backend === 'cursor';\n",
   'packages/web/src/routes/frame.ts': "switch (message.t) { case 'cursor': break; }\n",
+  // runner-roster-literal: the definition, a listed roster, a subset and a derived list.
+  'packages/cezar/src/core/agent-runner.ts': `export const RUNNER_IDS = [${ROSTER}] as const;\n`,
+  'packages/contract/src/health.ts': `export const runnerSchema = z.enum([${ROSTER}]);\n`,
+  'packages/web/src/lib/runner-subset.ts': "const some = ['codex', 'pi'];\nconst stored = [...RUNNER_IDS, 'claude-cli'];\n",
   // undocumented-env-name: a documented name, a mock control, and a test.
   'packages/cezar/src/j.ts': "process.env.CEZ_DRY_RUN = '1'; env.CEZ_MOCK_ANYTHING = '1';\n",
   'packages/cezar/src/k.test.ts': 'const c = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n',
@@ -325,6 +334,7 @@ describe('stale entries', () => {
     'packages/cezar/src/lint/run-history-readers.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/home-readers.baseline.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/runner-id-branch.baseline.json': JSON.stringify({ entries: [] }),
+    'packages/cezar/src/lint/runner-roster-literal.baseline.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/resume-time-readers.json': JSON.stringify({ files: { 'packages/web/src/lib/reads.ts': 'reads', 'packages/web/src/lib/stopped.ts': 'stopped' } }),
     'packages/web/src/test/search-params-discipline.baseline.json': JSON.stringify({ sites: [{ file: 'routes/x.tsx', site: '[query, setQuery] = useSearchParams()', reason: 'r' }] }),
     'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",

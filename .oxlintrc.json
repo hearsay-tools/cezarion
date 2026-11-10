@@ -32,6 +32,7 @@
     "cez/run-history-reader": "error",
     "cez/runner-fact-combination": "error",
     "cez/runner-id-branch": "error",
+    "cez/runner-roster-literal": "error",
     "cez/test-wait-discipline": "error",
     "cez/undocumented-env-name": "error",
     "cez/unit-wait-discipline": "error",

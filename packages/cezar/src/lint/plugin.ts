@@ -12,13 +12,14 @@ import { runFactReader } from './run-fact-reader.ts';
 import { runHistoryReader } from './run-history-reader.ts';
 import { runnerFactCombination } from './runner-fact-combination.ts';
 import { runnerIdBranch } from './runner-id-branch.ts';
+import { runnerRosterLiteral } from './runner-roster-literal.ts';
 import { oxlintRule, type SourceRule } from './source-rule.ts';
 import { testWaitDiscipline } from './test-wait-discipline.ts';
 import { undocumentedEnvName } from './undocumented-env-name.ts';
 import { unitWaitDiscipline } from './unit-wait-discipline.ts';
 
 /** Every repository rule. `.oxlintrc.json` turns each one on as `cez/<name>`. */
-export const RULES: SourceRule[] = [productEnvRead, homeBoundary, testHomeWrite, card2Contrast, contractRootImport, designGuardian, mockLifecycleBoundary, mockScenarioBoundary, nativeMockSource, rawQuerySetter, runFactReader, runHistoryReader, runnerFactCombination, runnerIdBranch, testWaitDiscipline, undocumentedEnvName, unitWaitDiscipline];
+export const RULES: SourceRule[] = [productEnvRead, homeBoundary, testHomeWrite, card2Contrast, contractRootImport, designGuardian, mockLifecycleBoundary, mockScenarioBoundary, nativeMockSource, rawQuerySetter, runFactReader, runHistoryReader, runnerFactCombination, runnerIdBranch, runnerRosterLiteral, testWaitDiscipline, undocumentedEnvName, unitWaitDiscipline];
 
 /** The `cez` oxlint JS plugin (hearsay-tools/cezarion#2416). */
 export default {

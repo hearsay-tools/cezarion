@@ -12,6 +12,7 @@ import type {
   RepoResponse,
   Runner,
 } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { AppRoutes } from '@/routes'
 
@@ -452,7 +453,7 @@ describe('the agents form', () => {
     expect(screen.getByText(/The model preselected in the composer/)).toBeTruthy()
     expect(
       [...document.querySelectorAll('[data-slot="agents-model"]')].map((el) => el.getAttribute('data-runner')),
-    ).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])
+    ).toEqual([...runnerSchema.options])
   })
 
   it('offers each runner the models its own host CLI reports (#794)', async () => {
@@ -619,7 +620,7 @@ describe('the agents form', () => {
       await waitFor(() => expect(form()).not.toBeNull())
       // Settled: the default-models field below it has rendered, so the pane is not mid-load.
       await screen.findByLabelText('Default model for claude')
-      expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])
+      expect(rows().map((r) => r.getAttribute('data-value'))).toEqual([...runnerSchema.options])
       expect(document.body.textContent).toContain('Default runner')
     })
 
