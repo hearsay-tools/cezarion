@@ -6,13 +6,14 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -838,5 +839,77 @@ describe('socket-safe temp directory length (#387)', () => {
           chmodSync(parent, 0o700);
         }
       });
+  });
+
+  // hearsay-tools/cezarion#3146: a fallback's name, `.cez-owner` marker and `.cez-fallback` pointer
+  // digest the dataDir that minted it. Migrating the project from `.ai/cezar` to `.ai/squawk` changes
+  // the dataDir, not those digests, so the run must still know the directory as its own.
+  describe('a fallback minted before the project migrated to .ai/squawk (hearsay-tools/cezarion#3146)', () => {
+    const runId = '55555555-6666-4777-8888-999900001111';
+
+    /** Mint a fallback under `.ai/cezar` with a scratch file, then move the data directory as the
+     *  project migration does. Returns the fallback and the migrated dataDir. */
+    const migrated = (): { dir: string; dataDir: string } => {
+      const legacy = deepDataDir();
+      const dir = mint(legacy, runId);
+      writeFileSync(join(dir, 'scratch.txt'), 'kept');
+      const dataDir = join(dirname(legacy), 'squawk');
+      renameSync(legacy, dataDir);
+      return { dir, dataDir };
+    };
+
+    it('hands Continue the same directory with its files', () => {
+      const { dir, dataDir } = migrated();
+      expect(resolveAgentTmpDir(dataDir, runId)).toBe(dir);
+      expect(agentTmpEnv(dataDir, runId, {}).TMPDIR).toBe(dir);
+      expect(readFileSync(join(dir, 'scratch.txt'), 'utf8')).toBe('kept');
+      expect(agentTmpDirLocations(dataDir, runId)).toContain(dir);
+    });
+
+    it('stays through its own project’s sweep while the run is kept', () => {
+      const { dir, dataDir } = migrated();
+      expect(sweepAgentTmpDirs(dataDir, [runId])).not.toContain(basename(dir));
+      expect(existsSync(join(dir, 'scratch.txt'))).toBe(true);
+    });
+
+    it('stays through another project’s sweep, though `.ai/cezar` is gone', () => {
+      const { dir } = migrated();
+      const otherRoot = join(osRoot(), `cez-deep-${'m'.repeat(80)}`);
+      try {
+        sweepAgentTmpDirs(join(otherRoot, 'other', '.ai', 'cezar'), []);
+        expect(existsSync(join(dir, 'scratch.txt'))).toBe(true);
+      } finally {
+        rmSync(otherRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('is swept as an orphan once no kept run claims it', () => {
+      const { dir, dataDir } = migrated();
+      expect(sweepAgentTmpDirs(dataDir, [])).toContain(basename(dir));
+      expect(existsSync(dir)).toBe(false);
+      expect(existsSync(agentTmpDir(dataDir, runId))).toBe(false);
+    });
+
+    it('is reaped with its run', () => {
+      const { dir, dataDir } = migrated();
+      removeAgentTmpDir(dataDir, runId);
+      expect(existsSync(dir)).toBe(false);
+      expect(existsSync(agentTmpDir(dataDir, runId))).toBe(false);
+    });
+
+    it('never adopts or sweeps another repo’s pre-migration fallback', () => {
+      const { dataDir } = migrated();
+      const otherRoot = join(osRoot(), `cez-deep-${'n'.repeat(80)}`);
+      const theirs = join(otherRoot, 'other', '.ai', 'cezar');
+      try {
+        const theirDir = mint(theirs, runId);
+        writeFileSync(join(agentTmpDir(dataDir, runId), '.cez-fallback'), theirDir);
+        expect(() => agentTmpEnv(dataDir, runId, {})).toThrow(AgentTempDirError);
+        expect(sweepAgentTmpDirs(dataDir, [])).not.toContain(basename(theirDir));
+        expect(existsSync(theirDir)).toBe(true);
+      } finally {
+        rmSync(otherRoot, { recursive: true, force: true });
+      }
+    });
   });
 });
