@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { ProcessWaitResult, Wait } from '@open-mercato/cezar-contract/waits';
-import { makeHumanWait, makePeerWait, makePrWait, makeProcessWait, makeSubagentWait, makeTimerWait, makeWorkerWait, RUN_STATUS, STEP_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makeHumanWait, makePeerWait, makePrWait, makeProcessWait, makeSubagentWait, makeTimerWait, makeWorkerWait, RUN_STATUS, STEP_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunStore } from '../../runs/store.ts';
 import { unused } from '../fixture-cleanup.testkit.ts';
 import type { RunModuleContext } from './types.ts';
@@ -62,7 +62,7 @@ function fixture() {
 const KINDS: { readonly [K in Kind]: { entry: (f: Fixture) => Wait; resolve: (f: Fixture, wait: Wait) => Promise<void> } } = {
   pr: { entry: () => makePrWait({ deadline: deadline() }),
     resolve: async (f, wait) => { f.ci.settle({ outcome: 'passed', headSha: (wait as ReturnType<typeof makePrWait>).headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false }); await vi.advanceTimersByTimeAsync(0); } },
-  timer: { entry: () => makeTimerWait({ deadline: deadline(), via: 'cezar_wait' }), resolve: passDeadline },
+  timer: { entry: () => makeTimerWait({ deadline: deadline(), via: WAIT_VIA.cezar_wait }), resolve: passDeadline },
   process: { entry: () => makeProcessWait({ deadline: deadline() }),
     resolve: async f => { f.processExit.settle({ outcome: 'exited', observedAt: new Date().toISOString() }); await vi.advanceTimersByTimeAsync(0); } },
   human: { entry: () => makeHumanWait(), resolve: async (f, wait) => { f.engine.resolveWait(f.run.id, wait.id); } },
