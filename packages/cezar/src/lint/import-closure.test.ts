@@ -1,0 +1,34 @@
+import { describe, expect, it } from 'vitest';
+import { relativeImports, runtimeImports } from './import-closure.testkit.ts';
+
+describe('runtimeImports', () => {
+  it.each([
+    ["import { a } from './a.ts';", ['./a.ts']],
+    ['import b from "b";', ['b']],
+    ["import './side-effect.ts';", ['./side-effect.ts']],
+    ["export { c } from './c.ts';", ['./c.ts']],
+    ["export * from './d.ts';", ['./d.ts']],
+    ["const e = await import('./e.ts');", ['./e.ts']],
+    ['const f = await import(`zod`);', ['zod']],
+    ["import type { G } from './g.ts';", []],
+    ["export type { H } from './h.ts';", []],
+    ["// import { i } from './i.ts';", []],
+    ["const j = \"import('./j.ts')\";", []],
+  ])('reads %s', (source, expected) => {
+    expect(runtimeImports(source)).toEqual(expected);
+  });
+
+  // A closure pin that skipped an import it cannot read would let that import through
+  // (hearsay-tools/cezarion#3241).
+  it.each([
+    ['const name = "./a.ts";\nconst a = await import(name);', 'import(name)'],
+    ['const b = await import(`./${name}.ts`);', 'import(`./${name}.ts`)'],
+    ["const c = await import('./' + name);", "import('./' + name)"],
+  ])('refuses a dynamic import it cannot read: %s', (source, site) => {
+    expect(() => runtimeImports(source)).toThrow(site);
+  });
+
+  it('keeps only relative specifiers in relativeImports', () => {
+    expect(relativeImports("import { a } from './a.ts';\nimport { z } from 'zod';\nconst b = await import(`../b.ts`);")).toEqual(['./a.ts', '../b.ts']);
+  });
+});
