@@ -577,8 +577,9 @@ The facts behind the D1 and D3 rules of `AGENT_PROTOCOL.md` and the D1 and D3 en
   message (no model turn) with `--settings '{"crossSessionInbound":"refuse"}'` and got a
   normal init. It shows that Claude accepts the flag. It does not show the cross-session
   effect: that needs a model-driven `SendMessage` between two live sessions, which no probe
-  made. The same probe with `"bogus"` also started normally: Claude ignores an unknown value
-  without a warning, so a renamed key or value fails open.
+  made. The same probe with `"bogus"` also started normally, with no warning. It did not test
+  message delivery with an invalid value, and it did not test a renamed key. Until a probe
+  shows otherwise, treat the setting as one that fails open.
 - **Codex 0.164.0, 2026-10-30 (D1).** `codex -c features.<unknown>=false features list` exits
   0, so a renamed key does not fail a launch.
 - **OpenCode 1.19.4, 2026-10-30 (D1).** OpenCode appends runtime plugins to the ones its
