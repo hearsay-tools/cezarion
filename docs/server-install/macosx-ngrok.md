@@ -41,14 +41,13 @@ npx hsq server-install --platform macosx-ngrok
 | **Autostart** | Installs the cockpit and tunnel **launchd** agents (`~/Library/LaunchAgents/tools.hearsay.squawk.cockpit.plist` and `tools.hearsay.squawk.ngrok.plist`) with `RunAtLoad` + `KeepAlive`. |
 | **Verify** | Confirms the ngrok basic-auth gate is active. |
 
-Old installs retain `ai.cezar.cockpit` and `ai.cezar.ngrok` until migration.
-Use `hsq server-migrate --dry-run`, then `hsq server-migrate`; see the
-[migration guide](../migration.md#installed-servers).
-Migration replaces only owned old agents and keeps private `*.plist.migrated`
-backups for rollback. A successful rollback removes its backup. Migration,
-reconfigure and rollback refuse foreign destination plists. Migration reports
-foreign old agents and leaves them alone. Uninstall
-and deploy use the recorded label and path, including for pre-switch installs.
+Old installs keep `ai.cezar.cockpit` and `ai.cezar.ngrok`. Their home moves
+to the new layout at the first start of the new build, as a desktop install
+does. `hsq server-migrate` does not support this platform: it refuses, because
+it cannot stop and start the launchd agents as a group. See the
+[migration guide](../migration.md#installed-servers). Reconfigure refuses a
+foreign destination plist. Uninstall and deploy use the recorded label and
+path, including for pre-switch installs.
 
 The **username + password** you set become the ngrok `--basic-auth`
 credentials — what you type in the browser to reach the cockpit over the public

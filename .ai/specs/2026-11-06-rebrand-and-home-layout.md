@@ -220,7 +220,9 @@ After commit, a watcher on the migrated legacy files reports a later change as a
 stays an accepted home variable after P5, unlike the other `CEZ_*` names: `resolveHome` uses
 `HSQ_HOME`, then `CEZ_HOME`, then the default, and a boot warning asks the operator to
 rename it. So every custom install, container or not, keeps its own home with no pointer
-file. A test covers a restart after P5 with only `CEZ_HOME` set.
+file. A test covers a restart after P5 with only `CEZ_HOME` set. A committed home records its
+source (`migratedFrom`); a later boot uses that source even when the env names another
+legacy home, so a launch with only `HSQ_HOME` neither fails nor migrates again.
 
 **Server installs** (apptension-host serves 12 projects): `hsq server-migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
@@ -252,7 +254,9 @@ rollback. `hsq server-migrate --dry-run` prints the stop, every move, each healt
 group, the pending marker and the rollback, and writes nothing, not even to the legacy home.
 
 **Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
-as in section 2.
+as in section 2. A first boot that cannot write the legacy home or the new home (`EROFS`,
+`EACCES`, `EPERM`) logs one line and serves the legacy home, or the migrated home when the
+commit already happened, instead of failing (zero config).
 
 ### 4.1 New bundle IDs
 

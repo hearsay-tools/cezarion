@@ -74,14 +74,15 @@ service is running; the cockpit picks the change up on the next page load.
 
 Need **disjoint** project sets on one box — one cockpit per customer, say? Give
 each instance its own home with `HSQ_HOME` (`CEZ_HOME` fallback), for example
-`Environment=HSQ_HOME=/srv/squawk-homes/shop` in its systemd unit or the matching launchd env entry. For a new home, set `CEZ_HOME` to the same path: it is the legacy layout's home and the source of a home migration, so with only `HSQ_HOME` set a migration copies the real `~/.cezar` registry into this home. A home already migrated from another legacy home keeps the `CEZ_HOME` it was migrated from. Each home carries its own registry,
+`Environment=HSQ_HOME=/srv/squawk-homes/shop` in its systemd unit or the matching launchd env entry. For a new home, set `CEZ_HOME` to the same path: it is the legacy layout's home and the source of a home migration, so with only `HSQ_HOME` set a migration copies the real `~/.cezar` registry into this home. A migrated home records its source, so after the migration `HSQ_HOME` alone is enough. Each home carries its own registry,
 global config and server state, so instances share nothing — and `--domain`
 already gives them separate ports, nginx sites and logins.
 
 ## Upgrading an old installation
 
-Use `hsq server-migrate --dry-run`, then `hsq server-migrate`, to move every
-instance that shares an old home as one group. See the [migration guide](../migration.md#installed-servers)
+On Ubuntu, use `hsq server-migrate --dry-run`, then `hsq server-migrate`, to move every
+instance that shares an old home as one group. A macOS + ngrok install moves its home
+at the first start of the new build and keeps its launchd agents. See the [migration guide](../migration.md#installed-servers)
 for backups, health checks and rollback. Deploy and uninstall keep using the
 names recorded for installations that have not migrated.
 

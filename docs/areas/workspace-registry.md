@@ -238,7 +238,10 @@ Home returned by `prepareOperatorHome`, as CLI boot does.
 | Completed group-migration server, failed marker, no committed marker | Legacy home; no target writes; warn to retry `hsq server-migrate` |
 | Finished staged retry, including a prior failed marker | Pending target, read-only, for the group's health checks |
 | Committed target, including a prior failed marker | Target; normal boot |
+| Committed target whose recorded source differs from the env's legacy home (a launch with only `HSQ_HOME`) | Target; the recorded source stays the legacy home and canary |
 | Desktop, incomplete install or dry-run server, with or without a failed marker | Existing boot migration to the target |
+| Boot migration fails with `EROFS`, `EACCES` or `EPERM` before the commit | Legacy home; one warning; the next boot retries |
+| A step after the commit fails with `EROFS`, `EACCES` or `EPERM` | Target; one warning |
 | Switch off | Existing legacy behavior |
 
 Platforms without group migration support, including `macosx-ngrok`, keep the desktop boot
