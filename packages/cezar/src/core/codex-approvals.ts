@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PermissionOption, UiPermissionRequestedEvent } from './ui-events.ts';
 
-// Native app-server v2 shapes (Codex 0.160.1). Older servers omit startedAtMs;
+// Native app-server v2 shapes (Codex 0.160.1): its generated JSON schemas and
+// https://developers.openai.com/codex/app-server/. Older servers omit startedAtMs;
 // availableDecisions is also supported by the documented pre-0.160 wire.
 const text = z.string().min(1);
 const nullableText = z.string().nullable().optional();

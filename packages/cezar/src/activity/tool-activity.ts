@@ -239,9 +239,10 @@ export class ToolActivityTracker implements ToolActivitySource {
   }
 
   /**
-   * A background subagent is not a tool call (AGENT_PROTOCOL.md §6): its item never counts and
-   * never becomes the latest tool. When the spawn call was already the latest tool (Claude marks
-   * it background only after the call returns), the call has ended: the child runs on its own.
+   * A background subagent is not a tool call (the background row of `core/ui-parity.test.ts`
+   * marks its item): the item never counts and never becomes the latest tool. When the spawn
+   * call was already the latest tool (Claude marks it background only after the call returns),
+   * the call has ended: the child runs on its own.
    */
   private backgrounded(runId: string, item: UiToolItem, at: number): void {
     const run = this.runs.get(runId);

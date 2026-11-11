@@ -322,14 +322,14 @@ export interface AgentSession {
    *  `discardQueuedMessages` drops it. A discard cannot retract an input the wire
    *  already wrote or spawned: the runner then either drops only the hold, and the
    *  input can still run, or keeps the hold because its discard is a no-op (the H2
-   *  exemptions in AGENT_PROTOCOL.md §7). Close needs no runner code: run.ts reads
+   *  entries of `PARITY_EXEMPTIONS`). Close needs no runner code: run.ts reads
    *  the hold only while the session is `open`. A native ack, a native run-start
    *  frame, a spawn or a queue shift is not a release on its own; it releases only
    *  when one of those exits already holds. run.ts parks a boundary whose hold reads
    *  false (hearsay-tools/cezarion#1112). A held follow-up that
    *  drains at an idle boundary without opening a new turn must call
    *  `onAgentInputReady` so run.ts can re-settle that boundary; the 250 ms recheck is
-   *  the backstop. AGENT_PROTOCOL.md §7 lists each runner's exit frames. */
+   *  the backstop. Each runner's hold comment lists its exit frames. */
   holdsHumanInput(): boolean;
   /** Count of human follow-ups still held behind `holdsHumanInput`. Every built-in
    *  runner reports it from the same state `holdsHumanInput` reads
@@ -358,7 +358,7 @@ interface InputDeliveryFacts {
    * turn the input opens, so no turn can end before its input is acknowledged (Cursor print).
    */
   readonly acknowledgement: 'write' | 'response' | 'model-work';
-  /** The native mechanism, for AGENT_PROTOCOL.md and the parity matrix. */
+  /** The native mechanism. Documentation only: no code branches on it. */
   readonly via: string;
 }
 /**
