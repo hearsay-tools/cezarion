@@ -2,7 +2,7 @@ import { WaitEngine } from './wait-engine.ts';
 import { seedWaits } from '../../runs/run-store.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeWorkerWait, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { boundaryOrderFixture } from './boundary-order.testkit.ts';
 import { FamilyReconciler } from './family-reconciler.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';

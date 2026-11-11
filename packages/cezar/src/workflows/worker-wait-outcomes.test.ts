@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { deliveredBesideWorkerMessages, checkpoint, controlledWire, fixtureUpdateRun, manager, parent, register, root, semaphore, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { deliveredBesideWorkerMessages, checkpoint, controlledWire, fixtureUpdateRun, manager, parent, register, root, semaphore, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait-claude.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.

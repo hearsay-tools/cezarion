@@ -1,7 +1,7 @@
 import { projectPaths } from '../project-paths.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, rm, writeFile } from 'node:fs/promises';

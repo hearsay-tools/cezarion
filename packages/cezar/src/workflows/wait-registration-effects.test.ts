@@ -7,7 +7,7 @@ import { callCezarWait } from '../ci-wait/client.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi, onTestFinished } from 'vitest';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { manager, parent, store, until, toolGenerationOf, useWorkerWaitFixture, restart } from './worker-wait.testkit.ts';
+import { manager, parent, store, until, toolGenerationOf, useWorkerWaitFixture, restart } from './worker-wait-claude.testkit.ts';
 
 describe('wait registration effects', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
