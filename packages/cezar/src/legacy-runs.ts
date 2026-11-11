@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { runIdParamSchema } from '@open-mercato/cezar-contract/events';
 
 /**
  * Tasks whose own files stay in `.ai/cezar/` after a project move (owner decision A,
@@ -19,7 +20,7 @@ import { z } from 'zod';
 
 export const LEGACY_RUNS_FILE = 'legacy-runs.json';
 
-export const legacyRunsSchema = z.object({ version: z.literal(1), runs: z.array(z.uuid()) }).strict();
+export const legacyRunsSchema = z.object({ version: z.literal(1), runs: z.array(runIdParamSchema.shape.id) }).strict();
 
 const cache = new Map<string, ReadonlySet<string>>();
 const warned = new Set<string>();

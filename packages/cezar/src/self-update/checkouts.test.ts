@@ -188,7 +188,7 @@ describe('linked checkouts', () => {
     const task = join(repo, '.ai', 'cezar', 'worktrees', 'def67890-run');
     git(repo, 'worktree', 'add', '-q', '-b', 'cez/def67890', task);
     fakeCheckout(task);
-    seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', branch: 'cez/def67890' })]);
+    seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', archived: true, branch: 'cez/def67890' })]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig,
       Buffer.from(JSON.stringify({ projects: register ? [{ id: 'cezar', root: realpathSync(repo) }] : [] })));

@@ -1,6 +1,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
+import { runIdParamSchema } from '@open-mercato/cezar-contract/events';
 import { replaceAtomically, settle } from './durable.ts';
 
 /**
@@ -56,7 +57,7 @@ export const projectMigrationJournalSchema = z.object({
   worktrees: z.array(worktreeRepairSchema),
   rewrites: z.array(pathRewriteSchema),
   /** The kept tasks (live or not archived) whose own items stay in `source`; absent in a journal of an older build: none. */
-  leftovers: z.array(z.uuid()).optional(),
+  leftovers: z.array(runIdParamSchema.shape.id).optional(),
 }).strict();
 export type ProjectMigrationJournal = z.infer<typeof projectMigrationJournalSchema>;
 

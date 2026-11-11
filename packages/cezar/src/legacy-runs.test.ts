@@ -57,7 +57,7 @@ describe('the items of a task the project move left in .ai/cezar/', () => {
 
   it('reads an unreadable list as empty, with one warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    writeFileSync(join(moved, LEGACY_RUNS_FILE), '{"version":1,"runs":["not-a-uuid"]}');
+    writeFileSync(join(moved, LEGACY_RUNS_FILE), '{"version":1,"runs":["../escape"]}');
     forgetLegacyRunIds(moved);
     expect(legacyRunIds(moved).size).toBe(0);
     forgetLegacyRunIds(moved);
