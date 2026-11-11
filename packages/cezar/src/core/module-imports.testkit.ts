@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parse } from '@babel/parser';
 import { traverse, type Node } from '@babel/types';
 
@@ -40,5 +43,27 @@ export function runtimeImports(source: string, file = 'source'): string[] {
     const specifier = staticImport(node) ?? dynamicLoad(node, file);
     if (specifier !== undefined) found.push(specifier);
   });
+  return found;
+}
+
+const SOURCE_EXTENSION = /\.[cm]?[jt]s$/;
+
+/** The modules in the file's own directory that the file loads and whose name `name` matches, as
+ *  file names. Each relative specifier is resolved against the file first, so `././x.ts` and
+ *  `../dir/x.ts` name the same module as `./x.ts`. A relative load with a query or a hash, or one
+ *  that names a matching module by another extension, throws: the guard cannot tell what it loads. */
+export function siblingImports(file: URL, name: RegExp): string[] {
+  const path = fileURLToPath(file);
+  const found: string[] = [];
+  for (const specifier of runtimeImports(readFileSync(path, 'utf8'), basename(path))) {
+    if (!specifier.startsWith('.')) continue;
+    const target = new URL(specifier, file);
+    if (target.search || target.hash) throw new Error(`${basename(path)}: ${specifier} carries a query or a hash`);
+    const targetPath = fileURLToPath(target);
+    if (dirname(targetPath) !== dirname(path)) continue;
+    const module = basename(targetPath);
+    if (name.test(module)) found.push(module);
+    else if (name.test(module.replace(SOURCE_EXTENSION, '.ts'))) throw new Error(`${basename(path)}: ${specifier} names a module by another extension`);
+  }
   return found;
 }

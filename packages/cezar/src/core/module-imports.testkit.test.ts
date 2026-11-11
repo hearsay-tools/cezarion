@@ -1,5 +1,20 @@
-import { describe, expect, it } from 'vitest';
-import { runtimeImports } from './module-imports.testkit.ts';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { runtimeImports, siblingImports } from './module-imports.testkit.ts';
+
+const CELLS = /^kit-[a-z]+\.testkit\.ts$/;
+
+/** A file `dir/part.test.ts` with the given source; returns its URL. */
+function partFile(source: string): URL {
+  const root = mkdtempSync(join(tmpdir(), 'module-imports-'));
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'dir'));
+  writeFileSync(join(root, 'dir', 'part.test.ts'), source);
+  return pathToFileURL(join(root, 'dir', 'part.test.ts'));
+}
 
 describe('runtimeImports', () => {
   it('lists named, side-effect, double-quoted, namespace and default imports', () => {
@@ -36,5 +51,24 @@ describe('runtimeImports', () => {
   it('fails closed on a load whose target it cannot read', () => {
     expect(() => runtimeImports(`const name = './x.ts'; await import(name);`, 'dynamic.ts')).toThrow('dynamic.ts');
     expect(() => runtimeImports(`const x = require('./x.ts');`, 'require.ts')).toThrow('require.ts');
+  });
+});
+
+describe('siblingImports', () => {
+  it('resolves every relative form to the module it loads', () => {
+    const file = partFile([
+      `import { a } from './kit-own.testkit.ts';`,
+      `import '././kit-registry.testkit.ts';`,
+      `import "../dir/kit-other.testkit.ts";`,
+      `import { b } from './unrelated.ts';`,
+      `import { c } from '../elsewhere/kit-far.testkit.ts';`,
+      `import { d } from 'some-package';`,
+    ].join('\n'));
+    expect(siblingImports(file, CELLS)).toEqual(['kit-own.testkit.ts', 'kit-registry.testkit.ts', 'kit-other.testkit.ts']);
+  });
+
+  it('fails closed on a load it cannot pin to one module', () => {
+    expect(() => siblingImports(partFile(`import './kit-own.testkit.ts?raw';`), CELLS)).toThrow('query or a hash');
+    expect(() => siblingImports(partFile(`import './kit-own.testkit.js';`), CELLS)).toThrow('another extension');
   });
 });
