@@ -131,9 +131,9 @@ const holdRemove = 'run is waiting on a usage-limit hold — choose Don’t resu
 const fallbackRefusal = fallbackProjectWriteError(fallback)!;
 const claimedRoutes = [
   { route: 'pr', intent: 'publish' },
-  { route: 'remove-worktree', intent: 'remove', claim: 'publish', activeBeforeLookup: false, checksActive: true, deletion: 'worktree', nullClaimError: cleanupPending },
-  { route: 'DELETE', intent: 'remove', claim: 'publish', activeBeforeLookup: true, checksActive: true, deletion: 'record', nullClaimError: cleanupPending },
-  { route: 'reclaim', intent: 'remove', claim: 'reclaim', activeBeforeLookup: false, checksActive: false, deletion: 'inline', nullClaimError: reclaimPending },
+  { route: 'remove-worktree', intent: 'remove', claim: 'publish', checksActive: true, deletion: 'worktree', nullClaimError: cleanupPending },
+  { route: 'DELETE', intent: 'remove', claim: 'publish', checksActive: true, deletion: 'record', nullClaimError: cleanupPending },
+  { route: 'reclaim', intent: 'remove', claim: 'reclaim', checksActive: false, deletion: 'inline', nullClaimError: reclaimPending },
 ] as const;
 // Each tuple is pr / remove-worktree / DELETE / reclaim. null means admitted.
 const claimedOutcomes: Record<string, readonly (string | null | 404)[]> = {
@@ -200,7 +200,7 @@ describe.each(claimedRoutes)('$intent $route', (route) => {
     const expected = claimedOutcomes[state.name]![claimedRoutes.indexOf(route)];
     expect(result).toEqual(expected === null ? { run: state.run, release }
       : { status: expected === 404 ? 404 : 409, body: { error: expected === 404 ? 'not found' : expected } });
-    expect(calls[0]).toBe(route.route === 'DELETE' ? 'active' : 'lookup');
+    expect(calls[0]).toBe('lookup');
     expect(autosaveCleanupBlocker).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
     const claims = calls.filter(call => call === 'publish' || call === 'reclaim');
@@ -216,17 +216,17 @@ describe('claim check order', () => {
     const orders = {
       pr: ['lookup', 'active', 'publish'],
       'remove-worktree': ['lookup', 'active', 'can-delete', 'publish'],
-      DELETE: ['active', 'lookup', 'can-delete', 'publish'],
+      DELETE: ['lookup', 'active', 'can-delete', 'publish'],
       reclaim: ['lookup', 'fallback', 'owner', 'reclaim'],
     };
     expect(calls).toEqual(orders[route.route]);
   });
 
-  it('DELETE refuses an active unknown id before lookup', () => {
+  it('DELETE refuses an unknown id before checking activity', () => {
     const { host, calls } = claimedHost(states[0]!);
     vi.mocked(host.manager.isActive).mockImplementation(() => { calls.push('active'); return true; });
-    expect(admitClaimed(host, claimedRoutes[2])).toEqual({ status: 409, body: { error: activeRemove } });
-    expect(calls).toEqual(['active']);
+    expect(admitClaimed(host, claimedRoutes[2])).toEqual({ status: 404, body: { error: 'not found' } });
+    expect(calls).toEqual(['lookup']);
   });
 
   it('reclaim fallback refusal wins over foreign ownership and claiming', () => {
