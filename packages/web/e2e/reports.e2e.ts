@@ -1,4 +1,4 @@
-import { projectPaths } from '../../cezar/src/project-paths.ts'
+import { projectPaths, runDataDir } from '../../cezar/src/project-paths.ts'
 import { productCommand } from './product'
 import { Home } from '../../cezar/src/home/home.ts';
 import { execFileSync, type ChildProcess } from 'node:child_process'
@@ -182,7 +182,8 @@ it('shows a deleted snapshot as missing and drops reports after snapshot or task
     const baseUrl = await waitForFixtureServer(deletionServer)
     browser.goto(baseUrl + path)
     browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 25`)
-    rmSync(join(projectPaths(project).write, 'runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
+    // The tasks are done, not archived: after the boot's move they keep their artifacts in .ai/cezar/ (owner decision A).
+    rmSync(join(runDataDir(projectPaths(project).write, runIds[0]!), 'runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
     browser.click(`[data-report-id="${ids[0]}"]`)
     browser.waitForFunction(`document.body.textContent.includes('Report missing or deleted')`)
     browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
