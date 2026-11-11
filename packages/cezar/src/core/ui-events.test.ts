@@ -68,6 +68,9 @@ describe('UiEvent vocabulary (compile-time contract)', () => {
   it('every UiEvent type is covered by a rendering-relevance map (compile-time exhaustive)', () => {
     // Adding a UiEvent variant without deciding how the UI treats it fails
     // this `satisfies` — the map is the honesty check for future additions.
+    // Its keys are also the shipped v2 type strings. They are in saved NDJSON
+    // transcripts: add a key for a new variant, never remove or rename one
+    // (`shipped-event-types.test.ts` holds the same rule for v1).
     const renderRelevance = {
       'session.started': 'meta',
       'session.ended': 'meta',

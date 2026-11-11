@@ -1,6 +1,7 @@
 import type { ProviderStatus, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 
-const RUNNER_ORDER: readonly Runner[] = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']
+const RUNNER_ORDER: readonly Runner[] = runnerSchema.options
 const PROVIDER_STATES = new Set(['connected', 'disconnected', 'not-installed', 'unknown'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {

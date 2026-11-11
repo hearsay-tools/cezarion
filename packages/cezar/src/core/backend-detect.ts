@@ -1,4 +1,5 @@
 import { productIdentity } from '../home/identity.ts';
+import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { productEnv } from './product-env.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -6,7 +7,7 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'omp' | 'gh' | 'git';
+  name: RunnerId | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;
@@ -20,17 +21,18 @@ export interface BackendCheck {
  * shows the hints for the rest.
  */
 export async function detectEnvironment(): Promise<BackendCheck[]> {
-  return Promise.all([
-    probeClaude(),
-    probeCodex(),
-    probeOpencode(),
-    probePi(),
-    probeCursor(),
-    probeOmp(),
-    probeGh(),
-    probeGit(),
-  ]);
+  return Promise.all([...RUNNER_IDS.map((runner) => RUNNER_PROBES[runner]()), probeGh(), probeGit()]);
 }
+
+/** One probe per runner: a runner id without a probe does not compile. */
+const RUNNER_PROBES: Record<RunnerId, () => Promise<BackendCheck>> = {
+  claude: probeClaude,
+  codex: probeCodex,
+  opencode: probeOpencode,
+  pi: probePi,
+  cursor: probeCursor,
+  omp: probeOmp,
+};
 
 /** Banner spelling follows the release identity; switch-off output stays stable. */
 function dryRunVersion(): string {

@@ -1,0 +1,22 @@
+id: child-killed-read
+valid:
+  - "const hasExited = trackChildExit(child); if (!hasExited()) child.kill('SIGKILL')"
+  - "if (error.killed) retry()"
+  - "const timedOut = commandError?.killed === true && commandError.signal === 'SIGTERM'"
+  - "const ordinary = error.code === 1 && !error.killed"
+  - "if (failure.err.killed) retry()"
+  - "if (failure.killed === true || typeof failure.signal === 'string') return late"
+  - "const killed = hasExited()"
+  - "const row = { killed: true }"
+  - "child.kill('SIGTERM')"
+  - "counts.killedWorkers += 1"
+  - "// child.killed"
+invalid:
+  - "if (!child.killed) child.kill('SIGKILL')"
+  - "if (child?.killed) return"
+  - "const gone = this.child.killed"
+  - "const gone = state.server!.killed"
+  - "if (proc.killed === false) proc.kill('SIGKILL')"
+  - "const { killed } = child"
+  - "const { killed: gone } = child"
+  - "function done({ killed }: ChildProcess) { return killed }"

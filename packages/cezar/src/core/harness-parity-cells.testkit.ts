@@ -79,6 +79,7 @@ import {
   type RunnerId,
   type ToolGrant,
 } from './agent-runner.ts';
+import { exemptionReasonProblem } from './exemption-reason.testkit.ts';
 import { runnersUnderTest } from './runners-under-test.testkit.ts';
 import { shellQuote } from './shell-env.ts';
 import { explicitToolGrant } from './tool-grant.testkit.ts';
@@ -2323,7 +2324,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         for (const exemption of PARITY_EXEMPTIONS) {
           expect(allIds).toContain(exemption.criterion);
           expect(RUNNER_IDS as readonly string[]).toContain(exemption.backend);
-          expect(exemption.reason.trim()).not.toBe('');
+          expect(exemptionReasonProblem(exemption.reason), `${exemption.criterion}/${exemption.backend}`).toBeUndefined();
         }
       });
 

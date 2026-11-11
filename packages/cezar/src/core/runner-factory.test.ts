@@ -21,4 +21,8 @@ describe('createRunner', () => {
   it.each([['claude-cli'], [undefined]] as const)('builds the claude runner for %s', (id) => {
     expect(createRunner(id)).toBeInstanceOf(ClaudeCliRunner);
   });
+
+  it('builds the claude runner for an unknown stored string', () => {
+    expect(createRunner('retired-runner' as never)).toBeInstanceOf(ClaudeCliRunner);
+  });
 });
