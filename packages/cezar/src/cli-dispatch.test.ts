@@ -263,27 +263,15 @@ describe.each([false, true])('CLI metadata (switch %s)', rebrand => {
     }
   });
 
-  it('prints help when home resolution fails', async () => {
+  it('prints help without resolving Home, so a host without one still gets it', async () => {
     const f = fixture(['--help']);
     f.processStub.argv[1] = '/bin/hsq';
     f.deps.resolveCliHome.mockImplementation(() => { throw new Error('No home directory'); });
     await main(f.deps as unknown as CliDeps, rebrand);
     expect(f.deps.console.log.mock.calls[0]?.[0]).toContain('Usage:');
-    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain(
-      `manage the desktop installation under ${rebrand ? 'the data folder' : '~/.cezar/versions'}`,
-    );
     expect(f.processStub.exitCode ?? 0).toBe(0);
+    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
     expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
     expect(f.deps.console.error).not.toHaveBeenCalled();
-  });
-
-  it('shows the resolved versions path only after the switch', async () => {
-    const f = fixture(['--help']);
-    f.processStub.argv[1] = '/bin/hsq';
-    await main(f.deps as unknown as CliDeps, rebrand);
-    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain(
-      `manage the desktop installation under ${rebrand ? f.home.versions : '~/.cezar/versions'}`,
-    );
-    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
   });
 });
