@@ -6,6 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { pickPullRequestRun } = require('./fetch-ci-results.cjs');
 const { compatibilityEntry, COMPATIBILITY_ENTRIES } = require('../../packages/cezar/src/release/compatibility.ts');
+const { productIdentity } = require('../../packages/cezar/src/home/identity.ts');
 const positive = n => Number.isSafeInteger(n) && n > 0;
 const successful = job => job?.status === 'completed' && job.conclusion === 'success';
 
@@ -123,7 +124,7 @@ function validateArchives({ artifacts, manifests, plan }) {
   if (!version || entries.some(e => e.pkg.version !== version)) throw new Error('Snapshot versions differ');
   const service = entries.find(e => e.key === 'cezar');
   const alias = entries.find(e => e.key === 'alias');
-  if (!service || !alias || alias.pkg.dependencies?.[service.pkg.name] !== version) throw new Error('Alias must pin the service snapshot');
+  if (!service || (manifests.alias && alias?.pkg.dependencies?.[service.pkg.name] !== version)) throw new Error('Alias must pin the service snapshot');
   for (const { pkg } of entries) {
     for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
       for (const sibling of Object.values(manifests)) {
@@ -152,4 +153,15 @@ function publishArchives({ entries, plan, dryRun, execute = execFileSync }) {
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 }
 
-module.exports = { resolveSnapshot, validateArchives, publishArchives };
+// The sticky comment's command. The new identity has no alias package: npm refuses `hsq`.
+function previewCommand(entries, pr) {
+  const service = entries.find(e => e.key === 'cezar').pkg;
+  const alias = entries.find(e => e.key === 'alias')?.pkg;
+  return {
+    version: service.version,
+    run: alias ? `npx ${alias.name}@${alias.version}` : `npx -p ${service.name}@${service.version} ${productIdentity(true).command}`,
+    tag: `${(alias ?? service).name}@pr-${pr}`,
+  };
+}
+
+module.exports = { resolveSnapshot, validateArchives, publishArchives, previewCommand };

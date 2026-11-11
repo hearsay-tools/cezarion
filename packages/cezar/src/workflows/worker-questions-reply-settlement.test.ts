@@ -5,7 +5,7 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { eventCheckpoint, manager, restart, root, semaphore, store, until, waitOf } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, semaphore, store, until, waitOf } from './worker-wait-claude.testkit.ts';
 import { conversationOf, eventsOf, closedAs, noHumanCard, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {

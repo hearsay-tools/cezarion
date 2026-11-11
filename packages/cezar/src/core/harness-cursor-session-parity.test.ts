@@ -1,4 +1,4 @@
-import { describeHarnessParity } from './harness-parity-cells.testkit.ts';
+import { describeHarnessParity } from './harness-parity-session.cells.testkit.ts';
 import { CursorRunner } from './cursor-runner.ts';
 import { onlyRunner, useRunners } from './runners-under-test.testkit.ts';
 

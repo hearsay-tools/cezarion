@@ -11,6 +11,7 @@ import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runWorkerCommand, runMessageCommand } from './cli.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
+import '../core/every-runner.testkit.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, expect, vi } from 'vitest';
 import { CredentialRegistry, type Caller } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { bookkeeping, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { bookkeeping, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 import { setRunStatus, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';

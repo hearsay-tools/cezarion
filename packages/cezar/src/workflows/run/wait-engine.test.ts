@@ -8,7 +8,7 @@ import { makeHumanWait, makePeerWait, makePrWait, makeProcessWait, makeSubagentW
 import { RunStore } from '../../runs/store.ts';
 import { WaitCapacityError } from '../../runs/wait-capacity.ts';
 import { createActiveRun } from '../active-run.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import type { RunModuleContext } from './types.ts';
 import { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';

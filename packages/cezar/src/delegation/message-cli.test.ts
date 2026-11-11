@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSubcommand } from '../subcommands.ts';
 import { runWorkerCommand } from './cli.ts';
+import '../core/every-runner.testkit.ts';
 import { fixture } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';

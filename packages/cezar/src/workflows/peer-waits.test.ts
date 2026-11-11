@@ -15,7 +15,7 @@ import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { stateOf } from './run-states.ts';
-import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 /**
  * The `peer` wait (hearsay-tools/cezarion#1995), spec 2026-10-27-task-communication-protocol § 7:

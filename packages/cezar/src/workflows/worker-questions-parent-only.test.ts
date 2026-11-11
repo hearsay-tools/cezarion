@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { eventCheckpoint, manager, restart, store, toolGenerationOf, until } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, store, toolGenerationOf, until } from './worker-wait-claude.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { eventsOf, askedPair, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 

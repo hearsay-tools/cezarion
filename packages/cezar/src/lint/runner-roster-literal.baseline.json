@@ -2,7 +2,7 @@
   "$comment": "Files that keep a hand-written list of every runner id, each with its count and a reason (cez/runner-roster-literal). The list only shrinks: npm run lint refuses a stale entry and CI refuses a new one.",
   "entries": [
     {
-      "file": "packages/contract/src/health.ts",
+      "file": "packages/contract/src/runner.ts",
       "count": 1,
       "reason": "the contract's own roster: the package is Node-free and cannot import the service; runner-roster-literal.test.ts holds it equal to RUNNER_IDS"
     },

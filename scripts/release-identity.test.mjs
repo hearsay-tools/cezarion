@@ -39,7 +39,8 @@ function fixture(rebrand) {
     put(`packages/${folder}/package.json`, `${JSON.stringify(pkg, null, 2)}\n`);
     put(`packages/${folder}/entry.js`, 'export {};\n');
   }
-  for (const alias of ['alias-cezarion', 'alias-hsq']) {
+  {
+    const alias = 'alias-cezarion';
     cpSync(join(root, alias), join(dir, alias), { recursive: true });
     const file = join(dir, alias, 'package.json');
     const pkg = JSON.parse(readFileSync(file));
@@ -86,7 +87,7 @@ function run(dir, channel, packOnly = false) {
 
 function releaseSnapshot(dir, calls) {
   const manifests = {};
-  for (const folder of ['packages/contract', 'packages/api-client', 'packages/cezar', 'packages/web', 'alias-cezarion', 'alias-hsq']) {
+  for (const folder of ['packages/contract', 'packages/api-client', 'packages/cezar', 'packages/web', 'alias-cezarion']) {
     manifests[folder] = readFileSync(join(dir, folder, 'package.json'), 'utf8');
   }
   return { manifests, calls: calls.map(call => ({ ...call, cwd: relative(dir, call.cwd) })) };
@@ -96,21 +97,27 @@ for (const rebrand of [false, true]) for (const [name, channel] of Object.entrie
   test(`${name} release uses the selected identity with switch ${rebrand}`, () => {
     const dir = fixture(rebrand);
     try {
-      const inactive = join(dir, rebrand ? 'alias-cezarion' : 'alias-hsq', 'package.json');
+      // With the switch on, the old alias directory is not stamped: the forwarding packages replace it.
+      const inactive = join(dir, 'alias-cezarion', 'package.json');
       const before = readFileSync(inactive, 'utf8');
       const stdout = run(dir, channel);
       const calls = readFileSync(join(dir, 'calls.ndjson'), 'utf8').trim().split('\n').map(JSON.parse);
-      assert.deepEqual(calls.map(c => c.pkg.name), rebrand ? ['@hearsay-tools/squawk', 'hsq', '@wjarka/cezarion', 'cezarion'] : ['@wjarka/cezarion', 'cezarion']);
-      assert.deepEqual(calls.map(c => c.args), Array(rebrand ? 4 : 2).fill(['publish', '--tag', channel.tag, '--access', 'public', '--ignore-scripts', '--dry-run']));
+      // npm refuses the unscoped name `hsq`, so the new identity publishes no alias package.
+      assert.deepEqual(calls.map(c => c.pkg.name), rebrand ? ['@hearsay-tools/squawk', '@wjarka/cezarion', 'cezarion'] : ['@wjarka/cezarion', 'cezarion']);
+      assert.deepEqual(calls.map(c => c.args), Array(rebrand ? 3 : 2).fill(['publish', '--tag', channel.tag, '--access', 'public', '--ignore-scripts', '--dry-run']));
       const range = name === 'stable' ? `^${channel.version}` : channel.version;
-      assert.deepEqual(calls[1].pkg.dependencies, { [calls[0].pkg.name]: range });
+      if (!rebrand) assert.deepEqual(calls[1].pkg.dependencies, { [calls[0].pkg.name]: range });
       assert.equal(calls[0].pkg.version, channel.version);
-      if (rebrand) for (const call of calls.slice(2)) {
+      const result = JSON.parse(stdout.match(/result: (\{.*\})$/m)[1]);
+      const command = rebrand ? `npx -p @hearsay-tools/squawk@${channel.version} hsq` : `npx cezarion@${channel.version}`;
+      if (name === 'stable') assert.equal(result.runCommand, command);
+      else assert.ok(result.installLines.every(line => line.startsWith(`${command} `)), result.installLines.join('\n'));
+      if (rebrand) for (const call of calls.slice(1)) {
         assert.deepEqual(call.pkg.dependencies, { [calls[0].pkg.name]: channel.version,
           ...(call.pkg.name === 'cezarion' ? { '@wjarka/cezarion': channel.version } : {}) });
         assert.deepEqual(call.pkg.bin, { cezarion: 'dist/index.js', cez: 'dist/index.js', hsq: 'dist/hsq.js' });
       }
-      assert.equal(readFileSync(inactive, 'utf8'), before);
+      if (rebrand) assert.equal(readFileSync(inactive, 'utf8'), before);
       const source = readFileSync(join(dir, 'packages/cezar/package.json'), 'utf8');
       assert.equal(JSON.parse(source).name, '@wjarka/cezarion');
       assert.equal(JSON.parse(readFileSync(join(dir, 'packages/web/package.json'))).devDependencies['@wjarka/cezarion'], range);
@@ -125,7 +132,7 @@ for (const rebrand of [false, true]) for (const [name, channel] of Object.entrie
         const snapshot = releaseSnapshot(dir, calls.map(call => {
           const { gitHead: _source, ...pkg } = call.pkg;
           const cwd = pkg.name === '@hearsay-tools/squawk' ? join(dir, '<publication>')
-            : pkg.name === 'hsq' ? call.cwd : join(dir, '<compatibility>', pkg.name === 'cezarion' ? 'legacyAlias' : 'legacyScoped');
+            : join(dir, '<compatibility>', pkg.name === 'cezarion' ? 'legacyAlias' : 'legacyScoped');
           return { ...call, pkg, cwd };
         }));
         const file = join(root, 'scripts/fixtures/release-identity', `${name}-on.json`);
@@ -189,7 +196,7 @@ for (const rebrand of [false, true]) {
         execFileSync('tar', ['-czf', join(artifacts, `${key}.tgz`), '-C', folder, 'package']);
       };
       pack('cezar', { name: manifests.cezar.name, version });
-      pack('alias', { name: manifests.alias.name, version, dependencies: { [manifests.cezar.name]: version } });
+      if (manifests.alias) pack('alias', { name: manifests.alias.name, version, dependencies: { [manifests.cezar.name]: version } });
       for (const key of ['legacyScoped', 'legacyAlias']) {
         if (manifests[key]) {
           const pkg = { ...manifests[key], version, dependencies: Object.fromEntries(Object.keys(manifests[key].dependencies).map(name => [name, version])) };
@@ -222,12 +229,11 @@ for (const rebrand of [false, true]) {
     try {
       run(dir, channels.pr, true);
       const calls = readFileSync(join(dir, 'calls.ndjson'), 'utf8').trim().split('\n').map(JSON.parse);
-      assert.deepEqual(calls.map(c => c.pkg.name), rebrand ? ['@hearsay-tools/squawk', 'hsq', '@wjarka/cezarion', 'cezarion'] : ['@wjarka/cezarion', 'cezarion']);
-      assert.deepEqual(calls.map(c => c.args), Array(rebrand ? 4 : 2).fill(['pack', '--ignore-scripts', '--json', '--pack-destination', join(dir, 'snapshot-artifacts')]));
+      assert.deepEqual(calls.map(c => c.pkg.name), rebrand ? ['@hearsay-tools/squawk', '@wjarka/cezarion', 'cezarion'] : ['@wjarka/cezarion', 'cezarion']);
+      assert.deepEqual(calls.map(c => c.args), Array(rebrand ? 3 : 2).fill(['pack', '--ignore-scripts', '--json', '--pack-destination', join(dir, 'snapshot-artifacts')]));
       assert.equal(readFileSync(join(dir, 'snapshot-artifacts/cezar.tgz'), 'utf8'), 'stub');
-      assert.equal(readFileSync(join(dir, 'snapshot-artifacts/alias.tgz'), 'utf8'), 'stub');
       assert.deepEqual(require('node:fs').readdirSync(join(dir, 'snapshot-artifacts')).sort(),
-        (rebrand ? ['cezar', 'alias', 'legacyScoped', 'legacyAlias'] : ['cezar', 'alias']).map(key => `${key}.tgz`).sort());
+        (rebrand ? ['cezar', 'legacyScoped', 'legacyAlias'] : ['cezar', 'alias']).map(key => `${key}.tgz`).sort());
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   test(`CI packs and cleanup use the selected identity with switch ${rebrand}`, () => {
@@ -235,21 +241,23 @@ for (const rebrand of [false, true]) {
     try {
       const calls = [];
       packChecks({ root: dir, rebrand, execute: (cmd, args, options) => calls.push({ cmd, args, options, bytes: readFileSync(join(options.cwd, 'package.json'), 'utf8') }) });
-      assert.equal(calls.length, rebrand ? 4 : 2);
+      assert.equal(calls.length, rebrand ? 3 : 2);
       assert.equal(calls[0].cmd, 'npm');
       assert.deepEqual(calls[0].args, rebrand ? ['pack', '--dry-run', '--ignore-scripts'] : ['pack', '--dry-run', '--ignore-scripts', '-w', '@wjarka/cezarion']);
       if (rebrand) assert.equal(JSON.parse(calls[0].bytes).name, '@hearsay-tools/squawk');
       else assert.equal(calls[0].bytes, readFileSync(join(dir, 'package.json'), 'utf8'));
       assert.deepEqual(calls[1].args, ['pack', '--dry-run', '--ignore-scripts']);
-      assert.equal(relative(dir, calls[1].options.cwd), rebrand ? 'alias-hsq' : 'alias-cezarion');
+      if (!rebrand) assert.equal(relative(dir, calls[1].options.cwd), 'alias-cezarion');
       const packages = releasePackages(dir, rebrand);
-      assert.equal(packages.dirs.alias, rebrand ? 'alias-hsq' : 'alias-cezarion');
-      assert.equal(releaseBumpFilePattern(rebrand).test(`${packages.dirs.alias}/package.json`), true);
-      assert.equal(releaseBumpFilePattern(!rebrand).test(`${packages.dirs.alias}/package.json`), false);
-      assert.deepEqual(releaseBumpPaths(rebrand), ['packages/*/package.json', `${packages.dirs.alias}/package.json`, 'pnpm-lock.yaml']);
+      assert.equal(packages.dirs.alias, rebrand ? undefined : 'alias-cezarion');
+      assert.equal(releaseBumpFilePattern(rebrand).test('alias-cezarion/package.json'), !rebrand);
+      assert.equal(releaseBumpFilePattern(rebrand).test('alias-hsq/package.json'), false);
+      assert.equal(releaseBumpFilePattern(rebrand).test('packages/cezar/package.json'), true);
+      assert.deepEqual(releaseBumpPaths(rebrand), ['packages/*/package.json', ...(rebrand ? [] : ['alias-cezarion/package.json']), 'pnpm-lock.yaml']);
       const cleanup = [];
       const names = cleanupTags({ root: dir, rebrand, tag: 'pr-7', execute: (cmd, args) => cleanup.push({ cmd, args }) });
-      assert.deepEqual(names, [rebrand ? '@hearsay-tools/squawk' : '@wjarka/cezarion', '@open-mercato/cezar-api-client', rebrand ? 'hsq' : 'cezarion', ...(rebrand ? ['@wjarka/cezarion', 'cezarion'] : [])]);
+      assert.deepEqual(names, rebrand ? ['@hearsay-tools/squawk', '@open-mercato/cezar-api-client', '@wjarka/cezarion', 'cezarion']
+        : ['@wjarka/cezarion', '@open-mercato/cezar-api-client', 'cezarion']);
       assert.deepEqual(cleanup.map(c => c.args), names.map(pkg => ['dist-tag', 'rm', pkg, 'pr-7']));
       assert.deepEqual(cleanupTags({ root: dir, rebrand, tag: 'pr-7', dryRun: true, execute: () => assert.fail('dry cleanup executed npm') }), names);
     } finally { rmSync(dir, { recursive: true, force: true }); }

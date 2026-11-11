@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 import { waitForSettledSample } from './visual-ready'
 import { dismissWithEscape } from './contrast'

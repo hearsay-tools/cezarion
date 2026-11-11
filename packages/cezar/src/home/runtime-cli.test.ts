@@ -43,7 +43,7 @@ it('keeps init command generation inside the CLI home boundary', async () => {
     vi.resetModules();
     await import('../index.ts');
     await done;
-    expect(log).toHaveBeenCalledWith(`\nDone. Start the cockpit with: npx ${productIdentity().npmAlias}`);
+    expect(log).toHaveBeenCalledWith(`\nDone. Start the cockpit with: ${productIdentity().npx}`);
     expect(readFileSync(join(expectedWriteRoot, 'workflows/fix-and-verify.yaml'), 'utf8')).toContain('name: fix-and-verify');
   } finally {
     process.argv = argv;

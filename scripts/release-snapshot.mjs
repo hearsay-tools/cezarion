@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS } from '../packages/cezar/dist/release/manifests.js';
+import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS, releaseRunCommand } from '../packages/cezar/dist/release/manifests.js';
 import { withCompatibilityPackages } from '../packages/cezar/dist/release/compatibility.js';
 import { withPublicationPackage } from '../packages/cezar/dist/release/publication.js';
 import {
@@ -147,9 +147,9 @@ emitOutput({
   dryRun,
   rootName: publication.cezar.name,
   apiClientName: stamped.apiClient.name,
-  aliasName: stamped.alias.name,
   version: plan.version,
   distTag: plan.distTag,
   publishedNames: published.join(','),
-  installLines: buildInstallLines(stamped.alias.name, plan.version),
+  tagCommand: releaseRunCommand(publication, plan.distTag),
+  installLines: buildInstallLines(releaseRunCommand(publication, plan.version)),
 });

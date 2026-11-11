@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { runnerSchema, type Runner } from './health.ts';
+import { runnerSchema, type Runner } from './runner.ts';
 
 /**
  * The WORKFLOWS family: the chain catalog, the save/parse routes, and the planner.

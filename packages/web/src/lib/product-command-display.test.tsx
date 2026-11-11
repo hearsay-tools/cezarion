@@ -21,8 +21,8 @@ vi.mock('./product-name', async importOriginal => {
   return {
     ...actual,
     productCommand: () => actual.productCommand(state.identity),
-    productNpmAlias: () => actual.productNpmAlias(state.identity),
-    productNpmPackage: () => actual.productNpmPackage(state.identity),
+    productNpx: () => actual.productNpx(state.identity),
+    productPackageNpx: () => actual.productPackageNpx(state.identity),
     productName: (legacy: 'cezar' | 'Cezar' | 'Cezarion') => actual.productName(legacy, state.identity),
   }
 })
@@ -63,7 +63,7 @@ describe.each([false, true])('browser command hints (switch %s)', rebrand => {
     client.setQueryData(selfUpdateQueryKeys.status, status)
     render(<QueryClientProvider client={client}><SelfUpdateDialog open onOpenChange={() => {}} /></QueryClientProvider>)
     const command = installKind === 'checkout' ? 'node packages/cezar/dist/index.js install'
-      : installKind === 'global-npm' ? `${state.identity.command} install` : `npx ${state.identity.npmPackage} install`
+      : installKind === 'global-npm' ? `${state.identity.command} install` : `${rebrand ? 'npx -p @hearsay-tools/squawk hsq' : 'npx @wjarka/cezarion'} install`
     expect(screen.getByText(command)).toBeTruthy()
   })
 
@@ -84,7 +84,8 @@ describe.each([false, true])('browser command hints (switch %s)', rebrand => {
     )
     expect(screen.getByText(`${state.identity.command} automation schema`)).toBeTruthy()
     expect(screen.getByText(`${state.identity.command} remote-settings enable`)).toBeTruthy()
-    expect(screen.getByText(`npx ${state.identity.npmAlias}`)).toBeTruthy()
+    expect(screen.getByText(state.identity.npx)).toBeTruthy()
+    expect(state.identity.npx).toBe(rebrand ? 'npx -p @hearsay-tools/squawk hsq' : 'npx cezarion')
     expect(screen.getByText((text, element) => element?.tagName === 'PRE' && text.includes(`${state.identity!.command} automation add`))).toBeTruthy()
   })
 })

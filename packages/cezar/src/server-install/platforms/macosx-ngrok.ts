@@ -14,7 +14,7 @@ import { REBRAND_SWITCH } from '../../home/switch.ts';
 import { launchdHealthDetails, migrateLaunchd, rollbackLaunchdMigration, startLaunchdServices, stopLaunchdServices, unloadLaunchd, type LaunchdService } from './macosx-migration.ts';
 import { applyMigrationReport } from '../migration-report.ts';
 import { guardLaunchdWrite, ownsLaunchdPlist, readLaunchdPlist } from './macosx-launchd-files.ts';
-import { refreshNpxCacheForRedeploy } from '../npx-cache.ts';
+import { npxLaunchArgs, refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 
 /**
  * The `macosx-ngrok` strategy: the app runs locally on a Mac and ngrok is the
@@ -306,21 +306,21 @@ export async function resolveCezarArgv(ctx: InstallContext, rebrand = REBRAND_SW
   const node = process.execPath;
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const entry = join(pkgRoot, 'dist', rebrand ? `${productIdentity(rebrand).command}.js` : 'index.js');
-  const cliPackage = productIdentity(rebrand).npmAlias;
+  const identity = productIdentity(rebrand);
   const npxPath = join(dirname(node), 'npx');
 
-  if (/[/\\]_npx[/\\]/.test(pkgRoot)) return [npxPath, '--yes', cliPackage];
+  if (/[/\\]_npx[/\\]/.test(pkgRoot)) return [npxPath, ...npxLaunchArgs(rebrand)];
   if (ctx.dryRun || existsSync(entry)) return [node, entry];
 
-  const out = (await ctx.runner.capture('bash', ['-lc', rebrand ? `command -v ${productIdentity(rebrand).command}` : `command -v ${cliPackage} || command -v cez`])).stdout.trim();
+  const out = (await ctx.runner.capture('bash', ['-lc', identity.rebrand ? `command -v ${identity.command}` : `command -v ${identity.npmAlias} || command -v cez`])).stdout.trim();
   const globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
   if (globalBin) return [node, globalBin];
 
   // No runnable cezar → installing a KeepAlive agent would make launchd
   // respawn-throttle a permanently failing job across reboots. Fail the step.
   throw new StepAborted(
-    `could not locate a runnable ${productName('cezar', rebrand)} (${entry} missing, no global ${cliPackage}) — ` +
-      `install it (npm i -g ${cliPackage}) or build the checkout, then re-run with --reconfigure autostart`,
+    `could not locate a runnable ${productName('cezar', rebrand)} (${entry} missing, no global ${identity.npmAlias ?? identity.command}) — ` +
+      `install it (npm i -g ${identity.npmAlias ?? identity.npmPackage}) or build the checkout, then re-run with --reconfigure autostart`,
   );
 }
 

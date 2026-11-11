@@ -28,7 +28,7 @@ import {
   type AgentProfile,
   type AgentProfilesResponse,
 } from '@open-mercato/cezar-api-client/contract/agent-profiles'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 import type {
   BackendCheck,
   ProviderId,

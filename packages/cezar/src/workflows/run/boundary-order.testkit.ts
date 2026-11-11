@@ -9,7 +9,7 @@ import type { AgentSession } from '../../core/agent-runner.ts';
 import { type RunRecord, RunStore } from '../../runs/store.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { createActiveRun, type ActiveRun } from '../active-run.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { TurnSettler } from './turn-settler.ts';
 import { HumanWaits } from './human-waits.ts';
 import { WorkerQuestions } from './worker-questions.ts';

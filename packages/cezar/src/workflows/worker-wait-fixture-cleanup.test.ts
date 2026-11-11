@@ -1,6 +1,7 @@
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { manager, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import '../core/no-runner.testkit.ts';
+import { manager, semaphore, store, until, useWorkerWaitFixture } from './worker-wait-core.testkit.ts';
 
 useWorkerWaitFixture();
 

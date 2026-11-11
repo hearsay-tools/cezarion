@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { controlledWire, manager, parent, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait-claude.testkit.ts';
 import type { TimerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { conversationPair, turnEnds } from './worker-wait-conversations.testkit.ts';
 

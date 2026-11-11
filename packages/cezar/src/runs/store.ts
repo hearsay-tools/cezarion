@@ -355,7 +355,7 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   });
   // Told once, by the import that committed: the marker means no later open reads runs.json again.
   if (commit.skipped || backup === undefined) return;
-  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; https://github.com/hearsay-tools/cezarion/blob/main/docs/run-history-recovery.md says how to import it after a repair.`;
+  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; https://github.com/hearsay-tools/squawk/blob/main/docs/run-history-recovery.md says how to import it after a repair.`;
   if (!parsed) console.warn(`${logPrefix()} ${LEGACY_INDEX_FILE} could not be read; no run was imported, and this project starts with an empty history. ${kept}`);
   else if (skipped > 0) console.warn(`${logPrefix()} ${skipped} of ${parsed.total} runs in ${LEGACY_INDEX_FILE} could not be read and were not imported. ${kept}`);
 }

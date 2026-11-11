@@ -2,7 +2,7 @@ import { seedWaits } from '../../runs/run-store.testkit.ts';
 import type { RunLine } from './run-line.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeHumanWait, makeTimerWait, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { boundaryOrderFixture } from './boundary-order.testkit.ts';
 import { MemoryGuard } from './memory-guard.ts';
 import { SubagentWaits } from './subagent-waits.ts';

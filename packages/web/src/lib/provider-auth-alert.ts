@@ -3,7 +3,7 @@ import type {
   ProviderStatusResponse,
   WorkspaceUiState,
 } from '@open-mercato/cezar-api-client'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 const PROVIDERS: readonly ProviderId[] = runnerSchema.options
 const LABELS: Record<ProviderId, string> = {

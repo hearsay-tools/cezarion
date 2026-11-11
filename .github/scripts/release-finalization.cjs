@@ -25,11 +25,12 @@ function failed(core, error) {
   core.setFailed(reason);
 }
 
-function releaseMetadata(version, published, alias) {
+// The run command is `npx cezarion@V` with the switch off, so old release bodies still match.
+function releaseMetadata(version, published, runCommand) {
   return [
     '## Published packages', '', '| Package | Version |', '|---|---|',
     ...published.map((name) => `| \`${name}\` | \`${version}\` |`),
-    '', '### Install', '', '```bash', `npx ${alias}@${version}`, '```',
+    '', '### Install', '', '```bash', runCommand, '```',
   ].join('\n');
 }
 
@@ -175,10 +176,10 @@ async function githubRelease({ github, context, core }) {
   core.setOutput('tag_verified', 'false');
   try {
     if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) throw new Error('Missing or invalid release version.');
-    const alias = process.env.ALIAS_NAME;
+    const runCommand = process.env.RUN_COMMAND;
     const published = (process.env.PUBLISHED_NAMES ?? '').split(',').filter(Boolean);
-    if (!alias || !published.length) throw new Error('Missing published package names.');
-    const metadata = releaseMetadata(version, published, alias);
+    if (!runCommand || !published.length) throw new Error('Missing published package names.');
+    const metadata = releaseMetadata(version, published, runCommand);
     const verifyTag = async () => {
       const ref = await readOptional(() => github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }));
       if (!ref) return false;
@@ -220,7 +221,7 @@ function summary() {
   const release = env.RELEASE_STATUS || 'not completed';
   const lines = [
     `## Release ${env.VERSION}`, '',
-    `- npm publication: ${published ? `published \`${env.ALIAS_NAME}@${env.VERSION}\` (including packages already published on an earlier attempt)` : 'dry run — nothing was published'}.`,
+    `- npm publication: ${published ? `published \`${env.ROOT_NAME}@${env.VERSION}\` (including packages already published on an earlier attempt)` : 'dry run — nothing was published'}.`,
     `- Version-bump PR: ${published ? pr : 'skipped'}${env.PR_URL ? ` — ${env.PR_URL}` : ''}.`,
     `- Version-bump CI: ${published ? env.CI_STATUS || 'not requested' : 'skipped'}${env.CI_URL ? ` — ${env.CI_URL}` : ''}.`,
     `- GitHub Release: ${published ? release : 'skipped'}${env.RELEASE_URL ? ` — ${env.RELEASE_URL}` : ''}.`,

@@ -472,7 +472,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     for (const [name, text] of Object.entries(files)) writeFileSync(join(dataDir, name), text);
     const failure = openFailure({ retryBusy: true });
     expect(failure.kind).toBe('corrupt');
-    expect(failure.message).toMatch(new RegExp(`runs\\.db is damaged \\(.*\\)\\. ${productName("cezar")} left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs\\.json\\.pre-sqlite\\.bak as https:\\/\\/github\\.com\\/hearsay-tools\\/cezarion\\/blob\\/main\\/docs\\/run-history-recovery\\.md describes, then restart ${productName("cezar")}\\.$`, ""));
+    expect(failure.message).toMatch(new RegExp(`runs\\.db is damaged \\(.*\\)\\. ${productName("cezar")} left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs\\.json\\.pre-sqlite\\.bak as https:\\/\\/github\\.com\\/hearsay-tools\\/squawk\\/blob\\/main\\/docs\\/run-history-recovery\\.md describes, then restart ${productName("cezar")}\\.$`, ""));
     for (const [name, text] of Object.entries(files)) expect(readFileSync(join(dataDir, name), 'utf8')).toBe(text);
     expect(readdirSync(dataDir).sort()).toEqual([...Object.keys(files), 'runs'].sort());
   });

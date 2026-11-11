@@ -121,7 +121,7 @@ const APPROVED: Record<string, string> = {
   'packages/web/src/routes/frame.ts': "switch (message.t) { case 'cursor': break; }\n",
   // runner-roster-literal: the definition, a listed roster, a subset and a derived list.
   'packages/cezar/src/core/agent-runner.ts': `export const RUNNER_IDS = [${ROSTER}] as const;\n`,
-  'packages/contract/src/health.ts': `export const runnerSchema = z.enum([${ROSTER}]);\n`,
+  'packages/contract/src/runner.ts': `export const runnerSchema = z.enum([${ROSTER}]);\n`,
   'packages/web/src/lib/runner-subset.ts': "const some = ['codex', 'pi'];\nconst stored = [...RUNNER_IDS, 'claude-cli'];\n",
   // undocumented-env-name: a documented name, a mock control, and a test.
   'packages/cezar/src/j.ts': "process.env.CEZ_DRY_RUN = '1'; env.CEZ_MOCK_ANYTHING = '1';\n",

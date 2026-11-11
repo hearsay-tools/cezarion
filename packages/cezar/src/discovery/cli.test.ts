@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { serve, type ServerType } from '@hono/node-server';
 import type { AddressInfo } from 'node:net';
 import { DelegationController } from '../delegation/provision.ts';
+import '../core/every-runner.testkit.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 import { createDelegationRoutes } from '../delegation/routes.ts';
 import { createDelegationApp, startDelegationTransport } from '../delegation/transport.ts';

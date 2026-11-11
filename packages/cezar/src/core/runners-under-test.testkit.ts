@@ -2,19 +2,39 @@ import type { SessionTransport } from '@open-mercato/cezar-contract';
 import type { AgentRunner, RunnerFactory, RunnerId } from './agent-runner.ts';
 
 /** The runner factory a test file drives. Each test file is its own module graph, so this is per
- *  file (hearsay-tools/cezarion#2939). */
+ *  file (hearsay-tools/cezarion#2939).
+ *
+ *  Two kinds of call choose it. `useRunners` is explicit: it always replaces the factory, so the
+ *  last explicit call wins. `core/every-runner.testkit.ts` makes one at import, and a test body
+ *  that calls it after its imports still wins. `offerRunners` is a default: it replaces only a
+ *  weaker offer, and never an explicit choice. `core/claude-runner.testkit.ts` offers
+ *  `RUNNER_OFFER.claude` and `core/no-runner.testkit.ts` offers `RUNNER_OFFER.none`. So when one
+ *  test file's closure holds several of these kits, every-runner beats claude, and claude beats
+ *  none, whatever the import order (hearsay-tools/cezarion#3242). */
 let current: RunnerFactory | undefined;
+let currentRank = 0;
+
+/** The rank of each default offer. A higher rank replaces a lower one. */
+export const RUNNER_OFFER = { none: 1, claude: 2 } as const;
 
 /** Choose the runners this test file's fixtures build. */
 export function useRunners(factory: RunnerFactory): void {
   current = factory;
+  currentRank = Number.POSITIVE_INFINITY;
+}
+
+/** Offer a default factory: it applies only when no explicit choice and no stronger offer exists. */
+export function offerRunners(factory: RunnerFactory, rank: number): void {
+  if (rank <= currentRank) return;
+  current = factory;
+  currentRank = rank;
 }
 
 /** The factory `useRunners` chose. A fixture asks for it only when a run starts a runner. */
 export function runnersUnderTest(): RunnerFactory {
   if (!current) {
     throw new Error('No runner factory for this test file: call useRunners() with the runner it drives, '
-      + 'or build the manager through workflows/fixture-cleanup.testkit.ts for every adapter.');
+      + 'or import core/claude-runner.testkit.ts, core/no-runner.testkit.ts or core/every-runner.testkit.ts.');
   }
   return current;
 }

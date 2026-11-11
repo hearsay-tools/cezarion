@@ -72,7 +72,7 @@ jobs:
         with:
           script: |
             const { releasePackages } = require('./.github/scripts/release-packages.cjs');
-            const { resolveSnapshot, validateArchives, publishArchives } = require('./.github/scripts/pr-snapshot.cjs');
+            const { resolveSnapshot, validateArchives, publishArchives, previewCommand } = require('./.github/scripts/pr-snapshot.cjs');
             const plan = JSON.parse(process.env.PLAN);
             const current = await resolveSnapshot({ github, ...context.repo, trigger: context.payload.workflow_run });
             if (JSON.stringify(current) !== JSON.stringify(plan)) {
@@ -83,9 +83,9 @@ jobs:
             const entries = validateArchives({ artifacts: process.env.ARCHIVES, manifests, plan });
             const dryRun = !process.env.NODE_AUTH_TOKEN;
             publishArchives({ entries, plan, dryRun });
-            const alias = entries.find(e => e.key === 'alias').pkg;
+            const preview = previewCommand(entries, plan.pr);
             const marker = '<!-- cezar-npm-preview -->';
-            const body = `${marker}\n### npm preview ${dryRun ? 'dry run (NPM_TOKEN not configured)' : 'published'} — \`${alias.version}\`\n\n\`npx ${alias.name}@${alias.version}\`\n\nMoving tag: \`${alias.name}@pr-${plan.pr}\``;
+            const body = `${marker}\n### npm preview ${dryRun ? 'dry run (NPM_TOKEN not configured)' : 'published'} — \`${preview.version}\`\n\n\`${preview.run}\`\n\nMoving tag: \`${preview.tag}\``;
             await core.summary.addRaw(body).write();
             const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: plan.pr, per_page: 100 });
             const existing = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));

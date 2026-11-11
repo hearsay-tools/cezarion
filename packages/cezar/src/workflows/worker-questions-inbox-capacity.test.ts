@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DelegationPolicyError } from '../delegation/policy.ts';
-import { fixtureUpdateRun, manager, root, store, until, worker } from './worker-wait.testkit.ts';
+import { fixtureUpdateRun, manager, root, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { eventsOf, cezarAnswered, noHumanCard, steeringParent, askedPair, answered, said, fillConversation, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 

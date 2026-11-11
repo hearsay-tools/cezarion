@@ -2,7 +2,7 @@ import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import { manager, parent, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { manager, parent, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 /** #505 review: accepted input a harness never reads must not hold the run forever. */
 describe('unread input liveness bound (#505)', { timeout: 45_000 }, () => {

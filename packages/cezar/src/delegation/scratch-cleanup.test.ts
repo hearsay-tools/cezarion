@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentTmpDir, agentTmpDirMayExist, agentTmpEnv, removeAgentTmpDir } from '../runs/agent-tmpdir.ts';
-import { manager, store, root, worker, reopenRuntime, useWorkerWaitFixture } from '../workflows/worker-wait.testkit.ts';
+import { manager, store, root, worker, reopenRuntime, useWorkerWaitFixture } from '../workflows/worker-wait-claude.testkit.ts';
 import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
 import { WorkerScratchCleanup } from './scratch-cleanup.ts';
 import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';

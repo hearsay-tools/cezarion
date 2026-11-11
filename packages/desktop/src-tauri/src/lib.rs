@@ -2050,7 +2050,7 @@ if (process.env.CEZ_SUPERVISOR_STDIN === '1') process.stdin.on('end', () => proc
 mod external_link_tests {
     #[test]
     fn only_web_links_and_the_exact_privacy_settings_link_open() {
-        assert!(super::allowed_external_url("https://github.com/hearsay-tools/cezarion"));
+        assert!(super::allowed_external_url("https://github.com/hearsay-tools/squawk"));
         assert!(super::allowed_external_url("x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders"));
         for url in ["file:///etc/passwd", "javascript:alert(1)", "x-apple.systempreferences:anything-else", "cmd:evil"] {
             assert!(!super::allowed_external_url(url));

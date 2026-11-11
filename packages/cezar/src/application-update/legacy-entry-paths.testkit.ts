@@ -44,7 +44,8 @@ export function oldInstallation(consumer: string, kind: ConsumerKind, alias: boo
   writeFileSync(join(packageRoot, 'dist/index.js'), 'console.log("previous implementation");');
   writeFileSync(join(packageRoot, 'web/dist/index.html'), 'previous cockpit');
   const scoped = JSON.parse(readFileSync(join(repo, 'packages/cezar/package.json'), 'utf8'));
-  writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ ...scoped, dependencies: {}, devDependencies: {}, scripts: {} }));
+  // The installation under test is the shipped v0.17.0, whatever version the repo is at now. A release bump must not make it look current.
+  writeFileSync(join(packageRoot, 'package.json'), JSON.stringify({ ...scoped, version: '0.17.0', dependencies: {}, devDependencies: {}, scripts: {} }));
   if (alias) {
     const pkg = entries[0] === 'bin.js' ? JSON.parse(fixtureText('v0.17.0-alias-package.json.txt'))
       : JSON.parse(readFileSync(join(repo, 'alias-cezarion/package.json'), 'utf8'));

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 import type { AgentConfigFile } from '@open-mercato/cezar-api-client'
 import { AGENT_DESCRIPTORS, descriptorFor } from './agent-descriptors'
 

@@ -27,7 +27,7 @@ describe('managed install instructions', () => {
     expect(await runSelfUpdateCommand('install', [], { home: testHome(), service, modifyPath: false })).toBe(0);
     const text = log.mock.calls.map(call => call.join(' ')).join('\n');
     expect(text).toContain('managed layout under ' + testHome().root);
-    expect(text).toMatch(new RegExp('run(?:[: ]| \\x60)+' + productIdentity().npmAlias));
+    expect(text).toMatch(new RegExp('run(?:[: ]| \\x60)+' + (productIdentity().npmAlias ?? productIdentity().command)));
     expect(text).not.toMatch(/run(?:[: ]| \x60)+cezar\b|~\/\.cez\b/);
     expect(existsSync(join(testHome().bin, process.platform === 'win32' ? 'cezarion.cmd' : 'cezarion'))).toBe(true);
   });

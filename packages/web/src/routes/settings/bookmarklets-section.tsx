@@ -1,4 +1,4 @@
-import { productName, productNpmAlias } from '@/lib/product-name'
+import { productName, productNpx } from '@/lib/product-name'
 import { TriangleAlertIcon } from '@/components/design-icons'
 
 import { useEffect, useRef, useState } from 'react'
@@ -104,7 +104,7 @@ export function BookmarkletPanel({ skills }: { skills: readonly Skill[] }) {
       <h2 className="text-xl font-semibold">Run from GitHub</h2>
       <p className="text-[13px] leading-relaxed text-muted-foreground">
         Drag a launcher to your browser&apos;s bookmarks bar. Then open a GitHub PR or issue and
-        click that bookmark. {productName('Cezar')} must be running: <span className="font-mono">npx {productNpmAlias()}</span>.
+        click that bookmark. {productName('Cezar')} must be running: <span className="font-mono">{productNpx()}</span>.
       </p>
 
       <div className="settings-bookmarklet-project rounded-lg bg-background p-3.5">

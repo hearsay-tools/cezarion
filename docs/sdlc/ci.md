@@ -180,7 +180,7 @@ preflight and run beside the protected review result; `verify` requires both. Ot
 `.node-version`, the four cockpit browser shards the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
-- Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results).
+- Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
@@ -434,7 +434,8 @@ dispatch proves the job too.
 ### Vitest coverage artifact
 
 Eligible pull request runs and manual dispatches collect V8 coverage in the four required
-`Vitest shard N/4` jobs (hearsay-tools/cezarion#1958). Each shard runs its tests once, with
+`Vitest shard N/4` jobs (hearsay-tools/cezarion#1958). A Squeal gate trial dispatch collects
+Squeal's coverage instead and has no V8 artifact (§ Squeal quality gate trial). Each shard runs its tests once, with
 `--coverage.enabled`; there is no separate coverage test matrix. Main pushes and merge groups
 keep the command without coverage. Docs-only, infra-only, verified queue-proof and bump-PR
 runs keep their existing skips.
@@ -501,6 +502,43 @@ unchanged command and exit code, both jobs' permissions, the publish job's token
 and their absence from required checks.
 To move to another Squeal release, change `SQUEAL_TAG` and `SQUEAL_COMMIT` in the vitest job's
 `Fetch the Squeal release` step; both Squeal jobs reuse it.
+
+### Squeal quality gate trial
+
+A manual trial measures Squeal's one-shot quality gate on the shards' own evidence, before
+any check depends on it (hearsay-tools/squeal spec 020 D13, row 020-08c;
+hearsay-tools/cezarion#3096). It runs only on request:
+
+```bash
+gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
+```
+
+- Only a dispatch with `squeal_gate_trial` and no `pr_number` takes the trial. Every other
+  dispatch, including the bare proof of a `ci.yml` change (§ Proving a `ci.yml` change) and
+  its V8 coverage artifact, is unchanged. Dispatches of one branch share a concurrency group
+  and cancel each other, so start the trial after the bare proof ends.
+- Each `Vitest shard N/4` runs `npm test -- --shard=N/4 --maxWorkers=4` under
+  `squeal ci record`, as in a merge group, but without `--coverage.enabled`: Squeal's coverage
+  provider yields to a project's own coverage, so only then does it write coverage records
+  into the parts. The shard's output and exit code stay its own. The parts upload as
+  `squeal-parts-shard-N`; the run collects and merges no V8 coverage.
+- The `Squeal quality gate trial` job (`squeal-gate-trial`) runs after the shards pass or
+  fail. It checks out the dispatched commit with the history of main, installs dependencies,
+  builds the server, fetches the pinned Squeal release, downloads the parts and runs
+  `squeal code --base origin/main --json --parts <shard directories>`. A selected test file
+  whose part certifies its inputs here comes from the parts; the gate runs the others itself,
+  for up to 600 seconds.
+- Its job summary gives the verdict and exit code, the changed functions by state, how many
+  selected test files came from the parts, from the stores and from the gate's own runs, and
+  for each shard the recording cost Squeal writes into its parts: Squeal's own time, its share
+  of the test time and its time after the command. The `squeal-gate-trial` artifact holds
+  `report.json` (`squeal-code-gate/1`), the gate's stderr, exit code and time, kept 14 days.
+- Nothing depends on it. The job is outside `verify.needs` and the merge-queue roster, only a
+  manual dispatch runs it, every step continues on error and the job sets
+  `continue-on-error`. The verdict is reported, not enforced.
+
+`.github/scripts/ci-squeal-gate-trial.workflow.test.cjs` pins the trigger, the job's
+permissions, its gate command and its summary.
 
 ### Upstream scan PRs
 

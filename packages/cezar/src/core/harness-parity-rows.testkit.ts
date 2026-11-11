@@ -1,8 +1,10 @@
 import type { ScenarioName } from './harness-parity-core.testkit.ts';
 
 /**
- * The rows `harness-parity-cells.testkit.ts` declares, as plain data: that kit imports the
- * workflow engine and the server, so nothing outside Vitest can load it. It attaches each row's
+ * The rows the harness parity cells declare, as plain data: the cell kits
+ * (`harness-parity-seam-tier.testkit.ts`, `harness-parity-run-tier.testkit.ts` and the
+ * `harness-parity-<part>.cells.testkit.ts` modules) import Vitest and runners, and some the workflow
+ * engine and the server, so nothing outside Vitest can load them. They attach each row's
  * assertion by id. `scripts/parity-rows.ts` prints these rows.
  */
 export interface ParityRow {

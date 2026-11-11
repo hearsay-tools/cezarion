@@ -1,4 +1,4 @@
-import { BINARY_NAMES, productIdentity, type BinaryName } from './identity.ts';
+import { BINARY_NAMES, npxCommand, productIdentity, type BinaryName } from './identity.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 
 /** npm's Windows wrappers pass the old bin target, index.js, rather than their name. */
@@ -23,7 +23,7 @@ export function commandText(text: string, entry: string | undefined = process.ar
   if (!rebrand && invokedCommand(entry) !== 'hsq') return text;
   if (text === 'cezarion' || text === 'cez') return cliCommand(entry, rebrand);
   return text.replace(/(?<![\w./\\-])\b(?:cez|hsq)(?=\s|\]|`|$)/g, cliCommand(entry, rebrand))
-    .replace(/\bnpx cezarion\b/g, `npx ${productIdentity(rebrand).npmAlias}`);
+    .replace(/\bnpx cezarion(?:@([\w.-]+))?(?![\w@-])/g, (_, version?: string) => npxCommand(version, rebrand));
 }
 
 /** The dispatcher owns the one per-process notice, including task command invocations. */

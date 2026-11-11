@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CANCEL, PreflightError, type InstallContext, type InstallStep, type PlatformStrategy, type StepArtifact } from '../types.ts';
 import { depCheckStep, generatePassword, owned, shared, shquote, StepAborted, StepCancelled, StepSkipped, sudoStep, verifyCommand } from '../steps.ts';
-import { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy } from '../npx-cache.ts';
+import { isForeignNpxExecStart, isNpxExecStart, npxLaunchArgs, refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 import { failedRestart, freshRestartOrFail, readExecStart, resolveRedeployScope, restartSystemService, restartUserService, serviceDiagnostics, serviceSnapshot } from './ubuntu-vps-redeploy.ts';
 import { recordedSite, recordedUnit, sitePathsToRemove, unitHint } from './ubuntu-vps-names.ts';
 import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuService } from './ubuntu-vps-migration.ts';
@@ -602,10 +602,11 @@ WantedBy=${installTarget}
  * Decide the absolute ExecStart command for the service, mirroring how the
  * installer itself was launched so the box keeps running the same cezar:
  *
- *  - Launched via `npx <alias>` (the CLI package lives in npm's ephemeral
- *    `_npx` cache, which gets cleaned): the service can't point there, so it
- *    reinstalls-and-runs the same way — `<abs npx> --yes cezarion` (bare `npx`
- *    would 203/EXEC, so npx is made absolute).
+ *  - Launched via npx (the CLI package lives in npm's ephemeral `_npx` cache,
+ *    which gets cleaned): the service can't point there, so it reinstalls-and-runs
+ *    the same way — `<abs npx> --yes cezarion`, or with the switch on
+ *    `<abs npx> --yes -p @hearsay-tools/squawk hsq` (bare `npx` would 203/EXEC,
+ *    so npx is made absolute).
  *  - A stable install (a checkout, or a global `cezarion`/`cez`): run the
  *    CLI's own built entry `<node> <pkg>/dist/index.js`, or a resolved global
  *    bin. Absolute node + absolute script → systemd never resolves off PATH.
@@ -618,16 +619,15 @@ export function serviceExecStart(opts: {
   npxPath: string;
   globalBin?: string | undefined;
 }, rebrand = REBRAND_SWITCH): string {
-  const cliPackage = productIdentity(rebrand).npmAlias;
   const entry = rebrand ? join(dirname(opts.entry), `${productIdentity(rebrand).command}.js`) : opts.entry;
-  if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return `${opts.npxPath} --yes ${cliPackage}`;
+  if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return [opts.npxPath, ...npxLaunchArgs(rebrand)].join(' ');
   if (opts.entryExists) return `${opts.node} ${entry}`;
   if (opts.globalBin) return `${opts.node} ${opts.globalBin}`;
   return `${opts.node} ${entry}`;
 }
 
 async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<string> {
-  const cliPackage = productIdentity(rebrand).npmAlias;
+  const identity = productIdentity(rebrand);
   const node = process.execPath; // absolute node running this installer
   // The CLI's OWN package root (…/dist/server-install/platforms/ → up 3), NOT the
   // repo being operated on — `--repo` / cwd can differ from where cezar lives.
@@ -644,12 +644,12 @@ async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<
 
   let globalBin: string | undefined;
   if (!existsSync(entry) && !/[/\\]_npx[/\\]/.test(pkgRoot)) {
-    const out = (await ctx.runner.capture('bash', ['-lc', rebrand ? `command -v ${productIdentity(rebrand).command}` : `command -v ${cliPackage} || command -v cez`])).stdout.trim();
+    const out = (await ctx.runner.capture('bash', ['-lc', identity.rebrand ? `command -v ${identity.command}` : `command -v ${identity.npmAlias} || command -v cez`])).stdout.trim();
     globalBin = out.split('\n').map((s) => s.trim()).filter(Boolean).pop();
     if (!globalBin) {
       ctx.ui.warn(
-        `Could not locate a built ${productName('cezar', rebrand)} to run (${entry} missing, no global ${cliPackage}).\n` +
-          `Install it (npm i -g ${cliPackage}) or build the checkout, then re-run with --reconfigure autostart.`,
+        `Could not locate a built ${productName('cezar', rebrand)} to run (${entry} missing, no global ${identity.npmAlias ?? identity.command}).\n` +
+          `Install it (npm i -g ${identity.npmAlias ?? identity.npmPackage}) or build the checkout, then re-run with --reconfigure autostart.`,
       );
     }
   }

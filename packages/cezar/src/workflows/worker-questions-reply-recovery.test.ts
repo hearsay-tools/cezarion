@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';

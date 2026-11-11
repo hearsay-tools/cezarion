@@ -10,7 +10,7 @@ import {
   workerListResultSchema, workerParamsSchema, workerResultFileSchema, workerSpawnRequestSchema, workerSpawnResultSchema,
   workerSteerRequestSchema, workerSteerResultSchema, workerStopResultSchema, workerWaitRequestSchema, workerWaitResultSchema,
 } from './delegation.ts';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
 import { RUN_STATUS, WAIT_PHASE, WAIT_VIA, WORKER_OUTCOME_STATUS } from './test-factories.testkit.ts';
 
 describe('parent-file context reference', () => {

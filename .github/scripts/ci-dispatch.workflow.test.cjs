@@ -99,7 +99,8 @@ test('dispatch validates the live release PR and runs the trusted version-stamp 
 test('dispatch loads the trusted identity and selects its alias in both switch states', () => {
   for (const rebrand of [false, true]) {
     for (const alias of ['alias-cezarion', 'alias-hsq']) {
-      const active = alias === (rebrand ? 'alias-hsq' : 'alias-cezarion');
+      // The switch-on identity has no alias package: npm refuses the unscoped name `hsq`.
+      const active = !rebrand && alias === 'alias-cezarion';
       assert.equal(classify('classify-pr', {
         rebrand, files: [{ filename: `${alias}/package.json` }],
       }).bump_pr, String(active));

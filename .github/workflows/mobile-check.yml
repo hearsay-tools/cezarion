@@ -53,7 +53,7 @@ jobs:
         id: identity
         run: |
           metadata=$(node packages/mobile/scripts/build-metadata.mjs ${{ matrix.metadata }})
-          echo "alias=$(echo "$metadata" | jq -r .npmAlias)" >> "$GITHUB_OUTPUT"
+          echo "alias=$(echo "$metadata" | jq -r '.npmAlias // .command')" >> "$GITHUB_OUTPUT"
           expected=$(echo "$metadata" | jq -r .mobileAppId)
           display_name=$(echo "$metadata" | jq -r .displayName)
           aapt="$ANDROID_HOME/build-tools/35.0.0/aapt"
@@ -117,7 +117,7 @@ jobs:
         id: identity
         run: |
           node packages/mobile/scripts/build-metadata.mjs ${{ matrix.metadata }} --write-ios > /tmp/mobile-identity.json
-          echo "alias=$(jq -r .npmAlias /tmp/mobile-identity.json)" >> "$GITHUB_OUTPUT"
+          echo "alias=$(jq -r '.npmAlias // .command' /tmp/mobile-identity.json)" >> "$GITHUB_OUTPUT"
       - name: Choose an installed iPhone simulator
         timeout-minutes: 5
         run: |

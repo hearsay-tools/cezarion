@@ -1,6 +1,6 @@
 import { validRecoveryMessage, scopedRecoveryTarget, validateScopedRecovery, validateRecoveryLayout } from './scoped-recovery.ts';
 import { installedRuntime, originalRuntimeName, hoistedRuntime } from './runtime-layout.ts';
-import { npmPackageIdentity, productIdentity } from '../home/identity.ts';
+import { productIdentity } from '../home/identity.ts';
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { access, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -141,7 +141,7 @@ function stagedRuntime(stage: string, outer: string) {
 }
 
 function isAlias(installation: Installation): boolean {
-  return installation.kind !== 'unsupported' && installation.outerPackage === npmPackageIdentity(installation.outerPackage)!.npmAlias;
+  return installation.kind !== 'unsupported' && installation.outerPackage === productIdentity(false).npmAlias;
 }
 
 export class ApplicationUpdateService implements ApplicationUpdateServiceLike {

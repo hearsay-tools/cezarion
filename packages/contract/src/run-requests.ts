@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { attachmentInputSchema } from './runs.ts';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
 const RUNNER_IDS = runnerSchema.options;
 
 // PATCH semantics are load-bearing here: an omitted field keeps its current value.

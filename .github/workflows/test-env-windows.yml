@@ -11,6 +11,8 @@ on:
       - 'packages/cezar/src/delegation/windows-workspace*'
       - 'packages/cezar/scripts/windows-workspace-identity.*'
       - 'packages/cezar/src/delegation/workspace.ts'
+      - 'packages/cezar/src/delegation/identity-file-store.ts'
+      - 'packages/cezar/src/delegation/windows-identity-store.ts'
   workflow_dispatch: {}
 permissions:
   contents: read

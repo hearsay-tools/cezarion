@@ -5,7 +5,7 @@ import { isUsageLimitHold } from './waits.ts';
  * Facts about a run that the store, the server, the engine and the cockpit all decide on, each
  * defined once here so that no reader restates one in its own code (hearsay-tools/cezarion#1496).
  * Each takes the record, never a bare status, so no caller can miss a usage-limit hold
- * (hearsay-tools/cezarion#1434). `isUsageLimitHold` lives beside `computeWaitingOn` in `waits.ts`.
+ * (hearsay-tools/cezarion#1434). `isUsageLimitHold` lives in `usage-limit-hold.ts`; `waits.ts` re-exports it.
  */
 
 const LIVE_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'waiting']);

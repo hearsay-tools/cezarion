@@ -1,5 +1,5 @@
 import type { ConversationMessage, PlanEntry, RequestOutcome, RunEvent, StopReason, UiItem } from '@open-mercato/cezar-api-client'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 import type {
   ThreadAsk,

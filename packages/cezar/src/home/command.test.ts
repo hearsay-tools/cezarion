@@ -69,3 +69,10 @@ it.each([false, true])('preserves path tokens in command examples (rebrand=%s)',
   const text = String.raw`Run cez inspect /tmp/cez /tmp/hsq C:\tools\cez ./hsq tools-cez`;
   expect(commandText(text, '/bin/hsq', rebrand)).toBe(text.replace('Run cez', 'Run hsq'));
 });
+
+it('runs the scoped package in one-off npx examples with the switch on', () => {
+  expect(commandText('Start the cockpit with: npx cezarion', '/bin/hsq', true)).toBe('Start the cockpit with: npx -p @hearsay-tools/squawk hsq');
+  expect(commandText('Run `npx cezarion@1.2.3 run`', '/bin/cez', true)).toBe('Run `npx -p @hearsay-tools/squawk@1.2.3 hsq run`');
+  expect(commandText('Start the cockpit with: npx cezarion', '/bin/hsq', false)).toBe('Start the cockpit with: npx cezarion');
+  expect(commandText('npx cezarion-foreign', '/bin/hsq', true)).toBe('npx cezarion-foreign');
+});

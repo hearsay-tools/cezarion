@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerCancelWaitResultSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import { collect, fixtureUpdateRun, manager, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { collect, fixtureUpdateRun, manager, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 import { pr, identity, handlers, entryOf, settledOf, inputOf, heldParent } from './worker-waits-shared.testkit.ts';
 

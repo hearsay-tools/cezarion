@@ -1,6 +1,6 @@
 import type { RunLine } from './run-line.ts';
 import { vi } from 'vitest';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { boundaryOrderFixture } from './boundary-order.testkit.ts';
 import { InputDelivery } from './input-delivery.ts';
 

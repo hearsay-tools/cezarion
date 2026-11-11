@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { DelegationPolicyError } from '../delegation/policy.ts';
-import { manager, store, until, waitOf, worker } from './worker-wait.testkit.ts';
+import { manager, store, until, waitOf, worker } from './worker-wait-claude.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { eventsOf, steeringParent, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 

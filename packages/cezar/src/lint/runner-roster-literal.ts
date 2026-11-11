@@ -78,6 +78,6 @@ export const runnerRosterLiteral: SourceRule = {
   applies,
   check: (file, source) => scanRunnerRosters(file, source).map(offset => ({
     line: lineAt(source, offset),
-    message: 'This array lists every runner id by hand, so a new runner would be missing here. Use RUNNER_IDS or isRunnerId() from packages/cezar/src/core/agent-runner.ts; a Node-free package derives from runnerSchema.options in packages/contract/src/health.ts (open-mercato/cezar#387).',
+    message: 'This array lists every runner id by hand, so a new runner would be missing here. Use RUNNER_IDS or isRunnerId() from packages/cezar/src/core/agent-runner.ts; a Node-free package derives from runnerSchema.options in packages/contract/src/runner.ts (open-mercato/cezar#387).',
   })),
 };

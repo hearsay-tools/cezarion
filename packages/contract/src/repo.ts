@@ -1,13 +1,12 @@
 import { z } from 'zod';
-import { repoInfoSchema } from './health.ts';
+import { repoInfoSchema } from './repo-info.ts';
 import { runStatusSchema } from './runs.ts';
 
 /**
  * The repo / git family of `/api/v1` — the Repo view, the structured diff shapes the Changes and
  * Files tabs read, and the worktree-retention panel.
  *
- * `RepoInfo` is NOT redeclared here: health already owns it (`./health.ts`), and the Repo view
- * serves the very same record.
+ * `RepoInfo` is NOT redeclared here: it lives in `./repo-info.ts`, which health also serves.
  */
 
 /** One `git status --porcelain` row. */

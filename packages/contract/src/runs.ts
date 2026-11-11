@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema, workerDestroyRetrySchema } from './delegation.ts';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
 import { referenceStatusSchema } from './github.ts';
 import { previewServerSchema } from './preview.ts';
 import { isAttachmentMediaType } from './attachments.ts';

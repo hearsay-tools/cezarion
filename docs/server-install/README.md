@@ -16,9 +16,9 @@ yourself. It's idempotent and resumable, and it ends with a real
 works behind its login.
 
 ```bash
-npx hsq server-install   --platform <id>   # install
-npx hsq server-deploy    --platform <id>   # redeploy a new version (reload the service)
-npx hsq server-uninstall --platform <id>   # reverse it
+npx -p @hearsay-tools/squawk hsq server-install   --platform <id>   # install
+npx -p @hearsay-tools/squawk hsq server-deploy    --platform <id>   # redeploy a new version (reload the service)
+npx -p @hearsay-tools/squawk hsq server-uninstall --platform <id>   # reverse it
 ```
 
 ## Available providers
@@ -87,14 +87,14 @@ names recorded for installations that have not migrated.
 
 ## Redeploying a new version
 
-`npx hsq server-deploy --platform <id>` is the standardized, per-strategy way to
+`npx -p @hearsay-tools/squawk hsq server-deploy --platform <id>` is the standardized, per-strategy way to
 roll out a new Squawk: it restarts the service and re-verifies. See each guide's
 **Updating / redeploying** section for the checkout-vs-npx details.
 
 To test an unreleased build on a server, pin a preview version
 (see [Preview builds](../publishing.md)) — for example roll a box to a PR's
-exact snapshot with `npx hsq@<version> server-deploy --platform <id>`,
-or track trunk with `npx hsq@dev server-deploy --platform <id>`.
+exact snapshot with `npx -p @hearsay-tools/squawk@<version> hsq server-deploy --platform <id>`,
+or track trunk with `npx -p @hearsay-tools/squawk@dev hsq server-deploy --platform <id>`.
 
 ---
 

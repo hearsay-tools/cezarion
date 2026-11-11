@@ -17,7 +17,7 @@ import { discoverSkills, type Skill } from '../skills.ts';
 import { RunSkills } from './run/run-skills.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-claude.testkit.ts';
 import { createActiveRun } from './active-run.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';

@@ -13,7 +13,7 @@ import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { setRunStatus, crashStore } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-no-runner.testkit.ts';
 
 /**
  * A process that crashed while it still held a settled family in memory leaves that family's claim

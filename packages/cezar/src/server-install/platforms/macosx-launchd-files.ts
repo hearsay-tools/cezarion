@@ -21,7 +21,10 @@ function isOurLauncher(xml: string): boolean {
   const serve = args.indexOf('serve');
   if (serve < 1) return false;
   const command = args.slice(0, serve);
-  if (basename(command[0]!) === 'npx') return command.length === 3 && command[1] === '--yes' && ownedNpxPackage(command.map(shellQuote).join(' ')) !== undefined;
+  if (basename(command[0]!) === 'npx') {
+    const form = command.length === 3 || (command.length === 5 && command[2] === '-p');
+    return form && command[1] === '--yes' && ownedNpxPackage(command.map(shellQuote).join(' ')) !== undefined;
+  }
   if (command.length !== 2 || !/^node(?:\.exe)?$/.test(basename(command[0]!))) return false;
   const entry = command[1]!;
   const ownEntry = resolve(fileURLToPath(new URL('../../../dist/index.js', import.meta.url)));

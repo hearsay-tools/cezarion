@@ -15,7 +15,7 @@ export function releaseConfig(platform, env, dryRun, metadata = desktopMetadata(
     config.identifier = metadata.desktopAppId;
     config.productName = metadata.displayName;
     config.mainBinaryName = metadata.desktopExecutable;
-    config.plugins = { updater: { endpoints: [`https://github.com/hearsay-tools/cezarion/releases/download/${metadata.feed}/${metadata.feed}.json`] } };
+    config.plugins = { updater: { endpoints: [`https://github.com/hearsay-tools/squawk/releases/download/${metadata.feed}/${metadata.feed}.json`] } };
   }
   if (!dryRun) {
     requireValue('TAURI_SIGNING_PRIVATE_KEY');

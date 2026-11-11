@@ -31,7 +31,7 @@ function packChecks({ root = repoRoot, rebrand, execute = execFileSync } = {}) {
     withPublicationPackage(join(root, dirs.cezar), publication.cezar,
       cwd => execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd }));
   }
-  execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd: join(root, dirs.alias) });
+  if (dirs.alias) execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd: join(root, dirs.alias) });
   withCompatibilityPackages(join(root, dirs.cezar), publication.cezar, packages => {
     for (const { dir } of Object.values(packages)) execute('npm', ['pack', '--dry-run', '--ignore-scripts'], { ...options, cwd: dir });
   }, publication.legacyScoped !== undefined);
@@ -41,7 +41,8 @@ function cleanupTags({ root = repoRoot, rebrand, tag, dryRun = false, execute = 
   if (!/^pr-[1-9]\d*$/.test(tag || '')) throw new Error('Expected a PR dist-tag');
   const { publication } = releasePackages(root, rebrand);
   // Preserve the historical client cleanup, including when it is private.
-  const names = ['cezar', 'apiClient', 'alias', ...Object.keys(publication).filter(key => key.startsWith('legacy'))].map(key => publication[key].name);
+  const keys = ['cezar', 'apiClient', 'alias', ...Object.keys(publication).filter(key => key.startsWith('legacy'))];
+  const names = keys.filter(key => publication[key]).map(key => publication[key].name);
   for (const name of names) {
     if (dryRun) continue;
     try { execute('npm', ['dist-tag', 'rm', name, tag], { cwd: root, stdio: 'inherit' }); }

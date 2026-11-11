@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { type WorkerWait } from '@open-mercato/cezar-contract/delegation';
-import { grantSteer, checkpoint, manager, parent, register, restart, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { grantSteer, checkpoint, manager, parent, register, restart, semaphore, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait-claude.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.

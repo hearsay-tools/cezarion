@@ -4,7 +4,7 @@ import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delega
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
-import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

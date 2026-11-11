@@ -4,8 +4,7 @@
     "packages/api-client": "{\n  \"name\": \"@open-mercato/cezar-api-client\",\n  \"version\": \"1.2.3-dev.9\",\n  \"private\": true,\n  \"files\": [\n    \"entry.js\"\n  ]\n}\n",
     "packages/cezar": "{\n  \"name\": \"@wjarka/cezarion\",\n  \"version\": \"1.2.3-dev.9\",\n  \"private\": false,\n  \"files\": [\n    \"entry.js\"\n  ]\n}\n",
     "packages/web": "{\n  \"name\": \"@open-mercato/cezar-web\",\n  \"version\": \"1.2.3-dev.9\",\n  \"private\": true,\n  \"files\": [\n    \"entry.js\"\n  ],\n  \"devDependencies\": {\n    \"@wjarka/cezarion\": \"1.2.3-dev.9\"\n  }\n}\n",
-    "alias-cezarion": "{\n  \"name\": \"cezarion\",\n  \"version\": \"1.2.3-dev.9\",\n  \"description\": \"Alias for @wjarka/cezarion — so `npx cezarion` just works. Local cockpit for running and tracking AI agent tasks in your repo.\",\n  \"license\": \"MIT\",\n  \"type\": \"module\",\n  \"bin\": {\n    \"cezarion\": \"cezarion.js\",\n    \"cez\": \"cez.js\",\n    \"hsq\": \"hsq.js\"\n  },\n  \"dependencies\": {\n    \"@wjarka/cezarion\": \"1.2.3-dev.9\"\n  },\n  \"publishConfig\": {\n    \"access\": \"public\"\n  },\n  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"https://github.com/hearsay-tools/cezarion\",\n    \"directory\": \"packages/cezar\"\n  }\n}\n",
-    "alias-hsq": "{\n  \"name\": \"hsq\",\n  \"version\": \"1.2.3\",\n  \"description\": \"Alias for @hearsay-tools/squawk.\",\n  \"license\": \"MIT\",\n  \"type\": \"module\",\n  \"bin\": {\n    \"hsq\": \"hsq.js\"\n  },\n  \"dependencies\": {\n    \"@hearsay-tools/squawk\": \"^1.2.3\"\n  },\n  \"publishConfig\": {\n    \"access\": \"public\"\n  },\n  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"https://github.com/hearsay-tools/cezarion\",\n    \"directory\": \"packages/cezar\"\n  }\n}\n"
+    "alias-cezarion": "{\n  \"name\": \"cezarion\",\n  \"version\": \"1.2.3-dev.9\",\n  \"description\": \"Alias for @wjarka/cezarion — so `npx cezarion` just works. Local cockpit for running and tracking AI agent tasks in your repo.\",\n  \"license\": \"MIT\",\n  \"type\": \"module\",\n  \"bin\": {\n    \"cezarion\": \"cezarion.js\",\n    \"cez\": \"cez.js\",\n    \"hsq\": \"hsq.js\"\n  },\n  \"dependencies\": {\n    \"@wjarka/cezarion\": \"1.2.3-dev.9\"\n  },\n  \"publishConfig\": {\n    \"access\": \"public\"\n  },\n  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"https://github.com/hearsay-tools/squawk\",\n    \"directory\": \"packages/cezar\"\n  }\n}\n"
   },
   "calls": [
     {
@@ -57,7 +56,7 @@
         },
         "repository": {
           "type": "git",
-          "url": "https://github.com/hearsay-tools/cezarion",
+          "url": "https://github.com/hearsay-tools/squawk",
           "directory": "packages/cezar"
         }
       },

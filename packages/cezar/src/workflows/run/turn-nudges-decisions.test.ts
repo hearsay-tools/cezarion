@@ -10,7 +10,7 @@ import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { RunStore } from '../../runs/store.ts';
 import { setRunStatus } from '../../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../fixture-no-runner.testkit.ts';
 import type { RunManager } from '../run.ts';
 import { COMPLETION_NUDGE_NOTE } from '../turn-end.ts';
 import { COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './constants.ts';

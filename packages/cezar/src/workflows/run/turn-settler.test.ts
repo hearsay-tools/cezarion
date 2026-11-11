@@ -3,7 +3,7 @@ import { WaitEngine } from './wait-engine.ts';
 import { traceBoundary } from './boundary-order.testkit.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { InputDelivery } from './input-delivery.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActiveRun } from '../active-run.ts';
 import type { AgentSession } from '../../core/agent-runner.ts';

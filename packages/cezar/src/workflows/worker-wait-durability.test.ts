@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RunStore } from '../runs/store.ts';
-import { controlledWire, fixtureUpdateRun, manager, parent, queuedWake, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait.testkit.ts';
+import { controlledWire, fixtureUpdateRun, manager, parent, queuedWake, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait-claude.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 

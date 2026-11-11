@@ -1,6 +1,6 @@
 import { type RunnerId } from '../core/agent-runner.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { delegatingParent, manager, spendWorkerBudget, store, until, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, manager, spendWorkerBudget, store, until, worker } from './worker-wait-claude.testkit.ts';
 
 type ConversationParent = Awaited<ReturnType<typeof delegatingParent>>;
 type ConversationPair = ConversationParent & {

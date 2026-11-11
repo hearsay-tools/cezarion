@@ -1,5 +1,5 @@
 import { testHome } from '../home/test-home.testkit.ts';
-import { unused } from './fixture-cleanup.testkit.ts';
+import { unused } from './fixture-claude.testkit.ts';
 import { createActiveRun } from './active-run.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { TrackedWork } from './run/tracked-work.ts';

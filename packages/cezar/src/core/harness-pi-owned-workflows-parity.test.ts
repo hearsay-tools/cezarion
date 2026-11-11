@@ -1,4 +1,4 @@
-import { describeHarnessParity } from './harness-parity-cells.testkit.ts';
+import { describeHarnessParity } from './harness-parity-owned-workflows.cells.testkit.ts';
 import { PiRunner } from './pi-runner.ts';
 import { CursorRunner } from './cursor-runner.ts';
 import { onlyRunners, useRunners } from './runners-under-test.testkit.ts';

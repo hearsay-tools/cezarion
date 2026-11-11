@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { runnerSchema } from '@open-mercato/cezar-contract/health';
+import { runnerSchema } from '@open-mercato/cezar-contract/runner';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import {

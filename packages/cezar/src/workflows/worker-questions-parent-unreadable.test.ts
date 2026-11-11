@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { uuidFrom } from '../delegation/questions.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { conversationOf, eventsOf, cezarAnswered, noHumanCard, askedPair, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';

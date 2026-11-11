@@ -1,4 +1,4 @@
-import { productCommand, productName, productNpmPackage } from '@/lib/product-name'
+import { productCommand, productName, productPackageNpx } from '@/lib/product-name'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -459,7 +459,7 @@ function InstallHint({ data }: { data: SelfUpdateStatus }) {
       ? 'node packages/cezar/dist/index.js install'
       : data.installKind === 'global-npm'
         ? `${productCommand()} install`
-        : `npx ${productNpmPackage()} install`
+        : `${productPackageNpx()} install`
   return (
     <div data-slot="self-update-install-hint" className="rounded-md border border-border bg-muted/40 px-3 py-2.5 text-[12.5px]">
       <p>{data.reason}</p>

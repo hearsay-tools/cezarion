@@ -46,7 +46,7 @@ export function toRunStoreOpenError(error: unknown, path: string, opts: { waited
   const kind = error instanceof RunDatabaseError ? error.kind : errnoKind(error) ?? 'other';
   switch (kind) {
     case 'corrupt':
-      return new RunStoreOpenError(kind, path, `${path} is damaged (${detail}). ${productName('cezar')} left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs.json.pre-sqlite.bak as https://github.com/hearsay-tools/cezarion/blob/main/docs/run-history-recovery.md describes, then restart ${productName('cezar')}.`, cause);
+      return new RunStoreOpenError(kind, path, `${path} is damaged (${detail}). ${productName('cezar')} left it and its -wal and -shm files exactly as they are: restore them from a backup, or rebuild them from runs.json.pre-sqlite.bak as https://github.com/hearsay-tools/squawk/blob/main/docs/run-history-recovery.md describes, then restart ${productName('cezar')}.`, cause);
     case 'busy': {
       const held = opts.waitedMs ? ` for over ${(opts.waitedMs / 1000).toFixed(1)} s` : '';
       return new RunStoreOpenError(kind, path, `${path} is busy: another ${productName('cezar')} process has held its write lock${held}. Wait for it to finish, then restart ${productName('cezar')}.`, cause);

@@ -2,7 +2,7 @@ import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { waitForConfig } from './poll'

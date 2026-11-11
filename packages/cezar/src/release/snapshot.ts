@@ -126,10 +126,9 @@ export function stampManifests(
 }
 
 /** The copy-pasteable commands for the sticky PR comment and the step summary.
- *  Rendered from the *actual* alias package name so a future rename of the npx
- *  command can never leave stale instructions (spec, resolved Q1). */
-export function buildInstallLines(aliasName: string, version: string): string[] {
-  const cmd = `npx ${aliasName}@${version}`;
+ *  Rendered from the *actual* published names (`releaseRunCommand`) so a future rename of
+ *  the npx command can never leave stale instructions (spec, resolved Q1). */
+export function buildInstallLines(cmd: string): string[] {
   return [
     `${cmd}                                # cockpit at http://localhost:4321`,
     `${cmd} run "…"                        # headless run`,

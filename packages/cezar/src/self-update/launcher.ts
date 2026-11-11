@@ -1,4 +1,4 @@
-import { BINARY_NAMES, productIdentity, type BinaryName } from '../home/identity.ts';
+import { BINARY_NAMES, productIdentity, scopedNpxCommand, type BinaryName } from '../home/identity.ts';
 import { shellQuote as quoteShellWord } from '../core/shell-env.ts';
 import type { Home } from '../home/home.ts';
 /**
@@ -61,7 +61,7 @@ ${useNotice}  if ${useTarget}[ ! -f "$CEZ_VERSIONS/$2/node_modules/${PACKAGE_NAM
 fi
 
 if [ ! -f "$ENTRY" ]; then
-  echo "cezar: no active version under $CEZ_VERSIONS — run: npx ${identity.npmPackage} install" >&2
+  echo "cezar: no active version under $CEZ_VERSIONS — run: ${scopedNpxCommand(identity)} install" >&2
   exit 1
 fi
 if ! command -v node >/dev/null 2>&1; then

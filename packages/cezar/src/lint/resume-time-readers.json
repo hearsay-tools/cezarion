@@ -1,7 +1,8 @@
 {
   "$comment": "Source files that read or write autoResumeAt, each with its reason (hearsay-tools/cezarion#1496). Tests build fixtures freely. Add a file only with its reason; npm run lint fails an entry whose file no longer reads the time. The cez/run-fact-reader rule reads this list.",
   "files": {
-    "packages/contract/src/waits.ts": "defines `isUsageLimitHold` and names the usage-limit wait by its time",
+    "packages/contract/src/usage-limit-hold.ts": "defines `isUsageLimitHold`",
+    "packages/contract/src/waits.ts": "names the usage-limit wait by its time",
     "packages/cezar/src/runs/store.ts": "the withdrawal and resume writes",
     "packages/cezar/src/runs/loaded-run-exits.ts": "restores a schema-7 failed row that kept its resume time as the waiting hold",
     "packages/cezar/src/runs/record-write-rules.ts": "stages the commit, loaded and debounced stale-resume write rules",

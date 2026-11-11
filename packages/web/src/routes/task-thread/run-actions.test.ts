@@ -12,7 +12,7 @@ import {
 import { describe, expect, it } from 'vitest'
 import { openHumanWait } from '@/test/run-summary-fixture'
 
-import { runnerSchema, type Runner } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema, type Runner } from '@open-mercato/cezar-api-client/contract/runner'
 import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 

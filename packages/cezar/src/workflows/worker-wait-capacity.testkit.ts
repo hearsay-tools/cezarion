@@ -1,5 +1,5 @@
 import { expect } from 'vitest';
-import { store, useWorkerWaitFixture, waitOf } from './worker-wait.testkit.ts';
+import { store, useWorkerWaitFixture, waitOf } from './worker-wait-claude.testkit.ts';
 
 export const parkedOnWorkers = (runId: string) =>
   store.getRun(runId)?.status === 'waiting' && waitOf(store.getRun(runId))?.phase === 'parked';
