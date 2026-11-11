@@ -28,6 +28,11 @@ describe('runtimeImports', () => {
     ["export type U = import('./u.ts').U;", []],
     ["let v: import('./v.ts').V;", []],
     ["export type * from './w.ts';", []],
+    // TypeScript's import-equals and a CommonJS require load a module at runtime too.
+    ["import x = require('./x.ts');\nx.run();", ['./x.ts']],
+    ["export import y = require('./y.ts');", ['./y.ts']],
+    ["import type z = require('./z.ts');", []],
+    ["const aa = require('./aa.cjs');", ['./aa.cjs']],
   ])('reads %s', (source, expected) => {
     expect(runtimeImports(source)).toEqual(expected);
   });
@@ -38,6 +43,7 @@ describe('runtimeImports', () => {
     ['const name = "./a.ts";\nconst a = await import(name);', 'import(name)'],
     ['const b = await import(`./${name}.ts`);', 'import(`./${name}.ts`)'],
     ["const c = await import('./' + name);", "import('./' + name)"],
+    ['const d = require(name);', 'require(name)'],
   ])('refuses a dynamic import it cannot read: %s', (source, site) => {
     expect(() => runtimeImports(source)).toThrow(site);
   });

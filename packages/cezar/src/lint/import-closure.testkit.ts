@@ -11,12 +11,38 @@ function literalSpecifier(argument: Node | undefined): string | undefined {
   return ((argument.quasis as Array<{ value: { cooked: string } }>)[0]!).value.cooked;
 }
 
+/** The module a value declaration loads: `import`, `export … from` or `import x = require('…')`. */
+function declaredModule(node: Node): string | undefined {
+  if (node.type === 'ImportDeclaration' && node.importKind !== 'type') return (node.source as Node).value as string;
+  const reExport = node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration';
+  if (reExport && node.source && node.exportKind !== 'type') return (node.source as Node).value as string;
+  const reference = node.type === 'TSImportEqualsDeclaration' && node.importKind !== 'type' ? node.moduleReference as Node : undefined;
+  return reference?.type === 'TSExternalModuleReference' ? (reference.expression as Node).value as string : undefined;
+}
+
+/** The argument of an expression that loads a module, `import(…)` or `require(…)`; null when it has none. */
+function loadArgument(node: Node): Node | null | undefined {
+  if (node.type === 'ImportExpression') return node.source as Node;
+  if (node.type !== 'CallExpression') return undefined;
+  const callee = node.callee as Node;
+  const loads = callee.type === 'Import' || (callee.type === 'Identifier' && callee.name === 'require');
+  return loads ? (node.arguments as Node[])[0] ?? null : undefined;
+}
+
+/** The syntax nodes directly under `node`, comments left out. */
+function children(node: Node): Node[] {
+  return Object.entries(node)
+    .filter(([key]) => !key.endsWith('Comments'))
+    .flatMap(([, value]) => (Array.isArray(value) ? value : [value]))
+    .filter((child): child is Node => Boolean(child) && typeof child === 'object' && typeof (child as Node).type === 'string');
+}
+
 /**
- * Every module specifier `source` imports for its values, read from its syntax tree: value
- * `import` and `export … from` declarations, and `import()` expressions. TypeScript erases
- * type-only imports and `import('…').T` type queries, so they are not counted. A dynamic import
- * whose argument is not one literal throws: a closure pin that skipped it would fail open.
- * `file` picks the JSX grammar for a `.jsx` or `.tsx` source.
+ * Every module specifier `source` loads at runtime, read from its syntax tree: value `import`,
+ * `export … from` and `import x = require(…)` declarations, and `import(…)` and `require(…)`
+ * calls. TypeScript erases type-only imports and `import('…').T` type queries, so they are not
+ * counted. A load whose argument is not one literal throws: a closure pin that skipped it would
+ * fail open. `file` picks the JSX grammar for a `.jsx` or `.tsx` source.
  */
 export function runtimeImports(source: string, file = 'module.ts'): string[] {
   const ast = parse(source, {
@@ -26,28 +52,20 @@ export function runtimeImports(source: string, file = 'module.ts'): string[] {
   const found: string[] = [];
   const visit = (node: Node): void => {
     if (node.type === 'TSImportType') return;
-    if (node.type === 'ImportDeclaration' && node.importKind !== 'type') found.push((node.source as Node).value as string);
-    if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.source && node.exportKind !== 'type') {
-      found.push((node.source as Node).value as string);
-    }
-    const argument = node.type === 'ImportExpression' ? node.source as Node
-      : node.type === 'CallExpression' && (node.callee as Node).type === 'Import' ? (node.arguments as Node[])[0] : undefined;
-    if (node.type === 'ImportExpression' || argument) {
-      const specifier = literalSpecifier(argument);
-      if (specifier === undefined) {
-        throw new Error(`${file}: a runtime import names no literal module, so its closure cannot be walked: ${source.slice(node.start ?? 0, node.end ?? 0)}`);
-      }
-      found.push(specifier);
-    }
-    for (const [key, value] of Object.entries(node)) {
-      if (key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') continue;
-      for (const child of Array.isArray(value) ? value : [value]) {
-        if (child && typeof child === 'object' && typeof (child as Node).type === 'string') visit(child as Node);
-      }
-    }
+    const declared = declaredModule(node);
+    const argument = declared === undefined ? loadArgument(node) : undefined;
+    if (declared !== undefined) found.push(declared);
+    else if (argument !== undefined) found.push(literalOrThrow(argument ?? undefined, file, source.slice(node.start ?? 0, node.end ?? 0)));
+    children(node).forEach(visit);
   };
   visit(ast);
   return found;
+}
+
+function literalOrThrow(argument: Node | undefined, file: string, call: string): string {
+  const specifier = literalSpecifier(argument);
+  if (specifier === undefined) throw new Error(`${file}: a runtime import names no literal module, so its closure cannot be walked: ${call}`);
+  return specifier;
 }
 
 /** The relative modules `source` imports for their values; type-only imports are erased. */
