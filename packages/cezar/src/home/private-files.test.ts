@@ -124,9 +124,10 @@ it.each(['\u2018', '\u2019', '\u201A', '\u201B'])('keeps a typographic apostroph
   expect(vi.mocked(execFileSync).mock.calls[0]?.[1]?.[3]).toContain(`Set-Acl -LiteralPath 'C:\\Users\\O${quote}${quote}Brien\\private' -AclObject $acl;`);
 });
 
-/** The Set-Acl targets of the mocked spawns, in order. */
+/** The Set-Acl targets of the mocked spawns, in order, with PowerShell's doubled quotes decoded. */
 function aclTargets(): string[] {
-  return vi.mocked(execFileSync).mock.calls.map(([, args]) => /Set-Acl -LiteralPath '(.*)' -AclObject/.exec(String(args?.[3]))?.[1] ?? '');
+  return vi.mocked(execFileSync).mock.calls.map(([, args]) =>
+    (/Set-Acl -LiteralPath '(.*)' -AclObject/.exec(String(args?.[3]))?.[1] ?? '').replace(/(['\u2018-\u201B])\1/g, '$1'));
 }
 
 describe('a new private directory chain on Windows', () => {
@@ -147,6 +148,12 @@ describe('a new private directory chain on Windows', () => {
     privateDirectory(join(root, 'a', 'b', 'c'), win);
     expect(aclTargets()).toEqual([join(root, 'a'), join(root, 'a', 'b'), join(root, 'a', 'b', 'c')]);
     expect(existsSync(join(root, 'a', 'b', 'c'))).toBe(true);
+  });
+
+  it('decodes quoted path literals before it compares them', () => {
+    const quoted = join(root, "o'brien \u2019s");
+    privateDirectory(quoted, win);
+    expect(aclTargets()).toEqual([quoted]);
   });
 
   it('protects only the part of the chain that did not exist', () => {
