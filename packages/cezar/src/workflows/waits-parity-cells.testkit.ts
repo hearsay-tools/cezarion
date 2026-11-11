@@ -1,5 +1,6 @@
 import { parentWithWorker, sessionOf, retryClock, nudgeNotes, nativeWire, parkedOn, waitOfKind, fireTimer, settled, prompted, inputsFor, workerParent, turnEnds, blockedDone, blockingWorker, liveRefusal, agentWaits, humanOpen, gated, workerWaits, repliesDoneAgain, replyBlockedAgain, describeWaitCells } from './waits-parity-fixture.testkit.ts';
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
+import { runtimeImports } from '../core/module-imports.testkit.ts';
 import { COMPLETION_NUDGE_NOTE } from './run.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -64,7 +65,7 @@ function foldTitles(runner: RunnerId, fold: WaitFold): string[] {
 /** Each wait parity cells module a test file imports: the registry, a part's or a fold's. */
 function cellModules(file: string): string[] {
   const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
-  return [...source.matchAll(/from '\.\/(waits-parity-(?:[a-z-]+-)?(?:cells|fold)\.testkit\.ts)'/g)].map(match => match[1]!);
+  return runtimeImports(source, file).flatMap(specifier => /^\.\/(waits-parity-(?:[a-z-]+-)?(?:cells|fold)\.testkit\.ts)$/.exec(specifier)?.[1] ?? []);
 }
 
 /** Whether a runner runs any cell of a part, after the wait family's class (hearsay-tools/cezarion#2991)

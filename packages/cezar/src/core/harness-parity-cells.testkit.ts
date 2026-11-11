@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runtimeImports } from './module-imports.testkit.ts';
 import { readMockRecords } from '../mock-records.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
@@ -319,6 +320,8 @@ function matrixGuards(r: HarnessRegistrar): void {
           expect(source.match(/describeHarnessParity\(/g), file).toHaveLength(1);
           // Each part file loads only its own part's cells (hearsay-tools/cezarion#3242).
           expect(source, file).toContain(`import { describeHarnessParity } from './${harnessParityCellsFile(part)}';`);
+          expect(runtimeImports(source, file).filter(specifier => /^\.\/harness-parity-(?:[a-z-]+\.)?cells\.testkit\.ts$/.test(specifier)), file)
+            .toEqual([`./${harnessParityCellsFile(part)}`]);
         }
       });
 
