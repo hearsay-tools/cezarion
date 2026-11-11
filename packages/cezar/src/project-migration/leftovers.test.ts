@@ -1,12 +1,16 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
+import { parentFileSnapshotPath, verifyWorkerContext } from '../delegation/context.ts';
+import { ownedWorkflow, workerContextHash, workerWorkflowHash } from '../delegation/execution-identity.ts';
 import { removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { handoffPath } from '../handoff.ts';
 import { LEGACY_RUNS_FILE } from '../legacy-runs.ts';
 import { isFallbackProjectPath } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { fence, moved, rows, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject } from './engine.ts';
@@ -139,5 +143,43 @@ describe('a project move with tasks that can still resume', { timeout: TIMEOUT }
     expect(rowsById(join(project.newDir, RUNS_DB_FILE)).get(WORKER)?.worktreePath).toBe(moved(project, project.worker.path));
     expect(existsSync(join(project.newDir, LEGACY_RUNS_FILE))).toBe(false);
     expect(existsSync(join(project.dataDir, 'worktrees'))).toBe(false);
+  });
+
+  it('keeps a kept worker\'s context recipe and catalog workflow as its identity binds them, so Continue still verifies', async () => {
+    project.restore();
+    const sha = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
+    const workflowDef = { name: 'local', source: 'file' as const, path: join(project.dataDir, 'workflows/local.yaml'), steps: [] };
+    // A parent-file input (its copy in the worker worktree, its snapshot in the worker's -images) and a parent attachment.
+    const fileBytes = 'parent file bytes', attachmentBytes = 'attachment bytes';
+    writeFileSync(join(project.worker.path, 'notes.txt'), fileBytes);
+    const fileSnapshot = await parentFileSnapshotPath(project.dataDir, project.worker, 0);
+    const attachmentSnapshot = await parentFileSnapshotPath(project.dataDir, project.worker, 1);
+    mkdirSync(join(project.dataDir, 'runs', `${WORKER}-images`), { recursive: true });
+    writeFileSync(fileSnapshot, fileBytes);
+    writeFileSync(attachmentSnapshot, attachmentBytes);
+    const context = { inputs: [
+      { source: { kind: 'parent-file' as const, path: 'notes.txt' }, path: join(project.worker.path, 'notes.txt'), sha256: sha(fileBytes), bytes: fileBytes.length },
+      { source: { kind: 'parent-attachment' as const, id: 'pasted-1.png' }, path: attachmentSnapshot, sha256: sha(attachmentBytes), bytes: attachmentBytes.length },
+    ] };
+    const store = RunStore.open(project.dataDir, { keepLive: true });
+    try {
+      const worker = store.getRun(WORKER)!;
+      setRunStatus(store, WORKER, 'done', { archived: false, workflowDef, delegation: { ...worker.delegation!, context } as never });
+      store.flush();
+    } finally { store.close(); }
+    writeFileSync(join(project.dataDir, 'runs', `${WORKER}.identity.json`), JSON.stringify({ kind: 'internal', workflowHash: workerWorkflowHash(workflowDef) }), { mode: 0o600 });
+    const contextHash = workerContextHash(context);
+
+    expect((await migrateWith(project)).journal.leftovers).toEqual([WORKER]);
+    const moved = RunStore.open(project.newDir, { keepLive: true });
+    try {
+      const run = moved.getRun(WORKER)!;
+      expect(run.workflowDef?.path).toBe(workflowDef.path);
+      expect(ownedWorkflow(run, moved.readWorkerIdentity(WORKER))).toEqual(workflowDef);
+      const recipe = run.delegation?.role === 'worker' ? run.delegation.context : undefined;
+      expect(recipe && workerContextHash(recipe)).toBe(contextHash);
+      await expect(verifyWorkerContext({ dataDir: project.newDir, parentId: PARENT, workspace: project.worker, context: recipe,
+        parentCwd: project.root })).resolves.toBeUndefined();
+    } finally { moved.close(); }
   });
 });

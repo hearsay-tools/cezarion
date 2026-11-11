@@ -254,7 +254,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   `.ai/cezar/`: `worktrees/<id>`, `tmp/<id>`, `preview/<id>`, `t/<first 8 of id>` and every
   `runs/<id>…` entry (`legacyItemOwner` in `legacy-runs.ts`). The directory around such an item
   merges item by item; no stored path into one is rewritten, so a session resumes at its old
-  cwd; a stored path into a moved item is rewritten, in a kept file too (in place, under
+  cwd; a kept task's `workflowDef` and `delegation.context` fields are never rewritten, because
+  the worker identity file binds them by hash (`identityBoundField` in `plan.ts`); a stored path into a moved item is rewritten, in a kept file too (in place, under
   `<source>/runs/`). The `leftovers` step writes the ids to `.ai/squawk/legacy-runs.json`
   before the mark, then removes the directories the move emptied and `.ai/cezar/` itself when
   nothing is left in it. `runDataDir(dataDir, id)` resolves a listed task's data directory to

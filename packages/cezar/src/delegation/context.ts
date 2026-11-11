@@ -56,7 +56,8 @@ async function readCanonicalFile(
   return read.bytes;
 }
 async function inputDirectory(dataDir: string, workerId: string): Promise<string> {
-  const root = await realpath(dataDir);
+  // A worker the project move left in `.ai/cezar/` keeps its inputs there (`legacy-runs.ts`).
+  const root = await realpath(runDataDir(dataDir, workerId));
   const runs = join(root, 'runs');
   if (await realpath(runs) !== runs) throw invalid();
   return join(runs, `${workerId}-images`);

@@ -174,6 +174,15 @@ export function runRecordPathFields(record: unknown): JsonField[] {
     ...listFields(record, ['waitRegistrations'], ['wait', 'exitFile'])];
 }
 
+/**
+ * Whether a run record field feeds an owned worker's private identity: `workerWorkflowHash` hashes
+ * the whole `workflowDef`, `workerContextHash` the whole `delegation.context`. The identity file is
+ * immutable evidence, so a kept task keeps these fields as they were written.
+ */
+export function identityBoundField(field: readonly string[]): boolean {
+  return field[0] === 'workflowDef' || (field[0] === 'delegation' && field[1] === 'context');
+}
+
 const WORKER_RESULT_FIELDS = (value: unknown): JsonField[] => [['result', 'workspace', 'path'], ['result', 'diff', 'path'],
   ...listFields(value, ['result', 'artifacts', 'items'], ['path'])];
 
@@ -426,7 +435,11 @@ class Planner {
         }
         for (const row of db.listAll()) {
           const data: unknown = JSON.parse(row.data);
-          for (const field of runRecordPathFields(data)) this.rowField(row.id, { data: field }, valueAt(data, field), map);
+          for (const field of runRecordPathFields(data)) {
+            // A kept task's worker identity binds these by hash: rewriting them would refuse its Continue.
+            if (this.keep.has(row.id) && identityBoundField(field)) continue;
+            this.rowField(row.id, { data: field }, valueAt(data, field), map);
+          }
           this.rowField(row.id, { summary: ['worktreePath'] }, valueAt(JSON.parse(row.summary), ['worktreePath']), map);
           this.rowField(row.id, { column: 'worktree_path' }, row.worktreePath, map);
         }
