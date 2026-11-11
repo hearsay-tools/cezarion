@@ -92,6 +92,7 @@ import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef 
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { promptFor, driveSeam, lastIndexWhere, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
 import { SEAM_CONTRACT_ROWS } from './seam-contract.testkit.ts';
+import { CONTROL_CRITERIA, FOLLOW_ON_ROWS, INPUT_ROWS, RUN_ROWS, SEAM_ROWS } from './harness-parity-rows.testkit.ts';
 import { parityRowId, runsOn, type ParityFamilyName } from './parity-classes.testkit.ts';
 import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
@@ -111,15 +112,16 @@ interface SeamCriterion<T = SeamObservation> {
   readonly assert: (obs: T) => void;
 }
 
+/** What this kit adds to each plain row of `harness-parity-rows.testkit.ts`, by row id. */
+type Cells<Rows extends readonly { readonly id: string }[], Criterion> =
+  Readonly<Record<Rows[number]['id'], Omit<Criterion, 'id' | 'name' | 'scenario'>>>;
+
 const sessionEvents = (v1: readonly AgentEvent[]) =>
   v1.filter((e): e is Extract<AgentEvent, { type: 'session' }> => e.type === 'session');
 
-const SEAM_CRITERIA: readonly SeamCriterion[] = [
-  {
+const SEAM_CELLS: Cells<typeof SEAM_ROWS, SeamCriterion> = {
+  S21: {
     // hearsay-tools/cezarion#832: restored history must not silently cross workflow steps.
-    id: 'S21',
-    name: 'S21 warns about unexpected startup history without failing the turn',
-    scenario: 'auto-resumed',
     assert: ({ v1, v2, result, failure }) => {
       const warnings = v2.filter(event => event.type === 'session.error');
       expect(warnings).toEqual([{
@@ -137,11 +139,8 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(v2.indexOf(warnings[0]!)).toBeLessThan(v2.findIndex(event => event.type === 'turn.completed'));
     },
   },
-  {
+  S25: {
     // hearsay-tools/cezarion#872: a start racing its predecessor's teardown exits before listening.
-    id: 'S25',
-    name: 'S25 retries a backend server that exits before listening once and completes the turn',
-    scenario: 'serve-start-exit',
     assert: ({ v1, v2, result, failure }) => {
       expect(failure).toBeUndefined();
       expect(v1.filter(event => event.type === 'error')).toEqual([]);
@@ -155,10 +154,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(v2).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
     },
   },
-  {
-    id: 'S20',
-    name: 'S20 reports missing executables through its existing failure channel without starting a turn',
-    scenario: 'missing-binary',
+  S20: {
     assert: ({ backend, v1, failure, pid, elapsedMs }) => {
       // ENOENT precedes the backend wire. Runners retain their existing event
       // and/or rejected-result channels; none may look like a successful turn.
@@ -181,10 +177,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeLessThan(done);
     },
   },
-  {
-    id: 'S18',
-    name: 'S18 reports one actionable crash before terminal boundaries when the opening prompt is unacknowledged',
-    scenario: 'crash-stderr-pre-ack',
+  S18: {
     assert: ({ v1 }) => {
       const errors = v1.filter(e => e.type === 'error');
       expect(errors).toHaveLength(1);
@@ -198,10 +191,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
     },
   },
-  {
-    id: 'S19',
-    name: 'S19 drains late crash stderr without waiting indefinitely for inherited pipes',
-    scenario: 'crash-stderr-held-pipe',
+  S19: {
     assert: ({ v1, elapsedMs }) => {
       expect(elapsedMs).toBeLessThan(4_000); // Descendant keeps both pipes open for 5s.
       const errors = v1.filter(e => e.type === 'error');
@@ -210,10 +200,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).toContain('late buffered crash diagnostic');
     },
   },
-  {
-    id: 'S17',
-    name: 'S17 keeps clean exits and requested signal teardown successful despite stderr',
-    scenario: 'shutdown-stderr',
+  S17: {
     assert: ({ v1 }) => {
       expect(v1.filter(e => e.type === 'error')).toEqual([]);
       expect(v1.filter(e => e.type === 'done')).toHaveLength(1);
@@ -222,10 +209,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).not.toContain('harmless shutdown diagnostic');
     },
   },
-  {
-    id: 'S15',
-    name: 'S15 preserves actionable crash stderr and full available diagnostics after malformed native output',
-    scenario: 'crash-stderr',
+  S15: {
     assert: ({ v1 }) => {
       const errors = v1.filter(e => e.type === 'error');
       expect(errors).toHaveLength(1);
@@ -247,10 +231,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(notes).toContain('Node.js v24.20.0');
     },
   },
-  {
-    id: 'S16',
-    name: 'S16 preserves single-line stderr and nonzero exit codes',
-    scenario: 'crash-stderr-single',
+  S16: {
     assert: ({ v1 }) => {
       const errors = v1.filter(e => e.type === 'error');
       expect(errors).toHaveLength(1);
@@ -258,26 +239,20 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(errors.at(-1)!.message).toMatch(/(?:code 7|\(7\))/);
     },
   },
-  {
+  S1: {
     // Group 7 — the baseline AgentSession contract, never asserted uniformly.
-    id: 'S1',
-    name: 'S1 terminates with exactly one v1 done, and it is the last event',
-    scenario: 'baseline',
     assert: ({ v1 }) => {
       expect(v1.filter((e) => e.type === 'done')).toHaveLength(1);
       expect(v1.at(-1)?.type).toBe('done');
     },
   },
-  {
+  S2: {
     // Group 2 / #4 — the OpenCode five-minute cut. The runner used to end the
     // turn from its transport's own response, so undici's 300s headers timeout
     // killed a healthy long turn and cezar parked the run. `hold` acknowledges
     // the prompt, THEN waits before emitting content and its terminal signal:
     // a runner that still derives turn-end from the ack reports it before the
     // content it is supposed to close over.
-    id: 'S2',
-    name: 'S2 ends the turn on its own terminal signal, after the last content event',
-    scenario: 'hold',
     assert: ({ v1, v2 }) => {
       const lastContent = Math.max(
         lastIndexWhere(v1, (e) => e.type === 'text'),
@@ -288,15 +263,12 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       expect(v2.filter((e) => e.type === 'turn.completed')).toHaveLength(1);
     },
   },
-  {
+  S7: {
     // Group 1 / #53, #54 — a runtime provider rejection used to look like a
     // clean finish, so the orchestrator parked the run as "Needs You" and the
     // user waited on an agent that was never coming back. The rejection has to
     // reach BOTH streams: v1 `error` is what fails the run, v2 `session.error`
     // is what the cockpit renders.
-    id: 'S7',
-    name: 'S7 surfaces a provider failure as an error on both streams',
-    scenario: 'provider-error',
     assert: ({ v1, v2 }) => {
       const errors = v1.filter(
         (e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error',
@@ -320,14 +292,11 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       );
     },
   },
-  {
+  S9: {
     // Group 4 / #5, #600 — a spawned sub-agent runs in its own child session
     // that emits a full lifecycle over the shared connection. Its terminal
     // signal used to end the PARENT turn, so the parent's remaining work was
     // attributed to a turn cezar had already closed.
-    id: 'S9',
-    name: 'S9 keeps the parent turn open past a child session terminal signal',
-    scenario: 'subagent',
     assert: ({ backend, v1, v2, result }) => {
       // #149: child text stays nested on v2 and never contaminates parent text,
       // including AgentRunResult's fallback buffer and unfinished child deltas.
@@ -358,41 +327,33 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       }
     },
   },
-  {
+  S3: {
     // Group 7 — `resumeCommand()` and "open in CLI" need a session id after
     // every run. The two wires differ and both are legitimate: codex, opencode
     // cursor and pi mint their own and echo a v1 `session` event, while claude pins
     // the id cezar supplied (`--session-id`, claude-cli-runner.ts:385) and
     // returns it on the result. What must never happen is neither — that is a
     // run nobody can resume.
-    id: 'S3',
-    name: 'S3 yields a resumable session id at the seam',
-    scenario: 'baseline',
     assert: ({ v1, result }) => {
       const reported = sessionEvents(v1)[0]?.sessionId ?? result.sessionId;
       expect(reported ?? '').not.toBe('');
     },
   },
-  {
+  S4: {
     // Group 7 — usage telemetry on both streams, not one.
-    id: 'S4',
-    name: 'S4 reports token usage on both streams',
-    scenario: 'baseline',
     assert: ({ v1, v2 }) => {
       expect(v1.some((e) => e.type === 'token-usage' && e.tokensUsed > 0)).toBe(true);
       expect(v2.some((e) => e.type === 'usage.updated')).toBe(true);
     },
   },
-  {
+  S10: {
     // Group 7 — the pid roots the run's process tree for resource telemetry (#348).
-    id: 'S10',
-    name: 'S10 exposes the spawned process pid',
-    scenario: 'baseline',
     assert: ({ pid }) => {
       expect(typeof pid).toBe('number');
     },
   },
-];
+};
+const SEAM_CRITERIA: readonly SeamCriterion[] = SEAM_ROWS.map(row => ({ ...row, ...SEAM_CELLS[row.id] }));
 
 /** One row of the run tier. `settled` says when the run has reached the state
  *  the row is about, so a row waits for its own condition rather than a sleep. */
@@ -449,13 +410,10 @@ function driveObservedRun(
   });
 }
 
-const RUN_CRITERIA: readonly RunCriterion[] = [
-  {
+const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
+  R17: {
     // #550: Codex keeps its turn open and emits retryable errors; other wires
     // use their native provider rejection. Every runner must leave running.
-    id: 'R17',
-    name: 'R17 bounds an unavailable provider and preserves its failure reason',
-    scenario: 'provider-unavailable',
     timeoutMs: 75_000,
     settled: record => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
     assert: obs => {
@@ -471,28 +429,22 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
       }
     },
   },
-  {
+  R1: {
     // Group 7 — a run whose agent DECLARED completion reaches cezar's review
     // gate, which is a non-attention terminal state (cezar never auto-merges).
     // The scenario has to declare it: a markerless turn-end parks as `waiting`
     // on every backend, and that is correct behaviour, not a defect.
-    id: 'R1',
-    name: 'R1 takes a declared-complete run to its review gate',
-    scenario: 'cezar-done',
     settled: (record) => TERMINAL.includes(record?.status ?? ''),
     assert: (obs) => {
       expect(['review', 'done']).toContain(obs.record?.status);
       expect(obs.statuses).not.toContain('waiting');
     },
   },
-  {
+  R2: {
     // Group 1 / #53, #54 — the row that would have caught both on whichever
     // backend shipped the bug second. `statuses` rather than the final status:
     // the defect was a park, and a run that parked and later failed anyway is
     // still the bug the user saw.
-    id: 'R2',
-    name: 'R2 fails the run on a provider failure instead of parking it as Needs You',
-    scenario: 'provider-error',
     // `waiting` settles too, so the defect fails on the assertion below rather
     // than as an opaque timeout: a parked run is the bug, not a slow one.
     settled: (record) => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
@@ -501,41 +453,32 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
       expect(obs.statuses).not.toContain('waiting');
     },
   },
-  {
+  R3: {
     // Group 3 / #6, #473 — an ask has to reach the cockpit as exactly one card
     // and park the run for the user. The two wires differ underneath: codex and
     // opencode have native asks their runners map; claude, pi, omp and cursor call
     // cezar_ask, whose human wait `workflows/run.ts` opens. Above the seam that
     // difference must be invisible.
-    id: 'R3',
-    name: 'R3 parks as waiting and emits exactly one ask card',
-    scenario: 'ask',
     settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
     assert: (obs) => {
       expect(obs.record?.status).toBe('waiting');
       expect(askEvents(obs)).toHaveLength(1);
     },
   },
-  {
+  R4: {
     // Group 3 — the other half, and the one that hangs a run when it is wrong:
     // a malformed ask must render no card AND still end its turn. A backend
     // that waits forever for an answer to a question nobody can see is the
     // failure this pins; `settled` returning is itself part of the assertion.
-    id: 'R4',
-    name: 'R4 renders no card for a malformed ask and still ends the turn',
-    scenario: 'ask-bad',
     settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
     assert: (obs) => {
       expect(askEvents(obs)).toEqual([]);
       expect([...TERMINAL, 'waiting']).toContain(obs.record?.status);
     },
   },
-  {
+  R5: {
     // Group 6 / #48 — a declared park is a non-attention state: a cezar_wait timer parks
     // the run as monitoring, never as Needs You.
-    id: 'R5',
-    name: 'R5 parks a declared monitoring turn on an open monitoring timer, not as a plain wait',
-    scenario: 'cezar-wait',
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
       // hearsay-tools/cezarion#1233: `waiting` plus an open timer reads as monitoring.
@@ -544,11 +487,8 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
   },
-  {
+  R12: {
     // #149: the child message lands before the parent's turn-end, after its cezar_wait.
-    id: 'R12',
-    name: 'R12 keeps monitoring parked when child text follows the parent cezar_wait',
-    scenario: 'subagent',
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
       expect(obs.record).toMatchObject({ status: RUN_STATUS.waiting });
@@ -556,133 +496,8 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
   },
-];
-
-/** Criteria driven through `whileOpen` rather than one settled observation. */
-const CONTROL_CRITERIA = [
-  // hearsay-tools/cezarion#1380: workflows/resume-diagnostics.testkit.ts.
-  { id: 'R85', scenario: 'provider-error' },
-  { id: 'R86', scenario: 'cezar-done' },
-  { id: 'R87', scenario: 'cezar-done' },
-  { id: 'R88', scenario: 'provider-error' },
-  { id: 'R89', scenario: 'provider-error' },
-  { id: 'R90', scenario: 'cezar-done' },
-  { id: 'R91', scenario: 'cezar-done' },
-  // hearsay-tools/cezarion#2279: a governed session keeps native subagents; only a separate
-  // cross-session tool gets a control.
-  { id: 'D1', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1994: a session at shipped defaults refuses native cross-session messages.
-  { id: 'D3', scenario: 'baseline' },
-  { id: 'S5', scenario: 'baseline' },
-  { id: 'S6', scenario: 'baseline' },
-  { id: 'S35', scenario: 'baseline' },
-  { id: 'S11', scenario: 'ask' },
-  { id: 'S12', scenario: 'hold' },
-  { id: 'S13', scenario: 'hold' },
-  { id: 'S14', scenario: 'baseline' },
-  { id: 'R44', scenario: 'skill-warning' },
-  { id: 'R45', scenario: 'skill-warning' },
-  { id: 'R46', scenario: 'provider-error' },
-  { id: 'R6', scenario: 'ask' },
-  { id: 'R7', scenario: 'ask' },
-  { id: 'R8', scenario: 'hold' },
-  { id: 'R9', scenario: 'ask-reply-late' },
-  { id: 'R10', scenario: 'cezar-done' },
-  { id: 'R11', scenario: 'baseline' },
-  { id: 'R15', scenario: 'subagent-after-park' },
-  // #961: hook items never move run state, mid-turn or after the park.
-  { id: 'R77', scenario: 'hook-after-park' },
-  { id: 'R20', scenario: 'baseline' },
-  { id: 'R22', scenario: 'baseline' },
-  { id: 'R23', scenario: 'ask' },
-  // harness-autosave.test.ts drives both cleanup paths with native runner wires.
-  { id: 'R24', scenario: 'baseline' },
-  { id: 'R25', scenario: 'baseline' },
-  // hearsay-tools/cezarion#934: harness-autosave-settlement.test.ts, independent writer guard.
-  { id: 'R61', scenario: 'provider-error' },
-  { id: 'R62', scenario: 'provider-error' },
-  { id: 'R63', scenario: 'baseline' },
-  { id: 'R64', scenario: 'cezar-ask' },
-  { id: 'R65', scenario: 'baseline' },
-  { id: 'R66', scenario: 'baseline' },
-  // hearsay-tools/cezarion#958: final autosave beside unrelated worktree process churn.
-  { id: 'R67', scenario: 'baseline' },
-  { id: 'R68', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1004: harness-autosave-branch.test.ts, run-finalize and turn-end
-  // saves leave work on an agent-checked-out branch uncommitted and report it in the handoff;
-  // R79 also reports a periodic commit that leaves the closing turn-end flush clean.
-  { id: 'R78', scenario: 'baseline' },
-  { id: 'R79', scenario: 'baseline' },
-  // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.testkit.ts,
-  // failed fresh/continued CI attempts retain history through scheduler recovery.
-  { id: 'R72', scenario: 'provider-error-controlled' },
-  { id: 'R73', scenario: 'provider-error-controlled' },
-  // Nonfinal CI recovery retains failure history and runs the tail/check retries, including restart.
-  { id: 'R74', scenario: 'provider-error-controlled' },
-  { id: 'R75', scenario: 'provider-error-controlled' },
-  { id: 'R76', scenario: 'provider-error-controlled' },
-  { id: 'R26', scenario: 'ask-resume' },
-  // workflows/ci-wait-refusal.test.ts: settled worker wake, private CI IPC, then delivery.
-  { id: 'R27', scenario: 'hold' },
-  // hearsay-tools/cezarion#1225: cancel/destroy releases the same-turn wait slot.
-  { id: 'R80', scenario: 'hold' },
-  // workflows/ci-wait-conflict-{fresh,continued,recovered}-parity.test.ts: real gh metadata, atomic input, native wake.
-  { id: 'R81', scenario: 'baseline' },
-  { id: 'R82', scenario: 'baseline' },
-  { id: 'R83', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1399: workflows/ci-wait-rerun-{fresh,recovered}-parity.test.ts keeps
-  // partial green pending during a rerun, including recovery without a session.
-  { id: 'R85', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1440: query retry through native wake, fresh and recovered.
-  { id: 'R92', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1425: workflows/pr-merge-wait-parity.test.ts keeps green checks
-  // open and delivers one committed merge observation, fresh, continued and recovered.
-  { id: 'R97', scenario: 'baseline' },
-  { id: 'R98', scenario: 'baseline' },
-  { id: 'R99', scenario: 'baseline' },
-  { id: 'R28', scenario: 'baseline' },
-  { id: 'R29', scenario: 'baseline' },
-  { id: 'R30', scenario: 'baseline' },
-  { id: 'R31', scenario: 'baseline' },
-  { id: 'R32', scenario: 'baseline' },
-  { id: 'R33', scenario: 'baseline' },
-  { id: 'R34', scenario: 'baseline' },
-  // R35 covers both preview serve (#781) and stop/restart (#803) discovery on every native wire.
-  { id: 'R35', scenario: 'baseline' },
-  // hearsay-tools/cezarion#784: the session's preview CDP address reaches each native process.
-  { id: 'R125', scenario: 'baseline' },
-  // core/ci-tools-wait-cancel.test.ts (hearsay-tools/cezarion#1233): `cezar_wait` and `cezar_cancel_wait`
-  // reach the session's handlers through each native wire, fresh and resumed.
-  { id: 'U0', scenario: 'baseline' },
-  // #399: shared monitoring instructions on each native prompt channel.
-  { id: 'R36', scenario: 'baseline' },
-  { id: 'R37', scenario: 'baseline' },
-  { id: 'R38', scenario: 'cezar-wait' },
-  { id: 'R39', scenario: 'cezar-wait' },
-  { id: 'R40', scenario: 'baseline' },
-  { id: 'R41', scenario: 'cezar-done' },
-  { id: 'R42', scenario: 'baseline' },
-  // workflows/worker-reboot-{collect,destroy,reuse}-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
-  // independent reboot proof, legacy location uncertainty, readable vs unreadable holders, cleanup retries
-  // and parent Finish.
-  { id: 'R43', scenario: 'baseline' },
-  // workflows/worker-restart-same-boot-crash-lock-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
-  { id: 'R47', scenario: 'baseline' },
-  // worker-restart-starting-proof-parity.test.ts: cold terminal starting-proof facts readiness.
-  { id: 'R60', scenario: 'baseline' },
-  // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
-  { id: 'R48', scenario: 'cezar-done' },
-  // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
-  { id: 'R49', scenario: 'cezar-done' },
-  // #779 plan step 3: a headless open beside the owner leaves its parked run alone.
-  { id: 'R50', scenario: 'ask' },
-  // #779 plan step 3: adopting a dead owner's mid-turn run for a control resumes nothing; Continue does.
-  { id: 'R51', scenario: 'hold' },
-  // #779: Stop on a dead owner's mid-turn run ends it cancelled, not interrupted, and starts nothing.
-  { id: 'R52', scenario: 'hold' },
-  { id: 'PR1', scenario: 'multi-pr-refs' },
-  { id: 'PR2', scenario: 'multi-pr-refs' },
-] as const;
+};
+const RUN_CRITERIA: readonly RunCriterion[] = RUN_ROWS.map(row => ({ ...row, ...RUN_CELLS[row.id] }));
 
 // Group 8 — #505: agent input reaches a running turn and its reading is reported.
 interface InputObservation {
@@ -715,27 +530,22 @@ async function observeInput(backend: RunnerId, scenario: ScenarioName, id: strin
     : e.type === 'turn-end' ? [...(e.unconsumedInputIds ?? [])] : []);
   return { obs, consumed, consumedBeforeTurnEnd, unconsumed };
 }
-const INPUT_CRITERIA: readonly SeamCriterion<InputObservation>[] = [
-  {
-    id: 'I1',
-    name: 'I1 admits agent input mid-turn and reports it read before that turn ends',
-    scenario: 'steer-tool',
+const INPUT_CELLS: Cells<typeof INPUT_ROWS, SeamCriterion<InputObservation>> = {
+  I1: {
     assert: ({ obs, consumed, consumedBeforeTurnEnd }) => {
       expect(consumed).toEqual(['parity-I1']);
       expect(consumedBeforeTurnEnd).toBe(true);
       expect(obs.v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
     },
   },
-  {
-    id: 'I2',
-    name: 'I2 reports accepted input the finished turn never read',
-    scenario: 'steer-late',
+  I2: {
     assert: ({ unconsumed, consumed }) => {
       expect(unconsumed).toEqual(['parity-I2']);
       expect(consumed).toEqual([]);
     },
   },
-];
+};
+const INPUT_CRITERIA: readonly SeamCriterion<InputObservation>[] = INPUT_ROWS.map(row => ({ ...row, ...INPUT_CELLS[row.id] }));
 // hearsay-tools/cezarion#1235 (PR #1291 CI): OpenCode can answer steered input in a follow-on run
 // that starts after the turn's idle. Input posted in that gap opened its own turn, the follow-on
 // run's idle closed it, and the input's own run then surfaced nothing. Every wire answers input
@@ -776,9 +586,7 @@ async function observeFollowOn(backend: RunnerId): Promise<FollowOnObservation> 
   return { obs, consumed, observable: inputDeliveryOf(runnersUnderTest()(backend)).consumption === 'observable' };
 }
 const FOLLOW_ON_CRITERION: SeamCriterion<FollowOnObservation> = {
-  id: 'I6',
-  name: 'I6 answers input posted right after a turn that took a steer in a turn of its own',
-  scenario: 'steer-tool',
+  ...FOLLOW_ON_ROWS[0],
   assert: ({ obs, consumed, observable }) => {
     expect(obs.failure).toBeUndefined();
     expect(answeredInItsTurn(obs.v1, FOLLOW_ON_NEXT)).toBe(true);
@@ -820,7 +628,7 @@ const agentInput = (parentRunId: string, text = '/owned-skill mock:agent-echo pa
 // runner cannot say it maps a field it drops, and cannot quietly start mapping
 // one it declared dropped. Codex and OpenCode ignoring `toolGrant` stays
 // pinned exactly as long as they declare it (the product decision the
-// `AgentRunSpec` caveat in AGENT_PROTOCOL.md records).
+// `AgentRunSpec.toolGrant` doc comment records).
 
 /**
  * How one field is observed. `boundary` probes set the field and nothing else
