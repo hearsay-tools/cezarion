@@ -17,13 +17,16 @@ for (const key of Object.keys(process.env)) if (/^(CEZ|HSQ)_/.test(key)) delete 
 process.env.HSQ_HOME = process.env.CEZ_HOME = join(root, 'home');
 process.env.HSQ_DRY_RUN = process.env.CEZ_DRY_RUN = '1';
 const runtime = { url: new URL('../dist/', import.meta.url), ext: 'js' };
-const dataDir = join(root, 'cold-project', '.ai/cezar');
+let dataDir;
 let store;
 let bootStore;
 let server;
 const watchdog = setTimeout(() => { console.error('health measurement exceeded 30s'); process.exitCode = 1; server?.closeAllConnections(); server?.close(); store?.close(); bootStore?.close(); }, 30_000);
 try {
   const { RunStore } = await import(new URL('runs/store.js', runtime.url));
+  // Seed where the built revision's cockpit reads each project, so a cockpit start moves nothing.
+  const { projectPaths } = await import(new URL('project-paths.js', runtime.url));
+  dataDir = projectPaths(join(root, 'cold-project')).write;
   const { startServer } = await import(new URL('server/server.js', runtime.url));
   const { resolveHome } = await import(new URL('home/resolve.js', runtime.url));
   const home = resolveHome({ purpose: 'cli' });
@@ -36,7 +39,7 @@ try {
   global.gc?.();
   // Project-open scenario: establish the real HTTP/client path before opening a
   // second cold store on this same event loop. No transcript sidecar is primed.
-  bootStore = RunStore.open(join(root, '.ai/cezar'));
+  bootStore = RunStore.open(projectPaths(root).write);
   await bootStore.factsWarmIdle();
   server = startServer({ home, repoRoot: root, store: bootStore, manager: {}, version: 'task4-measurement', bindHost: '127.0.0.1' }, 0);
   if (!server.listening) await once(server, 'listening');

@@ -414,3 +414,14 @@ does not make an existing migrated project's legacy state writable.
 The fallback guard checks the root's directory entry. An unreadable or dangling
 entry still counts as present and keeps the existing guard. Registered projects
 whose own current root was deleted retain their separate admission refusal.
+
+### Known limits at the switch
+
+- The one-time automatic move of a project that the cockpit prepares after the listener starts
+  runs synchronous file and Git work on the event loop. In CI (`transcript-facts-responsiveness`,
+  head 06169742d of hearsay-tools/cezarion#3240) the move of a project with an empty run store
+  blocked health requests for 568 ms, 542 ms of it waiting on synchronous I/O; on a local disk the
+  same move blocked 20–27 ms. The boot project moves before the listener, so this applies to
+  other registered projects and to projects added later. The move stays synchronous in the
+  switch release; the timing check seeds its fixture where a switch-on cockpit reads it, so it
+  measures the cold history open, not the move.
