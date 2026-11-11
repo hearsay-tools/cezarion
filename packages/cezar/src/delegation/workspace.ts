@@ -2,6 +2,7 @@ import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
 import { inspectGeneration } from './process-liveness.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
 import { identityFileStore } from './identity-file-store.ts';
+import { entryExists as exists } from './entry-exists.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -86,12 +87,6 @@ async function checkedGit(cwd: string, args: string[], index?: string): Promise<
 /** The repository's shared Git directory (where refs, reflogs and linked-worktree admin dirs live), resolved. */
 export async function gitCommonDir(cwd: string): Promise<string> {
   return realpath(await checkedGit(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
-}
-async function exists(path: string): Promise<boolean> {
-  return lstat(path).then(() => true, (error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return false;
-    throw error;
-  });
 }
 
 /** Reads only committed state in the server-known parent cwd; never flushes its edits. */

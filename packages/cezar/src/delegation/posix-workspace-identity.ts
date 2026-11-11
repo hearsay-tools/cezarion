@@ -2,13 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rename, rm } from 'node:fs/promises';
 import type { IdentityFileStore } from './identity-file-store.ts';
-
-async function exists(path: string): Promise<boolean> {
-  return lstat(path).then(() => true, (error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return false;
-    throw error;
-  });
-}
+import { entryExists as exists } from './entry-exists.ts';
 
 async function directory(dir: string, create: boolean): Promise<void> {
   if (create) await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
