@@ -254,7 +254,7 @@ it.each([{ installed: false }, { installed: true, dryRun: true }])('does migrate
 });
 
 
-it.each(['projects', 'serve'])('%s migrates an installed macOS home without a server-migrate notice', async command => {
+it.each(['projects', 'serve'])('%s keeps an installed macOS server home and prints one server-migrate notice', async command => {
   vi.resetModules();
   vi.doMock('./switch.ts', () => ({ REBRAND_SWITCH: true }));
   const { prepareOperatorHome: prepareSwitchedHome } = await import('./entry.ts');
@@ -263,10 +263,12 @@ it.each(['projects', 'serve'])('%s migrates an installed macOS home without a se
     Home.seed(f.legacy, f.legacy.serverState(), {
       schema: 1, installed: true, platform: 'macosx-ngrok', primaryPort: 4321, steps: {},
     });
+    const before = targetSnapshot(f.target);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(prepareSwitchedHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.target);
-    expect(readInstallMarker(f.target.config)?.state).toBe('committed');
-    expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(true);
-    expect(warn).not.toHaveBeenCalled();
+    expect(prepareSwitchedHome(f.target, command, f.env, { legacy: f.legacy })).toBe(f.legacy);
+    expect(targetSnapshot(f.target)).toEqual(before);
+    expect(readInstallMarker(f.target.config)?.state).toBeUndefined();
+    expect(existsSync(join(f.legacy.root, 'MOVED.json'))).toBe(false);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Run hsq server-migrate.'));
   } finally { cleanStoreRoots(); }
 });

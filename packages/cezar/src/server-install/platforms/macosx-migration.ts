@@ -2,6 +2,7 @@ import { existsSync, lstatSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { guardLaunchdWrite, ownsLaunchdPlist, readLaunchdPlist } from './macosx-launchd-files.ts';
 import type { InstallContext, PlatformMigrationReport, StepArtifact } from '../types.ts';
+import { StepAborted } from '../steps.ts';
 
 const emptyReport = (): PlatformMigrationReport => ({ moved: [], leftAloneForeign: [], errors: [] });
 type Move = PlatformMigrationReport['moved'][number];
@@ -78,6 +79,7 @@ async function movePlist(ctx: InstallContext, move: Move, xml: string): Promise<
 export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: boolean): Promise<PlatformMigrationReport> {
   const report = emptyReport();
   if (!rebrand) return report;
+  const details: string[] = [];
   for (const [stepId, agent] of [['autostart', 'cockpit'], ['ngrok', 'ngrok']] as const) {
     const from: StepArtifact = { kind: 'owned', type: 'launchd', name: `ai.cezar.${agent}`, path: join(dir, `ai.cezar.${agent}.plist`) };
     if (!existsSync(from.path!)) continue;
@@ -85,6 +87,7 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
       const xml = readLaunchdPlist(from.path!);
       if (!ownsLaunchdPlist(ctx, from, xml)) {
         report.leftAloneForeign.push({ ...from, kind: 'shared' });
+        details.push(`launchd ${from.name} left alone: ${from.path} is not ours`);
         continue;
       }
       if (!ctx.state.steps[stepId]) throw new Error(`Unknown migration step: ${stepId}`);
@@ -96,10 +99,12 @@ export async function migrateLaunchd(ctx: InstallContext, dir: string, rebrand: 
       if (guardLaunchdWrite(ctx, to) !== undefined) throw new Error(`Destination already exists: ${to.path}`);
       if (!ctx.dryRun) await movePlist(ctx, move, xml);
       report.moved.push(move);
+      details.push(`launchd ${from.name} → ${to.name} (${to.path}; old plist kept as ${backup.path})`);
     } catch (error) {
       report.errors.push({ artifact: from, message: error instanceof Error ? error.message : String(error) });
     }
   }
+  if (details.length) report.details = details;
   return report;
 }
 
@@ -165,4 +170,53 @@ export async function rollbackLaunchdMigration(ctx: InstallContext, migrated: Pl
     }
   }
   return report;
+}
+
+/** An agent whose plist the ledger records or whose launcher proves it ours. */
+export type LaunchdService = StepArtifact & { name: string; path: string; role: 'cockpit' | 'ngrok' };
+
+const NGROK_API = 'http://localhost:4040/api/tunnels';
+
+/** One line per service for the dry-run plan; names are the post-migration labels. */
+export function launchdHealthDetails(services: LaunchdService[], port: number): string[] {
+  return services.map((s) => `health check: ${s.name} is loaded and ${s.role === 'cockpit'
+    ? `http://127.0.0.1:${port}/ answers` : `the ngrok API at ${NGROK_API} lists a tunnel`}`);
+}
+
+/** `server-migrate` stop: boot out every owned agent. Foreign agents are never in the list. */
+export async function stopLaunchdServices(ctx: InstallContext, services: LaunchdService[]): Promise<void> {
+  for (const service of services) {
+    if (ctx.dryRun) ctx.ui.info(`DRY RUN — would launchctl bootout ${service.name}.`);
+    else await unloadLaunchd(ctx, service.name);
+  }
+}
+
+/** `sleep 1` through the runner keeps the poll testable without real timers. */
+async function poll(ctx: InstallContext, attempts: number, probe: () => Promise<boolean>): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    if (await probe()) return true;
+    if (i < attempts - 1) await ctx.runner.capture('sh', ['-c', 'sleep 1']);
+  }
+  return false;
+}
+
+/** `server-migrate` start: load each agent that is not loaded, then check the cockpit port and the tunnel. */
+export async function startLaunchdServices(ctx: InstallContext, services: LaunchdService[], port: number): Promise<void> {
+  if (ctx.dryRun) {
+    for (const line of launchdHealthDetails(services, port)) ctx.ui.info(`DRY RUN — would load and check: ${line}`);
+    return;
+  }
+  for (const service of services) {
+    if (!existsSync(service.path)) throw new StepAborted(`Recorded launchd plist missing: ${service.path}`);
+    if (!(await isLoaded(ctx, service))) await bootstrap(ctx, service);
+  }
+  for (const service of services) {
+    const up = service.role === 'cockpit'
+      ? await poll(ctx, 15, async () => {
+        const code = (await ctx.runner.capture('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `http://127.0.0.1:${port}/`])).stdout.trim();
+        return code !== '' && code !== '000';
+      })
+      : await poll(ctx, 5, async () => (await ctx.runner.capture('curl', ['-s', NGROK_API])).stdout.includes('public_url'));
+    if (!up) throw new StepAborted(service.role === 'cockpit' ? `${service.name} did not answer on port ${port}` : `${service.name}: the ngrok API lists no tunnel`);
+  }
 }
