@@ -23,26 +23,41 @@ export const LEGACY_RUNS_FILE = 'legacy-runs.json';
 export const legacyRunsSchema = z.object({ version: z.literal(1), runs: z.array(runIdParamSchema.shape.id) }).strict();
 
 const cache = new Map<string, ReadonlySet<string>>();
-const warned = new Set<string>();
+
+/**
+ * `legacy-runs.json` exists but cannot be read or validated. Which tasks keep their items in
+ * `.ai/cezar/` is then unknown: a reader that guessed `.ai/squawk/` could miss a kept task's
+ * history and write a second copy beside it, so every per-run path refuses until the project's
+ * next move rewrites the file from the run store.
+ */
+export class LegacyRunsUnreadableError extends Error {
+  constructor(readonly file: string, cause: unknown) {
+    super(`Cannot read ${file}: ${cause instanceof Error ? cause.message : String(cause)}. `
+      + 'It names the tasks whose files stayed in .ai/cezar/; the next cockpit start or migrate-project rewrites it', { cause });
+  }
+}
 
 /** Whether `dataDir` is a project's moved directory, `<root>/.ai/squawk`. */
 function movedDirectory(dataDir: string): boolean {
   return basename(dataDir) === 'squawk' && basename(dirname(dataDir)) === '.ai';
 }
 
-/** The ids of the tasks that keep their own items in `.ai/cezar/` beside the moved directory `movedDir`. */
+/**
+ * The ids of the tasks that keep their own items in `.ai/cezar/` beside the moved directory
+ * `movedDir`. Only an absent file means none; a file that is present but unreadable or invalid
+ * throws `LegacyRunsUnreadableError`, and is read again on the next call.
+ */
 export function legacyRunIds(movedDir: string): ReadonlySet<string> {
   const key = resolve(movedDir);
   const cached = cache.get(key);
   if (cached) return cached;
-  let ids: ReadonlySet<string> = new Set();
+  const file = join(key, LEGACY_RUNS_FILE);
+  let ids: ReadonlySet<string>;
   try {
-    ids = new Set(legacyRunsSchema.parse(JSON.parse(readFileSync(join(key, LEGACY_RUNS_FILE), 'utf8'))).runs);
+    ids = new Set(legacyRunsSchema.parse(JSON.parse(readFileSync(file, 'utf8'))).runs);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !warned.has(key)) {
-      warned.add(key);
-      console.warn(`Cannot read ${join(key, LEGACY_RUNS_FILE)}; tasks that kept their files in .ai/cezar/ resolve them in .ai/squawk/: ${(error as Error).message}`);
-    }
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new LegacyRunsUnreadableError(file, error);
+    ids = new Set();
   }
   cache.set(key, ids);
   return ids;
@@ -95,5 +110,11 @@ export function legacyRunItem(root: string, path: string): boolean {
   const legacy = resolve(root, '.ai', 'cezar');
   const target = resolve(path);
   if (!target.startsWith(legacy + sep)) return false;
-  return legacyItemOwner(target.slice(legacy.length + 1).split(sep), legacyRunIds(resolve(root, '.ai', 'squawk'))) !== undefined;
+  let ids: ReadonlySet<string>;
+  // A write guard fails closed: with the list unreadable, no item counts as a kept task's.
+  try { ids = legacyRunIds(resolve(root, '.ai', 'squawk')); } catch (error) {
+    if (error instanceof LegacyRunsUnreadableError) return false;
+    throw error;
+  }
+  return legacyItemOwner(target.slice(legacy.length + 1).split(sep), ids) !== undefined;
 }

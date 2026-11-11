@@ -1,4 +1,4 @@
-import { legacyRunsBeside } from '../legacy-runs.ts';
+import { legacyRunsBeside, runDataDir } from '../legacy-runs.ts';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -16,15 +16,25 @@ export type WorkerExecution = z.infer<typeof workerExecutionSchema>;
 
 /** Presence, not parseability, reserves scratch. Unknown evidence must never turn into an
  * orphan merely because runs.json was missing, partly salvaged, or unreadable. Undefined
- * means enumeration itself is uncertain: callers retain all scratch and retry later. */
+ * means enumeration itself is uncertain: callers retain all scratch and retry later. A task the
+ * project move left in `.ai/cezar/` keeps its evidence there; only such a task's own evidence
+ * files reserve it, so a kept task that never was a worker stays deletable. */
 export function workerEvidenceRunIds(dataDir: string): string[] | undefined {
-  const dir = join(dataDir, 'runs');
+  let kept: Set<string>;
+  try { kept = new Set(legacyRunsBeside(dataDir)); } catch { return undefined; } // an unreadable list: uncertain
+  const own = evidenceIdsIn(join(dataDir, 'runs'));
+  // Every listed task resolves to the same legacy directory, `.ai/cezar/` beside `dataDir`.
+  const legacy = kept.size === 0 ? [] : evidenceIdsIn(join(runDataDir(dataDir, [...kept][0]!), 'runs'));
+  if (own === undefined || legacy === undefined) return undefined;
+  return [...new Set([...own, ...legacy.filter(id => kept.has(id))])];
+}
+
+function evidenceIdsIn(dir: string): string[] | undefined {
   try {
     if (!lstatSync(dir).isDirectory() || realpathSync(dir) !== resolve(dir)) return undefined;
-    // A task the project move left in `.ai/cezar/` keeps its evidence there: reserved by id.
-    return [...new Set([...readdirSync(dir).flatMap(name => {
+    return readdirSync(dir).flatMap(name => {
       const match = /^([0-9a-f-]{36})\.(?:identity|execution|processes)\.json(?:\..*\.tmp)?$/i.exec(name);
       return match && z.string().uuid().safeParse(match[1]).success ? [match[1]!] : [];
-    }), ...legacyRunsBeside(dataDir)])];
+    });
   } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : undefined; }
 }

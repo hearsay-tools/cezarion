@@ -7,7 +7,7 @@ import { noticeLegacyProject, pathPresent, projectMoveMarked, projectPaths } fro
 import { CockpitOwnership, migrationFencePaths } from '../server/cockpit-ownership.ts';
 import { projectCockpits, projectForeignTasksOffline, projectKeptRunIds } from './live.ts';
 import { moveUnderFence } from './offline.ts';
-import { LEGACY_PROJECT_DIR, legacyItemsPresent, planProjectMigration } from './plan.ts';
+import { LEGACY_PROJECT_DIR, legacyStateLeft, MIGRATED_PROJECT_DIR, planProjectMigration } from './plan.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
 import type { ArchiveOnMergeDeps } from '../server/archive-on-merge.ts';
 import { automationLeaseHeld } from '../automations/store.ts';
@@ -121,7 +121,7 @@ async function attempt(root: string, options: Parameters<typeof moveProjectWhenI
   markFreshProject(root, options.rebrand ?? REBRAND_SWITCH);
   // A completed move marked the project (hearsay-tools/cezarion#3150): `.ai/cezar/` is its fallback
   // now, and holds nothing more to move once only the ownership claims are left in it.
-  if (!legacyItemsPresent(join(root, ...LEGACY_PROJECT_DIR.split('/')))) return { status: 'nothing' };
+  if (!legacyStateLeft(join(root, ...LEGACY_PROJECT_DIR.split('/')), join(root, ...MIGRATED_PROJECT_DIR.split('/')))) return { status: 'nothing' };
   const log = options.log ?? ((line: string) => console.warn(line));
   const blocked = (reason: string): AutomaticMove => {
     noticeLegacyProject(root, { releaseEnabled: options.rebrand ?? REBRAND_SWITCH, reason, warn: log });

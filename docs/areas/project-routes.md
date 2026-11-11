@@ -250,7 +250,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   of the tasks that can still resume at planning (`keep`, read under the fence by
   `projectKeptRunIds`): every live task and every task not archived, since a human can Continue
   a done, review, failed or cancelled task from its stored worktree. Live-ness alone does not
-  select items; an archived task's items move, and a deleted task's items move or are gone. Their own items stay in
+  select items; an archived task's items move, and a deleted task's items move or are gone. A
+  row that is not archived but whose record cannot be read refuses the move. Their own items stay in
   `.ai/cezar/`: `worktrees/<id>`, `tmp/<id>`, `preview/<id>`, `t/<first 8 of id>` and every
   `runs/<id>…` entry (`legacyItemOwner` in `legacy-runs.ts`). The directory around such an item
   merges item by item; no stored path into one is rewritten, so a session resumes at its old
@@ -262,10 +263,16 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   `.ai/cezar/`; every path helper of a run's own items (handoff, history, artifacts,
   attachments, worker results, scratch and control directories, preview profile, autosave
   cleanup, history removal, `RunStore.sourceDataDir`, the reports index and the agent's granted
-  `runs/` directory) calls it, the boot preview sweep also scans the listed tasks' `preview/<id>`, and `fallbackProjectWriteError` and
+  `runs/` directory) calls it, the boot preview sweep also scans the listed tasks' real
+  `preview/<id>` (never through a link), and `fallbackProjectWriteError` and
   `isFallbackProjectPath` exempt such items, so the task and its cleanup (a worker's destroy
   retry) work at the stored paths. A later move carries a task's items once it is archived or
-  deleted and drops it from the list; no task left removes the file.
+  deleted and drops it from the list; no task left removes the file. The checks fail closed:
+  only an absent `legacy-runs.json` means no kept task; a present one that cannot be read throws
+  `LegacyRunsUnreadableError` from `runDataDir`, the write guards treat no item as kept, and the
+  next move rewrites the file from the run store. A top-level directory the plan cannot list
+  blocks the plan, since it may hold a kept item. Only a kept task's own
+  `identity`/`execution`/`processes` files reserve it as a worker (`workerEvidenceRunIds`).
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
   before the entry that finds it reads the project, in both switch states. Without a journal it costs one

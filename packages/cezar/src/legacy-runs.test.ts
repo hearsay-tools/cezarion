@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { removeHistory } from './runs/history-file.ts';
-import { forgetLegacyRunIds, LEGACY_RUNS_FILE, legacyItemOwner, legacyRunIds, legacyRunItem, runDataDir } from './legacy-runs.ts';
+import { forgetLegacyRunIds, LEGACY_RUNS_FILE, legacyItemOwner, legacyRunIds, legacyRunItem, LegacyRunsUnreadableError, runDataDir } from './legacy-runs.ts';
+import { workerEvidenceRunIds } from './runs/worker-execution.ts';
 
 /** Live tasks that keep their own items in `.ai/cezar/` after a project move (owner decision A). */
 
@@ -55,14 +56,46 @@ describe('the items of a task the project move left in .ai/cezar/', () => {
     expect(legacyRunItem(root, join(root, '.ai', 'squawk', 'worktrees', LIVE))).toBe(false);
   });
 
-  it('reads an unreadable list as empty, with one warning', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    writeFileSync(join(moved, LEGACY_RUNS_FILE), '{"version":1,"runs":["../escape"]}');
+  it('fails closed on a present list it cannot read or validate, and reads a repaired one again', () => {
+    const file = join(moved, LEGACY_RUNS_FILE);
+    const legacyHandoff = join(root, '.ai', 'cezar', 'runs', `${LIVE}.handoff.md`);
+    for (const write of [
+      () => writeFileSync(file, '{"version":1,"runs":["../escape"]}'), // invalid
+      () => writeFileSync(file, '{"version":1,'), // malformed
+      () => mkdirSync(file), // present, unreadable as a file
+    ]) {
+      rmSync(file, { recursive: true, force: true });
+      write();
+      forgetLegacyRunIds(moved);
+      expect(() => legacyRunIds(moved)).toThrow(LegacyRunsUnreadableError);
+      // Never a guessed `.ai/squawk/` path for a task that may have kept its files.
+      expect(() => runDataDir(moved, LIVE)).toThrow(LegacyRunsUnreadableError);
+      // The write guard treats nothing in `.ai/cezar/` as a kept task's.
+      expect(legacyRunItem(root, legacyHandoff)).toBe(false);
+    }
+    // The failure is not cached: a repaired list is read on the next call.
+    rmSync(file, { recursive: true, force: true });
+    writeFileSync(file, JSON.stringify({ version: 1, runs: [LIVE] }));
+    expect(runDataDir(moved, LIVE)).toBe(join(root, '.ai', 'cezar'));
+    // Only a missing list means no kept task.
+    rmSync(file);
     forgetLegacyRunIds(moved);
     expect(legacyRunIds(moved).size).toBe(0);
+    expect(runDataDir(moved, LIVE)).toBe(moved);
+  });
+
+  it('reserves a kept task as a worker only by its own evidence in .ai/cezar/runs', () => {
+    list([LIVE, OTHER]);
+    const legacyRuns = join(root, '.ai', 'cezar', 'runs');
+    mkdirSync(legacyRuns, { recursive: true });
+    mkdirSync(join(moved, 'runs'), { recursive: true });
+    writeFileSync(join(legacyRuns, `${LIVE}.execution.json`), '{}');
+    writeFileSync(join(legacyRuns, `${OTHER}.handoff.md`), '# Handoff');
+    expect(workerEvidenceRunIds(moved)).toEqual([LIVE]);
+    // An unreadable list leaves the reservation unknown: callers retain every scratch.
+    writeFileSync(join(moved, LEGACY_RUNS_FILE), '{');
     forgetLegacyRunIds(moved);
-    expect(legacyRunIds(moved).size).toBe(0);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(workerEvidenceRunIds(moved)).toBeUndefined();
   });
 
   it('removes a listed task\'s history bytes from .ai/cezar/, and only its own', () => {

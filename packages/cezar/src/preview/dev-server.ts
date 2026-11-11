@@ -1,7 +1,7 @@
 import { productName } from '../home/display.ts';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
@@ -258,9 +258,16 @@ function previewRunDirectories(dataDir: string): Array<{ runId: string; director
   const runs = existsSync(root)
     ? readdirSync(root, { withFileTypes: true }).filter(run => run.isDirectory()).map(run => ({ runId: run.name, directory: join(root, run.name) }))
     : [];
-  for (const runId of legacyRunsBeside(dataDir)) {
-    const directory = join(runDataDir(dataDir, runId), 'preview', runId);
-    if (existsSync(directory) && statSync(directory).isDirectory()) runs.push({ runId, directory });
+  let kept: string[] = [];
+  // An unreadable kept-task list: sweep only this directory, never a guessed one.
+  try { kept = legacyRunsBeside(dataDir); } catch { /* none of the kept tasks' records are touched */ }
+  for (const runId of kept) {
+    const legacy = runDataDir(dataDir, runId);
+    const directory = join(legacy, 'preview', runId);
+    // Only the run's own real directory: a link at preview/ or preview/<id> could name another run's records.
+    try {
+      if (lstatSync(directory).isDirectory() && realpathSync(directory) === join(realpathSync(legacy), 'preview', runId)) runs.push({ runId, directory });
+    } catch { /* absent or unreadable: nothing of this run's to sweep */ }
   }
   return runs;
 }

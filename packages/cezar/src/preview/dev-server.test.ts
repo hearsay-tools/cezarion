@@ -1,7 +1,7 @@
 import { Home } from '../home/home.ts';
 import { testHome, useTestHome } from '../home/test-home.testkit.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -343,6 +343,32 @@ describe('sweepPreviewLeftovers', () => {
       expect(await sweepPreviewLeftovers(moved)).toBe(1);
       await exited(child);
       expect(existsSync(record)).toBe(false);
+    } finally { forgetLegacyRunIds(moved); }
+  });
+
+  it('never sweeps through a kept task\'s preview directory that is a link to another run\'s', async () => {
+    const kept = '20000000-0000-4000-8000-000000000002';
+    const moved = join(root, '.ai', 'squawk');
+    mkdirSync(moved, { recursive: true });
+    writeFileSync(join(moved, LEGACY_RUNS_FILE), JSON.stringify({ version: 1, runs: [kept] }));
+    forgetLegacyRunIds(moved);
+    try {
+      const child = strayFixture();
+      const pid = child.pid!;
+      // Another run's live record, which a link at the kept task's preview/<id> points at.
+      const record = writeRecord(join(root, 'elsewhere'), 'other-run', 5175, { pid, pgid: pid, startToken: processStartToken(pid) });
+      mkdirSync(join(root, '.ai', 'cezar', 'preview'), { recursive: true });
+      symlinkSync(join(root, 'elsewhere', 'preview', 'other-run'), join(root, '.ai', 'cezar', 'preview', kept));
+      expect(await sweepPreviewLeftovers(moved)).toBe(0);
+      expect(existsSync(record)).toBe(true);
+      expect(child.exitCode).toBeNull();
+      // A link at preview/ itself is refused too.
+      rmSync(join(root, '.ai', 'cezar', 'preview'), { recursive: true });
+      mkdirSync(join(root, 'elsewhere', 'preview', kept), { recursive: true });
+      symlinkSync(join(root, 'elsewhere', 'preview'), join(root, '.ai', 'cezar', 'preview'));
+      writeRecord(join(root, 'elsewhere'), kept, 5176, { pid, pgid: pid, startToken: processStartToken(pid) });
+      expect(await sweepPreviewLeftovers(moved)).toBe(0);
+      expect(child.exitCode).toBeNull();
     } finally { forgetLegacyRunIds(moved); }
   });
 

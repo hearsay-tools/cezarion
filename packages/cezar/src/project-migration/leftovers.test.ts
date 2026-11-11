@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
@@ -14,6 +15,7 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { fence, moved, rows, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject } from './engine.ts';
+import { projectKeptRunIds } from './live.ts';
 import { describeProjectMigrationPlan, planProjectMigration } from './plan.ts';
 import {
   buildMigrationProject, CHECKPOINTED, git, PARENT, projectSnapshot, removeMigrationProject, SNAPSHOT, TASK, WORKER, type MigrationProject,
@@ -181,5 +183,47 @@ describe('a project move with tasks that can still resume', { timeout: TIMEOUT }
       await expect(verifyWorkerContext({ dataDir: project.newDir, parentId: PARENT, workspace: project.worker, context: recipe,
         parentCwd: project.root })).resolves.toBeUndefined();
     } finally { moved.close(); }
+  });
+
+  it('rewrites an unreadable kept-task list from the run store at the next move, with items left or not', async () => {
+    project.restore();
+    await migrateWith(project, [CHECKPOINTED]);
+    const file = join(project.newDir, LEGACY_RUNS_FILE);
+    writeFileSync(file, '{"version":1,');
+    const repaired = await migrateWith(project, [CHECKPOINTED]);
+    expect(repaired.alreadyMoved).toBe(false);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ version: 1, runs: [CHECKPOINTED] });
+    // Nothing left in .ai/cezar/: an unreadable list still makes the move run, and the move removes it.
+    expect((await migrateWith(project, [])).journal.leftovers).toEqual([]);
+    expect(existsSync(join(project.dataDir, 'worktrees'))).toBe(false);
+    writeFileSync(file, 'not json');
+    const cleared = await migrateWith(project, []);
+    expect(cleared.alreadyMoved).toBe(false);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('blocks the plan when a directory that may hold a kept task\'s item cannot be listed', async () => {
+    project.restore();
+    const worktrees = join(project.dataDir, 'worktrees');
+    chmodSync(worktrees, 0o000);
+    try {
+      const plan = await planProjectMigration(project.root, { keep: new Set([CHECKPOINTED]) });
+      expect(plan.blockers.join('\n')).toContain(`Cannot list ${worktrees}`);
+      expect(plan.moves.map(move => move.from)).not.toContain(worktrees);
+    } finally { chmodSync(worktrees, 0o755); }
+  });
+
+  it('refuses a task not archived whose record cannot be read, and moves an archived one', async () => {
+    project.restore();
+    const database = new DatabaseSync(join(project.dataDir, RUNS_DB_FILE));
+    try { database.prepare('UPDATE runs SET data = ?, archived = 0 WHERE id = ?').run('{"unknown":true}', TASK); } finally { database.close(); }
+    expect(() => projectKeptRunIds(project.root)).toThrow(`these tasks are not archived but their records cannot be read: ${TASK}`);
+    const held = await fence(project);
+    try { await expect(migrateProject({ repoRoot: project.root, fence: held })).rejects.toThrow(TASK); } finally { held.release(); }
+    expect(existsSync(join(project.newDir, RUNS_DB_FILE))).toBe(false);
+
+    const archived = new DatabaseSync(join(project.dataDir, RUNS_DB_FILE));
+    try { archived.prepare('UPDATE runs SET archived = 1 WHERE id = ?').run(TASK); } finally { archived.close(); }
+    expect(projectKeptRunIds(project.root).has(TASK)).toBe(false);
   });
 });

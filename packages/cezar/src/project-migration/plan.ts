@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import { pathPresent, projectDestinationAvailable, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
-import { forgetLegacyRunIds, legacyItemOwner, legacyRunIds } from '../legacy-runs.ts';
+import { forgetLegacyRunIds, legacyItemOwner, legacyRunIds, LegacyRunsUnreadableError } from '../legacy-runs.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseUnsupportedSchemaError } from '../runs/run-database.ts';
 import { migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -286,7 +286,7 @@ class Planner {
     if (pathPresent(plan.journal)) plan.blockers.push(`An unfinished project migration journal ${plan.journal} exists; resume it first`);
     if (projectMoveMarked(this.root)) {
       // A moved project plans again only while its old directory holds more than the ownership claims.
-      if (!legacyItemsPresent(plan.source)) return this.moved();
+      if (!legacyStateLeft(plan.source, plan.destination)) return this.moved();
       this.marked = true;
     }
     // The mark-moved step writes where `projectPaths` looks; refuse before the journal when they differ.
@@ -340,7 +340,7 @@ class Planner {
   private async moved(): Promise<ProjectMigrationPlan> {
     const { plan } = this;
     plan.alreadyMoved = true;
-    plan.leftovers = currentLeftovers(plan.destination);
+    plan.leftovers = currentLeftovers(plan.destination) ?? [];
     const tracked = pathPresent(plan.source) ? await trackedPaths(this.root) : new Set<string>();
     plan.tracked = [...tracked ?? []].sort().map(from => ({ from, to: MIGRATED_PROJECT_DIR + from.slice(LEGACY_PROJECT_DIR.length) }));
     plan.gitMv = gitMvCommands(this.root, plan.tracked);
@@ -363,7 +363,9 @@ class Planner {
       // A kept task's own item stays where its agent knows it; the directory around it merges.
       const owner = legacyItemOwner(path.split('/').slice(2), this.keep);
       if (owner) { this.leftovers.add(owner); continue; }
-      if (kind === 'directory' && top && this.holdsKeptItem(path, source)) { this.mergeInto(source, target, path); continue; }
+      const holds = kind === 'directory' && top ? this.holdsKeptItem(path, source) : false;
+      if (holds === 'unknown') continue;
+      if (holds) { this.mergeInto(source, target, path); continue; }
       if (kind === 'directory' && this.trackedDirectories.has(path)) {
         // Untracked items move into this directory: it must be a real one, or absent.
         if (pathPresent(target) && !realDirectory(target)) this.plan.conflicts.push({ path: target, reason: `${target} is not a directory; nothing may move through it` });
@@ -380,11 +382,18 @@ class Planner {
     }
   }
 
-  /** Whether the top-level directory `source` (at `relative`) holds an item of a task in `keep`. */
-  private holdsKeptItem(relative: string, source: string): boolean {
+  /**
+   * Whether the top-level directory `source` (at `relative`) holds an item of a task in `keep`.
+   * A directory that cannot be listed may hold one: 'unknown' blocks the plan instead of moving it whole.
+   */
+  private holdsKeptItem(relative: string, source: string): boolean | 'unknown' {
     if (this.keep.size === 0) return false;
-    try { return readdirSync(source).some(name => legacyItemOwner([...relative.split('/').slice(2), name], this.keep) !== undefined); }
-    catch { return false; }
+    let names: string[];
+    try { names = readdirSync(source); } catch (error) {
+      this.plan.blockers.push(`Cannot list ${source}, which may hold a kept task's files: ${(error as Error).message}`);
+      return 'unknown';
+    }
+    return names.some(name => legacyItemOwner([...relative.split('/').slice(2), name], this.keep) !== undefined);
   }
 
   /** Move items into `target`, which exists or is created with the bits of `source`: never a broader one. */
@@ -503,21 +512,33 @@ export async function planProjectMigration(repoRoot: string, options: ProjectMig
   return new Planner(repoRoot, realpathSync(resolve(repoRoot)), options.keep ?? new Set()).build();
 }
 
-/** Whether the old directory `source` holds anything but the `cockpit.lock*` ownership claims. */
+/** Whether the old directory `source` holds anything but the `cockpit.lock*` ownership claims.
+ *  One that cannot be listed may: the planner then reports why. */
 export function legacyItemsPresent(source: string): boolean {
   if (!realDirectory(source)) return false;
   try { return readdirSync(source).some(name => !name.startsWith('cockpit.lock')); }
-  catch { return false; }
+  catch { return true; }
 }
 
-/** The leftover tasks the moved directory `destination` names now, read from disk. */
-function currentLeftovers(destination: string): string[] {
+/** Whether a moved project still has work for a move: items in the old directory `source`, or an
+ *  unreadable kept-task list in `destination`, which a move rewrites from the run store. */
+export function legacyStateLeft(source: string, destination: string): boolean {
+  return legacyItemsPresent(source) || currentLeftovers(destination) === undefined;
+}
+
+/** The leftover tasks the moved directory `destination` names now, read from disk; undefined
+ *  when the file is present but unreadable, so the move rewrites it from the run store. */
+function currentLeftovers(destination: string): string[] | undefined {
   forgetLegacyRunIds(destination);
-  return [...legacyRunIds(destination)].sort();
+  try { return [...legacyRunIds(destination)].sort(); } catch (error) {
+    if (error instanceof LegacyRunsUnreadableError) return undefined;
+    throw error;
+  }
 }
 
-function sameIds(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((id, index) => id === b[index]);
+/** Whether `b`, a list read from disk (undefined when unreadable), names exactly `a`. */
+function sameIds(a: readonly string[], b: readonly string[] | undefined): boolean {
+  return b !== undefined && a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
 function rewriteLocation(rewrite: PathRewrite): string {
