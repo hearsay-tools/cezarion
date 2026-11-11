@@ -43,7 +43,7 @@ import { displayUrl } from './preview-url'
  */
 
 /** Where the sandbox and proxy limits are written down. */
-export const PREVIEW_DOCS_URL = 'https://github.com/hearsay-tools/cezarion#environment-variables'
+export const PREVIEW_DOCS_URL = 'https://github.com/hearsay-tools/squawk#environment-variables'
 
 /** `agent-idle` is drawn by `PreviewEmptyState` (it lists what to pick), never by `PreviewStates`. */
 export type PreviewStageState =
