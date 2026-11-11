@@ -152,7 +152,8 @@ describe('macOS launchd migration', () => {
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(report.moved[0]!.to.path!)).toBe(false);
     expect(existsSync(report.moved[0]!.backup!.path!)).toBe(false);
-    expect(loaded).toEqual(new Set(['ai.cezar.cockpit']));
+    // The group starts the old job after the home rolls back, never during the rollback.
+    expect(loaded).toEqual(new Set());
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
     expect(commands).toEqual([]);
@@ -171,8 +172,8 @@ describe('macOS launchd migration', () => {
     expect(rollback.moved).toHaveLength(1);
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(move.to.path!)).toBe(false);
-    expect(loaded).toEqual(new Set([old.name!]));
-    expect(commands.filter((c) => c[1] === 'bootstrap')).toHaveLength(oldLoaded ? 0 : 1);
+    expect(loaded).toEqual(new Set(oldLoaded ? [old.name!] : []));
+    expect(commands.filter((c) => c[1] === 'bootstrap')).toHaveLength(0);
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
     expect(commands).toEqual([]);
@@ -245,7 +246,7 @@ describe('macOS launchd migration', () => {
     expect(commands).toEqual([]);
   });
 
-  it('restores the old job and active plist when the new bootstrap fails', async () => {
+  it('restores the active plist and leaves the old job for the group to start when the new bootstrap fails', async () => {
     const old = plant('ngrok');
     const xml = readFileSync(old.path!, 'utf8');
     failBootstrap = 'tools.hearsay.squawk.ngrok';
@@ -254,7 +255,7 @@ describe('macOS launchd migration', () => {
     expect(report.errors[0]!.message).toContain('Could not load');
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(join(dir, 'tools.hearsay.squawk.ngrok.plist'))).toBe(false);
-    expect(loaded).toEqual(new Set(['ai.cezar.ngrok']));
+    expect(loaded).toEqual(new Set());
   });
 
   it.each(['cockpit', 'ngrok'] as const)('migration refuses an existing foreign %s destination', async (agent) => {

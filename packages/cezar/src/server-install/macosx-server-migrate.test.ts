@@ -27,7 +27,16 @@ class FakeLaunchd implements Runner {
   readonly unhealthy = new Set<string>();
   readonly failBootout = new Set<string>();
   readonly failBootstrap = new Set<string>();
+  /** Labels whose bootstrap loads the job and still exits nonzero. */
+  readonly loadThenFail = new Set<string>();
   readonly commands: string[][] = [];
+  /** Runs at each bootstrap, before the job loads: what the new process would read. */
+  onBootstrap: (label: string) => void = () => {};
+  /** Every probe socket accepts and never answers; only curl --max-time returns (exit 28). */
+  hang = false;
+  /** The ngrok API lists no tunnel for this many requests. */
+  tunnelAfter = 0;
+  private tunnelRequests = 0;
 
   private up(agent: 'cockpit' | 'ngrok'): boolean {
     return [...this.loaded].some(label => label.endsWith(`.${agent}`) && !this.unhealthy.has(label));
@@ -42,8 +51,12 @@ class FakeLaunchd implements Runner {
       return ok();
     }
     if (program === 'launchctl' && args[0] === 'print') return { code: this.loaded.has(label) ? 0 : 113, stdout: '', stderr: '' };
-    if (program === 'curl' && args.includes('%{http_code}')) return ok(this.up('cockpit') ? '200' : '000');
-    if (program === 'curl') return ok(this.up('ngrok') ? '{"tunnels":[{"public_url":"https://x"}]}' : '');
+    const status = args.includes('%{http_code}');
+    if (program === 'curl' && this.hang) {
+      return args.includes('--max-time') ? { code: 28, stdout: status ? '000' : '', stderr: '' } : new Promise<CommandResult>(() => {});
+    }
+    if (program === 'curl' && status) return ok(this.up('cockpit') ? '200' : '000');
+    if (program === 'curl') return ok(this.up('ngrok') && ++this.tunnelRequests > this.tunnelAfter ? '{"tunnels":[{"public_url":"https://x"}]}' : '');
     if (program === 'sh') return ok();
     throw new Error(`unexpected command: ${program} ${args.join(' ')}`);
   }
@@ -52,9 +65,10 @@ class FakeLaunchd implements Runner {
     this.commands.push([program, ...args]);
     if (program !== 'launchctl' || args[0] !== 'bootstrap') throw new Error(`unexpected command: ${program} ${args.join(' ')}`);
     const label = readFileSync(args[2]!, 'utf8').match(/<key>Label<\/key>\s*<string>([^<]+)/)![1]!;
+    this.onBootstrap(label);
     if (this.failBootstrap.has(label)) return 5;
     this.loaded.add(label);
-    return 0;
+    return this.loadThenFail.has(label) ? 5 : 0;
   }
 
   launchctl(): string[][] {
@@ -150,8 +164,8 @@ describe('hsq server-migrate on macOS (launchd)', () => {
     expectNewAgents(f);
     expect(f.launchd.launchctl().slice(0, 2).map(c => c.slice(1, 2).concat(c[2]!.split('/').pop()!)))
       .toEqual([['bootout', OLD[0]], ['bootout', OLD[1]]]);
-    expect(f.launchd.commands).toContainEqual(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 'http://127.0.0.1:4321/']);
-    expect(f.launchd.commands).toContainEqual(['curl', '-s', 'http://localhost:4040/api/tunnels']);
+    expect(f.launchd.commands).toContainEqual(['curl', '-s', '--max-time', '2', '-o', '/dev/null', '-w', '%{http_code}', 'http://127.0.0.1:4321/']);
+    expect(f.launchd.commands).toContainEqual(['curl', '-s', '--max-time', '2', 'http://localhost:4040/api/tunnels']);
   });
 
   it('is a no-op on a rerun after success', async () => {
@@ -168,14 +182,32 @@ describe('hsq server-migrate on macOS (launchd)', () => {
   it.each([
     { step: 'stop', staged: false, fail: (f: MacInstall) => f.launchd.failBootout.add(OLD[1]!) },
     { step: 'bootstrap of the new tunnel', staged: true, fail: (f: MacInstall) => f.launchd.failBootstrap.add(NEW[1]!) },
+    { step: 'new cockpit bootstrap that loads and still fails', staged: true, fail: (f: MacInstall) => f.launchd.loadThenFail.add(NEW[0]!) },
+    { step: 'new tunnel bootstrap that loads and still fails', staged: true, fail: (f: MacInstall) => f.launchd.loadThenFail.add(NEW[1]!) },
     { step: 'cockpit health check', staged: true, fail: (f: MacInstall) => f.launchd.unhealthy.add(NEW[0]!) },
     { step: 'tunnel health check', staged: true, fail: (f: MacInstall) => f.launchd.unhealthy.add(NEW[1]!) },
-  ])('a failure at the $step restores the old plists and labels and the legacy home, then a rerun migrates', async ({ fail, staged }) => {
+    { step: 'health probe that never answers', staged: true, fail: (f: MacInstall) => { f.launchd.hang = true; } },
+  ])('a failure at the $step unloads every new agent, restores the old plists, labels and legacy home, then a rerun migrates', async ({ fail, staged }) => {
     const f = macInstall();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const homes: Array<[string, string]> = [];
+    f.launchd.onBootstrap = label => homes.push([label, prepareMigrationHome(f.target, f.env, { enabled: true, legacy: f.legacy }).kind]);
     fail(f);
     await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'rolled-back' });
     expectOldAgents(f, { staged });
-    for (const set of [f.launchd.failBootout, f.launchd.failBootstrap, f.launchd.unhealthy]) set.clear();
+    // A restored old job starts only after the home rolls back, so it reads the legacy home, never the staged one.
+    expect(homes.filter(([label]) => label === OLD[0])).not.toEqual([]);
+    expect(homes.filter(([label]) => OLD.includes(label))).toEqual(homes.filter(([label]) => OLD.includes(label)).map(([label]) => [label, 'legacy']));
+    expect(homes.filter(([label]) => NEW.includes(label))).toEqual(homes.filter(([label]) => NEW.includes(label)).map(([label]) => [label, 'staged']));
+    for (const set of [f.launchd.failBootout, f.launchd.failBootstrap, f.launchd.loadThenFail, f.launchd.unhealthy]) set.clear();
+    f.launchd.hang = false;
+    await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
+    expectNewAgents(f);
+  });
+
+  it('waits about 30 s for the tunnel after the cockpit answers', async () => {
+    const f = macInstall();
+    f.launchd.tunnelAfter = 10;
     await expect(serverMigrate(f)).resolves.toMatchObject({ status: 'migrated' });
     expectNewAgents(f);
   });

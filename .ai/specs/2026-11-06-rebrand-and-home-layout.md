@@ -226,9 +226,11 @@ every instance that shares the legacy home, migrates that home once, then for ea
 A macOS (`macosx-ngrok`) server install is a server-migrate install too: the stop is
 `launchctl bootout` of each recorded label, the move writes and bootstraps the
 `tools.hearsay.squawk.*` plist and keeps the old plist as `*.plist.migrated`, and the health
-check is the loaded agent, the cockpit on its loopback port and, when the install owns the tunnel
-agent, a tunnel in the ngrok local API. A rollback restores the old plist and bootstraps the old
-label. Only owned agents move, stop or start, as section 2 says.
+check reloads each agent, then waits for the cockpit on its loopback port and, when the install
+owns the tunnel agent, for a tunnel in the ngrok local API (about 30 s; each probe is time-bounded).
+A rollback restores the old plist and leaves the old label unloaded until the home has rolled back,
+so the restarted cockpit reads the legacy home. Only owned agents move, stop or start, as section 2
+says.
 The instances that share a home form one group and succeed or fail together. Until every
 instance passes its health check, the new marker stays in state `pending` and `HomeStore`
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
