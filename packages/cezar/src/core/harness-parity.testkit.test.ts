@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { waitFor } from './harness-parity.testkit.ts';
+import './no-runner.testkit.ts';
+import { waitFor } from './harness-parity-core.testkit.ts';
 
 describe('waitFor', () => {
   beforeEach(() => {

@@ -1,7 +1,7 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { uuidFrom } from '../delegation/questions.ts';
-import { delegatingParent, manager, store, until, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, manager, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { conversationOf, eventsOf, cezarAnswered, noHumanCard, steeringParent, parentAtLastSlot, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 

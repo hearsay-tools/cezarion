@@ -2,7 +2,7 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, fixtureWork } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled, fixtureWork } from './fixture-claude.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import * as processes from '../core/process-usage.ts';
-import { manager, parent, store, until, useWorkerWaitFixture, worker, work } from './worker-wait.testkit.ts';
+import { manager, parent, store, until, useWorkerWaitFixture, worker, work } from './worker-wait-claude.testkit.ts';
 
 /**
  * Slice S7, Table B row B12 (.ai/specs/2026-11-03-run-store-owns-exits.md): a worker Stop writes

@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { type Wait } from '@open-mercato/cezar-contract/waits';
 
-import { controlledWire, manager, parent, root, restart, store, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, restart, store, until, useWorkerWaitFixture, work } from './worker-wait-claude.testkit.ts';
 
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
