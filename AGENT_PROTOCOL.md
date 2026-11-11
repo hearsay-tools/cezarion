@@ -592,8 +592,9 @@ can be written to the claude CLI's stdin verbatim.
 ## 2. v1 `AgentEvent` — the flat stream
 
 `AgentEvent` in `packages/cezar/src/core/agent-runner.ts` is the v1 stream. Every runner
-emits it beside v2: `cezar run` renders it and saved runs hold it. New consumers read v2.
-Its `type` strings are additive-only (§ Compatibility).
+emits it beside v2: `cezar run` renders it and saved runs hold it. New consumers read runner
+output from v2. A Cezar-owned run event, such as `provider-auth-required`, has no v2 form
+and arrives as `run-event` (§9). The v1 `type` strings are additive-only (§ Compatibility).
 
 ---
 
