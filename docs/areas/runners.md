@@ -115,7 +115,7 @@ a `describe` whose body holds only runner cells; `describeRunners` in
 
 ## Native mock wire evidence
 
-Run, without a build:
+Build the service once (`npm run build -w @wjarka/cezarion`), then run:
 
 ```sh
 npm run mock:wire -- .ai/qa/wire-a
