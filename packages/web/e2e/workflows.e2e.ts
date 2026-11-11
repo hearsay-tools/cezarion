@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -28,7 +29,7 @@ const skillsDir = resolve(repoRoot, '.ai/skills')
 const ALPHA = 'e2e-wb-alpha'
 const BETA = 'e2e-wb-beta'
 const FLOW = 'e2e-wb-flow'
-const savedFlowPath = resolve(repoRoot, `.ai/cezar/workflows/${FLOW}.yaml`)
+const savedFlowPath = resolve(projectPaths(repoRoot).write, `workflows/${FLOW}.yaml`)
 const presentationArtifacts = resolve(artifactsDir, 'workflow-editor-presentation')
 
 let browser: AgentBrowser

@@ -1,3 +1,4 @@
+import { productName } from './product'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -100,7 +101,7 @@ describe('mobile top bar and project drawer', () => {
         return {
           barHeight: row.height, menu: [menu.width, menu.height], picker: picker ? [picker.width, picker.height] : null,
           search: [search.width, search.height],
-          wordmark: [...top.querySelectorAll('span')].some((node) => node.textContent.trim() === 'Cezarion'),
+          wordmark: [...top.querySelectorAll('span')].some((node) => node.textContent.trim() === ${JSON.stringify(productName('Cezarion'))}),
           overflow: document.documentElement.scrollWidth - innerWidth,
         }
       })()`) as { barHeight: number; menu: number[]; picker: number[] | null; search: number[]; wordmark: boolean; overflow: number }

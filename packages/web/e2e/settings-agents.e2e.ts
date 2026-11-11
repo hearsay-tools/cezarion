@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -23,7 +24,7 @@ const sessionId = `e2e-settings-agents-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
 
 // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
-const dataDir = resolve(servedRoot(), '.ai/cezar')
+const dataDir = projectPaths(servedRoot()).write
 const configFile = resolve(dataDir, 'config.json')
 
 let browser: AgentBrowser

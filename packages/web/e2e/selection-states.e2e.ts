@@ -1,5 +1,7 @@
+import { Home } from '../../cezar/src/home/home.ts'
+import { HomeStore } from '../../cezar/src/home/store.ts'
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
@@ -434,13 +436,13 @@ describe('selection and control states (#171)', () => {
     })
   }
   it('keeps the same selection cue in the multi-project navigation', () => {
-    const configPath = join(root, '.cez-home/config.json')
-    const config = JSON.parse(readFileSync(configPath, 'utf8'))
+    const home = Home.sandbox(join(root, '.cez-home'))
+    const config = JSON.parse(new HomeStore(home).read(home.workspaceConfig))
     const sibling = join(root, 'sibling')
     mkdirSync(sibling)
     config.projects.push({ id: 'sibling', name: 'Sibling', root: sibling, source: 'local',
       addedAt: new Date().toISOString(), lastOpenedAt: new Date().toISOString() })
-    writeFileSync(configPath, JSON.stringify(config))
+    Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify(config)))
     for (const variant of contrastQaVariants) {
       variantId = variant.id
       browser.setViewport(variant.viewport.width, variant.viewport.height)
