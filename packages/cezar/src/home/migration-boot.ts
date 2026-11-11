@@ -31,10 +31,7 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
   // The serve lifecycle prepares the selected home again. Never migrate a legacy fallback into itself.
   if (home.layout === 'legacy') return { kind: 'ready' };
   const marker = readInstallMarker(home.config);
-  // A committed home names its source. A later launch may name only HSQ_HOME, so the env no longer selects it.
-  if (marker?.state === 'committed' && marker.migratedFrom && resolve(marker.migratedFrom) !== resolve(legacy.root)) {
-    legacy = resolveHome({ purpose: 'cli', env: { CEZ_HOME: marker.migratedFrom }, layout: 'legacy' });
-  }
+  legacy = recordedSource(legacy, marker);
   // Only a finished commit:false copy is a staged server group. A crashed or failed run leaves a
   // pending home without stagedAt, or a stale claim: restart it at step 4 (spec §4 step 3).
   if (isStagedHome(home, legacy, marker)) return { kind: 'staged' };
@@ -51,21 +48,31 @@ export function prepareMigrationHome(home: Home, env: NodeJS.ProcessEnv, {
       throw new Error(commandText(`[hsq] refusing to write home ${home.root}: a server install in ${legacy.root} must move first. Run hsq server-migrate.`));
     } };
   }
+  return migrateAtBoot(home, legacy, env);
+}
+
+/** A committed home names its source. A later launch may name only HSQ_HOME, so the env no longer selects it. */
+function recordedSource(legacy: Home, marker: InstallMarker | undefined): Home {
+  if (marker?.state !== 'committed' || !marker.migratedFrom || resolve(marker.migratedFrom) === resolve(legacy.root)) return legacy;
+  return resolveHome({ purpose: 'cli', env: { CEZ_HOME: marker.migratedFrom }, layout: 'legacy' });
+}
+
+const UNWRITABLE = new Set(['EROFS', 'EACCES', 'EPERM']);
+
+/** Zero config: a read-only home degrades the cockpit, never fails the boot. */
+function migrateAtBoot(home: Home, legacy: Home, env: NodeJS.ProcessEnv): MigrationBootResult {
   try {
     migrateLegacyHome(legacy, home, { env });
     finishDeferredAccounts(legacy, home);
+    return { kind: 'ready' };
   } catch (error) {
     if (!UNWRITABLE.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-    // Zero config: a read-only home degrades the cockpit, never fails the boot.
     const committed = readInstallMarker(home.config)?.state === 'committed';
     console.warn(`${logPrefix()} cannot finish the home migration from ${legacy.root} to ${home.root} (${(error as Error).message}); `
       + (committed ? 'serving the migrated home.' : `serving ${legacy.root} until both homes are writable.`));
     return committed ? { kind: 'ready' } : { kind: 'legacy', home: legacy };
   }
-  return { kind: 'ready' };
 }
-
-const UNWRITABLE = new Set(['EROFS', 'EACCES', 'EPERM']);
 
 /** Only a completed server install needs the explicit group migration command. */
 function hasInstalledServer(legacy: Home): boolean {
