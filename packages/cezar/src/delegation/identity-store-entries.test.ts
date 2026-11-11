@@ -6,10 +6,11 @@ import { describe, expect, it } from 'vitest';
 // The ownership policy in workspace.ts has no store on Windows until a process entry installs one,
 // and only entries may import the Windows store, so the policy's importers never load it
 // (hearsay-tools/cezarion#3244, ADR 0032). A process entry is a package bin, a source module with
-// an `argv[1]` main guard, or a script under scripts/. The closure follows static and dynamic imports.
+// a shebang or an `argv[1]` main guard, or a script under scripts/. The closure follows static and dynamic imports.
 const pkg = join(import.meta.dirname, '../..');
 const POLICY = 'src/delegation/workspace.ts';
-const ADAPTER = 'src/delegation/windows-workspace-identity.ts';
+// The Windows store and the native helper it wraps.
+const WINDOWS = ['src/delegation/windows-identity-store.ts', 'src/delegation/windows-workspace-identity.ts'];
 const INSTALL = /^installWindowsIdentityStore\(\);$/m;
 const isTest = (file: string) => /\.test\.|\.testkit\.|\.d\.ts$/.test(file);
 
@@ -20,7 +21,7 @@ function sourceFiles(dir: string): string[] {
 function processEntries(): string[] {
   const bins = Object.values((JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')) as { bin: Record<string, string> }).bin)
     .map(bin => bin.replace(/^dist\//, 'src/').replace(/\.js$/, '.ts'));
-  const guarded = sourceFiles('src').filter(file => /process\.argv\[1\][^\n]*import\.meta/.test(readFileSync(join(pkg, file), 'utf8')));
+  const guarded = sourceFiles('src').filter(file => /^#!|process\.argv\[1\][^\n]*import\.meta/.test(readFileSync(join(pkg, file), 'utf8')));
   const scripts = readdirSync(join(pkg, 'scripts')).filter(name => name.endsWith('.ts') && !isTest(name)).map(name => `scripts/${name}`);
   return [...new Set([...bins, ...guarded, ...scripts])].sort();
 }
@@ -48,11 +49,10 @@ describe('workspace identity store installation', () => {
     expect(missing).toEqual([]);
   }, 60_000);
 
-  it('keeps the Windows store out of every source module but the process entries', () => {
+  it('keeps the Windows store out of every source module but the process entries', async () => {
     const entries = new Set(processEntries());
-    const importers = [...sourceFiles('src'), ...sourceFiles('scripts')]
-      .filter(file => file !== ADAPTER && !entries.has(file))
-      .filter(file => readFileSync(join(pkg, file), 'utf8').includes('windows-workspace-identity.ts'));
-    expect(importers).toEqual([]);
-  });
+    const others = [...sourceFiles('src'), ...sourceFiles('scripts')].filter(file => !WINDOWS.includes(file) && !entries.has(file));
+    const byFile = await closures(others);
+    expect(others.filter(file => WINDOWS.some(store => byFile.get(file)?.has(store)))).toEqual([]);
+  }, 60_000);
 });

@@ -31,8 +31,9 @@ The ownership policy (`delegation/workspace.ts`) reaches these files only throug
 `IdentityFileStore` port (`delegation/identity-file-store.ts`): directory, read, write and
 replace. The POSIX store (`posix-workspace-identity.ts`) is the default on a non-Windows host.
 On Windows the policy has no default and throws until a store is installed. Each process entry
-that reaches the policy calls `installWindowsIdentityStore()`, and only process entries import
-`windows-workspace-identity.ts`, so the policy's importers never load the Windows store.
+that reaches the policy calls `installWindowsIdentityStore()` from `windows-identity-store.ts`.
+Only process entries reach that module or the native helper `windows-workspace-identity.ts`,
+so the policy's importers never load the Windows store.
 `identity-store-entries.test.ts` holds both rules.
 
 Cleanup claims an idle test environment before stopping its app and scanning holders.

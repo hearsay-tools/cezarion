@@ -70,7 +70,7 @@ import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { RunRecord, RunStore as RunStoreInstance } from '../src/runs/store.ts';
 import { DEFAULT_FIXTURE_SEED, FIXTURE_PROFILES, generateRunFixture, isLiveRun, pickSaveTarget, type FixtureProfile } from './benchmark-run-store-fixture.ts';
-import { installWindowsIdentityStore } from '../src/delegation/windows-workspace-identity.ts';
+import { installWindowsIdentityStore } from '../src/delegation/windows-identity-store.ts';
 
 // Workspace receipts and markers use the host's identity store (ADR 0032).
 installWindowsIdentityStore();

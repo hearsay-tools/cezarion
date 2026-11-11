@@ -18,7 +18,7 @@ import { serverCommand } from './server-command.ts';
 import { runHeadless, defaultHeadlessDeps, type TaskAccess } from './headless-run.ts';
 import { serveCommand, defaultServeDeps } from './serve-command.ts';
 import { onTerminal } from './serve-listener.ts';
-import { installWindowsIdentityStore } from './delegation/windows-workspace-identity.ts';
+import { installWindowsIdentityStore } from './delegation/windows-identity-store.ts';
 
 // Workspace receipts and markers use the host's identity store (ADR 0032).
 installWindowsIdentityStore();

@@ -35,7 +35,7 @@ import type { RunStore as RunStoreInstance } from '../src/runs/store.ts';
 import type { RunManager as RunManagerInstance } from '../src/workflows/run.ts';
 // This benchmark reads settled runs and starts no runner.
 import { noRunners } from '../src/core/runners-under-test.testkit.ts';
-import { installWindowsIdentityStore } from '../src/delegation/windows-workspace-identity.ts';
+import { installWindowsIdentityStore } from '../src/delegation/windows-identity-store.ts';
 
 // Workspace receipts and markers use the host's identity store (ADR 0032).
 installWindowsIdentityStore();

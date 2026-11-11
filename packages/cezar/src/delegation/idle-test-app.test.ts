@@ -11,7 +11,7 @@ import { processStartToken } from '../detached-process.ts';
 import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
 import { withIdleTestApp } from './idle-test-app.ts';
 import { execFileSync } from 'node:child_process';
-import { installWindowsIdentityStore } from './windows-workspace-identity.ts';
+import { installWindowsIdentityStore } from './windows-identity-store.ts';
 
 // The Windows CI job runs this file in-process, as the CLI entry would (ADR 0032).
 installWindowsIdentityStore();
