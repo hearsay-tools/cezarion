@@ -275,7 +275,7 @@ force, or force only in part. The item numbers are stable: code cites them.
    existing runner's wire, read the fork's own protocol documents for the turn boundary,
    the session id and the tool flags before you copy code.
 2. **Factory** — the compiler and the guard tests name each place: the `case` in
-   `createRunner`, `runnerSchema` (`packages/contract/src/health.ts`), and `UiBackend` in
+   `createRunner`, `runnerSchema` (`packages/contract/src/runner.ts`), and `UiBackend` in
    `ui-events.ts` and in its api-client copy (§3).
 3. **Detection** — add the runner's probe to `RUNNER_PROBES` (`core/backend-detect.ts`).
    An absent CLI never fails the boot.

@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import { humanInputDeliveredEventSchema } from '@open-mercato/cezar-api-client/contract/events'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 import type { UiMessageItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import bashAndScreenshot from '../../../../cezar/src/core/__fixtures__/claude/bash-and-screenshot.expected.json'

@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
