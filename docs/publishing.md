@@ -7,7 +7,11 @@ pack paths, tags and version-bump paths. Release tools read the shared
 `productIdentity` data through `product-identity.mjs` or the same source module.
 
 With the switch on (since the switch release), stable, dev, nightly and PR archives select the new
-scoped package and `alias-hsq/`. Source workspace names stay unchanged: build
+scoped package and no alias package: npm refuses the unscoped name `hsq` as too
+similar to existing names (owner decision A1, 2026-11-11). Users install
+`@hearsay-tools/squawk` or run it once with `npx -p @hearsay-tools/squawk hsq`.
+Release outputs carry that run command (`runCommand`, `tagCommand`, `installLines`)
+in place of an alias name. Source workspace names stay unchanged: build
 commands and type imports still use those names. Version stamping updates source
 versions only. A single `publicationManifests` projection changes the service name
 in a disposable pack copy. Trusted PR archive validation uses that same projection.
@@ -506,7 +510,7 @@ Planner decision X4 interprets the rename table in
 as matching forwarding releases throughout the deprecation window. For every
 supported stable, dev, nightly and PR version `V`, publish this set in order:
 
-1. `@hearsay-tools/squawk@V`, then `hsq@V`.
+1. `@hearsay-tools/squawk@V`. There is no new-name alias package.
 2. `@wjarka/cezarion@V`, then `cezarion@V`. Each old manifest depends exactly on
    `@hearsay-tools/squawk@V`, including stable releases. The old alias also pins `@wjarka/cezarion@V` exactly,
    because shipped alias updaters validate that package during preparation and promotion.
@@ -550,16 +554,16 @@ Do not replace the exact pins with a range or `latest`.
 ### Cutover order: publish, verify, dist-tags, deprecate
 
 Use a dedicated release checkout at the approved source commit. Confirm package
-ownership and trusted-publisher/token access for all four names first. Keep the
+ownership and trusted-publisher/token access for all three names first. Keep the
 release version, source commit, tarball integrity values and prior channel tags
 in the owner release record. The switch must already be on in the build.
 
 1. **Pack and inspect.** Build the approved source and run the release dry-run
    matrix before any write. Preview archive preparation uses
    `node scripts/release-snapshot.mjs --pack-only`. It emits `cezar.tgz`,
-   `alias.tgz`, `legacyScoped.tgz` and `legacyAlias.tgz`. For a stable release,
+   `legacyScoped.tgz` and `legacyAlias.tgz`. For a stable release,
    stamp the approved version with `node scripts/release.mjs <bump> --dry-run`,
-   then pack the projected service, alias and temporary compatibility trees with
+   then pack the projected service and temporary compatibility trees with
    the same `withPublicationPackage` and `withCompatibilityPackages` helpers
    used by the release scripts. Keep their callback open until packing ends;
    the helpers delete the temporary directories when it returns. Inspect every
@@ -582,8 +586,8 @@ in the owner release record. The switch must already be on in the build.
    <channel>` in the same dependency order. The channel is `latest`, `dev`,
    `nightly` or the intended `pr-N`. Read all tags back and compare with the
    release record. Restore prior tags if the owner rolls back a channel. Keep
-   the published versions available. PR cleanup removes its tag from both new
-   names and both forwarding names.
+   the published versions available. PR cleanup removes its tag from the new
+   scoped package, the api-client name and both forwarding names.
 5. **End the window, then deprecate.** Continue matching forwarding releases
    until **two minor releases or 60 days after cutover, whichever is later**.
    At window end, publish and verify the last matching old-name pair and finish

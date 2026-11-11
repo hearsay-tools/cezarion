@@ -13,9 +13,10 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 
 // Real Node child processes, simulated Windows npm layout. This is not native
 // cmd.exe/PowerShell proof; on POSIX we also execute the restored shell launcher.
-it.each([false, true].flatMap(rebrand => { return (['direct', 'nested alias', 'hoisted alias'] as const).map(layout => { return { rebrand, layout }; }); }))('restores Windows global $layout launchers byte-for-byte after failed promotion (switch $rebrand)', async ({ rebrand, layout }) => {
+// The new identity has no unscoped alias package (npm refuses `hsq`), so only its direct layout exists.
+it.each([false, true].flatMap(rebrand => { return (rebrand ? ['direct'] as const : ['direct', 'nested alias', 'hoisted alias'] as const).map(layout => { return { rebrand, layout }; }); }))('restores Windows global $layout launchers byte-for-byte after failed promotion (switch $rebrand)', async ({ rebrand, layout }) => {
   const identity = productIdentity(rebrand);
-  const outerPackage = layout === 'direct' ? identity.npmPackage : identity.npmAlias;
+  const outerPackage = layout === 'direct' ? identity.npmPackage : identity.npmAlias!;
   const root = mkdtempSync(join(tmpdir(), 'cez Windows & prefix-')); roots.push(root);
   const prefix = join(root, 'npm prefix'); const home = join(root, 'home'); const cache = join(root, 'npm cache');
   const outer = join(prefix, 'node_modules', outerPackage);

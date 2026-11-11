@@ -177,10 +177,10 @@ describe('stampManifests', () => {
     expect(stamped.apiClient.version).toBe('0.1.5-pr482.123');
     expect(stamped.cezar.version).toBe('0.1.5-pr482.123');
     expect(stamped.web.version).toBe('0.1.5-pr482.123');
-    expect(stamped.alias.version).toBe('0.1.5-pr482.123');
+    expect(stamped.alias!.version).toBe('0.1.5-pr482.123');
     // Exact, no range: `npx cezar-cli@<v>` must run this PR's code, and the service must
     // resolve the api-client it was cut with.
-    expect(stamped.alias.dependencies).toEqual({ '@open-mercato/cezar': '0.1.5-pr482.123' });
+    expect(stamped.alias!.dependencies).toEqual({ '@open-mercato/cezar': '0.1.5-pr482.123' });
     expect(stamped.cezar.devDependencies).toEqual({
       '@open-mercato/cezar-api-client': '0.1.5-pr482.123',
     });
@@ -206,7 +206,7 @@ describe('stampManifests', () => {
       },
       '0.1.5-develop.7',
     );
-    expect(stamped.alias.dependencies).toEqual({ '@pat-lewczuk/cezar': '0.1.5-develop.7' });
+    expect(stamped.alias!.dependencies).toEqual({ '@pat-lewczuk/cezar': '0.1.5-develop.7' });
     expect(stamped.cezar.dependencies).toEqual({ '@old/client': '0.1.5-develop.7' });
     expect(stamped.web.dependencies).toEqual({ '@old/client': '0.1.5-develop.7' });
     expect(stamped.web.devDependencies).toEqual({ '@pat-lewczuk/cezar': '0.1.5-develop.7' });
@@ -216,7 +216,7 @@ describe('stampManifests', () => {
     const manifests = set();
     const stamped = stampManifests(manifests, '0.1.5-main.9');
     expect(manifests.cezar.version).toBe('0.1.5');
-    expect(manifests.alias.dependencies).toEqual({ '@open-mercato/cezar': '^0.1.5' });
+    expect(manifests.alias!.dependencies).toEqual({ '@open-mercato/cezar': '^0.1.5' });
     expect(stamped.cezar.bin).toEqual({ cezar: 'dist/index.js' });
   });
 
@@ -230,27 +230,27 @@ describe('stampManifests', () => {
       bugs: { url: 'https://example.test/issues' },
     };
     const stamped = stampManifests(manifests, '0.1.5-pr482.123');
-    expect(stamped.alias.repository).toEqual(repository);
-    expect(stamped.alias.homepage).toBe('https://example.test');
-    expect(stamped.alias.bugs).toEqual({ url: 'https://example.test/issues' });
+    expect(stamped.alias!.repository).toEqual(repository);
+    expect(stamped.alias!.homepage).toBe('https://example.test');
+    expect(stamped.alias!.bugs).toEqual({ url: 'https://example.test/issues' });
   });
 
   it('leaves the alias untouched when the service declares no repository', () => {
-    expect('repository' in stampManifests(set(), '0.1.5-pr482.123').alias).toBe(false);
+    expect('repository' in stampManifests(set(), '0.1.5-pr482.123').alias!).toBe(false);
   });
 });
 
 describe('buildInstallLines', () => {
-  it('renders exact-version npx commands from the actual alias name', () => {
-    const lines = buildInstallLines('cezar-cli', '0.1.5-pr482.123');
+  it('renders every line from the release run command', () => {
+    const lines = buildInstallLines('npx cezar-cli@0.1.5-pr482.123');
     expect(lines.length).toBeGreaterThanOrEqual(3);
     for (const line of lines) {
       expect(line).toContain('npx cezar-cli@0.1.5-pr482.123');
     }
   });
 
-  it('follows a renamed alias without code changes', () => {
-    const lines = buildInstallLines('some-future-name', '1.0.0-pr9.1');
-    expect(lines[0]).toContain('npx some-future-name@1.0.0-pr9.1');
+  it('follows a scoped package run without an alias', () => {
+    const lines = buildInstallLines('npx -p @hearsay-tools/squawk@1.0.0-pr9.1 hsq');
+    expect(lines[1]).toMatch(/^npx -p @hearsay-tools\/squawk@1\.0\.0-pr9\.1 hsq run /);
   });
 });

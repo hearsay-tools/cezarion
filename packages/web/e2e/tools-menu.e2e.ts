@@ -1,7 +1,7 @@
 import { productName } from './product'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 

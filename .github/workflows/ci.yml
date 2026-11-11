@@ -1395,7 +1395,7 @@ jobs:
           console.log('');
           console.log(`- Version: \`${r.version}\``);
           console.log(`- Dist-tag: \`${r.distTag}\``);
-          console.log(`- Packages: \`${r.aliasName}\` → \`${r.rootName}\` → \`${r.apiClientName}\``);
+          console.log(`- Packages: ${r.publishedNames.split(',').map(name => `\`${name}\``).join(', ')}`);
           console.log('');
           console.log('```bash');
           for (const line of r.installLines) console.log(line);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
 const PROVIDER_IDS = runnerSchema.options;
 
 export const providerConnectSchema = z.object({

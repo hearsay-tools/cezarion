@@ -41,6 +41,10 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { installWindowsIdentityStore } from '../src/delegation/windows-identity-store.ts';
+
+// Workspace receipts and markers use the host's identity store (ADR 0032).
+installWindowsIdentityStore();
 
 type RunManager = import('../src/workflows/run.ts').RunManager;
 type RunRecord = import('../src/runs/store.ts').RunRecord;

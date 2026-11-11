@@ -72,6 +72,20 @@ A per-runner parity file loads only its own adapter. It picks its runner with
 adapter for its workers, and an owned-workflows file the next runner for R14's mixed chain. `core/runner-closure.test.ts` enforces this
 (hearsay-tools/cezarion#2939).
 
+Any other test that builds a run manager picks the fewest adapters that cover its runs
+(hearsay-tools/cezarion#3242):
+
+| Kit | Runners | Use when the test… |
+| --- | --- | --- |
+| `core/no-runner.testkit.ts` (`workflows/fixture-no-runner.testkit.ts`) | none: building one fails the test | starts no runner |
+| `core/claude-runner.testkit.ts` (`workflows/fixture-claude.testkit.ts`, `workflows/worker-wait-claude.testkit.ts`) | Claude for `claude`, `claude-cli` and no backend | starts runs, but never with a non-Claude backend |
+| `core/every-runner.testkit.ts` (the plain kit names above) | all six | names another backend, iterates the runners, or spies on `createRunner` |
+
+`core/runners-under-test.testkit.ts` ranks them, so the import order inside one test file does not
+matter: every-runner beats claude, and claude beats none. A test body's own `useRunners` call
+still wins over all three. So a shared testkit can use the claude or no-runner kit while one of its
+test files imports `core/every-runner.testkit.ts` for the backends it names.
+
 The binding limit on a parity test file is CI's per-file cap: `FILE_DURATION_LIMIT_MS`
 (60 s) in `.github/scripts/vitest-file-duration.mjs`. CI enforces it on every Vitest
 file when `VITEST_FILE_DURATION_CAP=1` (`.github/workflows/ci.yml`), with coverage on,

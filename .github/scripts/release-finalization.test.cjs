@@ -29,7 +29,7 @@ async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source
     fs.writeFileSync(path.join(cwd, file), typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`);
   };
   write('package.json', { name: 'release-fixture', private: true, workspaces: ['packages/*'] });
-  const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', `${productIdentity().npmAliasDirectory}/package.json`];
+  const manifests = ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', ...(productIdentity().npmAliasDirectory === null ? [] : [`${productIdentity().npmAliasDirectory}/package.json`])];
   for (const [i, file] of manifests.entries()) write(file, { name: `fixture-${i}`, version: '0.12.0', private: i !== 0, ...(i === 3 ? { dependencies: { 'fixture-1': '^0.12.0' } } : {}) });
   write('pnpm-workspace.yaml', 'packages:\n  - packages/*\nlinkWorkspacePackages: true\n');
   const pnpm = () => execFileSync('pnpm', ['install', '--lockfile-only', '--ignore-scripts', '--offline', '--no-frozen-lockfile'], { cwd, stdio: 'pipe' });
@@ -125,7 +125,7 @@ async function fixture(t, base = 'main', { historyCommits = 0, subject = 'source
   const ci = parse(fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8'));
   const nativeCiEnabled = ci.on.pull_request_target.branches.some(pattern =>
     pattern === base || (pattern === 'release/**' && base.startsWith('release/')));
-  const outputs = { release: { version: '0.12.1', published: 'true', publishedNames: '@wjarka/cezarion,cezarion', aliasName: 'cezarion' } };
+  const outputs = { release: { version: '0.12.1', published: 'true', publishedNames: '@wjarka/cezarion,cezarion', runCommand: 'npx cezarion@0.12.1', rootName: '@wjarka/cezarion' } };
   const errors = [];
   const summary = path.join(dir, 'summary.md');
   const bin = path.join(dir, 'bin');
@@ -219,7 +219,7 @@ test('retry after a pushed branch and denied PR reuses the original commit', asy
   assert.equal(f.outputs.bump_pr.status, 'created');
   assert.equal(f.state.prs.length, 1);
   const head = pushed.split(/\s/)[0];
-  for (const file of ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', `${productIdentity().npmAliasDirectory}/package.json`]) {
+  for (const file of ['packages/cezar/package.json', 'packages/contract/package.json', 'packages/api-client/package.json', 'packages/web/package.json', ...(productIdentity().npmAliasDirectory === null ? [] : [`${productIdentity().npmAliasDirectory}/package.json`])]) {
     assert.equal(JSON.parse(f.git('show', `${head}:${file}`)).version, '0.12.1');
   }
   const lock = require('yaml').parseAllDocuments(f.git('show', `${head}:pnpm-lock.yaml`)).at(-1).toJSON();
