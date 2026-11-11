@@ -33,7 +33,7 @@ method is in the owner's shared notes (`projects/cezar/pipeline-timing-baseline.
 | PR CI run | 16.5 min, restarted by each new push; 45% of PRs get more pushes | Selected tests on the PR (§ Pull request check) |
 | Ready → queue | 2 min median, 55 min p90: draft round trip, a 180 s settle window, an agent turn | PR stays ready; auto-merge armed after the review (§ Merge) |
 | Queue run | 17 min on 4 Vitest + 4 browser shards | 8 + 8 shards (§ Queue) |
-| Failed queue run | delays its PR by a median of 62 min; 34 of 42 failed entries passed again with no new commit | One rerun of the failed files inside the run (§ Queue) |
+| Failed queue run | delays its PR by a median of 62 min; 34 of 42 failed entries passed again with no new commit | One rerun of the failed shard inside the run (§ Queue) |
 
 Two facts decide the shape:
 
@@ -128,22 +128,17 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
 
 1. Every entry runs today's queue verification on the combined commit, with the full
    Vitest and browser suites on 8 + 8 shards.
-2. A shard whose tests fail runs its failed test files once more, in the same job. A pass
-   on the rerun passes the shard and uploads the names of the files that passed only on
-   the rerun as an artifact. The shard runs queued code with read-only permissions, so it
-   writes no issue. A separate trusted job, run like `report-workflow-failure.yml` with
-   no checkout or run of queued code, validates those names against the run's test files
-   and files one flake issue per test file, keyed so a repeat updates it, with the label
-   `flaky-test`. A Cezar automation
-   starts a task for each such issue to fix or quarantine the test (§ Owner actions). The
-   main CI repair automation does not take them: it accepts only a failed `main` push run.
-   A second failure fails the entry, as today.
+2. A shard whose tests fail runs **the whole shard** once more, in the same job, in the
+   same order. A rerun of only the failed files could pass a failure that depends on
+   another file's state, so the shard passes only when the full rerun passes. Every merged
+   commit has still passed the full suite. A second failure fails the entry, as today. A
+   rerun adds one shard's time, about 5 min with 8 shards (estimate).
 3. The shards keep recording Squeal shared results under `squeal ci record`
-   (`docs/sdlc/ci.md` § Squeal shared results). The pinned Squeal cannot merge a rerun
-   into a shard's parts: `ci export` refuses two parts for one shard or one file. So a
-   shard that reran uploads no parts, and the export and publish jobs skip that merge
-   group. Developers' daemons import the nearest older ref. The export's shard pattern, its condition and `.github/scripts/ci-squeal-results.workflow.test.cjs`
-   change with the shard count.
+   (`docs/sdlc/ci.md` § Squeal shared results). The rerun records into a new parts
+   directory, and the shard uploads only the rerun's parts. That is one complete part per
+   shard, which the pinned Squeal's `ci export` accepts (it refuses two parts for one shard
+   or one file), so publication continues. The export's shard pattern, its condition and
+   `.github/scripts/ci-squeal-results.workflow.test.cjs` change with the shard count.
 4. Every reader of the shard job names changes with the count in the same change: the
    required and skipped rosters in `.github/scripts/queue-ci-proof.cjs` (with four-shard
    names it rejects the queue proof, and `main` repeats the full verification),
@@ -152,8 +147,19 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
    ignores the rest), `.github/scripts/ci-coverage.workflow.test.cjs` and the workflow
    parity tests that expand the matrices.
 5. A merged commit with no `refs/squeal/<sha>` gets a warning in the `main` push run
-   summary, unless its merge group reran a shard. Publication stays outside the required
-   checks.
+   summary. Publication stays outside the required checks.
+6. **Flake reports.** The shard runs queued code with read-only permissions, so it writes
+   no issue. It uploads the names of the test files that failed in the first run as an
+   artifact. A separate trusted job, run like `report-workflow-failure.yml`, never checks
+   out or runs queued code. It files a report only when the Actions API shows the shard's
+   first test step failed and its rerun step passed. It reads the names as untrusted text:
+   it keeps only names that exist as test files in the merge group's tree, read through
+   the Git API, and quotes them. It files one issue per merge group with the label
+   `flake-report`, keyed by test file so a repeat adds to the same issue. A report starts
+   no task on its own: a maintainer who confirms it adds `flaky-test`, and a Cezar
+   automation starts a task for that issue to fix or quarantine the test (§ Owner
+   actions). The main CI repair automation does not take these: it accepts only a failed
+   `main` push run.
 
 ### `main`
 
@@ -192,7 +198,8 @@ the files CI already ran. That change is not part of this plan.
 
 | Record | Writer | Reader | Absent or unreadable |
 | --- | --- | --- | --- |
-| Flake issue per test file, label `flaky-test` | The trusted flake reporter job, from the rerun artifact | The flaky-test automation | The label is missing or the artifact is malformed: the reporter job fails visibly; the entry's verdict does not change |
+| Flake report, label `flake-report` | The trusted flake reporter job, from step outcomes in the Actions API and the shard's name artifact | A maintainer | The label is missing, or the artifact is absent or malformed: the job files the report without names, or fails visibly; the entry's verdict does not change |
+| Label `flaky-test` on a report | A maintainer | The flaky-test automation | No label: no task starts |
 | `refs/squeal/<sha>` | `squeal-publish` | Developers' Squeal daemons | The daemon imports the nearest older ref; the push run warns |
 | Open `main-ci-failure` summary | The failure reporter | The 60-minute check | No mention; the repair automation still runs |
 
@@ -202,7 +209,7 @@ the files CI already ran. That change is not part of this plan.
 | --- | --- |
 | Full suites on every PR head | Selected tests on the PR. The full suite runs on the combined commit in the queue |
 | Queue reuse of PR suites | Removed. Every queue entry runs the full suites |
-| Failed queue entry needs a requeue | One rerun of the failed files inside the run; flakes become issues |
+| Failed queue entry needs a requeue | One full rerun of the failed shard inside the run; the full suite still passes before every merge; flakes become reports |
 | Draft until checks pass | PRs stay ready. The board follows check and thread state |
 | Reviewer loop until clean before the PR | One round beside the push, plus a fix check. Never-list paths keep the loop, capped at 5 |
 
@@ -212,7 +219,7 @@ Each row becomes one issue.
 
 | Phase | Content | Size | Needs |
 | --- | --- | --- | --- |
-| 1 | Local gate (`npm run prepr`, 2-minute bound, shorter duties; scope of hearsay-tools/cezarion#3216 without the lane); PR stays ready; auto-merge armed after the review and turned off before a later push; queue rerun of failed files; the trusted flake reporter; a shard that reran publishes no Squeal parts | days | Owner actions 1, 2 |
+| 1 | Local gate (`npm run prepr`, 2-minute bound, shorter duties; scope of hearsay-tools/cezarion#3216 without the lane); PR stays ready; auto-merge armed after the review and turned off before a later push; queue rerun of a failed shard, with its Squeal parts; the trusted flake reporter | days | Owner actions 1, 2 |
 | 2 | Selected tests on the PR; 8 + 8 shards for the queue and the full fallback; no queue reuse of PR suites; Squeal shard pattern and test; the 60-minute mention; the Squeal ref warning | about 1 week | |
 | 3 | Release: hearsay-tools/cezarion#3212 with the candidate rules of § Release, and the reusable full-suite workflow for `release/**` | as specified there, plus that workflow | Owner actions of that issue |
 | 4 | Optional: verification after the merge (hearsay-tools/cezarion#3209 to hearsay-tools/cezarion#3211), only if phase 2 data shows the queue is still the slowest step | | A change to this spec |
@@ -230,8 +237,8 @@ hearsay-tools/cezarion#3214 wait for phase 4.
    the fix only; on a change that matches a never-list rule of the auto-merge check, repeat
    with a fresh reviewer until a round reports no active finding, at most 5 rounds.
 
-2. Create the label `flaky-test` and a Cezar automation that starts a task when an issue
-   gets it.
+2. Create the labels `flake-report` and `flaky-test`, and a Cezar automation that starts
+   a task when an issue gets `flaky-test`.
 
 ## Limits
 
@@ -244,6 +251,4 @@ hearsay-tools/cezarion#3214 wait for phase 4.
 - The 15 to 20 minutes apply to PRs that merge without the owner: 34% of the last 330 PRs
   under today's rules. Other PRs wait for the owner.
 - `main` red from the calendar or the environment has no automatic repair.
-- A merge group that reran a shard publishes no Squeal results. Retry-aware parts would
-  need a Squeal change.
 - The shares come from one week of PRs, which included large migration work.
