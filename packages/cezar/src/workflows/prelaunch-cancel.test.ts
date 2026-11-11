@@ -14,7 +14,7 @@ import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { RunStore, type RunRecord, type RunStatus } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
-import { createFixtureManager, removeFixtureRepo, fixtureWork, fixtureWorkSettled, unused } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, removeFixtureRepo, fixtureWork, fixtureWorkSettled, unused } from './fixture-claude.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 
 const workflow: WorkflowDef = {

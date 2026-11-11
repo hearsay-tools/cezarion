@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { observationClock } from '../../core/observation-clock.testkit.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { boundaryOrderFixture } from './boundary-order.testkit.ts';
 import { clearIdleTimer } from './input-timers.ts';
 import { TurnNudges } from './turn-nudges.ts';

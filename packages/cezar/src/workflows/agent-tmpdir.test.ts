@@ -7,7 +7,7 @@ import { terminalScratchDisposition } from './run/run-settlement.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-claude.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import * as catalog from './load.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { fixtureUpdateRun, lastWaitOf, manager, parent, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { fixtureUpdateRun, lastWaitOf, manager, parent, root, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait-claude.testkit.ts';
 
 /**
  * Recovery for one adopted family (#779, plan step 3) runs while the rest of the project is live.
