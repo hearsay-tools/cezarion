@@ -37,11 +37,11 @@ exit. Design approval does not grant merge authority.
 3. **File.** File the verified issues as epic sub-issues, with board and labels.
    Update the phase's dependency/wave table. Land material plan updates before
    affected implementation starts.
-4. **Start.** Start a phase coordinator as a root Cezar task with the prompt
-   below and a freshly discovered runner/model/effort. Use `cez task start`
+4. **Start.** Start a phase coordinator as a root Squawk task with the prompt
+   below and a freshly discovered runner/model/effort. Use `hsq task start`
    with `--task-file <prompt>` and the selected execution controls. An owned
    worker cannot delegate; phase coordinators need root-task capabilities.
-5. **Wait.** Register `cez message wait --peer <coordinator id>`. Answer from
+5. **Wait.** Register `hsq message wait --peer <coordinator id>`. Answer from
    approved decisions; route new product questions to the owner. Prepare the
    next phase while this one runs, then repeat its verification against main.
 6. **Accept.** Read the coordinator's report and recheck the phase exit on main.
@@ -71,7 +71,7 @@ merges each PR">. Product decisions stay with the owner.
 Phase exceptions: <owner-approved exceptions and dates, or none>.
 Previous handoff/state: <paths, if present>.
 
-Planner task: <id>. Report with cez message progress when the phase is
+Planner task: <id>. Report with hsq message progress when the phase is
 accepted: merged PRs, main SHA, exit evidence, metrics, scope changes,
 exclusions, blockers and friction. Route product questions as explicit
 requests to the planner; acceptance of a message is not a decision reply.

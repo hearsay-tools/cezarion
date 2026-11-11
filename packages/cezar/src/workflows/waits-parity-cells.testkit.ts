@@ -2735,8 +2735,8 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
       expect(nudgeNotes(p.id)).toHaveLength(1);
       const entry = workerWaits(p.id)[0]!;
       expect(prompted(runner, request.id)).not.toHaveLength(0);
-      expect(prompted(runner, 'cez message wait --request')).not.toHaveLength(0);
-      expect(prompted(runner, 'cez message cancel-request')).not.toHaveLength(0);
+      expect(prompted(runner, 'hsq message wait --request')).not.toHaveLength(0);
+      expect(prompted(runner, 'hsq message cancel-request')).not.toHaveLength(0);
       expect(entry).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, requestIds: [request.id], phase: WAIT_PHASE.open });
       expect(entry).not.toHaveProperty('deadline');
       expect(entry).not.toHaveProperty('timeoutSeconds');

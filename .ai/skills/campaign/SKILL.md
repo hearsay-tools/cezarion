@@ -1,6 +1,6 @@
 ---
 name: campaign
-description: Orchestrate a set of issues or a phased epic with governed Cezar workers. Use for cleanup waves, feature delivery across dependent issues, or a whole epic through integrated acceptance.
+description: Orchestrate a set of issues or a phased epic with governed Squawk workers. Use for cleanup waves, feature delivery across dependent issues, or a whole epic through integrated acceptance.
 ---
 
 # Campaign
@@ -44,7 +44,7 @@ integration branch return to planning for independently landable slices.
 Keep `.ai/qa/campaign/state.json` in this worktree and link it from the handoff.
 Read [state](references/state.md) before inventory and on every resume. Record
 each transition there, including the plan revision, worker baseline, reviewed
-head, landing result and acceptance evidence. Reconcile it against Cezar, Git
+head, landing result and acceptance evidence. Reconcile it against Squawk, Git
 and GitHub before resuming work.
 
 ## 1. Admit work
@@ -103,14 +103,14 @@ For each free slot:
    [feature](references/feature-delivery.md#worker-brief). Include the merge
    authority verbatim, the coordinator id, the expected evidence and any
    mandatory PR-opening release check.
-4. Use `cez worker spawn --baseline parent-head --request-id <UUID>
+4. Use `hsq worker spawn --baseline parent-head --request-id <UUID>
    --context-file <brief> '<task>'` with the discovered runner/model. Reuse the
    request id only for an exact retry.
 5. Record the accepted worker id and register a wait covering every live worker.
 
 Done when the accepted worker and its baseline are recorded and a wait covers
 it. A request to a live worker needs an explicit reply when a decision depends
-on it. A settled worker needs `cez worker resume`; a message alone cannot wake it.
+on it. A settled worker needs `hsq worker resume`; a message alone cannot wake it.
 
 ## 4. Review and resolve
 
@@ -178,7 +178,7 @@ epic planner too. Update the handoff and call `cezar_done`.
 ## Holds
 
 - **Main CI fails:** hold landing through land-pr. Find the repair task with
-  `cez message tasks` (its title names the issue and "repairing main ci"). Keep
+  `hsq message tasks` (its title names the issue and "repairing main ci"). Keep
   repair with that task; if absent, establish one named repair owner. Report it
   and wait. land-pr owns which CI failures block landing.
 - **PR check fails:** read its log. A flake needs a tracking issue; retry failed

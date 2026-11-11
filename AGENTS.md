@@ -1,6 +1,6 @@
 # AGENTS.md — working in this repository
 
-cezar is a **parallel coding-agents orchestrator**: a local cockpit (CLI + browser GUI) for running and tracking AI coding-agent tasks in a repo. Each task runs a workflow on one backend from `RUNNER_IDS` (`packages/cezar/src/core/agent-runner.ts`), or a mix per step, in its own git worktree; it ends at a review gate (never auto-merges) and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud. State lives under `.ai/cezar/`: one embedded SQLite run store (`runs.db`, `node:sqlite`) plus plain JSON, NDJSON and Markdown. The stack stays deliberately small: strict TypeScript (ESM, Node 24.21.0+), Hono + SSE, Zod at every boundary, YAML workflows, and a React 19 + Vite + Tailwind v4 + shadcn/ui cockpit compiled to static assets.
+Squawk runs parallel coding agents through a local CLI and browser cockpit. Use `hsq`. Each task runs a workflow on one backend from `RUNNER_IDS` (`packages/cezar/src/core/agent-runner.ts`), or a mix per step, in its own git worktree; it ends at a review gate (never auto-merges) and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud. State lives under `.ai/cezar/`: one embedded SQLite run store (`runs.db`, `node:sqlite`) plus plain JSON, NDJSON and Markdown. The stack stays deliberately small: strict TypeScript (ESM, Node 24.21.0+), Hono + SSE, Zod at every boundary, YAML workflows, and a React 19 + Vite + Tailwind v4 + shadcn/ui cockpit compiled to static assets.
 
 Architecture decisions live in [docs/adr/](docs/adr/). Consult the relevant records before changing a mechanism.
 
@@ -19,19 +19,19 @@ titles and ledger fields follow
 
 ## Zero config
 
-cezar ships no config file the user must create and no setting they must set before it works. Every capability is discovered from what is already there — the repo, the environment, `gh`, the running processes — or it degrades quietly to a smaller cezar. `.ai/cezar/config.json` is optional and every key has a working default; `.env` is never auto-loaded.
+Squawk ships no config file the user must create and no setting they must set before it works. Every capability is discovered from what is already there — the repo, the environment, `gh`, the running processes — or it degrades quietly. `.ai/cezar/config.json` is optional and every key has a working default; `.env` is never auto-loaded.
 
-New state may be **written**, never **required**: `.ai/cezar/`, `~/.cache/cez/`, `~/.cezar/`. Delete any of them and cezar rebuilds what it needs on the next run. State that a user must author, migrate, or repair is not state — it is configuration, and it needs a reason. One deliberate exception inside that rule: the project registry keeps a `~/.cezar/config.json.bak` snapshot, so deleting `config.json` alone restores instead of resetting — delete the `~/.cezar` directory for a true reset.
+State may be **written**, never **required**. Project state stays in `.ai/cezar/`; user state uses the [platform roots](docs/migration.md#home-directories). Squawk rebuilds deleted state. User-authored, migrated or repaired state is configuration and needs a reason. The registry retains `config.json.bak`, so deleting only `config.json` restores it. See [migration and rollback](docs/migration.md) before resetting a home.
 
 Practical rules:
 
 - When a feature seems to need configuration, the design is wrong. Discover it, or default it.
-- Features that widen exposure or cost use opt-in `CEZ_*` flags. [Automations](docs/areas/automations.md)
+- Features that widen exposure or cost use opt-in `HSQ_*` flags (`CEZ_*` fallback). [Automations](docs/areas/automations.md)
   and [workers](docs/adr/0058-task-workers.md) are opt-out.
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.
 - Never trade a working default for a knob.
-- Adding, renaming, or removing a `CEZ_*` env var — or changing what its default does — MUST update `.env.example` in the same commit (and the README env table when the var is user-facing). `npm run lint` checks source reads against `.env.example`, the env contract.
+- Adding, renaming, or removing an `HSQ_*`/`CEZ_*` env var — or changing what its default does — MUST update `.env.example` in the same commit (and the README env table when the var is user-facing). `npm run lint` checks source reads against `.env.example`, the env contract.
 
 ## Changing what already works
 
@@ -47,7 +47,7 @@ between packages or import across them.
 
 | Path | Package | What it is |
 | --- | --- | --- |
-| `packages/cezar` | `@wjarka/cezarion` | The service and CLI (one program), published with the built cockpit in `web/dist` |
+| `packages/cezar` | `@wjarka/cezarion` | Service/CLI workspace; publishes as `@hearsay-tools/squawk` with the cockpit in `web/dist` |
 | `packages/contract` | `@open-mercato/cezar-contract` | Every HTTP request and response as a zod schema; Node-free |
 | `packages/api-client` | `@open-mercato/cezar-api-client` | The typed client over `AppType`; Node-free; the service imports it only in tests |
 | `packages/web` | `@open-mercato/cezar-web` | The cockpit SPA, built into `packages/cezar/web/dist` |
@@ -72,7 +72,7 @@ holds that area's rules.
 | Agent runners / backends, parity matrices | [`docs/areas/runners.md`](docs/areas/runners.md), then `AGENT_PROTOCOL.md` |
 | HTTP server, API routes, request/response shapes (any new field, route or payload) | [`docs/areas/http-api.md`](docs/areas/http-api.md) |
 | Real-time events (live UI signals, replacing polls) | [`docs/areas/realtime-events.md`](docs/areas/realtime-events.md) |
-| Workspace registry / per-user state (`~/.cezar/`) | [`docs/areas/workspace-registry.md`](docs/areas/workspace-registry.md) |
+| Workspace registry / per-user state | [`docs/areas/workspace-registry.md`](docs/areas/workspace-registry.md) |
 | Project-scoped routes & contexts (`/api/v1/p/:projectId`, `/p/:projectId`) | [`docs/areas/project-routes.md`](docs/areas/project-routes.md) |
 | Git / worktree logic | [`docs/areas/git-worktree.md`](docs/areas/git-worktree.md) |
 | GitHub integration (issues/PRs tab, draft PRs) | [`docs/areas/github.md`](docs/areas/github.md) |
@@ -82,7 +82,7 @@ holds that area's rules.
 | Pending asks (`cezar_ask`, the ask card, a new field on the ask) | [`docs/areas/pending-asks.md`](docs/areas/pending-asks.md) |
 | Skills (Markdown playbooks, team repos) | [`docs/areas/skills.md`](docs/areas/skills.md) |
 | Runs store / state persistence | [`docs/areas/runs-store.md`](docs/areas/runs-store.md) |
-| Task handoff journal (`CEZ_HANDOFF_FILE`) | [`docs/areas/handoff-journal.md`](docs/areas/handoff-journal.md) |
+| Task handoff journal (`HSQ_HANDOFF_FILE`, `CEZ_HANDOFF_FILE` fallback) | [`docs/areas/handoff-journal.md`](docs/areas/handoff-journal.md) |
 | Web UI (cockpit) | [`docs/areas/web-ui.md`](docs/areas/web-ui.md) |
 | Agent config files (Settings → Agent config) | [`docs/areas/agent-config.md`](docs/areas/agent-config.md) |
 | Cockpit e2e specs, the browser seam, a flaky shard | [`packages/web/e2e/README.md`](packages/web/e2e/README.md) |
@@ -125,7 +125,7 @@ Read the matching document before you:
 - change a runner, the event streams or a parity matrix: `AGENT_PROTOCOL.md` (§6 mapper
   capabilities, §7 session and lifecycle, the new-runner checklist);
 - change a CLI command, flag or exit code, an HTTP route, a state file under `.ai/cezar/`
-  or `~/.cezar/`, the workflow or skill format, the npm package surface, the event
+  or the user home, the workflow or skill format, the npm package surface, the event
   protocol or an in-band marker: `BACKWARD_COMPATIBILITY.md`;
 - apply a label, claim an issue, pass the QA gate or change the process itself: `SDLC.md`;
 - review a change or assign a severity: `CODE_REVIEW.md`;
@@ -156,6 +156,6 @@ row's value when the thing it names changes, rather than its label.
 | Auto-merge | Read `.ai/skills/auto-merge/SKILL.md` before you open a pull request into `main`, and after each push, CI result, review round or draft/ready change on one you opened with the `auto-merge` label. It decides whether the PR merges without owner review; every merge it makes is a squash. |
 | Code quality | Read `.ai/skills/check-code-quality/SKILL.md` for file/function/module quality stats and before opening a pull request. Use its measurement path for requested stats and its Squeal one-shot pre-PR path, without a bundled fallback, for changed-function checks and findings. |
 | Design track label | An issue labeled `friction-design` takes `/dev-flow`'s Design Track, even when Direct or Micro fits; read labels before the design gate. [docs/sdlc/friction.md § Handling automations](docs/sdlc/friction.md#handling-automations). |
-| Task orchestrator | Cezar |
+| Task orchestrator | Squawk |
 | SDLC feedback | `apptension/toolkit-dev` |
 | Friction inbox | Post friction findings, never file them: [docs/sdlc/friction.md § Friction inbox](docs/sdlc/friction.md#friction-inbox) |

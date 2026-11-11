@@ -510,7 +510,7 @@ function peerWaitResultText(wait: PeerWaitEntry): string {
   const result = wait.result;
   const head = `Peer wait ${wait.id} on ${peerTargetPhrase(wait)}`;
   if (result?.reason === 'message') return `${head}: task ${result.peerRunId ?? 'unknown'} sent message ${result.messageId ?? 'unknown'}, delivered with this wake. Register another peer wait if you still wait on it.`;
-  if (result?.reason === 'settled') return `${head}: task ${result.peerRunId ?? 'unknown'} settled or was deleted; it will not write again until its human continues it. Read its status with cez message tasks.`;
+  if (result?.reason === 'settled') return `${head}: task ${result.peerRunId ?? 'unknown'} settled or was deleted; it will not write again until its human continues it. Read its status with hsq message tasks.`;
   return `${head}: deadline reached with no message. Register another peer wait if you still wait on it.`;
 }
 

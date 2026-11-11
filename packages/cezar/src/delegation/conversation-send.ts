@@ -25,7 +25,7 @@ export function assertReplyDirection(state: ConversationState, request: Conversa
   const original = state.messages.find(message => message.id === request.requestId && message.kind === 'request' &&
     message.state === 'accepted' && message.senderRunId === sender.id && message.recipientRunId === recipient.id);
   if (original) throw new DelegationPolicyError('incompatible_state',
-    `Cannot reply to your own request. Use cez message follow-up ${recipient.id} "<text>" --id <new-message-UUID> --request-id ${original.id}; for a new request, use cez message request ${recipient.id} "<text>" --id <new-message-UUID>.`);
+    `Cannot reply to your own request. Use hsq message follow-up ${recipient.id} "<text>" --id <new-message-UUID> --request-id ${original.id}; for a new request, use hsq message request ${recipient.id} "<text>" --id <new-message-UUID>.`);
 }
 export function sendAdmission(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest) {
   const { recipient, relationship } = pair;

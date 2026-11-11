@@ -264,7 +264,7 @@ export class DelegationService {
       const alternatives = choices.otherRunners.join(', ') || 'none';
       const available = choices.availableModels.map(row => `${row.id}${row.effortLevels ? ` (effort: ${row.effortLevels.join(', ') || 'none advertised'})` : ''}`).join('; ');
       // Full choices remain structured even when the human-readable error reaches its bound.
-      throw new DelegationPolicyError('invalid_input', `Model "${model}" is not in the ${runner} catalog. Available models: ${available.slice(0, 1200)}. Other runners listing "${model}": ${alternatives}. Use cez discover models --runner=${runner}.`, choices);
+      throw new DelegationPolicyError('invalid_input', `Model "${model}" is not in the ${runner} catalog. Available models: ${available.slice(0, 1200)}. Other runners listing "${model}": ${alternatives}. Use hsq discover models --runner=${runner}.`, choices);
     }
   }
   private projects = new Map<string, DelegationProject>();
@@ -470,7 +470,7 @@ export class DelegationService {
       inputs.some(input => input.id === message.id && !input.deliveredAt));
     return { messages, outcomes,
       ...(merged.length > messages.length ? { nextBefore: encodeConversationCursor(messages[0]!) } : {}),
-      ...(unread ? { hint: 'This history includes unread messages. Run cez message inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
+      ...(unread ? { hint: 'This history includes unread messages. Run hsq message inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
   }
   /** The ledgers a history read covers: the family's one, or each peer root's own while it exists.
    *  A peer whose history is being deleted, or is deleted, stays readable to a participant (spec § 2). */

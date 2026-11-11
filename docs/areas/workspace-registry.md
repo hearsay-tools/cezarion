@@ -1,4 +1,4 @@
-# Workspace registry and per-user state (`~/.cezar/`)
+# Workspace registry and per-user state
 
 [AGENTS.md § Task routing](../../AGENTS.md#task-routing) points here. Read this page before you change or review this area.
 
@@ -15,9 +15,9 @@ This does not change the home layout or enable project migration.
 
 ## Rules
 
-`~/.cezar/config.json` is the per-user workspace config **and** the project registry — every repo cezar has been booted in (spec `2026-07-20-multi-project-workspace`). Entry points resolve a `Home` once and pass it through the migrated path mechanisms ([ADR 0059](../adr/0059-resolve-home-at-entry-points.md)). `home/resolve.ts` owns cockpit path formulas, including the legacy cache that ignores `CEZ_HOME`. Runtime config, accounts, model policy, launch, delegation, webhooks and project contexts also receive that object. Library APIs require an explicit Home or a path derived from it. The compatibility shim and ambient library defaults are removed in P1a-2 (hearsay-tools/cezarion#2810). `CEZ_HOME` keeps registry and install writes in tests and containers off a real home. Schema rules are load-bearing: every field optional with `.catch`, `.passthrough()` at every object level, per-entry salvage for `projects` (one bad row never evicts the registry), and writes only through `mergeWriteWorkspaceConfig` (read-modify-write + atomic tmp/rename, `0600`) so two processes converge. A corrupt or read-only home degrades to in-memory defaults with ONE warning — never a boot failure. Migrations are config-files-only, idempotent, additive and non-blocking; run state never migrates. `maxParallel`/`memoryLimitMb` are workspace-wide (`resources`): the per-repo keys are imported once by migration 001 and ignored by enforcement afterwards. Registration is suppressed for task worktrees and `$HOME` itself (`shouldRegisterProject`). A merge-write resolves its path ONCE and uses it for both halves — resolving it twice let a `CEZ_HOME` that changed mid-flight read one home and write another, wiping the user's registry. Two guards back that up: `assertCezarHomeWriteIsSandboxed` refuses any write into the real `~/.cezar` from Vitest, node:test, Jest or Stryker, using the OS account home even when HOME is pinned, and `packages/cezar/vitest.setup.ts` and the node:test preload `scripts/test-home-env.mjs` pin `CEZ_HOME` to a per-worker sandbox so no case ever runs unpinned. Every write that leaves projects behind also snapshots `config.json.bak`, which `loadWorkspaceConfig` restores from when the config is missing, empty or corrupt (a config that parses and is simply empty is the user's own state and is never overridden).
+`<config>/config.json` is the per-user workspace config **and** the project registry — every repo Squawk has been booted in (spec `2026-07-20-multi-project-workspace`). Entry points resolve a `Home` once and pass it through the migrated path mechanisms ([ADR 0059](../adr/0059-resolve-home-at-entry-points.md)). `home/resolve.ts` owns cockpit path formulas, with the [platform roots](../migration.md#home-directories) and explicit legacy source. Runtime config, accounts, model policy, launch, delegation, webhooks and project contexts also receive that object. Library APIs require an explicit Home or a path derived from it. The compatibility shim and ambient library defaults are removed in P1a-2 (hearsay-tools/cezarion#2810). `HSQ_HOME` (`CEZ_HOME` fallback) keeps registry and install writes in tests and containers off a real home in the split layout. The legacy layout, which a server-migration rollback can also select, reads only `CEZ_HOME` (or `~/.cezar`). In the split layout `CEZ_HOME` (or `~/.cezar`) is also the migration source: with only `HSQ_HOME` set, split-layout boot or `hsq migrate` copies the real `~/.cezar` registry into the new home and writes `MOVED.json` in the real home. For an isolated home, set `CEZ_HOME` to the same sandbox as `HSQ_HOME`; for an intended migration, point `CEZ_HOME` at the legacy home to migrate from. Schema rules are load-bearing: every field optional with `.catch`, `.passthrough()` at every object level, per-entry salvage for `projects` (one bad row never evicts the registry), and writes only through `mergeWriteWorkspaceConfig` (read-modify-write + atomic tmp/rename, `0600`) so two processes converge. A corrupt or read-only home degrades to in-memory defaults with ONE warning — never a boot failure. Migrations are config-files-only, idempotent, additive and non-blocking; run state never migrates. `maxParallel`/`memoryLimitMb` are workspace-wide (`resources`): the per-repo keys are imported once by migration 001 and ignored by enforcement afterward. Registration is suppressed for task worktrees and `$HOME` itself (`shouldRegisterProject`). A merge-write resolves its path ONCE and uses it for both halves — resolving it twice let a `HSQ_HOME` (`CEZ_HOME` fallback) that changed mid-flight read one home and write another, wiping the user's registry. Two guards back that up: `assertCezarHomeWriteIsSandboxed` refuses any write into the real `~/.cezar` from Vitest, node:test, Jest or Stryker, using the OS account home even when HOME is pinned, and `packages/cezar/vitest.setup.ts` and the node:test preload `scripts/test-home-env.mjs` pin `HSQ_HOME` (`CEZ_HOME` fallback) to a per-worker sandbox so no case ever runs unpinned. Every write that leaves projects behind also snapshots `config.json.bak`, which `loadWorkspaceConfig` restores from when the config is missing, empty or corrupt (a config that parses and is simply empty is the user's own state and is never overridden).
 
-**Agent accounts** (spec `2026-07-29-agent-profiles`) live in this directory too, but in their OWN file — `~/.cezar/agent-accounts.json`, never a key in `config.json`, so a cezar that has never heard of accounts cannot drop them; `src/workspace/agent-accounts.ts` owns the store, `src/core/agent-profiles.ts` the vendor knowledge and `src/workspace/agent-profiles.ts` the resolution.
+**Agent accounts** (spec `2026-07-29-agent-profiles`) live in this directory too, but in their OWN file — `<config>/agent-accounts.json`, never a key in `config.json`, so a Squawk that has never heard of accounts cannot drop them; `src/workspace/agent-accounts.ts` owns the store, `src/core/agent-profiles.ts` the vendor knowledge and `src/workspace/agent-profiles.ts` the resolution.
 
 Every changed HomeStore file is backed up before replacement or removal under
 `Home.backups/<home-relative file>/<UTC>-<sha8>.json`, including remote grants
@@ -28,7 +28,7 @@ stay listed and restorable. Private snapshots keep the last 20 plus
 one per day for 30 days. Backup failures warn once per file and never block the
 primary write. HomeStore checks the backup directory chain before the write lock;
 unavailable, dangling or escaping paths disable both backup creation and pruning.
-`cez backup list [<file>]` reads legacy backups without migration when the switch
+`hsq backup list [<file>]` reads legacy backups without migration when the switch
 is on and the split home has no install marker. Once the split home has a marker,
 it reads that home. Listing never prepares either home. The legacy fallback reads
 only paths inside the legacy home: a link that leaves it is not listed. It discovers every
@@ -36,7 +36,7 @@ supported file, including backups whose
 live file is gone. Legacy root-file snapshots and nested named-instance snapshots
 remain readable. `config.json.bak` is listed as the newest config backup; the
 loader still restores it only when the primary is missing, blank or corrupt.
-`cez backup restore <file> [--at <time>]` uses the same recovery writer as the
+`hsq backup restore <file> [--at <time>]` uses the same recovery writer as the
 cockpit. The default restores a pinned recovery target when one exists; an explicit
 UTC time selects a retained snapshot. Restoring config/accounts keeps tolerant
 schema parsing. Other home files, including locks, restore their exact bytes.
@@ -119,12 +119,12 @@ carry the incident time; resolved retries do nothing, while a different incident
 returns a conflict. See ADR 0060 for
 write ordering and the remaining version-retention and staging-file limits.
 
-## Split home roots (staged)
+## Split home roots
 
 ADR 0059 defines `Home.config`, `state`, `data`, `cache` and `runtime`.
 `root` remains the config root. `resolveHome({ purpose, env?, layout?, platform? })`
-selects legacy by default while `REBRAND_SWITCH` is false. Tests select split
-explicitly; do not mock the switch. `Home.sandbox(dir, { layout: 'split' })`
+selects split when `REBRAND_SWITCH` is enabled and legacy when it is disabled.
+Tests can select either layout explicitly; do not mock the switch. `Home.sandbox(dir, { layout: 'split' })`
 creates a test marker under `<dir>/config` and keeps every kind under dir.
 
 In split layout, registry, accounts and remote settings use config. UI state,
@@ -144,21 +144,22 @@ Entry seeding holds the config lock through marker publication and seeds each
 file under its owning lock. Transactions that need both roots take config first.
 Legacy roots coincide, so their paths and existing recovery formats stay intact.
 
-`HSQ_HOME` selects one-root subdirectories and wins over `CEZ_HOME`; an explicit
-legacy-default `CEZ_HOME` counts as unset in split layout. Both names belong to
+`HSQ_HOME` (`CEZ_HOME` fallback) selects one-root subdirectories. An explicit
+`CEZ_HOME` equal to the legacy default counts as unset in split layout. An
+explicit `HSQ_HOME` still selects its own one-root layout. Both names belong to
 `HOME_LOCATING_ENV` and are always removed from child environments. The separate
 `HOME_LAYOUT_ENV` list contains platform layout values, which still reach agents.
 The resolver has no filesystem access. New roots and the Windows current-user
-private ACL stay behind the disabled release switch.
+private ACL apply with the release switch enabled.
 
-## Legacy migration (staged)
+## Legacy migration
 
 `home/migrate.ts` exports synchronous `migrateLegacyHome(legacy, target,
 { commit = true, env?, onStep? })`. Entry points call it only while
 `REBRAND_SWITCH` is enabled; tests inject a split Home. It returns
 `{ status: 'fresh' | 'migrated' | 'unchanged' | 'pending', record? }`.
 `home/migration-plan.ts` exports the shared read-only `planLegacyMigration`
-used by `cez migrate --dry-run`. The command is absent with the switch off.
+used by `hsq migrate --dry-run`. The command is absent with the switch off.
 
 The legacy `.migrating` claim contains `{ pid, startToken? }`, uses exclusive
 creation, and reclaims proven-dead holders under the legacy write lock.
@@ -248,7 +249,7 @@ legacy data and commits the target, which clears the boot skip. The failed marke
 stays as diagnostic evidence. `migrate --dry-run` and legacy recovery actions do
 not commit a target or clear the skip. No new state marker or setting is used.
 
-`cez server-migrate` (`server-install/group-migrate.ts`, registered only with
+`hsq server-migrate` (`server-install/group-migrate.ts`, registered only with
 the switch on) is that caller. It holds every instance's install lock in the
 records home, sorted, for the whole run. `--dry-run` only reads: it takes no
 install lock, does not prepare the legacy home and writes no file. Server records
@@ -307,7 +308,7 @@ drops account trees the pass no longer copies, and it rebuilds the target
 Deferred retries first check the target registry: an already rewritten
 configDir repairs the migration record without copying over live credentials.
 
-`isCezarMigrationJson` defines the strict JSON set. It covers cezar's live registry,
+`isCezarMigrationJson` defines the strict JSON set. It covers Squawk's live registry,
 state, grants, connections and update JSON. Historical backups and version
 snapshots are opaque bytes, even when their filenames end in `.json`.
 An exact legacy `ACCEPTED` journal record follows its copied registry bytes;
@@ -320,7 +321,7 @@ and split-layout Windows ACLs. Every tree copy keeps the owner-execute bit:
 a file is 0700 when its owner could execute the source (managed executables,
 launchers, account profile hooks) and 0600 otherwise. The old launchers remain
 unchanged. Archive entries record the same 0700 or 0600 mode. Launchers come from `writeLaunchers`, and the PATH line update
-replaces the line `pathHook` defines for `cez install`.
+replaces the line `pathHook` defines for `hsq install`.
 The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
 keeps an external checkout only when its version manifest records that same
 checkout with `source: 'link'`. Other escaping links refuse migration.
@@ -363,7 +364,7 @@ Accounts recorded as intentionally unmoved omp profiles retain their original pa
 Remote sessions see the global banner read-only, with the existing host instruction.
 
 Legacy grant rows remain read-only in every cockpit. The host operator resolves
-them with `cez backup import remote-settings/<id>.json` or `cez backup ignore
+them with `hsq backup import remote-settings/<id>.json` or `hsq backup ignore
 remote-settings/<id>.json`. The banner shows Import only for an importable source
 and always names Ignore. These staged CLI actions use the same recovery writer
 and are unavailable while the release switch is disabled.
