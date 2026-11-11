@@ -12,7 +12,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { loadAgentAccounts, mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { ProviderAuthService } from '../core/provider-auth.ts';
+import { PROVIDER_IDS, ProviderAuthService } from '../core/provider-auth.ts';
 import { createApp, type ServerDeps } from './server.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
@@ -91,7 +91,7 @@ describe('agent profiles API', () => {
       const body = await list();
       expect(body.editable).toBe(true);
       expect(body.profiles.every((p) => p.isDefault)).toBe(true);
-      expect(body.profiles.map((p) => p.provider)).toEqual(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
+      expect(body.profiles.map((p) => p.provider)).toEqual([...PROVIDER_IDS]);
       expect(body.profiles.every((p) => p.id === 'default')).toBe(true);
     });
 

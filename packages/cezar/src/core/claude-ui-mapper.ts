@@ -910,9 +910,9 @@ export function stringifyToolResultContent(content: unknown): string {
   if (Array.isArray(content)) {
     return content
       .map((c) => {
-        const b = c as { type?: string; text?: string };
-        if (b.type === 'text' && typeof b.text === 'string') return b.text;
-        if (b.type === 'image') return '[screenshot]'; // emitted as its own image event
+        const b = c as { type?: string; text?: string } | null;
+        if (b?.type === 'text' && typeof b.text === 'string') return b.text;
+        if (b?.type === 'image') return '[screenshot]'; // emitted as its own image event
         try {
           return JSON.stringify(b);
         } catch {
@@ -922,7 +922,8 @@ export function stringifyToolResultContent(content: unknown): string {
       .join('\n');
   }
   try {
-    return JSON.stringify(content);
+    // `JSON.stringify(undefined)` is `undefined`: a result without content is empty text.
+    return JSON.stringify(content) ?? '';
   } catch {
     return String(content);
   }
@@ -933,8 +934,8 @@ export function toolResultImageBlocks(content: unknown): Array<{ media_type: str
   if (!Array.isArray(content)) return [];
   const out: Array<{ media_type: string; data: string }> = [];
   for (const c of content) {
-    const b = c as { type?: string; source?: { type?: string; media_type?: string; data?: string } };
-    if (b.type === 'image' && b.source?.type === 'base64' && b.source.media_type && b.source.data) {
+    const b = c as { type?: string; source?: { type?: string; media_type?: string; data?: string } } | null;
+    if (b?.type === 'image' && b.source?.type === 'base64' && b.source.media_type && b.source.data) {
       out.push({ media_type: b.source.media_type, data: b.source.data });
     }
   }

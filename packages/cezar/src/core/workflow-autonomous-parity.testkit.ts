@@ -57,8 +57,10 @@ const nudges = (events: readonly Record<string, unknown>[]) => events.filter(e =
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
   "budget-fresh": [
+    "cursor A5 fresh"
+  ],
+  "budget-fresh-claude-omp": [
     "claude A5 fresh",
-    "cursor A5 fresh",
     "omp A5 fresh"
   ],
   "budget-continuation": [

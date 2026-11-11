@@ -1,10 +1,11 @@
+import { RUNNER_IDS } from './agent-runner.ts';
 import { productEnv } from './product-env.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { profileEnv } from './agent-profiles.ts';
 import { withEnvPrefix } from './shell-env.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;
+export const PROVIDER_IDS = RUNNER_IDS;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderConnectionState =
   | 'connected'

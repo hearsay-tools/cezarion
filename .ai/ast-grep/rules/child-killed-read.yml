@@ -1,0 +1,35 @@
+id: child-killed-read
+language: typescript
+severity: warning
+message: >-
+  ChildProcess.killed says a signal was delivered, not that the child ended, so a watchdog that
+  gates its SIGKILL on it never escalates (open-mercato/cezar#844). Ask real termination:
+  trackChildExit(child) in packages/cezar/src/core/agent-runner.ts.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+# A `.killed` member read (`child.killed`, `child?.killed`, `this.child.killed`), and a `killed`
+# key in a destructuring pattern. The rule knows no type, so it matches the name on any receiver.
+# It leaves out a receiver whose name ends in `error`, `err` or `failure`: the error of an exec
+# call carries its own `killed`, set when Node ended the child at its timeout (five reads when the
+# rule landed). It also leaves out a computed key (`child['killed']`) and a child held under such
+# a name.
+utils:
+  error-receiver:
+    any:
+      - { kind: identifier, regex: '(?i)(err|error|failure)$' }
+      - { kind: member_expression, has: { field: property, regex: '(?i)(err|error|failure)$' } }
+rule:
+  any:
+    - all:
+        - kind: member_expression
+        - has: { field: property, regex: '^killed$' }
+        - not: { has: { field: object, matches: error-receiver } }
+    - all:
+        - kind: shorthand_property_identifier_pattern
+        - regex: '^killed$'
+    - all:
+        - kind: pair_pattern
+        - has: { field: key, regex: '^killed$' }

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { RUNNER_IDS } from './agent-runner.ts';
 import { detectEnvironment, probeOmp } from './backend-detect.ts';
 
 describe('probeOmp', () => {
@@ -87,6 +88,12 @@ describe('detectEnvironment: codex and opencode probes', () => {
       if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
     }
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('reports one check for every runner, then gh and git', async () => {
+    process.env.CEZ_DRY_RUN = '1';
+    const rows = await detectEnvironment();
+    expect(rows.map((row) => row.name)).toEqual([...RUNNER_IDS, 'gh', 'git']);
   });
 
   it('spawns neither CLI under CEZ_DRY_RUN=1 and reports both mocks present', async () => {

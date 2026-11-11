@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import { humanInputDeliveredEventSchema } from '@open-mercato/cezar-api-client/contract/events'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 import type { UiMessageItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import bashAndScreenshot from '../../../../cezar/src/core/__fixtures__/claude/bash-and-screenshot.expected.json'
@@ -662,7 +663,7 @@ describe('reduceThread — provider authorization recovery', () => {
     }])
   })
 
-  it.each(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const)('keeps a %s incident', (provider) => {
+  it.each(runnerSchema.options)('keeps a %s incident', (provider) => {
     expect(reduceThread([
       line(1, 'provider-auth-required', { provider, authFailureId: 'incident-1' }),
     ]).turns[0]?.items).toEqual([{

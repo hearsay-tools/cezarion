@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import type { Runner } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 import { EFFORT_OPTIONS } from '@/routes/new-task-form'
 
 import { EnginePills, engineBody, engineRunBody, type EnginePick, type ResolvedEngine, useResolvedEngine } from './engine-pills'
@@ -277,7 +278,7 @@ describe('engineBody', () => {
     expect(engineBody(resolved({ effort: 'max', modelsLocked: true })).effort).toBeUndefined()
   })
 
-  it.each<Runner>(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])(
+  it.each<Runner>(runnerSchema.options)(
     'is symmetric for %s as the host default',
     (runner) => {
       expect(engineBody(resolved({ runner, defaultRunner: runner })).runner).toBeUndefined()
