@@ -1,4 +1,5 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
+import { runDataDir } from '../../legacy-runs.ts';
 import { fallbackProjectWriteError } from '../../project-paths.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { continuationNextStep, waitingWorkflowStepIndex, ciWorkflowResumeStepIndex } from './workflow-position.ts';
@@ -578,7 +579,7 @@ export class ContinuationSession {
           ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
           cwd: state.liveSession.cwd,
           toolGrant: settings.toolGrant,
-          additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), settings.profile.env),
+          additionalDirectories: agentDirectories(join(runDataDir(this.context.dataDir, runId), 'runs'), settings.profile.env),
           env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
           ...(delegation ? { restrictCrossSessionMessaging: delegation.restrictCrossSessionMessaging } : {}),

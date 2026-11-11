@@ -48,7 +48,11 @@ export class ReportsIndex {
 
   private root(): string { return this.runsRoot ??= artifactRunsRoot(this.dataDir); }
   private async storage<T>(runId: string, read: (directory: string) => Promise<T>) {
-    try { return await read(join(this.store.isFallbackRun(runId) ? artifactRunsRoot(this.store.sourceDataDir(runId)) : this.root(), `${runId}-artifacts`)); }
+    try {
+      // A fallback run and a task the project move left in `.ai/cezar/` keep their artifacts there.
+      const source = this.store.sourceDataDir(runId);
+      return await read(join(source === this.dataDir ? this.root() : artifactRunsRoot(source), `${runId}-artifacts`));
+    }
     catch (error) { return { state: 'indeterminate' as const, error }; }
   }
 

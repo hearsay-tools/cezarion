@@ -1,4 +1,5 @@
 import type { LaunchSource } from './launch-read-resolver.ts';
+import { runDataDir } from '../../legacy-runs.ts';
 import { atStepOpen } from './launch-read-resolver.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
@@ -228,7 +229,7 @@ export class StepSession {
           cwd: state.liveSession.cwd,
           toolGrant: launch.toolGrant,
           // The handoff file lives outside the worktree — grant access.
-          additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), profile.env),
+          additionalDirectories: agentDirectories(join(runDataDir(this.context.dataDir, runId), 'runs'), profile.env),
           env: { ...profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
           ...(delegation ? { restrictCrossSessionMessaging: delegation.restrictCrossSessionMessaging } : {}),

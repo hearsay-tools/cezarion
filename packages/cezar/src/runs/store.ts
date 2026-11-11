@@ -3042,7 +3042,7 @@ export class RunStore extends EventEmitter {
   private removeRunHistoryBytes(id: string): void {
     // Fixed owned paths only: never follow context descriptors supplied in persisted metadata.
     z.uuid().parse(id);
-    const dir = join(this.dataDir, 'runs');
+    const dir = join(runDataDir(this.dataDir, id), 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
     this.facts.forget(id);
     removeHistory(this.dataDir, id);

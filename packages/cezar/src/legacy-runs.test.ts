@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { removeHistory } from './runs/history-file.ts';
 import { forgetLegacyRunIds, LEGACY_RUNS_FILE, legacyItemOwner, legacyRunIds, legacyRunItem, runDataDir } from './legacy-runs.ts';
 
 /** Live tasks that keep their own items in `.ai/cezar/` after a project move (owner decision A). */
@@ -62,5 +63,18 @@ describe('the items of a task the project move left in .ai/cezar/', () => {
     forgetLegacyRunIds(moved);
     expect(legacyRunIds(moved).size).toBe(0);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes a listed task\'s history bytes from .ai/cezar/, and only its own', () => {
+    list([LIVE]);
+    const legacyRuns = join(root, '.ai', 'cezar', 'runs');
+    mkdirSync(legacyRuns, { recursive: true });
+    mkdirSync(join(moved, 'runs'), { recursive: true });
+    const own = [`${LIVE}.ndjson`, `${LIVE}.ndjson.br`, `${LIVE}.ndjson.br.orphaned`, `${LIVE}.facts.json`].map(name => join(legacyRuns, name));
+    const others = [join(legacyRuns, `${OTHER}.ndjson`), join(legacyRuns, `${LIVE}.handoff.md`), join(moved, 'runs', `${OTHER}.ndjson`)];
+    for (const path of [...own, ...others]) writeFileSync(path, 'x');
+    removeHistory(moved, LIVE);
+    for (const path of own) expect(existsSync(path), path).toBe(false);
+    for (const path of others) expect(existsSync(path), path).toBe(true);
   });
 });

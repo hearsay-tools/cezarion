@@ -9,6 +9,7 @@ import { buildCommandEnv } from '../core/agent-env.ts';
 import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
 import { spawnDetached, stopGroup, type GroupLeader } from '../detached-process.ts';
 import { CHROMIUM_PID_FILE } from './chromium.ts';
+import { legacyRunsBeside, runDataDir } from '../legacy-runs.ts';
 
 /**
  * Supervisor for one cezar-owned dev server (#781, spec 2026-10-02-live-preview-v1): spawn the
@@ -250,6 +251,20 @@ export class DevServer extends EventEmitter {
   }
 }
 
+/** Each run's preview directory under `dataDir`, and those of the tasks a project move left in
+ *  `.ai/cezar/` (`legacy-runs.ts`): their servers and browsers keep their records there. */
+function previewRunDirectories(dataDir: string): Array<{ runId: string; directory: string }> {
+  const root = join(dataDir, 'preview');
+  const runs = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).filter(run => run.isDirectory()).map(run => ({ runId: run.name, directory: join(root, run.name) }))
+    : [];
+  for (const runId of legacyRunsBeside(dataDir)) {
+    const directory = join(runDataDir(dataDir, runId), 'preview', runId);
+    if (existsSync(directory) && statSync(directory).isDirectory()) runs.push({ runId, directory });
+  }
+  return runs;
+}
+
 /**
  * Boot sweep: a crashed cezar leaves pid records behind, `<port>.pid.json` for each dev server and
  * `chromium.pid.json` for the task's browser. Kill only when the recorded pid is still the process
@@ -260,16 +275,13 @@ export class DevServer extends EventEmitter {
  * Returns how many processes were killed.
  */
 export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: ((runId: string, what: number | 'browser') => boolean) | undefined } = {}): Promise<number> {
-  const root = join(dataDir, 'preview');
-  if (!existsSync(root)) return 0;
   const kills: Promise<void>[] = [];
-  for (const run of readdirSync(root, { withFileTypes: true })) {
-    if (!run.isDirectory()) continue;
-    for (const file of readdirSync(join(root, run.name))) {
+  for (const { runId, directory } of previewRunDirectories(dataDir)) {
+    for (const file of readdirSync(directory)) {
       if (!file.endsWith('.pid.json')) continue;
       const what = file === CHROMIUM_PID_FILE ? 'browser' : Number(file.slice(0, -'.pid.json'.length));
-      if (opts.keep?.(run.name, what)) continue;
-      const path = join(root, run.name, file);
+      if (opts.keep?.(runId, what)) continue;
+      const path = join(directory, file);
       let record: unknown;
       try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { /* unreadable: nothing to kill */ }
       rmSync(path, { force: true });

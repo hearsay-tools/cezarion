@@ -307,7 +307,8 @@ function leftoversStep(journal: ProjectMigrationJournal): void {
     replaceAtomically(file, `${JSON.stringify({ version: 1, runs: [...keep].sort() }, null, 2)}\n`, 0o600);
   } else rmSync(file, { force: true });
   forgetLegacyRunIds(journal.destination);
-  settle(dirname(journal.destination), file, { data: keep.size > 0 });
+  // With nothing moved and no task kept, the new directory may not exist: nothing was written there.
+  if (pathPresent(journal.destination)) settle(dirname(journal.destination), file, { data: keep.size > 0 });
   if (realDirectory(journal.source)) {
     pruneEmptied(journal.source, [], keep, true);
     // Nothing left at all, not even an ownership claim: the old directory itself goes.

@@ -260,7 +260,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   nothing is left in it. `runDataDir(dataDir, id)` resolves a listed task's data directory to
   `.ai/cezar/`; every path helper of a run's own items (handoff, history, artifacts,
   attachments, worker results, scratch and control directories, preview profile, autosave
-  cleanup, `RunStore.sourceDataDir`) calls it, and `fallbackProjectWriteError` and
+  cleanup, history removal, `RunStore.sourceDataDir`, the reports index and the agent's granted
+  `runs/` directory) calls it, the boot preview sweep also scans the listed tasks' `preview/<id>`, and `fallbackProjectWriteError` and
   `isFallbackProjectPath` exempt such items, so the task and its cleanup (a worker's destroy
   retry) work at the stored paths. A later move carries a task's items once it is archived or
   deleted and drops it from the list; no task left removes the file.

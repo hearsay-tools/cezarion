@@ -147,6 +147,8 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(readFileSync(handoff, 'utf8')).toContain(`**Worktree:** ${project.taskPath}`);
       expect(existsSync(artifactDirectory(context.dataDir, TASK))).toBe(true);
       expect(artifactDirectory(context.dataDir, TASK)).toBe(join(realpathSync(project.dataDir), 'runs', `${TASK}-artifacts`));
+      // The reports index reads the kept task's artifacts in .ai/cezar/, and keeps its report.
+      expect(await context.store.reports.list({})).toMatchObject({ reports: [{ id: project.artifactId, runId: TASK }] });
       // Everything else moved, and is written in the new directory.
       expect(existsSync(join(project.newDir, 'workflows/local.yaml'))).toBe(true);
       expect(existsSync(join(project.newDir, 'runs', `${PARENT}-worker-results`))).toBe(true);

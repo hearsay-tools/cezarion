@@ -286,7 +286,8 @@ export function restoreHistory(dataDir: string, id: string): void {
 }
 
 export function removeHistory(dataDir: string, id: string): void {
-  const dir = join(dataDir, 'runs');
+  // A task the project move left in `.ai/cezar/` keeps its history there (`legacy-runs.ts`).
+  const dir = join(runDataDir(dataDir, id), 'runs');
   const prefix = `${id}.ndjson`;
   const facts = `${id}.facts.json`;
   try {

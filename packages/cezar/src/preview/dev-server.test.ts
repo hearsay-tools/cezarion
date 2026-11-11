@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { DevServer, probePort, sweepPreviewLeftovers, trimLog } from './dev-server.ts';
+import { forgetLegacyRunIds, LEGACY_RUNS_FILE } from '../legacy-runs.ts';
 import { fixtureProcessGuard } from './preview.testkit.ts';
 
 vi.mock('../delegation/process-liveness.ts', async importOriginal => {
@@ -327,6 +328,22 @@ describe('sweepPreviewLeftovers', () => {
     expect(await sweepPreviewLeftovers(root)).toBe(1);
     await exited(child);
     expect(existsSync(record)).toBe(false);
+  });
+
+  it('sweeps the records of a task the project move left in .ai/cezar/ too', async () => {
+    const kept = '20000000-0000-4000-8000-000000000002';
+    const moved = join(root, '.ai', 'squawk');
+    mkdirSync(moved, { recursive: true });
+    writeFileSync(join(moved, LEGACY_RUNS_FILE), JSON.stringify({ version: 1, runs: [kept] }));
+    forgetLegacyRunIds(moved);
+    try {
+      const child = strayFixture();
+      const pid = child.pid!;
+      const record = writeRecord(join(root, '.ai', 'cezar'), kept, 5174, { pid, pgid: pid, startToken: processStartToken(pid) });
+      expect(await sweepPreviewLeftovers(moved)).toBe(1);
+      await exited(child);
+      expect(existsSync(record)).toBe(false);
+    } finally { forgetLegacyRunIds(moved); }
   });
 
   it('never kills a group the live host still owns, and keeps its record (#781 review)', async () => {
