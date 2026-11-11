@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { buildChildEnv } from './agent-env.ts';
@@ -48,7 +49,7 @@ describe('Cursor product integration', () => {
   it('reports Cursor in dry-run without an installed executable', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_CURSOR_BIN', '/missing/cursor-agent');
-    expect((await detectEnvironment()).find((row) => row.name === 'cursor')).toMatchObject({ available: true, version: 'mock (CEZ_DRY_RUN=1)' });
+    expect((await detectEnvironment()).find((row) => row.name === 'cursor')).toMatchObject({ available: true, version: `mock (${productIdentity().envPrefix}DRY_RUN=1)` });
   });
   it('degrades gracefully when Cursor is absent', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '0');
