@@ -1,6 +1,7 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import '../core/every-runner.testkit.ts';
 import { fixture } from './service.testkit.ts';
 import { provisionDelegationSession, DelegationController } from './provision.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
