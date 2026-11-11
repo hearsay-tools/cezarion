@@ -819,7 +819,9 @@ jobs:
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == ''))
 
       - name: Upload Squeal parts
-        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == '')) && steps.squeal.outcome == 'success'
+        # A status function: without one GitHub adds success(), and a shard whose tests failed
+        # would lose its parts and recording cost, which the gate trial reads.
+        if: "!cancelled() && (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == '')) && steps.squeal.outcome == 'success'"
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -91,6 +91,9 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
   assert.equal(upload.with.path, '${{ runner.temp }}/squeal-parts/');
   assert.equal(upload.with['retention-days'], 3);
   assert.match(upload.if, /steps\.squeal\.outcome == 'success'/);
+  // A shard whose tests failed still uploads its parts: the condition carries its own status
+  // function, so GitHub adds no success() (cezarion#3264 review).
+  assert.match(String(upload.if), /^!cancelled\(\) && /);
 });
 
 test('the merge-group step returns the test command\'s exit code and output, recorded or not', () => {
