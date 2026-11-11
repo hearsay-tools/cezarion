@@ -7,7 +7,8 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { openTestRunStore } from '../runs/run-store-open.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { defaultWorkspaceConfig } from '../workspace/config.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';

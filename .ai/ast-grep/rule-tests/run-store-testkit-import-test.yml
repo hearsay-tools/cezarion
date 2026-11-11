@@ -2,9 +2,12 @@ id: run-store-testkit-import
 valid:
   - "import { RunStore } from './runs/store.ts'"
   - "import { move } from './run-exits.ts'"
+  - "import { open } from './run-store-opener.ts'"
 invalid:
   - "import { setRunStatus } from './run-store.testkit.ts'"
   - "import { setRunStatus as seed } from '../runs/run-store.testkit.js'"
   - "export { setRunStatus } from './run-store.testkit.ts'"
   - "const kit = await import('./run-store.testkit.ts')"
   - "const kit = require('./run-store.testkit.ts')"
+  - "import { openTestRunStore } from './run-store-open.testkit.ts'"
+  - "const kit = await import('../runs/run-store-open.testkit.js')"
