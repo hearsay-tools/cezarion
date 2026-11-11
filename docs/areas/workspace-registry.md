@@ -244,8 +244,10 @@ Home returned by `prepareOperatorHome`, as CLI boot does.
 | A step after the commit fails with `EROFS`, `EACCES` or `EPERM` | Target; one warning |
 | Switch off | Existing legacy behavior |
 
-Platforms without group migration support, including `macosx-ngrok`, keep the desktop boot
-migration. The shared capability check requires migrate, rollback, stop and start methods.
+The shared capability check requires migrate, rollback, stop and start methods. Both
+`ubuntu-vps` and `macosx-ngrok` (hearsay-tools/cezarion#3234) pass it, so a home that records
+either install migrates only through `hsq server-migrate`. A platform without these methods
+would keep the desktop boot migration. The macOS path is checked by unit tests with a fake `launchctl` only, not on a real Mac.
 
 An explicit `hsq migrate` or successful `hsq server-migrate` recopies the current
 legacy data and commits the target, which clears the boot skip. The failed marker

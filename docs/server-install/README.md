@@ -80,9 +80,8 @@ already gives them separate ports, nginx sites and logins.
 
 ## Upgrading an old installation
 
-On Ubuntu, use `hsq server-migrate --dry-run`, then `hsq server-migrate`, to move every
-instance that shares an old home as one group. A macOS + ngrok install moves its home
-at the first start of the new build and keeps its launchd agents. See the [migration guide](../migration.md#installed-servers)
+Use `hsq server-migrate --dry-run`, then `hsq server-migrate`, to move every
+instance that shares an old home as one group, on Ubuntu and on macOS + ngrok. See the [migration guide](../migration.md#installed-servers)
 for backups, health checks and rollback. Deploy and uninstall keep using the
 names recorded for installations that have not migrated.
 

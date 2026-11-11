@@ -30,10 +30,9 @@ What changes in the Squawk release:
   moves a project offline. Tracked files under `.ai/cezar/` (workflows, skills,
   `context.yaml`) are not moved: the move prints the `git mv` commands for you to
   commit. A new project starts in `.ai/squawk/`.
-- **Servers.** An Ubuntu install made with `server-install` does not migrate at
-  boot. It keeps the old home until you run `hsq server-migrate`. A macOS + ngrok
-  install migrates its home at first start, as the desktop app does, and keeps its
-  launchd agents.
+- **Servers.** An install made with `server-install` (Ubuntu or macOS + ngrok)
+  does not migrate at boot. It keeps the old home until you run
+  `hsq server-migrate`.
 - **Desktop and mobile.** The apps get new IDs. A bridge build of the old desktop
   app installs the new app and hands over its state. The mobile app is a new
   store listing.
@@ -49,14 +48,27 @@ names and the `CEZ_*` fallbacks go, except `CEZ_HOME`. Boot still logs any
 
 The switch PR merges first. Then the owner:
 
-1. publishes the stable release;
-2. publishes `@hearsay-tools/squawk` and `hsq`, then the exact-pinned forwarding
+1. before the stable release, runs `hsq server-migrate --dry-run` on a Mac that
+   has a `macosx-ngrok` server install and checks the plan (the macOS path is
+   checked by unit tests with a fake `launchctl` only, not on a real Mac);
+2. publishes the stable release;
+3. publishes `@hearsay-tools/squawk` and `hsq`, then the exact-pinned forwarding
    releases `@wjarka/cezarion` and `cezarion` of the same version
    ([publishing runbook](publishing.md#owner-runbook-for-the-npm-rename));
-3. renames the repository to `hearsay-tools/squawk`;
-4. publishes the desktop and mobile store listings for the new IDs;
-5. runs `hsq server-migrate` on each Ubuntu server install that `server-install`
-   recorded.
+4. renames the repository to `hearsay-tools/squawk`;
+5. publishes the desktop and mobile store listings for the new IDs;
+6. runs `hsq server-migrate` on each server install that `server-install`
+   recorded (Ubuntu and macOS + ngrok);
+7. after the first start of the new build on each host, checks that the new
+   home's marker is live. On Linux with the default home:
+
+   ```sh
+   node -e 'console.log(JSON.parse(require("fs").readFileSync(require("os").homedir()+"/.config/hearsay-squawk/install.json","utf8")).kind)'
+   ```
+
+   It must print `live`. On other platforms read `<config>/install.json`. The
+   old home's `install.json` is not repaired: after the migration the old home
+   is only the canary.
 
 ## Install and command names
 
@@ -200,8 +212,8 @@ removes both from child environments.
 
 ## Installed servers
 
-Use the server command for Ubuntu installs recorded by `server-install` (macOS +
-ngrok installs: see below). It coordinates
+Use the server command for installs recorded by `server-install`, on Ubuntu and
+on macOS + ngrok. It coordinates
 all instances that share a home. Do not replace it with separate local migrations.
 Run it on the server as its normal service user:
 
@@ -220,6 +232,7 @@ installer prints privileged commands and uses its normal sudo-or-paste flow.
 | `cezar[-<slug>].service` | `hearsay-squawk[-<slug>].service` |
 | nginx site `cezar[-<slug>]` | `hearsay-squawk[-<slug>]` |
 | `/etc/cezar/htpasswd[-<slug>]` | `/etc/hearsay-squawk/htpasswd[-<slug>]` |
+| `ai.cezar.cockpit`, `ai.cezar.ngrok` launchd labels | `tools.hearsay.squawk.cockpit`, `tools.hearsay.squawk.ngrok` |
 
 Owned nginx sites retain TLS listeners, certificates, redirects and operator
 edits; only the site name and password-file path change. The public URL must
@@ -233,12 +246,12 @@ back, and the target marker becomes `install.json.failed`. Boot keeps serving
 the legacy home and warns to retry `hsq server-migrate`. Fix the reported cause
 and repeat the command. After success, old units remain as `*.migrated`.
 
-`hsq server-migrate` supports the Ubuntu (systemd) installs. It refuses a macOS +
-ngrok install, which cannot stop and start its services as a group. That install
-migrates its home at first start through the desktop path above. Its launchd
-agents keep their old labels (`ai.cezar.cockpit`, `ai.cezar.ngrok`) and keep
-working; deploy and uninstall act on the recorded labels. New macOS installs use
-`tools.hearsay.squawk.cockpit` and `tools.hearsay.squawk.ngrok`.
+On macOS + ngrok the command stops the owned launchd agents with
+`launchctl bootout`, writes and bootstraps the `tools.hearsay.squawk.*` agents
+and keeps each old plist as a private `*.plist.migrated`. The health check waits
+for the cockpit on its loopback port, then for the ngrok tunnel (about 30 s). A
+failure restores the old plists and labels and rolls the home back. Foreign
+launchd agents stay untouched. The macOS path is checked by unit tests with a fake `launchctl` only, not on a real Mac.
 
 See the [Ubuntu guide](server-install/ubuntu-vps.md) and
 [macOS guide](server-install/macosx-ngrok.md) for platform details.

@@ -41,13 +41,18 @@ npx hsq server-install --platform macosx-ngrok
 | **Autostart** | Installs the cockpit and tunnel **launchd** agents (`~/Library/LaunchAgents/tools.hearsay.squawk.cockpit.plist` and `tools.hearsay.squawk.ngrok.plist`) with `RunAtLoad` + `KeepAlive`. |
 | **Verify** | Confirms the ngrok basic-auth gate is active. |
 
-Old installs keep `ai.cezar.cockpit` and `ai.cezar.ngrok`. Their home moves
-to the new layout at the first start of the new build, as a desktop install
-does. `hsq server-migrate` does not support this platform: it refuses, because
-it cannot stop and start the launchd agents as a group. See the
-[migration guide](../migration.md#installed-servers). Reconfigure refuses a
-foreign destination plist. Uninstall and deploy use the recorded label and
-path, including for pre-switch installs.
+Old installs keep `ai.cezar.cockpit` and `ai.cezar.ngrok` until migration.
+Until then the cockpit and every command keep the old home and print one
+notice to run `hsq server-migrate`. Run `hsq server-migrate --dry-run`, then
+`hsq server-migrate`; see the [migration guide](../migration.md#installed-servers).
+It stops the owned agents with `launchctl bootout`, moves the home, writes and
+bootstraps the `tools.hearsay.squawk.*` agents and keeps each old plist as a
+private `*.plist.migrated`. Its health check waits for the cockpit on its
+loopback port, then for the ngrok tunnel (about 30 s). On any failure it
+restores the old plists and labels and rolls the home back. Foreign plists
+stay untouched, and a foreign destination plist causes a refusal. Uninstall
+and deploy use the recorded label and path, including for pre-switch installs.
+The macOS path is checked by unit tests with a fake `launchctl` only, not on a real Mac.
 
 The **username + password** you set become the ngrok `--basic-auth`
 credentials — what you type in the browser to reach the cockpit over the public

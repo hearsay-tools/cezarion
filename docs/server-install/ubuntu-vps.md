@@ -286,7 +286,8 @@ marker and the rollback. See [migration and rollback](../migration.md#installed-
 Until `server-migrate` succeeds, the server and every other command keep using
 the old home `~/.cezar` (or `CEZ_HOME`) and print one notice to run
 `hsq server-migrate`. They never migrate a home that records a server install with group migration support.
-Desktop platforms without that support, including macOS, keep their boot migration.
+Both Ubuntu and macOS + ngrok installs have that support; a desktop install keeps its boot
+migration.
 
 ---
 
