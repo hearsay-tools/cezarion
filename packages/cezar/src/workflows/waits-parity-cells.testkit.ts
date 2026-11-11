@@ -1,8 +1,7 @@
-import { pr, github, processes, nativeWire, waitOfKind, delivered, agentWaits, settled, listed, inputsFor, runnerBoundary, sessionOf, idleClock, retryClock, observeAdmissionRetries, retryAtOnce, fireTimer, flushMicrotasks, asks, turnEnds, viaOf, parkedOn, prompted, answered, pendingQuestion, questions, ASK_CONTEXT, humanOpen, gated, answerOf, workerWaits, workerWake, conversationOf, parkNotices, parentOn, parentWithWorker, workerParent, blockedDone, parentTurn, blockingWorker, liveRefusal, uncollectedRefusal, repliesDoneAgain, replyBlockedAgain, ignoreRefusal, nudgeNotes, noReplyNotes, silenceRefusals, conversingParent, messenger, expectPoolCapacity, timerText, expectAdmissionRetryCleared, describeWaitCells, waitPartDescribers, waitFoldDescriber } from './waits-parity-fixture.testkit.ts';
+import { processes, nativeWire, waitOfKind, delivered, agentWaits, settled, listed, inputsFor, runnerBoundary, sessionOf, idleClock, retryClock, retryAtOnce, fireTimer, flushMicrotasks, asks, turnEnds, viaOf, parkedOn, prompted, answered, pendingQuestion, questions, ASK_CONTEXT, humanOpen, gated, answerOf, workerWaits, workerWake, parkNotices, parentOn, parentWithWorker, workerParent, blockedDone, blockingWorker, liveRefusal, uncollectedRefusal, repliesDoneAgain, replyBlockedAgain, ignoreRefusal, nudgeNotes, noReplyNotes, silenceRefusals, messenger, expectPoolCapacity, timerText, describeWaitCells, waitPartDescribers, waitFoldDescriber } from './waits-parity-fixture.testkit.ts';
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { spawn } from 'node:child_process';
-import { WAKE_RETRY_BACKOFF } from '../delegation/retry-backoff.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,28 +9,29 @@ import { expect, it as registerTest, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import type { AgentInput, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, RunRecord, Wait } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { familyCells } from '../core/parity-classes.testkit.ts';
-import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, toolGenerationOf, until, waitOf, worker } from './worker-wait-core.testkit.ts';
-import { timed, type TimedWait } from './waits.testkit.ts';
+import { timed } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { handoffPath } from '../handoff.ts';
 import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { NO_WAIT_NUDGE } from './turn-end.ts';
-import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
-import { ciNativeMessages, ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
+import { ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OPENING, thenSay, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 import { registrationCells } from './waits-parity-registration-cells.testkit.ts';
 import { inputCells } from './waits-parity-input-cells.testkit.ts';
 import { deliveryCells } from './waits-parity-delivery-cells.testkit.ts';
 import { asksCells } from './waits-parity-asks-cells.testkit.ts';
 import { doneCells } from './waits-parity-done-cells.testkit.ts';
+import { mixedCells } from './waits-parity-mixed-cells.testkit.ts';
+import { recoveryCells } from './waits-parity-recovery-cells.testkit.ts';
 import { conversationsCells } from './waits-parity-conversations-cells.testkit.ts';
+import { completionRepliesCells } from './waits-parity-completion-replies-cells.testkit.ts';
 import { type WaitParityPart, type WaitCells, type WaitFold, foldCells, splitPart, folded, WAIT_PARITY_FILES, WAIT_PARITY_FAMILIES, ROW_FAMILIES, type FamilyPart, familyTest, WAIT_FOLDS, foldedWaitFile, FOLDED_WAIT_RUNNERS, type WaitParityFamily, type WaitPartScope, type WaitFoldScope } from './waits-parity-catalog.testkit.ts';
 
 // The registry of the wait parity cells. `waits-parity.test.ts` imports it: it guards the catalog and
@@ -429,344 +429,6 @@ function answersCells(runners: RunnerId[], it: typeof registerTest = registerTes
   }
 }
 
-function mixedCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
-  for (const runner of runners) {
-    it(`${runner} U2w ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered`, async () => {
-      const external = github();
-      const { p, w } = await parentWithWorker(runner);
-      const opened = `${toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr })} ${toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 })}`;
-      await parentTurn(p.id, opened, () => waitOfKind(p.id, 'pr')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
-      const ci = waitOfKind(p.id, 'pr')!, workers = workerWaits(p.id)[0]!;
-      expect(workers).toMatchObject({ via: WAIT_VIA.cezar_wait, source: WAIT_SOURCE.agent, workerIds: [w.id] });
-      const turns = turnEnds(p.id);
-      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
-      const wake = prompted(runner, workerWake(workers)).at(-1)!;
-      expect(wake).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
-      expect(wake).not.toContain(`worker wait ${workers.id}`);
-      expect(external.aborted()).toBe(false);
-      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, waitOfKind(p.id, 'pr')));
-      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: ci.id, phase: WAIT_PHASE.open })]);
-      external.settle();
-      await until(() => settled(p.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
-      expect(prompted(runner, `CI wait observation ${ci.id}`).at(-1)).not.toContain('Still open');
-      expect(inputsFor(p.id, workers.id)).toHaveLength(1);
-      await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
-    });
-
-    it(`${runner} U2t timer and worker open: the timer resolving wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered`, async () => {
-      const { p, w } = await parentWithWorker(runner);
-      const opened = `${toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 })} ${toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u2t' })}`;
-      await parentTurn(p.id, opened, () => waitOfKind(p.id, 'timer')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
-      const timer = waitOfKind(p.id, 'timer')!, workers = workerWaits(p.id)[0]!;
-      const turns = turnEnds(p.id);
-      fireTimer(timer.id);
-      await until(() => settled(p.id, timer.id)?.phase === 'delivered' && prompted(runner, timerText(timer, 'u2t')).length > 0);
-      expect(prompted(runner, timerText(timer, 'u2t')).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
-      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, workerWaits(p.id)[0]));
-      // The turn end re-parks on the same entry: nothing re-registered it, nothing delivered it.
-      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: WAIT_PHASE.open, deadline: workers.deadline })]);
-      expect(inputsFor(p.id, workers.id)).toEqual([]);
-      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
-      expect(prompted(runner, workerWake(workers)).at(-1)).not.toContain('Still open');
-      await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
-    });
-
-    it(`${runner} U2c ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered`, async () => {
-      const external = github();
-      const { p, w } = await parentWithWorker(runner);
-      const opened = `${toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 })} ${toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr })}`;
-      await parentTurn(p.id, opened, () => waitOfKind(p.id, 'pr')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
-      const ci = waitOfKind(p.id, 'pr')!, workers = workerWaits(p.id)[0]!;
-      const turns = turnEnds(p.id);
-      external.settle();
-      await until(() => settled(p.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
-      expect(prompted(runner, `CI wait observation ${ci.id}`).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
-      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, workerWaits(p.id)[0]));
-      // The turn end re-parks on the same entry: nothing re-registered it, nothing delivered it.
-      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: WAIT_PHASE.open, deadline: workers.deadline })]);
-      expect(inputsFor(p.id, workers.id)).toEqual([]);
-      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
-      expect(prompted(runner, workerWake(workers)).at(-1)).not.toContain('Still open');
-      expect(inputsFor(p.id, ci.id)).toHaveLength(1);
-      await until(() => store.getRun(p.id)?.status === 'waiting' && !agentWaits(p.id).length);
-    });
-
-    // Ticket criterion 2: messages are not waits.
-    it(`${runner} U3w a worker message during a worker wait wakes the parent and the worker wait stays open`, async () => {
-      const f = await conversingParent(runner);
-      await parentTurn(f.p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [f.w.id], timeout_seconds: 600 }), () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
-      const workers = workerWaits(f.p.id)[0]!;
-      const turns = turnEnds(f.p.id);
-      const id = await f.progress('Worker progress u3w');
-      await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u3w').length > 0);
-      expect(prompted(runner, 'Worker progress u3w').at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
-      await until(() => turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
-      expect(workerWaits(f.p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: WAIT_PHASE.open, deadline: workers.deadline })]);
-      expect(inputsFor(f.p.id, workers.id)).toEqual([]);
-      // The wait still ends on its own event, once.
-      expect(manager.finish(f.w.id)).toBe(true);
-      await until(() => settled(f.p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
-      expect(settled(f.p.id, workers.id)).toMatchObject({ result: { reason: 'outcome' } });
-      expect(inputsFor(f.p.id, workers.id)).toHaveLength(1);
-      await until(() => store.getRun(f.p.id)?.status === 'waiting');
-    });
-
-    // hearsay-tools/cezarion#1327: the worker runs on this runner's wire too, since its turn end parks.
-    it(`${runner} U3n a worker that parks on a timer while its parent waits on it wakes the parent with one notice naming its timer, the wait stays open, a second park sends none, and settlement resolves the wait`, async () => {
-      const p = await parentOn(runner);
-      const parkOnTimer = (text: string) => `${toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'u3n' })} ${thenSay(text)}`;
-      const timerOf = () => store.getRun(w.id)?.waits?.filter((wait): wait is TimedWait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open) ?? [];
-      const w = await worker(p.id, parkOnTimer('Squeal is still pending u3n.'), runner);
-      await parentTurn(p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
-      const workers = workerWaits(p.id)[0]!;
-      // A worker that has not parked yet sends nothing when the wait opens.
-      expect(parkNotices(p.id, w.id)).toEqual([]);
-      manager.enqueueOwnedRun(w.id);
-      await until(() => parkedOn(w.id, timerOf()[0]) && parkNotices(p.id, w.id).length > 0, () => timeline(w.id));
-      const [timer] = timerOf();
-      const [notice, ...more] = parkNotices(p.id, w.id);
-      expect(more).toEqual([]);
-      expect(notice).toMatchObject({ id: parkNoticeId(w.id, workers.id), kind: 'progress', senderRunId: w.id, recipientRunId: p.id, state: 'accepted' });
-      expect(notice!.text).toContain(`It waits on: timer ${timer!.id} at ${timer!.deadline}`);
-      expect(notice!.text).toContain('Squeal is still pending u3n.');
-      // The notice reaches the parent on its own wire, and the parent's wait stays open.
-      await until(() => delivered(p.id, notice!.id) && prompted(runner, `Cezar notice: your worker ${w.id}`).length > 0);
-      expect(prompted(runner, `Cezar notice: your worker ${w.id}`).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
-      await until(() => parkedOn(p.id, workerWaits(p.id)[0]));
-      expect(workerWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: WAIT_PHASE.open, deadline: workers.deadline })]);
-      expect(inputsFor(p.id, workers.id)).toEqual([]);
-      // A second park during the same wait sends no second notice.
-      const turns = turnEnds(w.id);
-      expect(manager.sendMessage(w.id, [{ type: 'text', text: parkOnTimer('Still pending u3n.') }])).toBe(true);
-      await until(() => turnEnds(w.id) > turns && timerOf().length === 2 && parkedOn(w.id, timerOf()[1]), () => timeline(w.id));
-      expect(parkNotices(p.id, w.id)).toHaveLength(1);
-      // The wait still ends on the worker's outcome, once.
-      expect(manager.finish(w.id)).toBe(true);
-      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
-      expect(settled(p.id, workers.id)).toMatchObject({ result: { reason: 'outcome' } });
-      expect(parkNotices(p.id, w.id)).toHaveLength(1);
-    });
-
-    it(`${runner} U3r a worker parked before its parent waits on it sends its notice when the wait opens`, async () => {
-      const p = await parentOn(runner);
-      const w = await worker(p.id, messagesPrompt(runner, ['Waiting for input u3r.']), runner);
-      // A spent budget plain-parks the opening turn end instead of asking the parent.
-      spendWorkerBudget(w.id);
-      manager.enqueueOwnedRun(w.id);
-      await until(() => store.getRun(w.id)?.status === 'waiting' && turnEnds(w.id) > 0, () => timeline(w.id));
-      // No wait is open on the worker yet, so its park sends nothing.
-      expect(parkNotices(p.id, w.id)).toEqual([]);
-      await parentTurn(p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }), () => workerWaits(p.id)[0]?.phase === 'open');
-      const workers = workerWaits(p.id)[0]!;
-      // The wait opens inside the parent's turn, so the notice reaches that open turn: Codex
-      // takes it as a steer, every other wire as a prompt.
-      const [notice, ...more] = parkNotices(p.id, w.id);
-      const reached = (text: string) => [...ciNativeMessages(runner, root), ...ciNativeSteers(runner, root)].some(input => input.includes(text));
-      await until(() => !!notice && delivered(p.id, notice.id) && reached(`Cezar notice: your worker ${w.id}`) && parkedOn(p.id, workerWaits(p.id)[0]), () => timeline(p.id));
-      expect(more).toEqual([]);
-      expect(notice).toMatchObject({ id: parkNoticeId(w.id, workers.id), senderRunId: w.id, recipientRunId: p.id });
-      expect(notice!.text).toContain('It has no open wait: it waits for a message from you.');
-      expect(notice!.text).toContain('Its last message:\nWaiting for input u3r.');
-      expect(workerWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: WAIT_PHASE.open, deadline: workers.deadline })]);
-      expect(inputsFor(p.id, workers.id)).toEqual([]);
-    });
-
-    it(`${runner} U3d a worker that finishes while its parent waits on it sends no notice`, async () => {
-      const p = await parentOn(runner);
-      const w = await worker(p.id, `${toolCall('cezar_done', {})} ${thenSay('Finished u3d.')}`, runner);
-      await parentTurn(p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
-      const workers = workerWaits(p.id)[0]!;
-      manager.enqueueOwnedRun(w.id);
-      await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0, () => timeline(w.id));
-      expect(terminal).toContain(store.getRun(w.id)?.status);
-      expect(store.readEvents(w.id).some(event => event.type === 'turn-end')).toBe(true);
-      expect(conversationOf(p.id).filter(message => message.senderRunId === w.id)).toEqual([]);
-      expect(prompted(runner, 'Cezar notice:')).toEqual([]);
-    });
-
-    it(`${runner} U7w cez worker wait and cezar_wait kind worker land in the same wait list`, async () => {
-      const { p, w } = await parentWithWorker(runner);
-      const other = await worker(p.id);
-      const alias = manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 });
-      await parentTurn(p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [other.id], timeout_seconds: 600 }), () => workerWaits(p.id).length === 2);
-      expect(workerWaits(p.id).map(wait => [wait.via, wait.workerIds]).sort()).toEqual([['cez-worker-wait', [w.id]], ['cezar_wait', [other.id]]]);
-      expect(workerWaits(p.id).find(wait => wait.via === 'cez-worker-wait')).toMatchObject({ id: alias.id, phase: WAIT_PHASE.open, source: WAIT_SOURCE.agent, deadline: alias.deadline });
-      // One engine resolves both, each on its own worker.
-      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => settled(p.id, alias.id)?.phase === 'delivered' && prompted(runner, `Worker wait ${alias.id}`).length > 0);
-      expect(workerWaits(p.id)).toEqual([expect.objectContaining({ via: WAIT_VIA.cezar_wait, phase: WAIT_PHASE.open })]);
-      const tool = workerWaits(p.id)[0]!;
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-      fixtureUpdateRun(other.id, { status: RUN_STATUS.done });
-      await until(() => settled(p.id, tool.id)?.phase === 'delivered' && prompted(runner, workerWake(tool)).length > 0);
-      expect(store.getRun(p.id)?.lastWaits?.filter(wait => wait.kind === 'worker').map(wait => wait.via).sort()).toEqual(['cez-worker-wait', 'cezar_wait']);
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-    });
-
-  }
-}
-
-function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
-  for (const runner of runners) {
-    it(`${runner} U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
-      const wire = gatedProviderFailure(root, runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
-      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-      await until(wire.held);
-      const w = await worker(run.id);
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
-      const registered = await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
-      expect(registered.answer).toMatchObject({ ok: true, kind: WAIT_KIND.worker });
-      if (!('wait' in registered)) throw Error('registration refused');
-      const wait = registered.wait;
-      wire.release();
-      await until(() => store.readEvents(run.id).some(event => event.type === 'error'));
-      await until(() => !manager.isActive(run.id));
-      expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
-      expect(store.getRun(run.id)?.status).not.toBe('failed');
-      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => settled(run.id, wait.id)?.phase === 'delivered');
-      expect(inputsFor(run.id, wait.id)).toHaveLength(1);
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-    });
-
-    it(`${runner} U9w clean close with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
-      const { p, w } = await parentWithWorker(runner);
-      const tools = manager.cezarToolHandlers(p.id, toolGenerationOf(p.id));
-      const registered = await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
-      if (!('wait' in registered)) throw Error('registration refused');
-      const wait = registered.wait;
-      sessionOf(p.id).end();
-      await until(() => !manager.isActive(p.id));
-      // A clean close is not a failure: the park and its wait survive it (it was an error before 3a).
-      expect(store.getRun(p.id)?.status).toBe('waiting');
-      expect(store.getRun(p.id)?.error).toBeUndefined();
-      expect(store.getRun(p.id)?.steps.at(-1)?.error).toBeUndefined();
-      expect(store.getRun(p.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
-      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
-      await until(() => settled(p.id, wait.id)?.phase === 'delivered' && prompted(runner, workerWake(wait)).length > 0);
-      expect(inputsFor(p.id, wait.id)).toHaveLength(1);
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-    });
-
-    /** A parent parked on a worker wait whose session has closed, so a worker message wakes it
-     *  through a scheduler continuation whose opening prompt the provider fails until lifted. */
-    async function messageWakeWithoutSession() {
-      const f = await conversingParent(runner);
-      const failure = persistentWakeFailure(root, runner, { opening: MESSAGE_WAKE_OPENING, unread: true });
-      await parentTurn(f.p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [f.w.id], timeout_seconds: 600 }), () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
-      sessionOf(f.p.id).end();
-      await until(() => !manager.isActive(f.p.id));
-      return { ...f, failure };
-    }
-
-    it(`${runner} U14m a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound, the run fails keeping the message, and Continue delivers it once`, async () => {
-      observeAdmissionRetries();
-      retryAtOnce();
-      const f = await messageWakeWithoutSession();
-      const id = await f.progress('Worker progress u14m');
-      // Without the bound the attempts never stop: one attempt past it is enough to fail on.
-      await until(() => {
-        return (store.getRun(f.p.id)?.status === 'failed' && !manager.isActive(f.p.id)) ||
-          prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS;
-      });
-      expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
-      const run = store.getRun(f.p.id)!;
-      expect(run.status).toBe('failed');
-      expect(run.error).toMatch(/^continue failed: /);
-      expect(delivered(f.p.id, id)).toBe(false);
-      expect(store.readEvents(f.p.id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
-      expect(retryClock.pending).toBe(0);
-      await expectAdmissionRetryCleared(runner, f.p.id);
-
-      // A steering wire took the message into each failed opening turn; none of them read it.
-      const attempts = prompted(runner, 'Worker progress u14m').length;
-      f.failure.lift();
-      expect(manager.continueRun(f.p.id, { text: 'go on' })).toEqual({ ok: true });
-      await until(() => delivered(f.p.id, id) && prompted(runner, 'Worker progress u14m').length > attempts);
-      expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === id)).toHaveLength(1);
-      await until(() => store.getRun(f.p.id)?.status === 'waiting');
-    });
-
-    it(`${runner} U14m a message-only wake that fails once counts the failure, and the delivered message clears it`, async () => {
-      // The retry waits on its backoff, which the test fires once the provider is lifted.
-      // Hold the product backoff until the provider is repaired.
-      const f = await messageWakeWithoutSession();
-      const id = await f.progress('Worker progress u14m once');
-      await until(() => store.getRun(f.p.id)?.waitDeliveryFailures === 1 && retryClock.pending > 0 && !manager.isActive(f.p.id));
-      expect(store.getRun(f.p.id)?.status).toBe('waiting');
-      f.failure.lift();
-      const commits = recordCommits(join(root, '.ai/cezar'));
-      await retryClock.advance(WAKE_RETRY_BACKOFF.fastMs);
-      await until(() => delivered(f.p.id, id) && store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.awaitingRead !== true);
-      expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
-      // hearsay-tools/cezarion#1805: the receipt or the read that ends the failures clears them in its commit.
-      commits.expectEveryCommit(f.p.id, row => { const message = row.agentInputs?.find(input => input.id === id); return !message?.deliveredAt || !!message.awaitingRead || row.waitDeliveryFailures === undefined; },
-        'a received message and its cleared failure count');
-      await until(() => store.getRun(f.p.id)?.status === 'waiting');
-      expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
-    });
-
-    /** A parent on `runner`'s wire parked on a worker wait, written back to disk as an older build
-     *  left it (the wait in `delegation.wait`, the list empty, `inputs` its only agent inputs), and
-     *  restarted: upgrade-on-read and recovery decide what wakes it. */
-    async function restartLegacyParked(legacy: (wait: WorkerWaitEntry) => Record<string, unknown>, inputs: (parentId: string, workerId: string, wait: WorkerWaitEntry) => unknown[], completion = false) {
-      const { p, w } = await parentWithWorker(runner);
-      await parentTurn(p.id, toolCall('cezar_wait', { kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
-      const wait = workerWaits(p.id)[0]!;
-      store.flush();
-      const disk = readPersistedRuns(join(root, '.ai/cezar')).map(row => {
-        if (row.id !== p.id) return row;
-        const { waits: _waits, ...rest } = row;
-        return { ...rest, delegation: { ...row.delegation, wait: legacy(wait), ...(completion ? { completion: { phase: 'waiting', waitId: wait.id } } : {}) }, agentInputs: inputs(p.id, w.id, wait) };
-      });
-      await restart(false, disk);
-      return { p, wait };
-    }
-    const legacyOf = (wait: WorkerWaitEntry) => ({ id: wait.id, workerIds: wait.workerIds, revisions: wait.revisions, deadline: wait.deadline, outcomes: [] });
-
-    it(`${runner} U9u after an upgrade, a cancelled worker wait's queued wake is delivered as ordinary input and the wait stays cancelled`, async () => {
-      const text = 'Worker wait cancelled, u9u marker';
-      const { p, wait } = await restartLegacyParked(wait => ({ ...legacyOf(wait), phase: 'wake-pending', reason: 'cancelled', wakeId: wait.id }),
-        (parentId, _workerId, wait) => [{ id: wait.id, parentRunId: parentId, source: 'lifecycle', text, createdAt: new Date().toISOString() }]);
-      await until(() => delivered(p.id, wait.id) && prompted(runner, text).length > 0);
-      expect(settled(p.id, wait.id)).toMatchObject({ kind: WAIT_KIND.worker, phase: WAIT_PHASE.cancelled });
-      expect(workerWaits(p.id)).toEqual([]);
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-    });
-
-    it(`${runner} U9u after an upgrade, a parent whose message stand-in a provider took before the crash resumes`, async () => {
-      const messageId = randomUUID(), now = new Date().toISOString();
-      const { p } = await restartLegacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
-        (parentId, workerId) => [{ id: messageId, parentRunId: parentId, source: agentInputSchema.shape.source.enum.agent, text: 'Worker progress u9u', createdAt: now, deliveredAt: now,
-          conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'progress' } }]);
-      await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
-      expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
-      expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === messageId)).toEqual([expect.objectContaining({ deliveredAt: now })]);
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-    });
-
-    it(`${runner} U9v an upgraded completion wait wakes once through the list`, async () => {
-      // The queued wake is the list engine's to deliver, in its own words for the entry.
-      let text = '';
-      const { p, wait } = await restartLegacyParked(wait => ({ ...legacyOf(wait), mode: 'all', phase: 'wake-pending', reason: 'outcome', wakeId: wait.id }),
-        (parentId, _workerId, wait) => [{ id: wait.id, parentRunId: parentId, source: 'lifecycle', text: (text = workerWake(wait)), createdAt: new Date().toISOString() }], true);
-      await until(() => delivered(p.id, wait.id) && prompted(runner, text).length > 0);
-      expect(settled(p.id, wait.id)).toMatchObject({ kind: WAIT_KIND.worker, source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, phase: WAIT_PHASE.delivered });
-      expect(workerWaits(p.id)).toEqual([]);
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
-      expect(inputsFor(p.id, wait.id)).toHaveLength(1);
-      expect(prompted(runner, text)).toHaveLength(1);
-      await until(() => store.getRun(p.id)?.status === 'waiting');
-    });
-
-  }
-}
-
 function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
     for (const settledWorker of [false, true]) {
@@ -1065,113 +727,6 @@ function completionCells(runners: RunnerId[], it: typeof registerTest = register
       await waitAt('completion-wake-repark', () => store.getRun(f.p.id)?.status === 'waiting');
     });
 
-  }
-}
-
-function completionRepliesCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
-  for (const runner of runners) {
-    it(`${runner} U21h an ignored refusal with only uncollected results parks on Cezar's human wait`, async () => {
-      const reply = repliesDoneAgain();
-      const p = await workerParent(runner);
-      const { second: w } = await ignoreRefusal(runner, p.id, reply, () => gated(p.id), { uncollected: true });
-      const refusal = `${uncollectedRefusal(w)}, then call cezar_done again.`;
-      expect(humanOpen(p.id)).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, phase: WAIT_PHASE.open })]);
-      expect(workerWaits(p.id)).toEqual([]);
-      const shown = store.readEvents(p.id).find(event => event.seq === humanOpen(p.id)[0]!.askSeq);
-      expect(shown).toMatchObject({ type: 'note', message: refusal });
-      expect(asks(p.id)).toEqual([]);
-      expect(deriveAttention(store.getRun(p.id)!).label).toBe('needs you');
-      expect(semaphore.busy()).toBe(0);
-    });
-
-    it(`${runner} U21a an autonomous parent's ignored refusal is nudged again until the budget`, async () => {
-      const reply = repliesDoneAgain();
-      nativeWire(runner);
-      process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['autonomous-cap']!, autonomous: true });
-      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-      // The opening turn spends what is left and parks on the budget; the workers come after it.
-      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-      await until(() => gated(run.id));
-      const atNudges: Wait[][] = [];
-      const append = store.appendEvent.bind(store);
-      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
-        if (id === run.id && event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) atNudges.push(store.getRun(run.id)?.waits ?? []);
-        return append(id, event);
-      });
-      // The human message restarted the budget; two units are left for the nudges.
-      const w = await blockedDone(run.id, async () => {
-        store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 2 });
-        return blockingWorker(run.id);
-      });
-      await until(() => prompted(runner, liveRefusal(w)).length > 0, () => timeline(run.id));
-      // The first reply's done is blocked again: the second nudge. The second reply's done, which the
-      // tool refuses while that worker is live, ends a turn at the spent budget.
-      const next = await replyBlockedAgain(run.id, reply, w, () => blockingWorker(run.id));
-      await until(() => humanOpen(run.id)[0]?.via === 'budget' && gated(run.id));
-      expect(prompted(runner, liveRefusal(w))).toHaveLength(1);
-      expect(prompted(runner, liveRefusal(next))).toHaveLength(1);
-      expect(atNudges).toEqual([[], []]);
-      expect(humanOpen(run.id)).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA.budget, phase: WAIT_PHASE.open })]);
-      expect(workerWaits(run.id)).toEqual([]);
-      expect(store.getRun(run.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-    });
-
-    // hearsay-tools/cezarion#1301: a blocked done found after the session closed is queued as a
-    // lifecycle wake; the scheduler continuation reopens the session and delivers it as the nudge.
-    it(`${runner} U22 a done blocked after the session closed reopens it and delivers the refusal`, async () => {
-      // The reply turn ends on done again: the refusal's turn is the nudge's, so it takes the second step.
-      const reply = repliesDoneAgain();
-      const { p, w } = await parentWithWorker(runner);
-      const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
-      const commits = recordCommits(join(root, '.ai/cezar'));
-      sessionOf(p.id).end();
-      const refusal = liveRefusal(w);
-      await until(() => prompted(runner, refusal).length > 0, () => timeline(p.id));
-      const next = await replyBlockedAgain(p.id, reply, w, () => blockingWorker(p.id));
-      await until(() => workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
-      // hearsay-tools/cezarion#1805: the refusal is queued with its charge, so no reopened store
-      // delivers it uncharged.
-      commits.expectEveryCommit(p.id, row => !row.agentInputs?.some(input => input.text.includes(refusal)) || row.automaticWakes === wakes + 1, 'a queued refusal and its charge');
-      expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
-      expect(prompted(runner, refusal)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
-      const inputs = store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
-      expect(inputs).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
-      expect(store.getRun(p.id)?.automaticWakes).toBe(wakes + 1);
-      expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)))
-        .toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES}): workers_outstanding` })]);
-      expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, workerIds: [next.id] })]);
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-    });
-
-    // hearsay-tools/cezarion#1301: a reopened session that acknowledges the refusal and never answers
-    // it is bounded as the live nudge is: at the reply bound the run parks on Cezar's human wait and
-    // gives up its slot, whether or not its harness reports the input read.
-    it(`${runner} U22s a refusal reopened into a session that acknowledges it and never answers parks on Cezar's human wait at the nudge's reply bound`, async () => {
-      if (exemptionFor('U22s', runner)) {
-        expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
-        return;
-      }
-      const silence = silenceRefusals();
-      const { p, w } = await parentWithWorker(runner);
-      const refusal = `Workers are still live: ${w.id}.`;
-      sessionOf(p.id).end();
-      await silence(runner, refusal);
-      await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
-      expect(prompted(runner, refusal)).toHaveLength(1);
-      expect(store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)))
-        .toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String) })]);
-      expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] })]);
-      expect(nudgeNotes(p.id)).toHaveLength(1);
-      expect(workerWaits(p.id)).toEqual([]);
-      expect(semaphore.busy()).toBe(0);
-    });
-
-    // hearsay-tools/cezarion#1301: a queued refusal is owed input, and a reopened session that closes
-    // before Cezar submits it is a failed delivery, as U14's: one copy, the delivery bound, and the
-    // run fails keeping it. A legacy accepted Finish takes the same path.
   }
 }
 
