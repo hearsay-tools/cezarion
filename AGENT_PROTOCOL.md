@@ -2558,8 +2558,8 @@ mapper. §6 reads the same expected files.
 Each run has one append-only NDJSON event file that holds v1 and v2 events together
 (`docs/areas/runs-store.md`). Never rewrite, reorder or renumber it. The per-run SSE route
 replays it, then streams live, under the event names `run-event` (v1) and `ui-event` (v2).
-The multiplex route has its own envelope: `packages/cezar/src/server/live-routes.ts` and
-`docs/areas/realtime-events.md` hold it. A Cezar-owned event such as
+The multiplex route has its own envelope: `packages/cezar/src/server/live-routes.ts` holds
+it. A Cezar-owned event such as
 `provider-auth-required` never carries vendor error text or credentials.
 
 ---
