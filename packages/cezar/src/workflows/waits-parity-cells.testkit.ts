@@ -1,4 +1,4 @@
-import { pr, github, processes, nativeWire, waitOfKind, delivered, agentWaits, settled, listed, inputsFor, toolResources, runnerBoundary, sessionOf, idleClock, retryClock, observeAdmissionRetries, retryAtOnce, stepStatus, fireTimer, flushMicrotasks, asks, turnEnds, viaOf, parkedOn, prompted, answered, pendingQuestion, questions, ASK_CONTEXT, askPrompt, humanOpen, gated, answerOf, workerWaits, workerWake, conversationOf, parkNotices, parentOn, parentWithWorker, workerParent, blockedDone, parentTurn, blockingWorker, liveRefusal, uncollectedRefusal, repliesDoneAgain, replyBlockedAgain, ignoreRefusal, nudgeNotes, noReplyNotes, silenceRefusals, conversingParent, messenger, expectPoolCapacity, timerText, expectAdmissionRetryCleared, timerWaits, describeWaitCells } from './waits-parity-fixture.testkit.ts';
+import { pr, github, processes, nativeWire, waitOfKind, delivered, agentWaits, settled, listed, inputsFor, runnerBoundary, sessionOf, idleClock, retryClock, observeAdmissionRetries, retryAtOnce, stepStatus, fireTimer, flushMicrotasks, asks, turnEnds, viaOf, parkedOn, prompted, answered, pendingQuestion, questions, ASK_CONTEXT, askPrompt, humanOpen, gated, answerOf, workerWaits, workerWake, conversationOf, parkNotices, parentOn, parentWithWorker, workerParent, blockedDone, parentTurn, blockingWorker, liveRefusal, uncollectedRefusal, repliesDoneAgain, replyBlockedAgain, ignoreRefusal, nudgeNotes, noReplyNotes, silenceRefusals, conversingParent, messenger, expectPoolCapacity, timerText, expectAdmissionRetryCleared, timerWaits, describeWaitCells, waitPartDescribers, waitFoldDescriber } from './waits-parity-fixture.testkit.ts';
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { spawn } from 'node:child_process';
@@ -13,8 +13,7 @@ import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
-import { familyCells, SHARED_RUNNERS } from '../core/parity-classes.testkit.ts';
-import { CiToolController, ToolsUnavailableError } from '../ci-wait/controller.ts';
+import { familyCells } from '../core/parity-classes.testkit.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, toolGenerationOf, until, waitOf, worker } from './worker-wait-core.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
@@ -30,6 +29,8 @@ import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withHeldAck, withRejectedInput } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
+import { registrationCells } from './waits-parity-registration-cells.testkit.ts';
+import { type WaitParityPart, type WaitCells, type WaitFold, foldCells, splitPart, folded, WAIT_PARITY_FILES, WAIT_PARITY_FAMILIES, ROW_FAMILIES, type FamilyPart, familyTest, WAIT_FOLDS, foldedWaitFile, FOLDED_WAIT_RUNNERS, type WaitParityFamily, type WaitPartScope, type WaitFoldScope } from './waits-parity-catalog.testkit.ts';
 
 // The registry of the wait parity cells. `waits-parity.test.ts` imports it: it guards the catalog and
 // runs the single-runner cells. A per-runner file imports its part's module once that part has its
@@ -186,13 +187,6 @@ async function continueDelivers(runner: RunnerId, id: string, timer: Wait, later
   await until(() => terminal.includes(store.getRun(id)?.status ?? ''));
 }
 
-// Six base parts cover registration/budgets, input, delivery/failures, asks/replies,
-// done and answers. Seven worker parts cover mixed waits/notices, recovery, conversations,
-// refusals/requests, completion, completion replies and closed-session recovery/fallback (hearsay-tools/cezarion#2519).
-// Earlier runner/base/worker splits: hearsay-tools/cezarion#1301, hearsay-tools/cezarion#1288.
-// Process and entry axes stay separate (hearsay-tools/cezarion#1525); the once file
-// checks registration and runs the single-runner cells.
-export type WaitParityPart = keyof typeof WAIT_PARITY_CELLS;
 const WAIT_PARITY_CELLS = {
   registration: registrationCells,
   input: inputCells,
@@ -209,109 +203,13 @@ const WAIT_PARITY_CELLS = {
   closed: closedCells,
   process: processCells,
   entries: entriesCells,
-};
-export const WAIT_PARITY_FILES = Object.fromEntries(
-  Object.keys(WAIT_PARITY_CELLS).map(part => [part, (runner: RunnerId) => `waits-${runner}-${part}-parity.test.ts`]),
-) as Record<WaitParityPart, (runner: RunnerId) => string>;
-
-// Only the measured residual runner/part pairs use smaller row families.
-export const WAIT_PARITY_FAMILIES = {
-  cursorMixedWaits: { runner: 'cursor', part: 'mixed', family: 'waits' },
-  cursorMixedNotices: { runner: 'cursor', part: 'mixed', family: 'notices' },
-  cursorMixedMessages: { runner: 'cursor', part: 'mixed', family: 'messages' },
-  cursorEntriesRefusals: { runner: 'cursor', part: 'entries', family: 'refusals' },
-  cursorEntriesNoWait: { runner: 'cursor', part: 'entries', family: 'no-wait' },
-  cursorEntriesCompletion: { runner: 'cursor', part: 'entries', family: 'completion' },
-  cursorEntriesTimer: { runner: 'cursor', part: 'entries', family: 'timer' },
-  cursorAsksOpens: { runner: 'cursor', part: 'asks', family: 'opens' },
-  cursorAsksEnds: { runner: 'cursor', part: 'asks', family: 'ends' },
-  cursorAsksNudges: { runner: 'cursor', part: 'asks', family: 'nudges' },
-  cursorClosedBound: { runner: 'cursor', part: 'closed', family: 'bound' },
-  cursorClosedContinue: { runner: 'cursor', part: 'closed', family: 'continue' },
-  cursorClosedResume: { runner: 'cursor', part: 'closed', family: 'resume' },
-} as const;
-type WaitParityFamily = typeof WAIT_PARITY_FAMILIES[keyof typeof WAIT_PARITY_FAMILIES];
-
-/** The row families of each part that splits by family, keyed by the row's criterion (an entry row's
- *  second criterion, after U27). Every row of such a part is in exactly one family. */
-const ROW_FAMILIES = {
-  mixed: { messages: ['U3w'], notices: ['U3n', 'U3r', 'U3d'], waits: ['U2w', 'U2t', 'U2c', 'U7w'] },
-  asks: { opens: ['U7h', 'U7k', 'U7a'], ends: ['U9h', 'U18'], nudges: ['U5a', 'U5c', 'U5d', 'U17', 'U15'] },
-  closed: { bound: ['U22c', 'U22f'], continue: ['U22k', 'U22x'], resume: ['U22r', 'U24', 'U24r', 'U25'] },
-  entries: { completion: ['U6'], timer: ['U11'], refusals: ['U20', 'U20u'], 'no-wait': ['U5', 'accepted'] },
-} as const satisfies Partial<Record<WaitParityPart, Record<string, readonly string[]>>>;
-type FamilyPart = keyof typeof ROW_FAMILIES;
-type RowFamily = { [P in FamilyPart]: keyof typeof ROW_FAMILIES[P] }[FamilyPart];
-
-/**
- * A runner outside the shared set runs only the rows that run on every runner, a few per part
- * (hearsay-tools/cezarion#2991). Its parts fold into the groups below, one file each: fewer per-file
- * setups, while each file stays well under CI's per-file cap (`FILE_DURATION_LIMIT_MS` in
- * `.github/scripts/vitest-file-duration.mjs`, 60 s with coverage on; about 30 s with coverage and 13 s
- * locally at most per group). Every part is in one group, or splits by row family (`ROW_FAMILIES`)
- * across groups as cursor's cap split does: `entries` and `closed`. `registration` holds U1 alone, the
- * slowest row, so it keeps a small group. The guard computes the folded runners from the class table
- * and their files from these groups.
- */
-export const FOLDED_WAIT_RUNNERS: readonly RunnerId[] = RUNNER_IDS.filter(runner => !SHARED_RUNNERS.includes(runner));
-type WaitFoldGroup = {
-  readonly parts?: readonly WaitParityPart[];
-  readonly families?: { readonly [P in FamilyPart]?: readonly (keyof typeof ROW_FAMILIES[P])[] };
-};
-export const WAIT_FOLDS = {
-  'base-registration': { parts: ['registration', 'process'] },
-  base: { parts: ['input', 'asks', 'done', 'answers'] },
-  'base-delivery': { parts: ['delivery'] },
-  workers: { parts: ['mixed', 'recovery', 'conversations'] },
-  'workers-refusals': { parts: ['refusal', 'completion', 'completion-replies'], families: { closed: ['continue'] } },
-  'workers-closed': { families: { closed: ['resume', 'bound'] } },
-  'entries-refusals': { families: { entries: ['refusals', 'no-wait'] } },
-  'entries-nudges': { families: { entries: ['completion', 'timer'] } },
-} as const satisfies Record<string, WaitFoldGroup>;
-export type WaitFold = keyof typeof WAIT_FOLDS;
-export const foldedWaitFile = (runner: RunnerId, fold: WaitFold): string => `waits-${runner}-every-runner-${fold}-parity.test.ts`;
-const folded = (runner: RunnerId): boolean => FOLDED_WAIT_RUNNERS.includes(runner);
-
-/** Register a folded runner's cells of one group, each row only where its class runs it. */
-function foldCells(runner: RunnerId, fold: WaitFold, register: typeof registerTest): void {
-  const group: WaitFoldGroup = WAIT_FOLDS[fold];
-  const classed = familyCells('waits', runner, register);
-  for (const part of group.parts ?? []) WAIT_PARITY_CELLS[part]([runner], classed);
-  for (const [part, families] of Object.entries(group.families ?? {}) as Array<[FamilyPart, readonly RowFamily[]]>) {
-    WAIT_PARITY_CELLS[part]([runner], ((title: string, body: () => Promise<void>) => {
-      if (families.includes(rowFamily(part, title))) classed(title, body);
-    }) as typeof registerTest);
-  }
-}
+} satisfies Record<WaitParityPart, WaitCells>;
 
 /** The titles a folded runner's group registers. */
 function foldTitles(runner: RunnerId, fold: WaitFold): string[] {
   const titles: string[] = [];
-  foldCells(runner, fold, ((title: string) => { titles.push(title); }) as typeof registerTest);
+  foldCells(runner, fold, WAIT_PARITY_CELLS, ((title: string) => { titles.push(title); }) as typeof registerTest);
   return titles;
-}
-
-/** Register a strict catalog reference, so the coverage scanner can prove every leaf call. */
-export function describeWaitParityFamily(scope: WaitParityFamily): void {
-  describeWaitParity(scope);
-}
-
-function rowFamily(part: FamilyPart, title: string): RowFamily {
-  const criterion = title.split(' ')[part === 'entries' ? 2 : 1]!;
-  const families: Record<string, readonly string[]> = ROW_FAMILIES[part];
-  const family = Object.keys(families).find(name => families[name]!.includes(criterion));
-  if (family === undefined) throw Error(`Unclassified ${part} wait parity row: ${title}`);
-  return family as RowFamily;
-}
-
-function familyTest(scope: WaitParityFamily, register: typeof registerTest): typeof registerTest {
-  return ((title: string, body: () => Promise<void>) => {
-    if (rowFamily(scope.part, title) === scope.family) register(title, body);
-  }) as typeof registerTest;
-}
-
-function splitPart(runner: RunnerId, part: WaitParityPart): boolean {
-  return Object.values(WAIT_PARITY_FAMILIES).some(scope => scope.runner === runner && scope.part === part);
 }
 
 /** Whether a runner runs any cell of a part, after the wait family's class (hearsay-tools/cezarion#2991)
@@ -331,14 +229,16 @@ function expectPartLeaf(runner: RunnerId, part: WaitParityPart): void {
   expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
 }
 
-function familyCalls(): string[] {
+function familyCalls(): Array<{ file: string; family: keyof typeof WAIT_PARITY_FAMILIES }> {
   return readdirSync(new URL('.', import.meta.url)).filter(file => file.endsWith('.test.ts')).flatMap(file =>
     registrationGroups(readFileSync(new URL(`./${file}`, import.meta.url), 'utf8'), file,
-      'describeWaitParityFamily', 'WAIT_PARITY_FAMILIES', Object.keys(WAIT_PARITY_FAMILIES)));
+      'describeWaitParityFamily', 'WAIT_PARITY_FAMILIES', Object.keys(WAIT_PARITY_FAMILIES))
+      .map(family => ({ file, family: family as keyof typeof WAIT_PARITY_FAMILIES })));
 }
 
 function expectWaitParityFamilies(): void {
-  const calls = familyCalls();
+  const found = familyCalls();
+  const calls = found.map(call => call.family);
   expect(calls.slice().sort()).toEqual(Object.keys(WAIT_PARITY_FAMILIES).sort());
   for (const runner of RUNNER_IDS) {
     for (const part of Object.keys(ROW_FAMILIES) as FamilyPart[]) {
@@ -347,7 +247,7 @@ function expectWaitParityFamilies(): void {
       const collect = (names: string[]) => ((title: string) => { names.push(title); }) as typeof registerTest;
       WAIT_PARITY_CELLS[part]([runner], collect(expected));
       for (const name of calls) {
-        const scope = WAIT_PARITY_FAMILIES[name as keyof typeof WAIT_PARITY_FAMILIES];
+        const scope = WAIT_PARITY_FAMILIES[name];
         if (scope.runner === runner && scope.part === part) WAIT_PARITY_CELLS[part]([runner], familyTest(scope, collect(actual)));
       }
       expect(actual.sort(), `${runner} ${part}: each full row exactly once`).toEqual(expected.sort());
@@ -355,344 +255,68 @@ function expectWaitParityFamilies(): void {
   }
 }
 
-type WaitScope = { runner: RunnerId; part: WaitParityPart; family?: WaitParityFamily['family'] } | { runner: RunnerId; part: 'every-runner'; fold: WaitFold };
-export function describeWaitParity(scope: WaitScope | 'once'): void {
-  const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
-  describeWaitCells(() => {
-
-    if (scope === 'once') {
-      it('runs every runner\'s cells from its own file', () => {
-        const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
-          /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
-        const parts = Object.keys(WAIT_PARITY_FILES) as WaitParityPart[];
-        expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => {
-          if (folded(runner)) return (Object.keys(WAIT_FOLDS) as WaitFold[]).filter(fold => foldTitles(runner, fold).length > 0).map(fold => foldedWaitFile(runner, fold));
-          return parts.filter(part => !splitPart(runner, part) && partRuns(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
-        }).sort());
-        for (const runner of RUNNER_IDS) for (const [part, file] of Object.entries(WAIT_PARITY_FILES) as Array<[WaitParityPart, (runner: RunnerId) => string]>) {
-          expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(!folded(runner) && (partRuns(runner, part) || splitPart(runner, part)));
-        }
-        for (const runner of FOLDED_WAIT_RUNNERS) {
-          // A folded runner splits no part by WAIT_PARITY_FAMILIES, its groups register each of its
-          // cells exactly once, and each group with cells runs from its own file.
-          expect(parts.filter(part => splitPart(runner, part)), runner).toEqual([]);
-          const all: string[] = [];
-          for (const part of parts) WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, ((title: string) => { all.push(title); }) as typeof registerTest));
-          const grouped = (Object.keys(WAIT_FOLDS) as WaitFold[]).flatMap(fold => foldTitles(runner, fold));
-          expect(grouped.slice().sort(), `${runner}: each cell in exactly one group`).toEqual(all.slice().sort());
-          for (const fold of Object.keys(WAIT_FOLDS) as WaitFold[]) {
-            if (foldTitles(runner, fold).length === 0) continue;
-            const source = readFileSync(new URL(`./${foldedWaitFile(runner, fold)}`, import.meta.url), 'utf8');
-            expect(source.match(/describeWaitParity\([^;]+\)/g), foldedWaitFile(runner, fold)).toEqual([`describeWaitParity({ runner: '${runner}', part: 'every-runner', fold: '${fold}' })`]);
-          }
-        }
-      });
-
-      it('registers every criterion and runner in exactly one part', () => {
-        for (const runner of RUNNER_IDS) {
-          const owners = new Map<string, string[]>();
-          for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) {
-            const criteria = new Set<string>();
-            const collect = ((title: string) => { criteria.add(title.split(' ')[1]!); }) as typeof registerTest;
-            WAIT_PARITY_CELLS[part]([runner], collect);
-            for (const criterion of criteria) owners.set(criterion, [...(owners.get(criterion) ?? []), part]);
-            expectPartLeaf(runner, part);
-          }
-          expect([...owners.keys()].sort()).toEqual(WAIT_CRITERIA.map(row => row.id).sort());
-          for (const [criterion, parts] of owners) expect(parts, `${runner} ${criterion}`).toHaveLength(1);
-        }
-      });
-
-      it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U7a', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U19w', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27', 'R13', 'R18', 'R17']);
-        for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
-      });
-
-      it('registers every split row exactly once', expectWaitParityFamilies);
-
-      singleRunnerCells();
-    }
-
-    // Each row runs on the runners its class names (core/parity-classes.testkit.ts).
-    if (scope !== 'once' && scope.part === 'every-runner') { foldCells(scope.runner, scope.fold, registerTest); return; }
-    const register = scope === 'once' ? registerTest : familyCells('waits', scope.runner, registerTest);
-    for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) WAIT_PARITY_CELLS[part](runnersFor(part),
-      scope !== 'once' && scope.family ? familyTest(scope as WaitParityFamily, register) : register);
-  });
+/** Register a strict catalog reference, so the coverage scanner can prove every leaf call. */
+export function describeWaitParityFamily(scope: WaitParityFamily): void {
+  describeWaitParity(scope);
 }
 
-
-// Each part's cells, one group per `WaitParityPart`, registered for each runner in `runners`.
-// `describeWaitParity` passes a file's own runner to its part's group and no runner to the others.
-function registrationCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
-  for (const runner of runners) {
-    it(`${runner} U26 a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools`, async () => {
-      nativeWire(runner);
-      retryAtOnce();
-      const resources = toolResources.current!;
-      const broken = () => vi.spyOn(resources, 'controller').mockRejectedValueOnce(new ToolsUnavailableError("ENOSPC: no space left on device, mkdtemp '/tmp/cez-ci-XXXXXX'", '/tmp'));
-      const cause = /Cezar tools could not start: ENOSPC: no space left on device, mkdtemp '\/tmp\/cez-ci-XXXXXX'\. .*Free space in \/tmp or fix its permissions, then Continue the task\./;
-      // A fresh start: nothing spawns, the step and the run fail with the cause.
-      broken();
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${HARNESS_ADAPTERS[runner].scenarios.baseline!} u26-opening` });
-      await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
-      expect(store.getRun(run.id)?.error).toMatch(cause);
-      expect(store.getRun(run.id)?.steps[0]).toMatchObject({ status: STEP_STATUS.failed, error: expect.stringMatching(cause) });
-      expect(prompted(runner, 'u26-opening')).toEqual([]);
-      // Its slot is free: at maxParallel 1 another task starts.
-      expect(semaphore.maxParallel()).toBe(1);
-      const other = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${HARNESS_ADAPTERS[runner].scenarios.baseline!} u26-other` });
-      await until(() => prompted(runner, 'u26-other').length > 0 && store.getRun(other.id)?.status === 'waiting');
-      sessionOf(other.id).end();
-      await until(() => !manager.isActive(other.id));
-      // The repair: Continue starts the tools and the session learns them.
-      expect(manager.continueRun(run.id, { text: 'u26-continue' }).ok).toBe(true);
-      await until(() => prompted(runner, 'u26-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
-      // A wake with no live session: the failed launch keeps the result, and the retry delivers it.
-      const handlers = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
-      const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u26-wake' }, 'cezar_wait', new AbortController().signal);
-      if (!('wait' in registered)) throw Error('registration refused');
-      sessionOf(run.id).end();
-      await until(() => !manager.isActive(run.id));
-      broken();
-      fireTimer(registered.wait.id);
-      await until(() => settled(run.id, registered.wait.id)?.phase === 'delivered' && prompted(runner, 'u26-wake').length > 0 && store.getRun(run.id)?.status === 'waiting');
-      expect(store.getRun(run.id)?.steps.filter(step => step.status === 'failed').map(step => step.error)).toEqual([expect.stringMatching(cause), expect.stringMatching(cause)]);
-      expect(inputsFor(run.id, registered.wait.id).map(input => input.text)).toEqual([timerText(registered.wait, 'u26-wake')]);
+/** The matrix guards and the single-runner cells, from `waits-parity.test.ts`; a part's or a fold's
+ *  cells, from a per-runner file that still imports this registry. */
+export function describeWaitParity(scope: WaitPartScope | WaitFoldScope | 'once'): void {
+  if (scope !== 'once' && scope.part === 'every-runner') return waitFoldDescriber(scope.fold, WAIT_PARITY_CELLS)(scope);
+  if (scope !== 'once') return waitPartDescribers(scope.part, WAIT_PARITY_CELLS[scope.part]).describeWaitParity(scope);
+  describeWaitCells(() => {
+    it('runs every runner\'s cells from its own file', () => {
+      const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
+        /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
+      const parts = Object.keys(WAIT_PARITY_FILES) as WaitParityPart[];
+      expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => {
+        if (folded(runner)) return (Object.keys(WAIT_FOLDS) as WaitFold[]).filter(fold => foldTitles(runner, fold).length > 0).map(fold => foldedWaitFile(runner, fold));
+        return parts.filter(part => !splitPart(runner, part) && partRuns(runner, part)).map(part => WAIT_PARITY_FILES[part](runner));
+      }).sort());
+      for (const runner of RUNNER_IDS) for (const [part, file] of Object.entries(WAIT_PARITY_FILES) as Array<[WaitParityPart, (runner: RunnerId) => string]>) {
+        expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(!folded(runner) && (partRuns(runner, part) || splitPart(runner, part)));
+      }
+      for (const runner of FOLDED_WAIT_RUNNERS) {
+        // A folded runner splits no part by WAIT_PARITY_FAMILIES, its groups register each of its
+        // cells exactly once, and each group with cells runs from its own file.
+        expect(parts.filter(part => splitPart(runner, part)), runner).toEqual([]);
+        const all: string[] = [];
+        for (const part of parts) WAIT_PARITY_CELLS[part]([runner], familyCells('waits', runner, ((title: string) => { all.push(title); }) as typeof registerTest));
+        const grouped = (Object.keys(WAIT_FOLDS) as WaitFold[]).flatMap(fold => foldTitles(runner, fold));
+        expect(grouped.slice().sort(), `${runner}: each cell in exactly one group`).toEqual(all.slice().sort());
+        for (const fold of Object.keys(WAIT_FOLDS) as WaitFold[]) {
+          if (foldTitles(runner, fold).length === 0) continue;
+          const source = readFileSync(new URL(`./${foldedWaitFile(runner, fold)}`, import.meta.url), 'utf8');
+          expect(source.match(/describeWaitParity\([^;]+\)/g), foldedWaitFile(runner, fold)).toEqual([`describeWaitParity({ runner: '${runner}', part: 'every-runner', fold: '${fold}' })`]);
+        }
+      }
     });
 
-    it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
-      const external = github();
-      nativeWire(runner);
-      const provision = vi.spyOn(CiToolController.prototype, 'provision');
-      const initial = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 });
-      const changed = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr, timeout_seconds: 60 });
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${initial} ${initial} ${changed}`, runner });
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
-      const ci = waitOfKind(run.id, 'pr')!;
-      expect(ci).toMatchObject({ via: WAIT_VIA.cezar_wait, source: WAIT_SOURCE.agent, prUrl: pr, timeoutSeconds: 30 });
-      expect(store.getRun(run.id)?.waitRegistrations).toMatchObject([{ wait: { id: ci.id }, deduplicated: false }, { wait: { id: ci.id }, deduplicated: true }]);
-      expect(agentWaits(run.id)).toHaveLength(1);
-      expect(manager.isActive(run.id)).toBe(true);
-      // The wait outlives its session: a Continue's registration for the same PR returns it.
-      sessionOf(run.id).end();
-      await until(() => !manager.isActive(run.id));
-      const boundaries = turnEnds(run.id);
-      expect(manager.continueRun(run.id, { text: initial }).ok).toBe(true);
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')) && turnEnds(run.id) > boundaries);
-      expect(store.getRun(run.id)?.waitRegistrations?.at(-1)).toMatchObject({ wait: { id: ci.id }, deduplicated: true });
-      expect(agentWaits(run.id)).toMatchObject([{ id: ci.id }]);
-      // A recovery keeps it, and its result wakes the run with one observation.
-      await restart();
-      expect(manager.isActive(run.id)).toBe(false);
-      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.waiting);
-      expect(agentWaits(run.id)).toMatchObject([{ id: ci.id, phase: WAIT_PHASE.open }]);
-      external.settle();
-      await until(() => settled(run.id, ci.id)?.phase === 'delivered');
-      expect(inputsFor(run.id, ci.id).map(input => input.text)).toEqual([expect.stringContaining(`CI wait observation ${ci.id} for ${pr}`)]);
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      // Each session, fresh, continued and woken after recovery, gets its own tool descriptor.
-      const descriptors = provision.mock.results.filter(result => result.type === 'return').map(result => result.value.descriptor.name);
-      expect(descriptors.length).toBeGreaterThanOrEqual(3);
-      expect(new Set(descriptors).size).toBe(descriptors.length);
-
-      expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u1' }) }])).toBe(true);
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
-      const timer = waitOfKind(run.id, 'timer')!;
-      expect(timer).toMatchObject({ via: WAIT_VIA.cezar_wait, seconds: 60, note: 'u1' });
-      fireTimer(timer.id);
-      await until(() => settled(run.id, timer.id)?.phase === 'delivered');
-      expect(inputsFor(run.id, timer.id).map(input => input.text)).toEqual([timerText(timer, 'u1')]);
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(agentWaits(run.id)).toEqual([]);
+    it('registers every criterion and runner in exactly one part', () => {
+      for (const runner of RUNNER_IDS) {
+        const owners = new Map<string, string[]>();
+        for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) {
+          const criteria = new Set<string>();
+          const collect = ((title: string) => { criteria.add(title.split(' ')[1]!); }) as typeof registerTest;
+          WAIT_PARITY_CELLS[part]([runner], collect);
+          for (const criterion of criteria) owners.set(criterion, [...(owners.get(criterion) ?? []), part]);
+          expectPartLeaf(runner, part);
+        }
+        expect([...owners.keys()].sort()).toEqual(WAIT_CRITERIA.map(row => row.id).sort());
+        for (const [criterion, parts] of owners) expect(parts, `${runner} ${criterion}`).toHaveLength(1);
+      }
     });
 
-    it(`${runner} U4 cezar_cancel_wait cancels and no observation is delivered`, async () => {
-      const external = github();
-      nativeWire(runner);
-      const opened = toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr }), cancelled = toolCall('cezar_cancel_wait', { wait_id: 'last' });
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${opened} ${cancelled}`, runner });
-      await until(() => store.getRun(run.id)?.lastWaits?.some(wait => wait.kind === 'pr') === true && store.getRun(run.id)?.status === 'waiting');
-      const ci = store.getRun(run.id)!.lastWaits!.find(wait => wait.kind === 'pr')!;
-      expect(ci).toMatchObject({ phase: WAIT_PHASE.cancelled, via: WAIT_VIA.cezar_wait });
-      expect(external.aborted()).toBe(true);
-      const turns = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
-      external.settle();
-      await flushMicrotasks();
-      expect(inputsFor(run.id, ci.id)).toEqual([]);
-
-      const timerOpened = toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u4' });
-      expect(manager.sendMessage(run.id, [{ type: 'text', text: `${timerOpened} ${cancelled}` }])).toBe(true);
-      await until(() => store.getRun(run.id)?.lastWaits?.some(wait => wait.kind === 'timer') === true
-        && store.readEvents(run.id).filter(event => event.type === 'turn-end').length > turns);
-      const timer = store.getRun(run.id)!.lastWaits!.find(wait => wait.kind === 'timer')!;
-      expect(timer).toMatchObject({ phase: WAIT_PHASE.cancelled, note: 'u4' });
-      fireTimer(timer.id);
-      await flushMicrotasks();
-      expect(inputsFor(run.id, timer.id)).toEqual([]);
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(inputsFor(run.id, timer.id)).toEqual([]);
-      expect(agentWaits(run.id)).toEqual([]);
+    it('registers every criterion', () => {
+      expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U7a', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U19w', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27', 'R13', 'R18', 'R17']);
+      for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
     });
 
-    it(`${runner} U10 timer wakes stop at the automatic-wake budget; one admitted turn is charged once`, async () => {
-      nativeWire(runner);
-      const release = join(root, 'u10-release');
-      process.env.CEZ_MOCK_RELEASE_FILE = release;
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
-      await until(() => store.readEvents(run.id).some(event => event.type === 'turn.started'));
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
-      const open = async (seconds: number, note: string) => {
-        const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        return registered.wait;
-      };
-      const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
-      store.updateRun(run.id, { automaticWakes: 39, waitDeliveryFailures: 2 });
-      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
-      const commits = recordCommits(join(root, '.ai/cezar'));
-      // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
-      fireTimer(first.id); fireTimer(second.id);
-      await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
-      writeFileSync(release, '');
-      await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered');
-      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
-      expect(prompted(runner, timerText(first, 'u10 first')).at(-1)).toContain(timerText(second, 'u10 second'));
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-      const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
-      expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
-      // The delivery, its charge and the cleared failure count are one commit: no committed row
-      // holds a delivered timer without its charge.
-      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => [first.id, second.id].includes(wait.id) && wait.phase === 'delivered') ||
-        (row.automaticWakes === 40 && row.waitDeliveryFailures === undefined && row.lastWaits.filter(wait => wait.phase === 'delivered').length === 2), 'a delivered timer and its charge');
-      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(wait => wait.id === first.id && wait.phase === 'delivered'))).toBe(true);
-      await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
-      const turns = turnEnds(run.id);
-      // The budget is spent: the next timer to come due is cancelled and wakes nothing.
-      fireTimer(last.id);
-      await until(() => settled(run.id, last.id)?.phase === 'cancelled');
-      await flushMicrotasks();
-      expect(inputsFor(run.id, last.id)).toEqual([]);
-      expect(prompted(runner, `Timer ${last.id} fired`)).toEqual([]);
-      expect(turnEnds(run.id)).toBe(turns);
-      expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === `automatic timer wake-up cap reached (40); timer ${last.id} cancelled`)).toBe(true);
-      // hearsay-tools/cezarion#1234: the spent budget leaves a cezar human wait, so the run waits on the user.
-      expect(store.getRun(run.id)?.waits ?? []).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      await expectPoolCapacity(runner, run.id, false);
-    });
+    it('registers every split row exactly once', expectWaitParityFamilies);
 
-    it(`${runner} U10 a timer due while a charged batch awaits its acknowledgement is cancelled at the cap, and CI still wakes`, async () => {
-      const external = github();
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
-      const open = async (request: Parameters<typeof tools.registerWait>[0]) => {
-        const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        return registered.wait;
-      };
-      const first = await open({ kind: WAIT_KIND.timer, seconds: 60, note: 'u10 first' });
-      const second = await open({ kind: WAIT_KIND.timer, seconds: 61, note: 'u10 second' });
-      const ci = await open({ kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
-      const session = sessionOf(run.id);
-      store.updateRun(run.id, { automaticWakes: 39 });
-      // The first wake reaches the native wire; its provider acknowledgement is held.
-      let release!: () => void;
-      const gate = new Promise<void>(resolve => { release = resolve; });
-      const send = session.sendAgentMessage.bind(session);
-      vi.spyOn(session, 'sendAgentMessage').mockImplementation((content, ids) => {
-        const ack = send(content, ids);
-        return ack && ack.then(() => gate);
-      });
-      fireTimer(first.id);
-      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
-      expect(settled(run.id, first.id)).toBeUndefined();
-      // The pending batch already holds the last wake of the budget.
-      fireTimer(second.id);
-      await until(() => settled(run.id, second.id)?.phase === 'cancelled');
-      expect(inputsFor(run.id, second.id)).toEqual([]);
-      release();
-      await until(() => settled(run.id, first.id)?.phase === 'delivered');
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-      const notes = () => store.readEvents(run.id).filter(event => event.type === 'note').map(event => String(event.message));
-      expect(notes().filter(note => note.startsWith('automatic timer wake-up ('))).toEqual(['automatic timer wake-up (40/40)']);
-      expect(notes()).toContain(`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`);
-      expect(prompted(runner, `Timer ${second.id} fired`)).toEqual([]);
-      // A CI result is an external event: it still wakes the agent at the cap and is not charged.
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
-      external.settle();
-      await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-    });
-    // hearsay-tools/cezarion#1234: the budget is on the record, so a new session does not refill it.
-    it(`${runner} U16 a scheduler continuation keeps the automatic-wake budget and a human Continue resets it`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const { timer } = await timerWaits(run.id);
-      store.updateRun(run.id, { automaticWakes: 39 });
-      sessionOf(run.id).end();
-      await until(() => !manager.isActive(run.id));
-      fireTimer(timer.id);
-      await until(() => settled(run.id, timer.id)?.phase === 'delivered');
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('))
-        .map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
-      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
-      const refused = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
-      expect(refused.answer).toMatchObject({ ok: false, code: 'wake_budget_spent' });
-      sessionOf(run.id).end();
-      await until(() => !manager.isActive(run.id));
-      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
-      expect(store.getRun(run.id)?.automaticWakes).toBe(0);
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
-
-    // Recovery fires an overdue timer before any session exists. At the spent budget it wakes
-    // nothing, and once no wait is left the run must still wait on the user through a wait.
-    it(`${runner} U16b timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const { timer, later } = await timerWaits(run.id);
-      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-      sessionOf(run.id).end();
-      await until(() => !manager.isActive(run.id));
-      fireTimer(timer.id);
-      await until(() => settled(run.id, timer.id)?.phase === 'cancelled');
-      // The other timer is still open: the run waits on it, not on the user.
-      expect(humanOpen(run.id)).toEqual([]);
-      fireTimer(later.id);
-      await until(() => settled(run.id, later.id)?.phase === 'cancelled' && humanOpen(run.id)[0]?.askSeq !== undefined);
-      expect(humanOpen(run.id)).toMatchObject([{ via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
-      expect(store.getRun(run.id)?.status).toBe('waiting');
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      expect(manager.isActive(run.id)).toBe(false);
-      const [budget] = humanOpen(run.id);
-      const commits = recordCommits(join(root, '.ai/cezar'));
-      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
-      await until(() => settled(run.id, budget!.id)?.phase === 'delivered');
-      expect(store.getRun(run.id)?.automaticWakes ?? 0).toBe(0);
-      // hearsay-tools/cezarion#1805: the restarted budget and the answered wait are committed with
-      // the Continue they come from, never before it.
-      const step = store.getRun(run.id)!.steps.at(-1)!.id;
-      commits.expectEveryCommit(run.id, row => {
-        return (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
-          row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending');
-      }, 'a restarted budget and its Continue');
-      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
-
-    // Clearing the wake counters is bookkeeping: a refused write may not stop a cleanup from
-    // stopping the run.
-  }
+    singleRunnerCells();
+  });
 }
 
 function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
