@@ -1,6 +1,6 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-no-runner.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

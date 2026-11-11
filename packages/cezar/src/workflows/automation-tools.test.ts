@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScheduleTaskAnswer, ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { RunStore } from '../runs/store.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-no-runner.testkit.ts';
 
 // hearsay-tools/cezarion#1465: the schedule tools reach a project-level service, not the run. The
 // server sets it after the boot manager recovers, so a session provisioned before the setter (a

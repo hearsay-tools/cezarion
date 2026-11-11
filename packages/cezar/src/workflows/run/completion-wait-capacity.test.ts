@@ -2,7 +2,7 @@ import { WaitEngine } from './wait-engine.ts';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeWorkerWait, RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_SOURCE, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { seedWaits } from '../../runs/run-store.testkit.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import * as rules from '../turn-end.ts';
 import type { CompletionRefusal } from '../completion-policy.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';

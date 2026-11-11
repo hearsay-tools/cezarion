@@ -3,7 +3,7 @@ import * as gitWorktree from '../git-worktree.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
-import { manager, parent, restart, root, store, until, work } from './worker-wait.testkit.ts';
+import { manager, parent, restart, root, store, until, work } from './worker-wait-claude.testkit.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
