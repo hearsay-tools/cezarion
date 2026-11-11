@@ -1,5 +1,5 @@
 import { testHome } from '../home/test-home.testkit.ts';
-import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
 
 import { existsSync } from 'node:fs';
 import { delegationStateSchema } from '@open-mercato/cezar-contract/delegation';

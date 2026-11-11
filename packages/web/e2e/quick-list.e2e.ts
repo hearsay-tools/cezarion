@@ -161,9 +161,11 @@ const ROW = '[data-slot="task-row"]'
 const scoped = (path: string) => `/p/${bootProject}${path}`
 
 /** An element's `textContent`, not the provider's `get text` — that returns *rendered* text, so a
- *  flex row comes back newline-separated and every assertion here would be about whitespace. */
+ *  flex row comes back newline-separated and every assertion here would be about whitespace.
+ *  A readiness probe can precede a remount. Read the text in the accepted sample
+ *  (hearsay-tools/cezarion#3236), rather than querying again after the wait. */
 const textOf = (selector: string) =>
-  browser.evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`) as string
+  browser.waitForValue<string>(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`)
 
 
 beforeAll(async () => {

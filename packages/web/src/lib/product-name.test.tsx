@@ -2,7 +2,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ rebrand: false, displayName: '', command: '', npmAlias: '', npmPackage: '' }))
+const state = vi.hoisted(() => ({ rebrand: false, displayName: '', command: '', npx: '', npmPackage: '' }))
 vi.mock('./product-name', async importOriginal => {
   const actual = await importOriginal<typeof import('./product-name')>()
   return { ...actual, productCommand: () => actual.productCommand(state), productName: (legacy: 'cezar' | 'Cezar' | 'Cezarion') => actual.productName(legacy, state) }

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { eventCheckpoint, manager, restart, root, semaphore, store, until, waitOf, work } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, semaphore, store, until, waitOf, work } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { conversationOf, eventsOf, closedAs, noHumanCard, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';

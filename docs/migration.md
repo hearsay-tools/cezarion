@@ -76,10 +76,13 @@ The switch PR merges first. Then the owner:
 npm i -g @hearsay-tools/squawk
 hsq --help
 # Or run without a global install:
-npx hsq
+npx -p @hearsay-tools/squawk hsq
 ```
 
-The unscoped `hsq` package is an alias for the scoped package. During the
+There is no unscoped `hsq` package: npm refuses that name. Install or run the
+scoped package; its command is `hsq`. The old packages `@wjarka/cezarion` and
+`cezarion` still publish every version, each pinned exactly to
+`@hearsay-tools/squawk` at the same version. During the
 deprecation window, `cez` and `cezarion` still work. Each process started through
 an old name prints one notice to stderr. JSON stdout stays valid. Change scripts
 to use `hsq`; do not parse the notice as command output.

@@ -2,7 +2,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { makeRunRecord, makeTimerWait, RUN_STATUS, WAIT_KIND, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from './run.ts';
-import { unused } from './fixture-cleanup.testkit.ts';
+import { unused } from './fixture-no-runner.testkit.ts';
 import { fireCapturedTimer, observeWaitTimers } from './waits.testkit.ts';
 
 describe('owned wait timer identity', () => {

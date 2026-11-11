@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { eventCheckpoint, manager, restart, root, store, until, work, worker } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, restart, root, store, until, work, worker } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WAIT_KIND, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { conversationOf, eventsOf, idleWorker, steeringParent, steer, expectFallbackIntact, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
