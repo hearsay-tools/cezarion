@@ -1,12 +1,12 @@
 # Publishing — stable releases and npm previews
 
-## Staged package identity
+## Package identity
 
-The disabled `REBRAND_SWITCH` keeps the current npm packages, alias directory,
+With `REBRAND_SWITCH` off, a build keeps the old npm packages, alias directory,
 pack paths, tags and version-bump paths. Release tools read the shared
 `productIdentity` data through `product-identity.mjs` or the same source module.
 
-When the switch is enabled, stable, dev, nightly and PR archives select the new
+With the switch on (since the switch release), stable, dev, nightly and PR archives select the new
 scoped package and `alias-hsq/`. Source workspace names stay unchanged: build
 commands and type imports still use those names. Version stamping updates source
 versions only. A single `publicationManifests` projection changes the service name
@@ -496,7 +496,7 @@ continue to use npm; end users do not need pnpm.
 
 ## Owner runbook for the npm rename
 
-This section is staged for `REBRAND_SWITCH = true`. It does not change the
+This section applies with `REBRAND_SWITCH = true`. It does not change the
 switch-off release procedure above. The owner performs registry writes. Agents
 prepare and verify the patch and artifacts; they do not publish, move tags,
 deprecate packages or unpublish versions.

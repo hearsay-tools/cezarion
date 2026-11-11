@@ -1,7 +1,8 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { workerExecutionStopped } from '../workflows/run/run-guards.ts';
 import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
-import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
 import { randomUUID } from 'node:crypto';

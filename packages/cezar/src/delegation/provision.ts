@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { productEnvEntries } from '../core/product-env.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { randomUUID } from 'node:crypto';
@@ -143,7 +144,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `You are an owned cezar worker. Your parent run ID is ${run.delegation.parentRunId}.`,
         conversationGuidance,
         `You cannot spawn Cezar workers. You cannot control peers, merge automatically, or accept your own review.`,
-        `Follow your assigned task and selected input context. Ask your parent with cez message request; any question you raise goes to your parent too, never to a human. Your parent answers or asks the human itself; do not wait for a human.`,
+        commandText(`Follow your assigned task and selected input context. Ask your parent with cez message request; any question you raise goes to your parent too, never to a human. Your parent answers or asks the human itself; do not wait for a human.`),
         `You may use native subagents for research, code reading and focused analysis.`,
         subagentMessaging,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,

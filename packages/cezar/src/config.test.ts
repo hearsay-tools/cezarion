@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectPaths } from './project-paths.ts';
 import { loadConfig, readRawConfig, resolveWorktreeRetention, updateConfigFile } from './config.ts';
 
 /**
@@ -443,8 +444,19 @@ describe('readRawConfig and updateConfigFile (hearsay-tools/cezarion#279)', () =
       writeFileSync(path(), text);
       const read = await readRawConfig(dataDir);
       expect(read.ok).toBe(false);
-      if (!read.ok) expect(read.issue).toMatch(/^\.ai\/cezar\/config\.json cannot be read: /);
+      if (!read.ok) expect(read.issue.startsWith(`${path()} cannot be read: `)).toBe(true);
     }
+  });
+
+  it.each(['cezar', 'squawk'])('names the project config file it read in .ai/%s', async folder => {
+    const root = mkdtempSync(join(tmpdir(), 'cez-config-issue-'));
+    try {
+      mkdirSync(join(root, '.ai', folder), { recursive: true });
+      writeFileSync(join(root, '.ai', folder, 'config.json'), '{ nope');
+      const read = await readRawConfig(projectPaths(root).write);
+      expect(read.ok).toBe(false);
+      if (!read.ok) expect(read.issue).toMatch(new RegExp(`^\\.ai/${folder}/config\\.json cannot be read: `));
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it('serializes concurrent writers, so neither drops the other one\'s key', async () => {

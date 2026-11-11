@@ -38,7 +38,7 @@ it('refuses a human Continue on a routed question whose session is gone', async 
       await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === f.questionId)?.deliveredAt && store.getRun(f.p.id)?.status === 'waiting');
       const answer = await manager.cezarToolHandlers(f.p.id, toolGenerationOf(f.p.id)).finishTurn({}, new AbortController().signal);
       expect(answer).toMatchObject({ ok: false, code: 'worker_questions', workers: [{ worker_id: f.w.id, reason: 'question' }] });
-      expect(answer.ok === false && answer.message).toContain(`cez message reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`);
+      expect(answer.ok === false && answer.message).toContain(`hsq message reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`);
       expect(store.getRun(f.p.id)?.status).toBe(RUN_STATUS.waiting);
       expect(store.getRun(f.p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
       expect(store.getRun(f.p.id)?.delegation).not.toHaveProperty('completion');

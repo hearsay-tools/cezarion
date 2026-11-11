@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -227,7 +228,7 @@ describe('the Files tab against a live dry-run worktree', () => {
       const source = join(outside, 'decision.md')
       writeFileSync(source, '# Published ADR\n\nSnapshot survives source removal.\n![blocked](https://example.invalid/tracker.png)\n')
       const artifact = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
-        env: { ...fixtureServeEnv(dataRoot), CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(dataRoot, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
+        env: { ...fixtureServeEnv(dataRoot), CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(projectPaths(dataRoot).write, 'runs', `${runId}-artifacts`) }, encoding: 'utf8',
       })) as { id: string; link: string }
       rmSync(outside, { recursive: true, force: true })
       browser.setViewport(360, 640)

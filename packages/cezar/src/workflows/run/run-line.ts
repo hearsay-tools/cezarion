@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import { atTaskHead } from './launch-read-resolver.ts';
@@ -342,7 +343,7 @@ export class RunLine {
       if (this.host.activeHas(run.id) || this.hasStarting(run.id)) continue;
       if (this.hasJob(run.id) || this.hasContinuation(run.id)) continue;
       if (this.hasQueued(run.id)) continue;
-      console.warn(`[cez] queue watchdog: re-adopting queued run ${run.id} the engine had lost`);
+      console.warn(`${logPrefix()} queue watchdog: re-adopting queued run ${run.id} the engine had lost`);
       await this.host.reviveQueuedRun(run, 'queue watchdog');
     }
     if (this.entries().length === 0) return;
@@ -361,7 +362,7 @@ export class RunLine {
       return;
     }
     console.warn(
-      '[cez] queue watchdog: work is queued, nothing is running, and the usage-limit hold has no'
+      `${logPrefix()} queue watchdog: work is queued, nothing is running, and the usage-limit hold has no`
       + ' deadline behind it — starting the next task anyway',
     );
     this.forceNext();

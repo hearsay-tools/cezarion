@@ -1,3 +1,4 @@
+import { logPrefix } from './display.ts';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -11,5 +12,5 @@ export function assertNoMigration(root: string, locked = false): void {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw error;
   }
-  throw new Error(`[cez] home migration in progress at ${path}; stop this writer and retry after migration`);
+  throw new Error(`${logPrefix()} home migration in progress at ${path}; stop this writer and retry after migration`);
 }

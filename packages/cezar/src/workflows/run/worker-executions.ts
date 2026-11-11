@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import { sessionGroupOf } from '../../core/session-process.ts';
 import type { RunModuleContext } from './types.ts';
@@ -93,8 +94,8 @@ export class WorkerExecutions {
   recordWorkerProcess(runId: string, pid: number): void {
     const generation = this.executions.get(runId)?.generation;
     if (!generation) return;
-    try { if (!this.context.store.appendWorkerProcess(runId, generation, pid, sessionGroupOf(pid))) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
-    catch { console.warn(`[cez] worker ${runId} process record write failed; relying on the working-directory scan`); }
+    try { if (!this.context.store.appendWorkerProcess(runId, generation, pid, sessionGroupOf(pid))) console.warn(`${logPrefix()} worker ${runId} process record unavailable; relying on the working-directory scan`); }
+    catch { console.warn(`${logPrefix()} worker ${runId} process record write failed; relying on the working-directory scan`); }
   }
 
   async proveRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean }): Promise<boolean> {

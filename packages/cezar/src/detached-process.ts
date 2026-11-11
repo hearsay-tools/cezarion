@@ -3,6 +3,20 @@ import { readdirSync, readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 
+// Windows PowerShell spawns live here: this module is copied alone into scratch trees, so it imports only node builtins.
+/** Windows PowerShell 5.1, the one PowerShell every supported Windows host has. */
+export const POWERSHELL = 'powershell.exe';
+
+/**
+ * The environment for a Windows PowerShell 5.1 child. PowerShell 7 exports its own `PSModulePath`,
+ * and a 5.1 child that inherits it finds PowerShell 7's built-in modules first, so autoloading
+ * cmdlets such as `Set-Acl` or `Get-CimInstance` fails. Without the variable, 5.1 builds its
+ * default module path. Windows environment names ignore case, so every spelling goes.
+ */
+export function powershellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
+}
+
 /**
  * Starts a process that outlives the call that started it, and later stops it
  * (hearsay-tools/cezarion#1717, hearsay-tools/cezarion#1815). It holds the Process exits cases
@@ -439,8 +453,8 @@ public static class CezLeaseJob {
 }
 '@
 [CezLeaseJob]::Live([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${value}')))`;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from("$ErrorActionPreference='Stop'; " + script, 'utf16le').toString('base64')], {
-    encoding: 'utf8', timeout: 10_000, windowsHide: true,
+  const result = spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from("$ErrorActionPreference='Stop'; " + script, 'utf16le').toString('base64')], {
+    env: powershellEnv(), encoding: 'utf8', timeout: 10_000, windowsHide: true,
   });
   return result.status === 0 ? result.stdout.trim() : undefined;
 }

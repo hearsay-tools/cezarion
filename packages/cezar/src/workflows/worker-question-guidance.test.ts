@@ -31,13 +31,13 @@ describe('unanswered worker question completion guidance', () => {
     const gate = completionRefusal(context, host, f.parent.id)!;
     expect(asked).toHaveBeenCalledWith(f.parent.id);
     expect(gate.code).toBe('worker_questions');
-    expect(gate.message).toContain('cez message reply');
+    expect(gate.message).toContain('hsq message reply');
     expect(gate.message).not.toMatch(/worker (?:reply|inbox)/);
     if (count === 1) {
-      expect(gate.message).toContain(`cez message reply ${questions[0]!.workerId}`);
+      expect(gate.message).toContain(`hsq message reply ${questions[0]!.workerId}`);
       expect(gate.message).toContain(`--request-id ${questions[0]!.messageId}`);
     } else {
-      expect(gate.message).toContain('cez message inbox');
+      expect(gate.message).toContain('hsq message inbox');
       expect(gate.message).toContain('--request-id <question-id>');
     }
   });

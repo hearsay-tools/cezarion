@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import * as clack from '@clack/prompts';
 import { CANCEL, PreflightError, type Cancellable, type SpinnerHandle, type Ui } from './types.ts';
 import { StepAborted } from './steps.ts';
@@ -49,7 +50,7 @@ export function createClackUi(backend: PromptBackend = realBackend): Ui {
   // tests, which have no TTY.)
   if (backend === realBackend && (!process.stdin.isTTY || !process.stdout.isTTY)) {
     throw new PreflightError(
-      'this terminal is not interactive — re-run from a TTY, or pass --yes (or CEZ_DRY_RUN=1) for non-interactive mode',
+      `this terminal is not interactive — re-run from a TTY, or pass --yes (or ${productIdentity().envPrefix}DRY_RUN=1) for non-interactive mode`,
     );
   }
   const wrapValidate = (validate?: (v: string) => string | undefined) =>

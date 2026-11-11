@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
@@ -115,7 +116,7 @@ describe('discoverCockpit', () => {
     const error = await discoverCockpit({ repoDir: repo, ports: [port, 1] }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(TaskCliError);
     expect((error as TaskCliError).exitCode).toBe(2);
-    expect((error as TaskCliError).body).toMatchObject({ code: 'no-cockpit', hint: `start the cockpit in ${repo} with: cez` });
+    expect((error as TaskCliError).body).toMatchObject({ code: 'no-cockpit', hint: `start the cockpit in ${repo} with: ${productIdentity().command}` });
   });
 
   it('with --url and no root match, uses the boot project', async () => {

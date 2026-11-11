@@ -10,6 +10,7 @@ import {
   __holdFetchForTests,
   __pauseAfterCachedListForTests,
   bareDirFor,
+  ensureBareClone,
   getTeamSkillsCached,
   isPinnedSha,
   lastFetchStampPath,
@@ -391,5 +392,18 @@ describe('team skills from several sources (#1494)', () => {
     const shared = (await discoverSkills(off.repoRoot, undefined, testHome())).filter((skill) => skill.name === 'shared');
     expect(shared).toHaveLength(1);
     expect(shared[0]).toMatchObject({ body: 'B-SHARED', team: { repo: off.b } });
+  });
+});
+
+describe('the unsafe-source warning', () => {
+  it('names the project config in both folders, since one clone cache serves every project', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(ensureBareClone(`--upload-pack=touch-${randomUUID()}`, testHome())).rejects.toThrow('refusing unsafe skills repo remote');
+      expect(warn).toHaveBeenCalledOnce();
+      const message = String(warn.mock.calls[0]![0]);
+      expect(message).toContain(`Check "skillsRepos" in the project's config.json (in .ai/squawk/, or .ai/cezar/ before the project moves)`);
+      expect(message).not.toContain('.ai/cezar/config.json');
+    } finally { warn.mockRestore(); }
   });
 });

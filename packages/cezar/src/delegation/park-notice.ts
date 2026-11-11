@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 import { createHash } from 'node:crypto';
 import type { ConversationMessage, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
@@ -64,7 +65,7 @@ export function formatParkNoticeText(input: { workerRunId: string; waitId: strin
     `Cezar notice: your worker ${input.workerRunId} parked before finishing. Your wait ${input.waitId} stays open; this message closes no wait.`,
     open.length ? `It waits on: ${open.map(describeWait).join('; ')}.` : 'It has no open wait: it waits for a message from you.',
     ...(excerpt === undefined ? [] : ['Its last message:', excerpt]),
-    `Check it with cez worker inspect ${input.workerRunId}, or instruct it with cez message request ${input.workerRunId} '<instruction>' --id <new-message-UUID>.`,
+    commandText(`Check it with cez worker inspect ${input.workerRunId}, or instruct it with cez message request ${input.workerRunId} '<instruction>' --id <new-message-UUID>.`),
   ].join('\n');
 }
 

@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import { transitionTurnBoundary } from './run/turn-boundary.ts';
 import type { CezarDoneAnswer, ConversationMessage } from '@open-mercato/cezar-contract';
 import { WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
@@ -23,8 +24,8 @@ export function rootCompletionRefusal({ questions, blockers, requests, incomingR
   // `workers` still lists each worker.
   const fit = (full: string, general: string) => full.length <= WAIT_MESSAGE_MAX ? full : general;
   if (questions.length) {
-    return { code: 'worker_questions', message: fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`cez message reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
-      `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`cez message inbox\` shows each question. Answer each (\`cez message reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
+    return { code: 'worker_questions', message: fit(commandText(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`cez message reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`),
+      commandText(`Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`cez message inbox\` shows each question. Answer each (\`cez message reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`)),
     workers: questions.map(q => ({ worker_id: q.workerId, reason: 'question' })), liveWorkerIds: [] };
   }
   const live = blockers.filter(b => b.reason === 'outstanding').map(b => b.workerId);
@@ -74,14 +75,14 @@ export function openCompletionRequests(store: RunStore, runId: string) {
 }
 
 export function sentRequestInstructions(requests: ConversationMessage[]): string {
-  return `Requests are still open: ${requests.map(request => `${request.id} to ${request.recipientRunId} (deadline ${request.deadline})`).join(', ')}. Wait with \`cez message wait --request <UUID>\`, then end your turn, or cancel a request you no longer need with \`cez message cancel-request <UUID>\`.`;
+  return commandText(`Requests are still open: ${requests.map(request => `${request.id} to ${request.recipientRunId} (deadline ${request.deadline})`).join(', ')}. Wait with \`cez message wait --request <UUID>\`, then end your turn, or cancel a request you no longer need with \`cez message cancel-request <UUID>\`.`);
 }
 
 /** As with worker refusals, bound the text while the gate retains every obligation. */
 export function incomingRequestInstructions(requests: ConversationMessage[]): string {
   const shown = requests.slice(0, 40);
   const omitted = requests.length - shown.length;
-  return `Requests are unanswered: ${shown.map(request => `${request.id} from ${request.senderRunId}`).join(', ')}. ${omitted ? `${omitted} more incoming requests omitted. ` : ''}Reply to each (a short refusal counts), or call cezar_done again to finish without replying. Read history with \`cez message conversation <sender>\`.`;
+  return `Requests are unanswered: ${shown.map(request => `${request.id} from ${request.senderRunId}`).join(', ')}. ${omitted ? `${omitted} more incoming requests omitted. ` : ''}Reply to each (a short refusal counts), or call cezar_done again to finish without replying. ${commandText('Read history with `cez message conversation <sender>`.')}`;
 }
 
 /** Terminal publication retires the accepted Finish intent in the same run write. */

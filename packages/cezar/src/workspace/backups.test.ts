@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { Home } from '../home/home.ts';
 import { homeFileLocation } from '../home/file-location.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
@@ -160,7 +161,7 @@ it.each(['config.json', 'agent-accounts.json'] as const)('warns when restoring %
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
   expect(await runBackupCommand(['restore', file, '--at', listBackups(file, testHome())[0]!.time], process.env, testHome())).toBe(0);
-  expect(warning).toHaveBeenCalledWith(`[cez] restore dropped 1 invalid ${key} entries from the snapshot`);
+  expect(warning).toHaveBeenCalledWith(`${logPrefix()} restore dropped 1 invalid ${key} entries from the snapshot`);
   expect(JSON.parse(readFileSync(homeFileLocation(testHome(), file).path, 'utf8')).future).toBe('preserved');
 });
 
