@@ -20,7 +20,7 @@ const MANIFEST = [
   'packages/contract/package.json',
   'packages/api-client/package.json',
   'packages/web/package.json',
-  `${productIdentity().npmAliasDirectory}/package.json`,
+  ...(productIdentity().npmAliasDirectory === null ? [] : [`${productIdentity().npmAliasDirectory}/package.json`]),
   'pnpm-lock.yaml',
 ];
 
