@@ -163,8 +163,14 @@ revert bot.
 
 The release design of hearsay-tools/cezarion#3212 stays: a release candidate on `next`,
 tests of the published candidate, promotion to `latest`, rollback by a patch release, and
-nightly as the rehearsal. One change: its candidate is the newest commit on `main` whose
-`ci.yml` push run passed, because no `main-verify` status exists in this plan.
+nightly as the rehearsal. Two changes, because this plan has no `main-verify.yml`
+(hearsay-tools/cezarion#3209):
+
+- On `main`, the candidate is the newest commit whose `ci.yml` push run passed.
+- On a `release/**` branch, no queue verified the head, so the release runs the full suite
+  on it first. Phase 3 builds that suite as one reusable workflow that `release.yml`
+  calls, from the jobs `ci.yml` runs today. It is the part of hearsay-tools/cezarion#3209
+  that hearsay-tools/cezarion#3212 needs.
 
 ### Coverage
 
@@ -200,7 +206,7 @@ Each row becomes one issue.
 | --- | --- | --- | --- |
 | 1 | Local gate (`npm run prepr`, 2-minute bound, shorter duties; scope of hearsay-tools/cezarion#3216 without the lane); PR stays ready; auto-merge armed after the review and turned off before a later push; queue rerun of failed files; the trusted flake reporter; a shard that reran publishes no Squeal parts | days | Owner actions 1, 2 |
 | 2 | Selected tests on the PR; 8 + 8 shards for the queue and the full fallback; no queue reuse of PR suites; Squeal shard pattern and test; the 60-minute mention; the Squeal ref warning | about 1 week | |
-| 3 | Release: hearsay-tools/cezarion#3212 with the candidate rule of § Release | as specified there | Owner actions of that issue |
+| 3 | Release: hearsay-tools/cezarion#3212 with the candidate rules of § Release, and the reusable full-suite workflow for `release/**` | as specified there, plus that workflow | Owner actions of that issue |
 | 4 | Optional: verification after the merge (hearsay-tools/cezarion#3209 to hearsay-tools/cezarion#3211), only if phase 2 data shows the queue is still the slowest step | | A change to this spec |
 
 Of the issues filed for hearsay-tools/cezarion#3217, hearsay-tools/cezarion#3216 and
