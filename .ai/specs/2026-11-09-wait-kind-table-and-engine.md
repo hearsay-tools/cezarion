@@ -460,7 +460,7 @@ request migrates every call that 3.4b's check would fail, by the one rule in its
 | `workflows/waits-subagents-parity-cells.testkit.ts` | `:110` |
 | `workflows/worker-destroy-orphaned-generation.test.ts` | `:319` |
 | `workflows/worker-parent-attention.testkit.ts` | `:204` |
-| `workflows/worker-wait-core.testkit.ts` | `:374` |
+| `workflows/worker-wait-core.testkit.ts` | `:321` |
 | `workflows/worker-wait-disposal.test.ts` | `:67, :68` |
 | `workflows/worker-wait-settlement.test.ts` | `:57` |
 | `workflows/worker-wait-terminal-ordering.test.ts` | `:125` |
