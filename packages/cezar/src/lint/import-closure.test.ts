@@ -22,6 +22,12 @@ describe('runtimeImports', () => {
     ['class O {\n  import(name: string): string { return name; }\n}', []],
     ["const p = ready ? await import('./p.ts') : undefined;", ['./p.ts']],
     ["import('./q.ts');\n{ import('./r.ts'); }", ['./q.ts', './r.ts']],
+    ["const s = { ...import('./s.ts') };", ['./s.ts']],
+    ["import('./t.ts')\n{ }", ['./t.ts']],
+    // TypeScript erases a type query (hearsay-tools/cezarion#3255).
+    ["export type U = import('./u.ts').U;", []],
+    ["let v: import('./v.ts').V;", []],
+    ["export type * from './w.ts';", []],
   ])('reads %s', (source, expected) => {
     expect(runtimeImports(source)).toEqual(expected);
   });

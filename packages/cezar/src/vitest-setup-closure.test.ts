@@ -40,7 +40,7 @@ function setupClosure(): { modules: string[]; packages: string[] } {
   const visit = (path: string): void => {
     if (modules.has(path)) return;
     modules.add(path);
-    for (const specifier of runtimeImports(readFileSync(path, 'utf8'))) {
+    for (const specifier of runtimeImports(readFileSync(path, 'utf8'), path)) {
       const local = resolveLocal(path, specifier);
       if (local) visit(local);
       else packages.add(specifier);

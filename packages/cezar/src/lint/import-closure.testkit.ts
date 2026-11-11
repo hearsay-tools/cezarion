@@ -1,60 +1,58 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { blank } from './blank.ts';
+import { parse } from '@babel/parser';
 
-/** The literal a dynamic `import(` at `start` names, or an error naming the call it cannot read. */
-function dynamicSpecifier(source: string, start: number): string {
-  const quote = source[start];
-  const end = quote === "'" || quote === '"' || quote === '`' ? source.indexOf(quote, start + 1) : -1;
-  const specifier = end < 0 ? undefined : source.slice(start + 1, end);
-  // A literal is the whole argument: no `${…}` in a template, and nothing but `)` or the
-  // options argument after it.
-  if (specifier !== undefined && !specifier.includes('${') && /^\s*[),]/.test(source.slice(end + 1))) return specifier;
-  const call = source.slice(source.lastIndexOf('import', start), source.indexOf(')', start) + 1);
-  throw new Error(`a runtime import names no literal module, so its closure cannot be walked: ${call}`);
+type Node = { type: string; start?: number | null; end?: number | null; [key: string]: unknown };
+
+/** The module a dynamic import's argument names, when it is one string or one plain template. */
+function literalSpecifier(argument: Node | undefined): string | undefined {
+  if (argument?.type === 'StringLiteral') return argument.value as string;
+  if (argument?.type !== 'TemplateLiteral' || (argument.expressions as unknown[]).length > 0) return undefined;
+  return ((argument.quasis as Array<{ value: { cooked: string } }>)[0]!).value.cooked;
 }
 
 /**
- * Whether the `import(` at `at` in the blanked `code` is the import keyword: a property call
- * (`loader.import(x)`, `loader?.import(x)`) and a method definition (`import(x) { … }`) are not.
+ * Every module specifier `source` imports for its values, read from its syntax tree: value
+ * `import` and `export … from` declarations, and `import()` expressions. TypeScript erases
+ * type-only imports and `import('…').T` type queries, so they are not counted. A dynamic import
+ * whose argument is not one literal throws: a closure pin that skipped it would fail open.
+ * `file` picks the JSX grammar for a `.jsx` or `.tsx` source.
  */
-function isImportCall(code: string, at: number, argStart: number): boolean {
-  if (/\.\s*$/.test(code.slice(0, at))) return false;
-  let depth = 1;
-  let end = argStart;
-  while (end < code.length && depth > 0) {
-    if (code[end] === '(') depth++;
-    else if (code[end] === ')') depth--;
-    end++;
-  }
-  // A method's parameter list is followed by its body, or by a TypeScript return type where the
-  // method starts a member. A `:` after a call is a ternary or object value: `c ? import('a') : b`.
-  const after = code.slice(end);
-  if (/^\s*\{/.test(after)) return false;
-  return !(/^\s*:/.test(after) && /(?:^|[{;},*]|\b(?:async|static|get|set))\s*$/.test(code.slice(0, at)));
-}
-
-/**
- * Every module specifier `source` imports for its values; type-only imports are erased. A dynamic
- * `import()` whose specifier is not one literal throws: a closure pin that skipped it would fail
- * open.
- */
-export function runtimeImports(source: string): string[] {
-  const code = blank(source);
+export function runtimeImports(source: string, file = 'module.ts'): string[] {
+  const ast = parse(source, {
+    sourceType: 'module',
+    plugins: ['typescript', ...(/\.[cm]?[jt]sx$/.test(file) ? ['jsx' as const] : [])],
+  }) as unknown as Node;
   const found: string[] = [];
-  // `blank` empties strings and comments, so a match is code; the specifier is read from the source.
-  for (const match of code.matchAll(/\b(?:import|export)\s+(type\s+)?(?:[^'"`;]*?\bfrom\s*)?(['"])|\bimport\s*\(\s*/g)) {
-    if (match[1]) continue;
-    const start = match.index + match[0].length;
-    if (match[2]) found.push(source.slice(start, source.indexOf(source[start - 1]!, start)));
-    else if (isImportCall(code, match.index, start)) found.push(dynamicSpecifier(source, start));
-  }
+  const visit = (node: Node): void => {
+    if (node.type === 'TSImportType') return;
+    if (node.type === 'ImportDeclaration' && node.importKind !== 'type') found.push((node.source as Node).value as string);
+    if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.source && node.exportKind !== 'type') {
+      found.push((node.source as Node).value as string);
+    }
+    const argument = node.type === 'ImportExpression' ? node.source as Node
+      : node.type === 'CallExpression' && (node.callee as Node).type === 'Import' ? (node.arguments as Node[])[0] : undefined;
+    if (node.type === 'ImportExpression' || argument) {
+      const specifier = literalSpecifier(argument);
+      if (specifier === undefined) {
+        throw new Error(`${file}: a runtime import names no literal module, so its closure cannot be walked: ${source.slice(node.start ?? 0, node.end ?? 0)}`);
+      }
+      found.push(specifier);
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments') continue;
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (child && typeof child === 'object' && typeof (child as Node).type === 'string') visit(child as Node);
+      }
+    }
+  };
+  visit(ast);
   return found;
 }
 
 /** The relative modules `source` imports for their values; type-only imports are erased. */
-export function relativeImports(source: string): string[] {
-  return runtimeImports(source).filter(specifier => specifier.startsWith('./') || specifier.startsWith('../'));
+export function relativeImports(source: string, file?: string): string[] {
+  return runtimeImports(source, file).filter(specifier => specifier.startsWith('./') || specifier.startsWith('../'));
 }
 
 /** Every module `entry` (an absolute `.ts` path) loads at runtime through relative imports, as absolute paths. */
@@ -63,7 +61,7 @@ export function importClosure(entry: string): string[] {
   const visit = (path: string): void => {
     if (seen.has(path)) return;
     seen.add(path);
-    for (const specifier of relativeImports(readFileSync(path, 'utf8'))) {
+    for (const specifier of relativeImports(readFileSync(path, 'utf8'), path)) {
       visit(join(dirname(path), specifier).replace(/\.js$/, '.ts'));
     }
   };
