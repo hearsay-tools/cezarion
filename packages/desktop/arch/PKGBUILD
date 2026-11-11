@@ -12,7 +12,7 @@ pkgver=@VERSION@
 pkgrel=1
 pkgdesc="Desktop app for cezar, the local cockpit for AI coding agents"
 arch=('x86_64')
-url="https://github.com/hearsay-tools/cezarion"
+url="https://github.com/hearsay-tools/squawk"
 license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
 # Not a hard dependency: the shell finds Node through the login shell, so an nvm, volta or fnm
