@@ -5,13 +5,14 @@ import { COMPLETION_NUDGE_NOTE, COMPLETION_NO_REPLY_NOTE, NO_WAIT_NUDGE_REPLY_MS
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { vi, expect, onTestFinished, describe, beforeEach, afterEach } from 'vitest';
+import { vi, expect, onTestFinished, describe, beforeEach, afterEach, it as registerTest } from 'vitest';
 import { WAIT_PHASE, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { CiWaitResult, ProcessWaitResult, Wait, HumanWaitEntry, WorkerWaitEntry, ConversationMessage, RunRecord } from '@open-mercato/cezar-contract';
 import type { RunnerId, RunnerFactory } from '../core/agent-runner.ts';
 import { useRunners, runnersUnderTest } from '../core/runners-under-test.testkit.ts';
 import { ClaudeCliRunner } from '../core/claude-cli-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
+import { familyCells } from '../core/parity-classes.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { root, store, parent, until, timeline, worker, checkpoint, manager, terminal, collect, delegatingParent, spendWorkerBudget, semaphore, toolGenerationOf, useWorkerWaitFixture } from './worker-wait-core.testkit.ts';
@@ -19,6 +20,7 @@ import { fireCapturedTimer, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages, toolCall, gate, thenSay } from './waits-parity.testkit.ts';
+import { type WaitParityPart, type WaitCells, type WaitPartScope, waitPartModule, familyTest, type WaitParityFamily, type WaitFold, type WaitFoldScope, waitFoldModule, foldCells } from './waits-parity-catalog.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
@@ -404,6 +406,28 @@ export function describeWaitCells(register: () => void): void {
     afterEach(() => vi.restoreAllMocks());
     register();
   });
+}
+
+/** The describers of a part's module. A file's runner runs the part's cells where the wait family's
+ *  class runs them (core/parity-classes.testkit.ts); a family file runs one row family of them. */
+export function waitPartDescribers(part: WaitParityPart, cells: WaitCells) {
+  const describeWaitParity = (scope: WaitPartScope): void => {
+    if (scope.part !== part) throw Error(`The ${part} cells cannot run the ${scope.part} part: import ${waitPartModule(scope.part)}`);
+    const register = familyCells('waits', scope.runner, registerTest);
+    describeWaitCells(() => cells([scope.runner], scope.family ? familyTest(scope as WaitParityFamily, register) : register));
+  };
+  /** Register a strict catalog reference, so the coverage scanner can prove every leaf call. */
+  const describeWaitParityFamily = (scope: WaitParityFamily): void => describeWaitParity(scope);
+  return { describeWaitParity, describeWaitParityFamily };
+}
+
+/** The describer of a fold's module: a folded runner's file registers that fold's cells. */
+export function waitFoldDescriber(fold: WaitFold, cells: Partial<Record<WaitParityPart, WaitCells>>) {
+  return (scope: WaitFoldScope): void => {
+    if (scope.fold !== fold) throw Error(`The ${fold} fold cannot run the ${scope.fold} fold: import ${waitFoldModule(scope.fold)}`);
+    // Each row runs on the runners its class names (core/parity-classes.testkit.ts).
+    describeWaitCells(() => foldCells(scope.runner, fold, cells, registerTest));
+  };
 }
 
 export { toolResources, runnerBoundary };
