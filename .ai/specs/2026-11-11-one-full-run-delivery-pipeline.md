@@ -7,14 +7,15 @@ hearsay-tools/cezarion#3208). Implementation follows in separate issues (§ Phas
 ## Goal
 
 A successful change reaches `main` in about 15 to 20 minutes after the PR opens. Every
-merged commit still passes the full suite first, so a merged change cannot make `main` red
-through a test.
+merged commit still passes the full suite first, so a test that fails every time cannot
+reach `main`. A flaky test can: it can pass its rerun in the queue and fail in a later run
+on `main` (§ `main`).
 
 | Target | Today (median) | This plan (estimate) |
 | --- | --- | --- |
 | Agent says the code is done → PR open | 51 min | 3 to 5 min |
 | PR open → merged, clean PR that merges without the owner | 69 min (all PRs) | 15 to 20 min |
-| `main` red because of a merged test failure | rare: 4 of 402 `main` push runs red after the queue started (2026-11-01) | not possible by design |
+| `main` red because of a merged test failure | rare: 4 of 402 `main` push runs red after the queue started (2026-11-01) | not possible for a test that fails every time; a flaky test still can |
 | Release | weaker checks than a PR | the release design of hearsay-tools/cezarion#3212, unchanged |
 
 The design runs the full suite once per change, in the merge queue, and makes that run
@@ -131,7 +132,9 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
 2. A shard whose tests fail runs **the whole shard** once more, in the same job, in the
    same order. A rerun of only the failed files could pass a failure that depends on
    another file's state, so the shard passes only when the full rerun passes. Every merged
-   commit has still passed the full suite. A second failure fails the entry, as today. A
+   commit has passed the full suite in the queue. A flaky test can still pass its rerun and
+   fail later on `main`, for example when the queue proof is unavailable and `main` runs the
+   full suite again. A second failure fails the entry, as today. A
    rerun adds one shard's time, about 5 min with 8 shards (estimate).
 3. The shards keep recording Squeal shared results under `squeal ci record`
    (`docs/sdlc/ci.md` § Squeal shared results). The rerun records into a new parts
@@ -163,11 +166,12 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
 
 ### `main`
 
-`main` can still go red without a merged test failure: the calendar, the environment, or
-a gap in the queue proof. The failure reporter and the repair automation handle it, as
+`main` can still go red: from the calendar, the environment, or a flaky test that passed
+its rerun in the queue and fails in a full run on `main` (when the queue proof is
+unavailable, or in nightly). The failure reporter and the repair automation handle it, as
 today. One addition: a scheduled check mentions the owner on an open `main-ci-failure`
-summary 60 minutes after it opened. A revert would not repair these causes, so there is no
-revert bot.
+summary 60 minutes after it opened. A revert would not repair these causes: the flake
+already has a report or gets one from the repair task. So there is no revert bot.
 
 ### Release
 
