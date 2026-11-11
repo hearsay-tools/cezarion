@@ -1440,12 +1440,15 @@ Print every row with its exemptions:
 node packages/cezar/scripts/parity-rows.ts [--row <id>] [--runner <id>]
 ```
 
+`--runner` prints only the rows that the runner is exempt from, not the rows that run on it.
+
 Owners. Paths are relative to `packages/cezar/src/`.
 
-- **Rows** (`{ id, name, scenario }`): the `*_CRITERIA` tables in
+- **Rows** (`{ id, name, scenario }`): the kit modules that `KITS` in
+  `packages/cezar/scripts/parity-rows.ts` names. The largest are the `*_CRITERIA` tables in
   `core/harness-parity-core.testkit.ts`, the row lists in
-  `core/harness-parity-cells.testkit.ts` and `core/seam-contract.testkit.ts`, and
-  `WAIT_CRITERIA` in `workflows/waits-parity.testkit.ts`.
+  `core/harness-parity-rows.testkit.ts` and `WAIT_CRITERIA` in
+  `workflows/waits-parity.testkit.ts`.
 - **Cells:** `core/harness-parity-cells.testkit.ts`,
   `workflows/waits-parity-cells.testkit.ts` and the testkit of each other family.
   `PARITY_FILES` in `core/parity-classes.testkit.ts` maps every parity test file to its

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import { formatRow, parityRowIndex, renderRows, unmatchedExemptions } from '../../scripts/parity-rows.ts';
+import { formatRow, parityRowIndex, renderRows, runParityRows, unmatchedExemptions } from '../../scripts/parity-rows.ts';
 import { PARITY_ROW_ID } from './parity-classes.testkit.ts';
 
 const SRC = new URL('../', import.meta.url);
@@ -80,5 +80,15 @@ describe('the parity row index (scripts/parity-rows.ts)', () => {
     const free = index.find(row => row.exemptions.every(exemption => exemption.runner !== runner))!;
     expect(renderRows(index, { row: free.id, runner })).toEqual({ out: ['0 rows in 0 kits'] });
     expect(renderRows(index, { runner: 'no-such-runner' }).error).toMatch(/^unknown runner "no-such-runner"; the runners are /);
+  });
+
+  it('reads its arguments and reports a refused flag with the usage line', () => {
+    const exempt = index.find(row => row.exemptions.length > 0)!;
+    expect(runParityRows(['--row', exempt.id])).toEqual(renderRows(index, { row: exempt.id }));
+    for (const args of [['--row'], ['--no-such-flag'], ['stray']]) {
+      const { out, error } = runParityRows(args);
+      expect(out).toEqual([]);
+      expect(error).toMatch(/\nusage: node packages\/cezar\/scripts\/parity-rows\.ts /);
+    }
   });
 });

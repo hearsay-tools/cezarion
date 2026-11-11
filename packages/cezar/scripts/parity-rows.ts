@@ -135,9 +135,21 @@ export function renderRows(index: readonly IndexedRow[], query: RowQuery): { out
   return named.length === 0 && query.row !== undefined ? { out, error: `no kit declares row "${query.row}"` } : { out };
 }
 
+const USAGE = 'usage: node packages/cezar/scripts/parity-rows.ts [--row <id>] [--runner <id>] [--json]';
+
+/** What the command prints for its arguments. A flag `parseArgs` refuses is an error with the usage line. */
+export function runParityRows(args: readonly string[]): { out: string[]; error?: string } {
+  let query: RowQuery;
+  try {
+    query = parseArgs({ args: [...args], options: { row: { type: 'string' }, runner: { type: 'string' }, json: { type: 'boolean' } } }).values;
+  } catch (error) {
+    return { out: [], error: `${(error as Error).message}\n${USAGE}` };
+  }
+  return renderRows(parityRowIndex(), query);
+}
+
 function main(): void {
-  const { values } = parseArgs({ options: { row: { type: 'string' }, runner: { type: 'string' }, json: { type: 'boolean' } } });
-  const { out, error } = renderRows(parityRowIndex(), values);
+  const { out, error } = runParityRows(process.argv.slice(2));
   for (const line of out) console.log(line);
   if (error !== undefined) {
     console.error(error);
