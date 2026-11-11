@@ -827,7 +827,7 @@ prove frame and event ordering, not OS cleanup.
 
 | Case | Current file and exact test/criterion | Evaluated seam coverage (rejected) |
 |---|---|---|
-| Clean completion | core/harness-parity-cells.testkit.ts S1 `terminates with exactly one v1 done, and it is the last event` | In-process plus real wire smoke |
+| Clean completion | core/harness-parity-seam-tier.testkit.ts S1 `terminates with exactly one v1 done, and it is the last event` | In-process plus real wire smoke |
 | Terminal signal after content | Same S2 `ends the turn on its own terminal signal, after the last content event` | In-process plus real smoke |
 | Clean exit without result | core/cursor-print-runner.test.ts `fails a clean process exit without a native result frame` | Existing non-parity test |
 | Boundary waits for print exit | Same `waits for process exit before it emits the v1 turn boundary` | Existing non-parity test |
