@@ -2109,6 +2109,20 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         }
       });
 
+      it('every repository path the protocol names exists', () => {
+        // A backticked token is a repository path when it has a directory, a source or doc
+        // extension and plain path characters only: no wildcard, `<placeholder>`, `{a,b}` or space.
+        // It resolves from the repository root or from `packages/cezar/src/`.
+        const repositoryPath = /^[\w.@-]+(?:\/[\w.@-]+)+\.(?:[cm]?[jt]s|tsx|md)$/;
+        const root = new URL('../../../../', import.meta.url);
+        const prose = readFileSync(new URL('AGENT_PROTOCOL.md', root), 'utf8').replace(/^```[\s\S]*?^```/gm, '');
+        const named = new Set([...prose.matchAll(/`([^`\n]+)`/g)].map(match => match[1]!)
+          .filter(token => repositoryPath.test(token) && !token.split('/').includes('..')));
+        expect(named.size).toBeGreaterThan(0);
+        const missing = [...named].filter(path => !['', 'packages/cezar/src/'].some(base => existsSync(new URL(base + path, root))));
+        expect(missing.sort()).toEqual([]);
+      });
+
       it('runs every runner\'s cells from its own file', () => {
         const routes = Object.values(HARNESS_PARITY_GROUPS).flat();
         expect([...routes].sort()).toEqual([...registeredGroups].sort());
