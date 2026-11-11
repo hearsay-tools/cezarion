@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type Wait } from '@open-mercato/cezar-contract/waits';
 
-import { controlledWire, manager, parent, root, restart, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, restart, semaphore, store, until, useWorkerWaitFixture } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 

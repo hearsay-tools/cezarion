@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
-import { controlledWire, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait-claude.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.

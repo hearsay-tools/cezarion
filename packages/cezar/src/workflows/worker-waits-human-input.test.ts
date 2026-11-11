@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunStore } from '../runs/store.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { manager, parent, restart, root, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 import { handlers, entryOf, settledOf } from './worker-waits-shared.testkit.ts';
 
