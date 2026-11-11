@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { perRunnerOptionalStrings } from './per-runner-optional-strings.ts';
 import { effortLevelSchema } from './effort.ts';
-import { type Runner, runnerSchema } from './health.ts';
+import { type Runner, runnerSchema } from './runner.ts';
 import { teamSkillRefSchema } from './team-skill-ref.ts';
 
 /**
@@ -520,6 +520,17 @@ export const runnerModelCatalogResponseSchema = z.object({
   reason: z.string().optional(),
 });
 export type RunnerModelCatalogResponse = z.infer<typeof runnerModelCatalogResponseSchema>;
+
+/** The models a spawn could pin instead of an unknown one, in a delegation error. It lives here,
+ *  beside its parts, so `delegation.ts` does not load `discovery.ts` (hearsay-tools/cezarion#3241);
+ *  `discovery.ts` re-exports it. */
+export const modelChoicesSchema = z.object({
+  runner: modelDiscoveryRunnerSchema,
+  requestedModel: z.string(),
+  availableModels: z.array(runnerModelOptionSchema),
+  otherRunners: z.array(modelDiscoveryRunnerSchema),
+});
+export type ModelChoices = z.infer<typeof modelChoicesSchema>;
 
 // ---- "Open in…" targets (`GET /api/v1/open-targets`) -----------------------------------------
 

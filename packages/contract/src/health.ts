@@ -1,17 +1,10 @@
 import { z } from 'zod';
 import { applicationUpdateStateSchema } from './application-update.ts';
+import { repoInfoSchema } from './repo-info.ts';
+import { runnerSchema } from './runner.ts';
 
-/** The agent backends a run can be dispatched to. */
-export const runnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
-export type Runner = z.infer<typeof runnerSchema>;
-
-/** Git facts about the project root, or `null` when it is not a repository. */
-export const repoInfoSchema = z.object({
-  root: z.string(),
-  branch: z.string(),
-  remote: z.string().optional(),
-});
-export type RepoInfo = z.infer<typeof repoInfoSchema>;
+export { runnerSchema, type Runner } from './runner.ts';
+export { repoInfoSchema, type RepoInfo } from './repo-info.ts';
 
 /** One probed CLI behind the Tools menu. */
 export const backendCheckSchema = z.object({

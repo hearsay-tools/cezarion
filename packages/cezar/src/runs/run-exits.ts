@@ -16,7 +16,7 @@
  * `console.warn` and nothing is recorded.
  */
 import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-contract';
-import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
+import { isUsageLimitHold } from '@open-mercato/cezar-contract/usage-limit-hold';
 
 /** The fields a write that applies a run exit patches beside it: never the status, which the exit
  *  writes (`RunStore.move`). */

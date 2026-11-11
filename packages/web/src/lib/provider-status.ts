@@ -1,5 +1,5 @@
 import type { ProviderStatus, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 
 const RUNNER_ORDER: readonly Runner[] = runnerSchema.options
 const PROVIDER_STATES = new Set(['connected', 'disconnected', 'not-installed', 'unknown'])
