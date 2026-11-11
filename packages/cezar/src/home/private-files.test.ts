@@ -1,14 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { privateDirectory, protectPrivatePath, replacePrivate } from './private-files.ts';
 
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>();
-  return { ...fs, renameSync: vi.fn(fs.renameSync), statSync: vi.fn(fs.statSync) };
+  return { ...fs, mkdirSync: vi.fn(fs.mkdirSync), renameSync: vi.fn(fs.renameSync), statSync: vi.fn(fs.statSync) };
 });
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); });
 
@@ -122,4 +122,37 @@ it.each(['\u2018', '\u2019', '\u201A', '\u201B'])('keeps a typographic apostroph
   protectPrivatePath(path, true, { platform: 'win32', layout: 'split' });
   expect(execFileSync).toHaveBeenCalledTimes(1);
   expect(vi.mocked(execFileSync).mock.calls[0]?.[1]?.[3]).toContain(`Set-Acl -LiteralPath 'C:\\Users\\O${quote}${quote}Brien\\private' -AclObject $acl;`);
+});
+
+/** The Set-Acl targets of the mocked spawns, in order. */
+function aclTargets(): string[] {
+  return vi.mocked(execFileSync).mock.calls.map(([, args]) => /Set-Acl -LiteralPath '(.*)' -AclObject/.exec(String(args?.[3]))?.[1] ?? '');
+}
+
+describe('a new private directory chain on Windows', () => {
+  const win = { platform: 'win32', layout: 'split' } as const;
+  let root: string;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-private-chain-')));
+    const real = vi.mocked(mkdirSync).getMockImplementation();
+    // Windows returns the first created path in another form; the walk must not depend on it.
+    vi.mocked(mkdirSync).mockImplementation(((path: string, options: unknown) => {
+      real?.(path, options as never);
+      return 'C:\\Foreign\\Form';
+    }) as never);
+  });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('protects every directory it creates and never joins a foreign path segment', () => {
+    privateDirectory(join(root, 'a', 'b', 'c'), win);
+    expect(aclTargets()).toEqual([join(root, 'a'), join(root, 'a', 'b'), join(root, 'a', 'b', 'c')]);
+    expect(existsSync(join(root, 'a', 'b', 'c'))).toBe(true);
+  });
+
+  it('protects only the part of the chain that did not exist', () => {
+    mkdirSync(join(root, 'a'));
+    vi.mocked(execFileSync).mockClear();
+    privateDirectory(join(root, 'a', 'b', 'c'), win);
+    expect(aclTargets()).toEqual([join(root, 'a', 'b'), join(root, 'a', 'b', 'c')]);
+  });
 });
