@@ -584,6 +584,47 @@ The runner selection and three updated split-suite weights were measured togethe
 
 The release workflow's verification job also uses `blacksmith-4vcpu-ubuntu-2404`, with its existing commands and default Vitest worker policy. Two successful matched release-verification pairs reduced median queue-inclusive job time from 438 to 354.5 seconds; one failure on each provider is retained in the report. Stable and snapshot npm publishing remain on GitHub-hosted runners.
 
+### Optional owner-only LXC routing
+
+The four Vitest and four Cockpit browser jobs can use the `cezarion-lxc`
+runner group and label. Repository variables `CEZARION_LXC_VITEST` and
+`CEZARION_LXC_BROWSER` independently enable each route when set to `true`.
+Both ship disabled. Leave them unset until the corresponding four-shard
+workload passes, coverage paths are verified where applicable, and the pool
+controller has demonstrated replacement and restart recovery.
+
+The existing hosted **Resolve immutable PR test inputs** job retains its SHA
+proof and then reads the live PR for LXC eligibility. It admits only open PRs
+authored by `wjarka` (immutable user ID `1118683`), with both repositories ID
+`1352758052`, targeting `main`, at the event's exact head. The event must be
+`pull_request_target` from this repository's protected
+`.github/workflows/ci.yml@refs/heads/main`. Labels and dispatcher identity do
+not grant admission. No PR code runs in this hosted admission step.
+
+| Case | Runner route |
+| --- | --- |
+| Variables absent, false, or misspelled | Existing hosted runner |
+| Corresponding variable `true`, eligible live owner PR | `cezarion-lxc` group and label |
+| Other author, fork (including owner's fork), stale head or closed PR | Existing hosted runner |
+| Missing live PR evidence or failed admission read | Existing hosted runner |
+| Dispatch, main push, merge queue, or off-main workflow | Existing hosted runner |
+| Enabled eligible route, but no LXC runner available | Queued for the LXC pool; disable the variable and start fresh CI to revert |
+
+Before enabling either variable, the organization runner group must allow
+only this public repository and only
+`hearsay-tools/cezarion/.github/workflows/ci.yml@refs/heads/main`. Keep the manual
+canary group separate. A group restriction enforces workflow provenance;
+the live author/head check enforces admission. Runner labels alone enforce
+neither. Only register disposable runners restored from the clean image,
+with one-job JIT credentials and a separate expiring proxy session per slot.
+The image must provide Chrome on `PATH`, a C compiler and four CPU cores;
+JIT work folders use `/home/runner/work` to match the hosted coverage root.
+
+Routing does not change immutable checkout selection, review dependencies,
+test commands, timeouts, required check names, coverage merging or queue
+attestations. Vitest keeps `ubuntu-24.04` as its hosted route and browser jobs
+keep `ubuntu-latest`. The weekly mutation workflow keeps its existing runner.
+
 ### Proving a `ci.yml` change
 
 A PR that edits `ci.yml`, or a workflow it calls, does not run its own definition.

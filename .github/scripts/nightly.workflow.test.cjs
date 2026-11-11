@@ -20,7 +20,12 @@ test('nightly shards the suite exactly as ci.yml does', () => {
   assert.equal(shards.strategy['fail-fast'], false);
   assert.equal(suite(shards), 'npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4');
   assert.deepEqual(shards.strategy.matrix.shard, ci.jobs.vitest.strategy.matrix.shard);
-  assert.equal(shards['runs-on'], ci.jobs.vitest['runs-on']);
+  // Nightly follows CI's main-push route, which has no owner-PR admission.
+  const route = ci.jobs.vitest['runs-on'].slice(3, -2).replace(/needs\.([\w-]+)/g, "needs['$1']");
+  const hosted = require('node:vm').runInNewContext(route, {
+    vars: { CEZARION_LXC_VITEST: 'true' }, needs: { 'pr-test-input': { outputs: {} } }, fromJSON: JSON.parse,
+  });
+  assert.equal(shards['runs-on'], hosted);
   // Nightly keeps the non-coverage path: same shards, command and 15-minute bound.
   assert.equal(shards['timeout-minutes'], 15);
   assert.equal(suite(shards), suite(ci.jobs.vitest).replace(/ \$\{\{.*?\}\}/g, ''));

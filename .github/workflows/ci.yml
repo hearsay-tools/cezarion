@@ -728,7 +728,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [ 1, 2, 3, 4 ]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON(vars.CEZARION_LXC_VITEST == 'true' && needs.pr-test-input.outputs.lxc == 'true' && '{"group":"cezarion-lxc","labels":"cezarion-lxc"}' || '"ubuntu-24.04"') }}
     # Coverage now shares the required test run on PRs and dispatches. Keep the
     # previous coverage job bound there; main and merge groups get 20 minutes.
     timeout-minutes: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 25 || 20 }}
@@ -1243,7 +1243,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [ 1, 2, 3, 4 ]
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CEZARION_LXC_BROWSER == 'true' && needs.pr-test-input.outputs.lxc == 'true' && '{"group":"cezarion-lxc","labels":"cezarion-lxc"}' || '"ubuntu-latest"') }}
     timeout-minutes: 30
 
     permissions:
@@ -1635,6 +1635,7 @@ jobs:
     outputs:
       sha: ${{ steps.input.outputs.sha }}
       reusable: ${{ steps.input.outputs.reusable }}
+      lxc: ${{ steps.input.outputs.lxc }}
     steps:
       - name: Check out trusted workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -1652,8 +1653,15 @@ jobs:
               workflowSha: process.env.WORKFLOW_SHA, headRepository: context.payload.pull_request.head.repo.full_name });
             core.setOutput('sha', input.sha);
             core.setOutput('reusable', String(input.reusable));
+            const { lxcRunnerEligible } = require('./.github/scripts/lxc-runner-eligibility.cjs');
+            core.setOutput('lxc', String(await lxcRunnerEligible({ github, ...context.repo,
+              eventName: context.eventName, ref: context.ref, repositoryId: context.payload.repository?.id,
+              workflowRef: process.env.WORKFLOW_REF, refProtected: process.env.REF_PROTECTED === 'true',
+              pullNumber: context.payload.pull_request.number, head: context.payload.pull_request.head.sha })));
         env:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          REF_PROTECTED: ${{ github.ref_protected }}
 
   pr-test-attestation:
     name: Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}

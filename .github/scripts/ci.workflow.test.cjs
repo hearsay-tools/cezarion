@@ -98,7 +98,10 @@ test('pull request CI runs npm run test:e2e as a Cockpit browser E2E job', () =>
   assert.equal(job.name, 'Cockpit browser E2E shard ${{ matrix.shard }}/4');
   assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4]);
   assert.equal(job.strategy['fail-fast'], false);
-  assert.equal(job['runs-on'], 'ubuntu-latest');
+  const route = job['runs-on'].slice(3, -2).replace(/needs\.([\w-]+)/g, "needs['$1']");
+  assert.equal(require('node:vm').runInNewContext(route, {
+    vars: {}, needs: { 'pr-test-input': { outputs: {} } }, fromJSON: JSON.parse,
+  }), 'ubuntu-latest');
   const setup = job.steps.find((step) => step.name === 'Set up Node.js');
   assert.equal(setup.with['node-version'], 'lts/*');
   assert.equal(setup.with['check-latest'], true);
