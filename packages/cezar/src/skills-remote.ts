@@ -123,7 +123,7 @@ function warnUnsafeRemoteOnce(repo: string): void {
   warnedUnsafeRemotes.add(repo);
   console.warn(
     `${logPrefix()} ignoring skills repo ${JSON.stringify(repo)} — not an accepted source shape ` +
-      `(${SKILLS_REPO_FORMATS}). Check "skillsRepos" in .ai/cezar/config.json, or remove it on the Skills page.`,
+      `(${SKILLS_REPO_FORMATS}). Check "skillsRepos" in the project's config.json (in .ai/squawk/, or .ai/cezar/ before the project moves), or remove it on the Skills page.`,
   );
 }
 
