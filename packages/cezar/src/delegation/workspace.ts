@@ -6,7 +6,7 @@ import { entryExists as exists } from './entry-exists.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize } from 'node:path';
 import { z } from 'zod';
