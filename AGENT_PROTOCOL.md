@@ -1516,7 +1516,7 @@ the checks return and finish. Recovery covers the same wait without a live sessi
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools-wait-cancel.test.ts` and `core/ci-tools-ask-done.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from semantic part files in `WAIT_PARITY_FILES`. Cursor mixed rows and Cursor/OpenCode U27 turn-end entry rows use the smaller files in `WAIT_PARITY_FAMILIES`; the original entries files retain the refusal rows. The criteria and exactly-once full-row guards run in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each settled outcome's word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from semantic part files in `WAIT_PARITY_FILES`. Cursor mixed, asks and closed rows and Cursor U27 turn-end entry rows use the smaller files in `WAIT_PARITY_FAMILIES`; the original part files retain one family each (the entries file the refusal rows). Runners outside the shared set run their every-runner rows from the `WAIT_FOLDS` group files. The criteria and exactly-once full-row guards run in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each settled outcome's word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 A Continue's registration for the same PR returns the open CI wait, a restart recovery keeps
 it, and each session gets its own tool descriptor name.
@@ -1566,11 +1566,12 @@ A third U14 case Stops the held run at the bound before any Continue, with the r
 a still-open one: both are in `lastWaits` as `cancelled`, no wait, backoff, admission retry,
 delivery count or queued continuation is left, the run stays `failed` with the discard note, and
 a later Continue is a plain continuation that delivers neither. Scenario cases that need one wire live in
-`workflows/waits-wake.test.ts`: a CI result beside a pending `cezar_ask` question (U3b,
-Claude and Codex), a Codex native question, an idle-closed question, two waits in one
-submission, the footer and the monitoring pool, and on the Claude wire the delivery bound's
-backoff (each retry waits for it, and Continue clears it), the usage-limit failure that is
-not counted, a failed run's held result across a restart and Stop, and Stop on a
+the `workflows/waits-wake-*.test.ts` files. `waits-wake-questions.test.ts` holds a CI result beside a
+pending `cezar_ask` question (U3b, Claude and Codex), a Codex native question, an idle-closed
+question and the monitoring pool; `waits-wake-budget.test.ts` holds two waits in one submission and
+the automatic-wake budget; `waits-wake-delivery.test.ts` holds the footer and, on the Claude wire,
+the delivery bound's backoff (each retry waits for it, and Continue clears it), the usage-limit
+failure that is not counted, a failed run's held result across a restart and Stop, and Stop on a
 usage-limited held run, which also cancels its automatic resume.
 
 Phase 2 (hearsay-tools/cezarion#1234) adds eight cells. U16 spends the automatic-wake budget to
@@ -2518,7 +2519,7 @@ cleanup continues with working files preserved.
 R69–R71 are retired (hearsay-tools/cezarion#1233). They pinned the CI withdrawal
 notice that human input used to trigger; human input no longer cancels a wait, and the
 open-waits footer that replaced the notice is pinned by U2 and the footer case of
-`workflows/waits-wake.test.ts`.
+`workflows/waits-wake-delivery.test.ts`.
 
 Monitoring turn rows (hearsay-tools/cezarion#772) live in the semantic `workflows/monitoring-turn-*.test.ts` suites
 (shared rows: `workflows/monitoring-turn-rows.testkit.ts`)
