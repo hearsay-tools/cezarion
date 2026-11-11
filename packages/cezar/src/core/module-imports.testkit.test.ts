@@ -70,5 +70,6 @@ describe('siblingImports', () => {
   it('fails closed on a load it cannot pin to one module', () => {
     expect(() => siblingImports(partFile(`import './kit-own.testkit.ts?raw';`), CELLS)).toThrow('query or a hash');
     expect(() => siblingImports(partFile(`import './kit-own.testkit.js';`), CELLS)).toThrow('another extension');
+    expect(() => siblingImports(partFile(`import './kit-own.testkit';`), CELLS)).toThrow('another extension or none');
   });
 });

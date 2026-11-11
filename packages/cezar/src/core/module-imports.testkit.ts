@@ -51,7 +51,8 @@ const SOURCE_EXTENSION = /\.[cm]?[jt]s$/;
 /** The modules in the file's own directory that the file loads and whose name `name` matches, as
  *  file names. Each relative specifier is resolved against the file first, so `././x.ts` and
  *  `../dir/x.ts` name the same module as `./x.ts`. A relative load with a query or a hash, or one
- *  that names a matching module by another extension, throws: the guard cannot tell what it loads. */
+ *  that names a matching module by another extension or by none (the resolver tries extensions), throws:
+ *  the guard cannot tell what it loads. */
 export function siblingImports(file: URL, name: RegExp): string[] {
   const path = fileURLToPath(file);
   const found: string[] = [];
@@ -63,7 +64,7 @@ export function siblingImports(file: URL, name: RegExp): string[] {
     if (dirname(targetPath) !== dirname(path)) continue;
     const module = basename(targetPath);
     if (name.test(module)) found.push(module);
-    else if (name.test(module.replace(SOURCE_EXTENSION, '.ts'))) throw new Error(`${basename(path)}: ${specifier} names a module by another extension`);
+    else if (name.test(`${module.replace(SOURCE_EXTENSION, '')}.ts`)) throw new Error(`${basename(path)}: ${specifier} names a module by another extension or none`);
   }
   return found;
 }
