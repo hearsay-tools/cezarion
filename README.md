@@ -1519,10 +1519,11 @@ only intended review material, never credentials or unrelated private files.
 
 ## Configuration (optional)
 
-Zero config is the default — everything below is opt-in via
-`.ai/cezar/config.json` (a missing or malformed file uses the defaults, a bad value
-falls back to its own default, and nothing blocks startup; the cockpit never saves
-over a file that is not valid JSON):
+Zero config is the default — everything below is opt-in via the project's
+`config.json` in `.ai/squawk/` (`.ai/cezar/` before the project moves). A missing
+or malformed file uses the defaults, a bad value falls back to its own default,
+nothing blocks startup, and the cockpit never saves over a file that is not valid
+JSON:
 
 ```jsonc
 {
@@ -1593,7 +1594,7 @@ agent's first turn, so the agent (and anything that runs beside it, such as a te
 starts in a ready tree:
 
 ```jsonc
-// .ai/cezar/config.json
+// .ai/squawk/config.json (.ai/cezar/config.json before the project moves)
 "worktreeSetup": {
   "commands": ["npm ci", "cp \"$HSQ_PROJECT_ROOT/.env\" .env"],
   "timeoutSeconds": 900 // optional, per command; default 900, max 7200

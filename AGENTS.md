@@ -1,6 +1,6 @@
 # AGENTS.md — working in this repository
 
-Squawk runs parallel coding agents through a local CLI and browser cockpit. Use `hsq`. Each task runs a workflow on one backend from `RUNNER_IDS` (`packages/cezar/src/core/agent-runner.ts`), or a mix per step, in its own git worktree; it ends at a review gate (never auto-merges) and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud. State lives under `.ai/cezar/`: one embedded SQLite run store (`runs.db`, `node:sqlite`) plus plain JSON, NDJSON and Markdown. The stack stays deliberately small: strict TypeScript (ESM, Node 24.21.0+), Hono + SSE, Zod at every boundary, YAML workflows, and a React 19 + Vite + Tailwind v4 + shadcn/ui cockpit compiled to static assets.
+Squawk runs parallel coding agents through a local CLI and browser cockpit. Use `hsq`. Each task runs a workflow on one backend from `RUNNER_IDS` (`packages/cezar/src/core/agent-runner.ts`), or a mix per step, in its own git worktree; it ends at a review gate (never auto-merges) and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud. Project state lives in `.ai/squawk/` (`.ai/cezar/` until moved): one SQLite run store (`runs.db`, `node:sqlite`) plus JSON, NDJSON and Markdown. The stack stays deliberately small: strict TypeScript (ESM, Node 24.21.0+), Hono + SSE, Zod at every boundary, YAML workflows, and a React 19 + Vite + Tailwind v4 + shadcn/ui cockpit compiled to static assets.
 
 Architecture decisions live in [docs/adr/](docs/adr/). Consult the relevant records before changing a mechanism.
 
@@ -19,9 +19,9 @@ titles and ledger fields follow
 
 ## Zero config
 
-Squawk ships no config file the user must create and no setting they must set before it works. Every capability is discovered from what is already there — the repo, the environment, `gh`, the running processes — or it degrades quietly. `.ai/cezar/config.json` is optional and every key has a working default; `.env` is never auto-loaded.
+Squawk ships no config file the user must create and no setting they must set before it works. Every capability is discovered from what is already there — the repo, the environment, `gh`, the running processes — or it degrades quietly. The project's `config.json` is optional and every key has a working default; `.env` is never auto-loaded.
 
-State may be **written**, never **required**. Project state stays in `.ai/cezar/`; user state uses the [platform roots](docs/migration.md#home-directories). Squawk rebuilds deleted state. User-authored, migrated or repaired state is configuration and needs a reason. The registry retains `config.json.bak`, so deleting only `config.json` restores it. See [migration and rollback](docs/migration.md) before resetting a home.
+State may be **written**, never **required**. User state uses the [platform roots](docs/migration.md#home-directories). Squawk rebuilds deleted state. User-authored, migrated or repaired state is configuration and needs a reason. The registry retains `config.json.bak`, so deleting only `config.json` restores it. See [migration and rollback](docs/migration.md) before resetting a home.
 
 Practical rules:
 
