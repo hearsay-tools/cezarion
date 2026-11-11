@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import type { Runner } from '@open-mercato/cezar-api-client'
-import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/runner'
 import { EFFORT_OPTIONS } from '@/routes/new-task-form'
 
 import { EnginePills, engineBody, engineRunBody, type EnginePick, type ResolvedEngine, useResolvedEngine } from './engine-pills'

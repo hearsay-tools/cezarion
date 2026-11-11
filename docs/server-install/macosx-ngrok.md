@@ -29,7 +29,7 @@ equivalent).
 ## Install
 
 ```bash
-npx hsq server-install --platform macosx-ngrok
+npx -p @hearsay-tools/squawk hsq server-install --platform macosx-ngrok
 ```
 
 ### What each step does
@@ -68,7 +68,7 @@ HTTPS URL.
 Reload the public tunnel with the standardized command:
 
 ```bash
-npx hsq server-deploy --platform macosx-ngrok
+npx -p @hearsay-tools/squawk hsq server-deploy --platform macosx-ngrok
 ```
 
 `server-deploy` restarts the Squawk cockpit and ngrok launchd agents and
@@ -80,8 +80,8 @@ one. A checkout or global-bin agent is left alone.
 To change the setup itself, the installer is idempotent:
 
 ```bash
-npx hsq server-install --platform macosx-ngrok --reconfigure autostart
-npx hsq server-install --platform macosx-ngrok --reinstall   # redo everything
+npx -p @hearsay-tools/squawk hsq server-install --platform macosx-ngrok --reconfigure autostart
+npx -p @hearsay-tools/squawk hsq server-install --platform macosx-ngrok --reinstall   # redo everything
 ```
 
 ---
@@ -89,7 +89,7 @@ npx hsq server-install --platform macosx-ngrok --reinstall   # redo everything
 ## Uninstall
 
 ```bash
-npx hsq server-uninstall --platform macosx-ngrok
+npx -p @hearsay-tools/squawk hsq server-uninstall --platform macosx-ngrok
 ```
 
 Removes the launchd plist and the tunnel config Squawk **owns**. Shared tools

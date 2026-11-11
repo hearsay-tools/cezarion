@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../../runs/store.ts';
-import { createFixtureManager, removeFixtureRepo, unused } from '../fixture-cleanup.testkit.ts';
+import { createFixtureManager, removeFixtureRepo, unused } from '../fixture-no-runner.testkit.ts';
 import { RunSettlement } from './run-settlement.ts';
 import { TrackedWork } from './tracked-work.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';

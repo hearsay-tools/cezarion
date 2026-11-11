@@ -3,7 +3,7 @@ import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/ceza
 import { expect, vi } from 'vitest';
 
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
-import { manager, parent, store, until, toolGenerationOf } from './worker-wait.testkit.ts';
+import { manager, parent, store, until, toolGenerationOf } from './worker-wait-claude.testkit.ts';
 import { timed, fireCapturedTimer, type TimedWait } from './waits.testkit.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.

@@ -5,6 +5,9 @@ import { peerWaitResultSchema, refinePeerWaitResult, workerIdsSchema, workerOutc
 import type { DelegationState, PeerWaitView, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
 import { requestOutcomeSchema, type ConversationMessage } from './conversations.ts';
 import type { RunRecord } from './runs.ts';
+import { isUsageLimitHold } from './usage-limit-hold.ts';
+
+export { isUsageLimitHold };
 
 /**
  * The wait list (spec `.ai/specs/2026-10-17-unified-waits.md`; phase 1 is
@@ -496,20 +499,6 @@ export type WaitingOn = z.infer<typeof waitingOnSchema>;
 export type WaitingOnInput = Partial<Pick<RunRecord, 'status' | 'waits' | 'autoResumeAt'>> & {
   delegation?: DelegationState | RunDelegationSummary | undefined;
 };
-
-/**
- * A usage-limit hold (hearsay-tools/cezarion#1236): a `waiting` run with a booked resume time. It
- * holds no slot and no session, so the engine does not own it; its resume or the user's Continue
- * wakes it. The one definition every reader calls (hearsay-tools/cezarion#1496). It takes the
- * record, never a bare status, and the store clears the resume time on every write that leaves
- * `waiting`, so a resume time on any other run is stale and this reads it as no hold. It narrows
- * the time only, so a caller can still settle the hold to another status.
- */
-export function isUsageLimitHold<T extends Partial<Pick<RunRecord, 'status' | 'autoResumeAt'>>>(
-  run: T,
-): run is T & { autoResumeAt: string } {
-  return run.status === 'waiting' && run.autoResumeAt !== undefined;
-}
 
 /** The requests a root sent to peer tasks, read from its own ledger: a request wait on one of them
  *  is not a wait on workers (hearsay-tools/cezarion#1995). A summary's slim delegation has none. */

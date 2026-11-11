@@ -6,7 +6,7 @@ export interface DisplayIdentity {
   rebrand: boolean
   displayName: string
   command: string
-  npmAlias: string
+  npx: string
   npmPackage: string
 }
 
@@ -17,10 +17,10 @@ export function readProductIdentity(rebrand?: boolean): DisplayIdentity {
   const args = rebrand === undefined ? [] : ['--rebrand', rebrand ? 'on' : 'off']
   const identity: DisplayIdentity = JSON.parse(execFileSync(process.execPath, [script, ...args], { encoding: 'utf8' }))
   if (typeof identity.rebrand !== 'boolean' || typeof identity.displayName !== 'string'
-    || typeof identity.command !== 'string' || typeof identity.npmAlias !== 'string' || typeof identity.npmPackage !== 'string') {
+    || typeof identity.command !== 'string' || typeof identity.npx !== 'string' || typeof identity.npmPackage !== 'string') {
     throw new Error('product-identity.mjs returned invalid display metadata')
   }
-  return { rebrand: identity.rebrand, displayName: identity.displayName, command: identity.command, npmAlias: identity.npmAlias, npmPackage: identity.npmPackage }
+  return { rebrand: identity.rebrand, displayName: identity.displayName, command: identity.command, npx: identity.npx, npmPackage: identity.npmPackage }
 }
 
 export function productIdentityPlugin(rebrand?: boolean): Plugin {

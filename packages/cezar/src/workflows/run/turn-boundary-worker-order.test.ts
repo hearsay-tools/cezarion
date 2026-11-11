@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { makeHumanWait, makeTimerWait, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { observationClock } from '../../core/observation-clock.testkit.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { boundaryOrderFixture } from './boundary-order.testkit.ts';
 import { TurnNudges } from './turn-nudges.ts';
 import { WORKER_FALLBACK_NOTE } from '../turn-end.ts';

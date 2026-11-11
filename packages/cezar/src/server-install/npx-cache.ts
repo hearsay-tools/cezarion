@@ -1,12 +1,13 @@
 import { commandText } from '../home/command.ts';
-import { NPM_LAUNCH_PACKAGES, productIdentity } from '../home/identity.ts';
+import { BINARY_NAMES, NPM_LAUNCH_PACKAGES, productIdentity } from '../home/identity.ts';
+import { REBRAND_SWITCH } from '../home/switch.ts';
 import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { StepAborted } from './steps.ts';
 import type { InstallContext } from './types.ts';
 
-const OFFICIAL_CLI_PKG = productIdentity().npmAlias;
+const OFFICIAL_CLI_PKG = productIdentity().npmAlias ?? productIdentity().npmPackage;
 
 const DEFAULT_RECONFIGURE_HINT = commandText(`  cez server-install --platform ubuntu-vps --reconfigure autostart`);
 
@@ -18,7 +19,15 @@ function npxCacheDir(): string {
   return join(base, '_npx');
 }
 
-/** The exact npx executable and requested package, including systemctl's argv[] form. */
+/** The npx arguments a service unit runs. npm refuses the unscoped name `hsq`, so the
+ *  new package runs its `hsq` binary through `-p`. */
+export function npxLaunchArgs(rebrand = REBRAND_SWITCH): string[] {
+  const identity = productIdentity(rebrand);
+  return identity.rebrand ? ['--yes', '-p', identity.npmPackage, identity.command] : ['--yes', identity.npmAlias];
+}
+
+/** The exact npx executable and requested package, including systemctl's argv[] form.
+ *  `npx [--yes] <package>` and `npx [--yes] -p <package> <binary>` name a package. */
 export function npxLaunchPackage(execStart: string): string | undefined {
   const command = execStart.match(/^\s*ExecStart=\{[^;]*;\s*argv\[\]=([^;]*)/)?.[1] ?? execStart;
   const words = [...command.matchAll(/"([^"\n]*)"|'([^'\n]*)'|([^\s]+)/g)]
@@ -26,7 +35,9 @@ export function npxLaunchPackage(execStart: string): string | undefined {
   const executable = words.shift()?.split(/[\\/]/).pop();
   if (!/^npx(?:\.cmd|\.exe)?$/.test(executable ?? '')) return;
   if (words[0] === '--yes' || words[0] === '-y') words.shift();
-  return words[0];
+  if (words[0] !== '-p' && words[0] !== '--package') return words[0];
+  // Without one of our binaries the launch is not ours: return the whole form, which names no package.
+  return BINARY_NAMES.some(name => name === words[2]) ? words[1] : words.slice(0, 3).join(' ');
 }
 
 function ownedPackageRequest(request: string | undefined): string | undefined {

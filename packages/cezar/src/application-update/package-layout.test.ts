@@ -15,7 +15,8 @@ const kinds = ['global', 'npx'] as const;
 function fixture(renamed: boolean, kind: typeof kinds[number], layout: typeof layouts[number]) {
   const root = mkdtempSync(join(tmpdir(), 'update-package-layout-')); roots.push(root);
   const identity = productIdentity(renamed);
-  const outerPackage = layout === 'direct' ? identity.npmPackage : identity.npmAlias;
+  // npm refuses the unscoped name `hsq`. A layout under it is not a published one and stays unsupported.
+  const outerPackage = layout === 'direct' ? identity.npmPackage : identity.npmAlias ?? 'hsq';
   const prefix = join(root, 'prefix'), cache = join(root, 'cache');
   const installRoot = kind === 'global' ? prefix : join(cache, '_npx', 'abc123');
   const modules = join(installRoot, kind === 'global' ? 'lib/node_modules' : 'node_modules');
@@ -28,7 +29,7 @@ function fixture(renamed: boolean, kind: typeof kinds[number], layout: typeof la
   writeFileSync(join(packageRoot, 'web/dist/index.html'), 'previous web');
   if (layout !== 'direct') {
     mkdirSync(outerRoot, { recursive: true });
-    writeFileSync(join(outerRoot, 'package.json'), JSON.stringify({ name: identity.npmAlias, version: '1.0.0', dependencies: { [identity.npmPackage]: '^1.0.0' }, bin: { hsq: 'bin.js', cez: 'bin.js' } }));
+    writeFileSync(join(outerRoot, 'package.json'), JSON.stringify({ name: outerPackage, version: '1.0.0', dependencies: { [identity.npmPackage]: '^1.0.0' }, bin: { hsq: 'bin.js', cez: 'bin.js' } }));
     writeFileSync(join(outerRoot, 'bin.js'), 'previous alias');
   }
   if (kind === 'npx') writeFileSync(join(installRoot, 'package.json'), JSON.stringify({ _npx: { packages: [outerPackage] }, dependencies: { [outerPackage]: '^1.0.0' } }));
@@ -61,7 +62,7 @@ for (const rebrand of [false, true]) for (const renamed of [false, true]) for (c
     const input = { prefix: f.options.npmPrefix, cache: f.options.npmCache, packageRoot: f.packageRoot, launchEntry: f.options.launchEntry };
     const installation = discoverInstallation(input, rebrand);
     const service = new ApplicationUpdateService({ ...f.options, rebrand });
-    if (renamed && !rebrand) {
+    if (renamed && (!rebrand || layout !== 'direct')) {
       expect(installation.kind).toBe('unsupported');
       expect(service.snapshot().supported).toBe(false);
       await expect(service.apply()).rejects.toThrow('manually');
@@ -88,9 +89,9 @@ for (const rebrand of [false, true]) for (const renamed of [false, true]) for (c
   });
 }
 
-it.skipIf(process.platform === 'win32')('preserves the new alias through real npm promotion and failure rollback without registry access', async () => {
-  const f = fixture(true, 'npx', 'hoisted');
-  const service = new ApplicationUpdateService({ ...f.options, rebrand: true });
+it.skipIf(process.platform === 'win32')('preserves the alias through real npm promotion and failure rollback without registry access', async () => {
+  const f = fixture(false, 'npx', 'hoisted');
+  const service = new ApplicationUpdateService({ ...f.options, rebrand: false });
   await service.apply(); await service.restart();
   const npm = join(f.root, 'offline-npm');
   const argsFile = join(f.root, 'args.json');
@@ -102,14 +103,14 @@ it.skipIf(process.platform === 'win32')('preserves the new alias through real np
     launch: async () => {}, verifyHealth: async () => { throw new Error('health failed'); }, reapReplacement: async () => {},
     restore: () => restoreOriginal(plan), launchPrevious: async () => { expect(readFileSync(join(f.packageRoot, 'dist/index.js'), 'utf8')).toBe('previous CLI'); },
     reportSuccess: async () => { throw new Error('must roll back'); }, reportFailure: async failed => { reported(failed); } });
-  expect(JSON.parse(readFileSync(argsFile, 'utf8')).at(-1)).toBe(`${f.identity.npmAlias}@2.0.0`);
+  expect(JSON.parse(readFileSync(argsFile, 'utf8')).at(-1)).toBe(`${f.outerPackage}@2.0.0`);
   expect(reported).toHaveBeenCalledWith(false);
 });
 
 it.each([
-  ['hsq@1.0.0'], ['@hearsay-tools/squawk@latest'], ['hsq', 'foreign'], ['foreign'], [],
-].map(requests => ({ requests })))('rejects pinned, mixed and foreign new npx requests: $requests', async ({ requests }) => {
-  const f = fixture(true, 'npx', 'nested');
+  ['hsq'], ['hsq@1.0.0'], ['@hearsay-tools/squawk@latest'], ['hsq', 'foreign'], ['foreign'], [],
+].map(requests => ({ requests })))('rejects pinned, mixed, foreign and unscoped new npx requests: $requests', async ({ requests }) => {
+  const f = fixture(true, 'npx', 'direct');
   const root = join(f.options.npmCache, '_npx/abc123');
   writeFileSync(join(root, 'package.json'), JSON.stringify({ _npx: { packages: requests } }));
   const service = new ApplicationUpdateService({ ...f.options, rebrand: true });
@@ -118,10 +119,10 @@ it.each([
   expect(f.runNpm).not.toHaveBeenCalled();
 });
 
-it('rejects an unrelated dependency under the new alias', () => {
-  const f = fixture(true, 'global', 'nested');
-  writeFileSync(join(f.outerRoot, 'package.json'), JSON.stringify({ name: f.identity.npmAlias, dependencies: { foreign: '1.0.0' } }));
-  const service = new ApplicationUpdateService({ ...f.options, rebrand: true });
+it('rejects an unrelated dependency under the alias', () => {
+  const f = fixture(false, 'global', 'nested');
+  writeFileSync(join(f.outerRoot, 'package.json'), JSON.stringify({ name: f.outerPackage, dependencies: { foreign: '1.0.0' } }));
+  const service = new ApplicationUpdateService({ ...f.options, rebrand: false });
   expect(service.snapshot().supported).toBe(false);
   expect(f.runNpm).not.toHaveBeenCalled();
 });

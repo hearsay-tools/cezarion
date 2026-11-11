@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { AgentSession } from '../../core/agent-runner.ts';
 import { createActiveRun } from '../active-run.ts';
-import { unused } from '../fixture-cleanup.testkit.ts';
+import { unused } from '../fixture-no-runner.testkit.ts';
 import { transitionTurnBoundary, type BoundaryCarrierEffects, type BoundaryCarry } from './turn-boundary.ts';
 
 function fixture() {
