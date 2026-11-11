@@ -678,7 +678,7 @@ it. A native question opens the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
 written as a note. In a workflow step that is not the last, `cezar_done` finishes that step
-and Cezarion starts the next one. `cezar_done` refuses while owned workers are live or uncollected,
+and Squawk starts the next one. `cezar_done` refuses while owned workers are live or uncollected,
 a worker question is unanswered or a question to you is still pending, and says what to do first. An
 autonomous task does not wait for you until its automatic-wake budget is spent.
 
