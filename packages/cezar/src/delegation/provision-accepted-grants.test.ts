@@ -1,5 +1,6 @@
 import { testHome } from '../home/test-home.testkit.ts';
-import { setRunStatus, openTestRunStore, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { setRunStatus, readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { openTestRunStore } from '../runs/run-store-open.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';

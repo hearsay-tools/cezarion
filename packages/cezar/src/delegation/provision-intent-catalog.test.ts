@@ -1,5 +1,6 @@
 import { testHome } from '../home/test-home.testkit.ts';
-import { setRunStatus, openTestRunStore, runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { openTestRunStore, runPersistence } from '../runs/run-store-open.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

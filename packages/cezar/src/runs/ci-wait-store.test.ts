@@ -1,5 +1,6 @@
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setRunStatus, openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { setRunStatus } from './run-store.testkit.ts';
+import { openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
