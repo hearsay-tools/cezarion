@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { projectMoveMarked } from '../project-paths.ts';
 import { CockpitOwnership, projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
+import { moveProjectWhenIdle } from './auto.ts';
 import { crashAt } from './engine.testkit.ts';
 import { migrateProject, resumeProjectMigration } from './engine.ts';
 
@@ -54,6 +55,22 @@ describe('a project move with nothing to move and no .ai/squawk/', () => {
       expect(projectMoveMarked(root)).toBe(true);
       expect(existsSync(join(root, '.ai/squawk-migration.json'))).toBe(false);
       expect(projectAdmissionRefusal(join(root, '.ai/cezar'))).toBeUndefined();
+    });
+  }
+
+  for (const tracked of [false, true]) {
+    it(`moves and marks it at cockpit start with ${tracked ? 'only tracked files, and names their git mv' : 'an empty .ai/cezar/'}`, async () => {
+      const root = project(tracked);
+      const lines: string[] = [];
+      const result = await moveProjectWhenIdle(root, { homes: [], rebrand: true, log: line => lines.push(line) });
+      expect(result).toEqual({ status: 'moved', gitMv: tracked
+        ? [`cd -- '${root}'`, "mkdir -p -- '.ai/squawk/workflows'", "git mv -- '.ai/cezar/workflows/flow.yaml' '.ai/squawk/workflows/flow.yaml'"] : [], leftovers: [] });
+      expect(projectMoveMarked(root)).toBe(true);
+      expect(existsSync(join(root, '.ai/squawk-migration.json'))).toBe(false);
+      expect(projectAdmissionRefusal(join(root, '.ai/cezar'))).toBeUndefined();
+      expect(lines).toHaveLength(1);
+      if (tracked) expect(lines[0]).toContain('Tracked files stay; run these and commit:');
+      expect(await moveProjectWhenIdle(root, { homes: [], rebrand: true, log: line => lines.push(line) })).toEqual({ status: 'nothing' });
     });
   }
 

@@ -60,7 +60,8 @@ async function precheck(root: string, homes: readonly Home[], self: number): Pro
     const plan = await planProjectMigration(root, { keep: projectKeptRunIds(root) });
     const refusals = [...plan.blockers, ...plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)];
     if (refusals.length > 0) return { reason: refusals.join('; ') };
-    if (plan.alreadyMoved || (!projectMoveMarked(root) && plan.moves.length === 0)) return 'nothing';
+    // An unmarked project moves while its `.ai/cezar/` exists, even with nothing in it to carry: the move marks it.
+    if (plan.alreadyMoved || (!projectMoveMarked(root) && !pathPresent(plan.source))) return 'nothing';
     const live = await blocker(root, homes, self);
     return live ? { reason: live } : undefined;
   } catch (error) {
@@ -120,8 +121,9 @@ export function moveProjectWhenIdle(root: string, options: {
 async function attempt(root: string, options: Parameters<typeof moveProjectWhenIdle>[1]): Promise<AutomaticMove> {
   markFreshProject(root, options.rebrand ?? REBRAND_SWITCH);
   // A completed move marked the project (hearsay-tools/cezarion#3150): `.ai/cezar/` is its fallback
-  // now, and holds nothing more to move once only the ownership claims are left in it.
-  if (!legacyStateLeft(join(root, ...LEGACY_PROJECT_DIR.split('/')), join(root, ...MIGRATED_PROJECT_DIR.split('/')))) return { status: 'nothing' };
+  // now, and holds nothing more to move once only the ownership claims are left in it. An unmarked
+  // project still needs the move that marks it, even when its `.ai/cezar/` is empty or tracked only.
+  if (projectMoveMarked(root) && !legacyStateLeft(join(root, ...LEGACY_PROJECT_DIR.split('/')), join(root, ...MIGRATED_PROJECT_DIR.split('/')))) return { status: 'nothing' };
   const log = options.log ?? ((line: string) => console.warn(line));
   const blocked = (reason: string): AutomaticMove => {
     noticeLegacyProject(root, { releaseEnabled: options.rebrand ?? REBRAND_SWITCH, reason, warn: log });
