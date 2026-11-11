@@ -1,3 +1,4 @@
+import { productCommand, productName } from './product'
 import type { ChildProcess } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
@@ -62,12 +63,12 @@ describe('remote settings administration', () => {
     browser.setViewport(1440, 900)
     browser.goto(`${url}/p/${project}/settings/agent-config`)
     browser.waitForFunction(`document.querySelector('[data-slot="agent-config-agents"]') !== null`)
-    expect(browser.waitForValue(agentConfigReadOnly, value => typeof value === 'string')).toContain('cez remote-settings enable')
+    expect(browser.waitForValue(agentConfigReadOnly, value => typeof value === 'string')).toContain(`${productCommand} remote-settings enable`)
     expect(browser.evaluate(notice)).toBeNull()
     openSection('worktrees')
     expect(browser.waitForValue(commandsReadOnly, value => value === true)).toBe(true)
     expect(browser.waitForValue(`document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent`, value => typeof value === 'string'))
-      .toContain('cez remote-settings enable')
+      .toContain(`${productCommand} remote-settings enable`)
 
     hostSwitch('enable')
     openSection('agent-config')
@@ -75,14 +76,14 @@ describe('remote settings administration', () => {
     expect(browser.waitForValue(agentConfigReadOnly, value => value === null)).toBeNull()
     openSection('worktrees')
     expect(browser.waitForValue(commandsReadOnly, value => value === false)).toBe(false)
-    expect(browser.waitForValue(notice, value => typeof value === 'string')).toContain('These commands run on the machine running Cezarion')
+    expect(browser.waitForValue(notice, value => typeof value === 'string')).toContain(`These commands run on the machine running ${productName('Cezarion')}`)
     browser.fill('[data-slot="worktree-setup-commands"]', 'npm ci')
     browser.click('[data-action="worktree-setup-save"]')
     expect(browser.waitForValue(`document.querySelector('[data-action="worktree-setup-save"]')?.disabled`, value => value === true)).toBe(true)
 
     hostSwitch('disable')
     openSection('agent-config')
-    expect(browser.waitForValue(agentConfigReadOnly, value => typeof value === 'string')).toContain('cez remote-settings enable')
+    expect(browser.waitForValue(agentConfigReadOnly, value => typeof value === 'string')).toContain(`${productCommand} remote-settings enable`)
     openSection('worktrees')
     expect(browser.waitForValue(commandsReadOnly, value => value === true)).toBe(true)
     expect(browser.waitForValue(`document.querySelector('[data-slot="worktree-setup-commands"]')?.value`, value => value === 'npm ci')).toBe('npm ci')

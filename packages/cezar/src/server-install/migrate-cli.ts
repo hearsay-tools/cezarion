@@ -6,11 +6,12 @@ import { runServerMigrate, type ServerMigrateOptions } from './group-migrate.ts'
 import type { Runner, Ui } from './types.ts';
 
 const USAGE = commandText(`Usage: cez server-migrate [--dry-run] [--yes]
-Move every server install recorded in the legacy home to the new unit, site and home names, as one group.
-It stops every instance that shares the home, copies the home, moves each unit and site, then starts
-each instance and checks its health. The new home stays pending (read-only) until every instance
-passes; any failure restores every old unit and site and leaves the legacy home in use.
-  --dry-run   print that plan: every unit, site, file and environment line it would change and each
+Move every server install recorded in the legacy home to the new unit, launchd agent, site and home
+names, as one group. It stops every instance that shares the home, copies the home, moves each unit,
+launchd agent and site, then starts each instance and checks its health. The new home stays pending
+(read-only) until every instance passes; any failure restores every old unit, agent and site and
+leaves the legacy home in use.
+  --dry-run   print that plan: every unit, agent, site, file and environment line it would change and each
               health check; change nothing, not even the legacy home
   --yes       accept safe defaults (privileged commands still need passwordless sudo or your paste)`);
 

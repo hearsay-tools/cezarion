@@ -18,6 +18,10 @@ Every other project, and every project with
 the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
 below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
 `isFallbackProjectPath` ask `projectPaths` too. Context `dataDir` is the write root.
+With the switch on, a stored checkout under an absent old project root is not read-only fallback
+state. Continue and restart recovery keep the missing-checkout fallback to the current
+repository. A missing checkout under an existing project root still obeys the fallback
+write guard, including after migration.
 `RunStore` and cold indexes merge the read roots internally. History, artifacts, handoffs,
 attachments and cleanup checks use `store.sourceDataDir(runId)`. Inspect fallback
 cockpit ownership before claiming legacy state; never reclaim a fallback claim.
@@ -204,7 +208,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   take `cockpit.lock` and the fence with the read-only live-task check, run `migrateProject`,
   release both claims. A dry run holds only `cockpit.lock` (in the directory that exists),
   passes admission and plans; when it finished an unfinished journal first, it reports what that
-  recovery moved and rewrote before the plan of what remains.
+  recovery moved and rewrote before the plan of what remains. A plan with blockers or
+  conflicts still prints on stdout, but the command exits 1, including with no planned moves.
 - **Automatic move.** With `REBRAND_SWITCH` true, the cockpit moves an idle legacy project
   itself (`moveProjectWhenIdle`, `project-migration/auto.ts`): at start for the boot project,
   before the listener; right after the listener starts for every other registered project (the

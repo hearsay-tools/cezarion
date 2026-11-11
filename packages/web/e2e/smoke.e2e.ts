@@ -1,3 +1,4 @@
+import { productName } from './product'
 import { normalizeColorSample } from './contrast'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -435,7 +436,7 @@ describe('mobile shell', () => {
       const y = rect.top + rect.height / 2
       return { width: rect.width, height: rect.height, label: menu.getAttribute('aria-label'),
         barHeight: top.firstElementChild.getBoundingClientRect().height,
-        wordmark: [...top.querySelectorAll('span')].some(node => node.textContent.trim() === 'Cezarion'),
+        wordmark: [...top.querySelectorAll('span')].some(node => node.textContent.trim() === ${JSON.stringify(productName('Cezarion'))}),
         edgesHit: [rect.left + 1, rect.right - 1].every(x => menu.contains(document.elementFromPoint(x, y))) }
     })()`) as { width: number; height: number; label: string; barHeight: number; wordmark: boolean; edgesHit: boolean }
 

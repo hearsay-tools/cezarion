@@ -4,6 +4,8 @@ import { describeProjectMigrationPlan, gitMvCommands, NOT_REWRITTEN, planProject
 /** What `migrate-project` reports. */
 export interface ProjectMigrationAnswer {
   dryRun: boolean;
+  /** Whether the plan has blockers or conflicts. */
+  blocked: boolean;
   /** Whether an unfinished migration journal was finished first. */
   resumed: boolean;
   /** What a journal finished first moved and rewrote, when one was; a dry run reports it too. */
@@ -28,13 +30,13 @@ function journalReport(result: ProjectMigrationResult): string {
 /** A dry run: the engine's whole plan, after any unfinished journal it had to finish first. */
 export async function dryRunAnswer(repoRoot: string, recovered: ProjectMigrationResult | undefined): Promise<ProjectMigrationAnswer> {
   const plan = await planProjectMigration(repoRoot);
-  return { dryRun: true, resumed: recovered !== undefined, ...(recovered ? { recovered: journalReport(recovered) } : {}),
+  return { dryRun: true, blocked: plan.blockers.length > 0 || plan.conflicts.length > 0, resumed: recovered !== undefined, ...(recovered ? { recovered: journalReport(recovered) } : {}),
     report: describeProjectMigrationPlan(plan), gitMv: plan.gitMv, alreadyMoved: plan.alreadyMoved };
 }
 
 /** A finished migration (its journal removed): what it moved, repaired and rewrote. */
 export function migrationAnswer(result: ProjectMigrationResult): ProjectMigrationAnswer {
-  return { dryRun: false, resumed: result.resumed, report: journalReport(result), gitMv: result.gitMv, alreadyMoved: result.alreadyMoved };
+  return { dryRun: false, blocked: false, resumed: result.resumed, report: journalReport(result), gitMv: result.gitMv, alreadyMoved: result.alreadyMoved };
 }
 
 /** The answer as the CLI prints it: what a finished journal did, the report, then what happened. */

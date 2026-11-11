@@ -2132,7 +2132,7 @@ cleanup continues with working files preserved.
 R69–R71 are retired (hearsay-tools/cezarion#1233). They pinned the CI withdrawal
 notice that human input used to trigger; human input no longer cancels a wait, and the
 open-waits footer that replaced the notice is pinned by U2 and the footer case of
-`workflows/waits-wake.test.ts`.
+`workflows/waits-wake-delivery.test.ts`.
 
 Monitoring turn rows (hearsay-tools/cezarion#772) live in the semantic `workflows/monitoring-turn-*.test.ts` suites
 (shared rows: `workflows/monitoring-turn-rows.testkit.ts`)

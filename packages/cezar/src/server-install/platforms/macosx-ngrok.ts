@@ -8,10 +8,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CANCEL, PreflightError, type InstallContext, type InstallStep, type PlatformStrategy, type StepArtifact, type StepCreated } from '../types.ts';
+import { CANCEL, PreflightError, type InstallContext, type InstallStep, type PlatformMigrationReport, type PlatformStrategy, type StepArtifact, type StepCreated } from '../types.ts';
 import { brewInstallTool, brewRemoveHint, depCheckStep, HOSTNAME_RE, owned, shared, StepAborted, StepCancelled, verifyCommand } from '../steps.ts';
 import { REBRAND_SWITCH } from '../../home/switch.ts';
-import { migrateLaunchd, rollbackLaunchdMigration, unloadLaunchd } from './macosx-migration.ts';
+import { launchdHealthDetails, migrateLaunchd, rollbackLaunchdMigration, startLaunchdServices, stopLaunchdServices, unloadLaunchd, type LaunchdService } from './macosx-migration.ts';
+import { applyMigrationReport } from '../migration-report.ts';
 import { guardLaunchdWrite, ownsLaunchdPlist, readLaunchdPlist } from './macosx-launchd-files.ts';
 import { refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 
@@ -26,6 +27,30 @@ import { refreshNpxCacheForRedeploy } from '../npx-cache.ts';
 /** Keep OS-user discovery at one injectable boundary. */
 function launchAgentsDir(ctx: InstallContext): string {
   return ctx.launchAgentsDir?.() ?? join(homedir(), 'Library', 'LaunchAgents');
+}
+
+/** Agents that `server-migrate` stops and starts: recorded in the ledger, or a launcher that proves it ours. */
+function launchdServices(ctx: InstallContext, rebrand: boolean): LaunchdService[] {
+  const services: LaunchdService[] = [];
+  for (const [step, role] of [['autostart', 'cockpit'], ['ngrok', 'ngrok']] as const) {
+    const agent = agentArtifact(ctx, step, rebrand);
+    const recorded = ctx.state.steps[step]?.created?.artifacts.some((a) => a.kind === 'owned' && a.type === 'launchd');
+    if (recorded || (existsSync(agent.path) && ownsLaunchdPlist(ctx, agent, readLaunchdPlist(agent.path)))) services.push({ ...agent, role });
+  }
+  return services;
+}
+
+/** Move the agents; a dry run also names each health check under the label the agent has after its move. */
+async function migrateAgents(ctx: InstallContext, rebrand: boolean): Promise<PlatformMigrationReport> {
+  const report = await migrateLaunchd(ctx, launchAgentsDir(ctx), rebrand);
+  if (!rebrand || !ctx.dryRun || report.errors.length) return report;
+  try {
+    const after = { ...ctx, state: applyMigrationReport(ctx.state, report) };
+    report.details = [...report.details ?? [], ...launchdHealthDetails(launchdServices(after, rebrand), ctx.state.primaryPort)];
+  } catch (error) {
+    report.errors.push({ artifact: { kind: 'owned', type: 'launchd', path: launchAgentsDir(ctx) }, message: error instanceof Error ? error.message : String(error) });
+  }
+  return report;
 }
 
 function labelFor(agent: 'ngrok' | 'cockpit', rebrand: boolean): string {
@@ -459,8 +484,10 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       if (code !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${ngrok.name}\`.`);
       await identityStep.run(ctx);
     },
-    migrate: (ctx) => migrateLaunchd(ctx, launchAgentsDir(ctx), rebrand),
+    migrate: (ctx) => migrateAgents(ctx, rebrand),
     rollbackMigration: (ctx, report) => rollbackLaunchdMigration(ctx, report, rebrand),
+    stopService: (ctx) => stopLaunchdServices(ctx, launchdServices(ctx, rebrand)),
+    startService: (ctx) => startLaunchdServices(ctx, launchdServices(ctx, rebrand), ctx.state.primaryPort),
   };
 }
 
