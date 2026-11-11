@@ -28,8 +28,6 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     // The lease imports the process-group helper from source; the marker makes it an ES module.
     mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
     copyFileSync(resolve(import.meta.dirname, '../../src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
-    mkdirSync(join(root, 'packages/cezar/src/core'), { recursive: true });
-    copyFileSync(resolve(import.meta.dirname, '../../src/core/windows-powershell.ts'), join(root, 'packages/cezar/src/core/windows-powershell.ts'));
     writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
     writeFileSync(join(root, 'mutator.mjs'), `
       import { renameSync, writeFileSync } from 'node:fs';

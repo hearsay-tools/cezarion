@@ -19,8 +19,6 @@ const copy = join(root, '.ai/scripts/lease.mjs');
 fs.mkdirSync(join(root, '.ai/scripts'), { recursive: true });
 fs.mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
 fs.copyFileSync(resolve(import.meta.dirname, '../../src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
-fs.mkdirSync(join(root, 'packages/cezar/src/core'), { recursive: true });
-fs.copyFileSync(resolve(import.meta.dirname, '../../src/core/windows-powershell.ts'), join(root, 'packages/cezar/src/core/windows-powershell.ts'));
 fs.writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
 fs.writeFileSync(copy, fs.readFileSync(source, 'utf8') + '\nexport { groupLive };\n');
 const { acquireTestEnvLease, groupLive } = await import(pathToFileURL(copy).href);

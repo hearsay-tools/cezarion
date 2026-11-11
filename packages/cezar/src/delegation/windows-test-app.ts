@@ -1,4 +1,4 @@
-import { POWERSHELL, powershellEnv } from '../core/windows-powershell.ts';
+import { POWERSHELL, powershellEnv } from '../detached-process.ts';
 import { spawnSync } from 'node:child_process';
 import { win32 } from 'node:path';
 

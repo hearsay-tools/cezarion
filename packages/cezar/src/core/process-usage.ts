@@ -14,7 +14,7 @@
  *    `ps` output (scripts/test-process-usage.mjs).
  */
 
-import { POWERSHELL, powershellEnv } from './windows-powershell.ts';
+import { POWERSHELL, powershellEnv } from '../detached-process.ts';
 import { execFile } from 'node:child_process';
 
 /** One aggregated sample for a run's process tree. */

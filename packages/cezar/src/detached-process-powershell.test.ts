@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { POWERSHELL, powershellEnv } from './windows-powershell.ts';
+import { POWERSHELL, powershellEnv } from './detached-process.ts';
 
 it('drops every spelling of PSModulePath and keeps the rest of the environment', () => {
   const env = powershellEnv({ PATH: 'C:\\Windows', PSModulePath: 'C:\\pwsh7', psmodulepath: 'x', HOME: 'C:\\Users\\op' });
