@@ -88,6 +88,9 @@ export function runCheckout(
   if (!run) return { status: 404, body: { error: 'not found' } };
   const refusal = intent === 'mutate' && run.worktreePath && fallbackProjectWriteError(run.worktreePath);
   if (refusal) return { status: 409, body: { error: refusal } };
+  if (intent === 'mutate' && run.status === 'running') {
+    return { status: 409, body: { error: 'the agent is still working in this worktree' } };
+  }
   if (intent === 'mutate') {
     const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
     if (blocker) return { status: 409, body: { error: blocker } };

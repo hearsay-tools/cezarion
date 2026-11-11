@@ -213,7 +213,8 @@ beforeAll(async () => {
   mkdirSync(join(project, '.ai/cezar/runs'), { recursive: true })
   const env = fixtureServeEnv(project)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'reader', root: project }] })))
+  const home = Home.sandbox(env.CEZ_HOME!)
+  Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'reader', root: project }] })))
   const publish = (name: string, html: string) => {
     const source = join(root, name)
     writeFileSync(source, html)

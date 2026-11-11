@@ -62,9 +62,9 @@ async function blocker(root: string, homes: readonly Home[], self: number): Prom
 async function precheck(root: string, homes: readonly Home[], self: number): Promise<'nothing' | { reason: string } | undefined> {
   try {
     const plan = await planProjectMigration(root);
-    if (plan.moves.length === 0) return 'nothing';
     const refusals = [...plan.blockers, ...plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)];
     if (refusals.length > 0) return { reason: refusals.join('; ') };
+    if (plan.moves.length === 0) return 'nothing';
     const live = await blocker(root, homes, self);
     return live ? { reason: live } : undefined;
   } catch (error) {
