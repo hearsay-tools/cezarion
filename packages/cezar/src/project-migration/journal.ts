@@ -13,8 +13,12 @@ import { replaceAtomically, settle } from './durable.ts';
  * fence holder.
  */
 
-/** `mark-moved` is last: from its marker on, `projectPaths` writes the project under `.ai/squawk/`. */
-export const PROJECT_MIGRATION_STEPS = ['lock-worktrees', 'move', 'repair-worktrees', 'receipts', 'run-store', 'run-files', 'mark-moved'] as const;
+/**
+ * `leftovers` writes which live tasks keep their own items in `.ai/cezar/` (`legacy-runs.ts`) and
+ * removes the old directories the move emptied. `mark-moved` is last: from its marker on,
+ * `projectPaths` writes the project under `.ai/squawk/`.
+ */
+export const PROJECT_MIGRATION_STEPS = ['lock-worktrees', 'move', 'repair-worktrees', 'receipts', 'run-store', 'run-files', 'leftovers', 'mark-moved'] as const;
 export type ProjectMigrationStep = typeof PROJECT_MIGRATION_STEPS[number];
 
 const absolute = z.string().min(1).refine(path => path.startsWith('/') || /^[a-z]:[\\/]/i.test(path), 'absolute path');
@@ -51,6 +55,8 @@ export const projectMigrationJournalSchema = z.object({
   tracked: z.array(trackedFileSchema),
   worktrees: z.array(worktreeRepairSchema),
   rewrites: z.array(pathRewriteSchema),
+  /** The live tasks whose own items stay in `source`; absent in a journal of an older build: none. */
+  leftovers: z.array(z.uuid()).optional(),
 }).strict();
 export type ProjectMigrationJournal = z.infer<typeof projectMigrationJournalSchema>;
 

@@ -1,3 +1,4 @@
+import { legacyRunsBeside } from '../legacy-runs.ts';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -20,9 +21,10 @@ export function workerEvidenceRunIds(dataDir: string): string[] | undefined {
   const dir = join(dataDir, 'runs');
   try {
     if (!lstatSync(dir).isDirectory() || realpathSync(dir) !== resolve(dir)) return undefined;
-    return [...new Set(readdirSync(dir).flatMap(name => {
+    // A task the project move left in `.ai/cezar/` keeps its evidence there: reserved by id.
+    return [...new Set([...readdirSync(dir).flatMap(name => {
       const match = /^([0-9a-f-]{36})\.(?:identity|execution|processes)\.json(?:\..*\.tmp)?$/i.exec(name);
       return match && z.string().uuid().safeParse(match[1]).success ? [match[1]!] : [];
-    }))];
+    }), ...legacyRunsBeside(dataDir)])];
   } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : undefined; }
 }

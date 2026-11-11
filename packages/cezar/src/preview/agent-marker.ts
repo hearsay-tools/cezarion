@@ -1,5 +1,6 @@
+import { legacyRunsBeside, runDataDir } from '../legacy-runs.ts';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { RunContext } from './host.ts';
 
 /**
@@ -12,13 +13,13 @@ import type { RunContext } from './host.ts';
 const MARKER = 'agent-connected';
 
 function markerPath(dataDir: string, runId: string): string {
-  return join(dataDir, 'preview', runId, MARKER);
+  return join(runDataDir(dataDir, runId), 'preview', runId, MARKER);
 }
 
 /** Before `connected` is appended: a crash after this line still leaves a marker to reconcile. */
 export function markAgentConnected(dataDir: string, runId: string): void {
   try {
-    mkdirSync(join(dataDir, 'preview', runId), { recursive: true });
+    mkdirSync(dirname(markerPath(dataDir, runId)), { recursive: true });
     writeFileSync(markerPath(dataDir, runId), '');
   } catch { /* a read-only data dir: the state then lives only as long as this process */ }
 }
@@ -54,11 +55,12 @@ export function recordAgentBrowser(ctx: Pick<RunContext, 'runId' | 'store' | 'da
  * Synchronous, so it finishes before the agent's CDP route can accept a connection.
  */
 export function reconcileAgentMarkers(dataDir: string, store: RunContext['store'], live: (runId: string) => boolean): number {
-  let runIds: string[];
+  // A task the project move left in `.ai/cezar/` keeps its marker there.
+  let runIds = legacyRunsBeside(dataDir);
   try {
-    runIds = readdirSync(join(dataDir, 'preview'));
+    runIds = [...new Set([...readdirSync(join(dataDir, 'preview')), ...runIds])];
   } catch {
-    return 0;
+    if (runIds.length === 0) return 0;
   }
   let reconciled = 0;
   for (const runId of runIds) {

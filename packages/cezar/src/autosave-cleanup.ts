@@ -1,3 +1,4 @@
+import { legacyRunsBeside, runDataDir } from './legacy-runs.ts';
 import { windowsAutosaveProcessLive, windowsAutosaveProcessToken } from './autosave-windows.ts';
 import { autosaveGroupAliveSync } from './autosave-group.ts';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +16,7 @@ const cleanupSchema = z.object({
 });
 export type AutosaveCleanupProof = Pick<z.infer<typeof cleanupSchema>, 'processes' | 'groups' | 'uncertain'>;
 const processLive = (entry: { pid: number; startToken?: string | undefined }) => process.platform === 'win32' ? windowsAutosaveProcessLive(entry) : recordedProcessLive(entry);
-const pathFor = (dataDir: string, id: string) => join(dataDir, 'runs', `${z.uuid().parse(id)}.autosave-cleanup.json`);
+const pathFor = (dataDir: string, id: string) => join(runDataDir(dataDir, z.uuid().parse(id)), 'runs', `${id}.autosave-cleanup.json`);
 
 /** Write before releasing execution. A failed write never authorizes settlement. */
 export function retainAutosaveCleanup(dataDir: string, id: string, cwd: string, message: string, proof: AutosaveCleanupProof): void {
@@ -36,12 +37,13 @@ export function clearAutosaveCleanup(dataDir: string, id: string): void {
   rmSync(pathFor(dataDir, id), { force: true });
 }
 
-/** Names reserve orphan scratch even when its run row is no longer loaded. */
+/** Names reserve orphan scratch even when its run row is no longer loaded; a task the project
+ *  move left in `.ai/cezar/` keeps its evidence there. */
 export function autosaveCleanupIds(dataDir: string): string[] | undefined {
-  try { return readdirSync(join(dataDir, 'runs')).flatMap(name => {
+  try { return [...readdirSync(join(dataDir, 'runs')).flatMap(name => {
     const id = name.replace(/\.autosave-cleanup\.json$/, '');
     return id !== name && z.uuid().safeParse(id).success && autosaveCleanupBlocker(dataDir, id) ? [id] : [];
-  }); } catch { return undefined; }
+  }), ...legacyRunsBeside(dataDir).filter(id => autosaveCleanupBlocker(dataDir, id))]; } catch { return undefined; }
 }
 
 /** Synchronous admission/cleanup proof, with no signalling or invented timeout release. */

@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { constants, realpathSync, type BigIntStats } from 'node:fs';
 import { mkdir, open, opendir, realpath, lstat, rename, rm, writeFile, type FileHandle } from 'node:fs/promises';
@@ -88,8 +89,9 @@ function validateContext(directory: string, runId: string): void {
 export function artifactRunsRoot(dataDir: string): string {
   return join(realpathSync(resolve(dataDir)), 'runs');
 }
-export function artifactDirectory(dataDir: string, runId: string): string {
+export function artifactDirectory(runsDataDir: string, runId: string): string {
   z.uuid().parse(runId);
+  const dataDir = runDataDir(runsDataDir, runId);
   let root: string;
   try { root = artifactRunsRoot(dataDir); }
   catch { root = join(resolve(dataDir), 'runs'); } // Preserve unavailable-storage behavior for public readers.

@@ -10,6 +10,7 @@
  * `.ndjson.br.orphaned` (or `.orphaned.<n>` if that name is taken) before renaming. A size/mtime/inode
  * mismatch returns `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
  */
+import { runDataDir } from '../legacy-runs.ts';
 import { logPrefix } from '../home/display.ts';
 import { randomBytes } from 'node:crypto';
 import {
@@ -47,10 +48,11 @@ const warnedUndecodable = new Set<string>();
 const warnedOrphaned = new Set<string>();
 
 export function historyPaths(dataDir: string, id: string): { plain: string; compressed: string; orphaned: string; facts: string } {
-  const plain = join(dataDir, 'runs', `${id}.ndjson`);
+  const directory = runDataDir(dataDir, id);
+  const plain = join(directory, 'runs', `${id}.ndjson`);
   const compressed = `${plain}.br`;
   // The transcript-facts sidecar (transcript-facts.ts) is a cache of the transcript and goes with it.
-  return { plain, compressed, orphaned: `${compressed}.orphaned`, facts: join(dataDir, 'runs', `${id}.facts.json`) };
+  return { plain, compressed, orphaned: `${compressed}.orphaned`, facts: join(directory, 'runs', `${id}.facts.json`) };
 }
 
 export function hasPlainHistory(dataDir: string, id: string): boolean {

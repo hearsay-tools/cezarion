@@ -1,3 +1,4 @@
+import { runDataDir } from '../../legacy-runs.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { attachmentExtension } from '@open-mercato/cezar-contract/attachments';
@@ -67,7 +68,7 @@ export class AttachmentWriter {
       // always had, a file gets `pdf`/`txt`/`md`, and both share the `pasted-<n>` numbering space
       // below so a `pasted-3.md` can never collide with a `pasted-3.png`.
       const ext = attachmentExtension(mediaType);
-      const dir = join(this.context.dataDir, 'runs', `${runId}-images`);
+      const dir = join(runDataDir(this.context.dataDir, runId), 'runs', `${runId}-images`);
       mkdirSync(dir, { recursive: true });
       if (!attachmentDirectory(this.context.dataDir, runId)) return null;
       // Seed from the highest numeric suffix already on disk, NOT the file count:

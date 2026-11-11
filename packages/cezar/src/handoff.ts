@@ -1,3 +1,4 @@
+import { runDataDir } from './legacy-runs.ts';
 import { commandText } from './home/command.ts';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,7 +20,7 @@ import type { RunStore } from './runs/store.ts';
  */
 
 export function handoffPath(dataDir: string, runId: string): string {
-  return join(dataDir, 'runs', `${runId}.handoff.md`);
+  return join(runDataDir(dataDir, runId), 'runs', `${runId}.handoff.md`);
 }
 
 export interface HandoffSeed {

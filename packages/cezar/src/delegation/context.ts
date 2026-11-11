@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { fallbackProjectWriteError } from '../project-paths.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -79,7 +80,7 @@ async function writeCopy(path: string, bytes: Buffer): Promise<void> {
 }
 async function attachmentBytes(dataDir: string, parentId: string, id: string, limit: number) {
   const source = resolveAttachmentPath(dataDir, parentId, id);
-  const expected = join(await realpath(dataDir), 'runs', `${parentId}-images`, id);
+  const expected = join(await realpath(runDataDir(dataDir, parentId)), 'runs', `${parentId}-images`, id);
   if (!source || source !== expected) throw invalid();
   await canonicalFile(source);
   return readCanonicalFile(source, limit, () => canonicalFile(source));

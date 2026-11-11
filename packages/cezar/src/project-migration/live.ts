@@ -14,8 +14,10 @@ import { readQuiescentRunDatabase } from './plan.ts';
 
 /**
  * Whether anything is live for a project (hearsay-tools/cezarion#3089). A project migration runs
- * offline: it refuses while a cockpit serves the project or a task of it is live, and names what to
- * stop. Shared by every caller that starts a migration.
+ * offline: it refuses while a cockpit serves the project or another live process claims a task of
+ * it, and names what to stop. A task live otherwise (parked, waiting, a worker whose destroy is
+ * unfinished) does not refuse it: its own items stay in `.ai/cezar/` (`projectLiveRunIds`).
+ * Shared by every caller that starts a migration.
  *
  * Seen: the cockpit that owns the project's `cockpit.lock` (any home), every live cockpit of the
  * given homes whose registry lists the project (their presence leases, `home/leases.ts`), and live
@@ -130,7 +132,19 @@ export async function assertNoProjectCockpit(root: string, homes: readonly Home[
   throw new ProjectInUseError(root, cockpits, tasks);
 }
 
-/** The project's live tasks, read without writing anything: the fence's live-task check. */
+/** The project's live tasks, read without writing anything. */
 export function projectLiveTasksOffline(root: string): LiveProjectTask[] {
   return projectLiveTasks(readLiveTaskView(root));
+}
+
+/** The tasks of families another live process claims, read without writing anything: the fence's check. */
+export function projectForeignTasksOffline(root: string): LiveProjectTask[] {
+  const view = readLiveTaskView(root);
+  const { foreign } = view.persistedLiveRunIds();
+  return projectLiveTasks({ ...view, persistedLiveRunIds: () => ({ live: [], foreign }) });
+}
+
+/** The ids of every live task of the project: a migration leaves their own items in place. */
+export function projectLiveRunIds(root: string): ReadonlySet<string> {
+  return new Set(projectLiveTasksOffline(root).map(task => task.id));
 }

@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { productEnv } from '../core/product-env.ts';
 /**
  * Task-owned temp directories with real-byte write probes and a Unix socket path budget. Prefer
@@ -33,7 +34,7 @@ function safeRunId(id: string): boolean {
  * run's next spawn.
  */
 export function agentTmpDir(dataDir: string, runId: string): string {
-  return join(dataDir, 'tmp', runId);
+  return join(runDataDir(dataDir, runId), 'tmp', runId);
 }
 
 /** The root every control directory hangs off (`runs/`, `runs.db` and
@@ -51,7 +52,7 @@ const RUN_FILE = '.cez-run';
  * marker forces the OS-root fallback. Reap and sweep must respect that marker.
  */
 export function agentShortTmpDir(dataDir: string, runId: string): string {
-  return join(dataDir, SHORT_TMP_ROOT, runId.slice(0, SHORT_TMP_NAME_LENGTH));
+  return join(runDataDir(dataDir, runId), SHORT_TMP_ROOT, runId.slice(0, SHORT_TMP_NAME_LENGTH));
 }
 
 /** Who the short directory belongs to: nobody yet (`free` — no marker, or no
@@ -316,7 +317,7 @@ function ownerDataDirGone(dir: string, owner: string): boolean {
  * whatever env a later reap or sweep runs under, it can find the directory.
  */
 function fallbackTmpDir(root: string, dataDir: string, runId: string): string {
-  const digest = createHash('sha256').update(`${dataDir}:${runId}`).digest('hex');
+  const digest = createHash('sha256').update(`${runDataDir(dataDir, runId)}:${runId}`).digest('hex');
   return join(root, FALLBACK_PREFIX + digest.slice(0, FALLBACK_NAME_LENGTH));
 }
 

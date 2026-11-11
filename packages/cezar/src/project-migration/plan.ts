@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import { pathPresent, projectDestinationAvailable, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
+import { forgetLegacyRunIds, legacyItemOwner, legacyRunIds } from '../legacy-runs.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseUnsupportedSchemaError } from '../runs/run-database.ts';
 import { migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -16,6 +17,11 @@ import type { PathRewrite } from './journal.ts';
  * file left in place with the `git mv` that moves it, every worktree repair and every path rewrite,
  * plus what blocks it. Planning writes nothing: no directory, Git metadata, receipt, run record or
  * journal changes, and the run store is read so that no SQLite sidecar is created.
+ *
+ * The own items of a task live at planning (`keep`: its worktree, `runs/<id>…` files and scratch
+ * directories, `legacy-runs.ts`) stay in `.ai/cezar/`, and no stored path into them is rewritten.
+ * A moved project whose `.ai/cezar/` still holds items plans again: what no live task owns now
+ * moves, so the items of a task that ended follow the rest.
  */
 
 export const LEGACY_PROJECT_DIR = '.ai/cezar';
@@ -51,8 +57,15 @@ export interface ProjectMigrationPlan {
   /** Shell commands, run from any directory, that move the tracked files for the user to commit. */
   gitMv: string[];
   notRewritten: readonly string[];
-  /** A completed migration marked the project moved: the plan moves and rewrites nothing. */
+  /** A completed migration marked the project moved, and nothing is left to move or rewrite. */
   alreadyMoved: boolean;
+  /** The live tasks whose own items stay in the old directory after this plan, sorted. */
+  leftovers: string[];
+}
+
+export interface ProjectMigrationPlanOptions {
+  /** The tasks live at planning: their own items stay where they are. */
+  keep?: ReadonlySet<string>;
 }
 
 const execFileAsync = promisify(execFile);
@@ -96,6 +109,8 @@ export interface PathMapping {
   moves: readonly MigrationMove[];
   /** Tracked files, relative to the root with `/`. */
   tracked: ReadonlySet<string>;
+  /** Tasks whose own items stay: no path into one moves. */
+  keep?: ReadonlySet<string>;
 }
 
 const inside = (path: string, parent: string) => path === parent || path.startsWith(parent + sep);
@@ -108,6 +123,8 @@ const inside = (path: string, parent: string) => path === parent || path.startsW
  */
 export function pathMapper(mapping: PathMapping): (path: string) => string | undefined {
   const { roots, realRoot, source, destination, moves, tracked } = mapping;
+  const keep = mapping.keep ?? new Set<string>();
+  const kept = (real: string) => keep.size > 0 && real !== source && inside(real, source) && legacyItemOwner(real.slice(source.length + 1).split(sep), keep) !== undefined;
   const absent = (real: string): boolean => {
     const relative = real.slice(realRoot.length + 1).split(sep).join('/');
     if (pathPresent(real) || [...tracked].some(file => file === relative || file.startsWith(`${relative}/`) || relative.startsWith(`${file}/`))) return false;
@@ -117,6 +134,7 @@ export function pathMapper(mapping: PathMapping): (path: string) => string | und
     for (const root of roots) {
       if (!inside(path, root)) continue;
       const real = realRoot + path.slice(root.length);
+      if (kept(real)) return undefined;
       const move = moves.find(item => inside(real, item.from));
       const to = move ? move.to + real.slice(move.from.length)
         : real !== source && inside(real, source) && absent(real) ? destination + real.slice(source.length) : undefined;
@@ -243,18 +261,24 @@ class Planner {
   readonly plan: ProjectMigrationPlan;
   private trackedFiles = new Set<string>();
   private trackedDirectories = new Set<string>();
+  private readonly leftovers = new Set<string>();
+  private marked = false;
 
-  constructor(private readonly given: string, readonly root: string) {
+  constructor(private readonly given: string, readonly root: string, private readonly keep: ReadonlySet<string>) {
     const source = join(root, ...LEGACY_PROJECT_DIR.split('/'));
     this.plan = { repoRoot: root, source, destination: join(root, ...MIGRATED_PROJECT_DIR.split('/')),
       journal: migrationFencePaths(source)!.journal, moves: [], tracked: [], worktrees: [], rewrites: [], conflicts: [],
-      blockers: [], gitMv: [], notRewritten: NOT_REWRITTEN, alreadyMoved: false };
+      blockers: [], gitMv: [], notRewritten: NOT_REWRITTEN, alreadyMoved: false, leftovers: [] };
   }
 
   async build(): Promise<ProjectMigrationPlan> {
     const { plan } = this;
     if (pathPresent(plan.journal)) plan.blockers.push(`An unfinished project migration journal ${plan.journal} exists; resume it first`);
-    if (projectMoveMarked(this.root)) return this.moved();
+    if (projectMoveMarked(this.root)) {
+      // A moved project plans again only while its old directory holds more than the ownership claims.
+      if (!legacyItemsPresent(plan.source)) return this.moved();
+      this.marked = true;
+    }
     // The mark-moved step writes where `projectPaths` looks; refuse before the journal when they differ.
     const common = await gitOutput(this.root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
     const marker = projectMovedMarker(this.root);
@@ -281,21 +305,32 @@ class Planner {
     for (const file of tracked) {
       for (let parent = posix.dirname(file); parent !== '.' && parent !== '/'; parent = posix.dirname(parent)) this.trackedDirectories.add(parent);
     }
+    await this.planItems();
+    return plan;
+  }
+
+  /** Every move, kept item, repair and rewrite, once the old directory and its tracked files are known. */
+  private async planItems(): Promise<void> {
+    const { plan } = this;
     this.walk(plan.source, plan.destination, LEGACY_PROJECT_DIR, true);
+    plan.leftovers = [...this.leftovers].sort();
     plan.gitMv = gitMvCommands(this.root, plan.tracked);
     const map = pathMapper({ roots: [...new Set([resolve(this.given), this.root])], realRoot: this.root, source: plan.source,
-      destination: plan.destination, moves: plan.moves, tracked: this.trackedFiles });
+      destination: plan.destination, moves: plan.moves, tracked: this.trackedFiles, keep: this.keep });
     await this.worktreeRepairs(map);
     await this.receiptRewrites(map);
     this.rowRewrites(map);
     this.evidenceRewrites(map);
-    return plan;
+    // A moved project with nothing left to carry, rewrite or forget changes nothing.
+    if (this.marked && plan.moves.length === 0 && plan.worktrees.length === 0 && plan.rewrites.length === 0
+      && sameIds(plan.leftovers, currentLeftovers(plan.destination))) plan.alreadyMoved = true;
   }
 
   /** A second migration of a moved project changes nothing; it lists the tracked files still to move. */
   private async moved(): Promise<ProjectMigrationPlan> {
     const { plan } = this;
     plan.alreadyMoved = true;
+    plan.leftovers = currentLeftovers(plan.destination);
     const tracked = pathPresent(plan.source) ? await trackedPaths(this.root) : new Set<string>();
     plan.tracked = [...tracked ?? []].sort().map(from => ({ from, to: MIGRATED_PROJECT_DIR + from.slice(LEGACY_PROJECT_DIR.length) }));
     plan.gitMv = gitMvCommands(this.root, plan.tracked);
@@ -315,6 +350,10 @@ class Planner {
         continue;
       }
       const kind = moveKind(entry);
+      // A live task's own item stays where its agent knows it; the directory around it merges.
+      const owner = legacyItemOwner(path.split('/').slice(2), this.keep);
+      if (owner) { this.leftovers.add(owner); continue; }
+      if (kind === 'directory' && top && this.holdsKeptItem(path, source)) { this.mergeInto(source, target, path); continue; }
       if (kind === 'directory' && this.trackedDirectories.has(path)) {
         // Untracked items move into this directory: it must be a real one, or absent.
         if (pathPresent(target) && !realDirectory(target)) this.plan.conflicts.push({ path: target, reason: `${target} is not a directory; nothing may move through it` });
@@ -329,6 +368,13 @@ class Planner {
       }
       this.plan.moves.push({ from: source, to: target, kind });
     }
+  }
+
+  /** Whether the top-level directory `source` (at `relative`) holds an item of a task in `keep`. */
+  private holdsKeptItem(relative: string, source: string): boolean {
+    if (this.keep.size === 0) return false;
+    try { return readdirSync(source).some(name => legacyItemOwner([...relative.split('/').slice(2), name], this.keep) !== undefined); }
+    catch { return false; }
   }
 
   /** Move items into `target`, which exists or is created with the bits of `source`: never a broader one. */
@@ -364,15 +410,16 @@ class Planner {
   }
 
   private rowRewrites(map: (path: string) => string | undefined): void {
-    const path = join(this.plan.source, RUNS_DB_FILE);
+    // A moved project's store is already in the new directory; a later plan rewrites it there.
+    const path = join(this.marked ? this.plan.destination : this.plan.source, RUNS_DB_FILE);
     const legacyIndex = pathPresent(join(this.plan.source, LEGACY_INDEX_FILE));
     if (!pathPresent(path)) {
-      if (legacyIndex) this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into a run store; open the project with this build first`);
+      if (legacyIndex && !this.marked) this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into a run store; open the project with this build first`);
       return;
     }
     try {
       readQuiescentRunDatabase(path, (db) => {
-        if (legacyIndex && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
+        if (legacyIndex && !this.marked && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
           this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into ${path}; open the project with this build first`);
           return;
         }
@@ -395,22 +442,29 @@ class Planner {
     if (to) this.plan.rewrites.push({ kind: 'run-row', runId, field, from: from as string, to });
   }
 
+  /**
+   * Run files with stored paths: each one the move carries, rewritten at its new place, and each
+   * one that stays (a live task's own file, or a moved project's newer file) rewritten in place.
+   */
   private evidenceRewrites(map: (path: string) => string | undefined): void {
-    const runs = join(this.plan.source, 'runs');
-    if (!realDirectory(runs)) return;
-    const visit = (directory: string, depth: number): void => {
-      for (const entry of sortedEntries(directory)) {
-        const path = join(directory, entry.name);
-        if (entry.isDirectory() && depth < 2) { visit(path, depth + 1); continue; }
-        if (!entry.isFile()) continue;
-        const kind = evidenceKind(path.slice(runs.length + 1));
-        const file = kind && map(path);
-        if (!kind || !file) continue;
-        try { this.evidenceFile(path, file, kind, map); }
-        catch (error) { this.plan.blockers.push(`Cannot read ${path}: ${(error as Error).message}`); }
-      }
-    };
-    visit(runs, 0);
+    const roots = [join(this.plan.source, 'runs'), ...this.keep.size > 0 || this.marked ? [join(this.plan.destination, 'runs')] : []];
+    for (const runs of roots) {
+      if (!realDirectory(runs)) continue;
+      const stays = runs !== roots[0];
+      const visit = (directory: string, depth: number): void => {
+        for (const entry of sortedEntries(directory)) {
+          const path = join(directory, entry.name);
+          if (entry.isDirectory() && depth < 2) { visit(path, depth + 1); continue; }
+          if (!entry.isFile()) continue;
+          const kind = evidenceKind(path.slice(runs.length + 1));
+          const file = kind && (stays ? path : map(path) ?? (legacyItemOwner(path.slice(this.plan.source.length + 1).split(sep), this.keep) ? path : undefined));
+          if (!kind || !file) continue;
+          try { this.evidenceFile(path, file, kind, map); }
+          catch (error) { this.plan.blockers.push(`Cannot read ${path}: ${(error as Error).message}`); }
+        }
+      };
+      visit(runs, 0);
+    }
   }
 
   private evidenceFile(path: string, file: string, kind: NonNullable<ReturnType<typeof evidenceKind>>, map: (path: string) => string | undefined): void {
@@ -431,8 +485,25 @@ class Planner {
 }
 
 /** The dry run, and the plan a real migration writes into its journal. Writes nothing. */
-export async function planProjectMigration(repoRoot: string): Promise<ProjectMigrationPlan> {
-  return new Planner(repoRoot, realpathSync(resolve(repoRoot))).build();
+export async function planProjectMigration(repoRoot: string, options: ProjectMigrationPlanOptions = {}): Promise<ProjectMigrationPlan> {
+  return new Planner(repoRoot, realpathSync(resolve(repoRoot)), options.keep ?? new Set()).build();
+}
+
+/** Whether the old directory `source` holds anything but the `cockpit.lock*` ownership claims. */
+export function legacyItemsPresent(source: string): boolean {
+  if (!realDirectory(source)) return false;
+  try { return readdirSync(source).some(name => !name.startsWith('cockpit.lock')); }
+  catch { return false; }
+}
+
+/** The leftover tasks the moved directory `destination` names now, read from disk. */
+function currentLeftovers(destination: string): string[] {
+  forgetLegacyRunIds(destination);
+  return [...legacyRunIds(destination)].sort();
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
 function rewriteLocation(rewrite: PathRewrite): string {
@@ -452,6 +523,7 @@ export function describeProjectMigrationPlan(plan: ProjectMigrationPlan): string
     ...section('Blockers', plan.blockers),
     ...section('Destination conflicts', plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)),
     ...section('Moves', plan.moves.map(move => `${move.from} -> ${move.to}`)),
+    ...section('Kept in .ai/cezar/ for live tasks until they end', plan.leftovers),
     ...section('Worktree repairs (git worktree repair)', plan.worktrees.map(worktree => `${worktree.from} -> ${worktree.to}`)),
     ...section('Path rewrites', plan.rewrites.map(rewrite => `${rewriteLocation(rewrite)}: ${rewrite.from} -> ${rewrite.to}`)),
     ...section('Tracked files left in place; run these and commit', plan.gitMv),

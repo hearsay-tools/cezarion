@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { fallbackProjectWriteError } from '../project-paths.ts';
 import { productName } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
@@ -451,7 +452,7 @@ export class PreviewHost implements PreviewHostLike {
     if (opts.deleteProfile && dataDir) {
       try {
         // Chromium may still be flushing the profile as it exits.
-        rmSync(join(dataDir, 'preview', runId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        rmSync(join(runDataDir(dataDir, runId), 'preview', runId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       } catch { /* a profile we cannot delete is left behind, never a failed run deletion */ }
     }
   }
@@ -680,7 +681,7 @@ export class PreviewHost implements PreviewHostLike {
   }
 
   private runDir(ctx: RunContext): string {
-    return join(ctx.dataDir, 'preview', ctx.runId);
+    return join(runDataDir(ctx.dataDir, ctx.runId), 'preview', ctx.runId);
   }
 
   private onServerState(entry: RunEntry, port: number, dev: DevServerLike, state: DevServerState): void {

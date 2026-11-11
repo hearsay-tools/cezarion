@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { projectPaths } from '../project-paths.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -116,7 +117,7 @@ async function listWorkerArtifacts(dataDir: string, run: RunRecord, delegation: 
   const published = await listArtifacts(artifactDirectory(dataDir, run.id), run.id);
   const publishedItems = published.slice().reverse().map(item => ({ state: 'available' as const, id: `published:${item.id}`, path: join(artifactDirectory(dataDir, run.id), item.id, 'content') }));
   const items: Extract<WorkerCollectedResult['artifacts'], { state: 'available' }>['items'] = [...publishedItems, ...[...ids].map((id): Extract<WorkerCollectedResult['artifacts'], { state: 'available' }>['items'][number] => {
-    const path = join(dataDir, 'runs', `${run.id}-images`, id);
+    const path = join(runDataDir(dataDir, run.id), 'runs', `${run.id}-images`, id);
     if (resolveAttachmentPath(dataDir, run.id, id)) return { state: 'available', id, path };
     return existsSync(path) ? { state: 'unavailable', reason: 'unreadable', id, path } : { state: 'deleted', reason: 'missing', id, path };
   })].slice(0, 32);
@@ -137,7 +138,7 @@ export async function revalidateRetainedWorkerResult(repoRoot: string, previous:
         }
         return resolveAttachmentPath(dataDir, previous.workerId, item.id)
           ? { state: 'available' as const, id: item.id, path: item.path }
-          : existsSync(join(dataDir, 'runs', `${previous.workerId}-images`, item.id))
+          : existsSync(join(runDataDir(dataDir, previous.workerId), 'runs', `${previous.workerId}-images`, item.id))
             ? { state: 'unavailable' as const, reason: 'unreadable' as const, id: item.id, path: item.path }
             : { state: 'deleted' as const, reason: 'missing' as const, id: item.id, path: item.path };
       })),
