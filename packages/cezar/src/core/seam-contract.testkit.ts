@@ -25,7 +25,7 @@
  *   once Cezar interrupts it, as `recordSessionFault` does.
  *
  * A fix to runner lifecycle, input delivery, holds or resume inside a runner class extends these
- * rows, which run on every runner (AGENT_PROTOCOL.md §7).
+ * rows, which run on every runner (docs/areas/runners.md).
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

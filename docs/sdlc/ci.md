@@ -141,7 +141,7 @@ persistent baseline file or migration.
 ### Runner regression coverage
 
 A runner lifecycle, input-delivery or attention fix adds shared regression
-coverage in the same PR, as required by `AGENTS.md` and `AGENT_PROTOCOL.md` §7.
+coverage in the same PR, as [the runner rules](../areas/runners.md#runner-regressions-ship-with-shared-coverage) require.
 `packages/cezar/src/core/harness-parity.test.ts` and
 `packages/cezar/src/workflows/worker-parent-attention.testkit.ts` run every
 `RUNNER_IDS` backend through its own offline wire. Their coverage guards reject

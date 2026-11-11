@@ -754,7 +754,7 @@ class OpencodeSession implements AgentSession {
         });
       } else {
         // A `task` deny an older cezar added stays on the session: OpenCode appends permission
-        // rules and has no remove (hearsay-tools/cezarion#2279, AGENT_PROTOCOL.md D1).
+        // rules and has no remove (hearsay-tools/cezarion#2279).
         this.attachSession(stringField(existing, 'id') ?? requested);
         resumed = true;
       }

@@ -141,7 +141,7 @@ the run shows Needs you at once (a human wait with `source: native`), and every
 result that resolves meanwhile waits for the boundary, as any mid-turn result
 does. This is not an exception to "everything wakes"; the agent simply is not
 parked. Its answer path through the human seam, and its behaviour in autonomous
-runs (`AGENT_PROTOCOL.md` 1185-1189), are unchanged. Cezar's prompt teaches
+runs, are unchanged. Cezar's prompt teaches
 `cezar_ask`, which parks at a real boundary and lets everything else wake the agent.
 
 ### Tools

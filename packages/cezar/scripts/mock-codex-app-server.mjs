@@ -233,7 +233,8 @@ const completeSteerTurn = (turnId) => {
 };
 
 // #708: requirements shape from Codex's generated ConfigRequirementsReadResponse.
-// Retain an invalid requested override to reproduce fallback warnings on later turns.
+// Retain an invalid requested override to reproduce fallback warnings on later turns. This
+// models the reported diagnostic pattern; no enterprise-account trace was captured.
 const managedRequirements = process.env.MOCK_CODEX_REQUIREMENTS
   ? JSON.parse(process.env.MOCK_CODEX_REQUIREMENTS) : null;
 let rejectedPermissionOverride = false;

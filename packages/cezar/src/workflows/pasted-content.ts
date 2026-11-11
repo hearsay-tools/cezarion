@@ -48,7 +48,7 @@ export interface PersistedAttachment {
  * A user attachment that is NOT an image (#950) — a PDF, a `.txt`, a `.md`.
  *
  * Deliberately not a `ContentBlock` variant: `ContentBlock` is the runner protocol
- * (`AGENT_PROTOCOL.md`), and a file has nothing a model can look at. The RunManager
+ * (`core/agent-runner.ts`), and a file has nothing a model can look at. The RunManager
  * converts these into files on disk plus a path in the prompt before anything is
  * handed to a session, so a `file` block can never reach a backend.
  */

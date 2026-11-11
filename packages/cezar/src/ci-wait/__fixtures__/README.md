@@ -5,8 +5,8 @@ fresh and resumed sessions. The mock consumes exactly that runner's injected
 configuration, negotiates with the bundled SDK MCP adapter, lists tools, calls
 `cezar_wait_for_ci`, and reaches the real private IPC controller. Pi loads the
 actual extension and invokes its registered tool. No GitHub request or model
-turn is needed. Tokens are absent from descriptor snapshots; Cursor's required
-ACP environment values are redacted when the mock records wire input.
+turn is needed. Tokens are absent from descriptor snapshots; Cursor's plugin
+`mcp.json` holds only `${NAME}` placeholders.
 
 Installed interfaces checked for these fixtures:
 
@@ -15,7 +15,7 @@ Installed interfaces checked for these fixtures:
 | Claude | 2.1.278 | Installed `--help` supports repeated/JSON `--mcp-config` and separate `--strict-mcp-config`. Only the former is used. Config env references expand before stdio launch; the generated tool is appended to restricted `--allowedTools`. |
 | Codex | 0.155.1 | Installed `app-server generate-json-schema` declares arbitrary `config` for `thread/start` and `thread/resume`. A real isolated app-server probe performed `mcpServerStatus/list` and `mcpServer/tool/call` successfully on both start and resume, using injected offline history to create a resumable rollout, then unsubscribing and injecting a new server name on resume, no provider turn. Dotted `mcp_servers.<unique-name>` overrides preserve unrelated servers and delegation config. |
 | OpenCode | 1.18.32 | Local MCP config uses `type: local`, command arrays, inherited process env. `OPENCODE_CONFIG_CONTENT` has runtime precedence; only one server is merged, existing runtime settings and config-file discovery remain intact. Malformed supplied runtime JSON fails explicitly. |
-| Cursor | 2026.09.18-9a7762b | Installed `1699.index.js` passes `e.mcpServers` through both ACP new/load into session resources. The session loader starts with existing `mcpLease.getClients`, adds session entries, and retains team-settings/disabled-server middleware. Stdio descriptors accept `{name,command,args,env:[{name,value}]}`. Installed `index.js` SDK's default env includes only HOME/LOGNAME/PATH/SHELL/TERM/USER; therefore exactly CEZ_TOOL_TOKEN/SOCKET must be supplied in the ACP environment. |
+| Cursor | 2026.10.01-e373342 | Print, checked 2026-10-07 (`core/__fixtures__/cursor/print-mcp.json` and `print-qualification.md`). Every print process gets `--plugin-dir` with a private local plugin. Its `mcp.json` names the stdio adapter and gives each tool environment name as a `${NAME}` placeholder, which Cursor expands from the process environment on fresh and exact-resume turns. No `--approve-mcps` and no write to the global Cursor configuration. |
 | Pi | 0.87.0 | Installed extension `types.d.ts`/`loader.js` expose `registerTool` with parameters; pi-ai validation explicitly supports plain JSON Schema. Repeated explicit `--extension` preserves discovery and the retry extension. Selected tools retain the CI tool. |
 
 Primary documentation consulted:
