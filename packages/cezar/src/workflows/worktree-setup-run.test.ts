@@ -5,13 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { withOwnedInputRun } from '../core/workflow-parity.testkit.ts';
+import '../core/claude-runner.testkit.ts';
+import { withOwnedInputRun } from '../core/workflow-parity-core.testkit.ts';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { reclaimWorktree } from '../runs/retention.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-claude.testkit.ts';
 import type { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 

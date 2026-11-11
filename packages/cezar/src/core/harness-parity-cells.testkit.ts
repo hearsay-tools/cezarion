@@ -3,7 +3,6 @@ import { monitoringTurnFiles } from '../workflows/monitoring-turn-partitions.tes
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { observationClock } from './observation-clock.testkit.ts';
 import { IDLE_TIMEOUT_MS } from '../workflows/run.ts';
-import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createApp } from '../server/server.ts';
 import { apiRequest } from '../server/loopback-request.testkit.ts';
 /**
@@ -55,7 +54,6 @@ import {
   STEP_STATUS,
   WAIT_SOURCE,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import type { TimerWaitEntry } from '@open-mercato/cezar-contract';
 import type { RunManager } from '../workflows/run.ts';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
@@ -63,7 +61,6 @@ import { readMockRecords } from '../mock-records.testkit.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
-import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { UiEvent } from './ui-events.ts';
@@ -91,293 +88,25 @@ import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-re
 import { supportsProfiles } from './agent-profiles.ts';
 import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef } from '../workflows/types.ts';
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
-import { promptFor, driveSeam, lastIndexWhere, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
+import { promptFor, driveSeam, textEvents, exemptionFor, HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, MODEL_REFUSAL_CRITERIA, PERMISSION_CRITERIA, WORKFLOW_TIMEOUT_CRITERIA, NO_PROGRESS_CRITERIA, AUTONOMOUS_CRITERIA, FINAL_MESSAGE_CRITERIA, WORKER_PROGRESS_WAIT_CRITERIA, WORKFLOW_ASK_CRITERIA, STEP_COMPLETION_CRITERIA, FOLLOWUP_CRITERIA, ANSWER_DELIVERY_CRITERIA, SKILL_RESUME_CRITERIA, SKILL_PROVISION_CRITERIA, WORKTREE_SETUP_CRITERIA, PARITY_EXEMPTIONS, PINNED_SESSION_ID, seedOpencodeMockSession, type ScenarioName, type SeamObservation, waitFor } from './harness-parity-core.testkit.ts';
 import { SEAM_CONTRACT_ROWS } from './seam-contract.testkit.ts';
-import { CONTROL_CRITERIA, FOLLOW_ON_ROWS, INPUT_ROWS, RUN_ROWS, SEAM_ROWS } from './harness-parity-rows.testkit.ts';
-import { parityRowId, runsOn, type ParityFamilyName } from './parity-classes.testkit.ts';
-import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
+import { CONTROL_CRITERIA, FOLLOW_ON_ROWS, INPUT_ROWS } from './harness-parity-rows.testkit.ts';
+import { parityRowId } from './parity-classes.testkit.ts';
+import { withOwnedInputRun, withoutTaskScenario, withSkillParentRun, driveRun, type RunObservation } from './workflow-parity-core.testkit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWork } from '../workflows/fixture-manager.testkit.ts';
+import { HARNESS_PARITY_GROUPS, harnessParityFile, type HarnessParityPart } from './harness-parity-parts.testkit.ts';
+import { describeHarnessGroups, probeEnv, readRecording, vitestRegistration, type HarnessGroup, type HarnessParityScope, type HarnessRegistrar, type HarnessRegistration, type SeamCriterion, type Cells } from './harness-parity-registrar.testkit.ts';
+import { SEAM_CRITERIA, seamRows } from './harness-parity-seam-tier.testkit.ts';
+import { driveObservedRun, openTimerWait, RUN_CRITERIA, runRows, TERMINAL, timerWakeOf } from './harness-parity-run-tier.testkit.ts';
+import { CONTRACT_GROUPS } from './harness-parity-contract.cells.testkit.ts';
+import { PROVIDER_GROUPS } from './harness-parity-provider.cells.testkit.ts';
+import { STARTUP_GROUPS } from './harness-parity-startup.cells.testkit.ts';
 
 /** One request the OpenCode serve mock recorded in `CEZ_MOCK_ARGS_FILE`. */
 type OpencodeRequestRow = { method?: string; url?: string; body?: { permission?: unknown } };
 
-/** One row of the matrix, named once and applied to every harness. */
-interface SeamCriterion<T = SeamObservation> {
-  /** Stable id the exemption table references. */
-  readonly id: string;
-  readonly name: string;
-  readonly scenario: ScenarioName;
-  /** Throws when the backend does not satisfy the criterion. */
-  readonly assert: (obs: T) => void;
-}
-
-/** What this kit adds to each plain row of `harness-parity-rows.testkit.ts`, by row id. */
-type Cells<Rows extends readonly { readonly id: string }[], Criterion> =
-  Readonly<Record<Rows[number]['id'], Omit<Criterion, 'id' | 'name' | 'scenario'>>>;
-
-const sessionEvents = (v1: readonly AgentEvent[]) =>
-  v1.filter((e): e is Extract<AgentEvent, { type: 'session' }> => e.type === 'session');
-
-const SEAM_CELLS: Cells<typeof SEAM_ROWS, SeamCriterion> = {
-  S21: {
-    // hearsay-tools/cezarion#832: restored history must not silently cross workflow steps.
-    assert: ({ v1, v2, result, failure }) => {
-      const warnings = v2.filter(event => event.type === 'session.error');
-      expect(warnings).toEqual([{
-        type: 'session.error', fatal: false,
-        message: expect.stringMatching(/restored.*4.*autoResume/),
-      }]);
-      expect(v1.filter(event => event.type === 'note')).toEqual([
-        { type: 'note', message: warnings[0]!.message },
-      ]);
-      expect(v1.some(event => event.type === 'error')).toBe(false);
-      expect(failure).toBeUndefined();
-      expect(result.text).not.toBe('');
-      expect(v1.filter(event => event.type === 'done')).toHaveLength(1);
-      expect(v2).toContainEqual(expect.objectContaining({ type: 'turn.completed', stopReason: 'end_turn' }));
-      expect(v2.indexOf(warnings[0]!)).toBeLessThan(v2.findIndex(event => event.type === 'turn.completed'));
-    },
-  },
-  S25: {
-    // hearsay-tools/cezarion#872: a start racing its predecessor's teardown exits before listening.
-    assert: ({ v1, v2, result, failure }) => {
-      expect(failure).toBeUndefined();
-      expect(v1.filter(event => event.type === 'error')).toEqual([]);
-      const retries = v1.filter(event => event.type === 'note' && /exited before listening .*retrying once/.test(event.message));
-      expect(retries).toHaveLength(1);
-      const retry = v1.indexOf(retries[0]!);
-      expect(v1.findIndex(event => event.type === 'session')).toBeGreaterThan(retry);
-      expect(v1.filter(event => event.type === 'turn-end')).toHaveLength(1);
-      expect(v1.filter(event => event.type === 'done')).toHaveLength(1);
-      expect(result.text).not.toBe('');
-      expect(v2).toContainEqual(expect.objectContaining({ type: 'turn.completed' }));
-    },
-  },
-  S20: {
-    assert: ({ backend, v1, failure, pid, elapsedMs }) => {
-      // ENOENT precedes the backend wire. Runners retain their existing event
-      // and/or rejected-result channels; none may look like a successful turn.
-      expect(pid).toBeUndefined();
-      const errors = v1.filter(event => event.type === 'error');
-      expect(errors.length).toBeLessThanOrEqual(1);
-      if (backend === 'opencode') {
-        expect(errors).toHaveLength(1);
-        expect(failure).toBeDefined();
-        expect(errors[0]!.message).toBe(failure!.message);
-        expect(v1.some(event => event.type === 'done' || event.type === 'turn-end')).toBe(false);
-        expect(elapsedMs).toBeLessThan(2_000); // hearsay-tools/cezarion#895: the real spawn error, not the 30 s server URL deadline.
-      }
-      const diagnostics = [...errors.map(event => event.message), ...(failure ? [failure.message] : [])];
-      expect(diagnostics.length).toBeGreaterThan(0);
-      for (const message of diagnostics) expect(message).toMatch(/PATH|install/i);
-      expect(v1.some(event => event.type === 'turn-end' || event.type === 'text')).toBe(false);
-      const done = v1.findIndex(event => event.type === 'done');
-      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeGreaterThanOrEqual(0);
-      if (done >= 0) expect(v1.findIndex(event => event.type === 'error')).toBeLessThan(done);
-    },
-  },
-  S18: {
-    assert: ({ v1 }) => {
-      const errors = v1.filter(e => e.type === 'error');
-      expect(errors).toHaveLength(1);
-      expect(errors[0]!.message).toContain('Error: write EPIPE');
-      expect(errors[0]!.message).toMatch(/(?:code 1|\(1\))/);
-      const errorIndex = v1.findIndex(e => e.type === 'error');
-      for (const [index, event] of v1.entries()) {
-        if (event.type === 'turn-end' || event.type === 'done') expect(index).toBeGreaterThan(errorIndex);
-      }
-      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
-      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
-    },
-  },
-  S19: {
-    assert: ({ v1, elapsedMs }) => {
-      expect(elapsedMs).toBeLessThan(4_000); // Descendant keeps both pipes open for 5s.
-      const errors = v1.filter(e => e.type === 'error');
-      expect(errors).toHaveLength(1);
-      expect(errors[0]!.message).toContain('Error: write EPIPE');
-      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).toContain('late buffered crash diagnostic');
-    },
-  },
-  S17: {
-    assert: ({ v1 }) => {
-      expect(v1.filter(e => e.type === 'error')).toEqual([]);
-      expect(v1.filter(e => e.type === 'done')).toHaveLength(1);
-      expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(1);
-      expect(v1.at(-1)?.type).toBe('done');
-      expect(v1.filter(e => e.type === 'note').map(e => e.message).join('\n')).not.toContain('harmless shutdown diagnostic');
-    },
-  },
-  S15: {
-    assert: ({ v1 }) => {
-      const errors = v1.filter(e => e.type === 'error');
-      expect(errors).toHaveLength(1);
-      const message = errors.at(-1)!.message;
-      expect(message).toContain('Error: write EPIPE');
-      expect(message).toMatch(/(?:code 1|\(1\))/);
-      expect(message).not.toContain('Node.js');
-      expect(message).not.toContain(' |  | ');
-      expect(message.length).toBeLessThan(650);
-      expect(v1.filter(e => e.type === 'done').length).toBeLessThanOrEqual(1);
-      expect(v1.filter(e => e.type === 'turn-end').length).toBeLessThanOrEqual(1);
-      if (message.startsWith('pi CLI')) {
-        expect(v1.some(e => e.type === 'note' && e.message.includes('skipped unparseable RPC line'))).toBe(true);
-      }
-      const notes = v1.filter(e => e.type === 'note').map(e => e.message).join('\n');
-      expect(notes).toContain('at afterWriteDispatched (node:internal/stream_base_commons:159:15)');
-      expect(notes).toContain("errno: -32,\n  code: 'EPIPE',\n  syscall: 'write',");
-      expect(notes).toContain("diagnostic: '" + 'x'.repeat(700) + "'");
-      expect(notes).toContain('Node.js v24.20.0');
-    },
-  },
-  S16: {
-    assert: ({ v1 }) => {
-      const errors = v1.filter(e => e.type === 'error');
-      expect(errors).toHaveLength(1);
-      expect(errors.at(-1)!.message).toContain('authentication unavailable');
-      expect(errors.at(-1)!.message).toMatch(/(?:code 7|\(7\))/);
-    },
-  },
-  S1: {
-    // Group 7 — the baseline AgentSession contract, never asserted uniformly.
-    assert: ({ v1 }) => {
-      expect(v1.filter((e) => e.type === 'done')).toHaveLength(1);
-      expect(v1.at(-1)?.type).toBe('done');
-    },
-  },
-  S2: {
-    // Group 2 / #4 — the OpenCode five-minute cut. The runner used to end the
-    // turn from its transport's own response, so undici's 300s headers timeout
-    // killed a healthy long turn and cezar parked the run. `hold` acknowledges
-    // the prompt, THEN waits before emitting content and its terminal signal:
-    // a runner that still derives turn-end from the ack reports it before the
-    // content it is supposed to close over.
-    assert: ({ v1, v2 }) => {
-      const lastContent = Math.max(
-        lastIndexWhere(v1, (e) => e.type === 'text'),
-        lastIndexWhere(v1, (e) => e.type === 'tool-result'),
-      );
-      expect(lastContent).toBeGreaterThanOrEqual(0);
-      expect(v1.findIndex((e) => e.type === 'turn-end')).toBeGreaterThan(lastContent);
-      expect(v2.filter((e) => e.type === 'turn.completed')).toHaveLength(1);
-    },
-  },
-  S7: {
-    // Group 1 / #53, #54 — a runtime provider rejection used to look like a
-    // clean finish, so the orchestrator parked the run as "Needs You" and the
-    // user waited on an agent that was never coming back. The rejection has to
-    // reach BOTH streams: v1 `error` is what fails the run, v2 `session.error`
-    // is what the cockpit renders.
-    assert: ({ v1, v2 }) => {
-      const errors = v1.filter(
-        (e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error',
-      );
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0]?.message.trim() ?? '').not.toBe('');
-      // v2 must signal it too, but the CHANNEL is legitimately per-wire:
-      // opencode and pi have a session-level error frame, codex reports a
-      // failed turn (as does cursor), and claude only has the result envelope's stop reason.
-      // What is uniform — and what #53/#54 were — is that v2 never reports the
-      // rejection as a clean end of turn.
-      expect(
-        v2.some(
-          (e) =>
-            e.type === 'session.error' ||
-            (e.type === 'turn.completed' && e.stopReason === 'error'),
-        ),
-      ).toBe(true);
-      expect(v2.some((e) => e.type === 'turn.completed' && e.stopReason === 'end_turn')).toBe(
-        false,
-      );
-    },
-  },
-  S9: {
-    // Group 4 / #5, #600 — a spawned sub-agent runs in its own child session
-    // that emits a full lifecycle over the shared connection. Its terminal
-    // signal used to end the PARENT turn, so the parent's remaining work was
-    // attributed to a turn cezar had already closed.
-    assert: ({ backend, v1, v2, result }) => {
-      // #149: child text stays nested on v2 and never contaminates parent text,
-      // including AgentRunResult's fallback buffer and unfinished child deltas.
-      const texts = v1.filter((e) => e.type === 'text').map((e) => e.text);
-      expect(texts).toHaveLength(1);
-      expect(texts[0]).not.toContain('Child review finished.');
-      expect(result.text).toBe(texts[0]);
-      expect(v2.some((e) => e.type === 'item.completed' && e.item.kind === 'message'
-        && e.item.text === 'Child review finished.' && !!e.item.parentItemId)).toBe(true);
-      expect(v1.filter((e) => e.type === 'turn-end')).toHaveLength(1);
-      const lastText = lastIndexWhere(v1, (e) => e.type === 'text');
-      expect(lastText).toBeGreaterThanOrEqual(0);
-      // The parent's own trailing text has to land BEFORE its turn-end. Under
-      // #600 the child's completion closed the turn first, so it did not.
-      expect(v1.findIndex((e) => e.type === 'turn-end')).toBeGreaterThan(lastText);
-      // hearsay-tools/cezarion#833: OMP's child message_end must contribute spend without
-      // changing the shared parent/child lifecycle contract above. Other native wires keep
-      // their existing aggregate telemetry; these literals describe the OMP mock's calls.
-      if (backend === 'omp') {
-        expect(result.tokensUsed).toBe(60);
-        expect(v1.filter(event => event.type === 'cost').map(event => event.usd)).toEqual([0.001, 0.002]);
-        expect(v2.filter(event => event.type === 'usage.updated').at(-1)).toMatchObject({
-          usage: { input: 30, output: 15, total: 149, cacheRead: 100, cacheWrite: 4 }, costUsd: 0.003,
-        });
-        expect(v2.filter(event => event.type === 'turn.completed')).toEqual([
-          expect.objectContaining({ usage: { input: 30, output: 15, total: 149, cacheRead: 100, cacheWrite: 4 }, costUsd: 0.003 }),
-        ]);
-      }
-    },
-  },
-  S3: {
-    // Group 7 — `resumeCommand()` and "open in CLI" need a session id after
-    // every run. The two wires differ and both are legitimate: codex, opencode
-    // cursor and pi mint their own and echo a v1 `session` event, while claude pins
-    // the id cezar supplied (`--session-id`, claude-cli-runner.ts:385) and
-    // returns it on the result. What must never happen is neither — that is a
-    // run nobody can resume.
-    assert: ({ v1, result }) => {
-      const reported = sessionEvents(v1)[0]?.sessionId ?? result.sessionId;
-      expect(reported ?? '').not.toBe('');
-    },
-  },
-  S4: {
-    // Group 7 — usage telemetry on both streams, not one.
-    assert: ({ v1, v2 }) => {
-      expect(v1.some((e) => e.type === 'token-usage' && e.tokensUsed > 0)).toBe(true);
-      expect(v2.some((e) => e.type === 'usage.updated')).toBe(true);
-    },
-  },
-  S10: {
-    // Group 7 — the pid roots the run's process tree for resource telemetry (#348).
-    assert: ({ pid }) => {
-      expect(typeof pid).toBe('number');
-    },
-  },
-};
-const SEAM_CRITERIA: readonly SeamCriterion[] = SEAM_ROWS.map(row => ({ ...row, ...SEAM_CELLS[row.id] }));
-
-/** One row of the run tier. `settled` says when the run has reached the state
- *  the row is about, so a row waits for its own condition rather than a sleep. */
-interface RunCriterion {
-  readonly id: string;
-  readonly name: string;
-  readonly scenario: ScenarioName;
-  readonly timeoutMs?: number;
-  readonly settled: (record: RunObservation['record']) => boolean;
-  readonly assert: (obs: RunObservation) => void;
-}
-
-const TERMINAL: readonly string[] = ['review', 'done', 'failed', 'cancelled'];
-
-const askEvents = (obs: RunObservation) =>
-  obs.events.filter((e) => e.type === 'ask.requested');
-
-/** The open timer wait a declared park registered: a cezar_wait timer, or a monitoring timer. Since
- *  the lifecycle markers went (hearsay-tools/cezarion#2397) every scenario parks through cezar_wait;
- *  `waiting` with an open timer reads as monitoring (hearsay-tools/cezarion#1233). */
-const openTimerWait = (run?: { waits?: readonly unknown[] | undefined } | null): TimerWaitEntry | undefined =>
-  (run?.waits as TimerWaitEntry[] | undefined)?.find(wait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open);
-const timerWakeOf = (run?: { waits?: readonly unknown[] | undefined } | null): string | undefined => openTimerWait(run)?.deadline;
 /** Keep the exact fire-and-forget settlement promise owned by the fixture. */
 function observeSettlements(manager: RunManager) {
   const work = fixtureWork(manager);
@@ -389,116 +118,6 @@ function observeSettlements(manager: RunManager) {
   });
   return { pending, restore: () => spy.mockRestore() };
 }
-
-/** Drive the native run with owned capacity and only its idle timer frozen. */
-function driveObservedRun(
-  backend: Parameters<typeof driveRun>[0], scenario: Parameters<typeof driveRun>[1],
-  settled: Parameters<typeof driveRun>[2], timeout: number,
-  observe: (context: { store: RunStore; manager: RunManager; runId: string; repoRoot: string; idle: ReturnType<typeof observationClock>; semaphore: WorkspaceSemaphore }) => Promise<void>,
-  options: NonNullable<Parameters<typeof driveRun>[5]> = {},
-) {
-  let repoRoot = '';
-  let idle: ReturnType<typeof observationClock>;
-  const semaphore = new WorkspaceSemaphore({ home: testHome() });
-  return driveRun(backend, scenario, settled, timeout, context => observe({ ...context, repoRoot, idle, semaphore }), {
-    ...options, semaphore,
-    beforeStart: context => {
-      repoRoot = context.repoRoot;
-      idle = observationClock(delay => delay === IDLE_TIMEOUT_MS && /armIdleTimer/.test(new Error().stack ?? ''));
-      options.beforeStart?.(context);
-    },
-    beforeCleanup: () => { idle?.restore(); options.beforeCleanup?.(); },
-  });
-}
-
-const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
-  R17: {
-    // #550: Codex keeps its turn open and emits retryable errors; other wires
-    // use their native provider rejection. Every runner must leave running.
-    timeoutMs: 75_000,
-    settled: record => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
-    assert: obs => {
-      expect(obs.record?.status).toBe('failed');
-      expect(obs.statuses).not.toContain('waiting');
-      expect(obs.record?.error?.trim()).toBeTruthy();
-      if (obs.record?.runner === 'codex') {
-        expect(obs.record.error).toContain('Connection failed: error sending request');
-        expect(obs.events).toContainEqual(expect.objectContaining({
-          type: 'session.error', fatal: false,
-          message: 'Reconnecting... 2/5 — stream disconnected before completion: invalid peer certificate: UnknownIssuer',
-        }));
-      }
-    },
-  },
-  R1: {
-    // Group 7 — a run whose agent DECLARED completion reaches cezar's review
-    // gate, which is a non-attention terminal state (cezar never auto-merges).
-    // The scenario has to declare it: a markerless turn-end parks as `waiting`
-    // on every backend, and that is correct behaviour, not a defect.
-    settled: (record) => TERMINAL.includes(record?.status ?? ''),
-    assert: (obs) => {
-      expect(['review', 'done']).toContain(obs.record?.status);
-      expect(obs.statuses).not.toContain('waiting');
-    },
-  },
-  R2: {
-    // Group 1 / #53, #54 — the row that would have caught both on whichever
-    // backend shipped the bug second. `statuses` rather than the final status:
-    // the defect was a park, and a run that parked and later failed anyway is
-    // still the bug the user saw.
-    // `waiting` settles too, so the defect fails on the assertion below rather
-    // than as an opaque timeout: a parked run is the bug, not a slow one.
-    settled: (record) => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
-    assert: (obs) => {
-      expect(obs.record?.status).toBe('failed');
-      expect(obs.statuses).not.toContain('waiting');
-    },
-  },
-  R3: {
-    // Group 3 / #6, #473 — an ask has to reach the cockpit as exactly one card
-    // and park the run for the user. The two wires differ underneath: codex and
-    // opencode have native asks their runners map; claude, pi, omp and cursor call
-    // cezar_ask, whose human wait `workflows/run.ts` opens. Above the seam that
-    // difference must be invisible.
-    settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
-    assert: (obs) => {
-      expect(obs.record?.status).toBe('waiting');
-      expect(askEvents(obs)).toHaveLength(1);
-    },
-  },
-  R4: {
-    // Group 3 — the other half, and the one that hangs a run when it is wrong:
-    // a malformed ask must render no card AND still end its turn. A backend
-    // that waits forever for an answer to a question nobody can see is the
-    // failure this pins; `settled` returning is itself part of the assertion.
-    settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
-    assert: (obs) => {
-      expect(askEvents(obs)).toEqual([]);
-      expect([...TERMINAL, 'waiting']).toContain(obs.record?.status);
-    },
-  },
-  R5: {
-    // Group 6 / #48 — a declared park is a non-attention state: a cezar_wait timer parks
-    // the run as monitoring, never as Needs You.
-    settled: (record) => record?.status === 'waiting',
-    assert: (obs) => {
-      // hearsay-tools/cezarion#1233: `waiting` plus an open timer reads as monitoring.
-      expect(obs.record).toMatchObject({ status: RUN_STATUS.waiting });
-      expect(timerWakeOf(obs.record)).toBeDefined();
-      expect(deriveAttention(obs.record!).label).toBe('monitoring');
-    },
-  },
-  R12: {
-    // #149: the child message lands before the parent's turn-end, after its cezar_wait.
-    settled: (record) => record?.status === 'waiting',
-    assert: (obs) => {
-      expect(obs.record).toMatchObject({ status: RUN_STATUS.waiting });
-      expect(timerWakeOf(obs.record)).toBeDefined();
-      expect(deriveAttention(obs.record!).label).toBe('monitoring');
-    },
-  },
-};
-const RUN_CRITERIA: readonly RunCriterion[] = RUN_ROWS.map(row => ({ ...row, ...RUN_CELLS[row.id] }));
 
 // Group 8 — #505: agent input reaches a running turn and its reading is reported.
 interface InputObservation {
@@ -691,24 +310,6 @@ const fieldVariants = (backend: RunnerId, field: AgentRunSpecField, probe: Extra
     ? { kind: 'boundary' as const, without: {}, with: probe.with }
     : probe;
 
-/** The mock's own record of what reached it: argv or requests, then stdin where hooked. */
-function readRecording(dir: string, name: string): string[] {
-  return [`${name}.args.ndjson`, `${name}.stdin.ndjson`].flatMap((file) => {
-    const path = join(dir, file);
-    return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean) : [];
-  });
-}
-
-/** Env for a probe drive. The recording paths are RELATIVE on purpose: the mock
- *  resolves them against ITS cwd, so a recording that lands in `dir` is
- *  evidence for `cwd` and `env` in one stroke (the `process` probes). */
-const probeEnv = (name: string) => ({
-  CEZ_MOCK_ARGS_FILE: `${name}.args.ndjson`,
-  CEZ_MOCK_STDIN_FILE: `${name}.stdin.ndjson`,
-  CEZ_HANDOFF_FILE: '',
-  CEZ_TODOS_FILE: '',
-});
-
 // ---- the pending request's lifecycle (hearsay-tools/cezarion#1266, P3–P8) --------------------
 
 type PermissionRequestedEvent = Extract<UiEvent, { type: 'permission.requested' }>;
@@ -738,33 +339,6 @@ const RETIREMENTS = [
   { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
 ] as const;
 
-export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup' | 'owned-workflows' | 'contract';
-
-// Adjacent semantic families; every group below belongs to exactly one part.
-export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly string[]>> = {
-  startup: ['startup'],
-  provider: ['provider'],
-  contract: ['contract'],
-  session: ['seam', 'session', 'input', 'governed', 'native-message', 'spec', 'tools', 'cdp', 'tool-grants'],
-  run: ['run', 'diagnostics', 'child', 'hooks', 'answer', 'monitoring', 'prs'],
-  'owned-workflows': ['owned-workflows'],
-  'owned-input': ['owned'],
-  ownership: ['continue', 'restart', 'owner', 'adopt', 'stop'],
-  settlement: ['cleanup', 'multi-continue', 'superseded', 'disposal', 'scratch', 'permission', 'default-permission', 'retirement-P3', 'retirement-P4', 'permission-failure', 'malformed', 'early-permission', 'late-permission', 'mcp'],
-};
-
-export const harnessParityFile = (backend: RunnerId, part: HarnessParityPart): string =>
-  `harness-${backend}-${part}-parity.test.ts`;
-
-// The once file keeps matrix guards and single-runner checks. Runner parts own disjoint groups.
-type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'beforeAll' | 'afterAll'> & {
-  toolGrants: typeof describeToolGrantParity;
-  allGroups?: boolean;
-  /** A dry collection, for `groupCellCounts` and `harnessGroupRows`. A function also hears each
-   *  cell the file's runner registers, with its group. */
-  probe?: true | ((group: string, title: string) => void);
-};
-
 /** Every matrix row with the scenario it drives, as the matrix guard reads them. */
 export function parityRowScenarios(): ReadonlyArray<{ readonly id: string; readonly scenario: ScenarioName }> {
   return [
@@ -776,27 +350,6 @@ export function parityRowScenarios(): ReadonlyArray<{ readonly id: string; reado
     ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
     ...SEAM_CRITERIA, ...SEAM_CONTRACT_ROWS, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
   ];
-}
-
-/** How many cells each group's suite registers for one runner, by suite name. A shared group can
- *  hold none for a runner outside the derived set, and Vitest 4 fails an empty suite. */
-function groupCellCounts(runner: RunnerId): Map<string, number> {
-  const counts = new Map<string, number>();
-  let cells = 0;
-  describeHarnessParity({ runner, part: 'session' }, {
-    describe: ((name: string, ...args: unknown[]) => {
-      const before = cells;
-      (args.at(-1) as () => void)();
-      counts.set(name, (counts.get(name) ?? 0) + cells - before);
-    }) as typeof describe,
-    it: (() => { cells++; }) as unknown as typeof it,
-    beforeAll: (() => undefined) as typeof beforeAll,
-    afterAll: (() => undefined) as typeof afterAll,
-    toolGrants: () => { cells += TOOL_GRANT_CASES.length; },
-    allGroups: true,
-    probe: true,
-  });
-  return counts;
 }
 
 /** The row ids each group registers on any runner, from its cell titles (hearsay-tools/cezarion#2991). */
@@ -819,116 +372,14 @@ export function harnessGroupRows(): Map<string, Set<string>> {
   return rows;
 }
 
-export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessParityPart } | 'once',
-  registration: HarnessRegistration = { describe, it, beforeAll, afterAll, toolGrants: describeToolGrantParity }): void {
-  const { beforeAll, afterAll } = registration;
-  // Each group is one parity family (core/parity-classes.testkit.ts, hearsay-tools/cezarion#2991):
-  // a cell registers only when its row runs on this file's runner. The group is carried into each
-  // suite factory, which Vitest may call after describeRunners returns.
-  let currentGroup: string | undefined;
-  const inGroup = <A extends unknown[]>(group: string | undefined, factory: (...args: A) => unknown) => {
-    return (...args: A) => {
-      const previous = currentGroup;
-      currentGroup = group;
-      try { return factory(...args); } finally { currentGroup = previous; }
-    };
-  };
-  const describe = new Proxy(registration.describe, {
-    apply: (target, self, args: unknown[]) => Reflect.apply(target, self, args.map(arg => typeof arg === 'function' ? inGroup(currentGroup, arg as () => unknown) : arg)),
-  });
-  const it = new Proxy(registration.it, {
-    apply: (target, self, args: unknown[]) => {
-      if (scope !== 'once' && currentGroup !== undefined && typeof args[0] === 'string'
-        && !runsOn(`harness:${currentGroup}` as ParityFamilyName, parityRowId(args[0]), scope.runner)) return undefined;
-      if (typeof registration.probe === 'function' && currentGroup !== undefined && typeof args[0] === 'string') registration.probe(currentGroup, args[0]);
-      return Reflect.apply(target, self, args);
-    },
-  });
-  /**
-   * Register one cell. An exempt cell still produces a named test that fails the
-   * day the backend gains the thing — see `ExemptionKind` for the two ways that
-   * is pinned. Never relax an assertion to accommodate an exemption; delete the
-   * exemption instead.
-   */
-  function parityRow<T = SeamObservation>(
-    backend: RunnerId,
-    criterion: SeamCriterion<T>,
-    observe: () => Promise<T>,
-  ): void {
-    const exempt = exemptionFor(criterion.id, backend);
-    if (!exempt) {
-      it(
-        `${backend} ${criterion.name}`,
-        async () => {
-          criterion.assert(await observe());
-        },
-        45_000,
-      );
-      return;
-    }
-    if (exempt.kind === 'scenario-unconstructible') {
-      it(`${backend} is exempt from ${criterion.id} — ${exempt.reason}`, () => {
-        // The pin: no prompt is declared, so nothing can drive this row here. Add
-        // one and this fails, which is the signal to make the row live.
-        expect(HARNESS_ADAPTERS[backend].scenarios[criterion.scenario]).toBeUndefined();
-      });
-      return;
-    }
-    it(
-      `${backend} is exempt from ${criterion.id} — ${exempt.reason}`,
-      async () => {
-        const obs = await observe();
-        expect(() => criterion.assert(obs)).toThrow();
-      },
-      45_000,
-    );
-  }
+export { HARNESS_PARITY_GROUPS, harnessParityFile, type HarnessParityPart };
 
-  /** Registers the exemption cell when there is one; P1's shape for every lifecycle criterion. */
-  function permissionExemption(id: string, backend: RunnerId, scenario: ScenarioName): boolean {
-    const exemption = exemptionFor(id, backend);
-    if (!exemption) return false;
-    it(`${backend} ${id} exemption — ${exemption.reason}`, () => {
-      expect(exemption.kind).toBe('scenario-unconstructible');
-      expect(HARNESS_ADAPTERS[backend].scenarios[scenario]).toBeUndefined();
-    });
-    return true;
-  }
-
-  const runners: RunnerId[] = scope === 'once' ? [] : [scope.runner];
-  const registeredGroups: string[] = [];
-  const cellCounts = scope === 'once' || registration.probe ? undefined : groupCellCounts(scope.runner);
-  const describeRunners = (group: string, name: string, body: () => void, once = false): void => {
-    registeredGroups.push(group);
-    if (scope === 'once') {
-      if (once) describe(name, body);
-      return;
-    }
-    if (cellCounts?.get(name) === 0) return;
-    const grouped = inGroup(group, body) as () => void;
-    // Iterate rather than use includes: duplicate routes register twice and fail the guard.
-    if (registration.allGroups) { describe(name, grouped); return; }
-    for (const selected of HARNESS_PARITY_GROUPS[scope.part]) {
-      if (selected === group) describe(name, grouped);
-    }
-  };
-
-  const seamRows = (criteria: readonly SeamCriterion[]): void => {
-    for (const backend of runners) {
-      for (const criterion of criteria) {
-        parityRow(backend, criterion, () => driveSeam(backend, criterion.scenario));
-      }
-    }
-  };
-  // hearsay-tools/cezarion#2991: the seam contract every runner keeps, read from its declared facts.
-  describeRunners('contract', 'harness parity — seam contract (hearsay-tools/cezarion#2991)', () => {
-    for (const backend of runners) for (const row of SEAM_CONTRACT_ROWS) parityRow(backend, row, () => row.observe(backend));
-  });
-  describeRunners('startup', 'harness parity — missing executable', () => seamRows(SEAM_CRITERIA.filter(row => row.id === 'S20')));
-  describeRunners('seam', 'harness parity — seam tier', () => seamRows(SEAM_CRITERIA.filter(row => row.id !== 'S20')));
+function seamToSessionGroups(r: HarnessRegistrar): void {
+  const { describeRunners, scope, runners, registration, it, parityRow } = r;
+  describeRunners('seam', 'harness parity — seam tier', () => seamRows(r, SEAM_CRITERIA.filter(row => row.id !== 'S20')));
   // hearsay-tools/cezarion#1810: the Tool-list kinds case table, one cell per case and runner.
   describeRunners('tool-grants', 'harness parity — tool grants', () => {
-    registration.toolGrants(scope === 'once' ? 'once' : scope.runner);
+    (registration.toolGrants ?? describeToolGrantParity)(scope === 'once' ? 'once' : scope.runner);
   }, true);
 
   describeRunners('input', 'harness parity — input delivery (#505)', () => {
@@ -1391,34 +842,11 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }, 45_000);
     }
   });
+}
 
-  const runRows = (criteria: readonly RunCriterion[]): void => {
-    for (const backend of runners) {
-      for (const criterion of criteria) {
-        const exempt = exemptionFor(criterion.id, backend);
-        if (exempt?.kind === 'scenario-unconstructible') {
-          it(`${backend} is exempt from ${criterion.id} — ${exempt.reason}`, () => {
-            expect(HARNESS_ADAPTERS[backend].scenarios[criterion.scenario]).toBeUndefined();
-          });
-          continue;
-        }
-        it(
-          exempt
-            ? `${backend} is exempt from ${criterion.id} — ${exempt.reason}`
-            : `${backend} ${criterion.name}`,
-          async () => {
-            const drive = criterion.id === 'R17' ? driveUnavailableProvider : driveRun;
-            const obs = await drive(backend, criterion.scenario, criterion.settled, criterion.timeoutMs);
-            if (exempt) expect(() => criterion.assert(obs)).toThrow();
-            else criterion.assert(obs);
-          },
-          (criterion.timeoutMs ?? 55_000) + 5_000,
-        );
-      }
-    }
-  };
-  describeRunners('provider', 'harness parity — unavailable provider', () => runRows(RUN_CRITERIA.filter(row => row.id === 'R17')));
-  describeRunners('run', 'harness parity — run tier', () => runRows(RUN_CRITERIA.filter(row => row.id !== 'R17')));
+function runToOwnedWorkflowsGroups(r: HarnessRegistrar): void {
+  const { describeRunners, runners, it } = r;
+  describeRunners('run', 'harness parity — run tier', () => runRows(r, RUN_CRITERIA.filter(row => row.id !== 'R17')));
 
   // #121/#401: release native child frames only AFTER the manager has parked.
   // Waiting for the final wire-derived event prevents a green test that returned
@@ -1913,7 +1341,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
 
     }
   });
+}
 
+function opencodeDurableInput(r: HarnessRegistrar): void {
+  const { scope, describe, it } = r;
   if (scope === 'once') {
     describe('OpenCode durable input acknowledgements', () => {
       it.each(['rejected', 'finished', 'cancelled'] as const)('%s opening answer never checkpoints an unanswered ask', async outcome => {
@@ -2022,7 +1453,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }, 60_000);
     });
   }
+}
 
+function matrixGuards(r: HarnessRegistrar): void {
+  const { scope, describe, it, registeredGroups } = r;
   if (scope === 'once') {
     describe('harness parity — the matrix itself', () => {
       const allIds = [
@@ -2174,7 +1608,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       });
     });
   }
+}
 
+function governedGroups(r: HarnessRegistrar): void {
+  const { describeRunners, runners, it } = r;
   // D1 (hearsay-tools/cezarion#2279): inspect the real argv/RPC/HTTP boundary of a governed
   // launch against an ordinary one. Native subagents and messages to them stay; a control is
   // added only where a runner's cross-session tool is separate from subagent messaging (Codex's
@@ -2231,7 +1668,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }
     }
   });
+}
 
+function opencodeRestrictedSessions(r: HarnessRegistrar): void {
+  const { scope, describe, it } = r;
   if (scope === 'once') {
     describe('harness parity — D1 OpenCode sessions an older cezar restricted', () => {
       // OpenCode appends permission rules and has no remove, so a `task` deny an older cezar
@@ -2274,7 +1714,10 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }, 45000);
     });
   }
+}
 
+function nativeMessageToMcpGroups(r: HarnessRegistrar): void {
+  const { describeRunners, scope, runners, describe, it, beforeAll, afterAll, parityRow, permissionExemption } = r;
   // D3 (hearsay-tools/cezarion#1994): at shipped defaults (no D1) a session refuses the
   // runner's native cross-session messages, which bypass cezar's recorded conversations.
   // Claude refuses inbound peer messages on every launch. Each other runner is a named
@@ -3221,6 +2664,17 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       }
     }
   });
+}
+
+/** Every group and once-only block, in the order the once file and the dry collections register them. */
+const HARNESS_PARITY_ORDER: readonly HarnessGroup[] = [
+  CONTRACT_GROUPS.contract, STARTUP_GROUPS.startup, seamToSessionGroups, PROVIDER_GROUPS.provider, runToOwnedWorkflowsGroups,
+  opencodeDurableInput, matrixGuards, governedGroups, opencodeRestrictedSessions, nativeMessageToMcpGroups,
+];
+
+/** Every part at once: the once file's guards and single-runner cells, or a dry collection. */
+export function describeHarnessParity(scope: HarnessParityScope, registration: HarnessRegistration = vitestRegistration()): void {
+  describeHarnessGroups(scope, registration, HARNESS_PARITY_ORDER, TOOL_GRANT_CASES.length);
 }
 
 /** Collect the real row registrations without starting their hooks or test bodies. */

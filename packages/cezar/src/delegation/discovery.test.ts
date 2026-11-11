@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
+import '../core/every-runner.testkit.ts';
 import { fixture } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
 
