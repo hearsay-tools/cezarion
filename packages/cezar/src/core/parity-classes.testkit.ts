@@ -309,10 +309,13 @@ export function runsOn(family: ParityFamilyName, row: string | undefined, runner
 }
 
 
+/** The shape of a parity row id: `S9`, `R100`, `U8l`, `WP1`. */
+export const PARITY_ROW_ID = /^[A-Z]{1,2}\d+[a-z]*$/;
+
 /** The row id a parity cell title names as its second word (`codex R48 …`, `claude U7k …`), if any. */
 export function parityRowId(title: string): string | undefined {
   const word = title.split(' ')[1];
-  return word !== undefined && /^[A-Z]{1,2}\d+[a-z]*$/.test(word) ? word : undefined;
+  return word !== undefined && PARITY_ROW_ID.test(word) ? word : undefined;
 }
 
 type Register = (title: string, ...rest: never[]) => unknown;
