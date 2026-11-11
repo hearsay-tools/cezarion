@@ -276,7 +276,10 @@ temporary random probe login in the new htpasswd. An `--external-proxy` install 
 unit, and its check stays at the bind address. The group commits only after
 every instance passes. Any failure stops the group, restores the old units and
 sites and renames the new home's `install.json` to `install.json.failed`, so the
-next run starts again from the untouched legacy home. After success, old unit
+next run starts again from the untouched legacy home. A unit or site that cannot
+be restored leaves its instance stopped and the rollback journal in place: fix
+the reported error and re-run `hsq server-migrate`. A restored service that fails
+its start check is reported as a warning. After success, old unit
 files stay as `*.migrated`. `--dry-run` prints that plan and changes nothing,
 not even the legacy home: the stop, every unit, site, file and `Environment=`
 line it would change (it shows only the legacy source `CEZ_HOME` value and

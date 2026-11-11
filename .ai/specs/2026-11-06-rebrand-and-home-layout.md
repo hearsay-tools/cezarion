@@ -241,7 +241,10 @@ instance passes its health check, the new marker stays in state `pending` and `H
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
 in the group fails its health check, every instance in the group stops, the old units and old
 sites (on macOS the old launchd plists and labels) come back, and the new home's marker is renamed to `install.json.failed` so the next run
-migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
+migrates again from the untouched legacy home. A rollback is an attempt: an instance whose old
+unit, site or plist cannot be restored stays stopped, the rollback journal stays and the marker
+is not renamed, so the operator fixes the reported error and re-runs `hsq server-migrate`; a
+restored service that fails its start check is a warning. Old unit files stay as `*.migrated` after
 success. When the install owns its nginx site, `/etc/cezar/htpasswd[-<slug>]` is copied to
 `/etc/hearsay-squawk/` (the old file stays). The new site is the old site file copied as is (TLS listeners,
 certificates, redirects and operator edits kept) with only its name and the

@@ -49,7 +49,10 @@ It stops the owned agents with `launchctl bootout`, moves the home, writes and
 bootstraps the `tools.hearsay.squawk.*` agents and keeps each old plist as a
 private `*.plist.migrated`. Its health check waits for the cockpit on its
 loopback port, then for the ngrok tunnel (about 30 s). On any failure it
-restores the old plists and labels and rolls the home back. Foreign plists
+tries to restore the old plists and labels and rolls the home back. A plist it
+cannot restore leaves that agent stopped and the rollback journal in place: fix
+the reported error and re-run `hsq server-migrate`. A restored agent that fails
+its start check is reported as a warning. Foreign plists
 stay untouched, and a foreign destination plist causes a refusal. Uninstall
 and deploy use the recorded label and path, including for pre-switch installs.
 The macOS path is checked by unit tests with a fake `launchctl` only, not on a real Mac.

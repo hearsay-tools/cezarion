@@ -244,13 +244,18 @@ recorded names for old installs.
 If any instance fails, the whole group rolls back. Old services and sites come
 back, and the target marker becomes `install.json.failed`. Boot keeps serving
 the legacy home and warns to retry `hsq server-migrate`. Fix the reported cause
-and repeat the command. After success, old units remain as `*.migrated`.
+and repeat the command. A rollback is an attempt: when restoring an old unit,
+site or plist fails, that instance stays stopped and the rollback journal stays,
+so fix the reported error and run `hsq server-migrate` again to finish the
+rollback. A restored service that fails its start check is reported as a
+warning; check those services yourself. After success, old units remain as `*.migrated`.
 
 On macOS + ngrok the command stops the owned launchd agents with
 `launchctl bootout`, writes and bootstraps the `tools.hearsay.squawk.*` agents
 and keeps each old plist as a private `*.plist.migrated`. The health check waits
 for the cockpit on its loopback port, then for the ngrok tunnel (about 30 s). A
-failure restores the old plists and labels and rolls the home back. Foreign
+failure tries to restore the old plists and labels and rolls the home back, with
+the same limits as above. Foreign
 launchd agents stay untouched. The macOS path is checked by unit tests with a fake `launchctl` only, not on a real Mac.
 
 See the [Ubuntu guide](server-install/ubuntu-vps.md) and
@@ -284,7 +289,7 @@ and browser state are not copied. See [mobile setup](mobile.md).
 ## Rollback and the deprecation window
 
 A failed pre-commit home migration leaves the old home intact. A failed server
-group migration restores the old services as described above. An interrupted
+group migration tries to restore the old services as described above. An interrupted
 group is recovered from its journal on the next `hsq server-migrate` run. Keep
 the reported backups and failed marker while diagnosing a failure.
 
