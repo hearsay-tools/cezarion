@@ -1,6 +1,6 @@
 import { scrubProbeSessionEnv } from '../../packages/cezar/scripts/probe-session-env.ts';
 // Manual real-harness probe for hearsay-tools/cezarion#1343: does cezar answer Codex's MCP tool
-// approvals as packages/cezar/src/core/ci-tools.testkit.ts pins? cezar's own server must run with no
+// approvals as AGENT_PROTOCOL.md § MCP tool approvals says? cezar's own server must run with no
 // approval request, and another server's tool call must reach cezar as permission.requested and get
 // the reply named on the command line (hearsay-tools/cezarion#1294).
 //
