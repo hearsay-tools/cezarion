@@ -64,7 +64,7 @@ linkSharedOmpNatives(sandboxUserHome)
 
 const testHome = configureTestHome({ userHome: sandboxUserHome, cezarHome: sandboxHome })
 
-configureTestHomeSelector(home => testHome.select(home?.root))
+configureTestHomeSelector(home => testHome.select(home?.rootOverride ?? home?.root))
 const pinSandboxHome = testHome.pinHome
 
 // Nor may a test resolve the developer's own agent folders (hearsay-tools/cezarion#1361).

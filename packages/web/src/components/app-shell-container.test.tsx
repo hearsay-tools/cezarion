@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -521,14 +522,14 @@ describe('document title wiring', () => {
     })
     renderShell('/p/shop/git')
 
-    await waitFor(() => expect(document.title).toBe('Storefront — Git · cezar'))
+    await waitFor(() => expect(document.title).toBe(`Storefront — Git · ${productName("cezar")}`))
   })
 
   it('falls back to the boot repository name when the registry is unavailable', async () => {
     serve({ '/api/v1/health': HEALTH_WITH_BOOT, '/api/v1/run-summaries': [] })
     renderShell('/p/cezar/')
 
-    await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
+    await waitFor(() => expect(document.title).toBe(`cezar — Tasks · ${productName("cezar")}`))
   })
 
   it('keeps global settings and a no-repo task route free of invented project context', async () => {
@@ -539,11 +540,11 @@ describe('document title wiring', () => {
     })
     const global = renderShell('/settings/global/projects')
 
-    await waitFor(() => expect(document.title).toBe('Settings · cezar'))
+    await waitFor(() => expect(document.title).toBe(`Settings · ${productName("cezar")}`))
     global.unmount()
 
     renderShell('/tasks/missing')
-    await waitFor(() => expect(document.title).toBe('cezar'))
+    await waitFor(() => expect(document.title).toBe(productName("cezar")))
   })
 
   it('updates after in-app navigation without remounting the shell', async () => {
@@ -554,9 +555,9 @@ describe('document title wiring', () => {
     })
     renderShell('/p/cezar/')
 
-    await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
+    await waitFor(() => expect(document.title).toBe(`cezar — Tasks · ${productName("cezar")}`))
     fireEvent.click(inSidebar().getByRole('link', { name: 'Activity' }))
-    await waitFor(() => expect(document.title).toBe('cezar — Activity · cezar'))
+    await waitFor(() => expect(document.title).toBe(`cezar — Activity · ${productName("cezar")}`))
   })
 
   it('reacts to live project and task title cache updates', async () => {
@@ -573,7 +574,7 @@ describe('document title wiring', () => {
     const { client } = renderShell('/p/shop/tasks/run-1')
 
     await waitFor(() =>
-      expect(document.title).toBe('Storefront — Implement page titles · cezar'),
+      expect(document.title).toBe(`Storefront — Implement page titles · ${productName("cezar")}`),
     )
 
     act(() => {
@@ -587,7 +588,7 @@ describe('document title wiring', () => {
     })
 
     await waitFor(() =>
-      expect(document.title).toBe('Renamed storefront — Rename browser titles · cezar'),
+      expect(document.title).toBe(`Renamed storefront — Rename browser titles · ${productName("cezar")}`),
     )
   })
 })
@@ -914,7 +915,7 @@ describe('project rail wiring', () => {
 
     const nav = await rail()
     await waitFor(() => expect(nav.querySelector('[data-slot="rail-app-mark"]')).not.toBeNull())
-    await waitFor(() => expect(within(nav).getByAltText('Cezarion v0.1.3')).toBeTruthy())
+    await waitFor(() => expect(within(nav).getByAltText(`${productName("Cezarion")} v0.1.3`)).toBeTruthy())
     expect(within(nav).queryByRole('button', { name: 'Add project' })).toBeNull()
     expect(within(nav).queryByRole('link', { name: 'All projects' })).toBeNull()
     expect(within(nav).getByRole('link', { name: 'Global settings' })).toBeTruthy()

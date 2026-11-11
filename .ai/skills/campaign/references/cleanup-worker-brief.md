@@ -129,7 +129,10 @@ At the end: git checkout cez/<your 8-char id>; squeal stop in this worktree;
 ## Kind: mutation
 
 ```text
-6. Start the baseline measurement with --out <baseline.json>. While it runs,
+6. Start each measurement with the job start command that the cezar_wait
+   tool description names, and wait for it with a process wait; never with
+   &, nohup or a background tool.
+   Start the baseline measurement with --out <baseline.json>. While it runs,
    write tests from the issue's FAIL lines; do not wait idle for the baseline.
    mutants-file.cjs measures the committed HEAD: commit the tests before the
    final measurement. Start the final run with --out <final.json> independently

@@ -7,12 +7,19 @@ import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { mkdtemp } from 'node:fs/promises';
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, mkdtemp: vi.fn(actual.mkdtemp) };
+});
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Hono } from 'hono';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { createWorktree } from '../git-worktree.ts';
@@ -339,6 +346,31 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       expect(existsSync(join(pathOf(untracked), 'notes.md'))).toBe(true);
     });
 
+    it('releases the reclaim claim before counting uncommitted files for the refusal', async () => {
+      const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
+      const path = store.getRun(id)!.worktreePath!;
+      writeFileSync(join(path, 'before-release.txt'), 'uncommitted work\n');
+      const claim = manager.claimWorktreeReclaim.bind(manager);
+      const released = vi.fn();
+      vi.spyOn(manager, 'claimWorktreeReclaim').mockImplementation((runId) => {
+        const release = claim(runId);
+        if (!release) return release;
+        return () => {
+          release();
+          writeFileSync(join(path, 'after-release.txt'), 'written after release\n');
+          released();
+        };
+      });
+
+      const res = await reclaimOne(id);
+      expect(res.status).toBe(409);
+      expect(released).toHaveBeenCalledOnce();
+      expect(await res.json()).toEqual({
+        error: 'the worktree has 2 uncommitted files that exist nowhere else — commit or discard them first',
+      });
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+    });
+
     it('refuses a checkout whose HEAD is a commit no branch keeps', async () => {
       const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
       const path = store.getRun(id)!.worktreePath!;
@@ -403,6 +435,28 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
       expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
     });
 
+    it('claims a reclaimed checkout for publishing before restoring its directory', async () => {
+      const id = store.createRun({ title: 'reclaimed', workflow: 'w', task: 't', steps: [] }).id;
+      const wt = await createWorktree(repoRoot, id, 'main');
+      setRunStatus(store, id, RUN_STATUS.done, {
+        finishedAt: '2026-07-01T00:00:00Z', worktreePath: wt.path, branch: wt.branch, baseBranch: 'main',
+      });
+      expect((await reclaimOne(id)).status).toBe(200);
+      expect(existsSync(wt.path)).toBe(false);
+      const claim = manager.claimForPublish.bind(manager);
+      const directoryAtClaim: boolean[] = [];
+      vi.spyOn(manager, 'claimForPublish').mockImplementation((runId) => {
+        directoryAtClaim.push(existsSync(wt.path));
+        return claim(runId);
+      });
+
+      const res = await apiRequest(app, `/api/v1/runs/${id}/pr`, { method: 'POST' });
+      expect(res.status).toBe(201);
+      expect(directoryAtClaim).toEqual([false]);
+      expect(existsSync(wt.path)).toBe(true);
+      expect(store.getRun(id)?.worktreeReclaimedAt).toBeUndefined();
+    });
+
     it('holds reclaim off a restored checkout for as long as its draft PR is publishing', async () => {
       const id = await seed(randomUUID(), 'done', '2026-07-01T00:00:00Z');
       // Restored and unstamped, this is exactly what the PR route has just re-materialized.
@@ -461,7 +515,7 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     expect(manager.claimWorktreeReclaim(id)).toBeNull();
     expect(manager.claimForBranchCleanup([id])).toBeNull();
     expect(store.canDeleteRun(id)).toBe(false);
-    for (const [suffix, method] of [['/remove-worktree', 'POST'], ['', 'DELETE'], ['/git/commit', 'POST'], ['/git/push', 'POST'], ['/changes', 'GET']] as const) {
+    for (const [suffix, method] of [['/remove-worktree', 'POST'], ['', 'DELETE'], ['/git/commit', 'POST'], ['/git/push', 'POST']] as const) {
       expect((await apiRequest(app, `/api/v1/runs/${id}${suffix}`, {
         method, ...(suffix === '/git/commit' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'unsafe' }) } : {}),
       })).status).toBe(409);
@@ -469,6 +523,42 @@ describe('the worktrees API', { timeout: 30_000 }, () => {
     expect(existsSync(path)).toBe(true);
     rmSync(evidence);
     const release = manager.claimForPublish(id); expect(release).not.toBeNull(); release?.();
+  });
+
+  it.each([false, true])('reads under autosave evidence with scratch allocation failing: %s', async noScratch => {
+    const id = await seed(randomUUID(), 'done');
+    const path = store.getRun(id)!.worktreePath!;
+    writeFileSync(join(path, 'untracked.txt'), 'preserve this\n');
+    const evidence = join(repoRoot, '.ai/cezar/runs', `${id}.autosave-cleanup.json`);
+    writeFileSync(evidence, JSON.stringify({
+      version: 1, cwd: path, controller: { pid: process.pid, startToken: processStartToken(process.pid) },
+      processes: [], groups: [], uncertain: false, message: 'cleanup pending',
+    }));
+    const indexPath = (await run('git', ['rev-parse', '--path-format=absolute', '--git-path', 'index'], { cwd: path })).stdout.trim();
+    const status = (await run('git', ['status', '--porcelain=v1'], { cwd: path })).stdout;
+    const index = readFileSync(indexPath);
+    if (noScratch) vi.mocked(mkdtemp).mockRejectedValue(new Error('scratch unavailable'));
+    try {
+      for (const suffix of ['diff', 'changes']) {
+        const response = await apiRequest(app, `/api/v1/runs/${id}/${suffix}`);
+        expect(response.status).toBe(noScratch ? 409 : 200);
+        if (noScratch) {
+          expect(response.headers.get('content-type')).toContain('application/json');
+          expect(await response.json()).toEqual({ error: autosaveCleanupBlocker(store.sourceDataDir(id), id) });
+        } else {
+          expect(await response.text()).toContain('untracked.txt');
+        }
+        expect(readFileSync(indexPath)).toEqual(index);
+        expect((await run('git', ['status', '--porcelain=v1'], { cwd: path })).stdout).toBe(status);
+      }
+      // Without evidence, the degraded fallback must still show untracked work.
+      rmSync(evidence);
+      for (const suffix of ['diff', 'changes']) {
+        const response = await apiRequest(app, `/api/v1/runs/${id}/${suffix}`);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain('untracked.txt');
+      }
+    } finally { vi.mocked(mkdtemp).mockReset().mockImplementation((await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).mkdtemp); }
   });
 
   it('human deletion still cleans an ordinary terminal run', async () => {

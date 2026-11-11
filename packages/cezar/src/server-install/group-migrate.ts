@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Home } from '../home/home.ts';
 import { readInstallMarker } from '../home/install-marker.ts';
 import { commitLegacyMigration, migrateLegacyHome, rollbackLegacyMigration } from '../home/migrate.ts';
@@ -7,6 +9,7 @@ import { applyMigrationReport } from './migration-report.ts';
 import { readServerMigrateJournal, removeServerMigrateJournal, writeServerMigrateJournal, type ServerMigrateJournal } from './migrate-journal.ts';
 import { listServerInstances, loadServerState, saveServerState } from './state.ts';
 import { defaultRunner } from './steps.ts';
+import { supportsServerMigration } from './strategies.ts';
 import type { InstallContext, PlatformMigrationReport, PlatformStrategy, Runner, ServerState, Ui } from './types.ts';
 
 /**
@@ -51,6 +54,11 @@ class Group {
   private readonly prefs: InstallContext['prefs'] = {};
   constructor(readonly opts: ServerMigrateOptions, readonly records: Home) {}
 
+  /** Planning cannot seed a version log or recover a journal as a side effect of reading. */
+  instances() {
+    return listServerInstances(this.records, this.opts.dryRun ? path => readFileSync(path, 'utf8') : undefined);
+  }
+
   say(line: string, level: 'info' | 'warn' | 'error' = 'info'): void {
     this.lines.push(line);
     this.opts.ui[level](line);
@@ -68,10 +76,10 @@ class Group {
 
   member(instance: string, state: ServerState): Member['strategy'] | string {
     const strategy = this.opts.strategy(state.platform ?? '');
-    if (!strategy?.migrate || !strategy.rollbackMigration || !strategy.stopService || !strategy.startService) {
+    if (!supportsServerMigration(strategy)) {
       return `${instance}: server-migrate does not support platform ${state.platform ?? 'unknown'}`;
     }
-    return strategy as Member['strategy'];
+    return strategy;
   }
 }
 
@@ -79,7 +87,7 @@ class Group {
 async function planGroup(group: Group): Promise<{ members: Member[]; errors: string[] }> {
   const members: Member[] = [];
   const errors: string[] = [];
-  for (const { instance, state } of listServerInstances(group.records)) {
+  for (const { instance, state } of group.instances()) {
     if (!state.installed || state.dryRun) { group.say(`${instance}: not a completed install — left as is`); continue; }
     const strategy = group.member(instance, state);
     if (typeof strategy === 'string') { errors.push(strategy); continue; }
@@ -92,15 +100,22 @@ async function planGroup(group: Group): Promise<{ members: Member[]; errors: str
 
 function describePlan(group: Group, members: Member[]): void {
   const { legacy, target } = group.opts;
-  if (committed(group.opts.target)) group.say(`home: already migrated to ${target.config}`);
+  const names = members.map(m => m.instance).join(', ');
+  const homeCommitted = committed(target);
+  group.say(`stop: every instance that shares this home stops first (${names})`);
+  if (homeCommitted) group.say(`home: already migrated to ${target.config}`);
   else {
     const plan = planLegacyMigration(legacy, target);
     group.say(`home: ${legacy.root} → config ${target.config}, state ${target.state}, data ${target.data} (${plan.files.length} files copied; the legacy home stays)`);
   }
   for (const { instance, planned } of members) {
-    for (const { stepId, from, to } of planned.moved) group.say(`${instance}: ${stepId} ${from.path ?? from.name} → ${to.path ?? to.name}`);
-    for (const detail of planned.details ?? []) group.say(`${instance}: ${detail}`);
+    // A platform's details name each of its moves; the raw moves print only when it gives none.
+    const lines = planned.details?.length ? planned.details : planned.moved.map(({ stepId, from, to }) => `${stepId} ${from.path ?? from.name} → ${to.path ?? to.name}`);
+    for (const line of lines) group.say(`${instance}: ${line}`);
   }
+  group.say(`group: ${names} succeed or fail together. Each instance starts under its new name and passes its health check before the group commits.`);
+  if (!homeCommitted) group.say(`marker: ${join(target.config, 'install.json')} stays pending (the new home is read-only) until every instance passes, then commits.`);
+  group.say(`rollback: any failure restores every old unit and site, starts the old services${homeCommitted ? '' : ' and renames the marker to install.json.failed; the legacy home stays in use'}.`);
 }
 
 function journalFor(group: Group, members: Member[], phase: ServerMigrateJournal['phase']): ServerMigrateJournal {
@@ -226,7 +241,8 @@ export async function runServerMigrate(opts: ServerMigrateOptions): Promise<Serv
   // Until the home commits, the legacy home holds the authoritative server records and locks.
   const records = committed(opts.target) ? opts.target : opts.legacy;
   const group = new Group(opts, records);
-  const instances = listServerInstances(records).map(i => i.instance);
-  const status = await withInstallLocks(instances, records, () => migrateGroup(group));
+  // A dry run only reads: it takes no install lock, because a lock is a home write.
+  const instances = group.instances().map(i => i.instance);
+  const status = opts.dryRun ? await migrateGroup(group) : await withInstallLocks(instances, records, () => migrateGroup(group));
   return { status, lines: group.lines };
 }

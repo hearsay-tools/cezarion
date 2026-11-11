@@ -21,10 +21,14 @@ function expression(raw, context) {
   return runInNewContext(code, context);
 }
 
-function context(event, { vitest = 'success', proof = 'success', verified = 'false' } = {}) {
+function context(event, { vitest = 'success', proof = 'success', verified = 'false', exported = 'success' } = {}) {
   return {
     github: { event_name: event },
-    needs: { vitest: { result: vitest }, 'pr-test-proof': { result: proof, outputs: { verified } } },
+    needs: {
+      vitest: { result: vitest },
+      'pr-test-proof': { result: proof, outputs: { verified } },
+      'squeal-export': { result: exported },
+    },
     steps: { squeal: { outcome: 'success' } },
     cancelled: () => false,
   };
@@ -126,6 +130,12 @@ test('squeal-publish alone writes contents, after the export, and runs no reposi
   const job = jobs['squeal-publish'];
   assert.deepEqual(job.needs, ['squeal-export']);
   for (const event of EVENTS) assert.equal(expression(job.if, context(event)), event === 'merge_group', event);
+  for (const exported of ['failure', 'skipped', 'cancelled']) {
+    assert.equal(expression(job.if, context('merge_group', { exported })), false, exported);
+  }
+  // Without a status function GitHub adds success(), which a skipped job further up
+  // (pr-test-input in a merge group) makes false: the publish was skipped in run 42843943744.
+  assert.match(String(job.if), /!cancelled\(\)/, 'the condition carries its own status function');
   assert.deepEqual(job.permissions, { contents: 'write' });
   for (const [id, other] of Object.entries(jobs)) {
     if (id !== 'squeal-publish') assert.notEqual(other.permissions?.contents, 'write', `${id} writes contents`);

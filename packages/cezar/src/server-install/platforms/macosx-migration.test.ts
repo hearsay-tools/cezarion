@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, sym
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Home } from '../../home/home.ts';
-import { createMacosxNgrok, cezarLaunchdPlist, launchdPlist, macosxNgrok } from './macosx-ngrok.ts';
+import { createMacosxNgrok, cezarLaunchdPlist, launchdPlist } from './macosx-ngrok.ts';
 import { applyMigrationReport } from '../migration-report.ts';
 import { createAutoUi } from '../ui.ts';
 import { STEP_STATUSES, freshServerState, type InstallContext, type StepArtifact } from '../types.ts';
@@ -57,7 +57,7 @@ describe('macOS launchd migration', () => {
   function plant(agent: 'cockpit' | 'ngrok', owned = true, argv = ['/n/npx', '--yes', 'cezarion']): StepArtifact {
     const name = `ai.cezar.${agent}`;
     const path = join(dir, `${name}.plist`);
-    writeFileSync(path, agent === 'cockpit' ? cezarLaunchdPlist('/repo', 4321, argv) : launchdPlist(4321, 'ops:secret'), { mode: 0o600 });
+    writeFileSync(path, agent === 'cockpit' ? cezarLaunchdPlist('/repo', 4321, argv, false) : launchdPlist(4321, 'ops:secret', undefined, '/opt/homebrew/bin/ngrok', false), { mode: 0o600 });
     loaded.add(name);
     const artifact: StepArtifact = { kind: 'owned', type: 'launchd', name, path };
     ctx.state.steps[agent === 'cockpit' ? 'autostart' : 'ngrok'] = { status: STEP_STATUSES[1], created: owned ? { artifacts: [artifact] } : null };
@@ -152,7 +152,8 @@ describe('macOS launchd migration', () => {
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(report.moved[0]!.to.path!)).toBe(false);
     expect(existsSync(report.moved[0]!.backup!.path!)).toBe(false);
-    expect(loaded).toEqual(new Set(['ai.cezar.cockpit']));
+    // The group starts the old job after the home rolls back, never during the rollback.
+    expect(loaded).toEqual(new Set());
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
     expect(commands).toEqual([]);
@@ -171,8 +172,8 @@ describe('macOS launchd migration', () => {
     expect(rollback.moved).toHaveLength(1);
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(move.to.path!)).toBe(false);
-    expect(loaded).toEqual(new Set([old.name!]));
-    expect(commands.filter((c) => c[1] === 'bootstrap')).toHaveLength(oldLoaded ? 0 : 1);
+    expect(loaded).toEqual(new Set(oldLoaded ? [old.name!] : []));
+    expect(commands.filter((c) => c[1] === 'bootstrap')).toHaveLength(0);
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
     expect(commands).toEqual([]);
@@ -196,7 +197,7 @@ describe('macOS launchd migration', () => {
     expect(existsSync(report.moved[0]!.backup!.path!)).toBe(true);
     expect((await strategy.rollbackMigration!(ctx, report)).errors).toEqual([]);
     expect(existsSync(report.moved[0]!.backup!.path!)).toBe(false);
-    const rotated = launchdPlist(4321, 'ops:rotated-secret');
+    const rotated = launchdPlist(4321, 'ops:rotated-secret', undefined, '/opt/homebrew/bin/ngrok', false);
     writeFileSync(old.path!, rotated);
     commands.length = 0;
     expect(await strategy.rollbackMigration!(ctx, report)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
@@ -213,7 +214,7 @@ describe('macOS launchd migration', () => {
     failBootstrap = 'tools.hearsay.squawk.ngrok';
     expect((await strategy.migrate!(ctx)).errors).toHaveLength(1);
     expect(existsSync(`${old.path}.migrated`)).toBe(false);
-    writeFileSync(old.path!, launchdPlist(4321, 'ops:rotated-secret'));
+    writeFileSync(old.path!, launchdPlist(4321, 'ops:rotated-secret', undefined, '/opt/homebrew/bin/ngrok', false));
     failBootstrap = undefined;
     const next = await strategy.migrate!(ctx);
     expect(next.errors).toEqual([]);
@@ -245,7 +246,7 @@ describe('macOS launchd migration', () => {
     expect(commands).toEqual([]);
   });
 
-  it('restores the old job and active plist when the new bootstrap fails', async () => {
+  it('restores the active plist and leaves the old job for the group to start when the new bootstrap fails', async () => {
     const old = plant('ngrok');
     const xml = readFileSync(old.path!, 'utf8');
     failBootstrap = 'tools.hearsay.squawk.ngrok';
@@ -254,7 +255,7 @@ describe('macOS launchd migration', () => {
     expect(report.errors[0]!.message).toContain('Could not load');
     expect(readFileSync(old.path!, 'utf8')).toBe(xml);
     expect(existsSync(join(dir, 'tools.hearsay.squawk.ngrok.plist'))).toBe(false);
-    expect(loaded).toEqual(new Set(['ai.cezar.ngrok']));
+    expect(loaded).toEqual(new Set());
   });
 
   it.each(['cockpit', 'ngrok'] as const)('migration refuses an existing foreign %s destination', async (agent) => {
@@ -269,7 +270,7 @@ describe('macOS launchd migration', () => {
 
   it('makes the switch-off migration a no-op and the dry-run report a preview', async () => {
     const old = plant('ngrok');
-    expect(await macosxNgrok.migrate!(ctx)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
+    expect(await createMacosxNgrok({ rebrand: false }).migrate!(ctx)).toEqual({ moved: [], leftAloneForeign: [], errors: [] });
     ctx.dryRun = true;
     const report = await strategy.migrate!(ctx);
     expect(report.moved).toHaveLength(1);

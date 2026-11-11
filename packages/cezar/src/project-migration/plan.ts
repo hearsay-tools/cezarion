@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
 import nodePath, { dirname, posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
-import { pathPresent, projectMovedMarker, projectMoveMarked } from '../project-paths.ts';
+import { pathPresent, projectDestinationAvailable, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseUnsupportedSchemaError } from '../runs/run-database.ts';
 import { migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -203,10 +203,6 @@ function moveKind(entry: Dirent): MigrationMove['kind'] {
   return entry.isSymbolicLink() ? 'symlink' : entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other';
 }
 
-function realDirectory(path: string): boolean {
-  try { return lstatSync(path).isDirectory(); } catch { return false; }
-}
-
 /**
  * The first existing component from `base` down to `path`, both included, that is not a real
  * directory (a symlink, a file); undefined when there is none. A move never passes through one,
@@ -267,7 +263,7 @@ class Planner {
     }
     if (!pathPresent(plan.source)) return plan;
     if (!realDirectory(plan.source) || realpathSync(plan.source) !== plan.source) { plan.blockers.push(`${plan.source} is not a directory of this project`); return plan; }
-    if (pathPresent(plan.destination) && !realDirectory(plan.destination)) {
+    if (!projectDestinationAvailable(plan.destination)) {
       plan.blockers.push(`${plan.destination} exists and is not a directory`);
       return plan;
     }

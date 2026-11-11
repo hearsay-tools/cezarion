@@ -73,7 +73,7 @@ it.each(['restore', 'accept'])('resolves a backup-derived reset with %s after a 
   expect(getHomeRecovery(target, false)).toEqual({ files: [] });
 });
 
-it.each(['agent-accounts.json', 'remote-settings/4321.json', 'server-instances/named.install.lock'])
+it.each(['agent-accounts.json', 'remote-settings/4321.json'])
 ('restores the pinned legacy %s through HomeStore and keeps a backup of the outside bytes', async file => {
   const { legacy, target, env } = migrationFixture();
   const { path } = homeFileLocation(legacy, file);
@@ -83,6 +83,19 @@ it.each(['agent-accounts.json', 'remote-settings/4321.json', 'server-instances/n
   expect(await runMigrationCommand(['--resolve-legacy', file, 'restore'], env, target, legacy)).toBe(0);
   expect(json(path)).toEqual({ saved: true });
   expect(listBackups(file, legacy).some(backup => json(backup.path).outside === true)).toBe(true);
+});
+
+it('restores a pinned legacy install lock without making rotating lock backups', async () => {
+  const { legacy, target, env } = migrationFixture();
+  const file = 'server-instances/named.install.lock';
+  const { path } = homeFileLocation(legacy, file);
+  Home.seed(legacy, path, { saved: true });
+  rawJson(path, { outside: true });
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  expect(await runMigrationCommand(['--resolve-legacy', file, 'restore'], env, target, legacy)).toBe(0);
+  expect(json(path)).toEqual({ saved: true });
+  // Locks hold no registry data; recovery uses the version log without a rotating snapshot.
+  expect(listBackups(file, legacy)).toEqual([]);
 });
 
 it('repeated recovery actions do not fall back to unrelated backups or migrate the home', async () => {
@@ -164,3 +177,6 @@ it('keeps migration error text literal while formatting the invoked command pref
     expect(output).not.toHaveBeenCalled();
   } finally { process.argv = argv; }
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('./switch.ts', () => ({ REBRAND_SWITCH: false }));

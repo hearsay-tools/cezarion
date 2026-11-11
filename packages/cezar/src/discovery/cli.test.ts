@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -102,6 +103,6 @@ describe('cez discover', () => {
 
 it('dispatches discovery before global CLI parsing and needs no controller for help', async () => {
   const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../index.ts', import.meta.url)), 'discover', 'models', '--runner=codex', '--help']);
-  expect(stdout).toContain('cez discover models');
+  expect(stdout).toContain(`${productIdentity().command} discover models`);
   expect(stdout).not.toContain('start the cockpit');
 }, 15000);

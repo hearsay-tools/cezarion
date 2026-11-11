@@ -20,12 +20,19 @@ This does not change the home layout or enable project migration.
 **Agent accounts** (spec `2026-07-29-agent-profiles`) live in this directory too, but in their OWN file — `~/.cezar/agent-accounts.json`, never a key in `config.json`, so a cezar that has never heard of accounts cannot drop them; `src/workspace/agent-accounts.ts` owns the store, `src/core/agent-profiles.ts` the vendor knowledge and `src/workspace/agent-profiles.ts` the resolution.
 
 Every changed HomeStore file is backed up before replacement or removal under
-`Home.backups/<home-relative file>/<UTC>-<sha8>.json`, including remote grants,
-server instances and raw install locks. Private snapshots keep the last 20 plus
+`Home.backups/<home-relative file>/<UTC>-<sha8>.json`, including remote grants
+and server instances. Install locks (`*.install.lock`) get no new snapshot: a
+lock holds only the pid of a running installer, so its snapshots held nothing to
+recover and grew with every install run. Snapshots that older versions wrote
+stay listed and restorable. Private snapshots keep the last 20 plus
 one per day for 30 days. Backup failures warn once per file and never block the
 primary write. HomeStore checks the backup directory chain before the write lock;
 unavailable, dangling or escaping paths disable both backup creation and pruning.
-`cez backup list [<file>]` discovers every supported file, including backups whose
+`cez backup list [<file>]` reads legacy backups without migration when the switch
+is on and the split home has no install marker. Once the split home has a marker,
+it reads that home. Listing never prepares either home. The legacy fallback reads
+only paths inside the legacy home: a link that leaves it is not listed. It discovers every
+supported file, including backups whose
 live file is gone. Legacy root-file snapshots and nested named-instance snapshots
 remain readable. `config.json.bak` is listed as the newest config backup; the
 loader still restores it only when the primary is missing, blank or corrupt.
@@ -46,7 +53,15 @@ the shrink-only OS-user reader list (hearsay-tools/cezarion#2810).
 
 Tests select `Home.sandbox(dir)` and use the shared setup's selector for process
 entry tests. The factory contains cache and config paths under that directory and
-creates a test `install.json` marker without replacing an existing one. Seed fixtures
+creates a test `install.json` marker without replacing an existing one. A request for
+a test marker refuses the account's real cezar home in every process, with or without
+a test-runner variable: the legacy home, each platform default root, their descendants
+and symlink aliases (`home/protected-roots.ts`, hearsay-tools/cezarion#2778). On
+Windows and macOS the comparison ignores case, so an absent `.CEZAR` still counts as
+`.cezar`. An empty or relative OS account home fails closed. The
+refusal runs before an existing marker is returned. `scripts/test-install-marker.mjs`
+imports no product module, so it keeps a local copy of the check;
+`home/test-marker-guard.test.ts` holds its roots equal to the product's. Seed fixtures
 with `Home.seed` or `Home.seedBytes`; both use HomeStore. A direct file write belongs
 only in a test that deliberately simulates an outside writer.
 
@@ -64,7 +79,9 @@ are a stated limit. An unconfirmed process claim expires after 30 seconds to rec
 from PID reuse. A confirmed live process token never expires. See ADR 0060 for
 the long-running-holder trade-off and cross-namespace lease collisions.
 
-Serve, init, run and backup restore prepare an install marker unconditionally.
+Serve, init, run and backup restore prepare an install marker unconditionally,
+after their arguments validate: `run` without a task, and `backup restore` with
+help, an unsupported file, extra arguments or an invalid `--at`, prepare nothing.
 Other authorized operator entries prepare existing registry files at entry. On an
 empty home, they record authorization in process memory and create nothing until
 the first write. That write creates the marker and seeds HEAD under the same lock.
@@ -160,7 +177,15 @@ They then run the normal journal interpretation on a report-only VersionLog,
 which keeps every record change in memory: a reset interrupted after its
 replacement (PENDING, stale HEAD) still reports, and no journal file changes.
 
-An empty or absent legacy home returns `fresh` and commits an explicit
+An absent legacy home leaves conditional entries read-only. Their first write
+commits the fresh decision before the registry mutation; serve, init, run and
+backup restore commit it at entry. Help, invalid commands and pure reads create
+no home. The deferred preparation runs once per entry, before the first write. When
+it selects another home (a legacy server install appeared, a rolled-back group or a
+staged group), the write fails with `Run hsq server-migrate.` and the split home stays
+unwritten; each later write fails the same way. An existing empty legacy home keeps
+its migration decision at entry.
+A fresh decision returns `fresh` and commits an explicit
 decision: a v1 record with `files: []` and `backup: ''`, then the marker with
 `migratedFrom` and `state: 'committed'`. A fresh home therefore carries
 `migratedFrom` and `committed` too. `MOVED.json` is written only when the
@@ -191,10 +216,14 @@ with a warning. `rollbackLegacyMigration(target)` renames a
 pending marker to `install.json.failed`; the next explicit migration overwrites
 the recorded pending destinations. Rollback never rewrites legacy registry data.
 
-With the switch on, boot keeps serving the legacy home after a server group
-rollback. The signal is an `installed` record without `dryRun` in the legacy
-`server.json` or `server-instances/`, plus target `install.json.failed` without
-a committed marker. Boot warns once to run `hsq server-migrate`. The selected
+With the switch on, boot defers a server home that supports group migration: only `hsq server-migrate`
+stops the group, stages the home and rolls every instance back on failure. The
+signal is an `installed` record without `dryRun` in the legacy `server.json` or
+`server-instances/` and no committed target marker. Then every CLI entry and the
+cockpit boot keep the legacy home, write nothing to the target and warn once on
+stderr to run `hsq server-migrate` (the warning says "retry" when the target has
+`install.json.failed` from a group rollback). `hsq migrate` still migrates such a
+home when the operator runs it. The selected
 legacy Home passes through CLI boot and the server lifecycle, including leases;
 the second preparation never tries to migrate that legacy Home into itself.
 The lifecycle refuses startup if preparation selects a different Home from the
@@ -204,11 +233,15 @@ Home returned by `prepareOperatorHome`, as CLI boot does.
 
 | Boot state | Selected home and action |
 | --- | --- |
-| Completed server, failed marker, no committed marker | Legacy home; no target writes; warn to retry `hsq server-migrate` |
+| Completed group-migration server, no committed marker | Legacy home; no target writes; warn to run `hsq server-migrate` |
+| Completed group-migration server, failed marker, no committed marker | Legacy home; no target writes; warn to retry `hsq server-migrate` |
 | Finished staged retry, including a prior failed marker | Pending target, read-only, for the group's health checks |
 | Committed target, including a prior failed marker | Target; normal boot |
-| Desktop, incomplete install or dry-run server, failed marker | Existing boot migration to the target |
+| Desktop, incomplete install or dry-run server, with or without a failed marker | Existing boot migration to the target |
 | Switch off | Existing legacy behavior |
+
+Platforms without group migration support, including `macosx-ngrok`, keep the desktop boot
+migration. The shared capability check requires migrate, rollback, stop and start methods.
 
 An explicit `hsq migrate` or successful `hsq server-migrate` recopies the current
 legacy data and commits the target, which clears the boot skip. The failed marker
@@ -217,7 +250,12 @@ not commit a target or clear the skip. No new state marker or setting is used.
 
 `cez server-migrate` (`server-install/group-migrate.ts`, registered only with
 the switch on) is that caller. It holds every instance's install lock in the
-records home, sorted, for the whole run. Before the first platform move it
+records home, sorted, for the whole run. `--dry-run` only reads: it takes no
+install lock, does not prepare the legacy home and writes no file. Server records
+are read as plain bytes, so a missing version log is not seeded by planning. Its plan
+names the stop of every instance, each unit, site, file and environment move
+(one line each), each instance's health check, the group, the pending marker
+and the rollback. Before the first platform move it
 writes `<state>/server-migrate.json` (version 1: `phase`, `stagedHome`, and per
 instance the dry-run `planned` report and the returned `moved` report). The
 home commits after every health check passes and before the journal says

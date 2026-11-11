@@ -124,7 +124,7 @@ describe('linked checkouts', () => {
     git(repo, 'commit', '-q', '-m', 'init');
     git(repo, 'worktree', 'add', '-q', '-b', 'cez/abc12345', join(home, 'wt-task'));
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
 
     const found = await discoverCheckouts(env, testHome(env));
     expect(found.map((c) => [c.branch, c.built, c.linked, c.id])).toEqual([
@@ -164,7 +164,7 @@ describe('linked checkouts', () => {
       makeRunRecord({ id: 'other-run', title: 'Elsewhere', worktreePath: join(repo, '.ai', 'cezar', 'worktrees', 'other'), branch: 'cez/other' }),
     ]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
 
     const found = await discoverCheckouts(env, testHome(env));
     expect(found.map((c) => c.branch)).toEqual(['cez/abc12345', 'main']);
@@ -190,7 +190,7 @@ describe('linked checkouts', () => {
     fakeCheckout(task);
     seedRuns(join(repo, '.ai', 'cezar'), [makeRunRecord({ id: 'def67890-run', title: 'Owner', branch: 'cez/def67890' })]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'),
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig,
       Buffer.from(JSON.stringify({ projects: register ? [{ id: 'cezar', root: realpathSync(repo) }] : [] })));
     return repo;
   }
@@ -259,7 +259,7 @@ describe('linked checkouts', () => {
       makeRunRecord({ id: 'def67890-run', title: 'Newest owner', createdAt: '2026-09-02T10:00:00.000Z', branch: 'cez/def67890' }),
     ]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
 
     const found = await discoverCheckouts(env, testHome(env));
     expect(found.find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run', title: 'Newest owner' });
@@ -277,7 +277,7 @@ describe('linked checkouts', () => {
     const future = new Date(Date.now() + 60_000);
     utimesSync(join(pkg, 'dist', 'index.js'), future, future);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
     expect((await discoverCheckouts(env, testHome(env)))[0]?.stale).toBe(false);
     if (change === 'deleted') rmSync(source);
     else writeFileSync(change === 'untracked' ? join(pkg, 'new-source.ts') : source, 'new source');
@@ -345,7 +345,7 @@ describe('linked checkouts', () => {
     const a = clone('a');
     const b = clone('b');
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'a', root: a }, { id: 'b', root: b }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'a', root: a }, { id: 'b', root: b }] })));
 
     const ids = async () => new Map((await discoverCheckouts(env, testHome(env))).map((c) => [c.worktree, c.id]));
     const before = await ids();
@@ -384,7 +384,7 @@ describe('linked checkouts', () => {
     const task = join(home, 'wt-task');
     git(repo, 'worktree', 'add', '-q', '-b', 'cez/abc12345', task);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
-    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
+    Home.seedBytes(Home.sandbox(env.CEZ_HOME!), testHome(env).workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] })));
 
     const built: string[] = [];
     let restarted = false;

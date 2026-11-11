@@ -1,3 +1,4 @@
+import { Home } from '../../cezar/src/home/home.ts'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -69,11 +70,8 @@ beforeAll(async () => {
   // CEZ_HOME keeps this test isolated from the developer's real workspace config.
   const cezHome = join(dataRoot, '.cez-home')
   mkdirSync(cezHome, { recursive: true })
-  writeFileSync(
-    join(cezHome, 'config.json'),
-    JSON.stringify({ resources: { maxParallel: 1 } }),
-    'utf8',
-  )
+  const home = Home.sandbox(cezHome)
+  Home.seed(home, home.workspaceConfig, { resources: { maxParallel: 1 } })
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },

@@ -30,11 +30,12 @@ export interface ProjectCockpit { pid: number; url?: string; port?: number; inst
 
 /** Something live serves the project: nothing was claimed, moved or written. */
 export class ProjectInUseError extends Error {
-  constructor(readonly project: string, readonly cockpits: readonly ProjectCockpit[], readonly tasks: readonly LiveProjectTask[]) {
+  constructor(readonly project: string, readonly cockpits: readonly ProjectCockpit[], readonly tasks: readonly LiveProjectTask[], readonly taskReadFailure?: string) {
     const lines = [
       ...cockpits.map(cockpit => `- cockpit pid ${cockpit.pid}${cockpit.url ? ` at ${cockpit.url}` : cockpit.port ? ` on port ${cockpit.port}` : ''}`
         + `${cockpit.instance ? `, instance ${cockpit.instance}` : ''}${cockpit.home ? `, home ${cockpit.home}` : ''}: stop it`),
       ...tasks.map(task => `- task ${task.id} ${task.title} (${task.state}): finish or cancel it`),
+      ...(taskReadFailure ? [`- live tasks could not be read: ${taskReadFailure}`] : []),
     ];
     super(`Cannot migrate ${project} while it is in use. Stop what is listed, then retry:\n${lines.join('\n')}`);
     this.name = 'ProjectInUseError';
@@ -117,10 +118,16 @@ export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'per
   return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id) };
 }
 
-/** Refuse when a cockpit serves the project; live tasks are checked under the fence (`fenceProject`). */
+/** Refuse when a cockpit serves the project; include live tasks in that first refusal. The fence checks them again. */
 export async function assertNoProjectCockpit(root: string, homes: readonly Home[], self = process.pid): Promise<void> {
   const cockpits = await projectCockpits(root, homes, self);
-  if (cockpits.length > 0) throw new ProjectInUseError(root, cockpits, []);
+  if (cockpits.length === 0) return;
+  let tasks: LiveProjectTask[];
+  try { tasks = projectLiveTasksOffline(root); }
+  catch (error) {
+    throw new ProjectInUseError(root, cockpits, [], error instanceof Error ? error.message : String(error));
+  }
+  throw new ProjectInUseError(root, cockpits, tasks);
 }
 
 /** The project's live tasks, read without writing anything: the fence's live-task check. */

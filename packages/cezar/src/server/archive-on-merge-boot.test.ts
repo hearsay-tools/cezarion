@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -44,11 +45,11 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
     execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/o/r.git']);
   }
   const bootProject = await registerProject(boot, undefined, testHome()), other = await registerProject(cold, undefined, testHome());
-  const id = randomUUID(), dataDir = join(cold, '.ai/cezar');
+  const id = randomUUID(), dataDir = projectPaths(cold).write;
   seedRuns(dataDir, [{ id, title: 't', task: 't', workflow: 'quick-task', steps: [], tokensUsed: 0, status: RUN_STATUS.done, archived: false, createdAt: '2026-01-01T00:00:00Z', pullRequests: [{ number: 42, source: 'declared' }] }]);
   const recover = vi.spyOn(RunManager.prototype, 'recover');
   const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
-  const store = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });
+  const store = RunStore.open(projectPaths(boot).write, { keepLive: true });
   // The real post-listen hook starts the coordinator; drive an additional tick to avoid
   // waiting a minute for the project cursor to move beyond the empty boot project.
   let coordinator: ArchiveOnMergeCoordinator | undefined;
@@ -60,7 +61,7 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
     await vi.waitFor(() => expect(coordinator).toBeDefined(), { timeout: HANG_GUARD_MS });
     await vi.waitFor(async () => {
       await coordinator!.tick();
-      expect(readPersistedRuns(dataDir)[0].archived).toBe(!single && repository === 'r');
+      expect(readPersistedRuns(projectPaths(cold).write)[0].archived).toBe(!single && repository === 'r');
     }, { timeout: HANG_GUARD_MS });
     expect(contexts.peek(other.id)).toBeUndefined(); expect(recover).not.toHaveBeenCalled();
     if (!single) {

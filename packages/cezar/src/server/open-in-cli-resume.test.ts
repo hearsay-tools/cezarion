@@ -132,6 +132,52 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
   const openInCli = (runId: string, options: { disabled?: ProviderId[]; disconnected?: ProviderId[] } = {}) =>
     apiRequest(app(options), `/api/v1/runs/${runId}/open-in-cli`, { method: 'POST' });
 
+  it.each(['queued', 'running', 'waiting'] as const)(
+    'open-in-cli opens a fresh CLI for an engine-owned %s run with a session', async (status) => {
+      const run = makeRun('claude', 'sess-1');
+      store.updateStep(run.id, 'work', { backend: 'codex' });
+      setRunStatus(store, run.id, status);
+      const response = await openInCli(run.id);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ opened: true, command: 'codex' });
+      expect(mockOpenInTerminal).toHaveBeenCalledWith(repoRoot, 'codex', {});
+    },
+  );
+
+  it.each(['queued', 'running', 'waiting', 'done'] as const)(
+    'open-in-cli keeps the no-session refusal first for %s', async (status) => {
+      const run = makeRun('claude');
+      setRunStatus(store, run.id, status);
+      const response = await openInCli(run.id, { disabled: ['claude'] });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'no agent session to resume' });
+      expect(mockOpenInTerminal).not.toHaveBeenCalled();
+    },
+  );
+
+  it('open-in-cli still resumes a usage-limit hold', async () => {
+    const run = makeRun('claude', 'sess-1');
+    setRunStatus(store, run.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    const response = await openInCli(run.id);
+    expect(await response.json()).toEqual({ opened: true, command: 'claude --resume sess-1' });
+  });
+
+  it.each(['omp', 'cursor'] as const)('open-in-cli refuses an unusable %s executable on a fresh launch', async (backend) => {
+    vi.stubEnv(backend === 'omp' ? 'CEZ_OMP_BIN' : 'CEZ_CURSOR_BIN', 'invalid\nexecutable');
+    try {
+      const run = makeRun(backend, 'sess-1');
+      setRunStatus(store, run.id, RUN_STATUS.running);
+      const response = await openInCli(run.id);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: `the configured ${backend === 'omp' ? 'OMP' : 'Cursor'} executable cannot be used in a terminal command`,
+      });
+      expect(mockOpenInTerminal).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([
     ['claude', 'cursor', 'agent --resume sess-1'],
     ['cursor', 'claude', 'claude --resume sess-1'],
@@ -376,6 +422,22 @@ describe('POST /api/v1/runs/:id/open-in — agent CLI resume vs fresh launch', (
       expect(mockOpenInTerminal).toHaveBeenCalledWith(expect.any(String), 'claude', {
         CLAUDE_CONFIG_DIR: dir,
       });
+    });
+
+    it('open-in-cli opens an engine-owned session on the project account', async () => {
+      const session = join(home, 'claude-session');
+      const project = join(home, 'claude-project');
+      await addAccount('session', 'claude', session);
+      await addAccount('project', 'claude', project);
+      await mergeWriteAgentAccounts((store) => {
+        store.selections[realpathSync(repoRoot)] = { claude: 'project' };
+      }, testHome());
+      const run = makeRun('claude', 'sess-1');
+      store.updateStep(run.id, 'work', { profileId: 'session' });
+      setRunStatus(store, run.id, RUN_STATUS.running);
+      const response = await openInCli(run.id);
+      expect(await response.json()).toEqual({ opened: true, command: 'claude' });
+      expect(mockOpenInTerminal).toHaveBeenCalledWith(repoRoot, 'claude', { CLAUDE_CONFIG_DIR: project });
     });
 
     it('refuses rather than resuming on the wrong account when the recorded one is gone', async () => {

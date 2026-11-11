@@ -1,3 +1,4 @@
+import { markFreshProject } from './project-migration/fresh.ts';
 import { noticeLegacyProject, projectPaths } from './project-paths.ts';
 import { fallbackWorkflowPath } from './workflows/load.ts';
 import { fallbackSkillPath } from './skills.ts';
@@ -20,7 +21,7 @@ export async function initCommand(repoRoot: string): Promise<void> {
   const workflowsDir = join(projectPaths(repoRoot).write, 'workflows');
   const skillsDir = join(projectPaths(repoRoot).write, 'skills');
   const dataDir = projectPaths(repoRoot).write;
-  admittedWrite(dataDir, () => { mkdirSync(workflowsDir, { recursive: true }); mkdirSync(skillsDir, { recursive: true }); });
+  admittedWrite(dataDir, () => { markFreshProject(repoRoot); mkdirSync(workflowsDir, { recursive: true }); mkdirSync(skillsDir, { recursive: true }); });
 
   const examples: Array<{ path: string; fallback: () => Promise<string | undefined>; content: string }> = [
     {
@@ -81,6 +82,7 @@ export function openStore(repoRoot: string, opts?: { keepLive?: boolean; repoHan
   // First: an open that fails may already have created the database and the history backups.
   // No await between the check and the open; later store writes pass the store's own backstop.
   const store = admittedWrite(dataDir, () => {
+    markFreshProject(repoRoot);
     ensureDataGitignore(repoRoot);
     return RunStore.open(dataDir, { keepLive: opts?.keepLive, retryBusy: true });
   });

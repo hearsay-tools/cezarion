@@ -1,7 +1,9 @@
 import { readdirSync } from 'node:fs';
+import { productIdentity } from '../home/identity.ts';
+import { markFreshProject } from './fresh.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 import type { Home } from '../home/home.ts';
-import { pathPresent, projectMoveMarked, projectPaths } from '../project-paths.ts';
+import { noticeLegacyProject, pathPresent, projectMoveMarked, projectPaths } from '../project-paths.ts';
 import { CockpitOwnership, migrationFencePaths } from '../server/cockpit-ownership.ts';
 import { projectCockpits, projectLiveTasksOffline } from './live.ts';
 import { moveUnderFence } from './offline.ts';
@@ -60,9 +62,9 @@ async function blocker(root: string, homes: readonly Home[], self: number): Prom
 async function precheck(root: string, homes: readonly Home[], self: number): Promise<'nothing' | { reason: string } | undefined> {
   try {
     const plan = await planProjectMigration(root);
-    if (plan.moves.length === 0) return 'nothing';
     const refusals = [...plan.blockers, ...plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)];
     if (refusals.length > 0) return { reason: refusals.join('; ') };
+    if (plan.moves.length === 0) return 'nothing';
     const live = await blocker(root, homes, self);
     return live ? { reason: live } : undefined;
   } catch (error) {
@@ -112,11 +114,12 @@ export function moveProjectWhenIdle(root: string, options: {
 }
 
 async function attempt(root: string, options: Parameters<typeof moveProjectWhenIdle>[1]): Promise<AutomaticMove> {
+  markFreshProject(root, options.rebrand ?? REBRAND_SWITCH);
   // A completed move marked the project (hearsay-tools/cezarion#3150): `.ai/cezar/` is its fallback now.
   if (projectMoveMarked(root) || !legacyStatePresent(root)) return { status: 'nothing' };
   const log = options.log ?? ((line: string) => console.warn(line));
   const blocked = (reason: string): AutomaticMove => {
-    log(`[hsq] Project ${root} keeps its state in .ai/cezar/ for now: ${reason}. It is served from both folders; the move runs again at the next start.`);
+    noticeLegacyProject(root, { releaseEnabled: options.rebrand ?? REBRAND_SWITCH, reason, warn: log });
     return { status: 'blocked', reason };
   };
   const check = await precheck(root, options.homes, options.self ?? process.pid);
@@ -126,7 +129,7 @@ async function attempt(root: string, options: Parameters<typeof moveProjectWhenI
   try {
     const result = await move(root, ownership, options.fault);
     if ('reason' in result) return blocked(result.reason);
-    log(`[hsq] Moved the state of ${root} from .ai/cezar/ to .ai/squawk/.${result.gitMv.length
+    log(`[${productIdentity(options.rebrand ?? REBRAND_SWITCH).command}] Moved the state of ${root} from .ai/cezar/ to .ai/squawk/.${result.gitMv.length
       ? ` Tracked files stay; run these and commit:\n${result.gitMv.map(line => `  ${line}`).join('\n')}` : ''}`);
     return { status: 'moved', gitMv: result.gitMv };
   } finally {
@@ -157,7 +160,7 @@ export async function prepareProjects<T extends { root: string; status?: string 
     if (options.stopped?.()) break;
     if (project.status === 'missing') continue;
     await prepareProject(project.root, options).catch((error: unknown) => {
-      console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[${productIdentity(options.rebrand ?? REBRAND_SWITCH).command}] ${error instanceof Error ? error.message : String(error)}`);
     });
   }
   return projects;

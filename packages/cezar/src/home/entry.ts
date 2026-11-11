@@ -10,6 +10,7 @@ import { holdCockpitLease } from './leases.ts';
 import { HomeStore, readHomeFile } from './store.ts';
 import { REBRAND_SWITCH } from './switch.ts';
 import { authorizeHomeEntry, registryFiles } from './entry-authorization.ts';
+import { isValidRestore } from '../workspace/backups.ts';
 
 export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remote-settings'
   | 'install' | 'update' | 'use' | 'link' | 'unlink' | 'server-install' | 'server-deploy' | 'server-uninstall' | 'migrate'
@@ -18,22 +19,25 @@ export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remo
 const entries: readonly string[] = ['serve', 'init', 'run', 'projects', 'backup', 'remote-settings',
   'install', 'update', 'use', 'link', 'unlink', 'server-install', 'server-deploy', 'server-uninstall'];
 
-/** Backup listing is a pure read; restore retains its unconditional preparation. */
+/** Backup listing, help and invalid restore input are pure reads; a valid restore retains its unconditional preparation. */
 export function operatorHomeEntry(argv: readonly string[]): string | undefined {
-  return argv[0] === 'backup' && argv[1] !== 'restore' ? 'backup-read' : argv[0];
+  return argv[0] === 'backup' && !isValidRestore(argv.slice(1)) ? 'backup-read' : argv[0];
 }
 
 /** Boot must still work with a read-only home. Mutations retain their own throwing contracts. */
 export function prepareOperatorHome(home: Home, command: string | undefined, env = process.env, migration?: MigrationBootOptions): Home {
   command ??= 'serve';
   if (!entries.includes(command)) return home;
-  const boot = prepareMigrationHome(home, env, migration);
+  const unconditional = ['serve', 'init', 'run', 'backup'].includes(command);
+  const boot = prepareMigrationHome(home, env, { ...migration, deferFresh: !unconditional });
   if (boot.kind === 'staged') return home;
   if (boot.kind === 'legacy') home = boot.home;
-  authorizeHomeEntry(home, command, markerKind(command, env));
+  const beforeWrite = boot.kind === 'fresh' ? boot.prepare : undefined;
+  authorizeHomeEntry(home, command, markerKind(command, env), beforeWrite);
   try {
-    if (['serve', 'init', 'run', 'backup'].includes(command) || registryFiles(home).some(path => existsSync(path))) {
-      prepareHome(home, command as HomeEntry, env);
+    if (unconditional || registryFiles(home).some(path => existsSync(path))) {
+      // Existing split files without a marker still take the fresh decision before seeding.
+      prepareHome(home, command as HomeEntry, env, beforeWrite);
     }
   } catch (error) {
     console.warn(`[cez] home registry unavailable (${error instanceof Error ? error.message : String(error)}) — continuing without it`);
@@ -46,8 +50,8 @@ function markerKind(entry: string, env: NodeJS.ProcessEnv) {
 }
 
 /** Explicit authorization at operator entry points. Resolution itself stays free of IO. */
-export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env): void {
-  authorizeHomeEntry(home, entry, markerKind(entry, env));
+export function prepareHome(home: Home, entry: HomeEntry, env: NodeJS.ProcessEnv = process.env, beforeWrite?: () => void): void {
+  authorizeHomeEntry(home, entry, markerKind(entry, env), beforeWrite);
   new HomeStore(home).transaction(() => {});
 }
 

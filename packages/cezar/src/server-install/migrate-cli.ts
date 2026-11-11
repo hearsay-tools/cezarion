@@ -6,8 +6,13 @@ import { runServerMigrate, type ServerMigrateOptions } from './group-migrate.ts'
 import type { Runner, Ui } from './types.ts';
 
 const USAGE = commandText(`Usage: cez server-migrate [--dry-run] [--yes]
-Move every server install recorded in the legacy home to the new unit, site and home names, as one group.
-  --dry-run   list every unit, site, file and environment line it would change; change nothing
+Move every server install recorded in the legacy home to the new unit, launchd agent, site and home
+names, as one group. It stops every instance that shares the home, copies the home, moves each unit,
+launchd agent and site, then starts each instance and checks its health. The new home stays pending
+(read-only) until every instance passes; any failure restores every old unit, agent and site and
+leaves the legacy home in use.
+  --dry-run   print that plan: every unit, agent, site, file and environment line it would change and each
+              health check; change nothing, not even the legacy home
   --yes       accept safe defaults (privileged commands still need passwordless sudo or your paste)`);
 
 export interface ServerMigrateHomes {
@@ -28,7 +33,8 @@ export async function runServerMigrateCommand(argv: string[], env: NodeJS.Proces
     const dryRun = values['dry-run'] === true;
     const assumeYes = values.yes === true;
     // The legacy home is the writer until the group commits. Never auto-migrate it at entry.
-    prepareHome(homes.legacy, 'server-migrate', env);
+    // A dry run only reads, so it does not prepare (write) the legacy home either.
+    if (!dryRun) prepareHome(homes.legacy, 'server-migrate', env);
     const { createAutoUi, createClackUi } = await import('./ui.ts');
     const ui = homes.ui ?? (dryRun || assumeYes ? createAutoUi({}, (m) => console.log(m), { strictValidate: !dryRun }) : createClackUi());
     const strategy = homes.strategy ?? (await import('./strategies.ts')).getStrategy;
@@ -38,7 +44,7 @@ export async function runServerMigrateCommand(argv: string[], env: NodeJS.Proces
     });
     return ['migrated', 'unchanged', 'planned'].includes(result.status) ? 0 : 1;
   } catch (error) {
-    console.error(`[cez] server-migrate failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`${commandText('[hsq] server-migrate failed:')} ${error instanceof Error ? error.message : String(error)}`);
     return 1;
   }
 }

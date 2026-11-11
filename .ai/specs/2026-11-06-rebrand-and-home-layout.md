@@ -83,7 +83,7 @@ Caw, Covey, Flock, Hatch, Nest.
 | npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/squawk`, unscoped alias `hsq` | matching old scoped and `cezarion` forwarding releases pin the new package exactly during the window; the dispatcher prints one notice; the last pair ships at window end, then `npm deprecate` (planner X4) |
 | CLI binary | `cezarion`, `cez` | `hsq` | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
 | Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `HSQ_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
-| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; automatic move at cockpit start for each registered project that is idle and has a clean plan, and `hsq migrate-project`, with the release switch (P4); a moved project (marker in the Git common directory, keyed by the project root) writes `.ai/squawk/` and reads `.ai/cezar/` as the fallback, an unmoved one keeps writing `.ai/cezar/` (hearsay-tools/cezarion#3150) |
+| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; automatic move at cockpit start for each registered project that is idle and has a clean plan, and `hsq migrate-project`, with the release switch (P4); a moved project (marker in the Git common directory, keyed by the project root) writes `.ai/squawk/` and reads `.ai/cezar/` as the fallback, a fresh project with no `.ai/cezar` path and an absent or real `.ai/squawk` directory starts in `.ai/squawk/` and records the same marker before its first write; an existing legacy path keeps the migration rules (hearsay-tools/cezarion#3150) |
 | Home | `~/.cezar`, `~/.cache/cez` | section 3 layout | read once by the migration, then a canary |
 | GitHub repo | `hearsay-tools/cezarion` | `hearsay-tools/squawk` (GitHub redirects the old name) | old citations stay valid; the citation checker accepts both |
 | Docs | README, AGENTS.md, docs/, specs | new name; specs and ADRs keep history | — |
@@ -126,7 +126,9 @@ Resolved once, at the process entry point, from the platform. No setting is requ
      or `HOME` says;
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
-   custom env objects cannot hide the live home.
+   custom env objects cannot hide the live home. A `test` marker is never written to the
+   account's real home: a test marker request (`Home.sandbox`, `scripts/test-install-marker.mjs`)
+   refuses the account's legacy and platform roots in every process, test runner or not.
 4. **Presence leases and write lock.** Two kinds of file in `<config>/.locks/`. They sit in
    the config dir, which identifies the home, not in the runtime dir, which depends on each
    process's `XDG_RUNTIME_DIR`; so a server and a CLI that share a home always share them. Each serving
@@ -161,8 +163,15 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    (`loadWorkspaceConfig` restores `config.json` from `config.json.bak`, ADR 0010) and count
    `config.json.bak` and `backups/` as registry data. Only a legacy home that does not exist,
    or holds no registry file, backup or account file after that recovery, has nothing to
-   migrate: write a fresh `live` marker in the new
-   home and stop. Every later lock and marker of this migration lives in the resolved legacy
+   migrate. With no legacy home, read-only and invalid commands write nothing.
+   Only writer entries with valid arguments (serve, init, run, backup restore, or the
+   first authorized registry write) record the fresh decision and write a `live` marker
+   in the new home. A deferred first write that finds a legacy server install refuses
+   and names `hsq server-migrate`. Never create the absent legacy directory to publish `MOVED.json`. An
+   existing empty legacy directory keeps the committed empty inventory and
+   `MOVED.json`. Later legacy data reaches the canary and is never copied over
+   the fresh home. Before a split marker exists, `hsq backup list` reads legacy
+   backups without migration or writes. Every later lock and marker of this migration lives in the resolved legacy
    home.
 2. Take `<legacy>/.migrating` with `O_EXCL`; a second migration waits or stops. Then take
    the legacy `write.lock`, which drains any writer already in its critical section, and hold
@@ -214,6 +223,14 @@ file. A test covers a restart after P5 with only `CEZ_HOME` set.
 every instance that shares the legacy home, migrates that home once, then for each instance in
 `server.json` and `server-instances/`: install
 `hearsay-squawk[-<slug>].service` and the nginx site on the same port, start, check health.
+A macOS (`macosx-ngrok`) server install is a server-migrate install too: the stop is
+`launchctl bootout` of each recorded label, the move writes and bootstraps the
+`tools.hearsay.squawk.*` plist and keeps the old plist as `*.plist.migrated`, and the health
+check reloads each agent, then waits for the cockpit on its loopback port and, when the install
+owns the tunnel agent, for a tunnel in the ngrok local API (about 30 s; each probe is time-bounded).
+A rollback restores the old plist and leaves the old label unloaded until the home has rolled back,
+so the restarted cockpit reads the legacy home. Only owned agents move, stop or start, as section 2
+says.
 The instances that share a home form one group and succeed or fail together. Until every
 instance passes its health check, the new marker stays in state `pending` and `HomeStore`
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
@@ -231,9 +248,17 @@ address, since its public route belongs to the operator. An `--external-proxy`
 install has neither; the migration leaves the operator's proxy untouched and moves only the
 unit. Units and sites of an install made before the switch keep working with
 `server-uninstall` and `server-deploy`, which act on the recorded names.
+A boot or ordinary command of the new build does not run `migrateLegacyHome()` for a legacy
+home that records an installed server supported by group migration (an `installed` record
+without `dryRun`, whose strategy supports migrate, rollback, stop and start) while the new
+home is not committed: it keeps the legacy home and prints one notice to run
+`hsq server-migrate`, so the home moves only with the group's stop, `pending` stage and
+rollback. `hsq server-migrate --dry-run` prints the stop, every move, each health check, the
+group, the pending marker and the rollback, and writes nothing, not even to the legacy home.
 
-**Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
-as in section 2.
+**Desktop installs**: the bundled server runs the same migration at boot. A Mac that records a
+completed `macosx-ngrok` server install is not a desktop install: its launchd labels move only
+through `hsq server-migrate`, as in section 2 and under "Server installs".
 
 ### 4.1 New bundle IDs
 
@@ -338,3 +363,46 @@ Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and
 The switch needs P0 to P4 accepted on `main`, including the per-project write root that follows moved state (hearsay-tools/cezarion#3150); P5 follows the release.
 
 Every slice follows `BACKWARD_COMPATIBILITY.md` and updates `.env.example`, the README env table and the area docs it touches.
+
+### Switch fix: first project use
+
+With the switch on, no `.ai/cezar` path means a fresh project. Path reads select
+`.ai/squawk/` without writing when it is absent or a real directory. Project preparation and the first CLI write mark the
+project in the Git common directory, so a later legacy path does not change its write
+root. An existing empty directory, tracked-only directory, symlink or unreadable path
+keeps the existing migration rules. With the switch off, all writes remain legacy.
+A blocked automatic move prints one switch-aware notice, and the offline cockpit
+refusal also lists live tasks from the read-only task view.
+
+| Case | Write root / result |
+| --- | --- |
+| Switch off, any marker or legacy path | `.ai/cezar/` |
+| Switch on, no legacy path, destination absent or real directory | `.ai/squawk/`, marker before ordinary writes |
+| Switch on, no legacy path, destination is a symlink or file | `.ai/cezar/`, no fresh marker |
+| Switch on, existing unmarked legacy path | Existing P4 migration checks |
+| Switch on, marked project, legacy path later appears | `.ai/squawk/`, legacy fallback |
+| Cockpit and task live during offline migration | First refusal names both |
+| Cockpit known, live-task read fails | Refusal names cockpit and read failure; nothing moves |
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.
+
+### Switch fix: stored checkout under a removed project root
+
+Continue and restart recovery keep the shipped missing-checkout fallback when a
+repository was moved or copied and its recorded old root no longer exists. This
+does not make an existing migrated project's legacy state writable.
+
+| Switch | Recorded root | Recorded checkout | Continue / recovery |
+| --- | --- | --- | --- |
+| Off | Removed | Missing legacy checkout | Use current repository, as shipped |
+| On | Removed | Missing legacy checkout | Use current repository |
+| On | Existing, migrated | Missing or existing legacy checkout | Refuse read-only fallback writes |
+| Either | Existing | Existing writable checkout | Keep normal continuation |
+
+The fallback guard checks the root's directory entry. An unreadable or dangling
+entry still counts as present and keeps the existing guard. Registered projects
+whose own current root was deleted retain their separate admission refusal.

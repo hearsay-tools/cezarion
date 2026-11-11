@@ -41,7 +41,7 @@ it('detects corrupt pinned content when its metadata stays unchanged', () => {
   Home.seed(home, home.workspaceUiState, { value: 'old' });
   writeFileSync(home.workspaceUiState, '{"outside":true}'); // Deliberate incident with one pinned restore version.
   getHomeRecovery(home);
-  const directory = join(home.root, '.versions', 'ui-state.json');
+  const directory = join(home.state, '.versions', 'ui-state.json');
   const flag = JSON.parse(readFileSync(join(directory, 'OUTSIDE'), 'utf8')) as { restoreHash: string };
   const pinned = join(directory, flag.restoreHash);
   holdMetadata(pinned);

@@ -52,6 +52,7 @@ const STATE_LOCK = 'automation-state.lock';
 const STATE_RECLAIM = 'automation-state.reclaim';
 const WRITE_LOCK_STALE_MS = 5_000;
 const WRITE_LOCK_TIMEOUT_MS = 10_000;
+const LOG_RETENTION_COUNT = 10_000;
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 
 /**
@@ -80,6 +81,8 @@ export interface AutomationStoreOptions {
   processAlive?: (pid: number) => boolean;
   /** How long a definitions/state write waits for the other process's write lock. Tests only. */
   writeLockTimeoutMs?: number;
+  /** Maximum recent log rows retained by compaction. Tests only; production keeps 10,000. */
+  logRetentionCount?: number;
 }
 
 export class AutomationStore {
@@ -466,7 +469,7 @@ export class AutomationStore {
           reason: receipt.error ?? 'Task launch failed; retry is available.',
         }));
       }
-      const kept = new Map(logs.slice(-10_000).map((log) => [log.seq, log]));
+      const kept = new Map(logs.slice(-(this.options.logRetentionCount ?? LOG_RETENTION_COUNT)).map((log) => [log.seq, log]));
       for (const log of retryLogs.values()) kept.set(log.seq, log);
       this.rewriteNdjson(LOG, [...kept.values()].sort((a, b) => a.seq - b.seq));
     });

@@ -1,3 +1,4 @@
+import { productName, productCommand } from '@/lib/product-name'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -89,7 +90,7 @@ function serveLive(server: LiveServer) {
       }
       if (url.includes('/api/v1/agent-config/') && method === 'PUT') {
         if (server.putStatus === 409) {
-          return json({ error: 'editing agent config is disabled on this remote cockpit — run `cez remote-settings enable` on the host to allow it' }, 409)
+          return json({ error: `editing agent config is disabled on this remote cockpit — run \`${productCommand()} remote-settings enable\` on the host to allow it` }, 409)
         }
         return json({ id: 'x', path: '/repo/x', exists: true, content: '{"a":2}', version: 'v2' })
       }
@@ -280,7 +281,7 @@ describe('AgentConfigSection', () => {
     expect(block).toBeTruthy()
     expect(block.textContent).toContain('github')
     expect(block.textContent).toContain('sentry')
-    expect(block.textContent).toContain('cezar does not edit')
+    expect(block.textContent).toContain(`${productName("cezar")} does not edit`)
     // the block belongs to Claude's pane only
     fireEvent.click(agentTab('codex'))
     await waitFor(() => expect(document.querySelector('[data-slot="agent-config-user-mcp"]')).toBeNull())
@@ -327,7 +328,7 @@ describe('AgentConfigSection', () => {
     fireEvent.click(screen.getByText('.claude/settings.json'))
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull()
-    expect(document.querySelector('[data-slot="agent-config-readonly"]')?.textContent).toContain('cez remote-settings enable')
+    expect(document.querySelector('[data-slot="agent-config-readonly"]')?.textContent).toContain(`${productCommand()} remote-settings enable`)
     expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
   })
 

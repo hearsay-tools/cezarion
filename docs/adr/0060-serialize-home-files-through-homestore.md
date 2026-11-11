@@ -46,6 +46,10 @@ Preparation selects `test` under the actual test process, `dev` for dry `serve`/
 and `live` otherwise. An existing marker keeps its identity and kind. Tests cannot
 write a live marker home, even through a different env object. The canonical
 passwd-home guard runs before marker, lock or journal mutation as a second check.
+A test marker request runs that guard in every process, not only under a test runner,
+and before it returns an existing marker: a plain Node process with an inherited
+`CEZ_HOME` cannot stamp `test` on the account home. Live and dev requests keep the
+runner-scoped guard.
 
 ## Entry and caller audit
 
@@ -91,7 +95,8 @@ The reader sweep covers the existing five store modules, workspace migrations,
 model policy, scripts, CLI tests, browser source and e2e fixtures. Project-scoped
 `.ai/cezar/config.json` and `.ai/cezar/ui-state.json` remain separate stores.
 Fixtures use Home sandbox seed helpers. Before-build JS tools use
-`scripts/test-install-marker.mjs`. Benchmarks that retain an inherited `CEZ_HOME`
+`scripts/test-install-marker.mjs`, which keeps a local copy of the account-home guard
+and refuses before its first read or write. Benchmarks that retain an inherited `CEZ_HOME`
 refuse a live marker before starting work.
 
 ## Version log and preserved cases

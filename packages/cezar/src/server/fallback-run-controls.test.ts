@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { retainAutosaveCleanup } from '../autosave-cleanup.ts';
+import { fallbackProjectWriteError } from '../project-paths.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { closeClaimSession, openClaimSession } from '../runs/run-claims.ts';
@@ -42,7 +44,10 @@ function seedFamily(mixed: boolean, live = true) {
   const moved = new Set(mixed ? [family.workerId] : [family.parentId, family.workerId]);
   seedRuns(primary, records.filter(run => !moved.has(run.id)));
   seedRuns(fallback, records.filter(run => moved.has(run.id)));
-  if (!mixed) rmSync(primary, { recursive: true, force: true });
+  if (!mixed) {
+    rmSync(primary, { recursive: true, force: true });
+    mkdirSync(primary, { recursive: true }); // Keep the project legacy while its history is fallback-only.
+  }
   return family;
 }
 function start() {
@@ -202,4 +207,23 @@ it('refuses a worktree reclaim for a mixed family with the named refusal, before
   expect(await response.json()).toEqual({ error: expect.stringMatching(refusal) });
   expect(readFileSync(join(worktree, 'file.txt'), 'utf8')).toBe('checkout');
   expect(primaryIds()).not.toContain(family.workerId);
+});
+
+
+it.each(['autosave', 'removed'] as const)('git writes refuse a fallback checkout before %s checks', async (state) => {
+  const family = seedFamily(false, false);
+  const worktree = join(fallback, 'worktrees', family.parentId);
+  const records = readPersistedRuns(fallback);
+  seedRuns(fallback, records.map(run => run.id === family.parentId ? { ...run, worktreePath: worktree } : run));
+  if (state === 'autosave') {
+    mkdirSync(worktree, { recursive: true });
+    mkdirSync(join(fallback, 'runs'), { recursive: true });
+    retainAutosaveCleanup(fallback, family.parentId, worktree, 'cleanup pending', { processes: [], groups: [], uncertain: true });
+  }
+  start();
+  for (const route of ['git/commit', 'git/push']) {
+    const response = await post(`${family.parentId}/${route}`, route === 'git/commit' ? { message: 'unsafe' } : undefined);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: fallbackProjectWriteError(worktree) });
+  }
 });

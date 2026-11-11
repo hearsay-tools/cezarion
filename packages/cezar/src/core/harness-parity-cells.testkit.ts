@@ -598,7 +598,7 @@ const CONTROL_CRITERIA = [
   // harness-autosave.test.ts drives both cleanup paths with native runner wires.
   { id: 'R24', scenario: 'baseline' },
   { id: 'R25', scenario: 'baseline' },
-  // hearsay-tools/cezarion#934: harness-autosave-settlement.test.ts, independent writer guard.
+  // hearsay-tools/cezarion#934: harness-autosave-settlement*.test.ts, independent writer guard.
   { id: 'R61', scenario: 'provider-error' },
   { id: 'R62', scenario: 'provider-error' },
   { id: 'R63', scenario: 'baseline' },

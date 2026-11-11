@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -111,7 +112,7 @@ describe('the agent drives the real preview browser (hearsay-tools/cezarion#784)
     expect(result.value).toBe('agent app');
 
     // The owner's browser outlives the agent's attempt to close it.
-    await expect(agent.send('Browser.close')).rejects.toThrow(/cezar refuses Browser\.close/);
+    await expect(agent.send('Browser.close')).rejects.toThrow(`${productName('cezar')} refuses Browser.close`);
     expect(host.ownsBrowser('run-1')).toBe(true);
 
     // The session ends: its socket closes, and the browser is the pane's alone.

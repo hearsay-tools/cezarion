@@ -1,3 +1,4 @@
+import { projectPaths } from './project-paths.ts';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -46,7 +47,11 @@ const agents: number[] = [];
 const env = () => {
   const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'),
     CEZ_CLAUDE_BIN: join(root, 'stalling-agent.mjs') };
+  for (const [key, value] of Object.entries(vars)) {
+    if (key.startsWith('CEZ_')) vars[`HSQ_${key.slice(4)}`] = value;
+  }
   delete vars.CEZ_AUTOMATIONS;
+  delete vars.HSQ_AUTOMATIONS;
   return vars;
 };
 
@@ -63,7 +68,7 @@ function alive(pid: number): boolean {
 /** The agent, once it stalls in its task worktree. */
 async function agentPid(): Promise<number> {
   return vi.waitFor(() => {
-    const worktrees = join(root, '.ai/cezar/worktrees');
+    const worktrees = join(projectPaths(root).write, 'worktrees');
     const file = readdirSync(worktrees).map(id => join(worktrees, id, 'watchdog.pid')).find(existsSync);
     expect(file).toBeDefined();
     const pid = requirePid(file!);
@@ -160,7 +165,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     await exited;
     await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
     // keepLive: read the run as serve left it, before any reader reconciles a live run as failed.
-    const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+    const store = RunStore.open(projectPaths(root).write, { keepLive: true });
     try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
   }, 60_000);
 
@@ -199,7 +204,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
       terminal.hangUp();
       await terminal.ended;
       await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
-      const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+      const store = RunStore.open(projectPaths(root).write, { keepLive: true });
       try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
     }, 60_000);
 

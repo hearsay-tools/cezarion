@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { describe, expect, it } from 'vitest';
 
 import { taskCliArgumentRun, taskCliFixture } from './cli.testkit.ts';
@@ -35,7 +36,7 @@ describe('cez task', () => {
     it.each(['start', 'list', 'status', 'log', 'wait', 'send', 'notify', 'stop', 'finish', 'archive', 'unarchive', 'archive-finished', 'diff', 'open'])(
       '%s accepts help without positionals and rejects values for common flags', async (operation) => {
         expect(await run([operation, '--help'])).toBe(0);
-        expect(ctx.out.at(-1)).toContain(`cez task ${operation}`);
+        expect(ctx.out.at(-1)).toContain(`${productIdentity().command} task ${operation}`);
         for (const flag of ['url', 'repo']) {
           expect(await run([operation, `--${flag}`])).toBe(64);
           expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation}: Option '--${flag} <value>' argument missing` });
@@ -63,7 +64,7 @@ describe('cez task', () => {
       { operation: 'open', args: '<id>', max: 1 },
     ])('$operation documents and enforces its positional arguments', async ({ operation, args, max }) => {
       expect(await run([operation, '--help'])).toBe(0);
-      expect(ctx.out.at(-1)?.split('\n')).toContain(`  cez task ${operation} ${args}`.trimEnd());
+      expect(ctx.out.at(-1)?.split('\n')).toContain(`  ${productIdentity().command} task ${operation} ${args}`.trimEnd());
       expect(await run([operation, ...Array.from({ length: max + 1 }, () => 'x')])).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation} has an extra argument` });
       expect(last()).toHaveProperty('usage.operations');

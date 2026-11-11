@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { describe, expect, it } from 'vitest';
 
 import { taskCliArgumentRun, taskCliFixture } from './cli.testkit.ts';
@@ -25,7 +26,7 @@ describe('cez task', () => {
       expect(await run([operation, `--${flag}`])).toBe(64);
       expect(last()).toMatchObject({
         code: 'invalid_input', error: `${operation}: Option '--${flag} <value>' argument missing`,
-        usage: { operations: expect.arrayContaining([{ name: operation, synopsis: expect.stringContaining(`cez task ${operation}`) }]) },
+        usage: { operations: expect.arrayContaining([{ name: operation, synopsis: expect.stringContaining(`${productIdentity().command} task ${operation}`) }]) },
       });
       expect(ctx.discoveries).toBe(0);
     });

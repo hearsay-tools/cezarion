@@ -102,8 +102,7 @@ describe('ProjectContexts.warmAll', () => {
     const { contexts } = makeContexts(projects);
     try {
       expect(await contexts.warmAll(projects)).toEqual(['fine']);
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(String(warn.mock.calls[0]?.[0])).toContain('broken');
+      expect(warn.mock.calls.filter(([message]: unknown[]) => String(message).includes('broken'))).toHaveLength(1);
       expect(contexts.peek('broken')).toBeUndefined();
 
       rmSync(join(broken, '.ai/cezar'));

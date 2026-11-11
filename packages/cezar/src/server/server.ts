@@ -1,4 +1,4 @@
-import { runCheckout, worktreeOf, NO_WORKTREE } from './run-checkout.ts';
+import { runCheckout, preparePublishCheckout, reclaimCheckoutError } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
@@ -20,7 +20,6 @@ import { mergeNumberParams, prChangesParams, prChangesQuery, mergeBodySchema } f
 import { gitCommitSchema, reclaimBodySchema, repoBranchSchema } from '@open-mercato/cezar-contract/repo-requests';
 import { setConfigSchema, setAgentConfigSchema } from '@open-mercato/cezar-contract/config-requests';
 import { saveWorkflowInputSchema as saveWorkflowSchema } from '@open-mercato/cezar-contract/workflows';
-import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { patchRunInputSchema as patchRunSchema, messageInputSchema as messageSchema } from '@open-mercato/cezar-contract/runs';
 import { checkoutProjectInputSchema as checkoutSchema, registerProjectInputSchema as registerProjectSchema } from '@open-mercato/cezar-contract/projects';
 import { setWorkspaceConfigInputSchema as workspaceConfigUpdateSchema } from '@open-mercato/cezar-contract/workspace';
@@ -48,7 +47,6 @@ import type {
 export type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
 import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
 import { runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract/events';
-import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createWorkspaceLiveRoutes } from './workspace-live-routes.ts';
@@ -195,7 +193,7 @@ import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../wo
 import type { PastedContent } from '../workflows/run/types.ts';
 import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
-import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
+import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { createGithubBranchForge } from './repo-branch-forge.ts';
 import { attributeLog, classifyInputFor, deleteBranches, forgetRepoBranches, readRepoBranchCounts, readRepoBranches, type BranchForge, type ClassifyProject } from './repo-branches.ts';
@@ -283,7 +281,7 @@ import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } 
 import { closingSignal, prepareBeforeTicks, prepareProject, prepareProjects } from '../project-migration/auto.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
-import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
+import { freshCliHandoff, openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import {
@@ -361,7 +359,7 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   /** Boot project's shared automation store. `startServer` injects the
    *  coordinator-owned instance so HTTP routes and the scheduler never cache
    *  separate views of the same project files. */
-  automationStore?: AutomationStore;
+  automationStore?: AutomationStore | (() => AutomationStore);
   /** Workspace-wide parallel-cap semaphore + cached resource config (spec
    *  2026-07-20, step 2.5): the ONE instance boot created, refreshed, and gave
    *  the boot manager — threaded into the default `ProjectContexts` so every
@@ -1317,6 +1315,16 @@ export function createApp(deps: ServerDeps) {
     const stored = accounts.find((a) => a.id === profileId && a.provider === provider);
     if (!stored) return { error: `unknown ${provider} account: ${profileId}` };
     return { profile: resolveStoredProfile(stored) };
+  };
+
+  const openHandoffCheckout = (c: Context<ProjectApiEnv>, suffix = '') => {
+    const checkout = runCheckout(c.get('project'), c.req.param('id')!, 'open');
+    if ('status' in checkout) return checkout;
+    // Hosted mode: there is no "my machine" to open a terminal on. The UI
+    // hides the button when localHandoff is false — this is defense in depth.
+    return !capabilities().localHandoff
+      ? { status: 409 as const, body: { error: `local handoff is disabled — this cockpit runs in hosted mode (CEZ_REMOTE)${suffix}` } }
+      : checkout;
   };
 
   /**
@@ -3606,35 +3614,26 @@ export function createApp(deps: ServerDeps) {
     // "Open in terminal" (spec 003): hand the session off to a real terminal —
     // in the task's worktree when it still exists (spec 006).
     .post('/runs/:id/open-in-cli', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      // Hosted mode: there is no "my machine" to open a terminal on. The UI
-      // hides the button when localHandoff is false — this is defense in depth.
-      if (!capabilities().localHandoff) {
-        return c.json(
-          {
-            error:
-              'local handoff is disabled — this cockpit runs in hosted mode (CEZ_REMOTE); resume the session from a machine that has the checkout',
-          },
-          409,
-        );
-      }
-      const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
+      const project = c.get('project');
+      const checkout = openHandoffCheckout(c, '; resume the session from a machine that has the checkout');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const sessionStep = [...checkout.run.steps].reverse().find((s) => s.sessionId);
       const sessionId = sessionStep?.sessionId;
       if (!sessionId) return c.json({ error: 'no agent session to resume' }, 409);
-      const backend = sessionStep?.backend ?? run.runner ?? 'claude';
+      const backend = sessionStep?.backend ?? checkout.run.runner ?? 'claude';
       const blocked = await providerActionError([backend]);
       if (blocked) return c.json({ error: blocked }, 409);
-      const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
+      const cwd = checkout.directory();
       const refusal = fallbackProjectWriteError(cwd);
       if (refusal) return c.json({ error: refusal }, 409);
-      const command = resumeCommand(backend, sessionId);
-      // Fails closed on an id we do not recognise — see resumeCommand (#431).
-      if (!command) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
-      const account = await handoffEnv(backend, sessionStep?.profileId);
+      const resume = checkout.resumeAllowed ? resumeCommand(backend, sessionId) : undefined;
+      // Fails closed on an id we do not recognise — see resumeCommand (open-mercato/cezar#431).
+      if (resume === null) return c.json({ error: 'the recorded session id has an unexpected shape' }, 409);
+      const account = resume
+        ? { command: resume, ...await handoffEnv(backend, sessionStep?.profileId) }
+        : await freshCliHandoff(backend, project.root, deps.home);
       if ('error' in account) return c.json({ error: account.error }, 409);
+      const { command } = account;
       const fallback = handoffFallbackCommand(cwd, command, account.env);
       // Fail closed for the same reason as the session id: a terminal opened without the
       // account's config dir resumes nothing and says nothing about why.
@@ -3650,32 +3649,24 @@ export function createApp(deps: ServerDeps) {
 
     // Open a run's worktree (or the repo root) in the chosen local app.
     .post('/runs/:id/open-in', jsonZodValidator(openInSchema), async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      if (!capabilities().localHandoff) {
-        return c.json(
-          {
-            error: 'local handoff is disabled — this cockpit runs in hosted mode (CEZ_REMOTE)',
-          },
-          409,
-        );
-      }
+      const project = c.get('project');
+      const checkout = openHandoffCheckout(c);
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
       // Follows the safeParse convention (#429); the downstream allowlist match is the real
       // injection guard, this just validates the shape.
-      const parsedBody = { data: c.req.valid('json') };
-      const { target, path: relPath } = parsedBody.data;
-      const dir = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
+      const { target, path: relPath } = c.req.valid('json');
+      const dir = checkout.directory();
 
       if (target === 'default') {
-        return openRunDefaultApp(c, run, relPath, openFile, NO_WORKTREE);
+        const worktree = checkout.defaultWorktree();
+        if (typeof worktree !== 'string') return c.json(worktree.body, worktree.status);
+        return openRunDefaultApp(c, worktree, relPath, openFile);
       }
       const cliRunner = agentCliRunner(target);
       if (cliRunner) {
-        return openRunCli(c, run, cliRunner, dir, repoRoot, { home: deps.home,
+        return openRunCli(c, checkout.run, cliRunner, dir, project.root, { home: deps.home,
           providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal,
-        });
+        }, checkout);
       }
       return openRunApp(c, target, dir, openApp);
     })
@@ -3721,20 +3712,20 @@ export function createApp(deps: ServerDeps) {
 
     // Task diff (spec 006): what this run changed — its worktree vs its base.
     .get('/runs/:id/diff', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: true, directory: 'existing-worktree' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'existing-worktree' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
-      const { run, directory: workingDirectory } = checkout;
-      if (!workingDirectory) {
-        return c.text('(no worktree — this task ran directly in the repo working tree)');
-      }
-      return c.text(await worktreeDiff(workingDirectory, run.baseBranch ?? 'HEAD'));
+      if (!checkout.directory) return c.text('(no worktree — this task ran directly in the repo working tree)');
+      const result = await worktreeDiff(checkout.directory, checkout.run.baseBranch ?? 'HEAD', undefined, checkout.beforeLiveIndex);
+      if (typeof result !== 'string') return c.json({ error: result.error }, 409);
+      return c.text(result);
     })
 
     .get('/runs/:id/changes', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: true, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const result = await collectChanges(workingDirectory, run.baseBranch ?? 'HEAD', {
+        beforeLiveIndex: checkout.beforeLiveIndex,
         taskBranch: run.branch,
         // Anchors a repointed worktree at the branch as this run found it (#751).
         runStartedAt: run.startedAt,
@@ -3747,7 +3738,7 @@ export function createApp(deps: ServerDeps) {
 
     // The run's own commits (<base>..HEAD on the worktree branch) — the Commits tab.
     .get('/runs/:id/commits', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const result = await collectRunCommits(workingDirectory, run.baseBranch ?? 'HEAD');
@@ -3757,7 +3748,7 @@ export function createApp(deps: ServerDeps) {
 
     // One of the run's commits, structured like the Changes tab (reuses collectCommitChanges).
     .get('/runs/:id/commit/:sha', async (c) => {
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { directory: workingDirectory } = checkout;
       const result = await collectCommitChanges(workingDirectory, c.req.param('sha'));
@@ -3767,7 +3758,7 @@ export function createApp(deps: ServerDeps) {
 
     .get('/runs/:id/file-link', paramZodValidator(artifactParamsSchema.omit({ artifactId: true })), queryZodValidator(fileLinkQuerySchema), async (c) => {
       const { root, store } = c.get('project');
-      const checkout = runCheckout(c.get('project'), c.req.valid('param').id, 'read', { checksAutosave: false, directory: 'recorded-path-or-root' });
+      const checkout = runCheckout(c.get('project'), c.req.valid('param').id, 'read', { directory: 'recorded-path-or-root' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { run, directory: workingDirectory } = checkout;
       const query = c.req.valid('query');
@@ -3846,7 +3837,7 @@ export function createApp(deps: ServerDeps) {
         query.raw !== undefined
           ? query.raw === '1'
           : negotiate(c.req.header('accept'), FILE_FORMATS) === 'image/*';
-      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { checksAutosave: false, directory: 'working-directory' });
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'read', { directory: 'working-directory' });
       if ('body' in checkout) return c.json(checkout.body, checkout.status);
       const { directory: workingDirectory } = checkout;
       const result = await readWorktreePath(workingDirectory, query.path ?? '');
@@ -3897,28 +3888,20 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs/:id/git/commit', jsonZodValidator(gitCommitSchema), async (c) => {
-      const { store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-      const worktree = worktreeOf(run);
-      if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'mutate');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
       const parsed = { data: c.req.valid('json') };
-      const result = await commitAll(worktree, parsed.data.message);
+      const result = await commitAll(checkout.directory, parsed.data.message);
       if (!result.ok) return c.json({ error: result.error }, 409);
       return c.json({ committed: true, sha: result.sha });
     })
 
     .post('/runs/:id/git/push', async (c) => {
-      const { root: repoRoot, store } = c.get('project');
-      const run = store.getRun(c.req.param('id'));
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const blocker = autosaveCleanupBlocker(store.sourceDataDir(run.id), run.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-      const worktree = worktreeOf(run);
-      if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
-      const result = await pushCurrentBranch(worktree);
+      const { root: repoRoot } = c.get('project');
+      const checkout = runCheckout(c.get('project'), c.req.param('id'), 'mutate');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run } = checkout;
+      const result = await pushCurrentBranch(checkout.directory);
       if (!result.ok) return c.json({ error: result.error }, 409);
       const repoBase = forgeWebRoot((await getRepoInfo(repoRoot))?.remote) ?? undefined;
       resolveForgeRoot(repoRoot, deps.forgeFactory).branchPushed(ownPullRequestNumbers(run, repoBase));
@@ -3935,26 +3918,15 @@ export function createApp(deps: ServerDeps) {
     // badge. Failures come back as 409 with a `manual` merge command the GUI
     // shows next to the toast. CEZ_DRY_RUN=1 fakes the URL (no push, no gh).
     .post('/runs/:id/pr', async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
-      const held = store.getRun(id);
-      if (!held) return c.json({ error: 'not found' }, 404);
-      const refusal = held.worktreePath && fallbackProjectWriteError(held.worktreePath);
-      if (refusal) return c.json({ error: refusal }, 409);
-      if (manager.isActive(id)) return c.json({ error: 'run is still active — wait for the review gate' }, 409);
-      // A hold is live: done would drop its resume (S7 B13). Don’t resume (DELETE …/auto-resume) settles it failed.
-      if (isUsageLimitHold(held)) return c.json({ error: 'run is waiting on a usage-limit hold — choose Don’t resume in the task’s usage-limit hint, then retry Draft PR' }, 409);
-      const release = manager.claimForPublish(id);
-      if (!release) return c.json({ error: 'its worktree or branch is being cleaned up — retry in a moment' }, 409);
+      const checkout = runCheckout(c.get('project'), id, 'publish');
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { release } = checkout;
       try {
-        // Reclaim (#483, issue 08 §B4) removed the directory and kept the branch, and Not landed
-        // offers this on exactly those rows: restore the checkout first, as Continue does.
-        await rematerializeReclaimedWorktree(repoRoot, store, id);
-        const run = store.getRun(id);
-        if (!run) return c.json({ error: 'not found' }, 404);
-        if (!run.worktreePath || !existsSync(run.worktreePath) || !run.branch) {
-          return c.json({ error: 'no worktree/branch to publish — this task ran in the repo working tree' }, 400);
-        }
+        const prepared = await preparePublishCheckout(c.get('project'), id);
+        if ('status' in prepared) return c.json(prepared.body, prepared.status);
+        const { run } = prepared;
         const outcome = await resolveForgeRoot(repoRoot, deps.forgeFactory).createPR({
           repoRoot,
           run,
@@ -3977,14 +3949,14 @@ export function createApp(deps: ServerDeps) {
     // Archived tasks keep their worktree for inspection; this is the explicit
     // "🧹 Remove worktree" cleanup (spec 006).
     .post('/runs/:id/remove-worktree', protectFallbackRun('worktree'), async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      if (!store.canDeleteRun(id, 'worktree') || run.delegation?.role === 'worker') return c.json({ error: 'owned resources require verified worker cleanup' }, 409);
-      const release = manager.claimForPublish(id);
-      if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
+      const checkout = runCheckout(c.get('project'), id, 'remove', {
+        claim: 'publish', checksActive: true, deletion: 'worktree',
+        nullClaimError: 'worktree cleanup pending — retry after cleanup is confirmed',
+      });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, release } = checkout;
       try {
         if (run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
         store.updateRun(id, { worktreePath: undefined, branch: undefined });
@@ -3993,15 +3965,14 @@ export function createApp(deps: ServerDeps) {
     })
 
     .delete('/runs/:id', protectFallbackRun('record'), async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
+      const { root: repoRoot, store } = c.get('project');
       const id = c.req.param('id');
-      if (manager.isActive(id)) return c.json({ error: 'run is active — cancel it first' }, 409);
-      const run = store.getRun(id);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      // Delete cleans up after itself: worktree + branch go with the run (spec 006).
-      if (!store.canDeleteRun(id)) return c.json({ error: 'owned resources require verified worker cleanup and explicit child history deletion first' }, 409);
-      const release = manager.claimForPublish(id);
-      if (!release) return c.json({ error: 'worktree cleanup pending — retry after cleanup is confirmed' }, 409);
+      const checkout = runCheckout(c.get('project'), id, 'remove', {
+        claim: 'publish', checksActive: true, deletion: 'record',
+        nullClaimError: 'worktree cleanup pending — retry after cleanup is confirmed',
+      });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, release } = checkout;
       try {
         if (run.delegation?.role !== 'worker' && run.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, id, repoRoot, run.worktreePath, run.branch);
         return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
@@ -4111,25 +4082,16 @@ export function createApp(deps: ServerDeps) {
     // the `cez/<id8>` branch is kept, which is what makes this safe to offer on every finished
     // row. `/runs/:id/remove-worktree` (directory AND branch) stays the task screen's action.
     .post('/worktrees/:runId/reclaim', paramZodValidator(reclaimRunParamsSchema), async (c) => {
-      const { root: repoRoot, store, manager } = c.get('project');
-      const run = store.getRun(c.req.valid('param').runId);
-      if (!run) return c.json({ error: 'not found' }, 404);
-      const refused = store.fallbackDeleteError(run.id, 'worktree') ?? store.writeRefusal(run.id);
-      if (refused) return c.json({ error: refused }, 409);
-      // Claimed, not merely checked: the claim holds Continue off until the directory is gone.
-      const release = manager.claimWorktreeReclaim(run.id);
-      if (!release) {
-        return c.json({ error: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed' }, 409);
-      }
+      const { root: repoRoot, store } = c.get('project');
+      const checkout = runCheckout(c.get('project'), c.req.valid('param').runId, 'remove', {
+        claim: 'reclaim', checksActive: false, deletion: 'inline',
+        nullClaimError: 'this worktree is in use or already reclaimed — only a finished task\'s worktree can be reclaimed',
+      });
+      if ('status' in checkout) return c.json(checkout.body, checkout.status);
+      const { run, release } = checkout;
       const worktreeReclaimedAt = await reclaimWorktree(repoRoot, store, run, { requireClean: true, previewHost: deps.previewHost }).finally(release);
       if (!worktreeReclaimedAt) {
-        // Reclaim keeps only what is committed, so it leaves a dirty checkout alone; say which case this was.
-        const dirty = run.worktreePath && existsSync(run.worktreePath) ? (await getStatus(run.worktreePath).catch(() => [])).length : 0;
-        return c.json({
-          error: dirty > 0
-            ? `the worktree has ${dirty} uncommitted file${dirty === 1 ? '' : 's'} that exist nowhere else — commit or discard them first`
-            : 'the worktree directory could not be removed',
-        }, 409);
+        return c.json({ error: await reclaimCheckoutError(run) }, 409);
       }
       forgetRepoBranches(repoRoot);
       return c.json({ runId: run.id, worktreeReclaimedAt });
@@ -5071,7 +5033,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
   const automationCoordinator = new AutomationCoordinator({ listProjects: () => visibleProjects().then((projects) => prepareProjects(projects, { ownership: deps.ownership, homes: [deps.home], rebrand: deps.legacyCanary })) }); // projects arrive prepared
   const bootProjectId = deps.bootProjectId ?? 'default';
-  const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
+  const bootAutomationStore = () => automationCoordinator.store(bootProjectId, deps.repoRoot)!; // resolve after preparation
   const taskWebhooks = createTaskWebhooks(deps);
   // #774: the bound origin every agent env carries (`CEZ_COCKPIT_URL`), so `cez automation` calls
   // this cockpit instead of probing ports. Unset until `listening`; a project built after that is

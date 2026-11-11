@@ -65,9 +65,44 @@ recovery runs in both switch states: an entry that finds an unfinished
 cannot finish keeps the project refused with the cause. A journal that names anything
 outside the project's own state, or that Git tracks, is refused unchanged before any step.
 The command prints the plan text and a closing line, exits 0, and prints the `git mv`
-commands for tracked files without running them; a refusal prints one message to stderr
-and exits 1. Its last step writes the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` (new runtime state inside the Git directory, never in the work tree). With the switch true,
+commands for tracked files without running them. A dry run with plan blockers or conflicts
+keeps that output on stdout and exits 1. Other refusals print one message to stderr
+and exit 1. Its last step writes the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` (new runtime state inside the Git directory, never in the work tree). With the switch true,
 a project with that marker writes `.ai/squawk/` and reads `.ai/cezar/` as its fallback
 (hearsay-tools/cezarion#3150); a second run on it changes nothing and says the project was
 already moved. With the switch false the marker is ignored and writes stay under
 `.ai/cezar/`.
+
+`cez job start|status` is an additive task command (hearsay-tools/cezarion#3097). Success
+prints one JSON object to stdout and exits 0; a refusal or usage error prints
+`{ "error": "<text>" }` to stderr and exits 1; help exits 0. Its `<name>.<run>.log`,
+`<name>.<run>.exit` and `<name>.job.db` files are scratch state in `$TMPDIR` or `--dir`:
+deleting them after the job ended loses only the record of that job. Do not delete them
+while the job runs: without `<name>.job.db` the name is free, so a later start runs a second
+copy beside the first, and without the directory the log and the exit code are lost. Cezar
+removes `$TMPDIR` when the task ends, so a job that must outlive its task takes `--dir`. The `cezar_wait` description now names
+this command in place of the `sh -c '( … ) & echo $!'` recipe, and the launch prompt gains a
+"Long commands" part after the artifact part. A process wait on a PID
+obtained another way still works. Its wake text for a PID that was already gone at
+registration changed from `exited, code unknown` to `PID N was not running when this wait
+was registered`; the stored outcome stays `exited`.
+
+With the release switch on, a project with no `.ai/cezar` path starts in
+`.ai/squawk/` immediately when that destination is absent or a real directory. Preparation and CLI writes mark it in the Git common
+directory before ordinary writes. An existing legacy path, even empty or holding
+only tracked files, keeps the existing migration checks. Switch-off paths and help
+remain unchanged. A migration refusal for a running cockpit also lists live tasks
+in the same message; it still exits 1 without moving state.
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.
+
+
+All CLI names add `--version` and `-v`: the package version plus a newline goes
+to stdout, with exit 0 and no home access. Old-name notices remain on stderr
+only with the release switch on. Switch-on help uses the resolved versions
+path, and missing-cockpit hints and dry-run banners use the new preferred names.
+Switch-off paths and display names keep their shipped spelling.

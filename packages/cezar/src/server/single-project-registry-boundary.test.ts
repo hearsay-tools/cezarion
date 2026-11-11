@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -86,7 +87,7 @@ describe('single-project registry boundary', () => {
   };
 
   const otherStoreOpens = (open: MockInstance<typeof RunStore.open> | MockInstance<typeof AutomationStore.open>) =>
-    open.mock.calls.filter(([dataDir]) => dataDir === join(otherRoot, '.ai/cezar')).length;
+    open.mock.calls.filter(([dataDir]) => dataDir === projectPaths(otherRoot).write).length;
 
   /** Boots startServer with automations on and waits until the background chain armed the scheduler. */
   const backgroundReaders = async () => {

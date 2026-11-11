@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { execFile } from 'node:child_process';
@@ -84,7 +85,7 @@ export interface DiscoverOptions {
 export async function discoverCockpit(options: DiscoverOptions): Promise<Cockpit> {
   const root = await checkoutRoot(options.repoDir, options.signal);
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
-  const hint = `start the cockpit in ${root} with: cez`;
+  const hint = `start the cockpit in ${root} with: ${productIdentity().command}`;
   if (options.url) {
     let origin: string;
     try { origin = new URL(options.url).origin; } catch {

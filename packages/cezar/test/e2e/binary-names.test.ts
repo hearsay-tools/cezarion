@@ -40,6 +40,12 @@ async function verifyBinary(run: BinaryRun, entries: Entry[], name: string, rebr
     const expectedName = rebrand || identity === 'hsq' ? identity : 'cez';
     assert.ok(help.stdout.includes(`  ${expectedName} run "<task>"`));
     assert.equal(help.stderr, expected);
+    const manifest = JSON.parse(await readFile(join(repo, 'packages/cezar/package.json'), 'utf8')) as { version: string };
+    for (const flag of ['--version', '-v']) {
+      const version = await run(file, [...pre, flag], shell);
+      assert.equal(version.stdout, `${manifest.version}\n`);
+      assert.equal(version.stderr, expected);
+    }
     const subHelp = await run(file, [...pre, 'worker', '--help'], shell);
     assert.ok(subHelp.stdout.includes(`  ${expectedName} worker spawn`));
     assert.equal(subHelp.stderr, expected);

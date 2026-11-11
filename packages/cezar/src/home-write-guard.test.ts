@@ -1,3 +1,4 @@
+import { REBRAND_SWITCH } from './home/switch.ts';
 import { resolveHome } from './home/resolve.ts'; // test-home-read: import for the annotated sandbox and refusal probes
 import { randomUUID } from 'node:crypto';
 const testHome = (env: NodeJS.ProcessEnv = process.env) => resolveHome({ purpose: 'cli', env }); // test-home-read: resolve refusal inputs; fixture blocks unowned mutations
@@ -105,8 +106,8 @@ describe('home write guard with HOME pinned to a sandbox', () => {
       fs.symlinkSync(fixture, join(fixture, 'alias'), 'dir');
       const destination = join(fixture, 'alias', 'fresh', 'sandbox');
       mutationScope.root = fixture;
-      expect(Home.sandbox(destination).root).toBe(destination);
-      expect(mkdirSync).toHaveBeenCalledWith(destination, { recursive: true, mode: 0o700 });
+      expect(Home.sandbox(destination).root).toBe(REBRAND_SWITCH ? join(destination, 'config') : destination);
+      expect(mkdirSync).toHaveBeenCalledWith(REBRAND_SWITCH ? join(destination, 'config') : destination, { recursive: true, mode: 0o700 });
     } finally {
       fs.rmSync(fixture, { recursive: true, force: true });
     }
@@ -140,8 +141,8 @@ describe('home write guard with HOME pinned to a sandbox', () => {
       vi.mocked(userInfo).mockReturnValue({ ...userInfo(), homedir: join(fixture, 'account') });
       const destination = join(fixture, 'sandbox');
       mutationScope.root = fixture;
-      expect(Home.sandbox(destination).root).toBe(destination);
-      expect(mkdirSync).toHaveBeenCalledWith(destination, { recursive: true, mode: 0o700 });
+      expect(Home.sandbox(destination).root).toBe(REBRAND_SWITCH ? join(destination, 'config') : destination);
+      expect(mkdirSync).toHaveBeenCalledWith(REBRAND_SWITCH ? join(destination, 'config') : destination, { recursive: true, mode: 0o700 });
       expect(() => Home.sandbox(join(fixture, 'account', '.cezar'))).toThrow('refusing to write');
     } finally {
       fs.rmSync(fixture, { recursive: true, force: true });
@@ -182,6 +183,7 @@ describe('home write guard with HOME pinned to a sandbox', () => {
       const home = Home.sandbox(join(fixture, 'sandbox'));
       const protectedHome = join(fixture, 'account', '.cezar');
       fs.mkdirSync(protectedHome, { recursive: true });
+      fs.mkdirSync(home.state, { recursive: true });
       fs.symlinkSync(protectedHome, home.serverInstances, 'dir');
       fs.symlinkSync(protectedHome, home.remoteSettings, 'dir');
       const path = home.serverState('named');
@@ -236,8 +238,8 @@ describe('home write guard with HOME pinned to a sandbox', () => {
     const fixture = fs.mkdtempSync(join(tmpdir(), 'cez-guard-no-runner-'));
     mutationScope.root = fixture;
     try {
-      expect(Home.sandbox(fixture).root).toBe(fixture);
-      expect(JSON.parse(readFileSync(join(fixture, 'install.json'), 'utf8')).kind).toBe('test');
+      expect(Home.sandbox(fixture).root).toBe(REBRAND_SWITCH ? join(fixture, 'config') : fixture);
+      expect(JSON.parse(readFileSync(join(Home.sandbox(fixture).config, 'install.json'), 'utf8')).kind).toBe('test');
     } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
   });
 
@@ -283,7 +285,7 @@ describe('home write guard with HOME pinned to a sandbox', () => {
       const home = Home.sandbox(fixture);
       vi.mocked(mkdirSync).mockImplementationOnce((path, options) => { env.CEZ_HOME = realHome; return fs.mkdirSync(path, options); });
       await enableRemoteSettings(4321, env, undefined, home);
-      expect(JSON.parse(readFileSync(join(fixture, 'remote-settings/4321.json'), 'utf8'))).toHaveProperty('enabledAt');
+      expect(JSON.parse(readFileSync(join(home.remoteSettings, '4321.json'), 'utf8'))).toHaveProperty('enabledAt');
       for (const [path] of vi.mocked(renameSync).mock.calls) expect(String(path)).not.toContain(realHome);
     } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
   });

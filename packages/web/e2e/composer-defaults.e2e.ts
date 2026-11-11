@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -31,7 +32,7 @@ async function putDefaults(autonomous: boolean | null, worktree: boolean | null)
 /** The record the server persisted for `runId` — its `runs.db` row (#779), read the way another
  *  process would, so a store write regression cannot hide behind the API. */
 function persistedRun(runId: string): RunRecord | undefined {
-  const db = new DatabaseSync(join(dataRoot, '.ai/cezar/runs.db'), { readOnly: true })
+  const db = new DatabaseSync(join(projectPaths(dataRoot).write, 'runs.db'), { readOnly: true })
   try {
     const row = db.prepare('SELECT data FROM runs WHERE id = ?').get(runId) as { data: string } | undefined
     return row ? (JSON.parse(row.data) as RunRecord) : undefined

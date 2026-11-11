@@ -141,8 +141,11 @@ export class SelfUpdateService {
    *  Windows separators. */
   private jobView(trim: boolean): SelfUpdateStatus['job'] {
     if (!this.job || !trim) return this.job;
-    const home = this.home.root;
-    const redact = (line: string) => [home, home.replaceAll('\\', '/')]
+    const roots = [this.home.config, this.home.state, this.home.data, this.home.cache, this.home.runtime, this.home.rootOverride]
+      .filter((root): root is string => !!root);
+    const paths = [...new Set(roots.flatMap(root => [root, root.replaceAll('\\', '/')]))]
+      .sort((left, right) => right.length - left.length);
+    const redact = (line: string) => paths
       .reduce((text, path) => text.replaceAll(path, '[cezar home]'), line);
     return {
       ...this.job,

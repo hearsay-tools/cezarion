@@ -310,6 +310,7 @@ describe('RunWaitDetails', () => {
       [result('exit_file', { exitCode: 3 }), 'PID 4242 exited with code 3'],
       [result('exit_file', { exitFileNote: 'not-an-exit-code' }), 'PID 4242 wrote an exit file that is not an exit code'],
       [result('exited'), 'PID 4242 exited, code unknown'],
+      [result('exited', { observedAt: '2026-09-22T12:00:00.000Z' }), 'PID 4242 was not running when the wait was registered'],
       [result('deadline'), 'PID 4242 still running at the deadline'],
       [result('error', { diagnostic: 'EACCES' }), 'PID 4242 could not be checked'],
     ])('shows the last settled process wait: %j', (outcome, label) => {

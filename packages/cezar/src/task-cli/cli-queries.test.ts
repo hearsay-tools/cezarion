@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -207,11 +208,11 @@ describe('cez task', () => {
       expect(await run(args)).toBe(0);
       const help = ctx.out.at(-1)!;
       for (const text of [
-        "cez task send <id> 'Use the retry helper instead'",
-        "cez task send <id> 'Use option A'",
-        "cez task send <id> --resume '…'",
+        ("cez task send <id> 'Use the retry helper instead'").replace("cez", productIdentity().command),
+        ("cez task send <id> 'Use option A'").replace("cez", productIdentity().command),
+        ("cez task send <id> --resume '…'").replace("cez", productIdentity().command),
         'delivered', 'queued', 'resumed', 'attention: waiting', 'question',
-        'Human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
+        'Human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', ("cez task start --help").replace("cez", productIdentity().command),
       ]) expect(help).toContain(text);
       expect(ctx.discoveries).toBe(0);
     });

@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -222,11 +223,11 @@ it('lets Model occupy the freed desktop track when Runner is unavailable', () =>
 })
 
 it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-column width', async () => {
-  const configPath = join(root, '.ai/cezar/config.json')
+  const configPath = join(projectPaths(root).write, 'config.json')
   const originalConfig = readFileSync(configPath, 'utf8')
   try {
     await stopFixtureServer(server)
-    writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
+    writeFileSync(configPath, JSON.stringify({
       defaultModels: { pi: 'grok-4.6' },
     }))
     server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {

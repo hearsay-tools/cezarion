@@ -41,7 +41,7 @@ describe('project directory reads before P5', () => {
     expect((await readRawConfig(projectPaths(repo).write)).ok).toBe(true);
     expect(loadSessionContextRules(repo)).toEqual({ rules: [], reports: [] });
     expect(readProjectUiStateSync(repo).disabledTeamSkills).toHaveLength(1);
-    if (root === 'squawk') expect(existsSync(projectPaths(repo).write)).toBe(false);
+    expect(existsSync(join(repo, '.ai', root === 'cezar' ? 'squawk' : 'cezar'))).toBe(false);
   });
 
   it('uses whole legacy files, including damaged files, before fallback', async () => {
@@ -55,6 +55,7 @@ describe('project directory reads before P5', () => {
   });
 
   it('preserves fallback config and preferences when writing legacy counterparts', async () => {
+    mkdirSync(join(repo, '.ai/cezar'), { recursive: true }); // Keep Squawk as fallback.
     const fallback = seed('squawk', 'config.json', '{"baseBranch":"fallback","unknown":7}');
     seed('squawk', 'ui-state.json', '{"openFiles":["a.ts"]}');
     await updateConfigFile(projectPaths(repo).write, current => {
@@ -92,6 +93,7 @@ describe('project directory reads before P5', () => {
   });
 
   it('adds fallback ignore rules without creating the fallback directory', () => {
+    mkdirSync(join(repo, '.ai/cezar'), { recursive: true }); // Keep Squawk as fallback.
     execFileSync('git', ['init', repo], { stdio: 'ignore' });
     writeFileSync(join(repo, '.git', 'info', 'exclude'), '/.ai/cezar/\n');
     ensureDataGitignore(repo);

@@ -7,6 +7,7 @@ import { AgentTempDirError } from '../../runs/agent-tmpdir.ts';
 import { ToolsUnavailableError } from '../../ci-wait/controller.ts';
 import { AgentAccountUnavailableError } from '../../workspace/agent-profiles.ts';
 import { artifactInstructions } from '../../artifacts/lifecycle.ts';
+import { jobInstructions } from '../../jobs/command.ts';
 import { handoffInstructions } from '../../handoff.ts';
 import type { SessionContext } from '../../session-context.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
@@ -213,7 +214,7 @@ export function launchOpening(context: RunModuleContext, host: SessionHelperHost
 /**
  * The system prompt after the skill playbook (hearsay-tools/cezarion#1632): the run's extra
  * prompt, the delegation instructions, the automations and project webhooks parts, the artifact
- * contract, then the handoff contract.
+ * contract, the long-command part, then the handoff contract.
  */
 export function launchSystemTail(context: RunModuleContext, host: SessionHelperHost, launch: {
   extraSystemPrompt: string | undefined;
@@ -231,6 +232,7 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
     host.automationsPart(),
     launch.webhooksPart,
     artifactInstructions(productEnv('ARTIFACTS_DIR', launch.env)),
+    jobInstructions(),
     handoffInstructions({ handoffInjected: launch.handoffInjected, nativeSubagents: reportsNativeSubagents(launch.runner) }),
   );
 }

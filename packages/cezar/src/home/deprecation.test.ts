@@ -14,7 +14,7 @@ it('reports shadowed, empty and unread legacy names once per boot without values
 
 it('keeps the disabled switch and absent legacy env silent', () => {
   const warn = vi.fn();
-  createLegacyEnvWarning()({ CEZ_HOME: '/legacy', CEZ_UNUSED: '' }, { warn });
+  createLegacyEnvWarning()({ CEZ_HOME: '/legacy', CEZ_UNUSED: '' }, { enabled: false, warn });
   createLegacyEnvWarning()({ CEZ_HOME: '/legacy' }, { enabled: false, warn });
   createLegacyEnvWarning()({ HSQ_HOME: '/preferred', CEZ_HOME: undefined }, { enabled: true, warn });
   expect(warn).not.toHaveBeenCalled();

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { homeFileLocation } from '../home/file-location.ts';
 import { mkdirSync, readFileSync, rmSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -10,13 +12,13 @@ import { restoreBackup, runBackupCommand } from './backup-cli.ts';
 afterEach(() => { cleanStoreRoots(); vi.restoreAllMocks(); });
 
 const files = ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json',
-  'server.install.lock', 'remote-settings/4321.json', 'server-instances/other.json',
-  'server-instances/other.install.lock'] as const;
+  'remote-settings/4321.json', 'server-instances/other.json'] as const;
+const locks = ['server.install.lock', 'server-instances/other.install.lock'] as const;
 
 it.each(files)('backs up changed and removed %s under its home-relative key', file => {
   const home = Home.sandbox(storeRoot());
   const store = new HomeStore(home);
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const before = Buffer.from('original bytes\n');
   const next = Buffer.from('next bytes\n');
   store.replace(path, before);
@@ -32,12 +34,35 @@ it.each(files)('backs up changed and removed %s under its home-relative key', fi
   if (process.platform !== 'win32') expect(statSync(snapshot!.path).mode & 0o777).toBe(0o600);
 });
 
+it.each(locks)('keeps no rotating snapshot of %s, which holds only an installer pid', file => {
+  const home = Home.sandbox(storeRoot());
+  const store = new HomeStore(home);
+  const path = homeFileLocation(home, file).path;
+  store.replace(path, Buffer.from('12345\n'));
+  store.replace(path, Buffer.from('67890\n'));
+  store.replace(path, null);
+  expect(listBackups(file, home)).toEqual([]);
+  expect(() => statSync(join(home.backups, file))).toThrow(/ENOENT/);
+});
+
+it.each(locks)('still lists and restores an older snapshot of %s byte for byte', async file => {
+  const home = Home.sandbox(storeRoot());
+  const previous = Buffer.from('12345\n');
+  const sha = createHash('sha256').update(previous).digest('hex').slice(0, 8);
+  mkdirSync(join(home.backups, file), { recursive: true });
+  writeFileSync(join(home.backups, file, `2026-11-01T10-00-00.000Z-${sha}.json`), previous); // A snapshot an older version wrote.
+  new HomeStore(home).replace(homeFileLocation(home, file).path, Buffer.from('current'));
+  expect(listBackups(undefined, home).map(entry => entry.file)).toContain(file);
+  await restoreBackup(file, undefined, home);
+  expect(readFileSync(homeFileLocation(home, file).path)).toEqual(previous);
+});
+
 it('discovers nested backups after the live files and their directories are removed', () => {
   const home = Home.sandbox(storeRoot());
   const store = new HomeStore(home);
-  for (const file of ['remote-settings/4321.json', 'server-instances/other.json']) {
-    store.writeJson(join(home.root, file), { first: true });
-    store.writeJson(join(home.root, file), { second: true });
+  for (const file of ['remote-settings/4321.json', 'server-instances/other.json'] as const) {
+    store.writeJson(homeFileLocation(home, file).path, { first: true });
+    store.writeJson(homeFileLocation(home, file).path, { second: true });
   }
   rmSync(home.remoteSettings, { recursive: true }); // Deliberate outside deletion; listing must stay read-only.
   rmSync(home.serverInstances, { recursive: true });
@@ -55,9 +80,9 @@ it.each(['../config.json', '/config.json', 'remote-settings/../config.json', 're
 });
 
 it('uses the Home backup root for nested files and reads the old named-instance location', () => {
-  const home = Home.sandbox(storeRoot());
+  const home = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const file = 'server-instances/config.json';
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const store = new HomeStore(home);
   store.writeJson(path, { first: true });
   store.writeJson(path, { second: true });
@@ -86,11 +111,11 @@ it('lists config.json.bak first and uses it for an unflagged restore', async () 
   expect(JSON.parse(readFileSync(home.workspaceConfig, 'utf8')).extra).toBe('snapshot');
 });
 
-it.each(['remote-settings/4321.json', 'server-instances/other.json', 'server.install.lock'])('restores %s byte for byte through the CLI helper', async file => {
+it.each(['remote-settings/4321.json', 'server-instances/other.json'])('restores %s byte for byte through the CLI helper', async file => {
   const home = Home.sandbox(storeRoot());
-  const path = join(home.root, file);
+  const path = homeFileLocation(home, file).path;
   const store = new HomeStore(home);
-  const previous = Buffer.from(file.endsWith('.lock') ? '12345\n' : '{ "unknown": "preserved" }');
+  const previous = Buffer.from('{ "unknown": "preserved" }');
   store.replace(path, previous);
   store.replace(path, Buffer.from('current'));
   await restoreBackup(file, undefined, home);
@@ -102,6 +127,7 @@ it('keeps backup failures auxiliary for nested file writes', () => {
   const path = join(home.remoteSettings, '4321.json');
   const store = new HomeStore(home);
   store.writeJson(path, { first: true });
+  mkdirSync(home.state, { recursive: true });
   writeFileSync(home.backups, 'unavailable'); // Deliberate obstruction of auxiliary storage.
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   store.writeJson(path, { next: true });

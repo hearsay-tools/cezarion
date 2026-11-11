@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +12,7 @@ describe('cez task', () => {
   describe('send', () => {
     it.each([[[]], [['--resume']], [['--notify']]])('refuses agent input before discovery with %j', async (flags) => {
       expect(await runTaskCommand(['send', 'target', 'hello', ...flags], { CEZ_TASK_ID: 'sender' }, io())).toBe(64);
-      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('human input'), next: expect.stringContaining('cez message progress') });
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('human input'), next: expect.stringContaining(("cez message progress").replace("cez", productIdentity().command)) });
       expect(ctx.discoveries).toBe(0);
     });
 
@@ -39,7 +40,7 @@ describe('cez task', () => {
       ctx.manager.cancel(id);
       expect(await run(['send', id, 'hi'])).toBe(1);
       expect(last()).toMatchObject({ id, delivery: 'not-delivered', reason: 'session closed' });
-      expect(last().next).toBe(`cez task send ${id} '…' --resume`);
+      expect(last().next).toBe(`${productIdentity().command} task send ${id} '…' --resume`);
     });
 
     it('reopens a closed session with --resume', async () => {
@@ -109,7 +110,7 @@ describe('cez task', () => {
       const child = worker(parent);
       expect(await run(['notify', child])).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input', parentId: parent });
-      expect(last().error).toContain(`cez task notify ${parent}`);
+      expect(last().error).toContain(`${productIdentity().command} task notify ${parent}`);
       expect(ctx.store.getRun(child)?.notify).not.toBe(true);
       // --off still undoes a subscription made before this guard existed.
       ctx.store.updateRun(child, { notify: true });

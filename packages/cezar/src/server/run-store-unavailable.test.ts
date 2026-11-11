@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -76,7 +77,7 @@ describe('a project whose run store cannot be opened', () => {
     for (const path of [`/api/v1/p/${other.id}/run-summaries`, `/api/v1/p/${other.id}/runs/some-id/archive`]) {
       const res = await apiRequest(server, path, path.endsWith('archive') ? post({ archived: true }) : undefined);
       expect(res.status, path).toBe(409);
-      expect(((await res.json()) as { error: string }).error).toMatch(/runs\.db is damaged \(.*\)\. cezar left it and its -wal and -shm files exactly as they are/);
+      expect(((await res.json()) as { error: string }).error).toMatch(new RegExp(`runs\\.db is damaged \\(.*\\)\\. ${productName('cezar')} left it and its -wal and -shm files exactly as they are`));
     }
     expect(contexts.peek(other.id)).toBeUndefined();
     expect(readFileSync(database, 'utf8')).toBe(DAMAGED);

@@ -87,7 +87,7 @@ file guards compute the expected files from the class table, never from
 `RUNNER_IDS` alone. Fold files that were split only for the cap once the derived
 set fits in fewer files, and measure each folded file against the CI cap first:
 `WAIT_FOLDS` in `workflows/waits-parity-cells.testkit.ts` groups the parts of a runner
-outside the shared set into files of about 8–21 s locally.
+outside the shared set into files of about 3–12 s locally.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
 (hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
@@ -137,3 +137,7 @@ opening frames.
 Terminating crash recipes record the leader's exit code or signal; clean crash
 diagnostics end on the native turn end. Held-pipe children keep their inherited
 stdio; only the mock's own writes and its leader exit enter that transcript.
+
+Dry-run backend version banners use the release identity's environment prefix:
+`mock (CEZ_DRY_RUN=1)` with the switch off and `mock (HSQ_DRY_RUN=1)` with it on.
+This display change does not change the accepted environment aliases.
