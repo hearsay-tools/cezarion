@@ -988,7 +988,7 @@ tools. Read each fact from its owner:
   liveness bounds).
 
 A wait result is an observation. It grants no merge, review-acceptance or task-completion
-authority. Word each new result text as data, not as an instruction.
+authority.
 
 ### Private transport and required harness evidence
 
@@ -2230,7 +2230,7 @@ A runner's native cross-session messages bypass Cezar's recorded conversations, 
 talk through `cez message`. The "Messaging other tasks" text of `handoffInstructions`
 (`packages/cezar/src/handoff.ts`) tells every session so. The D3 cells and the D3 entries in
 `PARITY_EXEMPTIONS` hold each runner's control at shipped defaults; § 11 of the same spec
-holds the entry points and the limits.
+holds the probe evidence.
 
 Cezar changes no MCP server, plugin or tool setting of the user.
 
