@@ -42,16 +42,20 @@ export function isPublishable(pkg: ManifestLike): boolean {
  * The completeness test walks the workspace root's `workspaces` array against these values, so a
  * new workspace that is not listed here fails CI rather than shipping a bump `npm ci` cannot
  * install. `alias` is not a workspace (it lives next to `packages/`) and is the one extra entry.
+ * The new identity has no alias: npm refuses the unscoped name `hsq`, so the switch-on set has none.
  */
-export function releaseManifestDirs(rebrand = REBRAND_SWITCH) {
+export function releaseManifestDirs(rebrand = REBRAND_SWITCH): ReleaseManifestDirs {
+  const alias = productIdentity(rebrand).npmAliasDirectory;
   return {
     contract: 'packages/contract',
     apiClient: 'packages/api-client',
     cezar: 'packages/cezar',
     web: 'packages/web',
-    alias: productIdentity(rebrand).npmAliasDirectory,
-  } as const;
+    ...(alias === null ? {} : { alias }),
+  };
 }
+
+export type ReleaseManifestDirs = { readonly [K in keyof ReleaseManifests]: string };
 
 export const RELEASE_MANIFEST_DIRS = releaseManifestDirs();
 
@@ -91,8 +95,15 @@ export interface ReleaseManifests {
    * version-bump branch fail the same way an unstamped contract does.
    */
   web: ManifestLike;
-  /** The unscoped bin alias, so `npx cezarion` works. */
-  alias: ManifestLike;
+  /** The unscoped bin alias, so `npx cezarion` works. Absent with the switch on. */
+  alias?: ManifestLike;
+}
+
+/** The one-off command that runs `version` (or a dist-tag) of this release set. Without an
+ *  alias package, npx installs the scoped package and names its `hsq` binary. */
+export function releaseRunCommand(publication: ReleaseManifests, version: string): string {
+  return publication.alias ? `npx ${publication.alias.name}@${version}`
+    : `npx -p ${publication.cezar.name}@${version} ${productIdentity(true).command}`;
 }
 
 /** How a released package pins a sibling it depends on. */
@@ -137,9 +148,6 @@ export function stampManifestSet(
 ): ReleaseManifests {
   const { contract, apiClient, cezar, web, alias } = manifests;
   const range = pin(version);
-  // The new alias depends on the published identity; workspace consumers retain the source name.
-  const aliasTarget = alias.name === productIdentity(true).npmAlias
-    ? productIdentity(true).npmPackage : cezar.name;
 
   const inherited: Partial<ManifestLike> = {};
   for (const field of ['repository', 'homepage', 'bugs'] as const) {
@@ -159,11 +167,13 @@ export function stampManifestSet(
       cezar.name,
       range,
     ),
-    alias: {
-      ...pinDependency({ ...alias, ...inherited, version }, aliasTarget, range),
-      // The alias exists only to depend on the service — an unpinned or missing entry would
-      // make `npx <alias>` install nothing useful, so this one is asserted, not merged.
-      dependencies: { ...alias.dependencies, [aliasTarget]: range },
-    },
+    ...(alias === undefined ? {} : {
+      alias: {
+        ...pinDependency({ ...alias, ...inherited, version }, cezar.name, range),
+        // The alias exists only to depend on the service — an unpinned or missing entry would
+        // make `npx <alias>` install nothing useful, so this one is asserted, not merged.
+        dependencies: { ...alias.dependencies, [cezar.name]: range },
+      },
+    }),
   };
 }

@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { agentTmpDir } from '../runs/agent-tmpdir.ts';
 import { ensureOwnedWorkspace } from '../delegation/workspace.ts';
+import { installIdentityFileStore } from '../delegation/identity-file-store.ts';
+import { posixIdentityFileStore } from '../delegation/posix-workspace-identity.ts';
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
@@ -53,10 +55,12 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const { w, service, detach } = await settled();
       const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
       // Windows refuses to delete a directory a process holds, so the checked removal is the proof there.
+      // Only the process scan is Windows here: the identity files stay on this host's POSIX store.
+      installIdentityFileStore(posixIdentityFileStore);
       Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
       try {
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
-      } finally { Object.defineProperty(process, 'platform', platform); detach(); }
+      } finally { Object.defineProperty(process, 'platform', platform); installIdentityFileStore(undefined); detach(); }
       expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
     });
 

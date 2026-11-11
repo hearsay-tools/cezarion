@@ -17,7 +17,7 @@ bytes in a separate hashed backup.
 
 ## Recovering run history
 
-Every step needs every Squawk process of the project stopped: `serve`, a headless `hsq run`, and anything started with `npx hsq`. Run the commands in the project root. Move files, never delete them, until you have checked the result.
+Every step needs every Squawk process of the project stopped: `serve`, a headless `hsq run`, and anything started with `npx -p @hearsay-tools/squawk hsq`. Run the commands in the project root. Move files, never delete them, until you have checked the result.
 
 The steps below name the project's data folder as `<dir>`. It is `.ai/squawk/` when the project has moved (the cockpit logged the move, or `hsq migrate-project` reported it) or started fresh with no `.ai/cezar` path. It is `.ai/cezar/` before the move. Pre-SQLite Cezarion releases, and any older binary you downgrade to on purpose, read only `.ai/cezar/`. The shell examples set the folder once:
 

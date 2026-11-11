@@ -74,6 +74,30 @@ describe('exact npm launch ownership', () => {
     refreshNpxCacheForRedeploy(ctx, '/usr/bin/npx --yes @wjarka/cezarion serve');
     expect(existsSync(root)).toBe(true);
   });
+  it.each(['hsq', 'hsq@latest'])('rejects the unpublished unscoped name %s', pkg => {
+    expect(isNpxExecStart(`/usr/bin/npx --yes ${pkg} serve`)).toBe(false);
+    expect(isForeignNpxExecStart(`/usr/bin/npx --yes ${pkg} serve`)).toBe(true);
+  });
+  it('recognizes the scoped package run through -p and refreshes only its cache', () => {
+    const ctx = context();
+    const cache = join(ctx.home.root, 'npm');
+    vi.stubEnv('npm_config_cache', cache);
+    for (const [index, candidate] of ['@hearsay-tools/squawk', '@wjarka/cezarion'].entries()) {
+      mkdirSync(join(cache, '_npx', String(index), 'node_modules', candidate), { recursive: true });
+      writeFileSync(join(cache, '_npx', String(index), 'package.json'), JSON.stringify({ dependencies: { [candidate]: '^0.18.0' } }));
+    }
+    for (const command of ['/usr/bin/npx --yes -p @hearsay-tools/squawk hsq serve', '/usr/bin/npx -p @hearsay-tools/squawk@0.18.0 hsq serve',
+      '/usr/bin/npx --package @hearsay-tools/squawk cez serve']) {
+      expect(isNpxExecStart(command)).toBe(true);
+    }
+    for (const command of ['/usr/bin/npx --yes -p @hearsay-tools/squawk foreign serve', '/usr/bin/npx --yes -p foreign hsq serve', '/usr/bin/npx --yes -p @hearsay-tools/squawk']) {
+      expect(isNpxExecStart(command)).toBe(false);
+      expect(isForeignNpxExecStart(command)).toBe(true);
+    }
+    refreshNpxCacheForRedeploy(ctx, '/usr/bin/npx --yes -p @hearsay-tools/squawk hsq serve');
+    expect(existsSync(join(cache, '_npx/0'))).toBe(false);
+    expect(existsSync(join(cache, '_npx/1'))).toBe(true);
+  });
   it.each(['cez', 'cezar-cli', 'foreign-cezarion', 'cezarion-foreign', '@foreign/cezarion', '@hearsay-tools/squawk-foreign', 'cezarion@npm:cezar-cli', 'hsq@file:/foreign', 'hsq@'])('rejects foreign package %s', pkg => {
     const command = `/usr/bin/npx --yes ${pkg} serve --repo /srv/cezarion`;
     expect(isNpxExecStart(command)).toBe(false);
@@ -93,6 +117,11 @@ describe('launchd ownership and selected command generation', () => {
       const xml = cezarLaunchdPlist('/repo', 4321, ['/usr/bin/npx', '--yes', pkg], false);
       expect(ownsLaunchdPlist(ctx, artifact, xml)).toBe((NPM_LAUNCH_PACKAGES as readonly string[]).includes(pkg));
     }
+    for (const [argv, owned] of [[['/usr/bin/npx', '--yes', '-p', '@hearsay-tools/squawk', 'hsq'], true],
+      [['/usr/bin/npx', '--yes', '-p', '@hearsay-tools/squawk', 'foreign'], false], [['/usr/bin/npx', '--yes', '-p', 'foreign', 'hsq'], false],
+      [['/usr/bin/npx', '--yes', 'hsq'], false]] as const) {
+      expect(ownsLaunchdPlist(ctx, artifact, cezarLaunchdPlist('/repo', 4321, [...argv], false))).toBe(owned);
+    }
     const entry = fileURLToPath(new URL('../../dist/hsq.js', import.meta.url));
     for (const script of [entry, '/usr/local/bin/hsq', '/usr/local/bin/cez', '/usr/local/bin/cezarion', '/foreign/dist/hsq.js', '/usr/local/bin/cezar-cli']) {
       const xml = cezarLaunchdPlist('/repo', 4321, ['/usr/bin/node', script], false);
@@ -107,7 +136,9 @@ describe('launchd ownership and selected command generation', () => {
     const opts = { node: '/bin/node', pkgRoot: '/pkg', entry: join('/pkg/dist', 'index.js'), entryExists: true, npxPath: '/bin/npx' };
     const selected = serviceExecStart(opts, rebrand);
     expect(selected).toBe(`/bin/node ${join('/pkg/dist', rebrand ? 'hsq.js' : 'index.js')}`);
-    expect(serviceExecStart({ ...opts, pkgRoot: '/cache/_npx/abc/node_modules/cezarion' }, rebrand)).toBe(`/bin/npx --yes ${rebrand ? 'hsq' : 'cezarion'}`);
+    const npx = serviceExecStart({ ...opts, pkgRoot: '/cache/_npx/abc/node_modules/cezarion' }, rebrand);
+    expect(npx).toBe(`/bin/npx --yes ${rebrand ? '-p @hearsay-tools/squawk hsq' : 'cezarion'}`);
+    expect(ownedNpxPackage(`${npx} serve --no-open`)).toBe(rebrand ? '@hearsay-tools/squawk' : 'cezarion');
     const unit = systemdUnit('/repo', 4321, 'user', selected, undefined, rebrand);
     expect(unit).toContain(`ExecStart=${selected} serve --no-open --port 4321`);
     expect(unit).toContain('Environment=CEZ_REMOTE=1\nEnvironment=HSQ_REMOTE=1');

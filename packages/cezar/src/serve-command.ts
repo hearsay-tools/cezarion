@@ -1,5 +1,6 @@
 import { projectPaths } from './project-paths.ts';
 import { productName } from './home/display.ts';
+import { npmPackageIdentity, scopedNpxCommand } from './home/identity.ts';
 import { once } from 'node:events';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
@@ -26,6 +27,12 @@ import { CockpitOwnership } from './server/cockpit-ownership.ts';
 import { recoverProjectMigration } from './project-migration/recovery.ts';
 import { moveProjectWhenIdle } from './project-migration/auto.ts';
 import { acquireServeListener, onTerminal, ignoreHangupOffTerminal, waitForHealth } from './serve-listener.ts';
+
+/** The new scoped package has no binary named after it, so npx needs its `hsq` binary named. */
+function restartCommand(pkgName: string): string {
+  const identity = npmPackageIdentity(pkgName);
+  return identity?.npmPackage === pkgName ? scopedNpxCommand(identity, 'latest') : `npx ${pkgName}@latest`;
+}
 
 export const defaultServeDeps = {
   CockpitOwnership, recoverProjectMigration, moveProjectWhenIdle, acquireServeListener, WorkspaceSemaphore, TaskWebhooks, previewToolEnabled, PreviewHost,
@@ -121,7 +128,7 @@ export async function serveCommand(
   void deps.checkForUpdate(pkgName, version).then((latest) => {
     if (!latest) return;
     update.latest = latest;
-    deps.console.log(`\n  ⬆ ${productName('cezar')} ${latest} is available (running ${version}) — restart with: npx ${pkgName}@latest\n`);
+    deps.console.log(`\n  ⬆ ${productName('cezar')} ${latest} is available (running ${version}) — restart with: ${restartCommand(pkgName)}\n`);
   });
 
   const port = preferredPort;
