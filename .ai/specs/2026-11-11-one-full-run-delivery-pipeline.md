@@ -114,14 +114,23 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
    once the review round has no blocking finding and the changed-function quality report
    for the current head is complete with no blocker. GitHub enqueues the PR when the required
    checks pass. Other PRs wait for the owner, as today.
+3. Before any later push to a PR with auto-merge armed, the agent turns it off
+   (`gh pr merge --disable-auto`). It arms it again only when 2 holds for the new head.
+   `.ai/skills/auto-merge/references/follow.md` changes to say so; today it keeps an armed
+   request across a qualifying push. Like the review round, this is an agent rule: queue
+   admission checks native CI and CodeRabbit, not the local report.
 
 ### Queue (about 10 minutes)
 
 1. Every entry runs today's queue verification on the combined commit, with the full
    Vitest and browser suites on 8 + 8 shards.
 2. A shard whose tests fail runs its failed test files once more, in the same job. A pass
-   on the rerun passes the shard and files a flake issue with the test names, one per test
-   file, keyed so a repeat updates it, with the label `flaky-test`. A Cezar automation
+   on the rerun passes the shard and uploads the names of the files that passed only on
+   the rerun as an artifact. The shard runs queued code with read-only permissions, so it
+   writes no issue. A separate trusted job, run like `report-workflow-failure.yml` with
+   no checkout or run of queued code, validates those names against the run's test files
+   and files one flake issue per test file, keyed so a repeat updates it, with the label
+   `flaky-test`. A Cezar automation
    starts a task for each such issue to fix or quarantine the test (§ Owner actions). The
    main CI repair automation does not take them: it accepts only a failed `main` push run.
    A second failure fails the entry, as today.
@@ -169,7 +178,7 @@ the tests that the changed-function check needs. When it lands, every CI Vitest 
 
 | Record | Writer | Reader | Absent or unreadable |
 | --- | --- | --- | --- |
-| Flake issue per test file, label `flaky-test` | The queue rerun step | The flaky-test automation | The label is missing: the step fails visibly; the entry's verdict does not change |
+| Flake issue per test file, label `flaky-test` | The trusted flake reporter job, from the rerun artifact | The flaky-test automation | The label is missing or the artifact is malformed: the reporter job fails visibly; the entry's verdict does not change |
 | `refs/squeal/<sha>` | `squeal-publish` | Developers' Squeal daemons | The daemon imports the nearest older ref; the push run warns |
 | Open `main-ci-failure` summary | The failure reporter | The 60-minute check | No mention; the repair automation still runs |
 
@@ -189,7 +198,7 @@ Each row becomes one issue.
 
 | Phase | Content | Size | Needs |
 | --- | --- | --- | --- |
-| 1 | Local gate (`npm run prepr`, 2-minute bound, shorter duties; scope of hearsay-tools/cezarion#3216 without the lane); PR stays ready; auto-merge armed after the review; queue rerun of failed files with flake issues; a shard that reran publishes no Squeal parts | days | Owner actions 1, 2 |
+| 1 | Local gate (`npm run prepr`, 2-minute bound, shorter duties; scope of hearsay-tools/cezarion#3216 without the lane); PR stays ready; auto-merge armed after the review and turned off before a later push; queue rerun of failed files; the trusted flake reporter; a shard that reran publishes no Squeal parts | days | Owner actions 1, 2 |
 | 2 | Selected tests on the PR; 8 + 8 shards for the queue and the full fallback; no queue reuse of PR suites; Squeal shard pattern and test; the 60-minute mention; the Squeal ref warning | about 1 week | |
 | 3 | Release: hearsay-tools/cezarion#3212 with the candidate rule of § Release | as specified there | Owner actions of that issue |
 | 4 | Optional: verification after the merge (hearsay-tools/cezarion#3209 to hearsay-tools/cezarion#3211), only if phase 2 data shows the queue is still the slowest step | | A change to this spec |
