@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager, StartRunInput } from '../workflows/run.ts';
-import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-no-runner.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { launchAutomationRun, launchScheduledRun, rebaselineIdleAutomations, reconcileAutomationReceipts, renderAutomationTask, renderScheduleTask, validateAutomationPrompt } from './task-template.ts';
 import { AutomationStore } from './store.ts';

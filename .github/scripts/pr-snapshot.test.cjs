@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { resolveSnapshot, validateArchives, publishArchives } = require('./pr-snapshot.cjs');
+const { resolveSnapshot, validateArchives, publishArchives, previewCommand } = require('./pr-snapshot.cjs');
 const SHA = 'a'.repeat(40);
 function fixture() {
   const run = { id: 42, run_attempt: 1, run_number: 15, path: '.github/workflows/ci.yml', event: 'pull_request_target', status: 'completed', conclusion: 'success', head_sha: SHA, head_branch: 'fix/example', head_repository: { full_name: 'o/n' } };
@@ -171,3 +171,12 @@ test('publisher supplies npm only a freshly repacked archive, never the untruste
     assert.equal(pkg.version, '1.2.3-pr7.15');
   } });
 }));
+
+test('the preview comment runs the alias, or the scoped package when npm has no alias', () => {
+  const version = '1.2.3-pr7.9';
+  assert.deepEqual(previewCommand([{ key: 'cezar', pkg: { name: '@wjarka/cezarion', version } },
+    { key: 'alias', pkg: { name: 'cezarion', version } }], 7), { version, run: `npx cezarion@${version}`, tag: 'cezarion@pr-7' });
+  assert.deepEqual(previewCommand([{ key: 'cezar', pkg: { name: '@hearsay-tools/squawk', version } },
+    { key: 'legacyAlias', pkg: { name: 'cezarion', version } }], 7),
+  { version, run: `npx -p @hearsay-tools/squawk@${version} hsq`, tag: '@hearsay-tools/squawk@pr-7' });
+});

@@ -70,21 +70,35 @@ function discoverInstallLayout(input: DiscoveryInput, rebrand: boolean): Unsuppo
 function discoverNpxRequest(installRoot: string, identity: ReturnType<typeof productIdentity>): string | UnsupportedInstall {
   const root = json(join(installRoot, 'package.json'));
   const requests = (root._npx as { packages?: unknown } | undefined)?.packages;
+  // The new identity has no unscoped alias: npm refuses the name `hsq`.
   if (!Array.isArray(requests) || requests.length !== 1 ||
-    ![identity.npmAlias, identity.npmPackage].includes(requests[0] as never)) {
+    ![identity.npmAlias, identity.npmPackage].some(name => name !== null && name === requests[0])) {
     return unsupported('pinned or mixed npx request');
   }
   return requests[0] as string;
 }
 
+type AliasRoot = { name: NpmLaunchPackage; path: string };
+
+/** The rebranded identity has no unscoped alias: npm refuses the name `hsq`. */
+function aliasRoot(modules: string, identity: ReturnType<typeof productIdentity>): AliasRoot | undefined {
+  return identity.npmAlias === null ? undefined : { name: identity.npmAlias, path: join(modules, identity.npmAlias) };
+}
+
+function aliasLinkError(alias: AliasRoot, scoped: string): UnsupportedInstall | undefined {
+  const outer = json(join(alias.path, 'package.json'));
+  const deps = outer.dependencies as Record<string, unknown> | undefined;
+  return outer.name !== alias.name || typeof deps?.[scoped] !== 'string' ? unsupported('alias is not linked to scoped package') : undefined;
+}
+
 function discoverOuterPackage(layout: InstallLayout, launchPath: string): Installation {
   const { prefix, cache, packageRoot, launchEntry, kind, installRoot, modules, identity } = layout;
   const direct = join(modules, identity.npmPackage);
-  const alias = join(modules, identity.npmAlias);
-  if (packageRoot !== direct && packageRoot !== join(alias, 'node_modules', identity.npmPackage)) {
+  const alias = aliasRoot(modules, identity);
+  if (packageRoot !== direct && packageRoot !== (alias && join(alias.path, 'node_modules', identity.npmPackage))) {
     return unsupported('linked or mixed package layout');
   }
-  let outerPackage: NpmLaunchPackage = inside(launchEntry, alias) ? identity.npmAlias : identity.npmPackage;
+  let outerPackage: NpmLaunchPackage = alias && inside(launchEntry, alias.path) ? alias.name : identity.npmPackage;
   let request: string = outerPackage;
   if (kind === 'npx') {
     const npxRequest = discoverNpxRequest(installRoot, identity);
@@ -95,15 +109,13 @@ function discoverOuterPackage(layout: InstallLayout, launchPath: string): Instal
     outerPackage = request as typeof outerPackage;
   }
   if (outerPackage === identity.npmPackage && packageRoot !== direct) return unsupported('mixed launch layout');
-  const outerPath = outerPackage === identity.npmAlias ? alias : direct;
+  const viaAlias = alias !== undefined && outerPackage === alias.name ? alias : undefined;
+  const outerPath = viaAlias?.path ?? direct;
   if (!inside(launchEntry, outerPath) && !(kind === 'npx' && inside(launchEntry, packageRoot))) {
     return unsupported('launch entry does not belong to installation');
   }
-  if (outerPackage === identity.npmAlias) {
-    const outer = json(join(alias, 'package.json'));
-    const deps = outer.dependencies as Record<string, unknown> | undefined;
-    if (outer.name !== identity.npmAlias || typeof deps?.[identity.npmPackage] !== 'string') return unsupported('alias is not linked to scoped package');
-  }
+  const linkError = viaAlias && aliasLinkError(viaAlias, identity.npmPackage);
+  if (linkError) return linkError;
   return { kind, prefix, cache, installRoot, packageRoot, outerRoot: outerPath,
     launchEntry: resolve(launchPath), outerPackage, request };
 }

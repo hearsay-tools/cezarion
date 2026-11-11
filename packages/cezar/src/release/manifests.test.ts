@@ -7,6 +7,7 @@ import {
   publicationManifests,
   releaseManifestDirs,
   RELEASE_MANIFEST_DIRS,
+  releaseRunCommand,
   stampManifestSet,
   type ReleaseManifests,
 } from './manifests.ts';
@@ -58,17 +59,24 @@ describe('stampManifestSet', () => {
   it('stamps every key in RELEASE_MANIFEST_DIRS', () => {
     const stamped = stampManifestSet(set(), '0.1.6', (v) => `^${v}`);
     for (const key of Object.keys(RELEASE_MANIFEST_DIRS) as (keyof ReleaseManifests)[]) {
-      expect(stamped[key].version).toBe('0.1.6');
+      expect(stamped[key]!.version).toBe('0.1.6');
     }
   });
 });
 
 
 describe('release identities', () => {
-  it.each([false, true])('selects only the active alias with rebrand %s', rebrand => {
+  it.each([false, true])('selects the alias only with rebrand %s off, because npm refuses `hsq`', rebrand => {
     const dirs = releaseManifestDirs(rebrand);
-    expect(dirs.alias).toBe(rebrand ? 'alias-hsq' : 'alias-cezarion');
+    expect(dirs.alias).toBe(rebrand ? undefined : 'alias-cezarion');
+    expect('alias' in dirs).toBe(!rebrand);
     expect(dirs.cezar).toBe('packages/cezar');
+  });
+  it('runs the alias, or the scoped package with its hsq binary when there is no alias', () => {
+    const source = set();
+    expect(releaseRunCommand(source, '0.1.6')).toBe('npx impl-cli@0.1.6');
+    const { alias: _alias, ...noAlias } = publicationManifests(source, true);
+    expect(releaseRunCommand(noAlias, 'nightly')).toBe('npx -p @hearsay-tools/squawk@nightly hsq');
   });
   it('preserves the complete switch-off publication bytes and source objects', () => {
     const source = set();
@@ -84,11 +92,10 @@ describe('release identities', () => {
     expect(published.apiClient).toBe(source.apiClient);
     expect(published.cezar.devDependencies).toEqual(source.cezar.devDependencies);
   });
-  it('pins the new alias to the publication name while workspace pins retain the source name', () => {
-    const source = set();
-    source.alias = { name: 'hsq', version: '0.1.5', dependencies: { '@hearsay-tools/squawk': '^0.1.5' } };
+  it('stamps a set without an alias and adds none', () => {
+    const { alias: _alias, ...source } = set();
     const stamped = stampManifestSet(source, '0.1.6', v => `^${v}`);
-    expect(stamped.alias.dependencies).toEqual({ '@hearsay-tools/squawk': '^0.1.6' });
+    expect('alias' in stamped).toBe(false);
     expect(stamped.web.devDependencies).toEqual({ '@scope/impl': '^0.1.6' });
   });
 });

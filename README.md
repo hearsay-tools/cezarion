@@ -36,7 +36,7 @@ your phone, working your backlog while you're away.
 
 ```bash
 cd your-repo
-npx hsq         # → cockpit at http://localhost:4321
+npx -p @hearsay-tools/squawk hsq   # → cockpit at http://localhost:4321
 ```
 
 That's the whole setup. If your `claude` CLI is logged in (Pro/Max) and `gh` is
@@ -106,7 +106,7 @@ Plenty of tools wrap a single coding agent in a nicer window — a "Codex GUI", 
 conductor-style app, one-agent front-ends. Squawk's bet is different. Three things
 it does better than any of them:
 
-- 🪶 **Genuinely zero config.** `npx hsq` in your repo and you're running —
+- 🪶 **Genuinely zero config.** `npx -p @hearsay-tools/squawk hsq` in your repo and you're running —
   no wizard, no API keys, no env vars, no schema, no database server. It rides the
   `claude` / `codex` / `opencode` / `agent` (Cursor) / `pi` / `omp` logins and the `gh` you already have, and every
   missing piece degrades gracefully instead of blocking you.
@@ -204,8 +204,8 @@ the [`codex` CLI](https://github.com/openai/codex),
 
 ```bash
 cd your-repo
-npx hsq               # start the cockpit for the current repo
-#   or: npx @hearsay-tools/squawk
+npx -p @hearsay-tools/squawk hsq   # start the cockpit for the current repo
+#   or install once: npm i -g @hearsay-tools/squawk, then run hsq
 
 ```
 
@@ -221,8 +221,8 @@ can start again without cleanup.
 Type a task, pick a workflow, hit **Start**. That's it.
 
 ```bash
-npx hsq run "add a --json flag to the export command"   # headless, CI-friendly
-npx hsq init                                            # scaffold .ai/squawk/
+npx -p @hearsay-tools/squawk hsq run "add a --json flag to the export command"   # headless, CI-friendly
+npx -p @hearsay-tools/squawk hsq init   # scaffold .ai/squawk/
 ```
 
 For a global install, run `npm i -g @hearsay-tools/squawk`, then use `hsq`.
@@ -244,7 +244,7 @@ Every night we publish the trunk to npm, so the features landing in the next
 release are one command away:
 
 ```bash
-npx hsq@nightly       # everything merged as of last night
+npx -p @hearsay-tools/squawk@nightly hsq   # everything merged as of last night
 ```
 
 **Come build this with us.** Squawk is shaped by the people who run it on real
@@ -260,9 +260,9 @@ can be rough, a flag or a screen may change under you, and something occasionall
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
 task runs in its own git worktree and auto merge is off by default — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
-version (`npx hsq@<nightly-version>` — the cockpit prints the
+version (`npx -p @hearsay-tools/squawk@<nightly-version> hsq` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
-back to stable any time with a plain `npx hsq`.
+back to stable any time with a plain `npx -p @hearsay-tools/squawk hsq`.
 
 ### Preview builds
 
@@ -271,13 +271,13 @@ Every green CI run also publishes an installable npm snapshot
 merged yet:
 
 ```bash
-npx hsq@dev           # current main head
+npx -p @hearsay-tools/squawk@dev hsq   # current main head
 ```
 
 Every pull request gets its own preview too — the CI bot posts a sticky comment
 on the PR with the exact pinned version to copy-paste
-(`npx hsq@<version>-pr<N>.<run>`). Nightlies and previews are all
-prerelease versions under their own dist-tags; a plain `npx hsq` always
+(`npx -p @hearsay-tools/squawk@<version>-pr<N>.<run> hsq`). Nightlies and previews are all
+prerelease versions under their own dist-tags; a plain `npx -p @hearsay-tools/squawk hsq` always
 resolves to the latest stable release.
 
 ---
@@ -410,7 +410,7 @@ Task and project views share one browser window and live updates over Server-Sen
 | **Workflows** | Build a chain by drag-ordering skills, save it as portable YAML, import/export, or delete. Built-ins always come back. |
 | **Settings** | Appearance (dark/light theme, accent, density), agent backends, notifications, and the skills catalog. |
 
-The cockpit is a React app served pre-built from the package — `npx hsq`
+The cockpit is a React app served pre-built from the package — `npx -p @hearsay-tools/squawk hsq`
 still means no build step and no dev server on your machine — with a dark/light
 theme, a ⌘K command palette, and bookmarklets that launch a task straight from
 a GitHub page.
@@ -1433,13 +1433,13 @@ strategy**, and never escalates silently: every privileged command is printed
 and verified, and it ends with a real authenticated end-to-end check.
 
 ```bash
-npx hsq server-install   --platform ubuntu-vps   # stand it up
-npx hsq server-deploy    --platform ubuntu-vps   # roll out a new version (reload the service)
-npx hsq server-uninstall --platform ubuntu-vps   # reverse it
+npx -p @hearsay-tools/squawk hsq server-install   --platform ubuntu-vps   # stand it up
+npx -p @hearsay-tools/squawk hsq server-deploy    --platform ubuntu-vps   # roll out a new version (reload the service)
+npx -p @hearsay-tools/squawk hsq server-uninstall --platform ubuntu-vps   # reverse it
 
 # host a SECOND cockpit for another domain on the same box (ubuntu-vps):
 
-npx hsq server-install   --platform ubuntu-vps --domain shop.example.com
+npx -p @hearsay-tools/squawk hsq server-install   --platform ubuntu-vps --domain shop.example.com
 ```
 
 On `ubuntu-vps` a single host can run several independent cockpits — add
@@ -1451,7 +1451,7 @@ nginx already owns `:80/:443`, Squawk's would fight it for the ports. Install th
 service only and let your proxy front it:
 
 ```bash
-npx hsq server-install --platform ubuntu-vps \
+npx -p @hearsay-tools/squawk hsq server-install --platform ubuntu-vps \
   --external-proxy --domain Squawk.example.com --bind-host 172.17.0.1
 ```
 
@@ -1704,7 +1704,7 @@ Now `cd` into any other repo and run it:
 ```bash
 cd ~/some-other-project
 hsq              # cockpit for that repo, straight off your checkout
-hsq --help       # the same command as `npx hsq`
+hsq --help       # the same command as `npx -p @hearsay-tools/squawk hsq`
 ```
 
 **5. The change loop**

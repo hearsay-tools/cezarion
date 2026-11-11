@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { runnerSchema } from './health.ts';
-import { modelDiscoveryRunnerSchema, providerStatusSchema, runnerModelCatalogResponseSchema, runnerModelOptionSchema } from './workspace.ts';
+import { runnerSchema } from './runner.ts';
+import { modelDiscoveryRunnerSchema, providerStatusSchema, runnerModelCatalogResponseSchema } from './workspace.ts';
 
 /** Host default-account discovery; delegation credentials select the controller, not an account. */
 export const hostDiscoveryRequestSchema = z.discriminatedUnion('kind', [
@@ -31,10 +31,4 @@ export type DiscoveredTasks = z.infer<typeof discoveredTasksSchema>;
 export const discoveryResponseSchema = z.union([discoveredRunnersSchema, runnerModelCatalogResponseSchema, discoveredTasksSchema]);
 export type DiscoveryResponse = z.infer<typeof discoveryResponseSchema>;
 
-export const modelChoicesSchema = z.object({
-  runner: modelDiscoveryRunnerSchema,
-  requestedModel: z.string(),
-  availableModels: z.array(runnerModelOptionSchema),
-  otherRunners: z.array(modelDiscoveryRunnerSchema),
-});
-export type ModelChoices = z.infer<typeof modelChoicesSchema>;
+export { modelChoicesSchema, type ModelChoices } from './workspace.ts';

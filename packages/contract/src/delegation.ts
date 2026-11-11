@@ -1,8 +1,8 @@
-import { modelChoicesSchema } from './discovery.ts';
 import { z } from 'zod';
 import { conversationAttributionSchema, conversationStateSchema, requestOutcomeSchema } from './conversations.ts';
 import { effortFieldSchema } from './effort.ts';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
+import { modelChoicesSchema } from './workspace.ts';
 
 /** Owned workers (spec 2026-09-06). No import from runs: runs embeds this metadata. */
 export const workerOperationSchema = z.enum(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait']);

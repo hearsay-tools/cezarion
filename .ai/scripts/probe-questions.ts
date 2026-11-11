@@ -21,6 +21,10 @@ import { planOwnedWorkspace } from '../../packages/cezar/src/delegation/workspac
 import { RunStore } from '../../packages/cezar/src/runs/store.ts';
 import { RunManager } from '../../packages/cezar/src/workflows/run.ts';
 import { createRunner } from '../../packages/cezar/src/core/runner-factory.ts';
+import { installWindowsIdentityStore } from '../../packages/cezar/src/delegation/windows-identity-store.ts';
+
+// Workspace receipts and markers use the host's identity store (ADR 0032).
+installWindowsIdentityStore();
 
 const home = resolveHome({ purpose: 'cli' });
 const [backend, model] = process.argv.slice(2) as [RunnerId, string | undefined];

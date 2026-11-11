@@ -46,7 +46,7 @@ command is verified before the installer moves on.
 From a published release:
 
 ```bash
-npx hsq server-install --platform ubuntu-vps
+npx -p @hearsay-tools/squawk hsq server-install --platform ubuntu-vps
 ```
 
 Or from a git checkout on the box:
@@ -97,7 +97,7 @@ a hand-rolled nginx, Caddy — installing Squawk's nginx would fight it for thos
 ports. Use `--external-proxy`:
 
 ```bash
-npx hsq server-install --platform ubuntu-vps \
+npx -p @hearsay-tools/squawk hsq server-install --platform ubuntu-vps \
   --external-proxy --domain squawk.example.com --bind-host 172.17.0.1
 ```
 
@@ -158,7 +158,7 @@ Once a new Squawk is available (a fresh local build, or a newly published
 `@hearsay-tools/squawk`), reload the running service with one standardized command:
 
 ```bash
-npx hsq server-deploy --platform ubuntu-vps
+npx -p @hearsay-tools/squawk hsq server-deploy --platform ubuntu-vps
 #   from a checkout:  node packages/cezar/dist/index.js server-deploy --platform ubuntu-vps
 #   npm script:       npm run server-deploy -- --platform ubuntu-vps
 ```
@@ -171,8 +171,8 @@ unit and includes up to 30 recent journal lines. A green deploy means the
 service restarted and the cockpit is serving the new version.
 
 - **From a checkout** the service runs `<node> <repo>/packages/cezar/dist/index.js` — so build
-  first, then deploy: `git pull && npm run build && npx hsq server-deploy --platform ubuntu-vps`.
-- **Via npx** the service runs `npx --yes hsq`. npx caches the resolved
+  first, then deploy: `git pull && npm run build && npx -p @hearsay-tools/squawk hsq server-deploy --platform ubuntu-vps`.
+- **Via npx** the service runs `npx --yes -p @hearsay-tools/squawk hsq`. npx caches the resolved
   package under `~/.npm/_npx` and reuses it on restart, so `server-deploy` first
   **clears that cached owned package build** and then restarts — the next launch
   re-resolves the latest published version. (Before this, a restart silently
@@ -199,10 +199,10 @@ header. Pass `--domain` to select or create an instance:
 
 ```bash
 # first cockpit — the default instance (loopback :4321, ~/.local/state/hearsay-squawk/server.json)
-npx hsq server-install --platform ubuntu-vps
+npx -p @hearsay-tools/squawk hsq server-install --platform ubuntu-vps
 
 # a SECOND, fully independent cockpit for another domain
-npx hsq server-install --platform ubuntu-vps --domain shop.example.com
+npx -p @hearsay-tools/squawk hsq server-install --platform ubuntu-vps --domain shop.example.com
 ```
 
 Because instances are **keyed by domain**, running `server-install` again with a
@@ -225,8 +225,8 @@ What differs per instance:
 - **Deploy / uninstall** — pass the same `--domain` to target that instance:
 
   ```bash
-  npx hsq server-deploy    --platform ubuntu-vps --domain shop.example.com
-  npx hsq server-uninstall --platform ubuntu-vps --domain shop.example.com
+  npx -p @hearsay-tools/squawk hsq server-deploy    --platform ubuntu-vps --domain shop.example.com
+  npx -p @hearsay-tools/squawk hsq server-uninstall --platform ubuntu-vps --domain shop.example.com
   ```
 
   A named-instance uninstall removes only that instance's owned artifacts and

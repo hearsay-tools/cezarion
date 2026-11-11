@@ -1,6 +1,6 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { RUN_STATUS, STEP_KIND, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager } from '../workflows/fixture-claude.testkit.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RunStore } from '../runs/store.ts';
