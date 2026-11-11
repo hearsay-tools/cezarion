@@ -1,4 +1,4 @@
-import { describeWaitParity } from './waits-parity-cells.testkit.ts';
+import { describeWaitParity } from './waits-parity-entries-cells.testkit.ts';
 import { OmpRunner } from '../core/omp-runner.ts';
 import { onlyRunner, useRunners } from '../core/runners-under-test.testkit.ts';
 

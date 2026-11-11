@@ -86,11 +86,15 @@ alone is too slow. A runner that runs no row of a part has no file for it, so th
 file guards compute the expected files from the class table, never from
 `RUNNER_IDS` alone. Fold files that were split only for the cap once the derived
 set fits in fewer files, and measure each folded file against the CI cap first:
-`WAIT_FOLDS` in `workflows/waits-parity-cells.testkit.ts` groups the parts of a runner
+`WAIT_FOLDS` in `workflows/waits-parity-catalog.testkit.ts` groups the parts of a runner
 outside the shared set into files of about 3–12 s locally.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
-(hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
+(hearsay-tools/cezarion#1288). Squeal re-runs a test file when any file it imports changes, so
+keep each part's cells in its own module and let a per-runner file import only its part's or
+fold's module. The wait parity cells do this: `workflows/waits-parity-<part>-cells.testkit.ts`,
+`workflows/waits-parity-<fold>-fold.testkit.ts`, one shared fixture and a catalog, and the full
+registry for the guard file only (hearsay-tools/cezarion#3242). Vitest 4 fails a suite that registers no test,
 so the file that runs the guard and the single-runner cells must not register
 a `describe` whose body holds only runner cells; `describeRunners` in
 `core/harness-parity-cells.testkit.ts` is the example

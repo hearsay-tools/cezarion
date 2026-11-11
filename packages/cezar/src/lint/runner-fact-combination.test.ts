@@ -153,6 +153,10 @@ describe('runner-fact-combination (hearsay-tools/cezarion#2991)', () => {
     expect(runnerFactCombination.applies('packages/cezar/src/workflows/input-acknowledgement.ts')).toBe(true);
     expect(runnerFactCombination.applies('packages/cezar/src/workflows/run/turn-settler.test.ts')).toBe(false);
     expect(runnerFactCombination.applies('packages/cezar/src/workflows/waits-parity-cells.testkit.ts')).toBe(false);
+    expect(runnerFactCombination.applies('packages/cezar/src/workflows/waits-parity-fixture.testkit.ts')).toBe(false);
+    expect(runnerFactCombination.applies('packages/cezar/src/workflows/waits-parity-catalog.testkit.ts')).toBe(false);
+    expect(runnerFactCombination.applies('packages/cezar/src/workflows/waits-parity-asks-cells.testkit.ts')).toBe(false);
+    expect(runnerFactCombination.applies('packages/cezar/src/workflows/waits-parity-base-fold.testkit.ts')).toBe(false);
     expect(runnerFactCombination.applies('packages/cezar/src/core/runner-facts.ts')).toBe(false);
   });
 
