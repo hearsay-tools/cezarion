@@ -1,5 +1,6 @@
 import { testHome } from '../home/test-home.testkit.ts';
-import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { openTestRunStore } from '../runs/run-store-open.testkit.ts';
 import * as agentAccounts from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';

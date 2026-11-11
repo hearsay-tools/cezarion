@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { fixture } from './service.testkit.ts';
 
 describe('committed message effects', () => {
@@ -107,8 +108,8 @@ describe('committed message effects', () => {
     await f.service.send(f.caller, request);
     const reply = { ...request, id: randomUUID(), kind: 'reply' as const, requestId: request.id };
     const refusal = f.service.reply(f.caller, reply);
-    await expect(refusal).rejects.toMatchObject({ code: 'incompatible_state', message: expect.stringContaining(`cez message follow-up ${recipientRunId} "<text>" --id <new-message-UUID> --request-id ${request.id}`) });
-    await expect(refusal).rejects.toThrow(`cez message request ${recipientRunId} "<text>" --id <new-message-UUID>`);
+    await expect(refusal).rejects.toMatchObject({ code: 'incompatible_state', message: expect.stringContaining(`hsq message follow-up ${recipientRunId} "<text>" --id <new-message-UUID> --request-id ${request.id}`) });
+    await expect(refusal).rejects.toThrow(`hsq message request ${recipientRunId} "<text>" --id <new-message-UUID>`);
     expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { messages: [expect.objectContaining({ id: request.id })], outcomes: [] } });
     expect(f.store.getRun(recipientRunId)?.agentInputs).toHaveLength(1);
   });

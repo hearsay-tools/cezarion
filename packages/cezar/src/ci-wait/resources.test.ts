@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CiToolController, ToolsUnavailableError } from './controller.ts';
 import { acquireCiResources } from './resources.ts';
@@ -14,7 +15,7 @@ describe('the shared tool controller', () => {
     const resources = acquireCiResources({});
     try {
       await expect(resources.controller()).rejects.toBe(failure);
-      expect(warn).toHaveBeenCalledWith(`[cez] ${failure.message}`);
+      expect(warn).toHaveBeenCalledWith(`${logPrefix()} ${failure.message}`);
       const controller = await resources.controller();
       expect(controller).toBeInstanceOf(CiToolController);
       expect(await resources.controller()).toBe(controller);

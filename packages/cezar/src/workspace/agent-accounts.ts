@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { HomeOutsideWriteError, HomeStore, readHomeFile } from '../home/store.ts';
 import { realpathSync } from 'node:fs';
@@ -190,7 +191,7 @@ function loadAgentAccountsSync(home: Home): AgentAccountStore {
   } catch {
     // malformed JSON — fall through to the warning + defaults
   }
-  console.warn(`[cez] agent accounts ${path} is corrupt — ignoring it (every project falls back to its default account)`);
+  console.warn(`${logPrefix()} agent accounts ${path} is corrupt — ignoring it (every project falls back to its default account)`);
   return defaultAgentAccountStore();
 }
 
@@ -239,7 +240,7 @@ function importLegacyAccounts(home: Home): AgentAccountStore {
       return readLegacyAccounts(home, true);
     }, [home.agentAccounts]);
   } catch (error) {
-    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; imported accounts are available in memory only`);
+    if (error instanceof HomeOutsideWriteError) console.warn(`${logPrefix()} ${error.message}; imported accounts are available in memory only`);
     // A missing marker or read-only home still permits the historical in-memory import.
     return readLegacyAccounts(home, false);
   }
@@ -305,7 +306,7 @@ function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
     const path = home.agentAccounts;
     new HomeStore(home).writeJson(path, imported.data);
   } catch (error) {
-    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; imported accounts are available in memory only`);
+    if (error instanceof HomeOutsideWriteError) console.warn(`${logPrefix()} ${error.message}; imported accounts are available in memory only`);
     // read-only home: the import stays in memory for this process, which is still correct
   }
   return imported.data;

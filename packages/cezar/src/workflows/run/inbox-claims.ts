@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession } from '../../core/agent-runner.ts';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
@@ -103,7 +104,7 @@ export class InboxClaims {
         this.host.armInboxClaimExpiry(runId);
         this.host.releaseSlot();
       } catch {
-        if (!warned) console.warn('[cez] inbox expiry checkpoint failed; retrying in 1 second');
+        if (!warned) console.warn(`${logPrefix()} inbox expiry checkpoint failed; retrying in 1 second`);
         warned = true;
         if (!this.context.disposed()) arm(1_000);
       }

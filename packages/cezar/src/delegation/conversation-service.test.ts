@@ -6,7 +6,8 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -97,7 +98,7 @@ describe('durable conversations', () => {
     const reply = await f.service.reply(a.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: request.message.id, text: 'Answer', timeoutSeconds: 600 });
     const update = await f.service.send(b.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Update', timeoutSeconds: 600 });
     const inspected = await f.service.conversation(f.caller, { recipientRunId: a.id });
-    expect(conversationInspectResultSchema.parse(inspected).hint).toContain('Run cez message inbox');
+    expect(conversationInspectResultSchema.parse(inspected).hint).toContain('Run hsq message inbox');
     expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === reply.message.id)?.deliveredAt).toBeUndefined();
     const batch = inboxReserveResultSchema.parse(await f.service.inbox(f.caller));
     expect(batch.messages.map(message => [message.id, message.senderRunId])).toEqual([[reply.message.id, a.id], [update.message.id, b.id]]);

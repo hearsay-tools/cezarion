@@ -1,6 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { RunEvent } from '../runs/store.ts';
-import { formatTimeline, until } from './worker-wait.testkit.ts';
+import { formatTimeline, until } from './worker-wait-timeline.testkit.ts';
 
 const ts = '2026-10-20T10:00:00.000Z';
 const events: RunEvent[] = [

@@ -49,7 +49,7 @@ export function withResumeContext(prompt: string, message: RunRecord['continuati
   const context = message?.resumeContext;
   if (!context?.failure && !context?.restarted) return prompt;
   const parts: string[] = [];
-  if (context.restarted) parts.push('The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context.');
+  if (context.restarted) parts.push('The cezar process restarted while you were working on this task. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context.');
   if (context.failure) {
     const { stepId, error } = context.failure;
     // Error messages can contain newlines; keep the diagnostic on one line without changing

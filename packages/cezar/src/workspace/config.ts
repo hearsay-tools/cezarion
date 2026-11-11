@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { HomeStore, homeFileRoot, readHomeFile } from '../home/store.ts';
@@ -364,12 +365,12 @@ export function loadWorkspaceConfigSync(path: string, recovery?: { base?: Buffer
   if (restored) {
     const cause = raw === null ? 'is missing' : 'is empty or corrupt';
     console.warn(
-      `[cez] workspace config ${path} ${cause} — restored ${restored.projects.length} project(s) from ${workspaceConfigBackupPath(path)}`,
+      `${logPrefix()} workspace config ${path} ${cause} — restored ${restored.projects.length} project(s) from ${workspaceConfigBackupPath(path)}`,
     );
     return restored;
   }
   if (raw === null) return defaultWorkspaceConfig();
-  console.warn(`[cez] workspace config ${path} is corrupt — using defaults (registry rebuilds)`);
+  console.warn(`${logPrefix()} workspace config ${path} is corrupt — using defaults (registry rebuilds)`);
   return defaultWorkspaceConfig();
 }
 
@@ -427,5 +428,5 @@ const warnedSnapshots = new Set<string>();
 function warnSnapshot(path: string, error: unknown): void {
   if (warnedSnapshots.has(path)) return;
   warnedSnapshots.add(path);
-  console.warn(`[cez] workspace backup ${path} unavailable (${error instanceof Error ? error.message : String(error)}); continuing the write`);
+  console.warn(`${logPrefix()} workspace backup ${path} unavailable (${error instanceof Error ? error.message : String(error)}); continuing the write`);
 }
