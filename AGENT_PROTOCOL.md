@@ -1437,10 +1437,11 @@ set instead.
 Print every row with its exemptions:
 
 ```bash
-node packages/cezar/scripts/parity-rows.ts [--row <id>] [--runner <id>]
+node packages/cezar/scripts/parity-rows.ts
 ```
 
-`--runner` prints only the rows that the runner is exempt from, not the rows that run on it.
+`--row R39` prints one row. `--runner pi` prints only the rows that the runner is exempt
+from, not the rows that run on it. `--json` prints the index as JSON.
 
 Owners. Paths are relative to `packages/cezar/src/`.
 
