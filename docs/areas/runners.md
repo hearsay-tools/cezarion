@@ -90,10 +90,13 @@ set fits in fewer files, and measure each folded file against the CI cap first:
 outside the shared set into files of about 3–12 s locally.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
-(hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
+(hearsay-tools/cezarion#1288). Define each part's cells in its own module, as
+`core/harness-parity-<part>.cells.testkit.ts` does, so a runner file imports only the
+part it runs and an edit behind another part does not rerun it
+(hearsay-tools/cezarion#3242). Vitest 4 fails a suite that registers no test,
 so the file that runs the guard and the single-runner cells must not register
 a `describe` whose body holds only runner cells; `describeRunners` in
-`core/harness-parity-cells.testkit.ts` is the example
+`core/harness-parity-registrar.testkit.ts` is the example
 (hearsay-tools/cezarion#1375).
 
 ## Native mock wire evidence

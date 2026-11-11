@@ -160,8 +160,9 @@ Owners. Paths are relative to `packages/cezar/src/`.
   `core/harness-parity-core.testkit.ts`, the row lists in
   `core/harness-parity-rows.testkit.ts` and `WAIT_CRITERIA` in
   `workflows/waits-parity.testkit.ts`.
-- **Cells:** `core/harness-parity-cells.testkit.ts`,
-  `workflows/waits-parity-cells.testkit.ts` and the testkit of each other family.
+- **Cells:** `core/harness-parity-<part>.cells.testkit.ts` (one module per part, joined by
+  `core/harness-parity-cells.testkit.ts`), `workflows/waits-parity-cells.testkit.ts` and the
+  testkit of each other family.
   `PARITY_FILES` in `core/parity-classes.testkit.ts` maps every parity test file to its
   family.
 - **Exemptions and their kinds:** `PARITY_EXEMPTIONS` and `ExemptionKind` in
@@ -175,7 +176,7 @@ Owners. Paths are relative to `packages/cezar/src/`.
   `packages/cezar/scripts/mock-scenario.mjs`.
 - **Row classes and the derived runner set:** `SHARED_RUNNERS` in
   `core/parity-classes.testkit.ts`.
-- **Spec-support rows:** `SPEC_FIELD_PROBES` in `core/harness-parity-cells.testkit.ts`.
+- **Spec-support rows:** `SPEC_FIELD_PROBES` in `core/harness-parity-session.cells.testkit.ts`.
 - **Per-runner files:** `core/harness-<runner>-<part>-parity.test.ts`
   (`harnessParityFile`) and `workflows/waits-<runner>-<part>-parity.test.ts`
   (`WAIT_PARITY_FILES`, `WAIT_PARITY_FAMILIES`).

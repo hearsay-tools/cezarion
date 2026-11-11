@@ -23,6 +23,13 @@ describe('the harness parity kits', () => {
     expect(engineFilesIn(kit)).toEqual([]);
   });
 
+  // The startup, contract and session parts drive only the seam tier, so their runner files load
+  // no engine; `harness-parity.test.ts` pins that each runner file imports only its part's kit
+  // (hearsay-tools/cezarion#3242).
+  it.each(['startup', 'contract', 'session'].map(part => `core/harness-parity-${part}.cells.testkit.ts`))('keeps the workflow engine out of the seam-tier part kit %s', (kit) => {
+    expect(engineFilesIn(kit)).toEqual([]);
+  });
+
   it.each(['core/workflow-parity.testkit.ts', 'core/workflow-parity-core.testkit.ts'])('loads the workflow engine through the workflow-level kit %s', (kit) => {
     expect(engineFilesIn(kit)).toEqual(ENGINE);
   });
