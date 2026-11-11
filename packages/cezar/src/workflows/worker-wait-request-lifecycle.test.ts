@@ -1,7 +1,7 @@
 import { WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { checkpoint, manager, restart, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, manager, restart, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker } from './worker-wait-claude.testkit.ts';
 import { conversationPair, turnEnds, parentHandledRequest } from './worker-wait-conversations.testkit.ts';
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {

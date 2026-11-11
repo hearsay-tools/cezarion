@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProcessWaitEntry, ProcessWaitResult, Wait } from '@open-mercato/cezar-contract';
 import { ProcessWaitSupervisor, type ProcessWatchRequest } from '../process-wait/supervisor.ts';
-import { manager, parent, restart, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
+import { manager, parent, restart, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait-claude.testkit.ts';
 import { waitResultText } from './waits.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.

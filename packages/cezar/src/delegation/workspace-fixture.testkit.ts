@@ -3,7 +3,7 @@ import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { copyWorkspaceSeed } from './workspace-seed.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
-import { drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { drainFixtureManagers } from '../workflows/fixture-claude.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';

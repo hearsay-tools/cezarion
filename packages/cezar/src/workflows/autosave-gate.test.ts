@@ -2,7 +2,7 @@ import { testHome } from '../home/test-home.testkit.ts';
 import { clearAutosaveTimer } from './run/input-timers.ts';
 import { createActiveRun } from './active-run.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
-import { unused } from './fixture-cleanup.testkit.ts';
+import { unused } from './fixture-no-runner.testkit.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { execFile } from 'node:child_process';

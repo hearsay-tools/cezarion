@@ -2,7 +2,7 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { manager, parent, queuedWake, restart, store, until, worker } from './worker-wait.testkit.ts';
+import { manager, parent, queuedWake, restart, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
 
 describe("worker waits through RunManager", { timeout: 30_000 }, () => {

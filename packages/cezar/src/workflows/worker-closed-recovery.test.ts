@@ -1,7 +1,7 @@
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { parent, restart, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { parent, restart, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 /**
  * A restart finds an owned worker `waiting` with no ask and no wait: its session closed, and a
