@@ -78,7 +78,8 @@ test('the trial reads only, holds no token, never fails its job, and checks out 
   assert.equal(upload.with.path, '${{ runner.temp }}/squeal-gate-trial/');
   const runs = job.steps.map((s) => s.run).filter(Boolean);
   assert.ok(runs.includes('pnpm install --frozen-lockfile'));
-  assert.ok(runs.includes('npm run build:server'), 'the gate checks the built server modules the shards read');
+  const builds = (j) => j.steps.some((s) => s.run === 'npm run build:server');
+  assert.equal(builds(job), builds(jobs.vitest), 'the gate checks the same checkout the shards read');
 });
 
 test('the gate step runs squeal code on every shard\'s parts and keeps its exit code, time and stderr', (t) => {
