@@ -2556,9 +2556,11 @@ mapper. §6 reads the same expected files.
 ## 9. Persistence & transport
 
 Each run has one append-only NDJSON event file that holds v1 and v2 events together
-(`docs/areas/runs-store.md`). Never rewrite, reorder or renumber it. The server replays it
-over SSE, then streams live (`packages/cezar/src/server/live-routes.ts`). A Cezar-owned
-event such as `provider-auth-required` never carries vendor error text or credentials.
+(`docs/areas/runs-store.md`). Never rewrite, reorder or renumber it. The per-run SSE route
+replays it, then streams live, under the event names `run-event` (v1) and `ui-event` (v2).
+The multiplex route (`packages/cezar/src/server/live-routes.ts`) sends SSE events named
+`live` and carries those two names in the JSON `name` field. A Cezar-owned event such as
+`provider-auth-required` never carries vendor error text or credentials.
 
 ---
 
@@ -2630,8 +2632,8 @@ the existing backends hold their channels.
 
 ## Compatibility
 
-v1 `AgentEvent` `type` strings, v2 `UiEvent` dotted types and the SSE event names
-`run-event` and `ui-event` are additive-only: saved runs and shipped clients read them. A
+v1 `AgentEvent` `type` strings, v2 `UiEvent` dotted types and the names `run-event` and
+`ui-event` (§9) are additive-only: saved runs and shipped clients read them. A
 test pins the shipped type strings. To remove or rename one, or to break the parity
 requirement (§6, §7), is a breaking change under `BACKWARD_COMPATIBILITY.md`.
 
