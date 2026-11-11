@@ -28,6 +28,7 @@ const notFound = { status: 404, body: { error: 'not found' } };
 const noWorktree = { status: 409, body: { error: 'no worktree — this task ran directly in the repo working tree' } };
 const fallbackError = { status: 409, body: { error: fallbackProjectWriteError(fallback)! } };
 const fallbackGone = join(root, '.ai', 'squawk', 'worktrees', 'gone');
+const stillWorking = { status: 409, body: { error: 'the agent is still working in this worktree' } };
 const autosave = { status: 409, body: { error: 'autosave cleanup pending' } };
 
 // One policy row for each Table A read and mutate route.
@@ -71,7 +72,7 @@ const states: State[] = [
   } }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
   { name: 'claim held elsewhere', run: { ...baseRun, worktreePath: live }, blocked: false, claimHeld: true, mutate: live, diff: live, working: live, fileLink: live },
   { name: 'foreign owner', run: { ...baseRun, worktreePath: live }, blocked: false, foreignOwner: true, mutate: live, diff: live, working: live, fileLink: live },
-  { name: 'running', run: { ...baseRun, status: RUN_STATUS.running, worktreePath: live }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
+  { name: 'running', run: { ...baseRun, status: RUN_STATUS.running, worktreePath: live }, blocked: false, mutate: stillWorking, diff: live, working: live, fileLink: live },
   { name: 'usage hold', run: { ...baseRun, status: RUN_STATUS.waiting, autoResumeAt: '2026-11-11T00:00:00Z', worktreePath: live }, blocked: false, mutate: live, diff: live, working: live, fileLink: live },
   { name: 'autosave with live path', run: { ...baseRun, worktreePath: live }, blocked: true, mutate: live, diff: live, working: live, fileLink: live },
   { name: 'autosave with removed path', run: { ...baseRun, worktreePath: gone }, blocked: true, mutate: noWorktree, diff: null, working: noWorktree, fileLink: gone },
@@ -92,13 +93,17 @@ function fakeHost({ run, claimHeld, foreignOwner }: State): RunCheckoutHost {
 }
 
 describe.each(routes)('$intent $route', (route) => {
-  it.each(states)('$name keeps admission order and directory policy', (state) => {
+  it.each([...states, ...(['queued', 'waiting'] as const).map(status => ({
+    ...states[1]!, name: status, run: { ...baseRun, status, worktreePath: live },
+  })), { ...states[14]!, name: 'running with autosave', blocked: true }, {
+    ...states[8]!, name: 'running fallback', run: { ...baseRun, status: RUN_STATUS.running, worktreePath: fallback },
+  }, { ...states[5]!, name: 'running without directory', mutate: stillWorking, run: { ...baseRun, status: RUN_STATUS.running } }])('$name keeps admission order and directory policy', (state) => {
     const host = fakeHost(state);
     vi.mocked(autosaveCleanupBlocker).mockReset().mockReturnValue(state.blocked ? autosave.body.error : undefined);
     const result = route.intent === 'mutate'
       ? runCheckout(host, baseRun.id, 'mutate')
       : runCheckout(host, baseRun.id, 'read', route);
-    const checksMutationAutosave = Boolean(state.run && route.intent === 'mutate' && !(state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
+    const checksMutationAutosave = Boolean(state.run && route.intent === 'mutate' && state.run.status !== 'running' && !(state.run.worktreePath && fallbackProjectWriteError(state.run.worktreePath)));
     const expected = checksMutationAutosave && state.blocked ? autosave : state[route.column];
     expect(result).toEqual(typeof expected === 'object' && expected !== null
       ? expected

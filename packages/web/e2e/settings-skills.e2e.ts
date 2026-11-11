@@ -1,3 +1,4 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -197,7 +198,7 @@ describe('settings → skills against the live dry-run server', () => {
 
   it('a team skill and its repository group switch off and back on by keyboard, and the project saves each change (#1494, #1607)', async () => {
     // Dry-run configures no team source, so this case adds a local skills repo for its duration.
-    const cezarDir = resolve(servedRoot(), '.ai/cezar')
+    const cezarDir = projectPaths(servedRoot()).write
     const configFile = resolve(cezarDir, 'config.json')
     const uiStateFile = resolve(cezarDir, 'ui-state.json')
     const savedConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
@@ -268,7 +269,7 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('a team skill source is added, disabled and removed on the page, and config.json follows (hearsay-tools/cezarion#279)', async () => {
-    const cezarDir = resolve(servedRoot(), '.ai/cezar')
+    const cezarDir = projectPaths(servedRoot()).write
     const configFile = resolve(cezarDir, 'config.json')
     const savedConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
     const source = mkdtempSync(join(tmpdir(), 'cez-e2e-team-source-'))

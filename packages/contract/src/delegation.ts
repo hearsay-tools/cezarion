@@ -2,6 +2,7 @@ import { modelChoicesSchema } from './discovery.ts';
 import { z } from 'zod';
 import { conversationAttributionSchema, conversationStateSchema, requestOutcomeSchema } from './conversations.ts';
 import { effortFieldSchema } from './effort.ts';
+import { runnerSchema } from './health.ts';
 
 /** Owned workers (spec 2026-09-06). No import from runs: runs embeds this metadata. */
 export const workerOperationSchema = z.enum(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait']);
@@ -94,7 +95,7 @@ export const workerCreationReceiptSchema = z.object({
   deletion: z.object({ phase: z.enum(['pending', 'complete']), revision: z.number().int().nonnegative(), resourceId: z.uuid(), generation: z.uuid() }).strict().optional(),
 }).strict();
 
-export const workerBackendSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
+export const workerBackendSchema = z.enum(runnerSchema.options);
 const relativeInputPath = z.string().min(1).max(4096).refine(path =>
   !/[\\\u0000-\u001f\u007f:]/.test(path) && !path.startsWith('/') &&
   path.split('/').every(part => part !== '' && part !== '.' && part !== '..' && part.toLowerCase() !== '.git'));

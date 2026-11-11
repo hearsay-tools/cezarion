@@ -566,6 +566,29 @@ request --resume` is refused and names `cez worker resume`.
   defaults. That decision must hold for every user's plugins and setup, not one host's.
 - Runner-native subagents inside one session are not tasks and are out of scope.
 
+### Probe evidence
+
+The facts behind the D1 and D3 rules of `AGENT_PROTOCOL.md` and the D1 and D3 entries of
+`PARITY_EXEMPTIONS`. Probe again when a runner version changes.
+
+- **Claude Code 2.1.311, 2026-10-27 (D3).** The `crossSessionInbound` setting governs other
+  sessions' `SendMessage`: `accept`, `hold` or `refuse`; unset delivers when the sender's
+  permission-mode class matches. The probe sent only `/reload-plugins` as a stream-json user
+  message (no model turn) with `--settings '{"crossSessionInbound":"refuse"}'` and got a
+  normal init. It shows that Claude accepts the flag. It does not show the cross-session
+  effect: that needs a model-driven `SendMessage` between two live sessions, which no probe
+  made. The same probe with `"bogus"` also started normally, with no warning. It did not test
+  message delivery with an invalid value, and it did not test a renamed key. Until a probe
+  shows otherwise, treat the setting as one that fails open.
+- **Codex 0.164.0, 2026-10-30 (D1).** `codex -c features.<unknown>=false features list` exits
+  0, so a renamed key does not fail a launch.
+- **OpenCode 1.19.4, 2026-10-30 (D1).** OpenCode appends runtime plugins to the ones its
+  config files name, so the user's plugins keep loading. A live `opencode serve` with
+  throwaway data directories loaded the task-scope plugin next to a second plugin. Its
+  client's `session.get` returned a child's `parentID`, and 404 for an unknown ID.
+- **OMP 18.13.1, 2026-10-27 (D3).** `get_state.dumpTools` lists the default set: read, bash,
+  edit, eval, glob, grep, find, task, wait, todo, web_search, write. None is a messaging tool.
+
 ## 12. Examples
 
 The runner of each task does not change the commands: every runner calls `cez message`

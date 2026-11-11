@@ -1,3 +1,3 @@
 import { describeAutosaveSettlement } from './harness-autosave-settlement.testkit.ts';
 
-describeAutosaveSettlement('failed');
+describeAutosaveSettlement('failed', undefined, [false]);

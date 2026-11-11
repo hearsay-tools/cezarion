@@ -1,5 +1,7 @@
+import { productName } from './product'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 
@@ -19,9 +21,8 @@ type Health = {
   checks: Array<{ name: string; available: boolean; version?: string; hint?: string }>
 }
 
-/** The agent CLIs among `checks[]` — `gh` and `git` are rows too, but neither runs a task. Kept in
- *  step with the contract's runner enum (`packages/contract/src/health.ts`). */
-const RUNNERS = new Set(['claude', 'codex', 'cursor', 'omp', 'opencode', 'pi'])
+/** The agent CLIs among `checks[]` — `gh` and `git` are rows too, but neither runs a task. */
+const RUNNERS = new Set<string>(runnerSchema.options)
 
 /** What (if anything) keeps the aggregate dot from green, derived from the live health answer the
  *  same way `toolsBlocker()` derives it: the dot is amber only when cez cannot start a task at all,
@@ -74,7 +75,7 @@ describe('tools menu', () => {
 
     const blocker = blockerFor(live)
     const missing = live.checks.filter((c) => !c.available).map((c) => c.name)
-    let expectedTitle = `cezar v${live.version}`
+    let expectedTitle = `${productName('cezar')} v${live.version}`
     if (blocker) expectedTitle += ` · ${blocker}`
     else if (missing.length > 0) expectedTitle += ` · optional: ${missing.join(', ')} not installed`
     expect(browser.evaluate(`document.querySelector('${TRIGGER}').getAttribute('title')`)).toBe(expectedTitle)

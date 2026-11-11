@@ -1,6 +1,8 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 
 import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { waitForConfig } from './poll'
@@ -23,7 +25,7 @@ const sessionId = `e2e-settings-agents-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
 
 // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
-const dataDir = resolve(servedRoot(), '.ai/cezar')
+const dataDir = projectPaths(servedRoot()).write
 const configFile = resolve(dataDir, 'config.json')
 
 let browser: AgentBrowser
@@ -94,8 +96,8 @@ describe('settings → agents against the live dry-run server', () => {
   it('renders every knob, agent-agnostically named', () => {
     gotoAgents()
     browser.waitForFunction(`document.querySelector('[data-slot="agents-base-branch"]') !== null`)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-runner"] [role="radio"]')].map(el => el.dataset.value).sort()`)).toEqual(['claude', 'codex', 'cursor', 'omp', 'opencode', 'pi'])
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-model"]')].map(el => el.dataset.runner).sort()`)).toEqual(['claude', 'codex', 'cursor', 'omp', 'opencode', 'pi'])
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-runner"] [role="radio"]')].map(el => el.dataset.value).sort()`)).toEqual([...runnerSchema.options].sort())
+    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="agents-model"]')].map(el => el.dataset.runner).sort()`)).toEqual([...runnerSchema.options].sort())
     expect(browser.count('[data-slot="agents-system-prompt"]')).toBe(1)
     // The dry-run repo is a git checkout, so the base-branch picker is the real control.
     expect(browser.count('[data-slot="agents-base-branch"]')).toBe(1)

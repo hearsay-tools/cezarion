@@ -1,3 +1,5 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
@@ -914,7 +916,21 @@ describe('session git API routes', () => {
     expect(refused.headers.get('content-type')).toContain('application/json');
   });
 
-  it('POST git/commit commits everything; a clean tree is a 409, a bad body a 400', async () => {
+  it.each(['commit', 'push'])('POST git/%s refuses a running run before changing Git state', async (action) => {
+    setRunStatus(store, run.id, RUN_STATUS.running);
+    writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
+    const before = g(worktree, 'rev-parse', 'HEAD');
+    const res = action === 'commit'
+      ? await commit(run.id, { message: 'must not commit' })
+      : await apiRequest(app, `/api/v1/runs/${run.id}/git/push`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'the agent is still working in this worktree' });
+    expect(g(worktree, 'rev-parse', 'HEAD')).toBe(before);
+    expect(g(worktree, 'status', '--porcelain')).toContain('?? feat.txt');
+  });
+
+  it.each([RUN_STATUS.queued, RUN_STATUS.waiting])('POST git/commit commits everything while %s; clean tree is 409, bad body is 400', async (status) => {
+    setRunStatus(store, run.id, status);
     writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
     const res = await commit(run.id, { message: 'feat: add feature' });
     expect(res.status).toBe(200);
@@ -939,7 +955,8 @@ describe('session git API routes', () => {
     expect(((await res.json()) as { error: string }).error).toContain('no remote configured');
   });
 
-  it('POST git/push sets upstream on first push to a real remote', async () => {
+  it.each([RUN_STATUS.queued, RUN_STATUS.waiting])('POST git/push sets upstream on first push while %s', async (status) => {
+    setRunStatus(store, run.id, status);
     const remote = mkdtempSync(join(tmpdir(), 'cez-remote-'));
     try {
       execFileSync('git', ['init', '--bare', remote], { encoding: 'utf8' });

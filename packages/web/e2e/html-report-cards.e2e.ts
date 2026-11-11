@@ -45,7 +45,8 @@ beforeAll(async () => {
   mkdirSync(join(project, '.ai/cezar/runs'), { recursive: true })
   const env = fixtureServeEnv(project)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [{ id: projectId, root: project }] })))
+  const home = Home.sandbox(env.CEZ_HOME!)
+  Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: projectId, root: project }] })))
   const source = join(root, 'published-results.html')
   writeFileSync(source, '<!doctype html><title>Published research results</title><main><h1>Research results</h1><p style="height:3000px">Long report body</p><p>End of report</p></main>')
   publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {

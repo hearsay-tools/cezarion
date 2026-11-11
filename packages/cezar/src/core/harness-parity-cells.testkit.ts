@@ -79,6 +79,7 @@ import {
   type RunnerId,
   type ToolGrant,
 } from './agent-runner.ts';
+import { exemptionReasonProblem } from './exemption-reason.testkit.ts';
 import { runnersUnderTest } from './runners-under-test.testkit.ts';
 import { shellQuote } from './shell-env.ts';
 import { explicitToolGrant } from './tool-grant.testkit.ts';
@@ -598,7 +599,7 @@ const CONTROL_CRITERIA = [
   // harness-autosave.test.ts drives both cleanup paths with native runner wires.
   { id: 'R24', scenario: 'baseline' },
   { id: 'R25', scenario: 'baseline' },
-  // hearsay-tools/cezarion#934: harness-autosave-settlement.test.ts, independent writer guard.
+  // hearsay-tools/cezarion#934: harness-autosave-settlement*.test.ts, independent writer guard.
   { id: 'R61', scenario: 'provider-error' },
   { id: 'R62', scenario: 'provider-error' },
   { id: 'R63', scenario: 'baseline' },
@@ -2323,7 +2324,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         for (const exemption of PARITY_EXEMPTIONS) {
           expect(allIds).toContain(exemption.criterion);
           expect(RUNNER_IDS as readonly string[]).toContain(exemption.backend);
-          expect(exemption.reason.trim()).not.toBe('');
+          expect(exemptionReasonProblem(exemption.reason), `${exemption.criterion}/${exemption.backend}`).toBeUndefined();
         }
       });
 

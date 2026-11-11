@@ -389,24 +389,32 @@ function assertContinuationSkill(
 }
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "generation": [
-    "claude R100",
-    "cursor R100",
+  "generation-claude": [
+    "claude R100"
+  ],
+  "generation-cursor": [
+    "cursor R100"
+  ],
+  "generation-omp": [
     "omp R100"
   ],
-  "live-continue": [
+  "live-continue-claude-pi": [
     "claude R53",
     "claude R55",
-    "codex R53",
-    "codex R55",
-    "cursor R53",
-    "cursor R55",
-    "omp R53",
-    "omp R55",
-    "opencode R53",
-    "opencode R55",
     "pi R53",
     "pi R55"
+  ],
+  "live-continue-codex-omp": [
+    "codex R53",
+    "codex R55",
+    "omp R53",
+    "omp R55"
+  ],
+  "live-continue-opencode-cursor": [
+    "cursor R53",
+    "cursor R55",
+    "opencode R53",
+    "opencode R55"
   ],
   "recovery-prompt": [
     "claude R54",
@@ -424,13 +432,17 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "opencode R59",
     "pi R59"
   ],
-  "session-identity": [
+  "session-identity-claude-pi": [
     "claude R57",
-    "codex R57",
-    "cursor R57",
-    "omp R57",
-    "opencode R57",
     "pi R57"
+  ],
+  "session-identity-codex-omp": [
+    "codex R57",
+    "omp R57"
+  ],
+  "session-identity-opencode-cursor": [
+    "cursor R57",
+    "opencode R57"
   ],
   "wire-and-fallback": [
     "claude R56",

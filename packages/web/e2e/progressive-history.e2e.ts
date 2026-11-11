@@ -267,7 +267,9 @@ function parkCurrentThread(): number {
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-progressive-history-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  seedRuns(dataRoot, [RUN, RUN_B])
+  // The recovered runs continue in their own project: a worktree path under another, absent
+  // root names a fresh project there, whose `.ai/cezar` is read-only with the release switch on.
+  seedRuns(dataRoot, [RUN, RUN_B].map(run => ({ ...run, worktreePath: join(dataRoot, '.ai/cezar/worktrees', run.id) })))
   for (const runId of [RUN_ID, RUN_B_ID]) {
     seedTranscript(
       join(dataRoot, '.ai/cezar/runs', `${runId}.ndjson`),

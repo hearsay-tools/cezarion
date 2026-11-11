@@ -1,0 +1,257 @@
+{
+  "$comment": "Branches on a runner id outside packages/cezar/src/core/, each with its count in that file and a reason (cez/runner-id-branch). The list only shrinks: npm run lint refuses a stale entry and CI refuses a new one.",
+  "entries": [
+    {
+      "file": "packages/cezar/src/agent-config/account-identity.ts",
+      "site": "provider === 'claude'",
+      "count": 1,
+      "reason": "identity choice: Claude keeps its login identity in its own file format; this selects its reader"
+    },
+    {
+      "file": "packages/cezar/src/agent-config/account-identity.ts",
+      "site": "provider === 'codex'",
+      "count": 1,
+      "reason": "identity choice: Codex keeps its login identity in its own file format; this selects its reader"
+    },
+    {
+      "file": "packages/cezar/src/delegation/execution-identity.ts",
+      "site": "binding.provider === 'claude'",
+      "count": 1,
+      "reason": "identity choice: only a Claude account binding carries a Claude config layout"
+    },
+    {
+      "file": "packages/cezar/src/delegation/execution-identity.ts",
+      "site": "profile.provider === 'claude'",
+      "count": 1,
+      "reason": "identity choice: a Claude account binds the Claude agent home, not the profile folder"
+    },
+    {
+      "file": "packages/cezar/src/delegation/execution-identity.ts",
+      "site": "profile.provider !== 'claude'",
+      "count": 1,
+      "reason": "identity choice: only a Claude account binding records a Claude config layout"
+    },
+    {
+      "file": "packages/cezar/src/delegation/execution-identity.ts",
+      "site": "binding.provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: omp selects an account by profile name, so its binding sets the omp profile environment"
+    },
+    {
+      "file": "packages/cezar/src/delegation/execution-identity.ts",
+      "site": "provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: a named omp account is an omp profile, selected by name and not by folder"
+    },
+    {
+      "file": "packages/cezar/src/home/legacy-account-paths.ts",
+      "site": "source.provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: an omp profile root inside the legacy home is not moved, because omp finds it by name"
+    },
+    {
+      "file": "packages/cezar/src/home/migration-accounts.ts",
+      "site": "account.provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: omp redirects by profile name, so migration keeps its folder and does not copy it"
+    },
+    {
+      "file": "packages/cezar/src/planner.ts",
+      "site": "config.defaultRunner === 'claude'",
+      "count": 1,
+      "reason": "identity choice: plannerModel is a Claude model alias; other runners plan on their own default model"
+    },
+    {
+      "file": "packages/cezar/src/runs/auto-name.ts",
+      "site": "config.defaultRunner === 'claude'",
+      "count": 1,
+      "reason": "identity choice: namerModel is a Claude model alias; other runners name on their own default model"
+    },
+    {
+      "file": "packages/cezar/src/runs/store.ts",
+      "site": "id === 'claude-cli'",
+      "count": 1,
+      "reason": "identity choice: a stored run with the legacy id reads as claude"
+    },
+    {
+      "file": "packages/cezar/src/server-install/steps.ts",
+      "site": "name === 'opencode'",
+      "count": 1,
+      "reason": "identity choice: OpenCode has no npm package, so the installer names its site"
+    },
+    {
+      "file": "packages/cezar/src/server/open-in-targets.ts",
+      "site": "cliRunner === 'omp'",
+      "count": 2,
+      "reason": "capability branch; should become a fact: Cursor and OMP start in a terminal from a configured executable, which the refusal also names"
+    },
+    {
+      "file": "packages/cezar/src/server/open-in-targets.ts",
+      "site": "cliRunner === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: Cursor and OMP start in a terminal from a configured executable; other runners start by their PATH name"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "result.runner === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: only Cursor's model catalog refreshes in the background and is pushed to cockpits"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "result.runner !== 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: only Cursor's model catalog refreshes in the background and is published on a socket topic"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "query.data.runner === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: only Cursor's model catalog is served from the cache; other runners are discovered on request"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "profile.provider === 'claude'",
+      "count": 1,
+      "reason": "identity choice: an account's folder fills its own provider's slot of the agent home paths"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "profile.provider === 'codex'",
+      "count": 1,
+      "reason": "identity choice: an account's folder fills its own provider's slot of the agent home paths"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "profile.provider === 'opencode'",
+      "count": 1,
+      "reason": "identity choice: an account's folder fills its own provider's slot of the agent home paths"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "profile.provider === 'pi'",
+      "count": 1,
+      "reason": "identity choice: an account's folder fills its own provider's slot of the agent home paths"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "profile.provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: an account's folder fills its own provider's slot of the agent home paths; a named omp account keeps its config in agent/"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: an omp account folder must be a profile in omp's profiles directory"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "backend === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: the take-over command of Cursor and OMP depends on a server-side executable override, so the server sends it"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "backend === 'omp'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: the take-over command of Cursor and OMP depends on a server-side executable override, so the server sends it"
+    },
+    {
+      "file": "packages/cezar/src/server/server.ts",
+      "site": "switch (runner) case 'codex', 'opencode', 'cursor', 'pi', 'omp'",
+      "count": 1,
+      "reason": "identity choice: each runner's CLI spells its session take-over command its own way"
+    },
+    {
+      "file": "packages/cezar/src/workflows/types.ts",
+      "site": "backend === 'claude-cli'",
+      "count": 1,
+      "reason": "identity choice: a step with the legacy id gets Claude's extra tools"
+    },
+    {
+      "file": "packages/cezar/src/workspace/agent-accounts.ts",
+      "site": "account.provider !== 'omp'",
+      "count": 1,
+      "reason": "identity choice: an omp account folder must have the shape of an omp profile"
+    },
+    {
+      "file": "packages/cezar/src/workspace/agent-profiles.ts",
+      "site": "provider !== 'omp'",
+      "count": 1,
+      "reason": "identity choice: only omp can lose an account when its profiles directory moves"
+    },
+    {
+      "file": "packages/web/src/api/global-events.tsx",
+      "site": "result.data.runner !== 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: only Cursor's model catalog arrives as a pushed event"
+    },
+    {
+      "file": "packages/web/src/api/queries.ts",
+      "site": "runner !== 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: only Cursor's model catalog arrives on a socket topic"
+    },
+    {
+      "file": "packages/web/src/api/queries.ts",
+      "site": "result.data.runner === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: only Cursor's model catalog arrives on a socket topic"
+    },
+    {
+      "file": "packages/web/src/routes/new-task-form.ts",
+      "site": "runner === 'cursor'",
+      "count": 2,
+      "reason": "capability branch; should become a fact: Cursor takes effort levels only from its discovered catalog and serves model ids of every provider"
+    },
+    {
+      "file": "packages/web/src/routes/new-task-form.ts",
+      "site": "runner !== 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: Cursor's effort levels count only when the catalog in hand is Cursor's own"
+    },
+    {
+      "file": "packages/web/src/routes/new-task-form.ts",
+      "site": "runner !== 'claude'",
+      "count": 1,
+      "reason": "identity choice: the retired dated Claude model ids belong to Claude only"
+    },
+    {
+      "file": "packages/web/src/routes/settings/add-account-dialog.tsx",
+      "site": "provider === 'omp'",
+      "count": 1,
+      "reason": "identity choice: the dialog explains that an omp account is an omp profile"
+    },
+    {
+      "file": "packages/web/src/routes/settings/agent-config-section.tsx",
+      "site": "agent.id === 'claude'",
+      "count": 1,
+      "reason": "identity choice: only Claude's MCP group also shows the user-level MCP listing"
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/conversation-presentation.ts",
+      "site": "recipientBackend === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: Cursor admits input only at a turn boundary (inputDelivery.mode), which the cockpit cannot read yet"
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.ts",
+      "site": "switch (runner) case 'codex', 'cursor', 'opencode', 'pi', 'omp'",
+      "count": 1,
+      "reason": "identity choice: each runner's CLI spells its session take-over command its own way"
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.ts",
+      "site": "backend === 'cursor'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: the take-over command of Cursor and OMP depends on a server-side executable override, so the cockpit shows the server's"
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.ts",
+      "site": "backend === 'omp'",
+      "count": 1,
+      "reason": "capability branch; should become a fact: the take-over command of Cursor and OMP depends on a server-side executable override, so the cockpit shows the server's"
+    }
+  ]
+}

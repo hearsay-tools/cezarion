@@ -101,7 +101,7 @@ choice below, reload the composer, then start the task:
 - `packages/web/src/routes/new-task.test.tsx`: `/setup` component matrix also covers
   workspace on/off and interactive hints, including explicit off beating workspace
   on and explicit on beating an interactive hint. The retained choice remains intact.
-- `packages/cezar/src/workflows/run.test.ts`: immediate human Continue preserves
+- `packages/cezar/src/workflows/run-continue-recovery.test.ts`: immediate human Continue preserves
   true, false and legacy absent values through disk persistence; runner startup is
   stubbed because this assertion concerns saved mode, not nudge execution.
 - `packages/cezar/src/workflows/recover-autonomous.test.ts`: queued recovery and

@@ -40,18 +40,16 @@ describe('harness autosave settlement part registration', () => {
       describe: ((_name: string, body: () => void) => body()) as typeof describe,
       it: ((name: string) => { names.push(name); }) as typeof it,
     };
-    for (const [suffix, outcome] of [['', 'failed'], ['-success', 'success']] as const) {
-      const source = readFileSync(new URL(`./harness-autosave-settlement${suffix}.test.ts`, import.meta.url), 'utf8');
-      expect(source).toContain(`describeAutosaveSettlement('${outcome}');`);
-      expect(source.match(/describeAutosaveSettlement\(/g)).toHaveLength(1);
-      describeAutosaveSettlement(outcome, registration);
-    }
-    for (const suffix of ['-cancel', '-cancel-continue']) {
-      const source = readFileSync(new URL(`./harness-autosave-settlement${suffix}.test.ts`, import.meta.url), 'utf8');
-      expect(source.match(/describeAutosaveSettlement\(/g)).toHaveLength(1);
-      const calls = [...source.matchAll(/describeAutosaveSettlement\('cancelled', undefined, \[(true|false)\]\);/g)];
-      expect(calls).toHaveLength(1);
-      for (const call of calls) describeAutosaveSettlement('cancelled', registration, [call[1] === 'true']);
+    const settlementFiles = ['', '-failed-continue', '-success', '-success-continue', '-cancel', '-cancel-continue']
+      .map(suffix => `harness-autosave-settlement${suffix}.test.ts`);
+    expect(readdirSync(new URL('.', import.meta.url)).filter(file => /^harness-autosave-settlement.*\.test\.ts$/.test(file)).sort())
+      .toEqual([...settlementFiles, 'harness-autosave-settlement-churn.test.ts'].sort());
+    for (const file of settlementFiles) {
+      const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
+      expect(source.match(/describeAutosaveSettlement\(/g), file).toHaveLength(1);
+      const calls = [...source.matchAll(/describeAutosaveSettlement\('(failed|success|cancelled)', undefined, \[(true|false)\]\);/g)];
+      expect(calls, file).toHaveLength(1);
+      for (const call of calls) describeAutosaveSettlement(call[1] as 'failed' | 'success' | 'cancelled', registration, [call[2] === 'true']);
     }
     const churn = readFileSync(new URL('./harness-autosave-settlement-churn.test.ts', import.meta.url), 'utf8');
     expect(churn.match(/describeAutosaveChurn\(/g)).toHaveLength(1);
