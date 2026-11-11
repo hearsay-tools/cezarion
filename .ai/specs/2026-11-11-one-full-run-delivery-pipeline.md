@@ -61,11 +61,15 @@ Two facts decide the shape:
    does not cover: typecheck, citations and clones.
 2. The Squeal wait bound in this command is 2 minutes. When the bound expires with no
    failure, the command names the missing results and passes. CI runs them within minutes.
-3. Local `test:parity`, local browser specs and local coverage collection leave the list of
-   duties. CI runs them.
+3. Local `test:parity`, local browser specs and any coverage run outside the quality check
+   leave the list of duties. CI runs them.
 4. The changed-function quality check (`.ai/skills/check-code-quality/`) runs beside the
-   push, like the reviewer, until hearsay-tools/squeal#190 lets it reuse imported coverage.
-   An incomplete report blocks, as the skill's pre-PR guidance says; § Merge waits for it.
+   push, like the reviewer. It reuses the daemon's results at the branch's own content:
+   one report on 2026-11-11 took 136 s with 681 of 755 files from the store, and 661 s with
+   none. Coverage imported from `main` cannot shorten it, because every file it selects
+   loads changed code, so no key equals a `main` key (Squeal research on
+   hearsay-tools/squeal#190, closed). An incomplete report blocks, as the skill's pre-PR
+   guidance says; § Merge waits for it.
 5. The agent opens the PR ready, not draft.
 
 Regression proof (`docs/sdlc/regression-proof.md`) stays. It is part of writing the test.
@@ -175,10 +179,14 @@ nightly as the rehearsal. Two changes, because this plan has no `main-verify.yml
 ### Coverage
 
 A Vitest run takes one coverage provider. Today the PR shards collect V8 coverage, and
-the queue shards collect Squeal's per-file records. Until hearsay-tools/squeal#189 lands,
-this stays as it is: PR runs keep `--coverage.enabled` over the selected tests, which are
-the tests that the changed-function check needs. When it lands, every CI Vitest run uses
-`squeal ci record` with one provider that writes both outputs.
+the queue shards collect Squeal's per-file records. This plan keeps that split: PR runs
+keep `--coverage.enabled` over the selected tests.
+
+Squeal is studying whether `ci record` can wrap the project's own provider and read
+per-file records from it, keeping the project's report and thresholds (hearsay-tools/squeal#189,
+squeal spec 020 row 020-26). If it can, a later change records the PR runs too. The quality
+check can then read the PR's own parts (`squeal code --parts`, squeal spec 020 D13.2) for
+the files CI already ran. That change is not part of this plan.
 
 ### Records that a later run reads
 
