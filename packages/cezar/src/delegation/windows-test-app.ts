@@ -1,3 +1,4 @@
+import { POWERSHELL, powershellEnv } from '../core/windows-powershell.ts';
 import { spawnSync } from 'node:child_process';
 import { win32 } from 'node:path';
 
@@ -22,7 +23,7 @@ public static class CezArgv {
 
 function powershell(script: string): string | undefined {
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { encoding: 'utf8', timeout: 10_000, windowsHide: true });
+  const result = spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { env: powershellEnv(), encoding: 'utf8', timeout: 10_000, windowsHide: true });
   return result.status === 0 ? result.stdout.trim() : undefined;
 }
 

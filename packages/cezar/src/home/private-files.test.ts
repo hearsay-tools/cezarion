@@ -10,14 +10,19 @@ vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>();
   return { ...fs, renameSync: vi.fn(fs.renameSync), statSync: vi.fn(fs.statSync) };
 });
-afterEach(() => { vi.resetAllMocks(); });
+afterEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); });
 
 it.each([false, true])('replaces the Windows ACL with one current-user grant (directory=%s)', directory => {
+  vi.stubEnv('PSModulePath', 'C:\\Program Files\\PowerShell\\7\\Modules');
   protectPrivatePath("C:\\Users\\operator's home\\private", directory, { platform: 'win32', layout: 'split' });
   expect(execFileSync).toHaveBeenCalledTimes(1);
   const [command, args, options] = vi.mocked(execFileSync).mock.calls[0]!;
   expect(command).toBe('powershell.exe');
-  expect(options).toEqual({ windowsHide: true, stdio: 'pipe' });
+  // A PowerShell 7 parent's module path stops 5.1 from autoloading Set-Acl.
+  const { env, ...rest } = options as { env: NodeJS.ProcessEnv };
+  expect(rest).toEqual({ windowsHide: true, stdio: 'pipe' });
+  expect(Object.keys(env).some(name => name.toUpperCase() === 'PSMODULEPATH')).toBe(false);
+  expect(env.PATH).toBe(process.env.PATH);
   expect(args?.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
   const script = args?.[3];
   expect(script).toContain(`New-Object System.Security.AccessControl.${directory ? 'DirectorySecurity' : 'FileSecurity'}`);

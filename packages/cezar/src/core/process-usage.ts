@@ -14,6 +14,7 @@
  *    `ps` output (scripts/test-process-usage.mjs).
  */
 
+import { POWERSHELL, powershellEnv } from './windows-powershell.ts';
 import { execFile } from 'node:child_process';
 
 /** One aggregated sample for a run's process tree. */
@@ -233,13 +234,13 @@ function runPs(): Promise<string | null> {
   if (process.platform === 'win32') {
     return new Promise((resolve) => {
       execFile(
-        'powershell',
+        POWERSHELL,
         [
           '-NoProfile',
           '-Command',
           "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $([math]::Round($_.WorkingSetSize/1024)) 0\" }",
         ],
-        { maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+        { env: powershellEnv(), maxBuffer: 16 * 1024 * 1024, windowsHide: true },
         (err, stdout) => resolve(err ? null : stdout),
       );
     });

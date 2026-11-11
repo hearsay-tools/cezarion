@@ -1,3 +1,4 @@
+import { POWERSHELL, powershellEnv } from './core/windows-powershell.ts';
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
@@ -439,8 +440,8 @@ public static class CezLeaseJob {
 }
 '@
 [CezLeaseJob]::Live([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${value}')))`;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from("$ErrorActionPreference='Stop'; " + script, 'utf16le').toString('base64')], {
-    encoding: 'utf8', timeout: 10_000, windowsHide: true,
+  const result = spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from("$ErrorActionPreference='Stop'; " + script, 'utf16le').toString('base64')], {
+    env: powershellEnv(), encoding: 'utf8', timeout: 10_000, windowsHide: true,
   });
   return result.status === 0 ? result.stdout.trim() : undefined;
 }

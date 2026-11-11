@@ -1,3 +1,4 @@
+import { POWERSHELL, powershellEnv } from '../core/windows-powershell.ts';
 import { execFileSync } from 'node:child_process';
 import { REBRAND_SWITCH } from './switch.ts';
 import type { HomeLayout } from './kind-roots.ts';
@@ -27,7 +28,7 @@ $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User;
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', '${inheritance}', 'None', 'Allow');
 $acl.AddAccessRule($rule);
 Set-Acl -LiteralPath ${literal} -AclObject $acl;`;
-  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'pipe' });
+  execFileSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script], { env: powershellEnv(), windowsHide: true, stdio: 'pipe' });
 }
 
 const protectedDirectories = new Map<string, { dev: bigint; ino: bigint }>();

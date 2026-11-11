@@ -1,3 +1,4 @@
+import { POWERSHELL, powershellEnv } from './core/windows-powershell.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { z } from 'zod';
 
@@ -8,8 +9,8 @@ const snapshotScript = `$ErrorActionPreference='Stop'; $rows=@(Get-CimInstance W
 /** Bounded async probes: never block another run's shutdown timers. */
 function powershell(script: string): Promise<string | undefined> {
   return new Promise(done => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { encoding: 'utf8', windowsHide: true, timeout: 5_000, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024 },
+    execFile(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      { env: powershellEnv(), encoding: 'utf8', windowsHide: true, timeout: 5_000, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024 },
       (error, stdout) => done(error ? undefined : stdout));
   });
 }
@@ -25,8 +26,8 @@ function incarnation(pid: number): string | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
   const script = `$ErrorActionPreference='Stop'; $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if (-not $p) { 'gone' } elseif ($p.CreationDate) { [string]$p.CreationDate.ToUniversalTime().Ticks }`;
   try {
-    const token = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-      { encoding: 'utf8', windowsHide: true, timeout: 2_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 }).trim();
+    const token = execFileSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+      { env: powershellEnv(), encoding: 'utf8', windowsHide: true, timeout: 2_000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 }).trim();
     return token === 'gone' || /^\d+$/.test(token) ? token : undefined;
   } catch { return undefined; }
 }
