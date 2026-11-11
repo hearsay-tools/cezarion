@@ -80,6 +80,8 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   // The lease imports the process-group helper from source; the marker makes it an ES module.
   mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
   copyFileSync(join(repoRoot, 'packages/cezar/src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
+  mkdirSync(join(root, 'packages/cezar/src/core'), { recursive: true });
+  copyFileSync(join(repoRoot, 'packages/cezar/src/core/windows-powershell.ts'), join(root, 'packages/cezar/src/core/windows-powershell.ts'));
   writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
   if (process.platform === 'darwin') symlinkSync(commandPath('ps'), join(root, 'bin/ps'));
   copyFileSync(join(repoRoot, '.ai/scripts/resolve-browser-launch.mjs'), join(root, '.ai/scripts/resolve-browser-launch.mjs'));

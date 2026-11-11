@@ -9,7 +9,7 @@ import type { HelperPlan } from './helper.ts';
 /** Every module the copied helper loads, by its path from this directory in `dist`. Each copy
  *  keeps that path from `helper/`, so `../detached-process.js` lands in the state directory.
  *  `launcher.test.ts` checks the list against the helper's import closure. */
-export const HELPER_MODULES = ['helper.js', 'runtime-layout.js', 'scoped-recovery.js', 'lock.js', 'npm-process.js', 'bin-recovery.js', '../detached-process.js', '../home/identity.js', '../home/switch.js'] as const;
+export const HELPER_MODULES = ['helper.js', 'runtime-layout.js', 'scoped-recovery.js', 'lock.js', 'npm-process.js', 'bin-recovery.js', '../detached-process.js', '../core/windows-powershell.js', '../home/identity.js', '../home/switch.js'] as const;
 
 /** Copy the helper out of the package npm will replace; pass credentials only via inherited env. */
 export async function armRestartHelper(plan: RestartPlan, launch: {
