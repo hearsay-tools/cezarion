@@ -689,11 +689,6 @@ jobs:
         if: hashFiles('pnpm-lock.yaml') != ''
         run: pnpm install --frozen-lockfile
 
-      # The former typecheck step built the server before these unit tests.
-      # Keep that preparation on this VM after moving typecheck to its own job.
-      - name: Build server for unit tests
-        run: npm run build:server
-
       - name: Run unit tests
         run: npm run test:unit
 
@@ -775,11 +770,6 @@ jobs:
       - name: Install pnpm dependencies
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (hashFiles('pnpm-lock.yaml') != '')
         run: pnpm install --frozen-lockfile
-
-      # Unit fixtures exercise built server modules; retain their server build.
-      - name: Build server dependencies
-        run: npm run build:server
-        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Run server and cockpit unit suites
         id: collect
@@ -896,10 +886,6 @@ jobs:
 
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
-
-      # The shards' tests read the built server modules; the export checks them.
-      - name: Build server dependencies
-        run: npm run build:server
 
       - name: Fetch the Squeal release
         env: *squeal-release
@@ -1027,11 +1013,6 @@ jobs:
       - name: Install pnpm dependencies
         continue-on-error: true
         run: pnpm install --frozen-lockfile
-
-      # The shards' tests read the built server modules; the gate checks them and runs tests.
-      - name: Build server dependencies
-        continue-on-error: true
-        run: npm run build:server
 
       - name: Fetch the Squeal release
         continue-on-error: true
