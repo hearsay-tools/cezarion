@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { realpath } from 'node:fs/promises';
 import { z } from 'zod';
@@ -155,7 +156,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
   const projectFailure = (error: unknown, projectId: string): { error: string; status: 404 | 409 | 503 } => {
     const failure = classifyProjectBuildFailure(error);
     if (failure.kind === 'unexpected') {
-      console.error(`[cez] project ${projectId} context build failed:`, error);
+      console.error(`${logPrefix()} project ${projectId} context build failed:`, error);
       return { error: 'project unavailable', status: 503 };
     }
     if (failure.kind === 'missing-root') return { error: `project folder not found: ${failure.error.projectId}`, status: 409 };

@@ -1,3 +1,4 @@
+import { POWERSHELL, powershellEnv } from '../detached-process.ts';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -116,7 +117,7 @@ function watcherPresent(root: string): boolean {
   const windows = windowsWatchers;
   const script = "$ErrorActionPreference='Stop'; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | ForEach-Object { if (!$_.CommandLine) { throw 'Unreadable node command line' }; $_.CommandLine })";
   const result = windows
-    ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+    ? spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: powershellEnv(), encoding: 'utf8', timeout: 10_000, windowsHide: true })
     : spawnSync('ps', ['-axww', '-o', 'args='], { encoding: 'utf8', timeout: 2_000 });
   if (result.status !== 0) return true;
   try {

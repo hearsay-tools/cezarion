@@ -1,23 +1,28 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { privateDirectory, protectPrivatePath, replacePrivate } from './private-files.ts';
 
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('node:fs', async original => {
   const fs = await original<typeof import('node:fs')>();
-  return { ...fs, renameSync: vi.fn(fs.renameSync), statSync: vi.fn(fs.statSync) };
+  return { ...fs, mkdirSync: vi.fn(fs.mkdirSync), renameSync: vi.fn(fs.renameSync), statSync: vi.fn(fs.statSync) };
 });
-afterEach(() => { vi.resetAllMocks(); });
+afterEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); });
 
 it.each([false, true])('replaces the Windows ACL with one current-user grant (directory=%s)', directory => {
+  vi.stubEnv('PSModulePath', 'C:\\Program Files\\PowerShell\\7\\Modules');
   protectPrivatePath("C:\\Users\\operator's home\\private", directory, { platform: 'win32', layout: 'split' });
   expect(execFileSync).toHaveBeenCalledTimes(1);
   const [command, args, options] = vi.mocked(execFileSync).mock.calls[0]!;
   expect(command).toBe('powershell.exe');
-  expect(options).toEqual({ windowsHide: true, stdio: 'pipe' });
+  // A PowerShell 7 parent's module path stops 5.1 from autoloading Set-Acl.
+  const { env, ...rest } = options as { env: NodeJS.ProcessEnv };
+  expect(rest).toEqual({ windowsHide: true, stdio: 'pipe' });
+  expect(Object.keys(env).some(name => name.toUpperCase() === 'PSMODULEPATH')).toBe(false);
+  expect(env.PATH).toBe(process.env.PATH);
   expect(args?.slice(0, 3)).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
   const script = args?.[3];
   expect(script).toContain(`New-Object System.Security.AccessControl.${directory ? 'DirectorySecurity' : 'FileSecurity'}`);
@@ -117,4 +122,44 @@ it.each(['\u2018', '\u2019', '\u201A', '\u201B'])('keeps a typographic apostroph
   protectPrivatePath(path, true, { platform: 'win32', layout: 'split' });
   expect(execFileSync).toHaveBeenCalledTimes(1);
   expect(vi.mocked(execFileSync).mock.calls[0]?.[1]?.[3]).toContain(`Set-Acl -LiteralPath 'C:\\Users\\O${quote}${quote}Brien\\private' -AclObject $acl;`);
+});
+
+/** The Set-Acl targets of the mocked spawns, in order, with PowerShell's doubled quotes decoded. */
+function aclTargets(): string[] {
+  return vi.mocked(execFileSync).mock.calls.map(([, args]) =>
+    (/Set-Acl -LiteralPath '(.*)' -AclObject/.exec(String(args?.[3]))?.[1] ?? '').replace(/(['\u2018-\u201B])\1/g, '$1'));
+}
+
+describe('a new private directory chain on Windows', () => {
+  const win = { platform: 'win32', layout: 'split' } as const;
+  let root: string;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-private-chain-')));
+    const real = vi.mocked(mkdirSync).getMockImplementation();
+    // Windows returns the first created path in another form; the walk must not depend on it.
+    vi.mocked(mkdirSync).mockImplementation(((path: string, options: unknown) => {
+      real?.(path, options as never);
+      return 'C:\\Foreign\\Form';
+    }) as never);
+  });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('protects every directory it creates and never joins a foreign path segment', () => {
+    privateDirectory(join(root, 'a', 'b', 'c'), win);
+    expect(aclTargets()).toEqual([join(root, 'a'), join(root, 'a', 'b'), join(root, 'a', 'b', 'c')]);
+    expect(existsSync(join(root, 'a', 'b', 'c'))).toBe(true);
+  });
+
+  it('decodes quoted path literals before it compares them', () => {
+    const quoted = join(root, "o'brien \u2019s");
+    privateDirectory(quoted, win);
+    expect(aclTargets()).toEqual([quoted]);
+  });
+
+  it('protects only the part of the chain that did not exist', () => {
+    mkdirSync(join(root, 'a'));
+    vi.mocked(execFileSync).mockClear();
+    privateDirectory(join(root, 'a', 'b', 'c'), win);
+    expect(aclTargets()).toEqual([join(root, 'a', 'b'), join(root, 'a', 'b', 'c')]);
+  });
 });

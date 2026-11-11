@@ -50,7 +50,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
       await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
       const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
       writeFileSync(opened, '');
-      const refusal = `cez message reply ${w.id} '<answer>' --id <new-UUID> --request-id ${questionId}`;
+      const refusal = `hsq message reply ${w.id} '<answer>' --id <new-UUID> --request-id ${questionId}`;
       const refusedNotes = () => eventsOf(p.id, 'note').filter(event => String(event.message).startsWith('Completion blocked: ') && String(event.message).includes(refusal));
       const nudges = () => eventsOf(p.id, 'note').filter(event => String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
       await until(() => refusedNotes().length === 1 && !!store.getRun(p.id)?.agentInputs?.find(input => input.id === questionId)?.deliveredAt && store.getRun(p.id)?.status === 'waiting');

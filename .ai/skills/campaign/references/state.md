@@ -11,7 +11,7 @@ Record these fields:
   scope and guarantees, expected files/regions at a main SHA, prerequisites and
   their release checks, status and blocker.
 - **Execution:** spawn request id, worker id, runner/model, baseline SHA,
-  brief path, Cezar wait and request ids, latest collected revision.
+  brief path, Squawk wait and request ids, latest collected revision.
 - **Evidence:** PR and current head, reviewed head and findings, criterion-to-check
   results, landing outcome and merge SHA, integrated acceptance SHA/results,
   before/after metrics when relevant, preserved artifacts.
@@ -34,7 +34,7 @@ can have a PR awaiting its owner; a merged PR can still fail integration.
 | State | Exit condition | Who fires the exit |
 |---|---|---|
 | Queued | Plan current, prerequisite checks passed, slot free | Coordinator dispatches |
-| Running | Evidence ready, question, failure or settlement | Worker report or Cezar worker wait |
+| Running | Evidence ready, question, failure or settlement | Worker report or Squawk worker wait |
 | Reviewing | Findings resolved at the current head | Coordinator diff review and worker reply |
 | Awaiting owner | Owner approves/merges, rejects or changes scope | Human input or PR wait; this is a deliberate human gate |
 | Landing | Observed merge, changed head or blocked gate | land-pr result or PR wait |

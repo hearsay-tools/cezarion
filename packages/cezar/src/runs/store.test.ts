@@ -219,7 +219,7 @@ describe('RunStore save lifecycle (#124)', () => {
 
     expect(existsSync(dataDir)).toBe(true);
     expect(error).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(
-      /\[cez\] failed to save runs\.db: .*locked/,
+      /\[(?:cez|hsq)\] failed to save runs\.db: .*locked/,
     ));
     expect(readPersistedRuns(dataDir)).toEqual([]);
     // The failed save left the row pending, so the next one writes it.

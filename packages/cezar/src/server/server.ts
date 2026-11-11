@@ -3,7 +3,7 @@ import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from '
 import { deleteSavedWorkflow } from './workflow-files.ts';
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
 import { productIdentity } from '../home/identity.ts';
-import { productName } from '../home/display.ts';
+import { productName, logPrefix } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { prepareHomeLifecycle } from '../home/entry.ts';
 import { reportsRoutes } from './reports-api.ts';
@@ -4873,7 +4873,7 @@ export function createApp(deps: ServerDeps) {
     try {
       return read();
     } catch (error) {
-      console.warn(`[cez] runs of project ${projectId} could not be read for the workspace run index: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${logPrefix()} runs of project ${projectId} could not be read for the workspace run index: ${error instanceof Error ? error.message : String(error)}`);
       return { runs: [], truncated: false };
     }
   };

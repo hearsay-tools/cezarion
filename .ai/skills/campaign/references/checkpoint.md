@@ -1,6 +1,6 @@
 # Recovery checkpoint
 
-Use this procedure when teardown requires preservation. The retained Cezar
+Use this procedure when teardown requires preservation. The retained Squawk
 result and bounded `diffSnapshot` are evidence, not a complete recovery copy.
 Run each command block in Bash with `set -euo pipefail`; a failure stops the
 procedure.

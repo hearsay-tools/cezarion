@@ -10,6 +10,7 @@
  * `.ndjson.br.orphaned` (or `.orphaned.<n>` if that name is taken) before renaming. A size/mtime/inode
  * mismatch returns `'changed'` so the compressor can retry; ineligible or missing plain returns `'skipped'`.
  */
+import { logPrefix } from '../home/display.ts';
 import { randomBytes } from 'node:crypto';
 import {
   closeSync,
@@ -310,13 +311,13 @@ function tryDecompressSync(encoded: Buffer): Buffer | undefined {
 function warnUndecodable(path: string, extra = ''): void {
   if (warnedUndecodable.has(path)) return;
   warnedUndecodable.add(path);
-  console.warn(`[cez] ignoring undecodable compressed transcript ${path}${extra}`);
+  console.warn(`${logPrefix()} ignoring undecodable compressed transcript ${path}${extra}`);
 }
 
 function warnOrphaned(path: string): void {
   if (warnedOrphaned.has(path)) return;
   warnedOrphaned.add(path);
-  console.warn(`[cez] keeping non-prefix compressed transcript as ${path}`);
+  console.warn(`${logPrefix()} keeping non-prefix compressed transcript as ${path}`);
 }
 
 function isDecodedPrefix(decoded: Buffer, plain: Buffer): boolean {

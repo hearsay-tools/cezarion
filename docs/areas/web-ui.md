@@ -26,7 +26,7 @@ React 19 + Vite + Tailwind v4 + shadcn/ui; source lives in `packages/web/` (its 
 The Activity tab shows live work: `/p/:projectId/activity` for one project and `/activity` for all projects. The spec is `.ai/specs/2026-11-05-live-activity-view.md`; the code is in `packages/web/src/routes/activity/`. Keep these rules when you change it:
 
 - **Stable placement.** A card keeps its column and its order while it stays on the view. A state change never moves a card. Only a card that comes or goes changes the placement (`placeCards` in `layout.ts`).
-- **Only open requests and waits.** A line and a rail entry stand for a request with no outcome. A dotted wait line stands for an open peer wait (`cez message wait --peer`), from the peer to the waiter; it has no rail entry. A settled request or an ended wait leaves the view. The view keeps no message history.
+- **Only open requests and waits.** A line and a rail entry stand for a request with no outcome. A dotted wait line stands for an open peer wait (`hsq message wait --peer`), from the peer to the waiter; it has no rail entry. A settled request or an ended wait leaves the view. The view keeps no message history.
 - **Text form of the lines.** The SVG lines are `aria-hidden`. Each card and each worker row carries the same facts as text: "Waiting for a reply from <task>" and "<task> waits for your reply"; for a peer wait, "Waiting for a message from <task>" and "<task> waits for you to write". Tests and screen readers read that text, not the line geometry.
 - **Reduced motion.** With `prefers-reduced-motion: reduce`, nothing pulses, breathes, sweeps, marches, drifts or slides, and no comet flies. Changes apply at once. Ages still tick.
 - **No motion on the first snapshot.** The client derives every animation from the difference between two snapshots. The first snapshot after a mount has nothing to compare with, so it draws at once, with no motion. This holds after a service restart too: open requests return in the first snapshot without a comet.
@@ -34,7 +34,8 @@ The Activity tab shows live work: `/p/:projectId/activity` for one project and `
 - **Motion cost.** Animate only `transform` and `opacity`, with one named exception: the marching dashes on open lines, stubs and arcs, and the drifting dots on wait lines, animate `stroke-dashoffset` in CSS, with no JavaScript loop. Both pause on a hidden tab and are static with reduced motion. Measure line geometry on layout change (`ResizeObserver`), never on every frame.
 - **Live region.** Only the summary chips are a polite live region. Cards and the Just now feed are not, so a busy project does not flood a screen reader.
 
-Build-time `VITE_HSQ_E2E` and `VITE_HSQ_API_BASE` take precedence over their
-`VITE_CEZ_*` fallbacks, including defined empty values. The Vite build marker
-uses the same E2E decision as the browser. The dev proxy accepts `HSQ_API_PORT`
+Build-time `VITE_HSQ_E2E` (`VITE_CEZ_E2E` fallback) and
+`VITE_HSQ_API_BASE` (`VITE_CEZ_API_BASE` fallback) take precedence, including
+defined empty values. The Vite build marker
+uses the same E2E decision as the browser. The dev proxy accepts `HSQ_API_PORT` (`CEZ_API_PORT` fallback)
 first; the root dev launcher pins both port names to the port it selected.
