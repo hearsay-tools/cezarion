@@ -1,7 +1,7 @@
 import { legacyIndexRows } from './legacy-run-rows.ts';
 import { dataReadDirs } from '../project-paths.ts';
 import { addRunSource, copyFallbackFamily, fallbackRunSource, bindWorkerResultPath, fallbackRunDeleteError, workerResultsDirectory } from './project-run-sources.ts';
-import { productName } from '../home/display.ts';
+import { productName, logPrefix } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
 import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
@@ -356,8 +356,8 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   // Told once, by the import that committed: the marker means no later open reads runs.json again.
   if (commit.skipped || backup === undefined) return;
   const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; https://github.com/hearsay-tools/cezarion/blob/main/docs/run-history-recovery.md says how to import it after a repair.`;
-  if (!parsed) console.warn(`[cez] ${LEGACY_INDEX_FILE} could not be read; no run was imported, and this project starts with an empty history. ${kept}`);
-  else if (skipped > 0) console.warn(`[cez] ${skipped} of ${parsed.total} runs in ${LEGACY_INDEX_FILE} could not be read and were not imported. ${kept}`);
+  if (!parsed) console.warn(`${logPrefix()} ${LEGACY_INDEX_FILE} could not be read; no run was imported, and this project starts with an empty history. ${kept}`);
+  else if (skipped > 0) console.warn(`${logPrefix()} ${skipped} of ${parsed.total} runs in ${LEGACY_INDEX_FILE} could not be read and were not imported. ${kept}`);
 }
 
 /**
@@ -768,7 +768,7 @@ export class RunStore extends EventEmitter {
     }
     for (const rootId of this.anchoredFamilies()) this.holdFamily(rootId, decode);
     this.releaseUnheldClaims();
-    if (unreadable > 0) console.warn(`[cez] ${unreadable} run(s) in ${RUNS_DB_FILE} could not be read; they are left in the database untouched.`);
+    if (unreadable > 0) console.warn(`${logPrefix()} ${unreadable} run(s) in ${RUNS_DB_FILE} could not be read; they are left in the database untouched.`);
   }
 
   /** Normalize a record just read from `row` (see `reconcileLoadedRun`) and hold it. Marks the row
@@ -1805,7 +1805,7 @@ export class RunStore extends EventEmitter {
     try { this.commitIndex(new Map([[id, staged.next]])); }
     catch (error) {
       if (!opts.bestEffort) throw error;
-      console.warn(`[cez] outcome checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${logPrefix()} outcome checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
       const live = this.record(id);
       if (!live) return { committed: false, answered: staged.answered, settled: staged.settled };
       for (const key of Object.keys(live) as Array<keyof RunRecord>) if (!(key in staged.next)) delete live[key];
@@ -3179,7 +3179,7 @@ export class RunStore extends EventEmitter {
       return run && !this.hasFallbackRun(id) && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
     const skipped = overflow.filter(id => this.hasFallbackRun(id)).length;
-    if (skipped) console.info(`[cez] Retention skipped ${skipped} read-only fallback run(s) under ${dataReadDirs(this.dataDir)[1]}.`);
+    if (skipped) console.info(`${logPrefix()} Retention skipped ${skipped} read-only fallback run(s) under ${dataReadDirs(this.dataDir)[1]}.`);
     const cold = overflow.filter((id) => !this.held.has(id) && !this.hasFallbackRun(id));
     if (cold.length > 0) {
       // Another process's runs are its own to keep or archive (#779, plan step 3).
@@ -3328,7 +3328,7 @@ export class RunStore extends EventEmitter {
       seqs = this.db.recordConflicts(this.owner.session, evidence);
     } catch (evidenceError) {
       const message = evidenceError instanceof Error ? evidenceError.message : String(evidenceError);
-      console.error(`[cez] ${RUNS_DB_FILE}: could not record the conflicting write on ${unexpected.map((c) => c.id).join(', ')}; it stays pending: ${message}`);
+      console.error(`${logPrefix()} ${RUNS_DB_FILE}: could not record the conflicting write on ${unexpected.map((c) => c.id).join(', ')}; it stays pending: ${message}`);
       return;
     }
     unexpected.forEach((conflict, index) => {
@@ -3361,7 +3361,7 @@ export class RunStore extends EventEmitter {
         this.base.delete(conflict.id);
         this.emit('deleted', conflict.id);
       }
-      console.error(`[cez] run ${conflict.id} was changed by another writer (${conflict.reason}); this process will not write it again until ${productName('cezar')} restarts. Evidence: ${join(this.dataDir, RUNS_DB_FILE)}, table run_conflicts, seq ${seqs[index]}.`);
+      console.error(`${logPrefix()} run ${conflict.id} was changed by another writer (${conflict.reason}); this process will not write it again until ${productName('cezar')} restarts. Evidence: ${join(this.dataDir, RUNS_DB_FILE)}, table run_conflicts, seq ${seqs[index]}.`);
     });
     this.scheduleSave();
   }
@@ -3380,7 +3380,7 @@ export class RunStore extends EventEmitter {
         // failures. The rows stay pending (and held), so the next save or commit retries them.
         if (existsSync(this.dataDir)) {
           const message = err instanceof Error ? err.message : String(err);
-          console.error(`[cez] failed to save ${RUNS_DB_FILE}: ${message}`);
+          console.error(`${logPrefix()} failed to save ${RUNS_DB_FILE}: ${message}`);
         }
         break;
       }

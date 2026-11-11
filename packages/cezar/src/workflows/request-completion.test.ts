@@ -181,7 +181,7 @@ describe('root request completion without a live session', () => {
     const refusal = completionRefusalFor(recipient.id)!;
     expect(refusal.code).toBe('requests_unanswered');
     expect(refusal.message).toContain('5 more incoming requests omitted');
-    expect(refusal.message).toContain('cez message conversation <sender>');
+    expect(refusal.message).toContain('hsq message conversation <sender>');
     expect(refusal.message.length).toBeLessThanOrEqual(4096);
     expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: refusal.code, message: refusal.message }).success).toBe(true);
     // The first cezar_done is refused with the request list; a second one in the same completion

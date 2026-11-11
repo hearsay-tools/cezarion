@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { fireCapturedTimer } from './waits.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -76,7 +77,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const answer = (await handlers(p.id).registerWait({ kind: WAIT_KIND.worker, worker_ids: subsets[17]!, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
       expect(answer).toMatchObject({ ok: false, code: 'capacity' });
-      expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] wait registration refused: capacity');
+      expect(warn).toHaveBeenCalledExactlyOnceWith(`${logPrefix()} wait registration refused: capacity`);
       // A repeat of an open wait is not a new one, and is still answered at capacity.
       expect(manager.registerWorkerListWait(p.id, { workerIds: subsets[0]!, timeoutSeconds: 600 }, 'cezar_wait').phase).toBe('open');
     } finally { release(); }
@@ -113,7 +114,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       // Storage has recovered (the fault was one write), and nothing else touches the family.
       await until(() => entryOf(p.id, entry.id)?.phase === 'resolved');
       expect(entryOf(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: w.id, status: WORKER_OUTCOME_STATUS.done }] });
-      expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] worker wait checkpoint failed; retrying in 1 second');
+      expect(warn).toHaveBeenCalledExactlyOnceWith(`${logPrefix()} worker wait checkpoint failed; retrying in 1 second`);
     } finally { release(); }
   });
 

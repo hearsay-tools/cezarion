@@ -76,8 +76,8 @@ describe('park notices (hearsay-tools/cezarion#1327)', () => {
     expect(text).toContain(`It waits on: timer ${timer.id} at ${timer.deadline} (Opened by CEZ:MONITORING.).`);
     expect(text).toContain('Its last message:\nSqueal times out harness-parity.test.ts.');
     expect(text).not.toContain('\nCEZ:MONITORING');
-    expect(text).toContain(`cez worker inspect ${worker}`);
-    expect(text).toContain(`cez message request ${worker} '<instruction>'`);
+    expect(text).toContain(`hsq worker inspect ${worker}`);
+    expect(text).toContain(`hsq message request ${worker} '<instruction>'`);
   });
 
   it('says a worker with no open wait waits for its parent, and leaves out settled waits and a missing message', () => {

@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceProject } from '../workspace/config.ts';
@@ -96,7 +97,7 @@ describe('project build failure policies', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const cause = new Error('unexpected /secret/path');
     expect(workspace().projectFailure(cause, 'other')).toEqual({ error: 'project unavailable', status: 503 });
-    expect(log).toHaveBeenCalledWith('[cez] project other context build failed:', cause);
+    expect(log).toHaveBeenCalledWith(`${logPrefix()} project other context build failed:`, cause);
     log.mockRestore();
   });
 

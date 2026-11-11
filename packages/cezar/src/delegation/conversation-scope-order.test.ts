@@ -49,8 +49,8 @@ describe('reply scope before direction guidance', () => {
     const before = snapshot(reply.recipientRunId);
     const pending = f.service.reply(f.caller, reply);
     await expect(pending).rejects.toMatchObject({ code: 'incompatible_state',
-      message: expect.stringContaining(`cez message follow-up ${reply.recipientRunId} "<text>" --id <new-message-UUID> --request-id ${reply.requestId}`) });
-    await expect(pending).rejects.toThrow(`cez message request ${reply.recipientRunId} "<text>" --id <new-message-UUID>`);
+      message: expect.stringContaining(`hsq message follow-up ${reply.recipientRunId} "<text>" --id <new-message-UUID> --request-id ${reply.requestId}`) });
+    await expect(pending).rejects.toThrow(`hsq message request ${reply.recipientRunId} "<text>" --id <new-message-UUID>`);
     expect(snapshot(reply.recipientRunId)).toEqual(before);
   });
 });

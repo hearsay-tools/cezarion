@@ -38,7 +38,7 @@ type MutationRecord = { status: number; body: string }
 let browser: AgentBrowser
 let server: ChildProcess
 let dataRoot: string
-let cezHome: string
+let home: Home
 let baseUrl: string
 let port: number
 
@@ -56,7 +56,7 @@ async function workspaceConfig(signal?: AbortSignal): Promise<WorkspaceConfig> {
 }
 
 function diskResources(): string {
-  const path = join(cezHome, 'config.json')
+  const path = home.workspaceConfig
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as { resources?: unknown }
     return JSON.stringify(parsed.resources ?? null)
@@ -160,9 +160,10 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  cezHome = join(dataRoot, '.cez-home')
+  const cezHome = join(dataRoot, '.cez-home')
   mkdirSync(cezHome, { recursive: true })
-  Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from(`${JSON.stringify({
+  home = Home.sandbox(cezHome)
+  Home.seedBytes(home, home.workspaceConfig, Buffer.from(`${JSON.stringify({
       resources: {
         maxParallel: 2,
         maxMonitoringSessions: 2,

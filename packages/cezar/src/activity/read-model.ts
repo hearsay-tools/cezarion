@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import type { ActivityProject, ActivityRun, ActivitySnapshot, ActivityTool, ActivityWorker, ConversationState } from '@open-mercato/cezar-contract';
 import { ACTIVITY_ERROR_MAX, ACTIVITY_RATE_SECONDS } from '@open-mercato/cezar-contract/activity';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
@@ -46,7 +47,7 @@ export function unreadableLogger(log: (message: string) => void = console.warn):
     const key = `${projectId}/${runId}`;
     if (logged.has(key)) return;
     logged.add(key);
-    log(`[cez] run ${runId} of project ${projectId} could not be read; the activity view leaves it out`);
+    log(`${logPrefix()} run ${runId} of project ${projectId} could not be read; the activity view leaves it out`);
   };
 }
 

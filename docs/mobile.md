@@ -1,6 +1,6 @@
-# Cezarion on your phone
+# Squawk on your phone
 
-The mobile app connects to an existing HTTPS Cezarion server. Agents, repositories,
+The mobile app connects to an existing HTTPS Squawk server. Agents, repositories,
 and worktrees stay on that server. The phone uses the same responsive cockpit as
 the browser: tasks, conversations, questions, and reviews. Your server's remote-mode
 restrictions still apply. The server must be reachable from the phone, including
@@ -19,8 +19,8 @@ informs its trust model; this change does not depend on that PR being merged.
 2. Unzip the download. Transfer **app-debug.apk** to your phone, or download and
    unzip it directly on the phone.
 3. Open the APK. If Android asks, allow this browser/file manager to **Install
-   unknown apps**, then install **Cezarion**. You can turn that permission off again.
-4. Launch Cezarion and follow **Connect and test** below.
+   unknown apps**, then install **Squawk**. You can turn that permission off again.
+4. Launch Squawk and follow **Connect and test** below.
 
 With USB debugging enabled, installation from a computer is also possible:
 
@@ -54,7 +54,7 @@ need to reinstall it. A downloaded unsigned archive cannot be installed directly
 5. If requested, enable **Settings → Privacy & Security → Developer Mode** on the
    phone and restart it. Trust the developer under **Settings → General → VPN &
    Device Management** if iOS asks. Run from Xcode again.
-6. Open Cezarion and follow **Connect and test** below. The Mac is not needed once
+6. Open Squawk and follow **Connect and test** below. The Mac is not needed once
    the app is installed and its provisioning is valid.
 
 If a signed development `.ipa` has been supplied separately, it only works on
@@ -70,7 +70,7 @@ and [Developer Mode](https://developer.apple.com/documentation/xcode/enabling-de
 ## Connect and test
 
 1. Enter your server's full **Cockpit address**, for example
-   `https://cezar.example.com`. Use the address without passwords, query parameters,
+   `https://squawk.example.com`. Use the address without passwords, query parameters,
    or fragments. Plain HTTP and invalid HTTPS certificates are refused.
 2. If authentication redirects to another host, enter its **Trusted sign-in
    origin**, for example `https://auth.example.com`. It must be an origin only,

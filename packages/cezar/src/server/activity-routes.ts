@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { registerReportsTopic } from './reports-topic.ts';
 import { Hono } from 'hono';
 import type { ActivitySnapshot } from '@open-mercato/cezar-contract';
@@ -102,7 +103,7 @@ export function createActivityRoutes(routeDeps: ActivityRouteDeps) {
       workspaceProjects,
       demand,
       publisher: { ...deps, changes,
-        onBuildError: (error) => console.warn('[cez] activity snapshot failed; the next change retries it:', error) },
+        onBuildError: (error) => console.warn(`${logPrefix()} activity snapshot failed; the next change retries it:`, error) },
       onProjectsChange: (listener) => {
         const offBuilt = contexts.onContextBuilt?.(listener);
         const offEvents = workspaceEvents?.on((event) => { if (event === 'project-added' || event === 'project-removed') listener(); });

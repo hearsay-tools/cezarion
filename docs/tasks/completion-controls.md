@@ -1,7 +1,7 @@
 # Task completion controls
 
 Tasks and automation templates have two optional switches. Both default to off.
-`cez task start` and `cez automation add` accept `--archive-when-done` and
+`hsq task start` and `hsq automation add` accept `--archive-when-done` and
 `--auto-merge-pr`. JSON uses `archiveWhenDone` and `autoMergePr` on the task.
 Automation edits affect future tasks. Existing tasks keep their choices.
 
