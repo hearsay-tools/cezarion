@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { sentRequestInstructions } from './completion-policy.ts';
 
-const argv = process.argv[1];
+const argv = process.argv[1]!;
 afterEach(() => { process.argv[1] = argv; });
 
 /** Agents inherit the ambient PATH. An upgrade through the old package links only cez and cezarion. */
