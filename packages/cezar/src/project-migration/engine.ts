@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { holdProjectWork, holdsProjectFence, migrationFencePaths, type ProjectMigrationFence } from '../server/cockpit-ownership.ts';
+import { asFenceHolder, holdsProjectFence, migrationFencePaths, type ProjectMigrationFence } from '../server/cockpit-ownership.ts';
 import {
   PROJECT_MIGRATION_STEPS, readProjectMigrationJournal, removeProjectMigrationJournal, writeProjectMigrationJournal, type ProjectMigrationJournal,
   type ProjectMigrationStep,
@@ -9,17 +9,18 @@ import {
 import { gitMvCommands, LEGACY_PROJECT_DIR, planProjectMigration, type ProjectMigrationPlan } from './plan.ts';
 import { GIT_MIGRATION_STEPS, MIGRATION_STEP_RUNNERS, type MigrationFault } from './steps.ts';
 import { withWorktreeMutation, type WorktreeGit } from '../git-worktree-lock.ts';
+import { assertJournalContained, assertJournalFile } from './containment.ts';
 
 /**
  * The project state migration engine (P4b2, hearsay-tools/cezarion#3088): it moves a project's
- * runtime state from `.ai/cezar/` to `.ai/squawk/` under the exclusive project fence (P4b1). It is
- * internal: no command, route or boot hook calls it until P4b3 wires it and P5 enables it.
+ * runtime state from `.ai/cezar/` to `.ai/squawk/` under the exclusive project fence. A migration
+ * runs offline (hearsay-tools/cezarion#3089): no cockpit serves the project and no task is live.
  *
- * Order: the caller takes the fence (`fenceProject` or `fenceProjectContext`); the engine checks
- * that this process holds it, runs the holder duty (`closeProject`: dispose the project's context
- * and close its store), plans, writes the journal, runs each step and marks it done, and removes
- * the journal last. The caller releases the fence afterwards, also after a failure: the journal
- * then keeps the project blocked until a resume completes it.
+ * Order: the caller takes the fence (`fenceProject`); the engine checks that this process holds
+ * it, runs as its holder (`asFenceHolder`), closes the store the caller opened (`closeProject`),
+ * plans, writes the journal, runs each step and marks it done, and removes the journal last. The
+ * caller releases the fence afterwards, also after a failure: the journal then keeps the project
+ * blocked until a resume completes it.
  */
 
 export interface ProjectMigrationOptions {
@@ -38,6 +39,8 @@ export interface ProjectMigrationResult {
   resumed: boolean;
   /** Commands that move the tracked files the migration left in place, for the user to commit. */
   gitMv: string[];
+  /** A completed migration had marked the project moved: nothing was written, no journal either. */
+  alreadyMoved: boolean;
 }
 
 /** The plan had conflicts or blockers: nothing was written and no journal exists. */
@@ -79,34 +82,36 @@ async function runJournal(path: string, start: ProjectMigrationJournal, resumed:
   }
   for (const step of PROJECT_MIGRATION_STEPS) await run(step);
   removeProjectMigrationJournal(path);
-  return { journal, resumed, gitMv: gitMvCommands(journal.repoRoot, journal.tracked) };
+  return { journal, resumed, gitMv: gitMvCommands(journal.repoRoot, journal.tracked), alreadyMoved: false };
 }
 
 /** Complete an unfinished journal, for P4b3's recovery before any project read; undefined without one. */
 export async function resumeProjectMigration(options: ProjectMigrationOptions): Promise<ProjectMigrationResult | undefined> {
   const dataDir = legacyDataDir(options.repoRoot);
   assertHeldFence(dataDir, options.fence);
-  return holdProjectWork(dataDir, async () => resumeHeld(options));
+  return asFenceHolder(options.fence, async () => resumeHeld(options));
 }
 
 async function resumeHeld(options: ProjectMigrationOptions): Promise<ProjectMigrationResult | undefined> {
+  const root = realpathSync(resolve(options.repoRoot));
+  // The file is accepted before anything reads it: a symlink, a huge file or a committed one is refused.
+  if (!await assertJournalFile(options.fence.journal, root)) return undefined;
   const journal = readProjectMigrationJournal(options.fence.journal);
   if (!journal) return undefined;
-  const root = realpathSync(resolve(options.repoRoot));
   if (journal.repoRoot !== root) throw new Error(`The migration journal ${options.fence.journal} belongs to ${journal.repoRoot}, not ${root}`);
+  // Read back from disk, so untrusted: nothing outside the project's own state may be named in it.
+  await assertJournalContained(options.fence.journal, journal);
   return runJournal(options.fence.journal, journal, true, options.fault ?? (() => undefined));
 }
 
 /**
- * Migrate the project, or finish its unfinished journal first. `closeProject` is the holder duty
- * after the drain and before the first move: an owning cockpit disposes the project's context
- * (`ProjectContexts.dispose(id, { releasePreviews: false })`, previews were released in the drain),
- * which closes its store; a CLI closes the store it opened. A refused plan writes nothing.
+ * Migrate the project, or finish its unfinished journal first. `closeProject` runs before the
+ * plan: the CLI closes the store it opened for its live-task check. A refused plan writes nothing.
  */
 export async function migrateProject(options: ProjectMigrationOptions & { closeProject?: () => void | Promise<void> }): Promise<ProjectMigrationResult> {
   const dataDir = legacyDataDir(options.repoRoot);
   assertHeldFence(dataDir, options.fence);
-  return holdProjectWork(dataDir, async () => {
+  return asFenceHolder(options.fence, async () => {
     await options.closeProject?.();
     const unfinished = await resumeHeld(options);
     if (unfinished) return unfinished;
@@ -116,6 +121,9 @@ export async function migrateProject(options: ProjectMigrationOptions & { closeP
       version: 1, id: randomUUID(), createdAt: new Date().toISOString(), repoRoot: plan.repoRoot, source: plan.source,
       destination: plan.destination, done: [], moves: plan.moves, tracked: plan.tracked, worktrees: plan.worktrees, rewrites: plan.rewrites,
     };
+    // The same rule as a resume, before the journal exists, so a refused plan leaves nothing behind.
+    await assertJournalContained(plan.journal, journal);
+    if (plan.alreadyMoved) return { journal, resumed: false, gitMv: plan.gitMv, alreadyMoved: true };
     const fault = options.fault ?? (() => undefined);
     fault('journal:before');
     writeProjectMigrationJournal(plan.journal, journal);

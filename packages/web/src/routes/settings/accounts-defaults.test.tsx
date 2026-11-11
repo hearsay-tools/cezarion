@@ -9,6 +9,7 @@ import type {
   AgentProfilesResponse,
   WorkspaceConfigResponse,
 } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { AppRoutes } from '@/routes'
 
@@ -228,9 +229,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     renderAccounts()
 
     await waitFor(() => expect(rows()).toHaveLength(7))
-    expect(rows().map((r) => r.getAttribute('data-value'))).toEqual([
-      'claude', 'claude', 'codex', 'opencode', 'pi', 'cursor', 'omp',
-    ])
+    expect(rows().map((r) => r.getAttribute('data-value'))).toEqual(['claude', ...runnerSchema.options])
     expect(rows()[1]?.textContent).toContain('~/.claude-klaudiusz')
   })
 

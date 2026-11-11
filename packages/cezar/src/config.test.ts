@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectPaths } from './project-paths.ts';
 import { loadConfig, readRawConfig, resolveWorktreeRetention, updateConfigFile } from './config.ts';
 
 /**
@@ -183,7 +184,7 @@ describe('resolveWorktreeRetention', () => {
   const writeRepo = (value: unknown) =>
     writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify(value), 'utf8');
   const writeWorkspace = (value: unknown) =>
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from(JSON.stringify(value)));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from(JSON.stringify(value)));
 
   it('inherits the workspace default when the repo sets nothing', async () => {
     writeWorkspace({ resources: { worktreeRetentionDefault: 4 } });
@@ -225,7 +226,7 @@ describe('resolveWorktreeRetention', () => {
   });
 
   it('falls back to 10 when the workspace config is corrupt (unreadable)', async () => {
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from('{ not json'));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from('{ not json'));
     expect(await resolveWorktreeRetention(repoRoot, testHome())).toBe(10);
   });
 
@@ -343,7 +344,7 @@ describe('loadConfig machine-wide agent defaults', () => {
   const writeRepo = (value: unknown) =>
     writeFileSync(join(repoRoot, '.ai/cezar', 'config.json'), JSON.stringify(value), 'utf8');
   const writeMachine = (agentDefaults: unknown) =>
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from(JSON.stringify({ agentDefaults })));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from(JSON.stringify({ agentDefaults })));
 
   it('fills a repo that has no config file at all', async () => {
     writeMachine({ runner: 'codex', models: { codex: 'gpt-5' } });
@@ -381,7 +382,7 @@ describe('loadConfig machine-wide agent defaults', () => {
   });
 
   it('degrades to the built-in default when the machine file is corrupt', async () => {
-    Home.seedBytes(Home.sandbox(cezHome), join(cezHome, 'config.json'), Buffer.from('{not json'));
+    Home.seedBytes(Home.sandbox(cezHome), Home.sandbox(cezHome).workspaceConfig, Buffer.from('{not json'));
     expect((await loadConfig(repoRoot, testHome())).defaultRunner).toBe('claude');
   });
 
@@ -443,8 +444,19 @@ describe('readRawConfig and updateConfigFile (hearsay-tools/cezarion#279)', () =
       writeFileSync(path(), text);
       const read = await readRawConfig(dataDir);
       expect(read.ok).toBe(false);
-      if (!read.ok) expect(read.issue).toMatch(/^\.ai\/cezar\/config\.json cannot be read: /);
+      if (!read.ok) expect(read.issue.startsWith(`${path()} cannot be read: `)).toBe(true);
     }
+  });
+
+  it.each(['cezar', 'squawk'])('names the project config file it read in .ai/%s', async folder => {
+    const root = mkdtempSync(join(tmpdir(), 'cez-config-issue-'));
+    try {
+      mkdirSync(join(root, '.ai', folder), { recursive: true });
+      writeFileSync(join(root, '.ai', folder, 'config.json'), '{ nope');
+      const read = await readRawConfig(projectPaths(root).write);
+      expect(read.ok).toBe(false);
+      if (!read.ok) expect(read.issue).toMatch(new RegExp(`^\\.ai/${folder}/config\\.json cannot be read: `));
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   it('serializes concurrent writers, so neither drops the other one\'s key', async () => {

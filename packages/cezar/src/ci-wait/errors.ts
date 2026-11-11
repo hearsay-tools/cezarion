@@ -62,7 +62,7 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   denied_scope: 'This run cannot wait on those workers or requests: wait only on workers you own (a parent with the wait permission), or on requests you sent that are still accepted.',
   // hearsay-tools/cezarion#1446: process waits.
   exit_file_outside: 'exit_file must be inside the task worktree or the Cezar temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree. For a command that writes its own status file somewhere else, leave exit_file out: wait on pid alone, and read that file after the wake.',
-  process_not_allowed: 'Cezar cannot wait on that PID: it is Cezar itself or an agent session, which ends only with the session. Pass the PID that `echo $!` printed for the background command.',
+  process_not_allowed: 'Cezar cannot wait on that PID: it is Cezar itself or an agent session, which ends only with the session. Pass the `pid` that the job start command printed for the background command.',
   process_not_owned: 'That PID belongs to another user, so Cezar cannot tell whether it is the process you started. Pass the PID of a command you started yourself.',
 };
 
@@ -231,7 +231,7 @@ const WAIT_FIELD_RULES: Record<string, string> = {
   mode: 'must be "one", "any" or "all"; "one" takes exactly one id (kind "worker" or "request")',
   seconds: `must be an integer between ${TIMER_MIN_SECONDS} and ${TIMER_MAX_SECONDS} (kind "timer")`,
   note: 'must be a string of at most 512 characters (kind "timer" or "process")',
-  pid: 'must be an integer of at least 2: the PID that `echo $!` printed (kind "process")',
+  pid: 'must be an integer of at least 2: the `pid` that the job start command printed (kind "process")',
   exit_file: 'must be a path of 1 to 4096 characters (kind "process")',
   wait_id: 'must be a wait_id that cezar_wait answered',
 };

@@ -1,3 +1,4 @@
+import { currentEntry } from '../self-update/layout.ts';
 import { Home } from './home.ts';
 import { testHome, useTestHome } from './test-home.testkit.ts';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -22,7 +23,7 @@ vi.mock('../workspace/config.ts', () => ({
 }));
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
-it.each(['artifact', 'message', 'worker', 'task', 'automation', 'webhook', 'discover'])(
+it.each(['artifact', 'job', 'message', 'worker', 'task', 'automation', 'webhook', 'discover'])(
   'does not resolve or pass Home to the task command %s', async command => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -61,7 +62,7 @@ it('passes the boot Home to both updater services and keeps the legacy dry paths
   const server = () => { throw new Error('No restart in this test'); };
   createServeApplicationUpdate('/repo', {}, server, () => undefined, store, home);
   expect(ApplicationUpdateService).toHaveBeenCalledWith(expect.objectContaining({
-    home: '/resolved/home', npmPrefix: '/resolved/home/dry-prefix', npmCache: '/resolved/home/dry-cache',
+    home: home.root, npmPrefix: home.dryPrefix, npmCache: home.dryCache,
   }));
   createServeSelfUpdate({ pkgName: 'cezarion', version: '1.0.0', store, bindHost: undefined, home }, server as () => ReturnType<typeof startServer>);
   expect(SelfUpdateService).toHaveBeenCalledWith(expect.objectContaining({ home }));
@@ -71,7 +72,7 @@ it('passes the resolved boot home to migrations', async () => {
   const home = resolveHome({ purpose: 'server', env: { CEZ_HOME: '/resolved/home' } }); // test-home-read: pure resolution; downstream services and writes are mocked
   const run = vi.fn(async () => {});
   await runMigrations({ bootRepoRoot: '/repo', home }, [{ id: 'test', to: 1, run }]);
-  expect(run).toHaveBeenCalledWith({ home: '/resolved/home', bootRepoRoot: '/repo' }, home);
+  expect(run).toHaveBeenCalledWith({ home: home.root, bootRepoRoot: '/repo' }, home);
 });
 
 it('restarts through the injected Home current entry after the ambient home changes', async () => {
@@ -80,5 +81,5 @@ it('restarts through the injected Home current entry after the ambient home chan
   const restart = vi.fn();
   const server = { shutdownForRestart: vi.fn(async () => {}), address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 4321 }) };
   await restartServe(server as unknown as Parameters<typeof restartServe>[0], restart, { forward: vi.fn() }, home);
-  expect(restart).toHaveBeenCalledWith(expect.objectContaining({ entry: join('/resolved/home', 'versions/current/node_modules/@wjarka/cezarion/dist/index.js') }));
+  expect(restart).toHaveBeenCalledWith(expect.objectContaining({ entry: currentEntry({}, home) }));
 });

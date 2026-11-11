@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { assertProjectWritable, projectWriteRefused } from '../server/cockpit-ownership.ts';
 import {
   automationDefinitionSchema,
@@ -52,6 +52,7 @@ const STATE_LOCK = 'automation-state.lock';
 const STATE_RECLAIM = 'automation-state.reclaim';
 const WRITE_LOCK_STALE_MS = 5_000;
 const WRITE_LOCK_TIMEOUT_MS = 10_000;
+const LOG_RETENTION_COUNT = 10_000;
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 
 /**
@@ -80,11 +81,11 @@ export interface AutomationStoreOptions {
   processAlive?: (pid: number) => boolean;
   /** How long a definitions/state write waits for the other process's write lock. Tests only. */
   writeLockTimeoutMs?: number;
+  /** Maximum recent log rows retained by compaction. Tests only; production keeps 10,000. */
+  logRetentionCount?: number;
 }
 
 export class AutomationStore {
-  /** Releases a migration fence kept off disk, by receipt key: the next reservation writes each. */
-  private readonly fencedReleases = new Map<string, AutomationReceipt>();
   private definitionsFile: DefinitionsFile = { version: 1, automations: [] };
   private stateFile: StateFile = { version: 1, states: {} };
   private definitions = new Map<string, AutomationDefinition>();
@@ -366,8 +367,6 @@ export class AutomationStore {
   }
 
   appendReceipt(receipt: AutomationReceipt): void {
-    // A release a migration fence keeps off disk is written by the occurrence's next reservation.
-    if (receipt.status === 'released' && projectWriteRefused(this.dataDir)) this.fencedReleases.set(receipt.receiptKey, receipt);
     const key = resolve(this.dataDir);
     const pending = inFlightReservations.get(key) ?? new Set<string>();
     try {
@@ -396,11 +395,6 @@ export class AutomationStore {
     occurrenceAt?: string;
   }): AutomationReceipt | undefined {
     const receiptKey = `${input.automationId}:${input.eventId}`;
-    const fenced = this.fencedReleases.get(receiptKey);
-    if (fenced && this.latestReceipts().get(receiptKey)?.receiptId === fenced.receiptId) {
-      this.fencedReleases.delete(receiptKey);
-      this.appendReceipt(fenced);
-    }
     const previous = this.latestReceipts().get(receiptKey);
     if (previous && previous.status !== 'released') return undefined;
     const now = this.now().toISOString();
@@ -475,7 +469,7 @@ export class AutomationStore {
           reason: receipt.error ?? 'Task launch failed; retry is available.',
         }));
       }
-      const kept = new Map(logs.slice(-10_000).map((log) => [log.seq, log]));
+      const kept = new Map(logs.slice(-(this.options.logRetentionCount ?? LOG_RETENTION_COUNT)).map((log) => [log.seq, log]));
       for (const log of retryLogs.values()) kept.set(log.seq, log);
       this.rewriteNdjson(LOG, [...kept.values()].sort((a, b) => a.seq - b.seq));
     });
@@ -834,13 +828,22 @@ function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino:
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+/** The lease files this process holds, so a project move never renames one from under its holder. */
+const heldLeases = new Set<string>();
+
+/** Whether this process holds an automation lease under `dataDir`. */
+export function automationLeaseHeld(dataDir: string): boolean {
+  const inside = resolve(dataDir) + sep;
+  return [...heldLeases].some(path => path.startsWith(inside));
+}
+
 export class AutomationLease {
   private released = false;
 
   constructor(
     private readonly path: string,
     private readonly fd: number,
-  ) {}
+  ) { heldLeases.add(resolve(path)); }
 
   isCurrent(): boolean {
     try { return sameFile(fstatSync(this.fd), statSync(this.path)); }
@@ -850,9 +853,9 @@ export class AutomationLease {
   release(): void {
     if (this.released) return;
     this.released = true;
+    heldLeases.delete(resolve(this.path));
     try {
-      // A lock left under a migration fence stays; its owner's pid proves it stale later.
-      if (this.isCurrent() && !projectWriteRefused(dirname(this.path))) unlinkSync(this.path);
+      if (this.isCurrent()) unlinkSync(this.path);
     } catch {
       // Already removed during shutdown cleanup.
     } finally {

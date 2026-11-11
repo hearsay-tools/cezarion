@@ -57,6 +57,11 @@ handler's to refuse. In hearsay-tools/cezarion#1081 the create-project schema ad
 handler refused through `isValidCheckoutName`; one project-name pattern exported from the contract
 now serves the schema, the handler and the New project dialog.
 
+A route that touches a run's checkout names its checkout intent and asks the run checkout module
+(`server/run-checkout.ts`) once for the directory, the run-state refusals and the claim; it never
+checks the worktree or takes a claim itself ([ADR 0062](../adr/0062-one-module-decides-run-checkout-access.md)).
+Each route follows this rule once a slice of hearsay-tools/cezarion#3158 has migrated it. Until then the route keeps its own handler checks, and a change to it follows its Table A row in the [run checkout spec](../../.ai/specs/2026-11-10-run-checkout-module.md#table-a-each-route-and-its-checks-in-todays-order).
+
 Import a contract VALUE from the module that defines it, never through a package root. The
 service writes `@open-mercato/cezar-contract/<module>`. The cockpit writes
 `@open-mercato/cezar-api-client/contract/<module>`, or `@open-mercato/cezar-api-client/<path>` for
@@ -76,7 +81,7 @@ They use the normal origin guard and require `localHandoff`; hosted sessions rec
 
 Recovery actions apply only to the incident named by `detectedAt`. A newer incident returns 409; an already resolved incident returns the current snapshot without writing. Explicit CLI backup restore can still select retained backups when no incident is open.
 
-Behind `REBRAND_SWITCH`, a committed migrated home also reports `legacy-change` rows
+A committed migrated home also reports `legacy-change` rows
 with `canImport`. POST `/home/recovery/import` takes the same `{file, detectedAt}` and
 uses the same local-only and host-CLI grant guards. Import performs a three-way merge
 through HomeStore and requires its backup to succeed. `/accept` means Ignore for a

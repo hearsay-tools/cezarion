@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 function wrapper() {
-  const markdown = readFileSync(new URL('../references/pre-pr.md', import.meta.url), 'utf8');
+  const markdown = readFileSync(new URL('../references/tool.md', import.meta.url), 'utf8');
   const block = markdown.match(/```sh\n(\(\n[\s\S]*?\n\))\n```/);
   assert.ok(block, 'the documented measurement wrapper must exist');
   return block[1].replace(/  node \.ai\/skills\/check-code-quality\/scripts\/check\.mjs[\s\S]*?(?=\n\)$)/,

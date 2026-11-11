@@ -23,7 +23,7 @@ describe('crash recovery up to the moves', { timeout: TIMEOUT }, () => {
   afterAll(() => { if (project) removeMigrationProject(project); });
 
   it('offers a fault point before and after every step effect and mark', () => {
-    for (const step of ['move', 'repair-worktrees', 'receipts', 'run-store', 'run-files']) {
+    for (const step of ['move', 'repair-worktrees', 'receipts', 'run-store', 'run-files', 'mark-moved']) {
       expect(points).toEqual(expect.arrayContaining([`${step}:before`, `${step}:after`, `${step}:marked`]));
     }
     expect(points).toEqual(expect.arrayContaining(['journal:before', 'journal:written', 'lock-worktrees:item:0', 'move:prepared:0', 'move:renamed:0', 'move:item:0',

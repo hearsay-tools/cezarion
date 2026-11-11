@@ -5,7 +5,7 @@
   <img src="packages/web/public/cezarion-mark-light.svg" alt="" width="96" height="96">
 </picture>
 
-# Cezarion
+# Squawk
 
 **Parallel coding agents orchestrator** — a local cockpit for running and
 tracking AI coding-agent tasks in your repo.
@@ -16,13 +16,13 @@ tokens, diffs, in a browser cockpit that runs entirely on your machine.
 Your CLI logins, your `gh`, your files. No accounts, no database server, no cloud.
 
 🔥 **Fire and forget.** Queue a stack of autonomous coding and maintenance
-tasks and let them run — Cezarion orchestrates them across isolated worktrees,
+tasks and let them run — Squawk orchestrates them across isolated worktrees,
 in parallel. Flip the **Autonomous** flag
 and a run never stops to ask; it just finishes. Leave it on a VPS and you get
 a dev team that's *always on* — a mobile-friendly cockpit you can check from
 your phone, working your backlog while you're away.
 
-[A look inside](#a-look-inside) · [What Cezarion does best](#what-cezarion-does-best-) · [What it solves](#what-it-solves) · [Who it's for](#who-its-for) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Core concepts](#core-concepts) · [Cockpit tour](#cockpit-tour) · [Agent backends](#coding-agent-backends) · [Remote access](#remote-access-host-cezarion-on-a-server)
+[A look inside](#a-look-inside) · [What Squawk does best](#what-squawk-does-best-) · [What it solves](#what-it-solves) · [Who it's for](#who-its-for) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Core concepts](#core-concepts) · [Cockpit tour](#cockpit-tour) · [Agent backends](#coding-agent-backends) · [Remote access](#remote-access-host-squawk-on-a-server)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node 24.21.0+](https://img.shields.io/badge/Node-24.21.0%2B-339933)
@@ -36,12 +36,12 @@ your phone, working your backlog while you're away.
 
 ```bash
 cd your-repo
-npx cezarion         # → cockpit at http://localhost:4321
+npx hsq         # → cockpit at http://localhost:4321
 ```
 
 That's the whole setup. If your `claude` CLI is logged in (Pro/Max) and `gh` is
-authenticated, there is nothing else to configure. State lives in `.ai/cezar/`
-inside your repo: your runs in one embedded SQLite file (`runs.db`, built into
+authenticated, there is nothing else to configure. State lives in `.ai/squawk/`
+inside your repo (`.ai/cezar/` in a project that has not moved yet): your runs in one embedded SQLite file (`runs.db`, built into
 Node: no server, no install, no config), event logs in NDJSON and journals in
 Markdown. Everything except the run file you can `cat` and fix by hand.
 
@@ -52,11 +52,17 @@ advertised by health while the current server keeps running; `POST
 successful restart updates the original global installation or ordinary npx
 cache entry, so the same command uses the new version on its next launch.
 Update preparation and recovery state is generated under
-`~/.cezar/application-updates/` (or `CEZ_HOME`).
+`<state>/application-updates/` in the [resolved home layout](docs/migration.md#home-directories).
 Pinned npx invocations, source checkouts, npm links, and hosted deployments use
-their existing manual update paths. Cezarion holds its own installation lock and
+their existing manual update paths. Squawk holds its own installation lock and
 npm's npx lock during promotion; a separate manual `npm install` does not honor
 those locks, so avoid one while an update is preparing or restarting.
+
+Upgrading from Cezarion? Read the [migration guide](docs/migration.md) before
+moving a desktop, server or custom-home install. User paths such as `<config>`
+and `<state>` below refer to its [platform roots](docs/migration.md#home-directories).
+A cockpit moves each idle project's state from `.ai/cezar/` to `.ai/squawk/` at start
+([project folders](docs/migration.md#project-folders)). Release operators use the [publishing runbook](docs/publishing.md).
 
 ## A look inside
 
@@ -88,30 +94,30 @@ cp .ai/cezar/todos.json ./cezar-followups-export.json
 ```
 Old Inbox URLs show this guidance. Create an ordinary task with **New task**, or use
 an issue-authoring skill to record work in your tracker. Task **Notes**, the rolling
-handoff journal, **Continue**, live follow-up messages, and `cez message inbox` remain
+handoff journal, **Continue**, live follow-up messages, and `hsq message inbox` remain
 available.
-## What Cezarion does best 🏆
+## What Squawk does best 🏆
 
 **On your phone:** the [iPhone and Android companion apps](docs/mobile.md) connect
 to your existing HTTPS cockpit. Personal installation and device testing are
 documented; agents continue running on your server.
 
 Plenty of tools wrap a single coding agent in a nicer window — a "Codex GUI", a
-conductor-style app, one-agent front-ends. Cezarion's bet is different. Three things
+conductor-style app, one-agent front-ends. Squawk's bet is different. Three things
 it does better than any of them:
 
-- 🪶 **Genuinely zero config.** `npx cezarion` in your repo and you're running —
+- 🪶 **Genuinely zero config.** `npx hsq` in your repo and you're running —
   no wizard, no API keys, no env vars, no schema, no database server. It rides the
   `claude` / `codex` / `opencode` / `agent` (Cursor) / `pi` / `omp` logins and the `gh` you already have, and every
   missing piece degrades gracefully instead of blocking you.
-- 🖥️ **Built for a server (VPS mode).** Cezarion is made to live on a **VPS, cloud,
+- 🖥️ **Built for a server (VPS mode).** Squawk is made to live on a **VPS, cloud,
   or dedicated box** as an always-on janitor for your repo — headless-first, with
   a mobile-friendly cockpit you drive from anywhere. It's a coding server you can
   actually watch, not a desktop app bolted onto one machine.
-- 🔀 **Parallel + autonomous orchestration.** The real edge: Cezarion runs **many
+- 🔀 **Parallel + autonomous orchestration.** The real edge: Squawk runs **many
   agents at once** in isolated worktrees, **queues** the overflow, and pushes each
   one **autonomously** through skill playbooks — fire-and-forget. This is exactly
-  what single-agent GUIs don't do well: they babysit one agent, while Cezarion
+  what single-agent GUIs don't do well: they babysit one agent, while Squawk
   orchestrates a whole team and drains your backlog while you're away.
 
 ---
@@ -120,18 +126,18 @@ it does better than any of them:
 
 Most "AI coding agent" tooling makes you choose between a **terminal** you can't
 see into once it's running, and a **cloud product** that wants your API key, your
-code on their servers, and an account. Cezarion is the third option: the agents run
+code on their servers, and an account. Squawk is the third option: the agents run
 locally under *your* subscription, a cockpit shows you exactly what they're doing,
 and an orchestrator keeps a whole queue of them moving.
 
 - 👀 **No visibility into a running agent.** A headless `claude` run is a black box
-  until it finishes. Cezarion streams every step — agent text, each tool call and
+  until it finishes. Squawk streams every step — agent text, each tool call and
   its result, tokens and cost per step — live, and keeps the full replay.
 - 🧩 **One agent, one working tree, one thing at a time.** Kick off a second task and
-  it fights the first over your files. Cezarion runs each task in its **own git
+  it fights the first over your files. Squawk runs each task in its **own git
   worktree**, so two (or three) agents work in parallel without stepping on
   each other — or on the branch you're editing.
-- 🗂️ **A backlog that needs babysitting.** Queue a stack of tasks and Cezarion
+- 🗂️ **A backlog that needs babysitting.** Queue a stack of tasks and Squawk
   **orchestrates** them: it runs up to your parallel limit and holds the rest in
   an ordered queue. Point it at a GitHub issue and it runs straight on that, so
   working the tracker down stops being a manual chore. Create ordinary tasks for
@@ -144,7 +150,7 @@ and an orchestrator keeps a whole queue of them moving.
   its own branch: inspect it, send notes back into the same session, or push a
   **draft PR**. Auto merge is off by default; each task can opt in to merge after Done.
   Turn on the optional **review gate**
-  (`CEZ_REVIEW_GATE=1` or Settings → Agents) and a finished run with changes
+  (`HSQ_REVIEW_GATE=1` (`CEZ_REVIEW_GATE` fallback) or Settings → Agents) and a finished run with changes
   waits in `review` for you.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
   Take it over interactively in one click (`claude --resume <id>`), or continue it
@@ -152,7 +158,7 @@ and an orchestrator keeps a whole queue of them moving.
   step failed and gives its saved error before your message. Restart recovery
   also explains the restart when replaying a saved message. Background commands
   may have stopped; the agent is told to verify their state before restarting them.
-- 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. Cezarion
+- 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. Squawk
   drives **Claude Code, Codex, OpenCode, Cursor, pi and OMP** (OpenCode, pi and OMP
   experimental) through one runner seam — set a
   default, pick a backend per task, or mix them inside one workflow (implement
@@ -161,7 +167,7 @@ and an orchestrator keeps a whole queue of them moving.
   big vendors. See
   [Agent backends](#coding-agent-backends).
 - 🖥️ **Close the laptop and the work stops.** A local agent only runs while your
-  machine is on and awake. Put Cezarion on a **VPS, cloud box, or dedicated server**
+  machine is on and awake. Put Squawk on a **VPS, cloud box, or dedicated server**
   and the cockpit becomes the GUI for an **always-on AI coding team** — kick off,
   watch and steer tasks from your laptop or **phone**, on the train or between
   meetings, while the agents keep grinding through the backlog back on the server.
@@ -198,16 +204,16 @@ the [`codex` CLI](https://github.com/openai/codex),
 
 ```bash
 cd your-repo
-npx cezarion               # start the cockpit for the current repo
-#   or: npx @wjarka/cezarion
+npx hsq               # start the cockpit for the current repo
+#   or: npx @hearsay-tools/squawk
 
 ```
 
 The cockpit opens at `http://localhost:4321`. If the requested port is occupied,
 startup exits with an actionable error before recovering tasks. Automatic port
 bounce has been removed (hearsay-tools/cezarion#722): open the existing cockpit,
-stop the process using that port, or choose `cez --port <free-port>` deliberately.
-Use `cez --port 0` to ask the OS for an ephemeral port. If another cockpit already
+stop the process using that port, or choose `hsq --port <free-port>` deliberately.
+Use `hsq --port 0` to ask the OS for an ephemeral port. If another cockpit already
 serves this repository, the command prints its URL and exits with an error,
 even with a different port. Different repositories can run side by side on
 explicitly different ports; after a cockpit exits or crashes, its repository
@@ -215,32 +221,33 @@ can start again without cleanup.
 Type a task, pick a workflow, hit **Start**. That's it.
 
 ```bash
-npx cezarion run "add a --json flag to the export command"   # headless, CI-friendly
-npx cezarion init                                            # scaffold .ai/cezar/
+npx hsq run "add a --json flag to the export command"   # headless, CI-friendly
+npx hsq init                                            # scaffold .ai/squawk/
 ```
 
-Both the `cezarion` and `cez` commands are installed, so once it's on your PATH you
-can run either. No API key is ever used — Cezarion shells out to whichever agent
+For a global install, run `npm i -g @hearsay-tools/squawk`, then use `hsq`.
+The old `cez` and `cezarion` commands still work during the
+[deprecation window](docs/migration.md#rollback-and-the-deprecation-window), with one stderr notice per process. No API key is ever used — Squawk shells out to whichever agent
 CLIs you are already logged into, `claude` by default.
 
 > **Contributing?** [Local development](#local-development) shows how to get a
-> global `cez` command straight off your checkout (`npm run install-as-command`)
+> global `hsq` command straight off your checkout (`npm run install-as-command`)
 > — no publish needed.
 
-> **Just kicking the tires?** Set `CEZ_DRY_RUN=1` to run against a bundled mock
+> **Just kicking the tires?** Set `HSQ_DRY_RUN=1` (`CEZ_DRY_RUN` fallback) to run against a bundled mock
 > instead of the real CLI — the whole cockpit works with no `claude` login, so
 > you can explore runs and diffs offline.
 
-### Nightly builds — help us shape Cezarion 🌙
+### Nightly builds — help us shape Squawk 🌙
 
 Every night we publish the trunk to npm, so the features landing in the next
 release are one command away:
 
 ```bash
-npx cezarion@nightly       # everything merged as of last night
+npx hsq@nightly       # everything merged as of last night
 ```
 
-**Come build this with us.** Cezarion is shaped by the people who run it on real
+**Come build this with us.** Squawk is shaped by the people who run it on real
 repos: if you try a nightly and something feels wrong — a workflow that stalls, a
 diff that reads badly, a runner that should exist — [open an
 issue](https://github.com/hearsay-tools/cezarion/issues) and tell us. That feedback,
@@ -253,9 +260,9 @@ can be rough, a flag or a screen may change under you, and something occasionall
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
 task runs in its own git worktree and auto merge is off by default — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
-version (`npx cezarion@<nightly-version>` — the cockpit prints the
+version (`npx hsq@<nightly-version>` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
-back to stable any time with a plain `npx cezarion`.
+back to stable any time with a plain `npx hsq`.
 
 ### Preview builds
 
@@ -264,20 +271,20 @@ Every green CI run also publishes an installable npm snapshot
 merged yet:
 
 ```bash
-npx cezarion@dev           # current main head
+npx hsq@dev           # current main head
 ```
 
 Every pull request gets its own preview too — the CI bot posts a sticky comment
 on the PR with the exact pinned version to copy-paste
-(`npx cezarion@<version>-pr<N>.<run>`). Nightlies and previews are all
-prerelease versions under their own dist-tags; a plain `npx cezarion` always
+(`npx hsq@<version>-pr<N>.<run>`). Nightlies and previews are all
+prerelease versions under their own dist-tags; a plain `npx hsq` always
 resolves to the latest stable release.
 
 ---
 
 ## How it works
 
-You describe a task. Cezarion runs it as a **workflow** — an ordered list of agent
+You describe a task. Squawk runs it as a **workflow** — an ordered list of agent
 steps and shell checks — shelling out to your locally installed agent CLI
 (Claude Code by default; Codex, OpenCode, Cursor, pi and OMP are drop-in
 alternatives, per task or per step). Each task gets its own git worktree; the
@@ -332,7 +339,7 @@ Three words, no jargon — **task**, **skill**, **chain**:
   the live session while it works.
 - 📖 **Skills** are Markdown playbooks. Drop them in `.ai/skills/` or
   `.ai/cezar/skills/`, or pull them from a shared **team skills repo** you name
-  in `skillsRepos` (a bare git clone cached globally in `~/.cache/cez/`). There is no
+  in `skillsRepos` (a bare git clone cached globally in `<cache>/`). There is no
   default team repo. Add, remove, enable and disable team repos on the **Skills** page,
   which writes `skillsRepos` for you, and each team skill has its own on/off switch per project. A workflow step references one by
   `skill: <name>` and its body becomes the agent's extra system prompt — so you
@@ -345,7 +352,7 @@ Three words, no jargon — **task**, **skill**, **chain**:
 
 The moves that make the cockpit worth the browser tab:
 
-- 🗃️ **Queue + orchestration.** Start as many tasks as you like: Cezarion runs up to
+- 🗃️ **Queue + orchestration.** Start as many tasks as you like: Squawk runs up to
   `maxParallel` at once across every project (default **2**; a non-git directory
   always runs one, until its first commit lifts that limit within a minute) and
   holds the rest in a FIFO queue with visible positions (`#1`, `#2`, …). Cancel a
@@ -359,7 +366,7 @@ The moves that make the cockpit worth the browser tab:
   demand. Event logs are append-only NDJSON and streamed rather than re-serialized,
   and live UI deltas are coalesced so they never hit disk.
 - 🧹 **Bounded worktree disk.** Each task runs in its own full checkout, so a busy
-  cockpit would otherwise grow without limit. Cezarion keeps only the last
+  cockpit would otherwise grow without limit. Squawk keeps only the last
   `worktreeRetention` **finished** worktrees on disk (default **10**; `0` =
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
   kept, so the work stays recoverable. Once a branch's work is on the base, or
@@ -369,19 +376,19 @@ The moves that make the cockpit worth the browser tab:
   worktree's disk use with per-row delete and a **Reclaim now** button.
 - 🛡️ **You control merging.** Read a finished run's diff, type notes that go
   straight back into the agent's session, or push a `gh pr create --draft`.
-  Auto merge is off by default and requires a task to opt in. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
+  Auto merge is off by default and requires a task to opt in. The **review gate** is optional (`HSQ_REVIEW_GATE=1` (`CEZ_REVIEW_GATE` fallback), or
   Settings → Agents): with it on, a successful run with changes parks in `review`
   until you accept it. Autonomous runs always skip it.
-- 🗂️ **Every project in one cockpit.** One `cez serve` hosts every repo you
+- 🗂️ **Every project in one cockpit.** One `hsq serve` hosts every repo you
   register; the desktop rail switches between them, and **All tasks** shows every
   project's tasks in one table. See
   [Multiple projects, one cockpit](#multiple-projects-one-cockpit).
 - 👥 **Owned workers.** A task's agent can spawn its own tracked workers — on the
   same or another runner — message them, and collect their diffs; you still review
-  the result. Each task has an **Allow cezar workers** switch, on by default. See
+  the result. Each task has an **Allow Squawk workers** switch, on by default. See
   [Owned workers](#owned-workers).
 - 📱 **Runs on your coding server, drives from your pocket.** The cockpit is a
-  responsive web app streaming over SSE, so the box running Cezarion can be a
+  responsive web app streaming over SSE, so the box running Squawk can be a
   **VPS, cloud, or dedicated server** you never sit in front of. Point a browser
   — laptop or **phone** — at it and run an **always-on coding team** on the move:
   start tasks, watch them live, and review their diffs from anywhere.
@@ -403,7 +410,7 @@ Task and project views share one browser window and live updates over Server-Sen
 | **Workflows** | Build a chain by drag-ordering skills, save it as portable YAML, import/export, or delete. Built-ins always come back. |
 | **Settings** | Appearance (dark/light theme, accent, density), agent backends, notifications, and the skills catalog. |
 
-The cockpit is a React app served pre-built from the package — `npx cezarion`
+The cockpit is a React app served pre-built from the package — `npx hsq`
 still means no build step and no dev server on your machine — with a dark/light
 theme, a ⌘K command palette, and bookmarklets that launch a task straight from
 a GitHub page.
@@ -418,12 +425,12 @@ bypasses the server cache immediately and refreshes the selected thread too.
 
 ## Multiple projects, one cockpit
 
-One `cez serve` hosts **every repo you work in**, not just the one you started
-it in. Each repo Cezarion boots in registers itself in a per-user registry at
-`~/.cezar/config.json` — the workspace file that also holds the global knobs
+One `hsq serve` hosts **every repo you work in**, not just the one you started
+it in. Each repo Squawk boots in registers itself in a per-user registry at
+`<config>/config.json` — the workspace file that also holds the global knobs
 (the parallel cap, the memory ceiling, the browse root, and the checkout root). Nothing is added to
-the repo: per-project state stays exactly where it was, in that repo's
-`.ai/cezar/`.
+the repo: per-project state stays in that repo's `.ai/squawk/` (or `.ai/cezar/`
+until the project moves).
 
 Every view is project-scoped:
 
@@ -432,7 +439,7 @@ Every view is project-scoped:
 ```
 
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
-on a collision), and `/p/default/…` always means the project Cezarion was started
+on a collision), and `/p/default/…` always means the project Squawk was started
 in. The desktop rail selects the project. Its sidebar shows the project header,
 view tabs and task list, ordered **Needs you → Finished → Working**.
 Pins stay first within their status section and do not spend the default ten-row
@@ -473,22 +480,22 @@ navigation drawer):
 
 Removing a project (**Settings → Projects**) drops the registry entry only — the
 repo and its `.ai/cezar/` are never touched, so re-adding it later finds all its
-tasks intact. The project Cezarion is currently serving can't be removed: it
+tasks intact. The project Squawk is currently serving can't be removed: it
 re-registers itself at the next start.
 
 **From the terminal** — the same registry, no cockpit required (handy over ssh):
 
 ```bash
-cez backup list [<file>]           # list rotating config.json / agent-accounts.json backups
-cez backup restore <file> [--at <time>] # restore JSON only; account folders are unchanged
-cez projects                      # list: id, branch or status, path, tags
-cez projects add ~/code/api       # register a folder (defaults to the current repo)
-cez projects remove api           # drop the registry entry; the repo is untouched
-cez projects tag api storefront backend     # set the grouping tags (no tags clears them)
+hsq backup list [<file>]           # list rotating config.json / agent-accounts.json backups
+hsq backup restore <file> [--at <time>] # restore JSON only; account folders are unchanged
+hsq projects                      # list: id, branch or status, path, tags
+hsq projects add ~/code/api       # register a folder (defaults to the current repo)
+hsq projects remove api           # drop the registry entry; the repo is untouched
+hsq projects tag api storefront backend     # set the grouping tags (no tags clears them)
 ```
 
-These read and write `~/.cezar/config.json` directly, so they work with the
-server stopped, and `CEZ_HOME` selects which workspace they operate on.
+These read and write `<config>/config.json` directly, so they work with the
+server stopped, and `HSQ_HOME` (`CEZ_HOME` fallback) selects which workspace they operate on.
 
 Settings split along the same line: **General** (the project's folder, its
 registry facts, its parallel-task ceiling, and Remove), **Agents**, **Agent config**,
@@ -559,7 +566,7 @@ of inventing `store-front` next to `storefront`. Anything not on the list is
 just typed. A tag is a free-form label — `storefront`, `infra`, `client-acme` —
 and a project can carry several, because a repo can belong to more than one
 piece of work. Tags are trimmed, deduplicated case-insensitively (`API` and
-`api` are one tag) and stored in `~/.cezar/config.json` beside the rest of the
+`api` are one tag) and stored in `<config>/config.json` beside the rest of the
 registry, so they are yours and this machine's, never something added to the
 repo.
 
@@ -597,7 +604,7 @@ is that project's own Tasks page, which is a better version of the same answer
 (live updates, the full column set, the composer). So picking a project *leaves*
 for it rather than turning the global view into a worse local one.
 
-Nothing else in Cezarion reads tags, on purpose: a tag is a lens, not a permission,
+Nothing else in Squawk reads tags, on purpose: a tag is a lens, not a permission,
 a queue or a routing rule. Removing one changes what you see and nothing else.
 
 > The page reads a workspace-wide index capped at the newest 200 tasks per
@@ -606,14 +613,14 @@ a queue or a routing rule. Removing one changes what you see and nothing else.
 > Tasks page.
 
 **Old page URLs keep working.** Every unprefixed page path — `/`, `/tasks/<id>`,
-`/settings` — still answers, bound to the project Cezarion was started in; the
+`/settings` — still answers, bound to the project Squawk was started in; the
 cockpit redirects flat paths to their `/p/<boot>/…` twin, so existing bookmarks
 and bookmarklets need no change. The HTTP API is the exception: it moved to
 `/api/v1/…` (see the CHANGELOG), so a script that calls it needs the extra
 segment.
 
 > **Hosted cockpit?** The folder picker is confined to the independent browse
-> root. Set `CEZ_BROWSE_ROOT` narrowly before first boot (or save it in
+> root. Set `HSQ_BROWSE_ROOT` (`CEZ_BROWSE_ROOT` fallback) narrowly before first boot (or save it in
 > **Settings → Projects**) when a remote viewer should not enumerate the host's
 > whole home. Clones continue to use the separate checkout root.
 
@@ -622,7 +629,7 @@ segment.
 ## Waiting for PR checks, merges and timers
 
 An agent waits on something outside its turn with `cezar_wait`. With `kind: "pr"` and
-a GitHub PR URL in `pr`, Cezarion watches the PR outside the model: its checks
+a GitHub PR URL in `pr`, Squawk watches the PR outside the model: its checks
 (`until: "checks"`, the default), its eventual merge (`until: "merge"`), or a merge
 the agent has requested (`until: "merge_or_blocked"`). The last target wakes when
 the PR merges, closes, conflicts, or is neither queued nor scheduled for auto-merge.
@@ -631,7 +638,7 @@ slot or enabled auto-merge keeps it open. The ordinary merge target ignores queu
 removal; use `wake_on_conflict: false` for a dependency wait that also ignores
 conflicts. Only `merged` confirms success. The optional
 `timeout_seconds` defaults to 1,800 and accepts 1–7,200. With `kind: "timer"`,
-`seconds` (60–7,200) and an optional `note`, Cezarion wakes the agent at that time and
+`seconds` (60–7,200) and an optional `note`, Squawk wakes the agent at that time and
 hands the note back. No authored configuration or worker delegation permission is
 needed. A PR wait requires `gh`, access to the repository, and a supported GitHub
 host; GitHub Enterprise hosts must already be recognized by the forge/auth
@@ -664,15 +671,15 @@ deadline. A checks wait and a merge wait on the same PR are two waits.
 The agent asks you with `cezar_ask`, a card of one to four questions in the ask
 format. A question with two to four options shows them as choices; a question without
 options is open, and the card shows a text box for your answer. The task reads Needs
-you once the turn ends, and your next message answers it. `cezar_wait` takes PR waits,
-worker waits and timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
+you once the turn ends, and your next message answers it. `cezar_wait` takes PR, worker, request,
+peer, process and timer waits only, and points an agent that asks it for a human wait to `cezar_ask`. A run
 has one question to you at a time, and the agent cannot cancel it once you have seen
 it. A native question opens the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
-written as a note. `cezar_done` refuses while owned workers are live or uncollected,
-a worker question is unanswered, a question to you is still pending, or the step is not
-the workflow's last, and says what to do first. An
+written as a note. In a workflow step that is not the last, `cezar_done` finishes that step
+and Cezarion starts the next one. `cezar_done` refuses while owned workers are live or uncollected,
+a worker question is unanswered or a question to you is still pending, and says what to do first. An
 autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the
@@ -686,14 +693,14 @@ observation is owed to the agent and its wake turn has not started yet. A run pa
 on CI or a timer keeps its agent slot, a monitoring slot when one is free, so the
 wake usually starts at once. Claude's `ScheduleWakeup` opens a timer in the same list.
 
-Every agent session needs these tools. Cezarion starts a private local socket for them,
+Every agent session needs these tools. Squawk starts a private local socket for them,
 in the system temporary directory, when the first session of a cockpit launches. If it
 cannot start, for example because that directory is full or not writable, the task fails
 before the agent starts. The error names the cause and the fix: free space or fix the
 permissions, then Continue the task. A task woken by a wait retries with the usual backoff.
 The cockpit and other tasks keep working, and the next launch tries again.
 
-Cezarion reports passed, failed, cancelled or skipped checks, no checks, changed head,
+Squawk reports passed, failed, cancelled or skipped checks, no checks, changed head,
 timeout or an operational error. It watches the registered commit: a new PR head
 is reported separately, and the agent decides whether to wait again. The first
 observation runs immediately. Later check-status and PR-head polls run every 30
@@ -702,11 +709,11 @@ queued waits retain their original deadline. Results are bounded
 observations, not merge approval or evidence that every expected workflow appeared.
 The agent still decides its next action; CI success never completes the task or
 accepts review. A wait ends only when its own result arrives, its deadline passes,
-or someone cancels it: the agent with `cezar_cancel_wait`, or Cezarion when the task
+or someone cancels it: the agent with `cezar_cancel_wait`, or Squawk when the task
 is stopped, finished, cancelled or deleted. A human message wakes the agent without
 closing any wait, and every delivered turn ends with a list of the waits still open.
 CI never answers a pending human question. If the agent's session fails or closes while a
-result is owed, Cezarion retries the delivery after 15 and then 30 seconds; a third
+result is owed, Squawk retries the delivery after 15 and then 30 seconds; a third
 failure marks the task failed and keeps the result. Continue delivers it, and Stop
 discards it and leaves the task failed.
 Controller recovery can replay an
@@ -722,20 +729,20 @@ The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
 Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,
 not settings to create or share. If the tool is unavailable or denied, its error
 is surfaced while ordinary tasks continue. See [the CI-wait protocol](AGENT_PROTOCOL.md#ci-wait-tool-contract-474)
-for limits and the executable harness verification required before release.
+for the owners of the limits and the harness evidence required before a runner ships.
 
 ## Discover runners and models
 
 Inspect the same host catalog the cockpit uses before selecting a runner or model:
 
 ```sh
-cez discover runners
-cez discover models --runner=codex
+hsq discover runners
+hsq discover models --runner=codex
 ```
 
 Both commands return JSON. `runners` lists connection status (`connected`, `disconnected`, `not-installed`, or `unknown`) and enablement, with `scope: "host-default-account"`. Model rows include `effortLevels` when the runner advertises them: an absent field means unknown; an empty array means no advertised levels. Omit `--effort` when spawning to keep the existing default. Model responses retain `source`, `stale`, and any unavailable `reason`; discovery never invents model IDs or effort support.
 
-For operators, the command finds the running cockpit for the current checkout; `--repo`, `--url`, and `CEZ_URL` work as they do for `cez task`. A missing cockpit returns an error and never starts a server. Inside a parent delegation session, the same command uses that session's authenticated controller, including headless runs. It rejects `--url` and `--repo` in that context and never falls back to a public cockpit after an authentication failure. Owned workers cannot use the private discovery route.
+For operators, the command finds the running cockpit for the current checkout; `--repo`, `--url`, and `HSQ_URL` (`CEZ_URL` fallback) work as they do for `hsq task`. A missing cockpit returns an error and never starts a server. Inside a parent delegation session, the same command uses that session's authenticated controller, including headless runs. It rejects `--url` and `--repo` in that context and never falls back to a public cockpit after an authentication failure. Owned workers cannot use the private discovery route.
 
 The catalog describes host default accounts, not every named account or the selections permitted by a task's model locks and workflow pins.
 
@@ -758,8 +765,8 @@ automations offer **Use one task** before saving or launching. A saved automatio
 For explicit comparison, ask a task: “Spawn two owned workers from the same committed
 baseline. Try a minimal change and a structural approach. Collect both results and
 compare their diffs. Show me the commits to choose from before integration and cleanup.”
-The parent uses `cez worker spawn`, `collect` and `diff`, reviews the chosen commits,
-integrates them with Git, then uses `cez worker destroy` for verified cleanup. Read
+The parent uses `hsq worker spawn`, `collect` and `diff`, reviews the chosen commits,
+integrates them with Git, then uses `hsq worker destroy` for verified cleanup. Read
 `diffSnapshot` from an available collection's JSON file rather than applying that file
 as a patch. Collect each worker's latest settled revision before finishing. Owned workers
 keep their ownership, isolation, resource limits and Git cleanup safeguards. There is
@@ -835,7 +842,7 @@ Parent completion requires collection of every worker's latest settled execution
 
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
-Provisioned root tasks and workers may use native subagents, and each mechanism has its own purpose. Use native subagents for work that needs no separate worktree: research, code reading and focused analysis, for example a subagent that reads the parser and summarizes its error handling. Native subagents need no worker creation, worktree, collection or destruction. Use Squawk workers for work that needs its own worktree, its own commits or a tracked lifecycle. Workers may use native subagents too, but cannot spawn Squawk workers. An agent may message its own subagents with its runner's tools; it reaches another Squawk task only through `hsq message`. Where a runner's native tool for reaching another session is separate from subagent messaging, a per-run adapter control turns it off: Codex's cross-thread message board, and an OpenCode plugin that refuses a `task` call whose `task_id` names a session outside the caller's own session tree. Claude sessions refuse messages from other sessions on every launch. Known limitations: a Claude session Squawk starts can still list and message Claude sessions that Squawk did not start, and sessions on other machines; an OpenCode session that an older Squawk created under delegation keeps its `task` deny on Continue and restart recovery, because OpenCode cannot remove a session permission rule (new OpenCode sessions allow subagents). See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. When the listener is unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its session credentials authorize only what that session may do: a root manages its own workers and messages peer roots in the same project, subject to the task's settings and relationship checks; a worker addresses only its parent. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot spawn Squawk workers or message peers through Squawk. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
+Provisioned root tasks and workers may use native subagents, and each mechanism has its own purpose. Use native subagents for work that needs no separate worktree: research, code reading and focused analysis, for example a subagent that reads the parser and summarizes its error handling. Native subagents need no worker creation, worktree, collection or destruction. Use Squawk workers for work that needs its own worktree, its own commits or a tracked lifecycle. Workers may use native subagents too, but cannot spawn Squawk workers. An agent may message its own subagents with its runner's tools; it reaches another Squawk task only through `hsq message`. Where a runner's native tool for reaching another session is separate from subagent messaging, a per-run adapter control turns it off: Codex's cross-thread message board, and an OpenCode plugin that refuses a `task` call whose `task_id` names a session outside the caller's own session tree. Claude sessions refuse messages from other sessions on every launch. Known limitations: a Claude session Squawk starts can still list and message Claude sessions that Squawk did not start, and sessions on other machines; an OpenCode session that an older Squawk created under delegation keeps its `task` deny on Continue and restart recovery, because OpenCode cannot remove a session permission rule (new OpenCode sessions allow subagents). These controls are cooperative same-user supervision, not isolation ([Governed delegation controls](AGENT_PROTOCOL.md#governed-delegation-controls-d1)). When the listener is unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its session credentials authorize only what that session may do: a root manages its own workers and messages peer roots in the same project, subject to the task's settings and relationship checks; a worker addresses only its parent. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot spawn Squawk workers or message peers through Squawk. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
 ## From the terminal: `hsq task` and `hsq message`
 
@@ -1270,7 +1277,7 @@ with `TMPDIR=/tmp` set by hand, the same commands succeed. Tools like `tsx` bind
 `<tmpdir>/tsx-<uid>/<pid>.pipe`), and the kernel caps a socket path at 104–108
 bytes — a temp directory near that length leaves no room for the name.
 
-**Fix.** Since hearsay-tools/cezarion#387 Cezarion keeps each task's temp directory short
+**Fix.** Since hearsay-tools/cezarion#387 Squawk keeps each task's temp directory short
 enough for these sockets: at most 58 bytes since hearsay-tools/cezarion#1022, which
 leaves room for Chromium's `<tmpdir>/org.chromium.Chromium.XXXXXX/SingletonSocket`
 on macOS's 104-byte limit. The repo-local directory is `.ai/cezar/t/<task-id8>`
@@ -1279,22 +1286,22 @@ as `/home/<user>/projects/<repo>`. A checkout deep enough to push it past the li
 gets a short `cez-agent-…` directory under the system temp directory instead —
 still per-task, still write-probed before the agent spawns, still reaped when the
 run ends.
-`CEZ_AGENT_TMPDIR=0` reverts the whole mechanism to the host `TMPDIR`.
+`HSQ_AGENT_TMPDIR=0` (`CEZ_AGENT_TMPDIR` fallback) reverts the whole mechanism to the host `TMPDIR`.
 
 ---
 
 ## Coding agent backends
 
-Cezarion is not married to one vendor. Every agent step runs through a single
+Squawk is not married to one vendor. Every agent step runs through a single
 `AgentRunner` seam with six built-in backends:
 
-| Backend | CLI | How Cezarion drives it | Tool access |
+| Backend | CLI | How Squawk drives it | Tool access |
 |---|---|---|---|
-| **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`CEZ_APPROVAL_GATE=1` → `acceptEdits` + approval UI; `CEZ_CLAUDE_PERMISSION_MODE=bypass` → `--dangerously-skip-permissions`). |
-| **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `CEZ_CODEX_NETWORK=0` requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
-| **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. Cezarion answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
+| **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`HSQ_APPROVAL_GATE=1` (`CEZ_APPROVAL_GATE` fallback) → `acceptEdits` + approval UI; `HSQ_CLAUDE_PERMISSION_MODE=bypass` (`CEZ_CLAUDE_PERMISSION_MODE` fallback) → `--dangerously-skip-permissions`). |
+| **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `HSQ_CODEX_NETWORK=0` (`CEZ_CODEX_NETWORK` fallback) requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
+| **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. Squawk answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
 | **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Resumable `--print --output-format stream-json` turns on a qualified build; an unqualified build fails the task before inference. | Print mode admits marketplace plugins, including user and team plugins. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
-| **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the Cezarion tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
+| **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the Squawk tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 | **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
 
 > ⚠️ **OpenCode, pi and OMP support are experimental.** These runners work but are less
@@ -1302,33 +1309,33 @@ Cezarion is not married to one vendor. Every agent step runs through a single
 > `allowedTools` (its own permission config governs what it asks). Treat them as
 > previews and expect rough edges.
 
-On startup Cezarion probes which CLIs are installed and the cockpit only offers
+On startup Squawk probes which CLIs are installed and the cockpit only offers
 the backends it found — install any one of the six and you're operational.
 
 ### Cursor CLI
 
 Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent login`,
-or set `CURSOR_API_KEY`. Cezarion discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
+or set `CURSOR_API_KEY`. Squawk discovers `agent` on PATH; `HSQ_CURSOR_BIN` (`CEZ_CURSOR_BIN` fallback) overrides
 its location. Select **Cursor** in the runner picker. On build
 `2026.10.01-e373342` or newer, new sessions use print mode so marketplace plugins
-are available. Cezarion checks `agent --version` and the native tool catalog before
+are available. Squawk checks `agent --version` and the native tool catalog before
 the first turn; `agent --version` is also the quick way to check your installation.
-Cezarion starts the CLI with `--disable-auto-update`, so a task never updates it;
+Squawk starts the CLI with `--disable-auto-update`, so a task never updates it;
 update it yourself with `agent update`. An older build, or a build missing a core
 tool, fails the task before any inference, with the reason and the fix: run
-`agent update`, or update Cezarion if your build is newer than it supports.
+`agent update`, or update Squawk if your build is newer than it supports.
 ACP-tagged and untagged Cursor sessions cannot resume after ACP removal: Continue
 on one reports that, and you start a new task to carry the work on. Existing
 print-tagged sessions can still resume.
-A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
-Cursor questions from a plugin may be automatically skipped by print mode. Cezarion's
+A missing CLI leaves the other backends available. `HSQ_DRY_RUN=1` (`CEZ_DRY_RUN` fallback) uses the mock.
+Cursor questions from a plugin may be automatically skipped by print mode. Squawk's
 own `cezar_ask` questions remain answerable in the cockpit; plugins that require
 native questions may not work fully. Project-local Claude plugin settings may
 not disable a user or team marketplace copy. A previously confirmed Cursor
-session ID can also lose history inside Cursor without an error; Cezarion resumes
+session ID can also lose history inside Cursor without an error; Squawk resumes
 the recorded ID and checks that Cursor returns the same ID.
-Cursor provides no qualified token-usage telemetry; Cezarion leaves usage unavailable
-instead of estimating it. Cezarion discovers Cursor's canonical model IDs and advertised
+Cursor provides no qualified token-usage telemetry; Squawk leaves usage unavailable
+instead of estimating it. Squawk discovers Cursor's canonical model IDs and advertised
 effort levels through Cursor's read-only ACP model catalog (`agent acp`), which opens
 no session. Print mode accepts those IDs and applies effort using a complete native
 parameter selection passed with `--model`, retaining the account catalog's defaults for
@@ -1339,19 +1346,19 @@ Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.
 [Cursor’s configuration reference](https://cursor.com/docs/cli/reference/configuration)
 documents `CURSOR_CONFIG_DIR` and the Linux/BSD `XDG_CONFIG_HOME/cursor` override.
-These select configuration; Cezarion does not offer alternate Cursor account profiles
+These select configuration; Squawk does not offer alternate Cursor account profiles
 because a complete credential-and-session home override has not been verified.
 
 ### OMP (Oh My Pi)
 
 Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`
-installs a prebuilt binary; Bun is needed only for `--source`) and run `omp login`. Cezarion discovers `omp` on PATH;
-`CEZ_OMP_BIN` overrides its location. `omp` is a separate backend from `pi`: a host with
-both binaries keeps both, and `CEZ_PI_BIN` never selects OMP. Select **OMP** in the runner
+installs a prebuilt binary; Bun is needed only for `--source`) and run `omp login`. Squawk discovers `omp` on PATH;
+`HSQ_OMP_BIN` (`CEZ_OMP_BIN` fallback) overrides its location. `omp` is a separate backend from `pi`: a host with
+both binaries keeps both, and `HSQ_PI_BIN` (`CEZ_PI_BIN` fallback) never selects OMP. Select **OMP** in the runner
 picker to use a persistent `--mode rpc` session. A missing CLI leaves the other backends
-available and shows OMP as unavailable. `CEZ_DRY_RUN=1` uses the mock.
+available and shows OMP as unavailable. `HSQ_DRY_RUN=1` (`CEZ_DRY_RUN` fallback) uses the mock.
 
-Agents ask questions through Cezarion's `cezar_ask` tool, and OMP's own sub-agents appear in the
+Agents ask questions through Squawk's `cezar_ask` tool, and OMP's own sub-agents appear in the
 Agents drawer. Settings → Agent config exposes OMP's `config.yml`, `mcp.json` and
 `AGENTS.md` files. Named OMP profiles and accounts are not supported yet.
 
@@ -1387,11 +1394,11 @@ Owned workers can compare approaches in separate worktrees. Each worker has its 
 runner and model selection; see [Owned workers](#owned-workers).
 
 **Models come from your own machine.** For Claude, Codex, OpenCode, and Pi, the model picker
-is not a list Cezarion ships — it asks the installed CLI what it can actually run
+is not a list Squawk ships — it asks the installed CLI what it can actually run
 (Claude stream-json `list_models`, `codex app-server`'s `model/list`,
 `opencode models`, and `pi --list-models`), caches the answer in
 memory for five minutes, and shows it. A model your provider rolled out
-yesterday is selectable without a Cezarion release, and one it retired stops being
+yesterday is selectable without a Squawk release, and one it retired stops being
 offered. Claude discovery starts no model turn and uses safe mode with no session
 persistence. It has a 15-second deadline and a 200-model cap, with child cleanup
 on every outcome. Unsupported or unavailable Claude CLIs fall back to the
@@ -1409,30 +1416,30 @@ can slot in the same way.
 
 ## Desktop app
 
-Cezarion Desktop is a Tauri 2 app for macOS, Windows and Linux. Start a local cockpit
+Squawk Desktop is a Tauri 2 app for macOS, Windows and Linux. Start a local cockpit
 or connect to a remote HTTPS cockpit (loopback HTTP supports SSH tunnels). Remote
 windows have no native command permissions and need no local Node or agent install.
-Local mode needs Node.js 24.21.0+ and npm, then installs cezarion on first use.
+Local mode needs Node.js 24.21.0+ and npm, then installs `@hearsay-tools/squawk` on first use.
 
 See [desktop installation, development and testing](docs/desktop.md). PR builds
 provide test installers; public releases require platform signing and notarization.
 
-## Remote access (host Cezarion on a server)
+## Remote access (host Squawk on a server)
 
-Cezarion runs on `localhost` by default. To reach the cockpit from another machine —
+Squawk runs on `localhost` by default. To reach the cockpit from another machine —
 a shared team box, a VPS, your phone — put an **authenticated public front** in
 front of it. The built-in installer does this interactively, per **platform
 strategy**, and never escalates silently: every privileged command is printed
 and verified, and it ends with a real authenticated end-to-end check.
 
 ```bash
-npx cezarion server-install   --platform ubuntu-vps   # stand it up
-npx cezarion server-deploy    --platform ubuntu-vps   # roll out a new version (reload the service)
-npx cezarion server-uninstall --platform ubuntu-vps   # reverse it
+npx hsq server-install   --platform ubuntu-vps   # stand it up
+npx hsq server-deploy    --platform ubuntu-vps   # roll out a new version (reload the service)
+npx hsq server-uninstall --platform ubuntu-vps   # reverse it
 
 # host a SECOND cockpit for another domain on the same box (ubuntu-vps):
 
-npx cezarion server-install   --platform ubuntu-vps --domain shop.example.com
+npx hsq server-install   --platform ubuntu-vps --domain shop.example.com
 ```
 
 On `ubuntu-vps` a single host can run several independent cockpits — add
@@ -1440,23 +1447,23 @@ On `ubuntu-vps` a single host can run several independent cockpits — add
 new domain never resumes or clobbers the first install.
 
 **Already running a reverse proxy?** If Dokploy, Coolify, Caddy or your own
-nginx already owns `:80/:443`, Cezarion's would fight it for the ports. Install the
+nginx already owns `:80/:443`, Squawk's would fight it for the ports. Install the
 service only and let your proxy front it:
 
 ```bash
-npx cezarion server-install --platform ubuntu-vps \
-  --external-proxy --domain cezar.example.com --bind-host 172.17.0.1
+npx hsq server-install --platform ubuntu-vps \
+  --external-proxy --domain Squawk.example.com --bind-host 172.17.0.1
 ```
 
 `--bind-host` is only needed when the proxy runs in a **container** (Traefik
 can't reach the host's loopback); a host-installed proxy uses the `127.0.0.1`
-default. In this mode **your proxy must enforce authentication** — Cezarion has
+default. In this mode **your proxy must enforce authentication** — Squawk has
 none of its own. [Details →](docs/server-install/ubuntu-vps.md#the-box-already-has-a-reverse-proxy-dokploy-coolify-caddy)
 
 | Provider | `--platform` | Public front | Guide |
 |----------|--------------|--------------|-------|
 | Ubuntu / Debian VPS | `ubuntu-vps` | nginx + Let's Encrypt HTTPS, htpasswd login, systemd | [Step-by-step →](docs/server-install/ubuntu-vps.md) |
-| Ubuntu + existing proxy | `ubuntu-vps --external-proxy` | your Dokploy/Traefik/Caddy front; Cezarion ships the service only | [Step-by-step →](docs/server-install/ubuntu-vps.md#the-box-already-has-a-reverse-proxy-dokploy-coolify-caddy) |
+| Ubuntu + existing proxy | `ubuntu-vps --external-proxy` | your Dokploy/Traefik/Caddy front; Squawk ships the service only | [Step-by-step →](docs/server-install/ubuntu-vps.md#the-box-already-has-a-reverse-proxy-dokploy-coolify-caddy) |
 | macOS + ngrok | `macosx-ngrok` | ngrok tunnel + `--basic-auth`, launchd | [Step-by-step →](docs/server-install/macosx-ngrok.md) |
 
 See the **[Remote access overview](docs/server-install/README.md)** for how it
@@ -1475,11 +1482,23 @@ so bookmarks and browser Back work. This works with local and remote cockpits.
 For a deliverable outside the project, an agent must explicitly publish a snapshot:
 
 ```sh
-cez artifact publish /tmp/decision.md
+hsq artifact publish /tmp/decision.md
 ```
 
-Cezarion supplies the bundled command and task context to agent sessions automatically
-(`CEZ_TASK_ID` and `CEZ_ARTIFACTS_DIR`; do not configure these yourself). The command
+An agent starts a long command, such as a benchmark or a full test run, with `hsq job start`:
+
+```sh
+hsq job start bench -- npm run benchmark
+hsq job status bench
+```
+
+The command keeps running after the agent's shell call, turn and session end. It prints the
+paths of its log file and its exit-code file, which are in the task's temp directory unless
+`--dir` names another one. The agent waits for it with a process wait. A second start of a
+name that still runs is refused.
+
+Squawk supplies the bundled command and task context to agent sessions automatically
+(`HSQ_TASK_ID` (`CEZ_TASK_ID` fallback) and `HSQ_ARTIFACTS_DIR` (`CEZ_ARTIFACTS_DIR` fallback); do not configure these yourself). The command
 returns JSON with a Markdown link for the agent to share. When the owning project
 is registered, the link keeps that project when copied or opened from another
 project. If ownership cannot be discovered, publication keeps the legacy task link.
@@ -1500,10 +1519,11 @@ only intended review material, never credentials or unrelated private files.
 
 ## Configuration (optional)
 
-Zero config is the default — everything below is opt-in via
-`.ai/cezar/config.json` (a missing or malformed file uses the defaults, a bad value
-falls back to its own default, and nothing blocks startup; the cockpit never saves
-over a file that is not valid JSON):
+Zero config is the default — everything below is opt-in via the project's
+`config.json` in `.ai/squawk/` (`.ai/cezar/` before the project moves). A missing
+or malformed file uses the defaults, a bad value falls back to its own default,
+nothing blocks startup, and the cockpit never saves over a file that is not valid
+JSON:
 
 ```jsonc
 {
@@ -1512,7 +1532,7 @@ over a file that is not valid JSON):
   // Only owner/name, https/ssh URLs, or local paths (`/abs`, `./rel`, `~/dir`,
   // `C:\dir`) are accepted — no ext::/fd:: transport helpers. Write a relative
   // path as `./name`, not a bare `name`. Pin `ref` to a full commit SHA to freeze
-  // the source against a moving branch head — cezar verifies it resolves to
+  // the source against a moving branch head — Squawk verifies it resolves to
   // exactly that commit, and reports it as `team.commit`. `"enabled": false` keeps
   // a source listed but loads none of its skills. The Skills page edits this list,
   // keeps every other key, and refuses to write a file it cannot read.
@@ -1525,9 +1545,9 @@ over a file that is not valid JSON):
 }
 ```
 
-Put the same `"modelsLocked": true` key in `~/.cezar/config.json` to apply it
+Put the same `"modelsLocked": true` key in `<config>/config.json` to apply it
 to every registered project. When the key is absent or `false` in both config
-files (and `CEZ_AGENT_MODELS_LOCKED` is not `1`), each runner's normal model
+files (and `HSQ_AGENT_MODELS_LOCKED` (`CEZ_AGENT_MODELS_LOCKED` fallback) is not `1`), each runner's normal model
 selector uses that runner's discovered model list. While locked, the model is
 shown read-only and follows the selected runner's native settings; the runner
 itself remains selectable.
@@ -1538,15 +1558,15 @@ automatically; your workflows and skills stay committable. See [run history reco
 
 Settings that belong to *you* rather than to a repo — the parallel cap
 (`maxParallel`, default **2**), the per-task memory ceiling and the checkout
-root — live once in `~/.cezar/config.json`, alongside the
+root — live once in `<config>/config.json`, alongside the
 [project registry](#multiple-projects-one-cockpit), and are edited from
 **Settings → Resources** and **Settings → Projects**. A `maxParallel` left over
 in a repo's `.ai/cezar/config.json` is imported into the workspace file the
-first time Cezarion boots there, and ignored afterwards.
+first time Squawk boots there, and ignored afterwards.
 
 ### Session-start context
 
-Every session Cezarion launches — a fresh step, a retry, **Continue**, recovery, an owned
+Every session Squawk launches — a fresh step, a retry, **Continue**, recovery, an owned
 worker — opens with the run's whole handoff file, so the agent has its notes without a tool
 call. Add your own context, such as a vision document, with an optional
 `.ai/cezar/context.yaml`:
@@ -1569,21 +1589,21 @@ for the variables, the limits and the error handling.
 ### Preparing new worktrees
 
 Every task and worker runs in a fresh worktree, and a fresh worktree has nothing installed. Give
-the project a `worktreeSetup` and Cezarion runs those commands in each new worktree before the
+the project a `worktreeSetup` and Squawk runs those commands in each new worktree before the
 agent's first turn, so the agent (and anything that runs beside it, such as a test watcher)
 starts in a ready tree:
 
 ```jsonc
-// .ai/cezar/config.json
+// .ai/squawk/config.json (.ai/cezar/config.json before the project moves)
 "worktreeSetup": {
-  "commands": ["npm ci", "cp \"$CEZ_PROJECT_ROOT/.env\" .env"],
+  "commands": ["npm ci", "cp \"$HSQ_PROJECT_ROOT/.env\" .env"],
   "timeoutSeconds": 900 // optional, per command; default 900, max 7200
 }
 ```
 
 Or edit it in **Settings → Worktrees → Prepare new worktrees**, one command per line. These are
-commands the host runs, so a hosted cockpit (`CEZ_REMOTE=1`) shows it read-only until the host
-operator runs `cez remote-settings enable` ([Remote settings administration](docs/server-install/remote-settings.md)).
+commands the host runs, so a hosted cockpit (`HSQ_REMOTE=1` or `CEZ_REMOTE=1`) shows it read-only until the host
+operator runs `hsq remote-settings enable` ([Remote settings administration](docs/server-install/remote-settings.md)).
 
 - **When it runs.** In every new task worktree and every worker worktree, and again when Continue
   rebuilds a worktree that retention reclaimed. Never for a task that runs in the repo working
@@ -1592,9 +1612,9 @@ operator runs `cez remote-settings enable` ([Remote settings administration](doc
   and the setup stops at the first command that fails or times out. Up to 20 commands.
 - **What it can see.** The same curated environment the live preview gives a dev server: your
   `PATH`, `HOME` and the shell basics, but no agent API keys and no GitHub token. A private
-  registry token reaches it through `CEZ_ENV_PASSTHROUGH=NPM_TOKEN` (or the tool's own config
-  file under `HOME`). It also gets `CEZ_PROJECT_ROOT` (the main checkout, for copying untracked
-  files like `.env`) and `CEZ_TASK_ID`.
+  registry token reaches it through `HSQ_ENV_PASSTHROUGH=NPM_TOKEN` (`CEZ_ENV_PASSTHROUGH` fallback) (or the tool's own config
+  file under `HOME`). It also gets `HSQ_PROJECT_ROOT` (`CEZ_PROJECT_ROOT` fallback) (the main checkout, for copying untracked
+  files like `.env`) and `HSQ_TASK_ID` (`CEZ_TASK_ID` fallback).
 - **What you see.** The task thread shows a "Ran `<command>`" card per command with its output
   (the last 20 KB) and a line with the outcome and duration.
 - **What the agent sees.** Its first message says what ran, so it doesn't repeat the install.
@@ -1617,7 +1637,7 @@ Without the key nothing runs, exactly as before. Examples:
 
 ### Editing the agents' own config (Settings → Agent config)
 
-Cezarion picks *which* agent runs; **Settings → Agent config** lets you edit *how* it
+Squawk picks *which* agent runs; **Settings → Agent config** lets you edit *how* it
 behaves — the raw config files Claude, Codex, OpenCode, Cursor, pi and OMP read
 for settings, MCP, and memory. In the multi-project cockpit the section is project-scoped:
 repo-relative files resolve from the selected project's root, while user-scope
@@ -1626,21 +1646,27 @@ files continue to resolve from the agent's home.
 Each file keeps its native format and vendor-documented precedence. Tracked
 files reach task worktrees after commit; Claude's gitignored personal layer is
 seeded into each run's worktree. Config files can define hooks and MCP commands that run
-on the host, so a hosted cockpit (`CEZ_REMOTE=1`) is read-only and never serves home-file
-contents until the host operator runs `cez remote-settings enable`
+on the host, so a hosted cockpit (`HSQ_REMOTE=1` or `CEZ_REMOTE=1`) is read-only and never serves home-file
+contents until the host operator runs `hsq remote-settings enable`
 ([Remote settings administration](docs/server-install/remote-settings.md)).
 
 ---
 
 ## Local development
 
-End-to-end, from a fresh clone to a global `cez` command you can run in **any**
+End-to-end, from a fresh clone to a global `hsq` command you can run in **any**
 repo on your machine — no npm publish required.
 
 **1. Prerequisites** — Node 24.21.0+ and `git` (plus at least one logged-in agent CLI,
 as in [Quick start](#quick-start)).
 
 **2. Clone & install**
+
+The npm global prefix must be writable by your user. On Unix, use Node installed
+with nvm, or set a user-owned prefix (`npm config set prefix ~/.npm-global`) and
+add `~/.npm-global/bin` to your `PATH`. On Windows, use a user-owned npm prefix
+and add the prefix itself (reported by `npm prefix -g`) to `PATH`; npm puts
+Windows executables directly there. Set `PATH` before these commands.
 
 ```bash
 git clone https://github.com/hearsay-tools/cezarion.git
@@ -1664,7 +1690,7 @@ continue to use npm. For this repository's Worktrees setup, use
 npm run build
 ```
 
-**4. Install as a global command** — build + put `cezarion` / `cez` on
+**4. Install as a global command** — build + put `hsq` on
 your PATH pointing at *this checkout*:
 
 ```bash
@@ -1677,8 +1703,8 @@ Now `cd` into any other repo and run it:
 
 ```bash
 cd ~/some-other-project
-cez              # cockpit for that repo, straight off your checkout
-cezarion --help  # same binary; the name matches `npx cezarion`
+hsq              # cockpit for that repo, straight off your checkout
+hsq --help       # the same command as `npx hsq`
 ```
 
 **5. The change loop**
@@ -1692,20 +1718,21 @@ cezarion --help  # same binary; the name matches `npx cezarion`
 **6. Uninstall**
 
 ```bash
-npm run uninstall-as-command    # removes cezarion / cez (either flavor)
+npm run uninstall-as-command    # removes hsq and the compatibility commands (either flavor)
 ```
 
 **7. Troubleshooting**
 
-- **`cez: command not found`** after install → your npm global bin dir isn't on
+- **`hsq: command not found`** after install → your npm global bin dir isn't on
   PATH. The script prints the exact dir; add it to your shell profile
-  (`export PATH="$(npm prefix -g)/bin:$PATH"`).
+  (Unix: `export PATH="$(npm prefix -g)/bin:$PATH"`; Windows: add the directory
+  reported by `npm prefix -g` itself to `PATH`, without a `bin` suffix).
 - **`EACCES` / permission denied** → your global prefix is root-owned. Point npm
   at a user-writable one and retry — **never** sudo:
   `npm config set prefix ~/.npm-global`.
 - **Already installed the published `@wjarka/cezarion` globally?** The
   link/snapshot install replaces it; `uninstall-as-command` removes ours, and
-  `npm i -g @wjarka/cezarion` brings the published one back.
+  `npm i -g @hearsay-tools/squawk` brings the published one back.
 
 ### In-checkout scripts
 
@@ -1766,25 +1793,30 @@ Ask an agent to measure a file, function or module for a scoped stats report.
 That path uses available coverage and reports missing CRAP without starting the
 PR process. Ask explicitly for fresh coverage when needed.
 
-The skill's pre-PR path selects changed functions, fixes small problems, and files larger
-inherited refactors as `code-quality-improvement` issues. The scan report defines
-the limits: CRAP 30 and complexity 20. Scores equal to a limit pass. Copy the
-whole skill directory to use the tool in another repository.
-
-Run the complete pre-PR measurement with the bundled command:
+The local pre-PR gate uses Squeal 0.1.423's one-shot changed-function check:
 
 ```bash
-node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
-  --runner node --test scripts/metrics.test.mjs --test scripts/changed-functions.test.mjs \
-  --test scripts/quality-check.test.mjs --node-import scripts/test-git-env.mjs \
-  --output .ai/analysis/code-quality.md
+quality_report=$(mktemp "${TMPDIR:-/tmp}/code-quality.XXXXXXXX") || exit 2
+squeal code --base origin/main --json > "$quality_report"
+quality_status=$?
+printf 'Report: %s; exit: %s\n' "$quality_report" "$quality_status"
 ```
 
-Select relevant tests for the changes. For Vitest, use `--runner vitest` and
-`--project` where needed. The command collects coverage once for all changed
-functions and writes Markdown plus JSON. Exit codes distinguish a pass (0),
-exceeded limits (1), and incomplete measurement (2). See the skill for how to
-resolve findings before opening a PR.
+It checks changed JS/TS functions, including test callbacks and nested functions,
+with complexity at most 20 and CRAP at most 30. Equality passes. The default
+budget is 600 seconds. The base commit supplies the policy.
+
+A pass requires complete evidence: no skipped, incomplete or uncounted functions,
+failed or unfinished tests, or exhausted budget. Exit 0 alone is insufficient
+because a report can contain skipped functions. Exits 1, 3 and 2 mean violations,
+incomplete measurement and usage/setup errors. Missing Squeal or unsupported
+evidence blocks the PR. There is no bundled fallback or inherited-refactor
+deferral. See the [pre-PR procedure](.ai/skills/check-code-quality/references/pre-pr.md)
+for report identity, completeness checks and reviewable evidence.
+
+CI and explicit statistics commands keep their existing paths during this
+local-first rollout. CI artifact reuse and supported exceptions await the
+remaining work in hearsay-tools/squeal#167.
 
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
@@ -1812,4 +1844,4 @@ Every module is meant to be read in one sitting.
 
 ## License
 
-**MIT** © Patryk Lewczuk (original cezar) and Wiktor Jarka (Cezarion) — full text in [LICENSE](LICENSE).
+**MIT** © Patryk Lewczuk (original Cezar) and Wiktor Jarka (Cezarion) — full text in [LICENSE](LICENSE).

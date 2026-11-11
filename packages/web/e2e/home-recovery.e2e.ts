@@ -1,3 +1,4 @@
+import { productName } from './product'
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
 import { AgentBrowser } from './agent-browser'
 import { createHomeRecoveryFixture } from './home-recovery-fixture'
@@ -52,7 +53,7 @@ it('accepts a reset registry and keeps it empty until a new project is added', a
 it('receives an outside write live, refuses saves, and restores the pinned UI state', async () => {
   await fixture.control({ kind: 'outside-ui-state' })
   const text = browser.waitForValue<string>(`document.querySelector(${JSON.stringify(row('ui-state.json'))})?.textContent`,
-    value => typeof value === 'string' && value.includes('ui-state.json changed outside Cezar. Restore the previous version or accept the file as found.'))
+    value => typeof value === 'string' && value.includes(`ui-state.json changed outside ${productName('Cezar')}. Restore the previous version or accept the file as found.`))
   expect(text).toContain('Accept as found')
   await expect(fixture.control({ kind: 'write-ui-state', value: 'blocked' })).rejects.toThrow(/Outside write/)
   browser.click(`${row('ui-state.json')} button[data-action="restore"]`)

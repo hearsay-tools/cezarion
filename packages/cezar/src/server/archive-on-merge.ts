@@ -63,7 +63,7 @@ export class ArchiveOnMergeCoordinator {
       // Four projects per tick avoids a minute per unopened project. Each project remains bounded.
       for (let i = 0; i < Math.min(4, projects.length) && current(); i++) {
         const project = projects[this.projectCursor++ % projects.length]!;
-        // Admitted for the whole tick, the config read included; a fenced project waits a tick.
+        // Checked before the tick, the config read included; a fenced project waits a tick.
         await withProjectAdmission(projectPaths(project.root).write, this.tickProject.bind(this, project, abort.signal, current), () => undefined);
       }
     } catch {

@@ -133,3 +133,26 @@ The part of a native runner mock that turns mock scenario steps into that
 runner's protocol frames. It keeps native ids, usage, acknowledgement, delivery
 control, failure control and steering admission. The real runner and mapper
 consume those frames in parity tests.
+
+## Run checkout
+
+The directory a cockpit route uses for a run's files and Git state: the run's
+worktree, or the repository root for a `worktree: false` run. One server
+module decides it for each route that hearsay-tools/cezarion#3158 has migrated;
+the other routes still decide it in their handlers. A route names its checkout intent and gets back either a
+refusal with a status and an `{ error }` body, or the run, the directory and,
+when the intent claims the run, the release. Artifact routes read the data
+directory and use no run checkout.
+
+_Avoid_: worktree (when a `worktree: false` run is meant too), working directory
+
+## Checkout intent
+
+What a route will do with a run checkout: `read`, `mutate` (Git commit and
+push), `publish` (Draft PR), `remove` (remove the worktree, delete the run,
+reclaim one worktree) or `open` (hand the directory to an outside app or
+terminal). The intent fixes the checks and their order, and whether the
+module takes a claim. A read never refuses a foreign owner and never rebuilds
+a reclaimed worktree.
+
+_Avoid_: mode, access level

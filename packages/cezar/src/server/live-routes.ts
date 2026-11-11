@@ -66,7 +66,7 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
           if (!resolved.project.store.getRun(demand.runId)) {
             results.push({ projectId: demand.projectId, runId: demand.runId, type: 'error', status: 404, error: 'run not found' });
           } else {
-            // Admitted until the history scan ends, so a migration fence drains it.
+            // Refused under a migration fence or an unfinished journal.
             results.push(await withProjectAdmission(resolved.project.dataDir, async () => {
               return readFiniteRunFeed(resolved.project, demand, c.req.raw.signal);
             }, (error) => failure(demand, new ProjectSetupFailure(projectFailure(error, demand.projectId)))));

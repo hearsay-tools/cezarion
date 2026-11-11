@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, type Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
-import nodePath, { posix, join, resolve, sep } from 'node:path';
+import nodePath, { dirname, posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
 import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
-import { pathPresent } from '../project-paths.ts';
+import { pathPresent, projectDestinationAvailable, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';
 import { RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, RunDatabaseUnsupportedSchemaError } from '../runs/run-database.ts';
 import { migrationFencePaths } from '../server/cockpit-ownership.ts';
@@ -51,6 +51,8 @@ export interface ProjectMigrationPlan {
   /** Shell commands, run from any directory, that move the tracked files for the user to commit. */
   gitMv: string[];
   notRewritten: readonly string[];
+  /** A completed migration marked the project moved: the plan moves and rewrites nothing. */
+  alreadyMoved: boolean;
 }
 
 const execFileAsync = promisify(execFile);
@@ -65,6 +67,24 @@ export async function gitOutput(cwd: string, args: string[]): Promise<string | u
 export async function trackedPaths(root: string): Promise<Set<string> | undefined> {
   const listed = await gitOutput(root, ['ls-files', '-z', '--cached', '--', LEGACY_PROJECT_DIR]);
   return listed === undefined ? undefined : new Set(listed.split('\0').filter(Boolean));
+}
+
+/**
+ * Read the run store at `path` without changing anything beside it: read-only and quiescent, and
+ * from a private copy when a WAL file exists, because even a read-only connection writes
+ * shared-memory state beside the database it reads.
+ */
+export function readQuiescentRunDatabase<T>(path: string, read: (db: RunDatabase) => T): T {
+  const copy = pathPresent(`${path}-wal`) ? mkdtempSync(join(tmpdir(), 'cez-migration-plan-')) : undefined;
+  let db: RunDatabase | null = null;
+  try {
+    if (copy) for (const suffix of ['', '-wal']) copyFileSync(`${path}${suffix}`, join(copy, `${RUNS_DB_FILE}${suffix}`));
+    db = RunDatabase.openReadOnly(copy ? join(copy, RUNS_DB_FILE) : path, RUN_DATABASE_SCHEMA_VERSION, { quiescent: true })!;
+    return read(db);
+  } finally {
+    db?.close();
+    if (copy) rmSync(copy, { recursive: true, force: true });
+  }
 }
 
 export interface PathMapping {
@@ -183,10 +203,6 @@ function moveKind(entry: Dirent): MigrationMove['kind'] {
   return entry.isSymbolicLink() ? 'symlink' : entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other';
 }
 
-function realDirectory(path: string): boolean {
-  try { return lstatSync(path).isDirectory(); } catch { return false; }
-}
-
 /**
  * The first existing component from `base` down to `path`, both included, that is not a real
  * directory (a symlink, a file); undefined when there is none. A move never passes through one,
@@ -215,6 +231,10 @@ export function gitReportedPath(path: string, api: Pick<typeof nodePath, 'normal
   return api.normalize(path);
 }
 
+function realpathOrSelf(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
+}
+
 function sortedEntries(path: string): Dirent[] {
   return readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 }
@@ -228,15 +248,22 @@ class Planner {
     const source = join(root, ...LEGACY_PROJECT_DIR.split('/'));
     this.plan = { repoRoot: root, source, destination: join(root, ...MIGRATED_PROJECT_DIR.split('/')),
       journal: migrationFencePaths(source)!.journal, moves: [], tracked: [], worktrees: [], rewrites: [], conflicts: [],
-      blockers: [], gitMv: [], notRewritten: NOT_REWRITTEN };
+      blockers: [], gitMv: [], notRewritten: NOT_REWRITTEN, alreadyMoved: false };
   }
 
   async build(): Promise<ProjectMigrationPlan> {
     const { plan } = this;
     if (pathPresent(plan.journal)) plan.blockers.push(`An unfinished project migration journal ${plan.journal} exists; resume it first`);
+    if (projectMoveMarked(this.root)) return this.moved();
+    // The mark-moved step writes where `projectPaths` looks; refuse before the journal when they differ.
+    const common = await gitOutput(this.root, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    const marker = projectMovedMarker(this.root);
+    if (common && (!marker || dirname(dirname(marker.path)) !== realpathOrSelf(common.trim()))) {
+      plan.blockers.push(`Cannot find the Git directory of ${this.root} from its .git entry, so a move could not be marked`);
+    }
     if (!pathPresent(plan.source)) return plan;
     if (!realDirectory(plan.source) || realpathSync(plan.source) !== plan.source) { plan.blockers.push(`${plan.source} is not a directory of this project`); return plan; }
-    if (pathPresent(plan.destination) && !realDirectory(plan.destination)) {
+    if (!projectDestinationAvailable(plan.destination)) {
       plan.blockers.push(`${plan.destination} exists and is not a directory`);
       return plan;
     }
@@ -262,6 +289,16 @@ class Planner {
     await this.receiptRewrites(map);
     this.rowRewrites(map);
     this.evidenceRewrites(map);
+    return plan;
+  }
+
+  /** A second migration of a moved project changes nothing; it lists the tracked files still to move. */
+  private async moved(): Promise<ProjectMigrationPlan> {
+    const { plan } = this;
+    plan.alreadyMoved = true;
+    const tracked = pathPresent(plan.source) ? await trackedPaths(this.root) : new Set<string>();
+    plan.tracked = [...tracked ?? []].sort().map(from => ({ from, to: MIGRATED_PROJECT_DIR + from.slice(LEGACY_PROJECT_DIR.length) }));
+    plan.gitMv = gitMvCommands(this.root, plan.tracked);
     return plan;
   }
 
@@ -333,30 +370,23 @@ class Planner {
       if (legacyIndex) this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into a run store; open the project with this build first`);
       return;
     }
-    let db: RunDatabase | null = null;
-    // A WAL file (a live writer, or one that crashed) is read from a private copy: even a read-only
-    // connection writes shared-memory state beside the database it reads.
-    const copy = pathPresent(`${path}-wal`) ? mkdtempSync(join(tmpdir(), 'cez-migration-plan-')) : undefined;
     try {
-      if (copy) for (const suffix of ['', '-wal']) copyFileSync(`${path}${suffix}`, join(copy, `${RUNS_DB_FILE}${suffix}`));
-      db = RunDatabase.openReadOnly(copy ? join(copy, RUNS_DB_FILE) : path, RUN_DATABASE_SCHEMA_VERSION, { quiescent: true })!;
-      if (legacyIndex && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
-        this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into ${path}; open the project with this build first`);
-        return;
-      }
-      for (const row of db.listAll()) {
-        const data: unknown = JSON.parse(row.data);
-        for (const field of runRecordPathFields(data)) this.rowField(row.id, { data: field }, valueAt(data, field), map);
-        this.rowField(row.id, { summary: ['worktreePath'] }, valueAt(JSON.parse(row.summary), ['worktreePath']), map);
-        this.rowField(row.id, { column: 'worktree_path' }, row.worktreePath, map);
-      }
+      readQuiescentRunDatabase(path, (db) => {
+        if (legacyIndex && db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) {
+          this.plan.blockers.push(`${join(this.plan.source, LEGACY_INDEX_FILE)} has not been imported into ${path}; open the project with this build first`);
+          return;
+        }
+        for (const row of db.listAll()) {
+          const data: unknown = JSON.parse(row.data);
+          for (const field of runRecordPathFields(data)) this.rowField(row.id, { data: field }, valueAt(data, field), map);
+          this.rowField(row.id, { summary: ['worktreePath'] }, valueAt(JSON.parse(row.summary), ['worktreePath']), map);
+          this.rowField(row.id, { column: 'worktree_path' }, row.worktreePath, map);
+        }
+      });
     } catch (error) {
       this.plan.blockers.push(error instanceof RunDatabaseUnsupportedSchemaError
         ? `The run store ${path} is not at this build's schema ${RUN_DATABASE_SCHEMA_VERSION}; open the project with this build first`
         : `Cannot read the run store ${path}: ${(error as Error).message}`);
-    } finally {
-      db?.close();
-      if (copy) rmSync(copy, { recursive: true, force: true });
     }
   }
 
@@ -418,6 +448,7 @@ export function describeProjectMigrationPlan(plan: ProjectMigrationPlan): string
   const section = (title: string, lines: readonly string[]) => lines.length ? [`${title}:`, ...lines.map(line => `  ${line}`)] : [`${title}: none`];
   return [
     `Project ${plan.repoRoot}: ${plan.source} -> ${plan.destination}`,
+    ...plan.alreadyMoved ? ['Already moved: a completed migration marked this project; nothing moves'] : [],
     ...section('Blockers', plan.blockers),
     ...section('Destination conflicts', plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)),
     ...section('Moves', plan.moves.map(move => `${move.from} -> ${move.to}`)),

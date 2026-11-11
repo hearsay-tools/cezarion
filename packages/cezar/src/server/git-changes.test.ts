@@ -1,7 +1,9 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
@@ -97,6 +99,47 @@ describe('collectChanges — structured diff vs base', () => {
     expect(status.map((file) => file.path).sort()).toEqual(expectedPaths);
     expect(status.filter((file) => file.status === '??')).toHaveLength(2);
     if (mixed) expect(status.find((file) => file.path === 'tracked.txt')?.status).toBe('MM');
+  });
+
+  it('keeps staged membership and older intent-to-add entries in the real index', async () => {
+    writeFileSync(join(dir, '.gitignore'), 'ignored.txt\n');
+    writeFileSync(join(dir, 'tracked.txt'), 'base\n');
+    g(dir, 'add', '-A');
+    g(dir, 'commit', '-m', 'base');
+    writeFileSync(join(dir, 'ignored.txt'), 'forced\n');
+    g(dir, 'add', '-f', 'ignored.txt');
+    writeFileSync(join(dir, 'tracked.txt'), 'staged\n');
+    g(dir, 'add', 'tracked.txt');
+    writeFileSync(join(dir, 'tracked.txt'), 'unstaged\n');
+    writeFileSync(join(dir, 'older.txt'), 'older\n');
+    g(dir, 'add', '-N', 'older.txt');
+    writeFileSync(join(dir, 'new.txt'), 'new\n');
+    const index = join(dir, '.git', 'index');
+    const before = readFileSync(index);
+
+    const result = await collectChanges(dir, 'main');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changes.files.map((file) => file.path).sort()).toEqual([
+      'ignored.txt', 'new.txt', 'older.txt', 'tracked.txt',
+    ]);
+    expect(result.changes.files.find((file) => file.path === 'tracked.txt')?.patch).toContain('+unstaged');
+    expect(readFileSync(index)).toEqual(before);
+  });
+
+  it('seeds a missing index privately without creating a real index', async () => {
+    writeFileSync(join(dir, 'tracked.txt'), 'base\n');
+    g(dir, 'add', '-A');
+    g(dir, 'commit', '-m', 'base');
+    const index = join(dir, '.git', 'index');
+    rmSync(index);
+    writeFileSync(join(dir, 'new.txt'), 'new\n');
+
+    const result = await collectChanges(dir, 'main');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.changes.files.map((file) => file.path)).toEqual(['new.txt']);
+    expect(existsSync(index)).toBe(false);
   });
 
   it('reports modified, added, deleted, renamed and binary files with counts and patches', async () => {
@@ -275,7 +318,7 @@ describe('collectChanges — structured diff vs base', () => {
     if (withAdd.ok) expect(withAdd.changes.files.some((f) => f.path === 'untracked.txt')).toBe(true);
   });
 
-  it('intentToAdd:false leaves the real index untouched on a repointed HEAD too', async () => {
+  it.each([false, undefined])('leaves the real index untouched on a repointed HEAD (intentToAdd: %s)', async (intentToAdd) => {
     // Choosing between the two repointed anchors compares them with `git diff --shortstat`,
     // and `git diff` REWRITES the index it reads (a stat refresh). Those probes must run on
     // the scratch index like every other diff here, or a read-only GET against the user's own
@@ -299,7 +342,7 @@ describe('collectChanges — structured diff vs base', () => {
     const indexBefore = readFileSync(join(dir, '.git', 'index'));
 
     const result = await collectChanges(dir, 'main', {
-      intentToAdd: false,
+      intentToAdd,
       taskBranch: 'cez/task1234',
       runStartedAt: '2026-06-01T00:00:00Z',
     });
@@ -598,6 +641,26 @@ describe('session git API routes', () => {
     expect((await apiRequest(app, '/api/v1/runs/nope/changes')).status).toBe(404);
   });
 
+  it.each([false, true])('GET /changes preserves the real index bytes and mtime (linked worktree: %s)', async (linked) => {
+    if (linked) {
+      worktree = join(repoRoot, 'linked');
+      g(repoRoot, 'worktree', 'add', '-b', 'linked-task', worktree);
+      store.updateRun(run.id, { worktreePath: worktree, branch: 'linked-task' });
+    }
+    writeFileSync(join(worktree, 'new.txt'), 'untracked\n');
+    const index = g(worktree, 'rev-parse', '--path-format=absolute', '--git-path', 'index').trim();
+    const before = readFileSync(index);
+    const mtime = statSync(index).mtimeMs;
+
+    const res = await apiRequest(app, `/api/v1/runs/${run.id}/changes`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ChangesPayload).files).toEqual([
+      expect.objectContaining({ path: 'new.txt', status: 'added' }),
+    ]);
+    expect(readFileSync(index)).toEqual(before);
+    expect(statSync(index).mtimeMs).toBe(mtime);
+  });
+
   it('GET /changes uses the persisted task branch to detect a repointed HEAD', async () => {
     writeFileSync(join(worktree, 'reviewed.txt'), 'reviewed branch history\n');
     g(worktree, 'add', '-A');
@@ -853,7 +916,21 @@ describe('session git API routes', () => {
     expect(refused.headers.get('content-type')).toContain('application/json');
   });
 
-  it('POST git/commit commits everything; a clean tree is a 409, a bad body a 400', async () => {
+  it.each(['commit', 'push'])('POST git/%s refuses a running run before changing Git state', async (action) => {
+    setRunStatus(store, run.id, RUN_STATUS.running);
+    writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
+    const before = g(worktree, 'rev-parse', 'HEAD');
+    const res = action === 'commit'
+      ? await commit(run.id, { message: 'must not commit' })
+      : await apiRequest(app, `/api/v1/runs/${run.id}/git/push`, { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'the agent is still working in this worktree' });
+    expect(g(worktree, 'rev-parse', 'HEAD')).toBe(before);
+    expect(g(worktree, 'status', '--porcelain')).toContain('?? feat.txt');
+  });
+
+  it.each([RUN_STATUS.queued, RUN_STATUS.waiting])('POST git/commit commits everything while %s; clean tree is 409, bad body is 400', async (status) => {
+    setRunStatus(store, run.id, status);
     writeFileSync(join(worktree, 'feat.txt'), 'feature\n');
     const res = await commit(run.id, { message: 'feat: add feature' });
     expect(res.status).toBe(200);
@@ -878,7 +955,8 @@ describe('session git API routes', () => {
     expect(((await res.json()) as { error: string }).error).toContain('no remote configured');
   });
 
-  it('POST git/push sets upstream on first push to a real remote', async () => {
+  it.each([RUN_STATUS.queued, RUN_STATUS.waiting])('POST git/push sets upstream on first push while %s', async (status) => {
+    setRunStatus(store, run.id, status);
     const remote = mkdtempSync(join(tmpdir(), 'cez-remote-'));
     try {
       execFileSync('git', ['init', '--bare', remote], { encoding: 'utf8' });

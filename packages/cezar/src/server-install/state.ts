@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { existsSync, readdirSync } from 'node:fs';
 import { HomeOutsideWriteError, HomeStore, readHomeFile } from '../home/store.ts';
@@ -17,11 +18,11 @@ import { freshServerState, serverStateSchema, type ServerState, type StepOutcome
  */
 
 /** Load a host-level instance record, degrading to a fresh record on any error. */
-export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home: Home): ServerState {
+export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home: Home, read = (path: string) => readHomeFile(path, home)): ServerState {
   const path = serverStatePath(instance, home);
   let raw: string;
   try {
-    raw = readHomeFile(path, home);
+    raw = read(path);
   } catch {
     return freshServerState();
   }
@@ -41,10 +42,10 @@ export function loadServerState(instance: string = DEFAULT_SERVER_INSTANCE, home
  * uninstall/deploy resolve which instance to act on. Never throws — an
  * unreadable dir or a corrupt file is simply skipped.
  */
-export function listServerInstances(home: Home): Array<{ instance: string; state: ServerState }> {
+export function listServerInstances(home: Home, read = (path: string) => readHomeFile(path, home)): Array<{ instance: string; state: ServerState }> {
   const out: Array<{ instance: string; state: ServerState }> = [];
   if (existsSync(serverStatePath(DEFAULT_SERVER_INSTANCE, home))) {
-    out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE, home) });
+    out.push({ instance: DEFAULT_SERVER_INSTANCE, state: loadServerState(DEFAULT_SERVER_INSTANCE, home, read) });
   }
   let entries: string[] = [];
   try {
@@ -55,7 +56,7 @@ export function listServerInstances(home: Home): Array<{ instance: string; state
   for (const file of entries) {
     if (!file.endsWith('.json')) continue;
     const instance = basename(file, '.json');
-    out.push({ instance, state: loadServerState(instance, home) });
+    out.push({ instance, state: loadServerState(instance, home, read) });
   }
   return out;
 }
@@ -92,7 +93,7 @@ export function deleteServerState(instance: string, home: Home): void {
   try {
     new HomeStore(home).replace(serverStatePath(instance, home), null);
   } catch (error) {
-    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; instance state was kept`);
+    if (error instanceof HomeOutsideWriteError) console.warn(`${logPrefix()} ${error.message}; instance state was kept`);
     // non-fatal — an empty record left behind is harmless
   }
 }
@@ -148,7 +149,7 @@ function lockRelease(store: HomeStore, path: string, home: Home): () => void {
     try {
       store.transaction(() => { if (readLockPid(path, home) === process.pid) store.replace(path, null); }, [path]);
     } catch (error) {
-      if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; install lock was kept`);
+      if (error instanceof HomeOutsideWriteError) console.warn(`${logPrefix()} ${error.message}; install lock was kept`);
       // Release has always been best-effort.
     }
   };

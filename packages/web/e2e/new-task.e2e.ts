@@ -1,8 +1,10 @@
+import { projectPaths } from '../../cezar/src/project-paths.ts'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 
 import { waitForSettledSample } from './visual-ready'
 import { dismissWithEscape } from './contrast'
@@ -223,7 +225,7 @@ describe('the full-screen /new against a live dry-run server', () => {
       )
       return snapshot.checks.length > 0 ? snapshot : undefined
     }, () => 'runner availability never finished its first background sweep', { tries: 120 })
-    const runners = ['claude', 'codex', 'cursor', 'omp', 'opencode', 'pi'].filter((id) =>
+    const runners = runnerSchema.options.filter((id) =>
       health.checks.some((c) => c.name === id && c.available),
     )
     const expectedPills = runners.length > 1 ? 1 : 0
@@ -430,7 +432,7 @@ describe('the bookmarklet contract on full /new loads (spec 011, Step 1.3)', () 
   it('auto=1 with the REAL launch key starts a run unattended and lands in its thread', async () => {
     // The documented on-disk contract: the server bakes this secret into the bookmarklets it
     // generates; only a page holding it may start runs. Read it exactly where users can.
-    const key = readFileSync(join(dataRoot, '.ai/cezar/launch-key'), 'utf8').trim()
+    const key = readFileSync(join(projectPaths(dataRoot).write, 'launch-key'), 'utf8').trim()
     expect(key).not.toBe('')
     const before = await runCount()
 

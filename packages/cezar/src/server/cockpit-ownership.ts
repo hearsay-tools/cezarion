@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { dataReadDirs, pathPresent } from '../project-paths.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
@@ -136,9 +137,9 @@ export function projectAdmissionRefusal(dataDir: string): ProjectMigrationFenced
     const owner = readOwner(paths.lock);
     if (!owner && pathPresent(paths.lock)) return new ProjectMigrationFencedError('unreadable', paths.lock);
     if (owner && alive(owner)) {
-      // A lease or hold passes only this process's own fence, whose drain counts it. A fence
-      // another owner holds refuses everything here, admitted work included.
-      if (heldFences.get(paths.lock) === owner.token && leased(paths.lock)) return undefined;
+      // Only the fence holder's own work passes: the migration engine and the holder's live-task
+      // check, run inside `asFenceHolder`. Everything else in this process is refused too.
+      if (heldFences.get(paths.lock) === owner.token && holderScope.getStore() === paths.lock) return undefined;
       return new ProjectMigrationFencedError('migrating', paths.lock, owner);
     }
   }
@@ -150,27 +151,27 @@ export function assertProjectAdmitted(dataDir: string): void {
   if (refusal) throw refusal;
 }
 
-/** Fences of this process still draining: the writes of the work being drained land. */
-const draining = new Set<string>();
 /** Fences whose skipped writes have been logged, so each is logged once. */
 const writeSkipsLogged = new Set<string>();
 
 /**
- * The write backstop under every store write, claim and save: true while a fence refuses this
- * project and the caller holds no lease or hold, unless the fence is this process's own and still
- * draining. A skipped write is logged once per fence. Dormant cost: two `lstat` calls.
+ * The write backstop under every store write, claim and save: true while a fence or a journal
+ * refuses this project, outside the fence holder's own work. Offline, the migration CLI refuses
+ * while any cockpit it can see serves the project; this stops the writes of one it cannot see (a
+ * cockpit of another home that has the project registered). A skipped write is logged once per
+ * fence. Dormant cost: two `lstat` calls.
  */
 export function projectWriteRefused(dataDir: string): boolean {
   const lock = migrationFencePaths(dataDir)?.lock;
   const refusal = lock && projectAdmissionRefusal(dataDir);
-  if (!lock || !refusal || draining.has(lock)) {
+  if (!lock || !refusal) {
     // No refusal now: the next fence of this project logs its first skip again.
     if (lock) writeSkipsLogged.delete(lock);
     return false;
   }
   if (!writeSkipsLogged.has(lock)) {
     writeSkipsLogged.add(lock);
-    console.warn(`[cez] A write to ${dataDir} was skipped: ${refusal.message}`);
+    console.warn(`${logPrefix()} A write to ${dataDir} was skipped: ${refusal.message}`);
   }
   return true;
 }
@@ -187,16 +188,10 @@ export function assertProjectWritable(dataDir: string): void {
   if (projectWriteRefused(dataDir)) assertProjectAdmitted(dataDir);
 }
 
-/** Operations admitted per fence path in this process; a fence drains them to zero. */
-const admitted = new Map<string, number>();
 /** The token of every fence this process holds, by lock path. */
 const heldFences = new Map<string, string>();
-/** The open leases of the current async call chain: an operation admitted before a fence
- *  finishes, task starts included, and the drain waits for what it started. */
-const leases = new AsyncLocalStorage<ReadonlyArray<{ lock: string; open: boolean }>>();
-function leased(lock: string): boolean {
-  return leases.getStore()?.some((lease) => lease.open && lease.lock === lock) ?? false;
-}
+/** The fence whose holder work the current async call chain runs (`asFenceHolder`). */
+const holderScope = new AsyncLocalStorage<string>();
 
 /** Whether this process holds the live migration fence of `dataDir`'s project: the project
  *  migration engine runs only under a fence its own process holds. */
@@ -206,72 +201,29 @@ export function holdsProjectFence(dataDir: string): boolean {
   return token !== undefined && readOwner(lock!)?.token === token;
 }
 
-/** Admit one operation until the returned release runs; throws `ProjectMigrationFencedError`. */
-export function admitProject(dataDir: string): () => void {
-  assertProjectAdmitted(dataDir);
-  const lock = migrationFencePaths(dataDir)?.lock;
-  if (!lock) return () => undefined;
-  admitted.set(lock, (admitted.get(lock) ?? 0) + 1);
-  let open = true;
-  return () => {
-    if (!open) return;
-    open = false;
-    const left = admitted.get(lock)! - 1;
-    if (left > 0) admitted.set(lock, left);
-    else admitted.delete(lock);
-  };
+/**
+ * Run `work` as the holder of `fence`: admission and the write backstop pass for this project
+ * inside it, and only inside it, so a cockpit that recovers a journal still refuses its own other
+ * requests for the project meanwhile.
+ */
+export function asFenceHolder<T>(fence: Pick<ProjectMigrationFence, 'lock'>, work: () => T): T {
+  return holderScope.run(fence.lock, work);
 }
 
-/**
- * Run `work` counted towards the drain and admitted for its whole length, without refusing it:
- * work that admitted or live work already set going (a webhook delivery, a preview release),
- * which a fence must wait for rather than drop. Everything it calls passes admission.
- */
-export function holdProjectWork<T>(dataDir: string, work: () => Promise<T>): Promise<T> {
-  const lock = migrationFencePaths(dataDir)?.lock;
-  if (!lock) return work();
-  admitted.set(lock, (admitted.get(lock) ?? 0) + 1);
-  const lease = { lock, open: true };
-  const settle = () => {
-    lease.open = false;
-    const left = admitted.get(lock)! - 1;
-    if (left > 0) admitted.set(lock, left);
-    else admitted.delete(lock);
-  };
-  let running: Promise<T>;
-  try { running = leases.run([...(leases.getStore() ?? []), lease], work); }
-  catch (error) { settle(); throw error; }
-  void running.then(settle, settle);
-  return running;
-}
-
-/**
- * Run `work` admitted until it settles, so a fence drains it; a fenced project answers `refused`.
- * Everything `work` calls passes admission for this project while the lease is open.
- */
+/** Run `work` unless the project is fenced or has an unfinished journal; then answer `refused`. */
 export async function withProjectAdmission<T, R>(dataDir: string, work: () => Promise<T>, refused: (error: ProjectMigrationFencedError) => R): Promise<T | R> {
   const refusal = projectAdmissionRefusal(dataDir);
-  if (refusal) return refused(refusal);
-  return holdProjectWork(dataDir, work);
+  return refusal ? refused(refusal) : work();
 }
 
 /** A task that is not terminal: it keeps a project from being fenced for a migration. */
 export interface LiveProjectTask { id: string; title: string; state: string }
 
-/**
- * How long a fence drains work already in flight before the migration stops by itself: longer
- * than one webhook delivery series (3 attempts of 10 s with backoff), a project context build with
- * recovery and one bounded archive or automation tick; short enough that no migration hangs.
- */
-export const PROJECT_FENCE_DRAIN_MS = 60_000;
-
-/** The fence was given up: tasks are live, or work still ran when the drain bound passed. */
+/** The fence was refused: tasks are live. Nothing was claimed or moved. */
 export class ProjectMigrationBusyError extends Error {
-  constructor(readonly reason: 'live' | 'drain-timeout', readonly tasks: readonly LiveProjectTask[], readonly project: string) {
+  constructor(readonly tasks: readonly LiveProjectTask[], readonly project: string) {
     const list = tasks.map((task) => `\n- ${task.id} ${task.title} (${task.state})`).join('');
-    super(reason === 'live'
-      ? `Cannot migrate ${project}: ${tasks.length} task${tasks.length === 1 ? ' is' : 's are'} live. Finish or cancel each one, then retry:${list}`
-      : `The migration of ${project} stopped: work was still running after ${PROJECT_FENCE_DRAIN_MS / 1000} s. Nothing was moved. Finish or cancel each task below, then retry:${list}`);
+    super(`Cannot migrate ${project}: ${tasks.length} task${tasks.length === 1 ? ' is' : 's are'} live. Finish or cancel each one, then retry:${list}`);
     this.name = 'ProjectMigrationBusyError';
   }
 }
@@ -281,20 +233,6 @@ export interface ProjectMigrationFence {
   lock: string;
   journal: string;
   release(): void;
-}
-
-/** `work`, or `timedOut()` once `deadline` passes, or the abort reason of `signal`. */
-async function withinDeadline(work: Promise<unknown>, deadline: number, signal: AbortSignal | undefined, timedOut: () => Error): Promise<void> {
-  const timer = new AbortController();
-  const abort = () => timer.abort(signal?.reason);
-  signal?.addEventListener('abort', abort, { once: true });
-  if (signal?.aborted) abort();
-  try {
-    await Promise.race([work, delay(Math.max(0, deadline - Date.now()), undefined, { signal: timer.signal }).then(() => { throw timedOut(); })]);
-  } finally {
-    signal?.removeEventListener('abort', abort);
-    timer.abort();
-  }
 }
 
 /** The live cockpit other than this process that owns `dataDir`, if any: its pid and, once it
@@ -370,22 +308,14 @@ export class CockpitOwnership {
   }
 
   /**
-   * Take the project's exclusive migration fence: own the project (taking `cockpit.lock` when this
-   * instance does not hold it) and refuse new operations. Then, with no wait in between, refuse
-   * while any task is live (`liveTasks`), and drain the work in flight (`inFlight` and admitted
-   * operations) for at most `drainMs`. Only the `cockpit.lock` holder ever holds the fence, so no
-   * other cockpit boots or serves the project meanwhile. A refusal, the bound or an abort releases
-   * the fence; otherwise it is held until `release`.
+   * Take the project's exclusive migration fence, offline: own the project (taking `cockpit.lock`
+   * when this instance does not hold it), so no cockpit boots on or builds it, then claim the
+   * fence, so no other process is admitted. Right after the claim, `liveTasks` runs as the holder;
+   * any live task releases the fence and throws `ProjectMigrationBusyError`. Held until `release`.
    */
-  async fenceProject(dataDir: string, options: {
-    liveTasks: () => readonly LiveProjectTask[]; inFlight: () => number; signal?: AbortSignal | undefined; drainMs?: number;
-    /** Work that ends on its own once nothing new starts (history compression, a reports scan),
-     *  awaited inside the same bound and abort. */
-    settle?: () => Promise<unknown>;
-  }): Promise<ProjectMigrationFence> {
+  async fenceProject(dataDir: string, options: { liveTasks: () => readonly LiveProjectTask[] }): Promise<ProjectMigrationFence> {
     const paths = migrationFencePaths(dataDir);
     if (!paths) throw new Error(`Not a project data directory: ${dataDir}`);
-    options.signal?.throwIfAborted();
     // The directory that exists, so resuming after the move never recreates the old name.
     const target = dataReadDirs(resolve(dataDir)).find(pathPresent) ?? dataDir;
     if (!this.owns(target)) await this.claimProject(target, true);
@@ -393,7 +323,6 @@ export class CockpitOwnership {
     if (!claim(paths.lock, owner)) throw projectAdmissionRefusal(dataDir) ?? new ProjectMigrationFencedError('migrating', paths.lock);
     this.fences.set(paths.lock, owner);
     heldFences.set(paths.lock, owner.token);
-    draining.add(paths.lock);
     const fence = { ...paths, release: () => {
       if (this.fences.get(paths.lock) !== owner) return;
       this.fences.delete(paths.lock);
@@ -401,23 +330,19 @@ export class CockpitOwnership {
       release(paths.lock, owner);
     } };
     try {
-      const project = dirname(dirname(paths.lock));
-      const live = options.liveTasks();
-      if (live.length > 0) throw new ProjectMigrationBusyError('live', live, project);
-      const deadline = Date.now() + (options.drainMs ?? PROJECT_FENCE_DRAIN_MS);
-      while (options.liveTasks().length > 0 || options.inFlight() > 0 || (admitted.get(paths.lock) ?? 0) > 0) {
-        if (Date.now() >= deadline) throw new ProjectMigrationBusyError('drain-timeout', options.liveTasks(), project);
-        await delay(50, undefined, { signal: options.signal });
-      }
-      if (options.settle) await withinDeadline(options.settle(), deadline, options.signal, () => new ProjectMigrationBusyError('drain-timeout', options.liveTasks(), project));
-      options.signal?.throwIfAborted();
+      const live = asFenceHolder(fence, options.liveTasks);
+      if (live.length > 0) throw new ProjectMigrationBusyError(live, dirname(dirname(paths.lock)));
       return fence;
     } catch (error) {
       fence.release();
       throw error;
-    } finally {
-      draining.delete(paths.lock);
     }
+  }
+
+  /** The claim this instance holds in `directory`, if any. */
+  private ownedClaim(directory: string): Owner | undefined {
+    try { return this.owned.get(join(realpathSync(directory), 'cockpit.lock')); }
+    catch { return undefined; }
   }
 
   /** A live owner under the project's other directory name; the claimed directory is not checked. */
@@ -429,6 +354,8 @@ export class CockpitOwnership {
       const owner = readOwner(path);
       // Invalid fallback claims cannot be repaired by this binary; retain them unchanged.
       if (!owner) throw new CockpitAlreadyRunningError(fallback, undefined, path);
+      // This instance's own claim there (a recovery kept it) is not another cockpit.
+      if (this.ownedClaim(fallback)?.token === owner.token) continue;
       if (alive(owner)) throw new CockpitAlreadyRunningError(fallback, owner);
     }
   }

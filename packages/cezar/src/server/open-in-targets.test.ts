@@ -1,7 +1,8 @@
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -77,6 +78,17 @@ describe('run open-in target dispatch and refusals', () => {
     expect(openFile).not.toHaveBeenCalled();
   });
 
+  it('opens the default-app image from the repository root for a worktree-off run', async () => {
+    writeFileSync(join(root, 'image.png'), 'image');
+    store.updateRun(runId, { worktree: false });
+    const res = await post('default', 'image.png');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ opened: true, path: join(root, 'image.png') });
+    expect(openFile).toHaveBeenCalledExactlyOnceWith(join(root, 'image.png'));
+    expect(openApp).not.toHaveBeenCalled();
+    expect(openTerminal).not.toHaveBeenCalled();
+  });
+
   it('preserves the image path when its default app cannot open', async () => {
     const worktree = join(root, 'worktree');
     mkdirSync(worktree);
@@ -106,6 +118,24 @@ describe('run open-in target dispatch and refusals', () => {
     const res = await post('cli:claude');
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'no terminal emulator found', command: `cd '${root}' && claude` });
+  });
+
+  it('quotes shell metacharacters in the copy-paste fallback directory', async () => {
+    const worktree = join(root, "space '$(touch dollar-marker)`touch backtick-marker` $'");
+    mkdirSync(worktree);
+    store.updateRun(runId, { worktreePath: worktree });
+    openTerminal.mockResolvedValueOnce(false);
+    const res = await post('cli:claude');
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error: string; command: string };
+    expect(body.error).toBe('no terminal emulator found');
+    expect(body.command.endsWith(' && claude')).toBe(true);
+    const cd = body.command.slice(0, -' && claude'.length);
+    const result = spawnSync('sh', ['-c', `${cd} && pwd -P`], { cwd: root, encoding: 'utf8' });
+    expect(existsSync(join(root, 'dollar-marker'))).toBe(false);
+    expect(existsSync(join(root, 'backtick-marker'))).toBe(false);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(worktree);
   });
 
   it.each([

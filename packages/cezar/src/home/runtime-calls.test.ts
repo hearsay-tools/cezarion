@@ -14,7 +14,7 @@ afterEach(() => { vi.clearAllMocks(); });
 
 it('uses the selected config and account for planner calls', async () => {
   const { root, selected } = runtimeHomes();
-  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
+  Home.seed(selected, selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
   run.mockResolvedValue({ text: JSON.stringify({ title: 'test-plan', steps: [{ prompt: '{{task}}', name: 'Task' }] }) });
   expect((await planChain(root, 'Plan a task', [], selected, createRunner)).fallback).toBe(false);
   expect(run).toHaveBeenCalledWith(expect.objectContaining({ env: { CLAUDE_CONFIG_DIR: join(root, 'selected-account') } }));
@@ -22,7 +22,7 @@ it('uses the selected config and account for planner calls', async () => {
 
 it('uses the selected config and account for task naming', async () => {
   const { root, selected } = runtimeHomes();
-  Home.seed(Home.sandbox(selected.root), selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
+  Home.seed(selected, selected.workspaceConfig, { agentDefaults: { runner: 'claude' } });
   run.mockResolvedValue({ text: '{"title":"testing home isolation"}' });
   expect(await generateRunName(root, { task: 'Test home isolation' }, selected, createRunner)).toMatchObject({ titleSummary: 'testing home isolation' });
   expect(run).toHaveBeenCalledWith(expect.objectContaining({ env: expect.objectContaining({ CLAUDE_CONFIG_DIR: join(root, 'selected-account') }) }));

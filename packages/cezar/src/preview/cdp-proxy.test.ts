@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { describe, expect, it } from 'vitest';
 import type { CdpConnection, CdpMessage } from './cdp.ts';
 import { AgentCdpLink, type AgentClient } from './cdp-proxy.ts';
@@ -76,7 +77,7 @@ describe('AgentCdpLink (hearsay-tools/cezarion#784)', () => {
     const { browser, agent, link } = await linked();
     link.fromClient(JSON.stringify({ id: 5, method }));
     expect(browser.requests).toEqual([]);
-    expect(agent.sent).toEqual([{ id: 5, error: { code: -32000, message: `cezar refuses ${method}: the owner's preview pane shares this browser.` } }]);
+    expect(agent.sent).toEqual([{ id: 5, error: { code: -32000, message: `${productName('cezar')} refuses ${method}: the owner's preview pane shares this browser.` } }]);
   });
 
   it("refuses closing the page the pane streams, by target and by its session, and allows the agent's other tabs", async () => {
@@ -96,7 +97,7 @@ describe('AgentCdpLink (hearsay-tools/cezarion#784)', () => {
     browser.requests[0]!.reply({ id: 9, result: { sessionId: 'C1' }, sessionId: 'B1' });
     link.fromClient(JSON.stringify({ id: 2, method: 'Target.sendMessageToTarget', params: { sessionId: 'C1', message: JSON.stringify({ id: 1, method: 'Page.close' }) } }));
     expect(browser.requests.map(r => r.method)).toEqual(['Target.attachToTarget']);
-    expect(agent.sent.at(-1)).toEqual({ id: 2, error: { code: -32000, message: 'cezar refuses Target.sendMessageToTarget: use flat sessions (attach with flatten: true).' } });
+    expect(agent.sent.at(-1)).toEqual({ id: 2, error: { code: -32000, message: `${productName('cezar')} refuses Target.sendMessageToTarget: use flat sessions (attach with flatten: true).` } });
   });
 
   it('delivers events in wire order: its browser session without a sessionId, children as they came, nothing else', async () => {

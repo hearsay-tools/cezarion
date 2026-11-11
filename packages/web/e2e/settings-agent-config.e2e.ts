@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, readTestEnv } from './agent-browser'
@@ -59,14 +60,7 @@ const contrastOf = (selector: string) => browser.evaluate(contrastSampleExpressi
 describe('settings → agent config: the Pi pane', () => {
   it('offers a Pi tab after the other three and lists Pi’s catalogued files under it', () => {
     gotoAgentConfig()
-    expect(browser.evaluate(`[...document.querySelectorAll(${JSON.stringify(TABS)})].map((el) => el.dataset.agent)`)).toEqual([
-      'claude',
-      'codex',
-      'opencode',
-      'pi',
-      'cursor',
-      'omp',
-    ])
+    expect(browser.evaluate(`[...document.querySelectorAll(${JSON.stringify(TABS)})].map((el) => el.dataset.agent)`)).toEqual([...runnerSchema.options])
     browser.click(PI_TAB)
     browser.waitForFunction(`document.querySelector(${JSON.stringify(PI_MCP_EMPTY)}) !== null`)
     // Catalog order inside each group: settings (user → project), then memory (global, shared).

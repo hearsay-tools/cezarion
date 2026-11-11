@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import { RUN_SEARCH_FIELDS, type RunSearchField } from '@open-mercato/cezar-contract/run-search';
 import { toRunSummary, type RunSummary } from '@open-mercato/cezar-contract/runs';
@@ -62,7 +63,7 @@ export class ReportsWatch {
     const delay = Math.max(0, 1_000 - (Date.now() - (this.lastScan.get(id) ?? 0)));
     const timer = setTimeout(() => {
       this.pending.delete(id);
-      void this.scan(id).catch(error => console.warn('[cez] Reports watch scan failed:', error));
+      void this.scan(id).catch(error => console.warn(`${logPrefix()} Reports watch scan failed:`, error));
     }, delay);
     timer.unref?.(); this.pending.set(id, timer);
   }
@@ -74,7 +75,7 @@ export class ReportsWatch {
     if (this.closed) return () => undefined;
     if (++this.demand === 1) {
       this.tick = setInterval(() => {
-        void this.reconcile(Date.now() - 5_000).catch(error => console.warn('[cez] Reports watch tick failed:', error));
+        void this.reconcile(Date.now() - 5_000).catch(error => console.warn(`${logPrefix()} Reports watch tick failed:`, error));
       }, 5_000);
       this.tick.unref?.();
     }

@@ -53,11 +53,11 @@ function flatWaitInputSchema() {
       wake_on_conflict: field('wake_on_conflict', 'kind "pr": Default true for "checks" and "merge". Set false when your work depends on another PR merging and you want to ignore its conflicts. "merge_or_blocked" always reports conflicts, regardless of this setting. With "checks", a conflicting PR may have no checks, ending as no_checks or deadline.'),
       worker_ids: field('worker_ids', 'kind "worker": the workers you own to wait for (1–32 unique ids).'),
       request_ids: field('request_ids', 'kind "request": the requests you sent, to a worker, your parent or a peer task, to wait for a reply to (1–32 unique ids).'),
-      peer_ids: field('peer_ids', 'kind "peer": the peer root tasks of this project to wait for (1–32 unique task ids; find them with `cez message tasks`). A message from one of them, or one of them settling, ends the wait; other messages wake you and keep it open.'),
+      peer_ids: field('peer_ids', 'kind "peer": the peer root tasks of this project to wait for (1–32 unique task ids; find them with `hsq message tasks`). A message from one of them, or one of them settling, ends the wait; other messages wake you and keep it open.'),
       mode: field('mode', 'kind "worker" or "request": "any" wakes you when one selected id settles (default), "all" when every one has, "one" takes exactly one id.'),
       timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "pr": 1–7200, default 1800. kind "worker", "request" or "peer": 1–1800, default 600 (the default shown is the pr one). kind "process": 1–7200, default 1800.'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
-      pid: field('pid', 'kind "process": the PID of the background command, as `echo $!` printed it.'),
+      pid: field('pid', 'kind "process": the PID of the background command: the `pid` the job start command printed.'),
       exit_file: field('exit_file', 'kind "process": optional. Only a file that your own wrapper writes the exit code to, in $TMPDIR or the worktree, with a new name for each command. Leave it out for a command that is already running or that writes its status file somewhere else.'),
       note: field('note', 'kind "timer" or "process": what to re-check, handed back to you at the wake.'),
     },
@@ -69,16 +69,18 @@ function flatWaitInputSchema() {
 export const waitToolDefinition = {
   name: 'cezar_wait',
   description: 'Open a wait on something outside this turn: a GitHub pull request\'s checks or its merge (kind "pr"), workers you own (kind "worker"), the replies to requests you sent (kind "request"), named peer tasks that may message you or settle (kind "peer"), a timer (kind "timer"), or a background command (kind "process"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait; only a message from a peer that a peer wait names closes that wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A checks observation is not merge approval; only a merge wait\'s "merged" outcome means the PR merged. Times in the answers, such as `deadline`, are UTC. ' +
-    // hearsay-tools/cezarion#1446: the `sh -c` wrapper because omp's own shell prints no `$!`.
+    // hearsay-tools/cezarion#3097: Codex ends a command's process group when the command returns,
+    // so a plain `&` job dies there, and `setsid … & echo $!` prints a dead PID under Claude.
     'kind "process" wakes you when a background command ends. To start one yourself, run ' +
-    '`sh -c \'( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!\'` ' +
-    'and pass the printed PID as `pid` and the exit file as `exit_file`, so the wake reports the exit code. ' +
-    'Use a new exit file name for each command: a file that already exists resolves the wait at once. ' +
+    '`hsq job start <name> -- <command> [args...]` (your instructions give the full command for this session under "Long commands") ' +
+    'and pass the `pid` and `exitFile` it prints as `pid` and `exit_file`, so the wake reports the exit code. ' +
+    'It writes the command\'s output to the `log` file it prints, refuses a name that still runs, and the job outlives this session; Cezar does not stop it. ' +
+    'Its files are in $TMPDIR, which Cezar removes when the task ends: for a job that must outlive the task, add `--dir <a git-ignored directory in the worktree>` before `--`. ' +
+    'Do not start a long command with `&`, `nohup`, `setsid` or your own background-task tool: it can end with the shell call or the session, or leave you a PID that is not the command\'s. ' +
     // A batch that writes its exit file outside $TMPDIR made agents start a watcher to copy it in.
     'For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out. ' +
     'The wake then reports `exited` without a code: read the command\'s own log or status file after it. ' +
     'Never start a watcher or helper process to copy a file into $TMPDIR. ' +
-    'The job outlives this session and Cezar does not stop it. ' +
     'An unchanged repeat names the retained wait. A changed timeout is refused and keeps that wait active; do not cancel it as a duplicate. On an unknown outcome retry the same operation_id and arguments, without a fallback timer.',
   inputSchema: flatWaitInputSchema(),
 };

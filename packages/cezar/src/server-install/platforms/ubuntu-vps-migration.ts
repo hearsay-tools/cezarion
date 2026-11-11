@@ -137,6 +137,15 @@ async function moveSite(ctx: InstallContext, { moves, next }: SitePlan): Promise
   });
 }
 
+/** What startUbuntuService checks after the move: the bind address behind an external proxy, else the public site. */
+async function healthDetail(ctx: InstallContext, site: SitePlan | undefined): Promise<string> {
+  const port = ctx.state.primaryPort;
+  if (ctx.state.externalProxy) return `health check: http://${ctx.state.bindHost?.trim() || '127.0.0.1'}:${port}/ answers (the bind address; the proxy is not checked)`;
+  const { url } = publicTarget(ctx, site?.next ?? await readText(ctx, recordedSite(ctx, true).vhostAvailable));
+  const tls = url.startsWith('https:') ? 'HTTPS, the site has TLS' : 'HTTP, the site has no TLS';
+  return `health check: port ${port} answers, then ${url} (${tls}) asks for a login and accepts a probe login`;
+}
+
 /** Move only recorded cezar resources. Dry runs plan the same moves and change nothing. */
 export async function migrateUbuntu(ctx: InstallContext, rebrand: boolean): Promise<PlatformMigrationReport> {
   const report = emptyReport();
@@ -152,6 +161,12 @@ export async function migrateUbuntu(ctx: InstallContext, rebrand: boolean): Prom
   }
   report.details = [...unit?.details ?? [], ...site?.details ?? []];
   if (ctx.state.externalProxy && unit) report.details.push('external proxy: its routes, TLS and authentication stay with the operator');
+  try {
+    report.details.push(await healthDetail(ctx, site));
+  } catch (error) {
+    report.errors.push({ artifact: recordedUnit(ctx, true), message: message(error) });
+    return report;
+  }
   const steps: Array<[Move[], () => Promise<void>]> = [];
   if (unit) steps.push([[unit.move], () => moveUnit(ctx, unit)]);
   if (site) steps.push([site.moves, () => moveSite(ctx, site)]);

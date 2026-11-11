@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -37,7 +38,7 @@ function renderShell(entry: string, props: Partial<AppShellProps> = {}) {
 
 const projects: MobileProjectNav = {
   projects: [
-    { id: 'cezarion', name: 'Cezarion', root: '/r/c', addedAt: '2026-07-01T00:00:00.000Z', lastOpenedAt: '2026-07-01T00:00:00.000Z', source: 'local', status: 'ok', branch: 'main' },
+    { id: 'cezarion', name: `${productName("Cezarion")}`, root: '/r/c', addedAt: '2026-07-01T00:00:00.000Z', lastOpenedAt: '2026-07-01T00:00:00.000Z', source: 'local', status: 'ok', branch: 'main' },
   ],
   signals: new Map([['cezarion', { needsYou: 0, failedUnread: 0, inMotion: 0, finishedUnread: 0 }]]),
   singleProject: false,
@@ -73,7 +74,7 @@ describe('desktop breadcrumb', () => {
     expect(slot('desktop-breadcrumb')?.textContent).toBe('Skills')
     cleanup()
     renderShell('/tools')
-    expect(slot('desktop-breadcrumb')?.textContent).toBe('Cezarion')
+    expect(slot('desktop-breadcrumb')?.textContent).toBe(`${productName("Cezarion")}`)
   })
 })
 
@@ -168,7 +169,7 @@ describe('mobile tab bar More sheet', () => {
   it('names the registry project, else the repo', () => {
     renderShell('/p/cezarion/', { mobileProjects: projects, repo: { name: 'repo-name', branch: 'main' } })
     openMore()
-    expect(slot('more-project')?.textContent).toBe('Cezarion')
+    expect(slot('more-project')?.textContent).toBe(`${productName("Cezarion")}`)
     cleanup()
     renderShell('/p/cezarion/', { repo: { name: 'repo-name', branch: 'main' } })
     openMore()

@@ -6,9 +6,9 @@ import { parseRunRecords } from './store.ts';
 import { stateOf } from '../workflows/run-states.ts';
 
 /**
- * What a cezar from before hearsay-tools/cezarion#2431 does with a stored `subagent` wait
- * (AGENT_PROTOCOL.md § Waits). Its wait union has no `subagent` arm, so this file loads the store
- * and the contract with that union in place of today's.
+ * What a cezar from before hearsay-tools/cezarion#2431 does with a stored `subagent` wait. Its
+ * wait union has no `subagent` arm, so this file loads the store and the contract with that union
+ * in place of today's.
  */
 vi.mock('@open-mercato/cezar-contract/waits', async importOriginal => {
   const actual = await importOriginal<typeof import('@open-mercato/cezar-contract/waits')>();

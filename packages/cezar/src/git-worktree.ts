@@ -1,45 +1,25 @@
+import { logPrefix } from './home/display.ts';
+import { execFile } from 'node:child_process';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from './project-paths.ts';
 import { inspectGeneration } from './delegation/process-liveness.ts';
-import { execFile } from 'node:child_process';
+import { git } from './git-command.ts';
 import { autosaveGit, type AutosaveOptions } from './autosave-git.ts';
 import { workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, realpathSync, type Dirent } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveTaskDiffBase } from './git-diff-base.ts';
-import { copyGitIndex } from './git-index-copy.ts';
+import { withPrivateIndex, type IndexGit, type LiveIndexCheck, type DiffRefusal } from './git-private-index.ts';
 import { isSafeGitRef } from './git-refs.ts';
 import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
 /** One worktree per task (spec 006). Only createWorktree throws; its caller reports failure. */
 
-/** Repo-relative home of all task worktrees (gitignored via .ai/cezar/.gitignore). */
-export const WORKTREES_DIR = '.ai/cezar/worktrees';
-
 export const DIFF_CAP = 400_000;
-
-interface GitResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-}
 
 interface RegisteredWorktree {
   path: string;
   branch?: string;
-}
-
-/** Run git, never throw — degradation is the caller's policy. */
-function git(cwd: string, args: string[], timeout?: number, env?: NodeJS.ProcessEnv): Promise<GitResult> {
-  return new Promise((resolve) => {
-    execFile(
-      'git',
-      args,
-      { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8', timeout, ...(env ? { env } : {}) },
-      (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
-    );
-  });
 }
 
 export function branchFor(runId: string): string {
@@ -66,7 +46,7 @@ export async function resolveBaseRef(repoRoot: string, base: string): Promise<st
 }
 
 export function worktreePathFor(repoRoot: string, runId: string): string {
-  return join(repoRoot, WORKTREES_DIR, runId);
+  return join(projectPaths(repoRoot).write, 'worktrees', runId);
 }
 
 export interface WorktreeInfo {
@@ -220,7 +200,7 @@ async function createWorktreeLocked(
 ): Promise<WorktreeInfo> {
   const base = await resolveWorktreeBase(repoRoot, baseBranch, git);
   const branch = branchFor(runId);
-  const absolutePath = join(canonicalPath(repoRoot), WORKTREES_DIR, runId);
+  const absolutePath = join(projectPaths(canonicalPath(repoRoot)).write, 'worktrees', runId);
   const branchRef = `refs/heads/${branch}`;
 
   if (options.freshOnly) {
@@ -555,7 +535,7 @@ async function pendingAutosaveOperation(dir: string, reason: AutosaveReason, git
   for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
     const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
     if (found.ok) {
-      console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
+      console.warn(`${logPrefix()} skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
       return 'refused';
     }
     if (found.code !== 1) return 'failed';
@@ -691,7 +671,7 @@ async function publishAutosaveCommit(
  */
 export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveCommitOptions = {}): Promise<AutosaveResult> {
   if (fallbackProjectWriteError(dir)) {
-    console.info('[cez] Autosave skipped 1 read-only fallback worktree under .ai/squawk/.');
+    console.info(`${logPrefix()} Autosave skipped 1 read-only fallback worktree under .ai/squawk/.`);
     return 'skipped';
   }
   let key = resolve(dir);
@@ -725,7 +705,7 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       // does not build. For the periodic and turn-end flushes the next one picks
       // the work up once the merge resolves; the pre-PR flush has no next one,
       // which is why callers get `refused` rather than a bare `false`.
-      console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
+      console.warn(`${logPrefix()} skipping ${reason} autosave in ${dir}: ${unresolved}`);
       return 'refused';
     }
     if (taskBranch !== undefined) {
@@ -833,42 +813,6 @@ function unquotePath(path: string): string {
   return Buffer.from(bytes).toString('utf8');
 }
 
-type IndexGit = (args: string[]) => Promise<GitResult>;
-
-/**
- * Read through a private index copy. Try OS temp, then the Git directory; if neither is
- * writable, retain the real-index fallback. Always remove scratch state.
- */
-async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
-  const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
-  const realIndex = real.ok ? real.stdout.trim() : '';
-  let scratch: string | undefined;
-  for (const parent of [tmpdir(), ...(realIndex ? [dirname(realIndex)] : [])]) {
-    try {
-      scratch = await mkdtemp(join(parent, 'cez-diff-index-'));
-      break;
-    } catch { /* Not writable: try the next location. */ }
-  }
-  if (!scratch) {
-    const refusal = fallbackProjectWriteError(worktreePath);
-    if (refusal) throw new Error(refusal);
-    return read((args) => git(worktreePath, args));
-  }
-  try {
-    const index = join(scratch, 'index');
-    const env = { ...process.env, GIT_INDEX_FILE: index };
-    const indexed: IndexGit = (args) => git(worktreePath, args, undefined, env);
-    let seeded = false;
-    if (realIndex) {
-      try { await copyGitIndex(realIndex, index); seeded = true; } catch { /* No index yet: seed from HEAD. */ }
-    }
-    if (!seeded) await indexed(['read-tree', 'HEAD']);
-    return await read(indexed);
-  } finally {
-    await rm(scratch, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
 async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promise<string> {
   await git(['add', '-N', '.']); // intent-to-add (private index, hearsay-tools/cezarion#1080): untracked files show up
   const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
@@ -878,12 +822,16 @@ async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promis
 /**
  * Whole-branch committed, uncommitted and untracked diff against the merge-base. Preserve this
  * anchor for the protected text endpoint and conservative settlement checks.
+ * Callers without a live-index check, including settlement, keep a string result.
  */
+export function worktreeDiff(worktreePath: string, baseBranch: string, cap?: number): Promise<string>;
+export function worktreeDiff(worktreePath: string, baseBranch: string, cap: number | undefined, beforeLiveIndex: LiveIndexCheck): Promise<string | DiffRefusal>;
 export async function worktreeDiff(
   worktreePath: string,
   baseBranch: string,
   cap = DIFF_CAP,
-): Promise<string> {
+  beforeLiveIndex?: LiveIndexCheck,
+): Promise<string | DiffRefusal> {
   if (!isSafeGitRef(baseBranch)) return '(diff failed: refusing option-like base ref)';
   return withPrivateIndex(worktreePath, async (git) => {
     const base = await prepareWholeBranchDiff(git, baseBranch);
@@ -891,6 +839,9 @@ export async function worktreeDiff(
     if (!res.ok) return `(diff failed: ${res.stderr.trim() || 'unknown git error'})`;
     if (res.stdout.length > cap) return `${res.stdout.slice(0, cap)}\n… (diff truncated)`;
     return res.stdout;
+  }, (): DiffRefusal | undefined => {
+    const error = beforeLiveIndex?.();
+    return error === undefined ? undefined : { error };
   });
 }
 
@@ -983,13 +934,13 @@ async function pruneOrphansLocked(repoRoot: string, validIds: ReadonlySet<string
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
   let entries: Dirent[];
   try {
-    entries = await readdir(join(repoRoot, WORKTREES_DIR), { withFileTypes: true });
+    entries = await readdir(join(projectPaths(repoRoot).write, 'worktrees'), { withFileTypes: true });
   } catch {
     entries = []; // Fallback paths still need the read-only cleanup count.
   }
   const fallbackEntries = await readdir(join(projectPaths(repoRoot).reads[1]!, 'worktrees'), { withFileTypes: true }).catch(() => []);
   const skipped = fallbackEntries.filter(entry => entry.isDirectory() && !validIds.has(entry.name)).length;
-  if (skipped) console.info(`[cez] Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under .ai/squawk/.`);
+  if (skipped) console.info(`${logPrefix()} Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under ${projectPaths(repoRoot).reads[1]}.`);
   const removed: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || validIds.has(entry.name) || protection.paths.has(worktreePathFor(repoRoot, entry.name))) continue;

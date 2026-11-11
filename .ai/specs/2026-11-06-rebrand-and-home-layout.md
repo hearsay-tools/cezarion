@@ -83,7 +83,7 @@ Caw, Covey, Flock, Hatch, Nest.
 | npm package | `@wjarka/cezarion`, alias `cezarion` | `@hearsay-tools/squawk`, unscoped alias `hsq` | matching old scoped and `cezarion` forwarding releases pin the new package exactly during the window; the dispatcher prints one notice; the last pair ships at window end, then `npm deprecate` (planner X4) |
 | CLI binary | `cezarion`, `cez` | `hsq` | `cez` and `cezarion` work and print one notice to stderr, never to JSON stdout |
 | Env vars | 144 `CEZ_*` names in source, 85 in `.env.example` | `HSQ_*` | `CEZ_*` read as fallback; the new name wins; one boot warning lists the old names that are set |
-| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; opt-in `hsq migrate-project` after the window (P4, P5) |
+| Per-project dir | `.ai/cezar/` (505 files mention it) | `.ai/squawk/` | both read; automatic move at cockpit start for each registered project that is idle and has a clean plan, and `hsq migrate-project`, with the release switch (P4); a moved project (marker in the Git common directory, keyed by the project root) writes `.ai/squawk/` and reads `.ai/cezar/` as the fallback, a fresh project with no `.ai/cezar` path and an absent or real `.ai/squawk` directory starts in `.ai/squawk/` and records the same marker before its first write; an existing legacy path keeps the migration rules (hearsay-tools/cezarion#3150) |
 | Home | `~/.cezar`, `~/.cache/cez` | section 3 layout | read once by the migration, then a canary |
 | GitHub repo | `hearsay-tools/cezarion` | `hearsay-tools/squawk` (GitHub redirects the old name) | old citations stay valid; the citation checker accepts both |
 | Docs | README, AGENTS.md, docs/, specs | new name; specs and ADRs keep history | — |
@@ -118,15 +118,20 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    entry points call `resolveHome({ purpose })` once and pass a `Home` object down. Tests
    build `Home.sandbox(tmpdir)`. A module that needs a path and has no `Home` cannot get one.
 3. **Install marker.** The config dir holds `install.json`
-   (`{ installId, kind: "live" | "dev" | "test", createdAt, migratedFrom? }`). Only
-   `serve`, `init` and the migration create a `live` marker. One `HomeStore` writer handles
+   (`{ installId, kind: "live" | "dev" | "test", createdAt, migratedFrom? }`). The migration
+   writes the `live` marker of a migrated home. Without one, every home-writing entry (serve,
+   init, run, backup restore, the first authorized registry write) creates the fresh `live`
+   marker on its first authorized write; read-only and invalid commands create no marker and
+   write nothing (section 4 step 1). One `HomeStore` writer handles
    every registry-type write and refuses:
    - a write to a home whose marker is `live` from a process that runs under a test runner
      (`VITEST`, `NODE_TEST_CONTEXT`, `JEST_WORKER_ID`, `STRYKER_*`), whatever the env object
      or `HOME` says;
    - a write to a dir with no marker, unless the caller is an entry point that creates one.
    The check reads the marker, not the path, so pinned `HOME`, inherited variables and
-   custom env objects cannot hide the live home.
+   custom env objects cannot hide the live home. A `test` marker is never written to the
+   account's real home: a test marker request (`Home.sandbox`, `scripts/test-install-marker.mjs`)
+   refuses the account's legacy and platform roots in every process, test runner or not.
 4. **Presence leases and write lock.** Two kinds of file in `<config>/.locks/`. They sit in
    the config dir, which identifies the home, not in the runtime dir, which depends on each
    process's `XDG_RUNTIME_DIR`; so a server and a CLI that share a home always share them. Each serving
@@ -161,8 +166,15 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    (`loadWorkspaceConfig` restores `config.json` from `config.json.bak`, ADR 0010) and count
    `config.json.bak` and `backups/` as registry data. Only a legacy home that does not exist,
    or holds no registry file, backup or account file after that recovery, has nothing to
-   migrate: write a fresh `live` marker in the new
-   home and stop. Every later lock and marker of this migration lives in the resolved legacy
+   migrate. With no legacy home, read-only and invalid commands write nothing.
+   Only writer entries with valid arguments (serve, init, run, backup restore, or the
+   first authorized registry write) record the fresh decision and write a `live` marker
+   in the new home. A deferred first write that finds a legacy server install refuses
+   and names `hsq server-migrate`. Never create the absent legacy directory to publish `MOVED.json`. An
+   existing empty legacy directory gets a committed marker (an empty inventory) and
+   `MOVED.json`, so a later legacy write reaches the canary and is never copied over
+   the fresh home. Before a split marker exists, `hsq backup list` reads legacy
+   backups without migration or writes. Every later lock and marker of this migration lives in the resolved legacy
    home.
 2. Take `<legacy>/.migrating` with `O_EXCL`; a second migration waits or stops. Then take
    the legacy `write.lock`, which drains any writer already in its critical section, and hold
@@ -208,18 +220,31 @@ After commit, a watcher on the migrated legacy files reports a later change as a
 stays an accepted home variable after P5, unlike the other `CEZ_*` names: `resolveHome` uses
 `HSQ_HOME`, then `CEZ_HOME`, then the default, and a boot warning asks the operator to
 rename it. So every custom install, container or not, keeps its own home with no pointer
-file. A test covers a restart after P5 with only `CEZ_HOME` set.
+file. A test covers a restart after P5 with only `CEZ_HOME` set. A committed home records its
+source (`migratedFrom`); a later boot uses that source even when the env names another
+legacy home, so a launch with only `HSQ_HOME` neither fails nor migrates again.
 
 **Server installs** (apptension-host serves 12 projects): `hsq server-migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
 `server.json` and `server-instances/`: install
 `hearsay-squawk[-<slug>].service` and the nginx site on the same port, start, check health.
+A macOS (`macosx-ngrok`) server install is a server-migrate install too: the stop is
+`launchctl bootout` of each recorded label, the move writes and bootstraps the
+`tools.hearsay.squawk.*` plist and keeps the old plist as `*.plist.migrated`, and the health
+check reloads each agent, then waits for the cockpit on its loopback port and, when the install
+owns the tunnel agent, for a tunnel in the ngrok local API (about 30 s; each probe is time-bounded).
+A rollback restores the old plist and leaves the old label unloaded until the home has rolled back,
+so the restarted cockpit reads the legacy home. Only owned agents move, stop or start, as section 2
+says.
 The instances that share a home form one group and succeed or fail together. Until every
 instance passes its health check, the new marker stays in state `pending` and `HomeStore`
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
 in the group fails its health check, every instance in the group stops, the old units and old
-sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
-migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
+sites (on macOS the old launchd plists and labels) come back, and the new home's marker is renamed to `install.json.failed` so the next run
+migrates again from the untouched legacy home. A rollback is an attempt: an instance whose old
+unit, site or plist cannot be restored stays stopped, the rollback journal stays and the marker
+is not renamed, so the operator fixes the reported error and re-runs `hsq server-migrate`; a
+restored service that fails its start check is a warning. Old unit files stay as `*.migrated` after
 success. When the install owns its nginx site, `/etc/cezar/htpasswd[-<slug>]` is copied to
 `/etc/hearsay-squawk/` (the old file stays). The new site is the old site file copied as is (TLS listeners,
 certificates, redirects and operator edits kept) with only its name and the
@@ -231,9 +256,20 @@ address, since its public route belongs to the operator. An `--external-proxy`
 install has neither; the migration leaves the operator's proxy untouched and moves only the
 unit. Units and sites of an install made before the switch keep working with
 `server-uninstall` and `server-deploy`, which act on the recorded names.
+A boot or ordinary command of the new build does not run `migrateLegacyHome()` for a legacy
+home that records an installed server supported by group migration (an `installed` record
+without `dryRun`, whose strategy supports migrate, rollback, stop and start) while the new
+home is not committed: it keeps the legacy home and prints one notice to run
+`hsq server-migrate`, so the home moves only with the group's stop, `pending` stage and
+rollback. `hsq server-migrate --dry-run` prints the stop, every move, each health check, the
+group, the pending marker and the rollback, and writes nothing, not even to the legacy home.
 
-**Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
-as in section 2.
+**Desktop installs**: the bundled server runs the same migration at boot. A Mac that records a
+completed `macosx-ngrok` server install is not a desktop install: its launchd labels move only
+through `hsq server-migrate`, as in section 2 and under "Server installs".
+A first boot that cannot write the legacy home or the new home (`EROFS`, `EACCES`, `EPERM`)
+logs one line and serves the legacy home, or the migrated home when the commit already
+happened, instead of failing (zero config).
 
 ### 4.1 New bundle IDs
 
@@ -330,11 +366,65 @@ release are the single user-visible change.
 | **P1 Home object** | (a-1) `Home` type and `resolveHome` (legacy layout while the switch is off), passed down from entry points; `cezarHomeDir()` stays as a thin shim. (a-2) Remove the shim; tests use `Home.sandbox`; lint for `homedir()` and `cezarHomeDir()`. (b) `HomeStore` writer with `install.json` marker (written into the legacy home too), test-runner refusal and lease. (c) Backups and restore command for every registry-type file; shrink banner. (d) Lint: test code writes only through `Home.sandbox`. ADR superseding the "literal `~/.cezar`" rule. | Only the reset banner, which appears after a reset |
 | **P2 Layout and migration** | (a-1) XDG / macOS / Windows / `HSQ_HOME` resolver, `Home` kind roots, Windows private-file ACL. (a-2) HomeStore, backups, version log and recovery routed by kind root. (b-1) `migrateLegacyHome` with backup, `pending`/`committed` marker, managed-install copy, `MOVED.json`; it carries `~/.cezar/backups/` into `<state>/backups/`. (b-2) Legacy-home canary with Import and Ignore. (c) `server-migrate` for systemd units and nginx sites, as a group with rollback. (d) launchd label move through `PlatformStrategy.migrate`. All behind the switch. | No |
 | **P3 Name surfaces** | (a) One env helper: `HSQ_*` first, `CEZ_*` fallback (additive). (b) `hsq` bin added beside `cezarion` and `cez` (additive). (c) Packages `@hearsay-tools/squawk` and unscoped `hsq` prepared; publish waits for the switch. (d) Desktop and mobile new IDs and the bridge build, behind the switch. (e) Docs and display names, merged with the switch PR. | Additive names only |
-| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/squawk/` (additive). Built in P4, enabled in P5: `hsq migrate-project`: runs only under an exclusive project fence. A cockpit that owns the project (`server/cockpit-ownership.ts`) runs the migration itself: it stops accepting task starts and project reads for that project, refuses to start while any task is live and lists those tasks, drains in-flight operations for a bounded time (60 s), aborts and reports them if the bound passes, and holds the fence until every rewrite ends. A CLI run asks the owning cockpit to do it, or, when no cockpit owns the project, takes the ownership lock itself so no cockpit can start on the project meanwhile. Every CLI operation on the project checks the fence. It first writes a journal (`.ai/squawk-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files under `gitCommonDir(repoRoot)/cezar-owned-workspaces` (`delegation/workspace.ts`; in a linked worktree `.git` is a file), then one run-store transaction for each run's `worktreePath`, `delegation.workspace.path`, cleanup checkpoints, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later start of the cockpit, the CLI or `migrate-project` that finds an unfinished journal resumes it before anything else reads the project, so a crash never leaves receipts, worktrees and the database on different paths. A dry run lists every rewrite first. Tracked files under `.ai/cezar/` (workflows, skills, `context.yaml`) are not moved by the command: it prints the `git mv` for the user to commit. The command ships with P5, after the deprecation window, because an older binary opens `.ai/cezar` directly and would create an empty run store after a move; until then `.ai/cezar` stays a real directory and both names are read. | Command only |
+| **P4 Project dir** | Dual read of `.ai/cezar/` and `.ai/squawk/` (additive). With `REBRAND_SWITCH` true the cockpit moves each registered legacy project by itself at start, after journal recovery, when it is idle (no other cockpit, live task, headless run or automation lease of this cockpit) and its plan has no blocker or conflict: the boot project before the listener, every other registered project right after the listener starts (or earlier, when a request reaches it first), and a project registered later when it is added. An older binary therefore stops seeing the earlier tasks of every project a cockpit start moved. A project that is not idle, or whose plan has a blocker or conflict, stays in place: the cockpit serves it from both folders, logs what blocks the move and retries at the next start. `hsq migrate-project`, registered exactly when `REBRAND_SWITCH` is true and run only by the user with the cockpit stopped, migrates offline the same way (hearsay-tools/cezarion#3089): it refuses while a cockpit it can see serves the project (the `cockpit.lock` owner, or a live cockpit of the user's homes whose registry lists it) or any task of it is live, and names what to stop. It cannot see a cockpit of another home that lists the project but never opened it: the user stops that cockpit, and while the fence holds the write backstop refuses its store and listed state writes. The automatic move has the same limit. It then takes the ownership lock and an exclusive project fence, so no cockpit of a binary that knows the fence can start on the project and no other process of such a binary is admitted meanwhile. A cockpit never migrates a project while it serves it: its automatic move runs before it serves the project. Every CLI operation that touches project data checks the fence, directly or through the cockpit's routes. It first writes a journal (`.ai/squawk-migration.json` beside both dirs) that lists every step and every path rewrite: move the dir, `git worktree repair`, rewrite the owned-workspace receipt files under `gitCommonDir(repoRoot)/cezar-owned-workspaces` (`delegation/workspace.ts`; in a linked worktree `.git` is a file), then one run-store transaction for each run's `worktreePath`, `delegation.workspace.path`, cleanup checkpoints, artifact and handoff paths. Each step is idempotent and marks itself done in the journal. Any later cockpit start or first open, CLI entry or `migrate-project` that finds an unfinished journal resumes it before it reads the project. A crash between steps can leave receipts, worktrees and the database on different paths; until recovery finishes, admission refuses the project to every cockpit and CLI operation of a binary that knows the journal, so none of them reads that state before the paths agree again. A dry run completes and reports any unfinished migration first, then lists the remaining rewrites; planning the remaining migration changes nothing. Tracked files under `.ai/cezar/` (workflows, skills, `context.yaml`) are not moved by the command: it prints the `git mv` for the user to commit. The command and the automatic move follow the release switch. An older binary opens `.ai/cezar` directly: on a moved project it sees no earlier task and starts a new run store there, while the moved runs stay intact under `.ai/squawk/` and the newer binary reads both names, so mixed versions during the window hide moved tasks from the older binary but lose no data. `.ai/cezar` stays a real directory for that reason. An older binary checks neither the fence nor the journal, so the user keeps older binaries off the project while a migration runs or a journal is unfinished. The switch turns on only after the write root follows moved state (hearsay-tools/cezarion#3150). The move's last step writes the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json`, which no commit can ship; with the switch on, `projectPaths(root)` then makes `.ai/squawk/` the write root and `.ai/cezar/` the fallback, every writer asks it, an unmoved or busy project keeps writing `.ai/cezar/` until it moves, and a second move of a marked project is a no-op (hearsay-tools/cezarion#3150). | No: the command and the automatic move follow the switch; the dual read is additive |
 | **Switch** | Turn `REBRAND_SWITCH` on; deprecation notices start; docs land. Then owner actions: stable release, npm publish and deprecate, repo rename, store listings, apptension-host server migration. | Yes: the release |
-| **P5 Window end** | Remove aliases and `CEZ_*` fallbacks (except `CEZ_HOME`, section 4) and enable `hsq migrate-project`, two minor releases or 60 days after the release. | Yes |
+| **P5 Window end** | Remove aliases and `CEZ_*` fallbacks (except `CEZ_HOME`, section 4), two minor releases or 60 days after the release. | Yes |
 
 Dependencies: P1(a-1) before every other P1 slice and P2; P0(c) before P1(b) and P1(c) (same writers); P1(b) before P1(c) and P1(d); P0(b) before P1(d); P0(c) before P2(b); P1(a-2) before P1(b) (they share the test files); every P1 slice before P2(a-2); P2(a-1) before P2(a-2) before P2(b-1) and P2(d); P2(b-1) before P2(b-2); P2(b-1) and P2(d) before P2(c); P1(b) before P2(b). P0 and P3(a–b) do not depend on P1 and run in parallel with it.
-The switch needs P0 to P4 accepted on `main`; P5 follows the release.
+The switch needs P0 to P4 accepted on `main`, including the per-project write root that follows moved state (hearsay-tools/cezarion#3150); P5 follows the release.
 
 Every slice follows `BACKWARD_COMPATIBILITY.md` and updates `.env.example`, the README env table and the area docs it touches.
+
+### Switch fix: first project use
+
+With the switch on, no `.ai/cezar` path means a fresh project. Path reads select
+`.ai/squawk/` without writing when it is absent or a real directory. Project preparation and the first CLI write mark the
+project in the Git common directory, so a later legacy path does not change its write
+root. An existing empty directory, tracked-only directory, symlink or unreadable path
+keeps the existing migration rules. With the switch off, all writes remain legacy.
+A blocked automatic move prints one switch-aware notice, and the offline cockpit
+refusal also lists live tasks from the read-only task view.
+
+| Case | Write root / result |
+| --- | --- |
+| Switch off, any marker or legacy path | `.ai/cezar/` |
+| Switch on, no legacy path, destination absent or real directory | `.ai/squawk/`, marker before ordinary writes |
+| Switch on, no legacy path, destination is a symlink or file | `.ai/cezar/`, no fresh marker |
+| Switch on, existing unmarked legacy path | Existing P4 migration checks |
+| Switch on, marked project, legacy path later appears | `.ai/squawk/`, legacy fallback |
+| Cockpit and task live during offline migration | First refusal names both |
+| Cockpit known, live-task read fails | Refusal names cockpit and read failure; nothing moves |
+
+Fresh project writes also require an absent or real `.ai/squawk` directory. A
+symlink or file keeps legacy writes and is never marked fresh. The destination
+check is shared with migration planning. If a cockpit is known but its live tasks
+cannot be read, migration still refuses and lists both the cockpit and the read
+failure. It does not treat the failed read as an empty task list.
+
+### Switch fix: stored checkout under a removed project root
+
+Continue and restart recovery keep the shipped missing-checkout fallback when a
+repository was moved or copied and its recorded old root no longer exists. This
+does not make an existing migrated project's legacy state writable.
+
+| Switch | Recorded root | Recorded checkout | Continue / recovery |
+| --- | --- | --- | --- |
+| Off | Removed | Missing legacy checkout | Use current repository, as shipped |
+| On | Removed | Missing legacy checkout | Use current repository |
+| On | Existing, migrated | Missing or existing legacy checkout | Refuse read-only fallback writes |
+| Either | Existing | Existing writable checkout | Keep normal continuation |
+
+The fallback guard checks the root's directory entry. An unreadable or dangling
+entry still counts as present and keeps the existing guard. Registered projects
+whose own current root was deleted retain their separate admission refusal.
+
+### Known limits at the switch
+
+- The one-time automatic move of a project that the cockpit prepares after the listener starts
+  runs synchronous file and Git work on the event loop. In CI (`transcript-facts-responsiveness`,
+  head 06169742d of hearsay-tools/cezarion#3240) the move of a project with an empty run store
+  blocked health requests for 568 ms, 542 ms of it waiting on synchronous I/O; on a local disk the
+  same move blocked 20–27 ms. The boot project moves before the listener, so this applies to
+  other registered projects and to projects added later. The move stays synchronous in the
+  switch release; the timing check seeds its fixture where a switch-on cockpit reads it, so it
+  measures the cold history open, not the move.

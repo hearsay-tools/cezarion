@@ -1,3 +1,5 @@
+import { productName } from './home/display.ts';
+import { REBRAND_SWITCH } from './home/switch.ts';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { defaultCliDeps, main, type CliDeps } from './cli-dispatch.ts';
@@ -73,16 +75,19 @@ describe('main dispatch', () => {
     expect(f.deps.serveCommand).toHaveBeenCalledWith(f.home, '/work', 4321, true, undefined, false);
   });
 
-  it.each(['--help', '-h'])('prints help for %s before repo or Home access', async (flag) => {
+  it.each(['--help', '-h'])('prints help for %s before repo access or Home preparation', async (flag) => {
     const f = fixture([flag]);
     await f.run();
     const help = f.deps.console.log.mock.calls[0]![0];
-    expect(help).toContain('cezar — local cockpit for AI agent tasks in your repo\n\nUsage:');
+    expect(help).toContain(`${productName('cezar')} — local cockpit for AI agent tasks in your repo\n\nUsage:`);
     expect(help).toContain('  cez run "<task>"          run a task headless in the terminal');
     expect(help).toContain('      --no-workers');
     expect(help).toContain('      --no-messaging');
     expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
-    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    // With the switch on, help names the selected Home's paths: path resolution only.
+    if (REBRAND_SWITCH) expect(f.deps.resolveCliHome).toHaveBeenCalledBefore(f.deps.console.log);
+    else expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
     expect(f.processStub.exitCode).toBeUndefined();
   });
 
@@ -116,6 +121,8 @@ describe('main dispatch', () => {
     const f = fixture(['run']);
     await f.run();
     expect(f.deps.runCommand).toHaveBeenCalledWith(f.home, '/work', '', undefined, undefined, { allowWorkers: true, allowMessaging: true });
+    // A usage error is not a writer entry: preparation must not create the home.
+    expect(f.deps.prepareOperatorHome).toHaveBeenCalledExactlyOnceWith(f.home, 'run-usage');
   });
 
   it('prepares Home before scaffolding init', async () => {
@@ -185,7 +192,10 @@ describe('main dispatch', () => {
     const help = fixture(['--help']);
     await unknown.run();
     await help.run();
-    expect(unknown.deps.console.error).toHaveBeenCalledExactlyOnceWith('unknown command: nonsense\n');
+    expect(unknown.deps.console.error.mock.calls).toEqual([
+      ...(REBRAND_SWITCH ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []),
+      ['unknown command: nonsense\n'],
+    ]);
     expect(unknown.deps.console.log.mock.calls).toEqual(help.deps.console.log.mock.calls);
     expect(unknown.processStub.exitCode).toBe(1);
     expect(unknown.deps.prepareOperatorHome).not.toHaveBeenCalled();
@@ -208,7 +218,7 @@ describe('binary help and notices', () => {
     expect(f.deps.console.log.mock.calls[0]![0]).toContain('  cez run "<task>"');
     expect(f.deps.console.error.mock.calls).toEqual(rebrand ? [["[cez] 'cez' is deprecated; use 'hsq' instead."]] : []);
   });
-  it('keeps legacy help byte-identical to the pre-rebrand entry', async () => {
+  it('keeps legacy help spelling and paths with the additive version option', async () => {
     const expected = readFileSync(new URL('./home/fixtures/cli-help-legacy.txt', import.meta.url), 'utf8');
     for (const name of ['cez', 'cezarion']) {
       const f = fixture(['--help']);
@@ -244,8 +254,11 @@ describe('binary help and notices', () => {
       expect(help).toContain(`${rebrand ? 'Squawk' : 'cezar'} — local cockpit`);
       expect(help).toContain(`host ${rebrand ? 'Squawk' : 'cezar'} on a server`);
       expect(help).toContain(`resume ${rebrand ? 'Squawk' : 'Cezar'} workers`);
-      expect(help).toContain('.ai/cezar/config.json');
-      expect(help).toContain('~/.cezar/versions');
+      expect(help).toContain(`scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/`);
+      expect(help).toContain(`"skillsRepos" in .ai/${rebrand ? 'squawk' : 'cezar'}/config.json`);
+      expect(help).toContain(`workflows in .ai/${rebrand ? 'squawk' : 'cezar'}/workflows/.`);
+      expect(help.includes('A project also reads .ai/cezar/')).toBe(rebrand);
+      expect(help).toContain(rebrand ? f.home.versions : '~/.cezar/versions');
     }
   });
   it('prints the notice before a managed command can return', async () => {
@@ -254,5 +267,45 @@ describe('binary help and notices', () => {
     await main(f.deps as unknown as CliDeps, true);
     expect(f.deps.console.error).toHaveBeenCalledBefore(f.deps.runManagedCommand);
     expect(f.deps.console.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe.each([false, true])('CLI metadata (switch %s)', rebrand => {
+  it.each(['cez', 'cezarion', 'hsq'])('prints only the package version on stdout for %s', async name => {
+    for (const flag of ['--version', '-v']) {
+      const f = fixture([flag]);
+      f.processStub.argv[1] = `/bin/${name}`;
+      await main(f.deps as unknown as CliDeps, rebrand);
+      expect(f.deps.console.log.mock.calls).toEqual([['1.2.3']]);
+      expect(f.processStub.exitCode ?? 0).toBe(0);
+      expect(f.deps.console.error).toHaveBeenCalledTimes(rebrand && name !== 'hsq' ? 1 : 0);
+      expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+      expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
+    }
+  });
+
+  it('prints help when home resolution fails', async () => {
+    const f = fixture(['--help']);
+    f.processStub.argv[1] = '/bin/hsq';
+    f.deps.resolveCliHome.mockImplementation(() => { throw new Error('No home directory'); });
+    await main(f.deps as unknown as CliDeps, rebrand);
+    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain('Usage:');
+    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain(
+      `manage the desktop installation under ${rebrand ? 'the data folder' : '~/.cezar/versions'}`,
+    );
+    expect(f.processStub.exitCode ?? 0).toBe(0);
+    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
+    expect(f.deps.console.error).not.toHaveBeenCalled();
+  });
+
+  it('shows the resolved versions path only after the switch', async () => {
+    const f = fixture(['--help']);
+    f.processStub.argv[1] = '/bin/hsq';
+    await main(f.deps as unknown as CliDeps, rebrand);
+    expect(f.deps.console.log.mock.calls[0]?.[0]).toContain(
+      `manage the desktop installation under ${rebrand ? f.home.versions : '~/.cezar/versions'}`,
+    );
+    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
   });
 });

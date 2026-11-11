@@ -1,5 +1,5 @@
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import type { WaitCancellation } from './wait-cancellation.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { computeWaitingOn, isUsageLimitHold, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
@@ -23,16 +23,15 @@ import * as stepDecisions from './step-decisions.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WakeRetries } from './wake-retries.ts';
 import type { RunLine } from './run-line.ts';
-import type { WaitResolve } from './wait-resolve.ts';
 import type { InboxClaims } from './inbox-claims.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
 import type { HumanWaits } from './human-waits.ts';
 
 type HumanAnswerBudget = { spent: number };
 interface WakeAdmissionHost {
-  waitCancellation: WaitCancellation;
+  waitEngine: WaitEngine;
   active: ReadonlyMap<string, ActiveRun>;
-  retries: WakeRetries; line: RunLine; waitResolve: WaitResolve;
+  retries: WakeRetries; line: RunLine;
   inboxClaims: InboxClaims; workerQuestions: WorkerQuestions; humanWaits: HumanWaits;
   isActive(id: string): boolean; move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown;
   recoveringRun(run: RunRecord | string | undefined): boolean;
@@ -59,7 +58,7 @@ export class WakeAdmission {
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
     if (!waits.length) return;
-    this.host.waitCancellation.cancel(runId, waits.map(wait => wait.id));
+    this.host.waitEngine.cancel(runId, waits.map(wait => wait.id));
     for (const wait of waits) {
       this.context.store.appendEvent(runId, { type: 'note', message: WAIT_KINDS[wait.kind].capNote(wait, this.maxAutoContinues) });
     }
@@ -290,7 +289,7 @@ export class WakeAdmission {
       if (!run || !WAIT_KINDS.worker.is(wait) || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
       if ((this.context.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.context.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
-        text: waitResultText(wait, { workerStatus: this.host.waitResolve.workerStatus }) });
+        text: waitResultText(wait, { workerStatus: this.host.waitEngine.workerStatus }) });
     }
   }
 
@@ -345,8 +344,8 @@ export class WakeAdmission {
 
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
   readonly onRunDeleted = (runId: string): void => {
-    this.host.waitCancellation.forgetRun(runId);
-    if (!this.context.disposed()) this.host.waitResolve.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
+    this.host.waitEngine.forgetRun(runId);
+    if (!this.context.disposed()) this.host.waitEngine.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
     if (this.context.disposed()) return;

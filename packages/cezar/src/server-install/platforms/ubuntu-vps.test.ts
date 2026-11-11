@@ -1080,3 +1080,6 @@ describe('ubuntu-vps preflight', () => {
     expect(warn.mock.calls[0]?.[0]).toContain('"docker-proxy"');
   });
 });
+
+// These installer fixtures describe the existing cezar systemd units.
+vi.mock('../../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

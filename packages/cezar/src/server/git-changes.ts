@@ -6,6 +6,7 @@ import { lstat, open, readFile, readdir, realpath, stat } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { resolveTaskDiffBase, type RepointedHead } from '../git-diff-base.ts';
+import { withPrivateIndex, type LiveIndexCheck } from '../git-private-index.ts';
 import { isSafeGitRef } from '../git-refs.ts';
 
 /**
@@ -251,6 +252,7 @@ export async function collectChanges(
   dir: string,
   baseBranch: string,
   opts: {
+    beforeLiveIndex?: LiveIndexCheck;
     patchCap?: number;
     intentToAdd?: boolean | undefined;
     taskBranch?: string | undefined;
@@ -259,31 +261,19 @@ export async function collectChanges(
 ): Promise<ChangesResult> {
   if (!isSafeGitRef(baseBranch)) return { ok: false, error: 'refusing option-like base ref' };
   const patchCap = opts.patchCap ?? PATCH_CAP;
-  // `git add -N .` (intent-to-add) makes untracked files appear in the diff, but it MUTATES the
-  // index — fine in a task worktree cezar owns, but forbidden on the user's real main tree (a
-  // read-only GET must never stage files, #major-index-mutation). When `intentToAdd` is false we
-  // build a SCRATCH index (GIT_INDEX_FILE) seeded from HEAD + intent-to-add, so untracked files
-  // still show WITHOUT touching the user's real index.
-  let env: Record<string, string> | undefined;
-  let scratchIndex: string | undefined;
-  try {
-    if (opts.intentToAdd === false || fallbackProjectWriteError(dir)) {
-      scratchIndex = join(tmpdir(), `cez-scratch-index-${process.pid}-${scratchSeq++}`);
-      env = { GIT_INDEX_FILE: scratchIndex };
-      await git(dir, ['read-tree', 'HEAD'], env); // seed with tracked files; harmless if no HEAD
-      await git(dir, ['add', '-N', '.'], env);
-    } else {
-      await git(dir, ['add', '-N', '.']);
-    }
+  // Worktrees read a private copy of the agent's index, preserving staged entries.
+  // The repo and fallback paths keep their HEAD-seeded scratch index.
+  const read = async (runGit: (args: string[]) => Promise<GitResult>): Promise<ChangesResult> => {
+    await runGit(['add', '-N', '.']);
     // Which ref anchors this task's diff — merge-base normally, the checked-out branch's
     // pre-run state when the agent repointed the worktree onto it (#591, #751). The rule is
-    // shared with `worktreeShortstat`, and it runs WITH the scratch-index `env`: picking
+    // shared with `worktreeShortstat`, and it runs with the listing's private index: picking
     // between two repointed anchors compares them with `git diff --shortstat`, and `git diff`
     // refreshes and rewrites the index it reads. On the user's real main tree that would be a
     // read-only GET writing their index, and it would measure against a different index than
     // the listing below. The ref lookups themselves ignore `GIT_INDEX_FILE`.
     const { base, repointedHead } = await resolveTaskDiffBase(
-      (args) => git(dir, args, env),
+      runGit,
       baseBranch,
       {
         taskBranch: opts.taskBranch,
@@ -291,11 +281,11 @@ export async function collectChanges(
       },
     );
 
-    const nameStatus = await git(dir, ['diff', '--name-status', '-z', '-M', base], env);
+    const nameStatus = await runGit(['diff', '--name-status', '-z', '-M', base]);
     if (!nameStatus.ok) return { ok: false, error: gitReason(nameStatus, 'git diff failed') };
-    const numstat = await git(dir, ['diff', '--numstat', '-z', '-M', base], env);
+    const numstat = await runGit(['diff', '--numstat', '-z', '-M', base]);
     if (!numstat.ok) return { ok: false, error: gitReason(numstat, 'git diff failed') };
-    const patchOut = await git(dir, ['diff', '--patch', '-M', '--no-color', base], env);
+    const patchOut = await runGit(['diff', '--patch', '-M', '--no-color', base]);
     if (!patchOut.ok) return { ok: false, error: gitReason(patchOut, 'git diff failed') };
 
     return {
@@ -305,8 +295,20 @@ export async function collectChanges(
         ...(repointedHead ? { repointedHead } : {}),
       },
     };
+  };
+  if (opts.intentToAdd !== false && !fallbackProjectWriteError(dir)) {
+    return withPrivateIndex(dir, read, (): ChangesResult | undefined => {
+      const error = opts.beforeLiveIndex?.();
+      return error === undefined ? undefined : { ok: false, error };
+    });
+  }
+  const scratchIndex = join(tmpdir(), `cez-scratch-index-${process.pid}-${scratchSeq++}`);
+  const env = { GIT_INDEX_FILE: scratchIndex };
+  try {
+    await git(dir, ['read-tree', 'HEAD'], env); // seed with tracked files; harmless if no HEAD
+    return await read((args) => git(dir, args, env));
   } finally {
-    if (scratchIndex) rmSync(scratchIndex, { force: true });
+    rmSync(scratchIndex, { force: true });
   }
 }
 

@@ -1,3 +1,4 @@
+import { productCommand } from '@/lib/product-name'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -251,7 +252,7 @@ describe('TeamSourcesPanel', () => {
     serve({ sources: [source({ repo: 'acme/skills' })], editable: false })
     renderPanel()
     await waitFor(() => expect(document.querySelector('[data-slot="skill-sources-read-only"]')).not.toBeNull())
-    expect(document.querySelector('[data-slot="skill-sources-read-only"]')?.textContent).toContain('cez remote-settings enable')
+    expect(document.querySelector('[data-slot="skill-sources-read-only"]')?.textContent).toContain(`${productCommand()} remote-settings enable`)
     expect(rowFor('acme/skills')!.querySelector<HTMLButtonElement>('[data-slot="skill-source-switch"]')!.disabled).toBe(true)
     expect(rowFor('acme/skills')!.querySelector<HTMLButtonElement>('[data-slot="skill-source-remove"]')!.disabled).toBe(true)
     expect(field('skill-source-submit').disabled).toBe(true)

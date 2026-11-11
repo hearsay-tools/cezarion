@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { workerInspectionSchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import { useState } from 'react'
 import { QueryClientProvider, onlineManager } from '@tanstack/react-query'
@@ -161,7 +162,7 @@ it('shows a parent parked on Cezar\'s completion wait, which has no deadline', (
     kind: WAIT_KIND.worker, id: '10000000-0000-4000-8000-000000000003', source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, registeredAt: at,
     phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all', workerIds: [workerId], revisions: [], outcomes: [],
   }] });
-  expect(screen.getByText('Waiting on 1 worker. No deadline: Cezar wakes this task when they have all settled.')).toBeTruthy();
+  expect(screen.getByText(`Waiting on 1 worker. No deadline: ${productName("Cezar")} wakes this task when they have all settled.`)).toBeTruthy();
   expect(screen.queryByText(/Deadline:/)).toBeNull();
 });
 

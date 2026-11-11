@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { noticeLegacyProject, projectPaths } from '../project-paths.ts';
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
@@ -24,9 +25,10 @@ import { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, holdProjectWork, withProjectAdmission, CockpitOwnership, type LiveProjectTask, type ProjectMigrationFence } from './cockpit-ownership.ts';
+import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, withProjectAdmission, CockpitOwnership, type LiveProjectTask } from './cockpit-ownership.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
+import { prepareProject } from '../project-migration/auto.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -100,13 +102,15 @@ export interface ProjectContextDeps {
   toolActivity?: ToolActivityTracker | undefined;
   /** Builds each manager's runners: the entry point's choice (hearsay-tools/cezarion#2939). */
   createRunner: RunnerFactory;
+  /** Test seam for the release switch of the automatic project move; production uses `REBRAND_SWITCH`. */
+  rebrand?: boolean | undefined;
 }
 
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
 const sweptPreviewDirs = new Set<string>();
 
-/** One data dir's crash leftovers, once per process; whatever the live host runs is spared. Admitted
- *  for its whole length; a project under a migration fence is swept after the fence ends. */
+/** One data dir's crash leftovers, once per process; whatever the live host runs is spared. A
+ *  project under a migration fence is swept after the fence ends. */
 function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promise<number> {
   if (sweptPreviewDirs.has(dataDir) || projectAdmissionRefusal(dataDir)) return Promise.resolve(0);
   sweptPreviewDirs.add(dataDir);
@@ -129,7 +133,7 @@ export function armPreview(store: RunStore, dataDir: string, host: PreviewHost |
   // Before the sweep's first await: a crash's agent state is reconciled before any agent can connect.
   reconcileAgentMarkers(dataDir, store, runId => host?.hasAgents(runId) ?? false);
   void sweepPreviewOnce(dataDir, host);
-  if (host) store.on('deleted', (runId: string) => void holdProjectWork(dataDir, function previewRelease() { return host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined); }));
+  if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined));
 }
 
 /**
@@ -166,7 +170,7 @@ function liveState(run: RunRecord): string {
  * human, a usage-limit auto-resume, a timer, a PR or a worker, held by this store or persisted
  * in either project directory. Plus the runs of every family another live process (a headless
  * `cez run`, another binary) claims in the same database.
- * Admission, the fence's preflight and its drain share this one notion of live.
+ * The migration fence's live-task check uses this one notion of live.
  */
 export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'>): LiveProjectTask[] {
   const tasks = new Map(store.listRuns().filter(isLiveRecord).map((run) => [run.id, run]));
@@ -181,33 +185,6 @@ export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'persistedLi
     if (run) tasks.set(id, run);
   }
   return [...tasks.values()].map((run) => ({ id: run.id, title: run.title, state: liveState(run) }));
-}
-
-/**
- * The owning cockpit's migration fence over one of its projects: refuse new reads and starts,
- * refuse to proceed while any task is live (listing them), then drain the work in flight (runs
- * pinned by retention, publish or branch cleanup, the manager's tracked work) for a bounded time.
- * The caller holds it until every rewrite ends.
- */
-export async function fenceProjectContext(ownership: CockpitOwnership, project: Pick<ProjectContext, 'dataDir' | 'store' | 'manager'>,
-  options: { signal?: AbortSignal | undefined; preview?: Pick<PreviewHost, 'releaseProject'> | undefined; drainMs?: number } = {}): Promise<ProjectMigrationFence> {
-  const fence = await ownership.fenceProject(project.dataDir, {
-    liveTasks: () => projectLiveTasks(project.store),
-    inFlight: () => project.store.listRuns().length + project.manager.pendingWork(),
-    // History compression and a reports scan write run files and the database; both end within
-    // the bound. The rest of the store's own work ends when the holder closes the store.
-    // In order, each step after the work it covers: previews stop first (a stop records events
-    // that can queue history compression), then compression and report scans end, then the last
-    // debounced save lands, all while the drain still admits them.
-    settle: async () => {
-      await options.preview?.releaseProject(project.dataDir);
-      await Promise.all([project.store.historyIdle(), project.store.reports.idle()]);
-      project.store.flush();
-    },
-    signal: options.signal,
-    ...(options.drainMs === undefined ? {} : { drainMs: options.drainMs }),
-  });
-  return fence;
 }
 
 /** A build that finished after `disposeAll`: its context was torn down, never registered. */
@@ -320,7 +297,7 @@ export class ProjectContexts {
     finally { if (this.maintenance.get(projectId) === lease) this.maintenance.delete(projectId); }
   }
 
-  /** The cold half of `withMaintenanceStore`, admitted for its whole length. */
+  /** The cold half of `withMaintenanceStore`, refused under a fence or an unfinished journal. */
   private async coldMaintenance<T>(projectId: string, work: (store: RunStore, current: () => boolean) => Promise<T>, current: () => boolean, finish: () => void): Promise<T | undefined> {
     const project = (await this.deps.listProjects()).find(project => project.id === projectId);
     if (!project || project.status === 'missing' || !current()) return undefined;
@@ -381,7 +358,8 @@ export class ProjectContexts {
       if (generation !== this.generation) break;
       if (project.status === 'missing' || this.contexts.has(project.id) || this.building.has(project.id)) continue;
       const dataDir = projectPaths(project.root).write;
-      if (ownedByAnotherCockpit(dataDir) || projectAdmissionRefusal(dataDir)) continue;
+      // An unfinished migration journal alone does not skip: the build finishes it first.
+      if (ownedByAnotherCockpit(dataDir) || (projectAdmissionRefusal(dataDir)?.reason ?? 'journal') !== 'journal') continue;
       try {
         await this.context(project.id);
         warmed.push(project.id);
@@ -393,7 +371,7 @@ export class ProjectContexts {
         }
         // Removed from the registry after this list was read: nothing to prepare, nothing to say.
         if (err instanceof ProjectContextError && err.reason === 'unknown-project') continue;
-        console.warn(`[cez] project ${project.id} could not be prepared in the background: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`${logPrefix()} project ${project.id} could not be prepared in the background: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return warmed;
@@ -514,9 +492,13 @@ export class ProjectContexts {
     if (!project) throw new ProjectContextError('unknown-project', projectId);
     if (project.status === 'missing') throw new ProjectContextError('missing-root', projectId);
 
+    // An unfinished migration finishes first, before any read; this build then keeps the claim it took.
+    // With the release switch, an idle legacy project then moves before its first read or task start.
+    await prepareProject(project.root, { ownership: this.deps.ownership, homes: [this.deps.home], rebrand: this.deps.rebrand, keep: true });
+    if (stale()) throw new ProjectContextsClosedError();
     noticeLegacyProject(project.root);
+    // Asked after the move: a moved project's write root is `.ai/squawk/`.
     const dataDir = projectPaths(project.root).write;
-    // Admitted until recovery ends, so a migration fence drains this build before it moves anything.
     return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
   }
 

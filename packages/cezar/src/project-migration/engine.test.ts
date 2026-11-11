@@ -72,7 +72,7 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
     // A store opened on the project reads the moved rows, artifacts, handoffs and receipts, and the
     // emptied legacy directory neither shadows them nor gains a run store.
-    const store = RunStore.open(project.dataDir);
+    const store = RunStore.open(REBRAND_SWITCH ? project.newDir : project.dataDir);
     try {
       expect(store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
       expect(store.sourceDataDir(TASK)).toBe(project.newDir);
@@ -149,14 +149,21 @@ describe.each([{ linked: false }, { linked: true }])('a project migration (linke
 
 
 describe('without a release', () => {
-  it('keeps the switch off, registers nothing, and refuses to run without the fence held by this process', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    expect(SUBCOMMAND_NAMES.some(name => /migrat/.test(name))).toBe(false);
+  it('registers migration only behind the release switch, and refuses to run without the fence held by this process', async () => {
+    for (const name of ['migrate', 'server-migrate', 'migrate-project']) {
+      expect(SUBCOMMAND_NAMES.includes(name)).toBe(REBRAND_SWITCH);
+    }
     const src = join(import.meta.dirname, '..');
-    const importers = readdirSync(src, { recursive: true, encoding: 'utf8' })
+    const sources = readdirSync(src, { recursive: true, encoding: 'utf8' })
       .filter(path => path.endsWith('.ts') && !/\.(?:test|testkit)\.ts$/.test(path) && !path.startsWith('project-migration'))
-      .filter(path => /project-migration\//.test(readFileSync(join(src, path), 'utf8')));
-    expect(importers).toEqual([]);
+      .map(path => ({ path, text: readFileSync(join(src, path), 'utf8') }));
+    // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry, and the switch-gated starts.
+    expect(sources.filter(({ text }) => /project-migration\//.test(text)).map(({ path }) => path).sort()).toEqual([
+      'artifacts/cli.ts', 'cli-dispatch.ts', 'project-commands.ts', 'self-update/checkouts.ts', 'serve-command.ts', 'server/project-context.ts',
+      'server/server.ts', 'server/workspace-projects.ts', 'subcommands.ts']);
+    // The command, and the cockpit's prepare step (recovery, then the automatic move), each move behind the release switch.
+    expect(sources.filter(({ text }) => /\bmigrateProject(?:Offline)?\(|\bmoveProjectWhenIdle\(|\bprepare(?:Project|Projects|BeforeTicks)\(|project-migration\/cli\.ts/.test(text))
+      .map(({ path }) => path).sort()).toEqual(['serve-command.ts', 'server/project-context.ts', 'server/server.ts', 'subcommands.ts']);
     const root = join(import.meta.dirname, 'nowhere');
     const unheld = { lock: join(root, '.ai/squawk-migration.lock'), journal: join(root, '.ai/squawk-migration.json'), release: () => undefined };
     await expect(migrateProject({ repoRoot: root, fence: unheld })).rejects.toThrow(/needs the project's migration fence/);

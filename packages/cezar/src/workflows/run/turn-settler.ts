@@ -1,4 +1,4 @@
-import type { WaitCancellation } from './wait-cancellation.ts';
+import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
@@ -32,7 +32,7 @@ interface TurnSettlerHost {
   humanWaits: HumanWaits; line: RunLine; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
   subagentWaits: SubagentWaits;
   move(id: string, exit: RunExitId, patch?: RunPatch, call?: ExitCall): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
-  waitCancellation: WaitCancellation; countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
+  countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
   submitAgentInput(id: string, state: ActiveRun, content: ContentBlock[]): boolean; flushAgentInputs(id: string): boolean; hasQueuedAgentInputs(id: string, except?: readonly string[]): boolean;
   armUnreadInputTimer(id: string, state: ActiveRun): void; armHeldHumanInputTimer(id: string, state: ActiveRun): void;
   parkOnWaits(id: string, state: ActiveRun): boolean; queueWaitWake(id: string): void; leaveMonitoringPool(id: string): void; chargeAutomaticWake(id: string): number;
@@ -69,7 +69,7 @@ export class TurnSettler {
     transitionTurnBoundary(state, { kind: 'done-step-consumed', phase: 'completed', session: state.liveSession.session, stepId: state.liveSession.currentStepId });
     if (close?.summary) this.context.store.appendEvent(runId, { type: 'note', message: close.summary });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'cezar_done' });
-    this.host.waitCancellation.cancelAll(runId);
+    this.host.waitEngine.cancelAll(runId);
     session?.end();
   }
 
@@ -464,13 +464,10 @@ export class TurnSettler {
       this.host.humanWaits.openHumanAlias(runId, state, 'budget');
       return;
     }
-    if (!this.host.waitEngine.compare(run, 'silent')) return;
+    if (!this.host.waitEngine.hasRoom(run)) return;
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
     const wait = WAIT_KINDS.timer.monitoringEntry(via, now, delay, minutes, state.waitIdentity.ciTurnId ?? 'monitoring');
-    this.host.waitEngine.open(runId, state, wait, {
-      withdraw: 'before-commit', onCommitFailure: { log: '[cez] monitoring timer checkpoint failed' },
-      arm: 'watch', park: 'none', return: 'none',
-    });
+    this.host.waitEngine.open(runId, state, wait, { withdraw: true, onCommitFailure: { log: `${logPrefix()} monitoring timer checkpoint failed` }, park: false });
   }
 }

@@ -282,20 +282,41 @@ describe('server-migrate sites and credentials', () => {
 });
 
 describe('server-migrate dry run and environment', () => {
+  it('names the stop, each health check, the group, the pending marker and the rollback', async () => {
+    const f = sharedHome();
+    installInstance(f, { instance: 'api', port: 4400, domain: 'api.example.com', externalProxy: true });
+    const result = await serverMigrate(f, { dryRun: true });
+    expect(result.status).toBe('planned');
+    const marker = join(f.target.config, 'install.json');
+    expect(result.lines[0]).toBe('stop: every instance that shares this home stops first (default, api, shop)');
+    for (const line of [
+      'default: health check: port 4321 answers, then https://cockpit.example.com/ (HTTPS, the site has TLS) asks for a login and accepts a probe login',
+      'shop: health check: port 4322 answers, then http://shop.example.com/ (HTTP, the site has no TLS) asks for a login and accepts a probe login',
+      'api: health check: http://127.0.0.1:4400/ answers (the bind address; the proxy is not checked)',
+      'group: default, api, shop succeed or fail together. Each instance starts under its new name and passes its health check before the group commits.',
+      `marker: ${marker} stays pending (the new home is read-only) until every instance passes, then commits.`,
+      'rollback: any failure restores every old service definition (systemd units and nginx sites, launchd plists), starts the old services and renames the marker to install.json.failed; the legacy home stays in use. A restore error leaves its instance stopped and the rollback journal in place: fix the reported error and re-run server-migrate to finish the rollback. A restored service that fails its start check is reported as a warning.',
+    ]) expect(result.lines).toContain(line);
+    expect(f.host.commands).toEqual([]);
+  });
+
+
   it('carries a custom CEZ_HOME line and lists every unit, site, file and environment line without changing anything', async () => {
     const f = serverFixture();
     installInstance(f, { instance: 'default', port: 4321, environment: ['Environment=CEZ_HOME=/srv/cez-home', 'Environment=GH_TOKEN=do-not-print'] });
     const result = await serverMigrate(f, { dryRun: true });
     expect(result.status).toBe('planned');
     const lines = result.lines.join('\n');
-    expect(lines).toContain(`default: autostart ${userUnit(f, 'cezar.service')} → ${userUnit(f, 'hearsay-squawk.service')}`);
     for (const line of [
-      'default: nginx-proxy /etc/nginx/sites-available/cezar → /etc/nginx/sites-available/hearsay-squawk',
-      'default: nginx-proxy /etc/nginx/sites-enabled/cezar → /etc/nginx/sites-enabled/hearsay-squawk',
-      'default: nginx-proxy /etc/cezar/htpasswd → /etc/hearsay-squawk/htpasswd',
+      `default: unit user cezar.service → hearsay-squawk.service (old file kept as ${userUnit(f, 'cezar.service')}.migrated)`,
+      'default: site /etc/nginx/sites-available/cezar → /etc/nginx/sites-available/hearsay-squawk (copied; auth_basic_user_file /etc/cezar/htpasswd → /etc/hearsay-squawk/htpasswd)',
+      'default: enabled site /etc/nginx/sites-enabled/cezar → /etc/nginx/sites-enabled/hearsay-squawk',
+      'default: file /etc/cezar/htpasswd → /etc/hearsay-squawk/htpasswd (copied; old file kept)',
       'default: environment CEZ_HOME=/srv/cez-home carried',
       'default: environment GH_TOKEN carried (value not shown)',
     ]) expect(lines).toContain(line);
+    // Each move prints once: the platform's detail line replaces the raw move line.
+    expect(lines).not.toMatch(/^default: (autostart|nginx-proxy) /m);
     expect(lines).toMatch(/^home: .* files copied/m);
     expect(lines).not.toContain('do-not-print');
     expect(f.host.commands).toEqual([]);

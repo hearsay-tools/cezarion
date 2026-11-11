@@ -592,24 +592,50 @@ export const WAIT_PARITY_FAMILIES = {
   cursorEntriesNoWait: { runner: 'cursor', part: 'entries', family: 'no-wait' },
   cursorEntriesCompletion: { runner: 'cursor', part: 'entries', family: 'completion' },
   cursorEntriesTimer: { runner: 'cursor', part: 'entries', family: 'timer' },
+  cursorAsksOpens: { runner: 'cursor', part: 'asks', family: 'opens' },
+  cursorAsksEnds: { runner: 'cursor', part: 'asks', family: 'ends' },
+  cursorAsksNudges: { runner: 'cursor', part: 'asks', family: 'nudges' },
+  cursorClosedBound: { runner: 'cursor', part: 'closed', family: 'bound' },
+  cursorClosedContinue: { runner: 'cursor', part: 'closed', family: 'continue' },
+  cursorClosedResume: { runner: 'cursor', part: 'closed', family: 'resume' },
 } as const;
 type WaitParityFamily = typeof WAIT_PARITY_FAMILIES[keyof typeof WAIT_PARITY_FAMILIES];
+
+/** The row families of each part that splits by family, keyed by the row's criterion (an entry row's
+ *  second criterion, after U27). Every row of such a part is in exactly one family. */
+const ROW_FAMILIES = {
+  mixed: { messages: ['U3w'], notices: ['U3n', 'U3r', 'U3d'], waits: ['U2w', 'U2t', 'U2c', 'U7w'] },
+  asks: { opens: ['U7h', 'U7k', 'U7a'], ends: ['U9h', 'U18'], nudges: ['U5a', 'U5c', 'U5d', 'U17', 'U15'] },
+  closed: { bound: ['U22c', 'U22f'], continue: ['U22k', 'U22x'], resume: ['U22r', 'U24', 'U24r', 'U25'] },
+  entries: { completion: ['U6'], timer: ['U11'], refusals: ['U20', 'U20u'], 'no-wait': ['U5', 'accepted'] },
+} as const satisfies Partial<Record<WaitParityPart, Record<string, readonly string[]>>>;
+type FamilyPart = keyof typeof ROW_FAMILIES;
+type RowFamily = { [P in FamilyPart]: keyof typeof ROW_FAMILIES[P] }[FamilyPart];
 
 /**
  * A runner outside the shared set runs only the rows that run on every runner, a few per part
  * (hearsay-tools/cezarion#2991). Its parts fold into the groups below, one file each: fewer per-file
  * setups, while each file stays well under CI's per-file cap (`FILE_DURATION_LIMIT_MS` in
- * `.github/scripts/vitest-file-duration.mjs`, 60 s with coverage on; about 25 s locally at most). Every
- * part is in one group; `entries`, the slowest, splits by row family as cursor's cap split does. The
- * guard computes the folded runners from the class table and their files from these groups.
+ * `.github/scripts/vitest-file-duration.mjs`, 60 s with coverage on; about 30 s with coverage and 13 s
+ * locally at most per group). Every part is in one group, or splits by row family (`ROW_FAMILIES`)
+ * across groups as cursor's cap split does: `entries` and `closed`. `registration` holds U1 alone, the
+ * slowest row, so it keeps a small group. The guard computes the folded runners from the class table
+ * and their files from these groups.
  */
 export const FOLDED_WAIT_RUNNERS: readonly RunnerId[] = RUNNER_IDS.filter(runner => !SHARED_RUNNERS.includes(runner));
-type WaitFoldGroup = { readonly parts: readonly WaitParityPart[]; readonly families?: readonly WaitParityFamily['family'][] };
+type WaitFoldGroup = {
+  readonly parts?: readonly WaitParityPart[];
+  readonly families?: { readonly [P in FamilyPart]?: readonly (keyof typeof ROW_FAMILIES[P])[] };
+};
 export const WAIT_FOLDS = {
-  base: { parts: ['registration', 'input', 'delivery', 'asks', 'done', 'answers', 'process'] },
-  workers: { parts: ['mixed', 'recovery', 'conversations', 'refusal', 'completion', 'completion-replies', 'closed'] },
-  'entries-refusals': { parts: ['entries'], families: ['refusals', 'no-wait'] },
-  'entries-nudges': { parts: ['entries'], families: ['completion', 'timer'] },
+  'base-registration': { parts: ['registration', 'process'] },
+  base: { parts: ['input', 'asks', 'done', 'answers'] },
+  'base-delivery': { parts: ['delivery'] },
+  workers: { parts: ['mixed', 'recovery', 'conversations'] },
+  'workers-refusals': { parts: ['refusal', 'completion', 'completion-replies'], families: { closed: ['continue'] } },
+  'workers-closed': { families: { closed: ['resume', 'bound'] } },
+  'entries-refusals': { families: { entries: ['refusals', 'no-wait'] } },
+  'entries-nudges': { families: { entries: ['completion', 'timer'] } },
 } as const satisfies Record<string, WaitFoldGroup>;
 export type WaitFold = keyof typeof WAIT_FOLDS;
 export const foldedWaitFile = (runner: RunnerId, fold: WaitFold): string => `waits-${runner}-every-runner-${fold}-parity.test.ts`;
@@ -619,9 +645,9 @@ const folded = (runner: RunnerId): boolean => FOLDED_WAIT_RUNNERS.includes(runne
 function foldCells(runner: RunnerId, fold: WaitFold, register: typeof registerTest): void {
   const group: WaitFoldGroup = WAIT_FOLDS[fold];
   const classed = familyCells('waits', runner, register);
-  for (const part of group.parts) {
-    const families = group.families;
-    WAIT_PARITY_CELLS[part]([runner], families === undefined ? classed : ((title: string, body: () => Promise<void>) => {
+  for (const part of group.parts ?? []) WAIT_PARITY_CELLS[part]([runner], classed);
+  for (const [part, families] of Object.entries(group.families ?? {}) as Array<[FamilyPart, readonly RowFamily[]]>) {
+    WAIT_PARITY_CELLS[part]([runner], ((title: string, body: () => Promise<void>) => {
       if (families.includes(rowFamily(part, title))) classed(title, body);
     }) as typeof registerTest);
   }
@@ -639,19 +665,12 @@ export function describeWaitParityFamily(scope: WaitParityFamily): void {
   describeWaitParity(scope);
 }
 
-function rowFamily(part: WaitParityPart, title: string): WaitParityFamily['family'] {
-  const words = title.split(' ');
-  if (part === 'mixed') {
-    if (words[1] === 'U3w') return 'messages';
-    if (['U3n', 'U3r', 'U3d'].includes(words[1]!)) return 'notices';
-    if (['U2w', 'U2t', 'U2c', 'U7w'].includes(words[1]!)) return 'waits';
-    throw Error(`Unclassified mixed wait parity row: ${title}`);
-  }
-  if (words[2] === 'U6') return 'completion';
-  if (words[2] === 'U11') return 'timer';
-  if (words[2] === 'U20' || words[2] === 'U20u') return 'refusals';
-  if (words[2] === 'U5' || words[2] === 'accepted') return 'no-wait';
-  throw Error(`Unclassified wait parity row: ${title}`);
+function rowFamily(part: FamilyPart, title: string): RowFamily {
+  const criterion = title.split(' ')[part === 'entries' ? 2 : 1]!;
+  const families: Record<string, readonly string[]> = ROW_FAMILIES[part];
+  const family = Object.keys(families).find(name => families[name]!.includes(criterion));
+  if (family === undefined) throw Error(`Unclassified ${part} wait parity row: ${title}`);
+  return family as RowFamily;
 }
 
 function familyTest(scope: WaitParityFamily, register: typeof registerTest): typeof registerTest {
@@ -691,7 +710,7 @@ function expectWaitParityFamilies(): void {
   const calls = familyCalls();
   expect(calls.slice().sort()).toEqual(Object.keys(WAIT_PARITY_FAMILIES).sort());
   for (const runner of RUNNER_IDS) {
-    for (const part of ['mixed', 'entries'] as const) {
+    for (const part of Object.keys(ROW_FAMILIES) as FamilyPart[]) {
       if (!splitPart(runner, part)) continue;
       const expected: string[] = [], actual: string[] = [];
       const collect = (names: string[]) => ((title: string) => { names.push(title); }) as typeof registerTest;
@@ -2735,8 +2754,8 @@ function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTes
       expect(nudgeNotes(p.id)).toHaveLength(1);
       const entry = workerWaits(p.id)[0]!;
       expect(prompted(runner, request.id)).not.toHaveLength(0);
-      expect(prompted(runner, 'cez message wait --request')).not.toHaveLength(0);
-      expect(prompted(runner, 'cez message cancel-request')).not.toHaveLength(0);
+      expect(prompted(runner, 'hsq message wait --request')).not.toHaveLength(0);
+      expect(prompted(runner, 'hsq message cancel-request')).not.toHaveLength(0);
       expect(entry).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, requestIds: [request.id], phase: WAIT_PHASE.open });
       expect(entry).not.toHaveProperty('deadline');
       expect(entry).not.toHaveProperty('timeoutSeconds');

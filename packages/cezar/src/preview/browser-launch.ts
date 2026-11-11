@@ -7,12 +7,14 @@ import { ChromiumError, launchChromium, resolveChromium } from './chromium.ts';
 /** A task's Chromium as the preview host launches it (hearsay-tools/cezarion#781): resolve, launch, attach to its page. Split out of `host.ts`. */
 
 const PROFILE_RELEASE_WAIT_MS = 5_000;
+/** How long a closed Chromium may take to exit before it gets SIGKILL. */
+const BROWSER_KILL_GRACE_MS = 5_000;
 const STDERR_TAIL_CHARS = 4096;
 
 export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };
 /** A launched Chromium: its page's CDP session, and the browser connection the agent's proxy
  *  opens its own sessions on (hearsay-tools/cezarion#784). `exited` settles when the process is gone. */
-export type BrowserHandle = { cdp: Cdp; connection: CdpConnection; pageTargetId?: string | undefined; exited: Promise<BrowserExit>; close(): void; kill?(): void };
+export type BrowserHandle = { cdp: Cdp; connection: CdpConnection; pageTargetId?: string | undefined; exited: Promise<BrowserExit>; close(): void };
 
 /** No Chromium anywhere `resolveChromium` looks: the pane offers the download or the OS command. */
 export class ChromiumMissingError extends Error {}
@@ -46,7 +48,16 @@ export async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv, 
     if (!page) throw new ChromiumError('exited', tail, 'Chromium opened no page');
     const { sessionId } = attachedSchema.parse(await root.send('Target.attachToTarget', { targetId: page.targetId, flatten: true }));
     const cdp = connection.session(sessionId);
-    return { cdp, connection, pageTargetId: page.targetId, exited, close: () => { connection.close(); proc.kill(); }, kill: () => { proc.kill('SIGKILL'); } };
+    // A Chromium that ignores the termination signal is killed after the grace, so no closed
+    // browser outlives its run (idle close, run deletion, a stale or failed launch).
+    const close = () => {
+      connection.close();
+      proc.kill();
+      const kill = setTimeout(() => { proc.kill('SIGKILL'); }, BROWSER_KILL_GRACE_MS);
+      kill.unref?.();
+      void exited.then(() => { clearTimeout(kill); });
+    };
+    return { cdp, connection, pageTargetId: page.targetId, exited, close };
   } catch (error) {
     connection.close();
     proc.kill('SIGKILL');

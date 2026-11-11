@@ -1,5 +1,7 @@
 import { Home } from '../../cezar/src/home/home.ts'
 import { HomeStore } from '../../cezar/src/home/store.ts'
+import { homeFileLocation } from '../../cezar/src/home/file-location.ts'
+import { homeFileSchema } from '@open-mercato/cezar-api-client/contract/home-recovery'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
@@ -52,7 +54,7 @@ type SharedConfig = { projects?: RegistryProject[] } & Record<string, unknown>
  * so that is exactly what is refused.
  */
 function sharedFile(name: string): string {
-  const path = resolve(sharedHome, name)
+  const { path } = homeFileLocation(Home.sandbox(sharedHome), homeFileSchema.parse(name))
   if (path.startsWith(resolve(homedir(), '.cezar'))) {
     throw new Error(`cezar e2e: refusing to touch the real workspace home at ${path}`)
   }

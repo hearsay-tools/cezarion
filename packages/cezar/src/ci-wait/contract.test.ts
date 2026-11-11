@@ -223,9 +223,14 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(schema.properties.kind.description).toMatch(/"process" wakes you when a background command ends/);
   const description = waitToolDefinition.description;
   expect(description).toContain('Times in the answers, such as `deadline`, are UTC.');
-  expect(description).toContain(`sh -c '( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!'`);
-  expect(description).toContain('Use a new exit file name for each command: a file that already exists resolves the wait at once.');
-  expect(description).toContain('The job outlives this session and Cezar does not stop it.');
+  // hearsay-tools/cezarion#3097: the `sh -c '( … ) & echo $!'` recipe died with the shell call under Codex.
+  // The tool list also loads inside omp, a standalone binary: the description names no path of its own.
+  expect(description).toContain('`hsq job start <name> -- <command> [args...]` (your instructions give the full command for this session under "Long commands")');
+  expect(description).not.toContain('echo $!');
+  expect(description).toContain('pass the `pid` and `exitFile` it prints as `pid` and `exit_file`');
+  expect(description).toContain('the job outlives this session; Cezar does not stop it.');
+  expect(description).toContain('Its files are in $TMPDIR, which Cezar removes when the task ends: for a job that must outlive the task, add `--dir <a git-ignored directory in the worktree>` before `--`.');
+  expect(description).toContain('Do not start a long command with `&`, `nohup`, `setsid` or your own background-task tool');
   // An agent whose batch wrote its exit file outside $TMPDIR started a watcher to copy it in.
   expect(description).toContain('For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out.');
   expect(description).toContain('Never start a watcher or helper process to copy a file into $TMPDIR.');
@@ -233,7 +238,7 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   const refused = cezarWaitRequestSchema.safeParse({ kind: OBSOLETE_HUMAN_WAIT_KIND });
   expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
   const pid = cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 });
-  expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the PID that `echo $!` printed (kind "process").');
+  expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the `pid` that the job start command printed (kind "process").');
 });
 
 it('accepts old observations and the new bounded conflict metadata', () => {

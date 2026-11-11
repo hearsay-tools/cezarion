@@ -204,6 +204,12 @@ describe('process waits', () => {
     expect(waitResultText(settled({ outcome: 'exit_file', observedAt, exitCode: 0 }, { note: 'build' }))).toBe(`Process wait ${id} for PID 4242 (build): exited with code 0. Read the command's output with your own tools.`);
     expect(waitResultText(settled({ outcome: 'exit_file', observedAt, exitFileNote: 'not-an-exit-code' }))).toBe(`Process wait ${id} for PID 4242: exit file present, not an exit code. Read the command's output with your own tools.`);
     expect(waitResultText(settled({ outcome: 'exited', observedAt }))).toBe(`Process wait ${id} for PID 4242: exited, code unknown. Read the command's output with your own tools.`);
+    // hearsay-tools/cezarion#3097: a PID that was already gone at registration is not read as a finished command.
+    const registeredAt = proc().registeredAt;
+    expect(waitResultText(settled({ outcome: 'exited', observedAt: registeredAt }, { startToken: undefined }))).toBe(`Process wait ${id} for PID 4242: PID 4242 was not running when this wait was registered. If the command should still run, this is not its PID: find the command before you start it again. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'exited', observedAt: registeredAt }))).toContain(': exited, code unknown.');
+    expect(waitResultText(settled({ outcome: 'exited', observedAt }, { startToken: undefined }))).toContain(': exited, code unknown.');
+    expect(waitResultText(settled({ outcome: 'exit_file', observedAt: registeredAt, exitCode: 0 }, { startToken: undefined }))).toContain(': exited with code 0.');
     expect(waitResultText(settled({ outcome: 'deadline', observedAt }))).toBe(`Process wait ${id} for PID 4242: still running at the deadline. Register another wait if you still need it.`);
     expect(waitResultText(settled({ outcome: 'error', observedAt, diagnostic: 'EACCES' }))).toBe(`Process wait ${id} for PID 4242: could not be checked (EACCES). Check it with your own tools.`);
   });

@@ -1,3 +1,4 @@
+import { commandText } from '../../home/command.ts';
 import type { WaitResult, resolvedWaits } from '../waits.ts';
 import type { CiWaitResult, ProcessWaitResult, PeerWaitResult, SubagentWaitResult } from '@open-mercato/cezar-contract';
 import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, TIMER_MIN_SECONDS, TIMER_MAX_SECONDS } from '@open-mercato/cezar-contract/waits';
@@ -374,11 +375,6 @@ export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly stri
   return waits.find((wait): wait is PeerWaitEntry => wait.kind === 'peer' && wait.phase === 'open' && key(wait.peerIds) === key(peerIds));
 }
 
-/** Whether this request kind registers through the delegation facade. */
-export function registersThroughDelegation(kind: CezarWaitRequest['kind']): boolean {
-  return waitRequestRow(kind).delegation;
-}
-
 /** The stored row that serves a tool request kind, including request waits in the worker row. */
 export function waitRequestRow(kind: CezarWaitRequest['kind']): WaitKindRow<Wait['kind']> {
   const row = Object.values(WAIT_KINDS).find(row => row.requestKinds.includes(kind));
@@ -486,6 +482,12 @@ function workerWaitResultText(wait: WorkerWaitEntry, workerStatus: (workerId: st
     })))}. Outcomes (summaries abbreviated): ${JSON.stringify(outcomes)}`;
 }
 
+/** Whether a process wait found no process at its PID when it was registered: it then carries no
+ *  start identity and was settled by registration's own check, at the registration instant. */
+export function processNotRunningAtRegistration(wait: Pick<ProcessWaitEntry, 'startToken' | 'registeredAt' | 'result'>): boolean {
+  return wait.result?.outcome === 'exited' && wait.startToken === undefined && wait.result.observedAt === wait.registeredAt;
+}
+
 /** A process wait's result (hearsay-tools/cezarion#1446). Only the outcome and an integer exit code
  *  come from Cezar; the agent reads the command's own output with its tools. */
 function processWaitResultText(wait: ProcessWaitEntry): string {
@@ -493,7 +495,12 @@ function processWaitResultText(wait: ProcessWaitEntry): string {
   const read = "Read the command's output with your own tools.";
   const result = wait.result;
   if (result?.outcome === 'exit_file') return `${head}: ${result.exitCode === undefined ? 'exit file present, not an exit code' : `exited with code ${result.exitCode}`}. ${read}`;
-  if (result?.outcome === 'exited') return `${head}: exited, code unknown. ${read}`;
+  if (result?.outcome === 'exited') {
+    // hearsay-tools/cezarion#3097: a launcher's PID (`setsid … & echo $!`) is gone before the wait
+    // opens while the command still runs, and read as a finished command it was started again.
+    if (processNotRunningAtRegistration(wait)) return `${head}: PID ${wait.pid} was not running when this wait was registered. If the command should still run, this is not its PID: find the command before you start it again. ${read}`;
+    return `${head}: exited, code unknown. ${read}`;
+  }
   if (result?.outcome === 'error') return `${head}: could not be checked (${result.diagnostic ?? 'unknown error'}). Check it with your own tools.`;
   return `${head}: still running at the deadline. Register another wait if you still need it.`;
 }
@@ -504,7 +511,7 @@ function peerWaitResultText(wait: PeerWaitEntry): string {
   const result = wait.result;
   const head = `Peer wait ${wait.id} on ${peerTargetPhrase(wait)}`;
   if (result?.reason === 'message') return `${head}: task ${result.peerRunId ?? 'unknown'} sent message ${result.messageId ?? 'unknown'}, delivered with this wake. Register another peer wait if you still wait on it.`;
-  if (result?.reason === 'settled') return `${head}: task ${result.peerRunId ?? 'unknown'} settled or was deleted; it will not write again until its human continues it. Read its status with cez message tasks.`;
+  if (result?.reason === 'settled') return `${head}: task ${result.peerRunId ?? 'unknown'} settled or was deleted; it will not write again until its human continues it. ${commandText('Read its status with cez message tasks.')}`;
   return `${head}: deadline reached with no message. Register another peer wait if you still wait on it.`;
 }
 
@@ -568,8 +575,12 @@ export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
   return waits.flatMap(wait => WAIT_KINDS[wait.kind].deliveryLabel(wait)).sort((a, b) => a.priority - b.priority)[0]?.text;
 }
 
+/** The handler of each registration path. A new path fails typecheck until every router names it. */
+export type RegistrationRoutes<R> = { readonly [P in keyof RegistrationRequest]: (request: RegistrationRequest[P]) => R };
+
 /** Request dispatch follows the typed registration cell of its stored-kind row. */
-export function registersAs<R extends keyof RegistrationRequest>(request: CezarWaitRequest, registration: R,
-  row = waitRequestRow(request.kind)): request is RegistrationRequest[R] {
-  return row.registration === registration;
+export function routeRegistration<R>(request: CezarWaitRequest, routes: RegistrationRoutes<R>): R {
+  const path = waitRequestRow(request.kind).registration;
+  if (path === 'none') throw new Error('Unsupported wait registration');
+  return (routes[path] as (request: CezarWaitRequest) => R)(request);
 }

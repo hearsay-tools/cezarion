@@ -25,13 +25,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import type { UiEvent, UiItem } from './ui-events.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BACKENDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;
+const BACKENDS = RUNNER_IDS;
 
 /** Every event across every golden fixture of one backend. */
-function fixtureEvents(backend: (typeof BACKENDS)[number]): UiEvent[] {
+function fixtureEvents(backend: RunnerId): UiEvent[] {
   const dir = join(HERE, '__fixtures__', backend);
   const events: UiEvent[] = [];
   for (const file of readdirSync(dir).sort()) {

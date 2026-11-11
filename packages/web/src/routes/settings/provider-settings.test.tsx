@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -170,7 +171,7 @@ describe('ProviderSettings', () => {
 
     expect(within(card('opencode')).getByRole('button', { name: 'Connect' })).toBeTruthy()
     expect(within(card('opencode')).getByRole('button', { name: 'Try again' })).toBeTruthy()
-    expect(within(card('opencode')).getByText(/cezar cannot validate.*task/i)).toBeTruthy()
+    expect(within(card('opencode')).getByText(new RegExp(`${productName("cezar")} cannot validate.*task`, "i"))).toBeTruthy()
     fireEvent.click(within(card('opencode')).getByRole('button', { name: 'Check again' }))
     await within(card('opencode')).findByText('Not connected')
     expect(within(card('opencode')).getByRole('button', { name: 'Try again' })).toBeTruthy()

@@ -17,11 +17,15 @@ export type HomeRecoveryControl =
   | { kind: 'write-ui-state'; value: string }
   | { kind: 'legacy-ui-state'; value: string }
 
-/** Real CLI and HomeStore share one sandbox. Only the deliberate outside-write case bypasses it. */
+/**
+ * Real CLI and HomeStore share one sandbox. Only the deliberate outside-write case bypasses it.
+ * The server's CEZ_HOME names the legacy home this fixture migrated, as an operator's does, so a
+ * boot with the release switch on finds that migration done.
+ */
 export async function createHomeRecoveryFixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-home-recovery-e2e-'))
   const env = fixtureServeEnv(root)
-  const legacy = Home.sandbox(join(root, 'legacy'))
+  const legacy = Home.sandbox(join(root, 'legacy'), { layout: 'legacy' })
   const home = Home.sandbox(env.CEZ_HOME!, { layout: 'split' })
   const store = new HomeStore(home)
   const project = { id: 'recovery-project', root, name: 'Recovery project', source: 'local' as const,
@@ -30,7 +34,7 @@ export async function createHomeRecoveryFixture() {
   Home.seed(legacy, legacy.workspaceUiState, { recoveryFixture: 'original' })
   migrateLegacyHome(legacy, home)
   const server = spawnFixtureServer([join(import.meta.dirname, 'home-recovery-server.mjs'),
-    dirname(cezarCli), root, env.CEZ_HOME!], { env })
+    dirname(cezarCli), root, env.CEZ_HOME!], { env: { ...env, CEZ_HOME: legacy.root } })
   try {
     const origin = await waitForFixtureServer(server)
     const control = async (command: HomeRecoveryControl): Promise<void> => {

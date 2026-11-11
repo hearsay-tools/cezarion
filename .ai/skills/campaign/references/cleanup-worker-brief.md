@@ -49,9 +49,9 @@ Before the PR, in this order:
    npm test -- <files> only when no daemon validates, the result is unknown,
    or the repo's own gate requires it. Complete the Reader sweep's selected
    browser and packaged checks too.
-5. Use check-code-quality's pre-PR path for changed-function findings. Measure
-   every changed, new or moved function, test files included:
-   node .ai/skills/check-code-quality/scripts/metrics.mjs <file> --json.
+5. Use check-code-quality's Squeal one-shot pre-PR path for changed-function
+   findings. Require complete evidence for every changed, new or moved
+   function, test files included. Bundled metrics are statistics only.
    CI's complexity gate counts a moved function as new when a same-named
    delegator stays behind; tell the coordinator about any function over 20
    before you push.
@@ -60,8 +60,8 @@ Read auto-merge before opening the PR. The campaign's owner-merge control
 requires owner review; leave automatic merging off in that case. Workers
 leave the merge action to the coordinator/owner under the recorded authority.
 Repeat steps 2 to 5 after any later code change, and step 3 before every push.
-Leave full suites to Squeal and CI; follow check-code-quality's bundled fallback
-when its Squeal-first path has no verdict.
+Leave full suites to Squeal and CI. Missing or incomplete one-shot evidence
+blocks the PR; there is no bundled pre-PR fallback.
 
 PR: git push, then gh pr create --draft --base main. Title in Conventional
 Commits, for example refactor(<area>): <what moved>. Write the body in
@@ -129,7 +129,10 @@ At the end: git checkout cez/<your 8-char id>; squeal stop in this worktree;
 ## Kind: mutation
 
 ```text
-6. Start the baseline measurement with --out <baseline.json>. While it runs,
+6. Start each measurement with the job start command that the cezar_wait
+   tool description names, and wait for it with a process wait; never with
+   &, nohup or a background tool.
+   Start the baseline measurement with --out <baseline.json>. While it runs,
    write tests from the issue's FAIL lines; do not wait idle for the baseline.
    mutants-file.cjs measures the committed HEAD: commit the tests before the
    final measurement. Start the final run with --out <final.json> independently

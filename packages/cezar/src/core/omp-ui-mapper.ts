@@ -13,7 +13,7 @@
  *
  * Unknown or malformed wire data is ignored; this mapper never throws.
  *
- * Design record: `.ai/specs/2026-10-02-omp-runner.md`; protocol summary: `AGENT_PROTOCOL.md` §4.
+ * Design record: `.ai/specs/2026-10-02-omp-runner.md`.
  */
 import type {
   FileDiff,

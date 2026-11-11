@@ -35,7 +35,8 @@ beforeAll(async () => {
   }
   const env = fixtureServeEnv(boot)
   mkdirSync(env.CEZ_HOME!, { recursive: true })
-  Home.seedBytes(Home.sandbox(env.CEZ_HOME!), join(env.CEZ_HOME!, 'config.json'), Buffer.from(JSON.stringify({ projects: [
+  const home = Home.sandbox(env.CEZ_HOME!)
+  Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [
     { id: 'boot', root: boot }, { id: 'owner', root: owner },
   ] })))
   const source = join(root, 'owned-report.md')

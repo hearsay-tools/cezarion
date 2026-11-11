@@ -10,6 +10,7 @@ import {
   workerListResultSchema, workerParamsSchema, workerResultFileSchema, workerSpawnRequestSchema, workerSpawnResultSchema,
   workerSteerRequestSchema, workerSteerResultSchema, workerStopResultSchema, workerWaitRequestSchema, workerWaitResultSchema,
 } from './delegation.ts';
+import { runnerSchema } from './health.ts';
 import { RUN_STATUS, WAIT_PHASE, WAIT_VIA, WORKER_OUTCOME_STATUS } from './test-factories.testkit.ts';
 
 describe('parent-file context reference', () => {
@@ -191,7 +192,7 @@ describe('worker spawn, steer and wait requests', () => {
   });
 
   it('accepts every backend', () => {
-    acceptsEach(workerSpawnRequestSchema, spawn, 'backend', ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
+    acceptsEach(workerSpawnRequestSchema, spawn, 'backend', runnerSchema.options);
   });
 
   it('names each refused spawn combination', () => {

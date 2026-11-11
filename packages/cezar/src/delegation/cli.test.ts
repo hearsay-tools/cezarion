@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -34,7 +35,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(await runWorkerCommand(['list', 'extra'], env)).toBe(1);
     expect(json()).toMatchObject({ code: 'invalid_input' });
     expect(await runWorkerCommand(['list', '--help'], {})).toBe(0);
-    expect(output.mock.calls.at(-1)?.[0]).toContain('cez worker list');
+    expect(output.mock.calls.at(-1)?.[0]).toContain(("cez worker list").replace("cez", productIdentity().command));
   });
   it('follows every list page and emits one complete worker list', async () => {
     const spawned = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
@@ -66,7 +67,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(await runWorkerCommand([flag], {})).toBe(0);
     const help = String(output.mock.calls.at(-1)?.[0]);
     expect(help).toContain('Usage:');
-    expect(help).toContain('cez worker');
+    expect(help).toContain(`${productIdentity().command} worker`);
     expect(help).toContain('spawn');
     expect(help).toContain('collect');
     expect(help).toContain('--baseline');
@@ -80,7 +81,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       for (const flag of ['-h', '--help']) {
         expect(await runWorkerCommand([operation, flag], {})).toBe(0);
         const help = String(output.mock.calls.at(-1)?.[0]);
-        expect(help).toContain(`cez worker ${operation}`);
+        expect(help).toContain(`${productIdentity().command} worker ${operation}`);
         expect(help).toContain('Usage:');
         expect(help).not.toContain('invalid_input');
       }

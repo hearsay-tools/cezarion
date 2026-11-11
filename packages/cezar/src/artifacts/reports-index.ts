@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { ReportsWatch, reportMetadataKey } from './reports-watch.ts';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -10,7 +11,6 @@ import { REPORTS_BACKFILL_KEY, type IndexedArtifact, type ReportRow, type Report
 import { parseStoredSummary } from '../runs/run-summary-page.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { artifactRunsRoot, scanArtifactsForIndex, checkArtifactContentForIndex } from './store.ts';
-import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
@@ -70,7 +70,7 @@ export class ReportsIndex {
         // Closing the last shelf must not cancel the existing terminal reconciliation guarantee.
         if (this.settlements.size) {
           this.settlements.clear();
-          void this.reconcile(false).catch(error => console.warn('[cez] Reports settlement failed:', error));
+          void this.reconcile(false).catch(error => console.warn(`${logPrefix()} Reports settlement failed:`, error));
         }
       },
     );
@@ -92,20 +92,17 @@ export class ReportsIndex {
     this.changes.run(run, live || wasLive, this.db.reports.forRun(run.id).length > 0);
     if (live) { this.live.add(run.id); return; }
     const settled = this.live.delete(run.id);
-    if (this.started && settled && !this.changes.watching()) void this.reconcile(false, run.id).catch(error => console.warn('[cez] Reports reconciliation failed:', error));
+    if (this.started && settled && !this.changes.watching()) void this.reconcile(false, run.id).catch(error => console.warn(`${logPrefix()} Reports reconciliation failed:`, error));
   };
 
   /** Only the post-listen boot hook and already-served lazy contexts call this. */
   start(): void {
     this.started = true;
-    void this.backfill().catch(error => console.warn('[cez] Reports backfill failed:', error));
+    void this.backfill().catch(error => console.warn(`${logPrefix()} Reports backfill failed:`, error));
   }
-  /** Settles once the scans queued so far end; a project migration fence drains it. */
+  /** Settles once the scans queued so far end. */
   idle(): Promise<void> { return this.queue; }
   private serial(work: () => Promise<void>): Promise<void> {
-    // A project under a migration fence queues no new scan (watch ticks included), so the
-    // fence's captured `idle()` covers every scan; dirty rows are picked up after it ends.
-    if (projectAdmissionRefusal(this.dataDir)) return Promise.resolve();
     const next = this.queue.then(async () => { if (!this.closed) await work(); });
     this.queue = next.catch(() => undefined);
     return next;
@@ -145,7 +142,7 @@ export class ReportsIndex {
     const revision = this.db.revisionOf(runId);
     const scan = await this.storage(runId, directory => scanArtifactsForIndex(directory, runId));
     if (scan.state === 'indeterminate') {
-      console.warn(`[cez] Report scan could not be completed: ${runId}`, scan.error);
+      console.warn(`${logPrefix()} Report scan could not be completed: ${runId}`, scan.error);
       if (this.closed) return false;
       this.db.reports.retry(runId, revision);
       return false;
@@ -154,7 +151,7 @@ export class ReportsIndex {
     const uncertain = scan.state === 'read' ? scan.value.indeterminate : [];
     for (const cached of previous) if (uncertain.includes(cached.id)) artifacts.push(cached);
     const complete = uncertain.length === 0;
-    if (!complete) console.warn(`[cez] Report read could not be completed: ${runId}`);
+    if (!complete) console.warn(`${logPrefix()} Report read could not be completed: ${runId}`);
     if (this.closed) return false;
     this.db.reports.replace(runId, artifacts, revision, complete);
     const current = this.db.reports.forRun(runId);
@@ -167,7 +164,7 @@ export class ReportsIndex {
       else this.changes.seed(runId);
     } else this.changes.forget(runId);
     const kept = new Set(artifacts.map(a => a.id));
-    for (const missing of previous) if (!kept.has(missing.id)) console.warn(`[cez] Report missing or deleted: ${runId}/${missing.id}`);
+    for (const missing of previous) if (!kept.has(missing.id)) console.warn(`${logPrefix()} Report missing or deleted: ${runId}/${missing.id}`);
     return complete;
   }
   private async present(row: ReportRow): Promise<boolean | null> {
@@ -175,14 +172,14 @@ export class ReportsIndex {
     const check = await this.storage(row.runId, directory => checkArtifactContentForIndex(directory, row.runId, row.id, row.size));
     if (check.state === 'indeterminate') {
       this.db.reports.retry(row.runId, this.db.revisionOf(row.runId));
-      console.warn(`[cez] Report content could not be checked: ${row.runId}/${row.id}`, check.error);
+      console.warn(`${logPrefix()} Report content could not be checked: ${row.runId}/${row.id}`, check.error);
       return null;
     }
     if (check.state === 'read' && check.value) return true;
     this.db.reports.drop(row.id);
     if (!this.db.reports.forRun(row.runId).length) this.changes.forget(row.runId);
     this.changes.content();
-    console.warn(`[cez] Report missing or deleted: ${row.runId}/${row.id}`);
+    console.warn(`${logPrefix()} Report missing or deleted: ${row.runId}/${row.id}`);
     return false;
   }
   private matchingRows(q: string): ReportRow[] {
@@ -191,7 +188,7 @@ export class ReportsIndex {
     for (const row of this.db.reports.summaries()) {
       const summary = parseStoredSummary(row.summary);
       if (!summary) {
-        if (!warned.has(row.runId)) console.warn(`[cez] Report source task could not be read: ${row.runId}`);
+        if (!warned.has(row.runId)) console.warn(`${logPrefix()} Report source task could not be read: ${row.runId}`);
         warned.add(row.runId);
         continue;
       }

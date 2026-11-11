@@ -13,7 +13,7 @@ for (const backend of RUNNER_IDS) {
   it.each(['0', '1'])(`${backend} native child omits the cockpit home with full-env=%s`, async (full) => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-child-home-'));
     try {
-      useTestHome(Home.sandbox(testHome().root));
+      useTestHome(Home.sandbox(testHome().rootOverride ?? testHome().root));
       vi.stubEnv('CEZ_AGENT_ENV_FULL', full);
       vi.stubEnv('CEZ_ENV_PASSTHROUGH', 'CEZ_HOME');
       const record = join(dir, 'env.json');

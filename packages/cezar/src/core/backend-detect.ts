@@ -1,3 +1,5 @@
+import { productIdentity } from '../home/identity.ts';
+import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { productEnv } from './product-env.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -5,7 +7,7 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'omp' | 'gh' | 'git';
+  name: RunnerId | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;
@@ -19,21 +21,27 @@ export interface BackendCheck {
  * shows the hints for the rest.
  */
 export async function detectEnvironment(): Promise<BackendCheck[]> {
-  return Promise.all([
-    probeClaude(),
-    probeCodex(),
-    probeOpencode(),
-    probePi(),
-    probeCursor(),
-    probeOmp(),
-    probeGh(),
-    probeGit(),
-  ]);
+  return Promise.all([...RUNNER_IDS.map((runner) => RUNNER_PROBES[runner]()), probeGh(), probeGit()]);
+}
+
+/** One probe per runner: a runner id without a probe does not compile. */
+const RUNNER_PROBES: Record<RunnerId, () => Promise<BackendCheck>> = {
+  claude: probeClaude,
+  codex: probeCodex,
+  opencode: probeOpencode,
+  pi: probePi,
+  cursor: probeCursor,
+  omp: probeOmp,
+};
+
+/** Banner spelling follows the release identity; switch-off output stays stable. */
+function dryRunVersion(): string {
+  return `mock (${productIdentity().envPrefix}DRY_RUN=1)`;
 }
 
 async function probeClaude(): Promise<BackendCheck> {
   if (productEnv('DRY_RUN') === '1') {
-    return { name: 'claude', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+    return { name: 'claude', available: true, version: dryRunVersion() };
   }
   // `CEZ_CLAUDE_BIN` like every other claude call site (the runner, provider-auth,
   // open-in-app). Probing a bare `claude` reported "not installed" for a host whose
@@ -74,7 +82,7 @@ async function probeCodex(): Promise<BackendCheck> {
   // mock in the runner too, so it is still probed.
   const override = productEnv('CODEX_BIN');
   if (productEnv('DRY_RUN') === '1' && override === undefined) {
-    return { name: 'codex', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+    return { name: 'codex', available: true, version: dryRunVersion() };
   }
   const bin = override ?? 'codex';
   try {
@@ -99,7 +107,7 @@ async function probeOpencode(): Promise<BackendCheck> {
   // unless CEZ_OPENCODE_BIN overrides it there as well.
   const override = productEnv('OPENCODE_BIN');
   if (productEnv('DRY_RUN') === '1' && override === undefined) {
-    return { name: 'opencode', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+    return { name: 'opencode', available: true, version: dryRunVersion() };
   }
   const bin = override ?? 'opencode';
   try {
@@ -122,7 +130,7 @@ async function probeOpencode(): Promise<BackendCheck> {
 async function probePi(): Promise<BackendCheck> {
   // Dry-run stands the runner up on the shared mock, so report it present.
   if (productEnv('DRY_RUN') === '1') {
-    return { name: 'pi', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+    return { name: 'pi', available: true, version: dryRunVersion() };
   }
   const bin = productEnv('PI_BIN') ?? 'pi';
   try {
@@ -146,7 +154,7 @@ async function probePi(): Promise<BackendCheck> {
 
 async function probeCursor(): Promise<BackendCheck> {
   if (productEnv('DRY_RUN') === '1') {
-    return { name: 'cursor', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+    return { name: 'cursor', available: true, version: dryRunVersion() };
   }
   const bin = productEnv('CURSOR_BIN') ?? 'agent';
   try {
@@ -161,7 +169,7 @@ async function probeCursor(): Promise<BackendCheck> {
 export async function probeOmp(): Promise<BackendCheck> {
   // Dry-run stands the runner up on the shared mock, so report it present.
   if (productEnv('DRY_RUN') === '1') {
-    return { name: 'omp', available: true, version: 'mock (CEZ_DRY_RUN=1)' };
+    return { name: 'omp', available: true, version: dryRunVersion() };
   }
   const bin = productEnv('OMP_BIN') ?? 'omp';
   try {

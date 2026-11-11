@@ -9,7 +9,8 @@ window remain visible.
 
 Scratch indexes try the OS temp directory and then the Git directory. If neither works,
 the read uses the real index instead of reporting an empty diff. That fallback is not the
-normal isolation guarantee.
+normal isolation guarantee. A worktree under read-only `.ai/squawk` project data refuses
+instead of using the real index (`fallbackProjectWriteError`).
 
 Worktree mutations use a separate cross-process lock keyed by the canonical Git common
 directory. A short-lived keeper owns the lock and its Git children until they exit, even if

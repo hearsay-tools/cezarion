@@ -1,3 +1,4 @@
+import { productName } from '@/lib/product-name'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { projectAddress, runAddress } from './run-address'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -661,7 +662,7 @@ describe('history responses are validated at the boundary (#827)', () => {
     reply([{ id: 'r1' }])
     const error = (await call().catch((e: unknown) => e)) as ApiError
     expect(error).toBeInstanceOf(ApiError)
-    expect(error.message).toBe(`the cezar server answered ${label} with an unexpected body`)
+    expect(error.message).toBe(`the ${productName("cezar")} server answered ${label} with an unexpected body`)
   })
 
   it('rejects a 200 whose page body is the catch-all empty object', async () => {
@@ -669,7 +670,7 @@ describe('history responses are validated at the boundary (#827)', () => {
     const error = (await getRunHistory('run-1').catch((e: unknown) => e)) as ApiError
     expect(error).toBeInstanceOf(ApiError)
     expect(error.status).toBe(200)
-    expect(error.message).toBe('the cezar server answered /runs/run-1/history with an unexpected body')
+    expect(error.message).toBe(`the ${productName("cezar")} server answered /runs/run-1/history with an unexpected body`)
   })
 
   it('rejects a 200 whose page carries a non-array `events`', async () => {
@@ -685,7 +686,7 @@ describe('history responses are validated at the boundary (#827)', () => {
     expect(error).toBeInstanceOf(ApiError)
     expect(error.status).toBe(200)
     expect(error.message).toBe(
-      'the cezar server answered /runs/run-1/history-context with an unexpected body',
+      `the ${productName("cezar")} server answered /runs/run-1/history-context with an unexpected body`,
     )
   })
 
@@ -712,7 +713,7 @@ describe('new-project calls (spec 2026-10-15-create-new-project)', () => {
     reply({ login: 'octo', orgs: [] })
     const error = (await getGithubOwners().catch((e: unknown) => e)) as ApiError
     expect(error).toBeInstanceOf(ApiError)
-    expect(error.message).toBe('the cezar server answered /projects/github-owners with an unexpected body')
+    expect(error.message).toBe(`the ${productName("cezar")} server answered /projects/github-owners with an unexpected body`)
   })
 
   it('posts the create body as given and surfaces the server error verbatim', async () => {
@@ -755,7 +756,7 @@ describe('voice calls', () => {
   })
 
   it('rejects with the server message when voice is off or the engine is down, and does not retry', async () => {
-    reply({ error: 'Voice mode is off: set CEZ_VOICE=1 and TYPESAFE_API_KEY, then restart cezar' }, { status: 409 })
+    reply({ error: `Voice mode is off: set CEZ_VOICE=1 and TYPESAFE_API_KEY, then restart ${productName("cezar")}` }, { status: 409 })
     const error = (await voiceDecide({ text: 'x', sidebarView: 'active' }).catch((e: unknown) => e)) as ApiError
     expect(error).toBeInstanceOf(ApiError)
     expect(error.status).toBe(409)

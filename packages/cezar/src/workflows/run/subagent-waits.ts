@@ -1,11 +1,11 @@
+import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
-import type { WaitCancellation } from './wait-cancellation.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { ReadonlyMapView } from './readonly-collections.ts';
 import {
   SUBAGENT_WAIT_CHILD_LIMIT, SUBAGENT_WAIT_DEADLINE_SECONDS, SUBAGENT_WAIT_GRACE_SECONDS,
-  type SubagentChild, type SubagentWaitEntry, type SubagentWaitResult, type Wait,
+  type SubagentChild, type SubagentWaitEntry,
 } from '@open-mercato/cezar-contract/waits';
 import type { UiEvent, UiToolItem } from '../../core/ui-events.ts';
 import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';
@@ -48,14 +48,10 @@ const INTERRUPT_RETRY_MS = 60_000;
 type ChildEvent = { id: string; status: SubagentStatus; background: boolean };
 
 interface SubagentWaitsHost {
-  waitCancellation: WaitCancellation;
   waitEngine: WaitEngine;
   active: ReadonlyMap<string, ActiveRun>;
   isParked(id: string): boolean;
   isAdmitted(id: string): boolean;
-  settleWait(id: string, waitId: string, result?: SubagentWaitResult): void;
-  armWait(id: string, wait: Wait): void;
-  disarmWait(id: string): void;
   /** Give a held park for the user its slot back and arm its idle close. */
   releaseHeldPark(id: string, state: ActiveRun): void;
 }
@@ -175,10 +171,7 @@ export class SubagentWaits {
    *  alias it would have opened before. */
   private openSubagentWait(runId: string, state: ActiveRun): void {
     const wait = WAIT_KINDS.subagent.entry(state.waitIdentity.ciTurnId ?? 'subagents', this.deadline(), this.children(state));
-    this.host.waitEngine.open(runId, state, wait, {
-      withdraw: 'none', onCommitFailure: { log: '[cez] subagent wait checkpoint failed' },
-      arm: 'watch', park: 'none', return: 'none',
-    });
+    this.host.waitEngine.open(runId, state, wait, { withdraw: false, onCommitFailure: { log: `${logPrefix()} subagent wait checkpoint failed` }, park: false });
   }
 
   /** Save the children and move the deadline, then re-arm it. False when the checkpoint failed:
@@ -186,11 +179,7 @@ export class SubagentWaits {
   private refreshWait(runId: string, state: ActiveRun, wait: SubagentWaitEntry): boolean {
     const children = this.children(state);
     const next: SubagentWaitEntry = { ...wait, deadline: this.deadline(), children: children.length ? children : wait.children };
-    try { this.context.store.commitWait(runId, next); }
-    catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
-    this.host.disarmWait(wait.id);
-    this.host.armWait(runId, next);
-    return true;
+    return this.host.waitEngine.refresh(runId, wait, next, { log: `${logPrefix()} subagent wait checkpoint failed` });
   }
 
   /** Every child ended: unless the runner starts a parent turn first, the wait resolves `settled`. */
@@ -205,7 +194,7 @@ export class SubagentWaits {
       // itself: its turn end cancels the wait. The saved snapshot must hold every end first.
       if (!state || !wait || liveSubagents(state) || this.context.disposed() || !this.host.isParked(runId)) return;
       if (!this.refreshWait(runId, state, wait)) return;
-      this.host.settleWait(runId, wait.id, { reason: 'settled' });
+      this.host.waitEngine.settleWait(runId, wait.id, { reason: 'settled' });
     }, this.graceMs);
     timer.unref?.();
     this.graces.set(runId, timer);
@@ -233,7 +222,7 @@ export class SubagentWaits {
 
   private supersede(runId: string, waitIds: readonly string[]): void {
     this.clearGrace(runId);
-    this.host.waitCancellation.cancel(runId, waitIds, { onCommitFailure: 'skip', superseded: true });
+    this.host.waitEngine.cancel(runId, waitIds, { onCommitFailure: 'skip', superseded: true });
   }
 
   /** The run left the live registry: its session, and the children it held, are gone. An open
@@ -256,7 +245,7 @@ export class SubagentWaits {
   interrupt(runId: string, waitId: string): void {
     this.clearRetry(runId);
     if (!this.endStoppedChildren(runId)) { this.armRetry(runId, waitId); return; }
-    this.host.settleWait(runId, waitId, { reason: 'interrupted' });
+    this.host.waitEngine.settleWait(runId, waitId, { reason: 'interrupted' });
   }
 
   /** Write the stopped children's ends again later: through the wait while it is open, or on their
@@ -297,7 +286,7 @@ export class SubagentWaits {
     for (const { item, stepId } of last.values()) {
       if (item.status !== 'running' && item.status !== 'pending') continue;
       try { this.context.store.appendEvent(runId, { type: 'item.completed', ...(stepId ? { stepId } : {}), item: { ...item, background: true, status: 'declined' } }); }
-      catch (error) { written = false; console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { written = false; console.warn(`${logPrefix()} subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
     return written;
   }

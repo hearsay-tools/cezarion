@@ -1,7 +1,9 @@
+import { productIdentity } from '../home/identity.ts';
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { RUNNER_IDS } from './agent-runner.ts';
 import { detectEnvironment, probeOmp } from './backend-detect.ts';
 
 describe('probeOmp', () => {
@@ -22,7 +24,7 @@ describe('probeOmp', () => {
 
   it('reports the mock as present under CEZ_DRY_RUN=1', async () => {
     process.env.CEZ_DRY_RUN = '1';
-    await expect(probeOmp()).resolves.toEqual({ name: 'omp', available: true, version: 'mock (CEZ_DRY_RUN=1)' });
+    await expect(probeOmp()).resolves.toEqual({ name: 'omp', available: true, version: `mock (${productIdentity().envPrefix}DRY_RUN=1)` });
   });
 
   it('reads the version from CEZ_OMP_BIN', async () => {
@@ -88,6 +90,12 @@ describe('detectEnvironment: codex and opencode probes', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('reports one check for every runner, then gh and git', async () => {
+    process.env.CEZ_DRY_RUN = '1';
+    const rows = await detectEnvironment();
+    expect(rows.map((row) => row.name)).toEqual([...RUNNER_IDS, 'gh', 'git']);
+  });
+
   it('spawns neither CLI under CEZ_DRY_RUN=1 and reports both mocks present', async () => {
     process.env.CEZ_DRY_RUN = '1';
     // No override: the fakes are what `codex` and `opencode` would resolve to on PATH.
@@ -97,8 +105,8 @@ describe('detectEnvironment: codex and opencode probes', () => {
     const rows = await detectEnvironment();
     expect(spawned('codex')).toBe(false);
     expect(spawned('opencode')).toBe(false);
-    expect(rows.find((row) => row.name === 'codex')).toEqual({ name: 'codex', available: true, version: 'mock (CEZ_DRY_RUN=1)' });
-    expect(rows.find((row) => row.name === 'opencode')).toEqual({ name: 'opencode', available: true, version: 'mock (CEZ_DRY_RUN=1)' });
+    expect(rows.find((row) => row.name === 'codex')).toEqual({ name: 'codex', available: true, version: `mock (${productIdentity().envPrefix}DRY_RUN=1)` });
+    expect(rows.find((row) => row.name === 'opencode')).toEqual({ name: 'opencode', available: true, version: `mock (${productIdentity().envPrefix}DRY_RUN=1)` });
   });
 
   // The runners resolve CEZ_*_BIN before the bundled mock, so an override is what a

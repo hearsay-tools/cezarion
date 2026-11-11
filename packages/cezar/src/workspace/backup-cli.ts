@@ -1,10 +1,10 @@
+import { logPrefix } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
 import { homeFileLocation } from '../home/file-location.ts';
 import { HomeStore } from '../home/store.ts';
-import { parseArgs } from 'node:util';
-import { isBackupFile, listBackups, type BackupFile } from './backups.ts';
+import { isBackupFile, listBackups, parseBackupArgs, restoreLimit, restoreRequest, type BackupFile } from './backups.ts';
 import { storeSchema } from './agent-accounts.ts';
 import { workspaceConfigSchema } from './config.ts';
 import { resolveLegacyRecovery } from '../home/legacy-recovery.ts';
@@ -37,8 +37,7 @@ function resolveLegacyCommand(command: string | undefined, file: string | undefi
 
 export async function restoreBackup(file: BackupFile, at: string | undefined, home: Home): Promise<string> {
   if (!isBackupFile(file)) throw new Error(`Unsupported backup file: ${file}`);
-  const utc = at === undefined || /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at);
-  const limit = at === undefined ? Infinity : utc ? Date.parse(at) : NaN;
+  const limit = restoreLimit(at);
   if (Number.isNaN(limit)) throw new Error('Invalid --at time; use an ISO UTC time');
   const store = new HomeStore(home);
   if (at === undefined) {
@@ -78,7 +77,7 @@ function refreshSnapshot(store: HomeStore, home: Home): void {
   } catch (error) {
     if (warnedSnapshots.has(home.workspaceConfig)) return;
     warnedSnapshots.add(home.workspaceConfig);
-    console.warn(`[cez] workspace backup unavailable after restore (${error instanceof Error ? error.message : String(error)})`);
+    console.warn(`${logPrefix()} workspace backup unavailable after restore (${error instanceof Error ? error.message : String(error)})`);
   }
 }
 
@@ -102,26 +101,27 @@ function restoreBytes(file: BackupFile, bytes: Buffer): Buffer {
 function warnDroppedEntries(raw: object, key: 'projects' | 'accounts', kept: number): void {
   const original: unknown = (raw as Record<string, unknown>)[key];
   if (Array.isArray(original) && original.length > kept) {
-    console.warn(`[cez] restore dropped ${original.length - kept} invalid ${key} entries from the snapshot`);
+    console.warn(`${logPrefix()} restore dropped ${original.length - kept} invalid ${key} entries from the snapshot`);
   }
 }
 
-export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home, legacyCanary: boolean = REBRAND_SWITCH): Promise<number> {
+/** `contained` marks a legacy home listed before migration: the list reads nothing outside it. */
+export async function runBackupCommand(argv: string[], _env: NodeJS.ProcessEnv, home: Home, legacyCanary: boolean = REBRAND_SWITCH, { contained = false } = {}): Promise<number> {
   try {
-    const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
-      at: { type: 'string' }, help: { type: 'boolean', short: 'h' },
-    } });
+    const args = parseBackupArgs(argv);
+    const { values, positionals } = args;
     if (values.help) { console.log(backupHelp(legacyCanary)); return 0; }
     const [command, file] = positionals;
     if (file !== undefined && !isBackupFile(file)) throw new Error('File must be a supported home-relative HomeStore file');
     if (resolveLegacyCommand(command, file, positionals.length === 2 && values.at === undefined, home, legacyCanary)) return 0;
     if (command === 'list' && positionals.length <= 2 && values.at === undefined) {
-      console.log(JSON.stringify(listBackups(file as BackupFile | undefined, home), null, 2));
+      console.log(JSON.stringify(listBackups(file as BackupFile | undefined, home, { contained }), null, 2));
       return 0;
     }
-    if (command === 'restore' && file && positionals.length === 2) {
-      const time = await restoreBackup(file as BackupFile, values.at, home);
-      console.log(`Restored ${file} from ${time}. Only the home file was restored.`);
+    const restore = restoreRequest(args);
+    if (restore) {
+      const time = await restoreBackup(restore.file, restore.at, home);
+      console.log(`Restored ${restore.file} from ${time}. Only the home file was restored.`);
       return 0;
     }
     throw new Error(backupHelp(legacyCanary));

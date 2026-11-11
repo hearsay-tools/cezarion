@@ -20,7 +20,7 @@ answer the shared scenario catalog and pass every row".
 |---|---|---|---|---|
 | Q1 | Where do rows assert? | Two tiers: the `AgentRunner`/`AgentSession` seam, and a real `RunManager` run. | `workflows/run/` emits `ask.requested` for every runner's `cezar_ask` card, while codex and opencode also emit it from the runner for a native ask (hearsay-tools/cezarion#2446). Groups 1, 3 and 6 are only uniform above the seam. | confirmed by owner |
 | Q2 | A cell a backend cannot satisfy? | A declared `PARITY_EXEMPTIONS` entry carrying a reason, asserted INVERTED so a stale exemption fails. | An `it.skip` is invisible; an inverted assertion is a ratchet. AC #6 needs exemptions to be data the suite validates, not a comment. | confirmed by owner |
-| Q3 | What transport drives a row? | Each backend's real runner class against its own existing mock binary, selected by the `CEZ_*_BIN` var it already reads. | A test-owned fake transport would be a second wire-shape source of truth, drifting from the mocks. `AGENT_PROTOCOL.md` §7 names that drift as PR open-mercato/cezar#443's root cause. | ok |
+| Q3 | What transport drives a row? | Each backend's real runner class against its own existing mock binary, selected by the `CEZ_*_BIN` var it already reads. | A test-owned fake transport would be a second wire-shape source of truth, drifting from the mocks. That drift was the root cause of PR open-mercato/cezar#443. | ok |
 | Q4 | Shared scenario names, or shared markers? | Shared NAMES; the adapter maps each to that backend's own `mock:` spelling. | Renaming `mock:turn-failed` or `mock:auth-error` would churn passing runner tests for no gain, and the existing markers are already wire-faithful. | ok |
 | Q6 | S3 — every backend echoes a `session` event? | No: the criterion is a RESUMABLE id, from the v1 `session` event or the settled `AgentRunResult`. | Codex, opencode and pi mint their own id and echo it; claude pins the id cezar supplied (`--session-id`) and returns it. Both are how `resumeCommand()` gets an id, and demanding the event would have failed claude for conforming to its own documented wire. | applied during implementation |
 | Q7 | S7 — every backend emits `session.error`? | No: v2 must signal the failure, and the CHANNEL is per-wire. | opencode and pi have a session-level error frame, codex reports a failed turn, claude has only the result envelope's stop reason. What hearsay-tools/cezarion#53 and hearsay-tools/cezarion#54 both WERE is the run looking finished, so that is what the row pins. | applied during implementation |
@@ -212,7 +212,7 @@ row whose scenario runs runner code (`provider-error`, a native ask, native suba
 failure control names `provider-error-controlled` instead, which S44 holds on every runner, so it
 runs on the derived set.
 The classification table in that file names each family's class and these rows; its guards are
-listed in `AGENT_PROTOCOL.md` §7.
+listed in `docs/areas/runners.md`.
 
 | Row | Scenario | Asserts | Group |
 |---|---|---|---|
@@ -287,7 +287,7 @@ The matrix IS the test. Two things about it need their own proof:
   a mock must fail the inverted assertion. Both are checked by hand during implementation, per
   AGENTS.md's "prove the regression test fails without the fix".
 - **Each new mock scenario must be wire-faithful.** Every addition cites the fixture or runner test it
-  was derived from, as `AGENT_PROTOCOL.md` §7 requires. A scenario invented from assumption is the
+  was derived from, as `AGENT_PROTOCOL.md` §8 requires of a fixture. A scenario invented from assumption is the
   open-mercato/cezar#443 failure repeating inside the very suite meant to prevent it.
 
 ## Cost

@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { Home } from '../home/home.ts';
 import { useTestHome } from '../home/test-home.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
@@ -6,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSelfUpdateCommand } from './cli.ts';
+import { writeLaunchers } from './launcher.ts';
 import { activate, activeId, versionEntry, writeManifest } from './layout.ts';
 import { RegistryCache } from './registry.ts';
 import { SelfUpdateService } from './service.ts';
@@ -15,16 +17,19 @@ describe('managed install instructions', () => {
   beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'cezar-cli-instructions-')); useTestHome(home ? Home.sandbox(home) : undefined); });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
   it.each([true, false])('prints the actual home and installed launcher (on PATH: %s)', async onPath => {
-    vi.stubEnv('PATH', onPath ? join(home, 'bin') : '');
+    vi.stubEnv('PATH', onPath ? testHome().bin : '');
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const service = new SelfUpdateService({ home: testHome(), pkgName: '@wjarka/cezarion', version: '0.16.0', entry: '/fixture/dist/index.js', restart: () => {} });
-    vi.spyOn(service, 'installSelf').mockResolvedValue({ id: '0.16.0+local', entry: '/fixture/dist/index.js' });
+    vi.spyOn(service, 'installSelf').mockImplementation(async () => {
+      writeLaunchers({}, testHome());
+      return { id: '0.16.0+local', entry: '/fixture/dist/index.js' };
+    });
     expect(await runSelfUpdateCommand('install', [], { home: testHome(), service, modifyPath: false })).toBe(0);
     const text = log.mock.calls.map(call => call.join(' ')).join('\n');
-    expect(text).toContain('managed layout under ' + home);
-    expect(text).toMatch(/run(?:[: ]| \x60)+cezarion/);
+    expect(text).toContain('managed layout under ' + testHome().root);
+    expect(text).toMatch(new RegExp('run(?:[: ]| \\x60)+' + productIdentity().npmAlias));
     expect(text).not.toMatch(/run(?:[: ]| \x60)+cezar\b|~\/\.cez\b/);
-    expect(existsSync(join(home, 'bin', process.platform === 'win32' ? 'cezarion.cmd' : 'cezarion'))).toBe(true);
+    expect(existsSync(join(testHome().bin, process.platform === 'win32' ? 'cezarion.cmd' : 'cezarion'))).toBe(true);
   });
 });
 
@@ -74,7 +79,7 @@ describe('managed version selection', () => {
       'dist-tags': { latest: '0.13.0', nightly: '0.14.0-nightly.1' }, versions: { '0.13.0': {} },
     }));
     expect(await runSelfUpdateCommand('versions', [], { home: testHome(), service: service(entry, '0.12.0'), modifyPath: false })).toBe(0);
-    expect(fetch.mock.calls[0]?.[0]).toBe('https://registry.npmjs.org/@wjarka%2Fcezarion');
+    expect(fetch.mock.calls[0]?.[0]).toBe(`https://registry.npmjs.org/${productIdentity().npmPackage.replace('/', '%2F')}`);
     const text = vi.mocked(console.log).mock.calls.map(call => call.join(' ')).join('\n');
     expect(text).toContain('* 0.12.0');
     expect(text).toContain('stable 0.13.0');

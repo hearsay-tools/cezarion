@@ -8,7 +8,7 @@
 
 ## Rules
 
-On by default; only exact `CEZ_AUTOMATIONS=0` opts out, and the gate middleware then answers `409`. Restart after changing the flag. New definitions remain paused; existing enabled definitions resume unless opted out. Two kinds: `github` polls, `schedule` fires on the clock and needs no remote. A schedule fire takes the hearsay-tools/cezarion#651 store lease, reserves one receipt per occurrence (`<id>:schedule:<iso>`), launches an ordinary task, and never advances `nextRunAt` on a lost lease. At most one catch-up inside 24 h, auto-pause after 3 consecutive launch failures. `setState` is a read-modify-write against a fresh disk read. No `task.dispatch`. Stage 2 (hearsay-tools/cezarion#774): `cez automation` (`automations/automation-cli.ts`) reaches the cockpit through `CEZ_COCKPIT_URL`/`CEZ_PROJECT_ID`, which the boot manager receives at construction (`serve` binds its listener before it recovers, so recovered runs carry it) and every other project's manager receives from `startServer` via `RunManager.setCockpitAddress`; it never starts a server or probes ports on its own. The prompt part and the built-in `create-cezarion-automation` skill share ONE gate (`CEZ_AUTOMATIONS !== '0'` AND an address): add any new skill lookup through `RunManager.builtinSkills()` and any new session construction site through `automationsPart()`. Templates, calendars and stats are stage 3.
+On by default; only exact `HSQ_AUTOMATIONS=0` (`CEZ_AUTOMATIONS` fallback) opts out, and the gate middleware then answers `409`. Restart after changing the flag. New definitions remain paused; existing enabled definitions resume unless opted out. Two kinds: `github` polls, `schedule` fires on the clock and needs no remote. A schedule fire takes the hearsay-tools/cezarion#651 store lease, reserves one receipt per occurrence (`<id>:schedule:<iso>`), launches an ordinary task, and never advances `nextRunAt` on a lost lease. At most one catch-up inside 24 h, auto-pause after 3 consecutive launch failures. `setState` is a read-modify-write against a fresh disk read. No `task.dispatch`. Stage 2 (hearsay-tools/cezarion#774): `hsq automation` (`automations/automation-cli.ts`) reaches the cockpit through `HSQ_COCKPIT_URL` (`CEZ_COCKPIT_URL` fallback)/`HSQ_PROJECT_ID` (`CEZ_PROJECT_ID` fallback), which the boot manager receives at construction (`serve` binds its listener before it recovers, so recovered runs carry it) and every other project's manager receives from `startServer` via `RunManager.setCockpitAddress`; it never starts a server or probes ports on its own. The prompt part and the built-in `create-cezarion-automation` skill share ONE gate (the effective `HSQ_AUTOMATIONS` value, with `CEZ_AUTOMATIONS` fallback, is not `0` AND an address): add any new skill lookup through `RunManager.builtinSkills()` and any new session construction site through `automationsPart()`. Templates, calendars and stats are stage 3.
 
 ## Project directory log reads
 
@@ -25,3 +25,17 @@ an open page but never skips one. Legacy-only pages keep their stored sequences.
 The projection is read-only: appends and compaction retain original positive
 legacy sequences. Compaction rewrites legacy receipts and logs only. Fallback
 records remain readable from their source and are never copied by compaction.
+
+Log compaction retains the newest 10,000 legacy rows plus durable retry rows.
+`AutomationStoreOptions.logRetentionCount` is a test-only override so paging
+regressions can cross the compaction boundary with small fixtures.
+
+## Project moves at startup
+
+The boot context resolves its automation store when used. It must not retain a
+store opened before automatic project preparation. The coordinator compares each
+cached store's directory with `projectPaths(root).write`, both during refresh and
+at lookup, and replaces a handle whose directory changed. Initial discovery and
+late registration prepare projects before braking idle polls and arming schedules.
+A busy project keeps its legacy write root and its existing automation state.
+Baselines, cursors, schedule state, receipts and logs follow the same write root.

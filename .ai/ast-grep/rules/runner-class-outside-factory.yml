@@ -1,0 +1,59 @@
+id: runner-class-outside-factory
+language: typescript
+severity: warning
+message: >-
+  Only createRunner in packages/cezar/src/core/runner-factory.ts constructs a runner class
+  (hearsay-tools/cezarion#2939). Code outside packages/cezar/src/core/ takes a RunnerFactory
+  (core/agent-runner.ts) and loads no concrete runner module at run time; use `import type` for
+  a type.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/core/**
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+# Two shapes, outside core/ only:
+# 1. `new <RunnerClass>(...)`, on the bare name or as a namespace member. The names are the
+#    classes that implement AgentRunner; runner-class-rule.test.ts holds the list to core/.
+# 2. A run-time load of a concrete runner module `core/<name>-runner.ts`: a static import or
+#    re-export that is not `import type` / `export type`, a dynamic `import()` and a `require()`.
+#    `core/agent-runner.ts` is the interface module and stays allowed.
+# The rule knows no type and resolves no import. It leaves out a class that reaches a file under
+# another name (a renamed import, a re-export from another core module) and a module specifier
+# that is not a plain string. An inline `import { type X }` is reported: it still loads the module.
+# A type query `import('…').X` stays allowed in a type alias and a type annotation; in another
+# type position (an `as` cast, a type argument) it is reported, so write `import type` there.
+utils:
+  runner-class-name:
+    regex: '^(ClaudeCliRunner|CodexAppServerRunner|CursorPrintRunner|CursorRunner|OmpRunner|OpencodeServerRunner|PiRunner)$'
+  runner-module:
+    all:
+      - kind: string
+      - has: { kind: string_fragment, regex: '(^|/)core/[a-z0-9-]+-runner(\.ts|\.js)?$' }
+      - not: { has: { kind: string_fragment, regex: '/agent-runner(\.ts|\.js)?$' } }
+rule:
+  any:
+    - all:
+        - kind: new_expression
+        - any:
+            - has: { field: constructor, kind: identifier, matches: runner-class-name }
+            - has:
+                field: constructor
+                kind: member_expression
+                has: { field: property, matches: runner-class-name }
+    - all:
+        - any:
+            - kind: import_statement
+            - kind: export_statement
+        - has: { field: source, matches: runner-module }
+        - not: { regex: '^(import|export)\s+type\b' }
+    - all:
+        - kind: call_expression
+        - has: { field: function, regex: '^(import|require)$' }
+        - has: { field: arguments, has: { matches: runner-module } }
+        - not:
+            inside:
+              stopBy: end
+              any:
+                - kind: type_alias_declaration
+                - kind: type_annotation

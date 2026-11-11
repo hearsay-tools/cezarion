@@ -1,16 +1,16 @@
 # Session-start context
 
-Cezarion puts context at the start of the opening message of every session it launches. The
+Squawk puts context at the start of the opening message of every session it launches. The
 agent then has its handoff notes, and any project context you add, without spending a tool call
 to read them (hearsay-tools/cezarion#1584).
 
 ## When it applies
 
-Context is added when Cezarion launches a session:
+Context is added when Squawk launches a session:
 
 - a fresh agent step, including a later step of a workflow;
 - a step that runs again after a failed check (`onFail.retry`);
-- **Continue**, from the cockpit or `cez task send <id> … --resume`;
+- **Continue**, from the cockpit or `hsq task send <id> … --resume`;
 - restart recovery, the usage-limit auto-resume and other scheduler continuations;
 - an owned worker's sessions, which render the context for the worker itself.
 
@@ -19,8 +19,8 @@ session does not add it again.
 
 ## The handoff block
 
-The first block is always the run's own handoff file (`CEZ_HANDOFF_FILE`), complete: Goal,
-Progress log, Resume notes and cezar's records block, which the launch first renders from the run
+The first block is always the run's own handoff file (`HSQ_HANDOFF_FILE` (`CEZ_HANDOFF_FILE` fallback)), complete: Goal,
+Progress log, Resume notes and Squawk's records block, which the launch first renders from the run
 store (hearsay-tools/cezarion#1809). It needs no configuration, and it cannot be
 turned off or replaced. A worker gets its own handoff, never its parent's.
 
@@ -31,9 +31,9 @@ The agent still has to keep the Progress log and the Resume notes up to date in 
 
 ## Project rules: `.ai/cezar/context.yaml`
 
-Add project context with an optional `.ai/cezar/context.yaml` in the project root. Cezarion reads
-it from the project root (the checkout Cezarion runs in), not from the task worktree. A missing
-file means no custom rules, with no warning. Cezarion's own `.ai/cezar/.gitignore` does not list
+Add project context with an optional `.ai/cezar/context.yaml` in the project root. Squawk reads
+it from the project root (the checkout Squawk runs in), not from the task worktree. A missing
+file means no custom rules, with no warning. Squawk's own `.ai/cezar/.gitignore` does not list
 it, so you can commit it. When your repository ignores the whole `.ai/cezar/` directory, ignore its
 contents instead and re-include the file; Git cannot re-include a file inside an ignored directory:
 
@@ -87,7 +87,7 @@ working directory after symlinks resolve; absolute paths, `..` escapes and symli
 the worktree are refused. A file must be valid UTF-8. There are no commands, conditionals,
 loops, globs or remote sources.
 
-Cezarion reads the rules and the files again for each launch. The text a launch receives does not
+Squawk reads the rules and the files again for each launch. The text a launch receives does not
 change after the launch starts.
 
 ## Limit
@@ -130,7 +130,7 @@ Errors never stop a launch:
 - A block over the limit is skipped.
 
 The other rules still run. Each launch writes one lifecycle line to the task log, which the
-cockpit and headless `cez run` both show:
+cockpit and headless `hsq run` both show:
 
 ```text
 session context: handoff applied (2431 B, /…/runs/<run>.handoff.md); project-vision skipped (docs/vision.md) — file docs/vision.md: not found
@@ -143,7 +143,8 @@ confirmed it.
 ## Native resume
 
 A runner that resumes its own native session keeps that session's history. Context injected at
-an earlier launch stays in the history, and native compaction can summarize or drop it; Cezarion
+an earlier launch stays in the history, and native compaction can summarize or drop it; Squawk
 does not add it again until the next launch. Claude keeps the system prompt of a session's first
-launch when it resumes (see `AGENT_PROTOCOL.md`), so a session that started before this feature
+launch when it resumes (see `SystemPromptOnResume` in
+`packages/cezar/src/core/agent-runner.ts`), so a session that started before this feature
 can still be told to read the handoff file. Both instructions are safe: the file is the same one.

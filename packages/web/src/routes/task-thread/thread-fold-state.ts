@@ -1,4 +1,5 @@
 import type { ConversationMessage, PlanEntry, RequestOutcome, RunEvent, StopReason, UiItem } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client/contract/health'
 
 import type {
   ThreadAsk,
@@ -103,7 +104,7 @@ export function stamp(value: unknown): string | undefined {
   return Number.isFinite(new Date(value).getTime()) ? value : undefined
 }
 
-const PROVIDER_IDS: ReadonlySet<string> = new Set<ThreadProviderAuthRequired['provider']>(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'])
+const PROVIDER_IDS: ReadonlySet<string> = new Set<ThreadProviderAuthRequired['provider']>(runnerSchema.options)
 
 export function providerId(value: unknown): ThreadProviderAuthRequired['provider'] | undefined {
   return typeof value === 'string' && PROVIDER_IDS.has(value) ? value as ThreadProviderAuthRequired['provider'] : undefined

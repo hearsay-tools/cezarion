@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { realpath } from 'node:fs/promises';
 import { z } from 'zod';
@@ -7,10 +8,11 @@ import { loadWorkspaceConfig, PROJECT_ID_RE, type WorkspaceProject } from '../wo
 import { allocateProjectSlug, listProjects } from '../workspace/projects.ts';
 import { resolveCapabilities } from './capabilities.ts';
 import { assertProjectAdmitted, CockpitAlreadyRunningError, projectAdmissionRefusal, ProjectMigrationFencedError } from './cockpit-ownership.ts';
+import { ProjectMigrationRecoveryError } from '../project-migration/recovery.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
-type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home'> & {
+type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'forgeFactory' | 'toolActivity' | 'home' | 'legacyCanary'> & {
   /** Every project's manager builds runners the way the boot manager does. */
   manager: Pick<ServerDeps['manager'], 'createRunner'>;
   delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
@@ -35,6 +37,7 @@ export function createWorkspaceProjectContexts(
     semaphore: deps.semaphore,
     preview: deps.previewHost,
     toolActivity: deps.toolActivity,
+    rebrand: deps.legacyCanary,
     prepareManager: (project) => {
       taskWebhooks.attach(project);
       options.addressManager?.(project);
@@ -62,6 +65,7 @@ const projectIdSchema = z.union([z.literal('default'), z.string().regex(PROJECT_
 function classifyProjectBuildFailure(error: unknown) {
   if (error instanceof CockpitAlreadyRunningError) return { kind: 'cockpit-owned', error } as const;
   if (error instanceof ProjectMigrationFencedError) return { kind: 'migrating', error } as const;
+  if (error instanceof ProjectMigrationRecoveryError) return { kind: 'migrating', error } as const;
   if (error instanceof RunStoreOpenError) return { kind: 'store-unavailable', error } as const;
   if (error instanceof ProjectContextError) return { kind: error.reason, error } as const;
   return { kind: 'unexpected', error } as const;
@@ -152,7 +156,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
   const projectFailure = (error: unknown, projectId: string): { error: string; status: 404 | 409 | 503 } => {
     const failure = classifyProjectBuildFailure(error);
     if (failure.kind === 'unexpected') {
-      console.error(`[cez] project ${projectId} context build failed:`, error);
+      console.error(`${logPrefix()} project ${projectId} context build failed:`, error);
       return { error: 'project unavailable', status: 503 };
     }
     if (failure.kind === 'missing-root') return { error: `project folder not found: ${failure.error.projectId}`, status: 409 };

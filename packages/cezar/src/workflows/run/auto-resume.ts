@@ -39,7 +39,7 @@ export const MAX_AUTO_RESUMES = 12;
 export const AUTO_RESUME_MISSED_WINDOW_MS = 24 * 60 * 60_000;
 
 const AUTO_RESUME_PROMPT =
-  'The provider usage limit that interrupted this task has reset. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
+  'The provider usage limit that interrupted this task has reset. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
 
 export class AutoResumeScheduler {
   /** Armed usage-limit resumes, keyed by run id (spec

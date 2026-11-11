@@ -16,6 +16,6 @@ A watchdog repairs queued records missing their process-local jobs. It only chal
 queue when no running work or real future appointment explains the pause, then uses ordinary
 capacity rules. It is a fallback for lost wakeups, not a second scheduler.
 
-Implementation: [execution-account.ts](../../packages/cezar/src/workflows/execution-account.ts), [run.ts](../../packages/cezar/src/workflows/run.ts), [semaphore.ts](../../packages/cezar/src/workspace/semaphore.ts).
+Implementation: [execution-account.ts](../../packages/cezar/src/workflows/execution-account.ts), [run-scheduling.ts](../../packages/cezar/src/workflows/run-scheduling.ts), [run-line.ts](../../packages/cezar/src/workflows/run/run-line.ts), [auto-resume.ts](../../packages/cezar/src/workflows/run/auto-resume.ts), [run.ts](../../packages/cezar/src/workflows/run.ts), [semaphore.ts](../../packages/cezar/src/workspace/semaphore.ts).
 
 Coverage: [execution-account.test.ts](../../packages/cezar/src/workflows/execution-account.test.ts), [auto-resume.test.ts](../../packages/cezar/src/workflows/auto-resume.test.ts).

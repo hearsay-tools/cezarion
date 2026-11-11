@@ -1,4 +1,6 @@
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Home } from '../home/home.ts';
 import { serverInstanceForPort } from '../home/entry.ts';
@@ -79,11 +81,47 @@ describe('cez server-migrate', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps({ rebrand: true }) };
     await expect(runServerMigrateCommand(['--dry-run'], f.env, homes)).resolves.toBe(0);
-    expect(log.mock.calls.flat().join('\n')).toContain('default: nginx-proxy /etc/cezar/htpasswd → /etc/hearsay-squawk/htpasswd');
+    expect(log.mock.calls.flat().join('\n')).toContain('default: file /etc/cezar/htpasswd → /etc/hearsay-squawk/htpasswd (copied; old file kept)');
     expect(f.host.commands).toEqual([]);
     await expect(runServerMigrateCommand(['--help'], f.env, homes)).resolves.toBe(0);
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await expect(runServerMigrateCommand(['--nope'], f.env, homes)).resolves.toBe(1);
+  });
+});
+
+/** Every entry under root with its kind, mode and content hash: any created, changed or removed entry shows. */
+function tree(root: string, dir = root): string[] {
+  return readdirSync(dir).sort().flatMap(name => {
+    const path = join(dir, name);
+    const stat = lstatSync(path);
+    const key = `${relative(root, path)} ${(stat.mode & 0o7777).toString(8)}`;
+    if (stat.isDirectory()) return [`${key}/`, ...tree(root, path)];
+    const bytes = stat.isSymbolicLink() ? Buffer.from(readlinkSync(path)) : readFileSync(path);
+    return [`${key} ${createHash('sha256').update(bytes).digest('hex')}`];
+  });
+}
+
+describe('cez server-migrate --dry-run writes nothing', () => {
+  it.each(['unmarked', 'unjournaled', 'current'])('leaves every file unchanged across repeated dry runs of a %s home', async mode => {
+    const f = sharedHome();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps({ rebrand: true }) };
+    // Simulate old homes and upgrades that have no version history yet.
+    if (mode !== 'current') rmSync(join(f.legacy.root, '.versions'), { recursive: true, force: true });
+    if (mode === 'unmarked') rmSync(join(f.legacy.root, 'install.json'));
+    const before = tree(f.directory);
+    await expect(runServerMigrateCommand(['--dry-run'], f.env, homes)).resolves.toBe(0);
+    await expect(runServerMigrateCommand(['--dry-run'], f.env, homes)).resolves.toBe(0);
+    expect(tree(f.directory)).toEqual(before);
+    expect(f.host.commands).toEqual([]);
+  });
+
+  it('a real run leaves no rotating backup of the install locks it took', async () => {
+    const f = sharedHome();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const homes = { legacy: f.legacy, target: f.target, runner: f.host, strategy: () => createUbuntuVps({ rebrand: true }) };
+    await expect(runServerMigrateCommand(['--yes'], f.env, homes)).resolves.toBe(0);
+    expect(tree(f.directory).filter(entry => entry.includes('backups/') && entry.includes('install.lock'))).toEqual([]);
   });
 });
 
@@ -97,3 +135,6 @@ describe('cockpit lease instance', () => {
     expect(serverInstanceForPort(home, 9999)).toBe('default');
   });
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

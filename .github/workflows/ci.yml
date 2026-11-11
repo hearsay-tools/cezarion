@@ -751,10 +751,12 @@ jobs:
         with:
           version: '12.11.2'
 
+      # One exact Node version in .node-version, shared with developers, so Squeal's
+      # shared results (merge groups) carry the environment developers key on.
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: lts/*
+          node-version-file: .node-version
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
@@ -777,7 +779,46 @@ jobs:
         env:
           VITEST_FILE_DURATION_CAP: '1'
         run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
-        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && github.event_name != 'merge_group'
+
+      # Merge groups (the run whose SHA becomes main) run the same command under
+      # `squeal ci record`, which returns the command's exit code and output and writes
+      # part files for the squeal-export job. See docs/sdlc/ci.md § Squeal shared results.
+      - name: Fetch the Squeal release
+        id: squeal
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && github.event_name == 'merge_group'
+        continue-on-error: true
+        env: &squeal-release
+          SQUEAL_TAG: squeal--v0.1.426
+          SQUEAL_COMMIT: f20fd5f33f682ff0895cc152af9660df2b9a848a
+        run: &fetch-squeal |
+          git clone --quiet --depth 1 --branch "$SQUEAL_TAG" https://github.com/hearsay-tools/squeal.git "$RUNNER_TEMP/squeal"
+          test "$(git -C "$RUNNER_TEMP/squeal" rev-parse HEAD)" = "$SQUEAL_COMMIT"
+
+      - name: Run server and cockpit unit suites with Squeal recording
+        id: record
+        env:
+          VITEST_FILE_DURATION_CAP: '1'
+          SQUEAL_FETCHED: ${{ steps.squeal.outcome }}
+        run: |
+          set -- npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
+          if [ "$SQUEAL_FETCHED" = success ]; then
+            exec node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" ci record --out "$RUNNER_TEMP/squeal-parts" -- "$@"
+          fi
+          echo "::warning title=Squeal release not fetched::Shard ${{ matrix.shard }}/4 runs its tests without recording Squeal results."
+          exec "$@"
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && github.event_name == 'merge_group'
+
+      - name: Upload Squeal parts
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && github.event_name == 'merge_group' && steps.squeal.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: squeal-parts-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/squeal-parts/
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
 
       - name: Upload shard coverage
         id: upload
@@ -806,6 +847,120 @@ jobs:
           fi
           echo "::warning title=Vitest coverage shard $SHARD/4 missing::No coverage report from shard $SHARD: $reason. The test verdict comes from the Vitest shard job."
           echo "Vitest coverage shard $SHARD/4: no report, $reason." >> "$GITHUB_STEP_SUMMARY"
+
+  # Squeal shared results, after passing merge-group shards: squeal-export keys the shard
+  # parts in a read-only checkout, squeal-publish pushes them as refs/squeal/<sha> for
+  # squeal.config.json `shared.ref`. Both stay outside verify.needs and every required
+  # check: a failure never blocks a merge. See docs/sdlc/ci.md § Squeal shared results.
+  squeal-export:
+    name: Export Squeal shared results
+    needs: [vitest, pr-test-proof]
+    if: >-
+      !cancelled() && github.event_name == 'merge_group' && needs.vitest.result == 'success' && needs.pr-test-proof.outputs.verified != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    # Runs the queued code (install, server build, `ci export`), so it only reads.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the merge group commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The shards' tests read the built server modules; the export checks them.
+      - name: Build server dependencies
+        run: npm run build:server
+
+      - name: Fetch the Squeal release
+        env: *squeal-release
+        run: *fetch-squeal
+
+      - name: Download Squeal parts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: squeal-parts-shard-*
+          path: ${{ runner.temp }}/squeal-parts
+
+      - name: Export Squeal results
+        run: node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" ci export --parts "$RUNNER_TEMP"/squeal-parts/squeal-parts-shard-* --out "$RUNNER_TEMP/squeal-results.json.gz"
+
+      - name: Upload Squeal results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: squeal-results
+          path: ${{ runner.temp }}/squeal-results.json.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  # The only job with contents: write. It runs no repository code: no install, build or
+  # package script; `squeal ci publish` runs git and reads squeal.config.json.
+  squeal-publish:
+    name: Publish Squeal shared results
+    needs: [squeal-export]
+    # A status function in the condition: without one GitHub adds success(), which is
+    # false in a merge group because a job further up (pr-test-input) is skipped there.
+    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.squeal-export.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    permissions:
+      contents: write
+
+    steps:
+      # Full history: the publish prunes refs beyond the newest 100 main commits by their
+      # place on the first-parent line. No credentials on disk; only the publish step
+      # receives the token.
+      - name: Check out the merge group commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Fetch the Squeal release
+        env: *squeal-release
+        run: *fetch-squeal
+
+      - name: Download Squeal results
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: squeal-results
+          path: ${{ runner.temp }}/squeal-results
+
+      # The token reaches git as configuration in this step's environment only.
+      - name: Publish Squeal results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$basic"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic" \
+            node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" ci publish "$RUNNER_TEMP/squeal-results/squeal-results.json.gz" --keep 100
 
   # Merges the four shard reports into one repo-relative Istanbul `coverage-final.json` and
   # uploads it as `vitest-coverage-<head SHA>`. See docs/sdlc/ci.md § Vitest coverage artifact.

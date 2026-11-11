@@ -17,6 +17,7 @@ const sizes = sizesJson ? JSON.parse(sizesJson) : undefined
 const load = file => import(pathToFileURL(resolve(serverPackage, 'dist', file)).href)
 const { publishArtifact, artifactDirectory } = await load('artifacts/store.js')
 const { RunStore } = await load('runs/store.js')
+const { projectPaths } = await load('project-paths.js')
 const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')
 const { startServer } = await load('server/server.js')
@@ -58,7 +59,8 @@ let family
 /** Each project's unarchived index roots, oldest first: fixed targets for updates and ticks. */
 const indexRoots = {}
 const seed = (dir, projectId) => {
-  const store = RunStore.open(join(dir, '.ai/cezar'))
+  // The project's write root: .ai/squawk/ for a fresh project with the release switch on.
+  const store = RunStore.open(projectPaths(dir).write)
   if (indexSeed) { seedIndex(store, projectId); store.flush(); return store }
   const active = sizes?.active ?? (taskList === 'project' ? 300 : taskList === 'global' ? 30 : 10)
   const archived = sizes?.archived ?? (taskList === 'project' ? 1000 : taskList === 'global' ? 200 : 0)
@@ -77,7 +79,7 @@ const stores = new Map([['boot', store]])
 for (const project of projects.slice(1)) stores.set(project.id, (await contexts.context(project.id)).store)
 const runs = [...stores].flatMap(([projectId, value]) => value.listRunIds().map(runId => ({ projectId, runId })))
 let timer, published = 0, proxy, ticker, ticks = 0
-const reports = createReportFixture({ stores, projects, root, publishArtifact, artifactDirectory })
+const reports = createReportFixture({ stores, projects, root, publishArtifact, artifactDirectory, dataDir: dir => projectPaths(dir).write })
 /** Index workload: one-off row updates, and token ticks at `rate` per second round-robin. */
 const indexCommand = command => {
   for (const update of command.update ?? []) stores.get(update.projectId)?.updateRun(update.runId, update.patch)

@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -14,7 +15,7 @@ import { runBackupCommand } from './backup-cli.ts';
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
 
 function fixture() {
-  const legacy = Home.sandbox(storeRoot());
+  const legacy = Home.sandbox(storeRoot(), { layout: 'legacy' });
   const home = Home.sandbox(storeRoot(), { layout: 'split' });
   const file = 'remote-settings/4321.json';
   const source = join(legacy.root, file);
@@ -45,7 +46,7 @@ it.each(['import', 'ignore'])('refuses host CLI %s by default while the switch i
   const { home, file, target } = fixture();
   const before = readFileSync(target);
   const record = readMigrationRecord(home);
-  expect(await runBackupCommand([action, file], {}, home)).toBe(1);
+  expect(await runBackupCommand([action, file], {}, home, false)).toBe(1);
   expect(console.error).toHaveBeenCalledWith('Legacy home import and ignore are not enabled.');
   expect(readFileSync(target)).toEqual(before);
   expect(readMigrationRecord(home)).toEqual(record);
@@ -64,11 +65,11 @@ it('allows host CLI Ignore for a deleted grant and refuses Import', async () => 
 
 it('shows legacy command usage only when the canary is enabled', async () => {
   const { home } = fixture();
-  expect(await runBackupCommand(['--help'], {}, home)).toBe(0);
+  expect(await runBackupCommand(['--help'], {}, home, false)).toBe(0);
   expect(console.log).toHaveBeenLastCalledWith(expect.not.stringContaining('backup import'));
   expect(await runBackupCommand(['--help'], {}, home, true)).toBe(0);
-  expect(console.log).toHaveBeenLastCalledWith(expect.stringContaining('cez backup import <file>'));
-  expect(console.log).toHaveBeenLastCalledWith(expect.stringContaining('cez backup ignore <file>'));
+  expect(console.log).toHaveBeenLastCalledWith(expect.stringContaining(`${productIdentity().command} backup import <file>`));
+  expect(console.log).toHaveBeenLastCalledWith(expect.stringContaining(`${productIdentity().command} backup ignore <file>`));
 });
 
 it.each([['import'], ['ignore', 'remote-settings/4321.json', '--at', '2026-11-07T00:00:00Z'],

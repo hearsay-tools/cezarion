@@ -122,3 +122,6 @@ describe('legacy Home compatibility (release switch off)', () => {
     expect(resolveChromium(fs, { HOME: '/later/home', PATH: '' }, 'linux', 'x64', home)).toBe(binary);
   });
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('./switch.ts', () => ({ REBRAND_SWITCH: false }));

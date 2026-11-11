@@ -29,18 +29,16 @@ import { seedRuns, setRunStatus } from '../runs/run-store.testkit.ts';
 import { closeClaimSession, openClaimSession } from '../runs/run-claims.ts';
 import { RUNS_DB_FILE, RunDatabase } from '../runs/run-database.ts';
 import { RunStore } from '../runs/store.ts';
-import { REBRAND_SWITCH } from '../home/switch.ts';
 import { healthConfig } from '../config.ts';
 import { defaultServeDeps, serveCommand, type ServeDeps } from '../serve-command.ts';
-import { loadSubcommand, SUBCOMMAND_NAMES } from '../subcommands.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, registerProject } from '../workspace/projects.ts';
 import {
-  CockpitAlreadyRunningError, CockpitOwnership, MIGRATION_JOURNAL_FILE, ProjectMigrationBusyError, ProjectMigrationFencedError, admitProject,
-  holdProjectWork, migrationFencePaths, projectAdmissionRefusal, withProjectAdmission,
+  CockpitAlreadyRunningError, CockpitOwnership, MIGRATION_JOURNAL_FILE, ProjectMigrationBusyError, ProjectMigrationFencedError, assertProjectAdmitted,
+  migrationFencePaths, projectAdmissionRefusal,
 } from './cockpit-ownership.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
-import { ProjectContexts, fenceProjectContext, sweepRegisteredPreviewLeftovers } from './project-context.ts';
+import { ProjectContexts, projectLiveTasks, sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { createApp } from './server.ts';
 import { createWorkspaceProjects } from './workspace-projects.ts';
 
@@ -52,7 +50,7 @@ import { createWorkspaceProjects } from './workspace-projects.ts';
 const roots: string[] = [];
 const owners: CockpitOwnership[] = [];
 const disposers: Array<() => void> = [];
-const none = { liveTasks: () => [], inFlight: () => 0 };
+const none = { liveTasks: () => [] };
 
 function project() {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-fence-'));
@@ -67,25 +65,13 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, rebrand: false,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
 }
 
 const fenced = (promise: Promise<unknown>) => expect(promise).rejects.toBeInstanceOf(ProjectMigrationFencedError);
-
-/** The drain polls the busy count through `listRuns`: each call is the signal that it looked and kept waiting. */
-function drainPolls(store: RunStore): (count: number) => Promise<void> {
-  const listRuns = store.listRuns.bind(store);
-  let polls = 0;
-  let wake: (() => void) | undefined;
-  vi.spyOn(store, 'listRuns').mockImplementation(() => { polls += 1; wake?.(); return listRuns(); });
-  return async (count) => {
-    const target = polls + count;
-    while (polls < target) await new Promise<void>((resolve) => { wake = resolve; });
-  };
-}
 
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
@@ -157,7 +143,7 @@ describe('one migration owner', () => {
     writeFileSync(`${lock}.reclaim`, dead);
     const before = readdirSync(ai).sort();
     expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-    admitProject(dataDir)();
+    assertProjectAdmitted(dataDir);
     expect(readdirSync(ai).sort()).toEqual(before);
     expect(readFileSync(lock, 'utf8')).toBe(dead);
     const fence = await owner().fenceProject(dataDir, none);
@@ -166,7 +152,7 @@ describe('one migration owner', () => {
     fence.release();
     // A project without any fence: nothing is created by admission.
     const quiet = project();
-    admitProject(quiet.dataDir)();
+    assertProjectAdmitted(quiet.dataDir);
     expect(readdirSync(quiet.root)).toEqual([]);
     expect(migrationFencePaths(join(quiet.root, 'fixture-data'))).toBeUndefined();
   });
@@ -207,7 +193,7 @@ describe('one migration owner', () => {
     first.releaseAll();
     expect(JSON.parse(readFileSync(fence.lock, 'utf8')).token).toBe(successor.token);
     expect(projectAdmissionRefusal(dataDir)?.reason).toBe('migrating');
-    admitProject(free.dataDir)();
+    assertProjectAdmitted(free.dataDir);
     await owner().acquire(free.dataDir);
     const contexts = contextsFor(undefined, { id: 'fenced', root }, { id: 'free', root: free.root });
     await fenced(contexts.context('fenced'));
@@ -269,7 +255,7 @@ describe('the write backstop over automation and artifact files', () => {
     const poller = { poll: async () => { parked(); await network; return { candidates: [], truncated: false, pages: 1 }; }, matchesCurrentLabels: async () => true };
     // A cockpit that does not own the project polls it (no lease of the owner's process).
     const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: poller as never }, launch: vi.fn() });
-    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation') && !name.endsWith('.lock')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const check = scheduler.check(definition).catch((error: unknown) => error);
@@ -303,7 +289,7 @@ describe('the write backstop over automation and artifact files', () => {
     const scheduler = new WorkspaceAutomationScheduler({
       coordinator, handle: (_projectId, automations) => ({ projectId: 'p', store: automations, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: poller as never }, launch: vi.fn() }),
     });
-    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation') && !name.endsWith('.lock')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
     const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
@@ -333,7 +319,7 @@ describe('the write backstop over automation and artifact files', () => {
     }
   });
 
-  it.each(['returns', 'is refused'])('records nothing when a schedule fire meets another process\'s fence while its launch %s', async (launch) => {
+  it('records nothing when a schedule fire meets another process\'s fence while its launch returns', async () => {
     const { root, dataDir } = project();
     const store = AutomationStore.open(dataDir);
     store.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
@@ -342,17 +328,15 @@ describe('the write backstop over automation and artifact files', () => {
     const gate = new Promise<void>((resolve) => { resume = resolve; });
     let parked!: () => void;
     const launching = new Promise<void>((resolve) => { parked = resolve; });
-    let refuse = launch === 'is refused';
     const launchSchedule = vi.fn(async () => {
       parked();
       await gate;
-      if (refuse) throw new ProjectMigrationFencedError('migrating', migrationFencePaths(dataDir)!.lock);
       return { runId: 'nightly-run' };
     });
     const coordinator = new AutomationCoordinator({ listProjects: async () => [{ id: 'p', root, status: 'not-git' }] });
     const refreshed = vi.spyOn(coordinator, 'refresh');
     const scheduler = new WorkspaceAutomationScheduler({ coordinator, handle: (_projectId, automations) => ({ projectId: 'p', store: automations, timeZone: 'UTC', launchSchedule }) });
-    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation') && !name.endsWith('.lock')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
     const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
@@ -362,34 +346,10 @@ describe('the write backstop over automation and artifact files', () => {
       const startToken = processStartToken(other.pid!);
       writeFileSync(migrationFencePaths(dataDir)!.lock, JSON.stringify({ pid: other.pid, token: randomUUID(), ...(startToken ? { startToken } : {}) }));
       const calls = refreshed.mock.calls.length;
-      const receipts = vi.spyOn(AutomationStore.prototype, 'appendReceipt');
       resume();
       // bound: hang guard; the fire has ended when the scheduler re-arms through refresh.
       await vi.waitFor(() => expect(refreshed.mock.calls.length).toBeGreaterThan(calls), { timeout: 5_000 });
       expect(files()).toEqual(before);
-      // A refused launch is a skip: no launch-error receipt is even attempted.
-      if (launch === 'is refused') expect(receipts.mock.calls.filter(([receipt]) => receipt.status === 'launch-error')).toEqual([]);
-      receipts.mockRestore();
-      if (launch === 'is refused') {
-        // The fence ends: the same occurrence launches on the next fire, not as a duplicate.
-        scheduler.stop();
-        const exited = once(other, 'exit');
-        other.kill('SIGKILL');
-        await exited;
-        refuse = false;
-        // The poll lease the fenced fire could not unlink stays until it ages out: a declined,
-        // fence-only limitation tracked in hearsay-tools/cezarion#3142. Removed here so this test
-        // shows only that the released reservation launches.
-        rmSync(join(dataDir, 'automation-poll.lock'), { force: true });
-        const next = new WorkspaceAutomationScheduler({ coordinator, handle: (_projectId, automations) => ({ projectId: 'p', store: automations, timeZone: 'UTC', launchSchedule }) });
-        try {
-          await next.start();
-          // bound: hang guard while the due occurrence fires again.
-          await vi.waitFor(() => expect(launchSchedule).toHaveBeenCalledTimes(2), { timeout: 5_000 });
-          // bound: hang guard while the launched receipt is written after the launch returns.
-          await vi.waitFor(() => expect(readFileSync(join(dataDir, 'automation-receipts.ndjson'), 'utf8')).toContain('"runId":"nightly-run"'), { timeout: 5_000 });
-        } finally { next.stop(); }
-      }
     } finally {
       scheduler.stop();
       warn.mockRestore();
@@ -499,17 +459,27 @@ describe('health while fenced', () => {
 
 describe('with the release switch off', () => {
   it('offers no migration command and a normal project build writes no fence or journal', async () => {
-    expect(REBRAND_SWITCH).toBe(false);
-    expect(SUBCOMMAND_NAMES.filter((name) => name.includes('migrate'))).toEqual([]);
-    expect(await loadSubcommand('migrate-project')).toBeUndefined();
-    const { ai, root } = project();
-    const contexts = contextsFor(owner(), { id: 'p', root });
-    await contexts.context('p');
-    expect(readdirSync(ai)).toEqual(['cezar']);
+    vi.resetModules();
+    vi.doMock('../home/switch.ts', () => ({ REBRAND_SWITCH: false }));
+    try {
+      const { SUBCOMMAND_NAMES: names, loadSubcommand: load } = await import('../subcommands.ts');
+      const { ProjectContexts: SwitchOffContexts } = await import('./project-context.ts');
+      expect(names.includes('migrate-project')).toBe(false);
+      expect(await load('migrate-project', undefined, false)).toBeUndefined();
+      const { ai, root } = project();
+      const contexts = new SwitchOffContexts({ createRunner, home: testHome(), ownership: owner(), rebrand: false,
+        listProjects: async () => [{ id: 'p', root, status: 'not-git' as const }] });
+      disposers.push(() => contexts.disposeAll());
+      await contexts.context('p');
+      expect(readdirSync(ai)).toEqual(['cezar']);
+    } finally {
+      vi.doUnmock('../home/switch.ts');
+      vi.resetModules();
+    }
   });
 });
 
-describe('the owning cockpit', () => {
+describe('the live-task check under the fence', () => {
   function cockpitStore() {
     const { root, dataDir } = project();
     const store = RunStore.open(dataDir, { keepLive: true });
@@ -517,7 +487,6 @@ describe('the owning cockpit', () => {
     const create = (title: string) => store.createRun({ title, workflow: 'w', task: 't', steps: [] }).id;
     return { root, dataDir, store, create };
   }
-  const idleManager = { pendingWork: () => 0 } as unknown as RunManager;
 
   it('refuses to fence while any task is live, lists each one, and releases the fence at once', async () => {
     const { dataDir, store, create } = cockpitStore();
@@ -536,10 +505,9 @@ describe('the owning cockpit', () => {
     const headless = other.createRun({ title: 'headless', workflow: 'w', task: 't', steps: [] }).id;
     setRunStatus(other, headless, RUN_STATUS.running);
     other.flush();
-    const refusal = await fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }).catch((error: unknown) => error);
+    const refusal = await cockpit.fenceProject(dataDir, { liveTasks: () => projectLiveTasks(store) }).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(ProjectMigrationBusyError);
     const busy = refusal as ProjectMigrationBusyError;
-    expect(busy.reason).toBe('live');
     expect(new Map(busy.tasks.map((task) => [task.id, task.state]))).toEqual(new Map([
       [queued, 'queued'], [running, 'running'], [human, 'waiting'],
       [usage, 'waiting, usage-limit auto-resume'], [headless, 'running'],
@@ -560,8 +528,7 @@ describe('the owning cockpit', () => {
     const ctx = await contextsFor(cockpit, { id: 'p', root }).context('p');
     // That owner ends: its row is no longer claimed by a live process and this store never held it.
     other.close();
-    const refusal = await fenceProjectContext(cockpit, ctx).catch((error: unknown) => error);
-    expect((refusal as ProjectMigrationBusyError).reason).toBe('live');
+    const refusal = await cockpit.fenceProject(ctx.dataDir, { liveTasks: () => projectLiveTasks(ctx.store) }).catch((error: unknown) => error);
     expect((refusal as ProjectMigrationBusyError).tasks).toEqual([{ id: theirs, title: 'left queued', state: 'queued' }]);
     expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
   });
@@ -584,147 +551,10 @@ describe('the owning cockpit', () => {
     try {
       const cockpit = owner();
       const ctx = await contextsFor(cockpit, { id: 'p', root }).context('p');
-      const refusal = await fenceProjectContext(cockpit, ctx).catch((error: unknown) => error);
-      expect((refusal as ProjectMigrationBusyError).reason).toBe('live');
+      const refusal = await cockpit.fenceProject(ctx.dataDir, { liveTasks: () => projectLiveTasks(ctx.store) }).catch((error: unknown) => error);
       expect((refusal as ProjectMigrationBusyError).tasks).toEqual([{ id, title: 'finalizing elsewhere', state: 'done' }]);
       expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
     } finally { closeClaimSession(fallbackOwner.session); }
-  });
-
-  it('stops the project\'s previews inside the drain bound', async () => {
-    const { dataDir, store } = cockpitStore();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    let exited!: () => void;
-    const exit = new Promise<void>((resolve) => { exited = resolve; });
-    let asked!: () => void;
-    const releasing = new Promise<void>((resolve) => { asked = resolve; });
-    const preview = { releaseProject: vi.fn(async () => { asked(); await exit; }) };
-    let held = false;
-    const fencing = fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }, { preview }).then((fence) => { held = true; return fence; });
-    await releasing;
-    expect(preview.releaseProject).toHaveBeenCalledWith(dataDir);
-    expect(held).toBe(false);
-    exited();
-    (await fencing).release();
-  });
-
-  it('stops previews before it waits for history compression, and refuses when a preview never exits', async () => {
-    const { dataDir, store } = cockpitStore();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    const order: string[] = [];
-    const historyIdle = store.historyIdle.bind(store);
-    vi.spyOn(store, 'historyIdle').mockImplementation(() => { order.push('history-idle'); return historyIdle(); });
-    // Stopping a dev server records an event that can queue compression: the idle wait must come after.
-    const preview = { releaseProject: vi.fn(async () => { order.push('preview-start'); await Promise.resolve(); order.push('preview-exited'); }) };
-    (await fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }, { preview })).release();
-    expect(order).toEqual(['preview-start', 'preview-exited', 'history-idle']);
-    const stuck = { releaseProject: vi.fn(() => new Promise<void>(() => undefined)) };
-    const refusal = await fenceProjectContext(cockpit, { dataDir, store, manager: idleManager }, { preview: stuck, drainMs: 100 }).catch((error: unknown) => error);
-    expect((refusal as ProjectMigrationBusyError).reason).toBe('drain-timeout');
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-  });
-
-  it('honours an abort that came before the claim or during a settled wait', async () => {
-    const { dataDir } = project();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    const aborted = AbortSignal.abort();
-    await expect(cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, signal: aborted })).rejects.toThrow();
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-    const late = new AbortController();
-    await expect(cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: async () => { late.abort(); }, signal: late.signal })).rejects.toThrow();
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-  });
-
-  it('queues no report scan while fenced, so the captured idle covers every scan', async () => {
-    const { dataDir, store } = cockpitStore();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    const reports = store.reports; // built first: its constructor flushes once
-    const flush = vi.spyOn(store, 'flush');
-    const fence = await cockpit.fenceProject(dataDir, none);
-    await reports.backfill();
-    expect(flush).not.toHaveBeenCalled();
-    fence.release();
-    await reports.backfill();
-    expect(flush).toHaveBeenCalled();
-  });
-
-  it('drains work in flight before it returns, and refuses new reads and starts meanwhile', async () => {
-    const { dataDir, store, create } = cockpitStore();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    // Retention, publish and branch cleanup pin a finished run while they touch its files.
-    const settled = create('settled');
-    setRunStatus(store, settled, RUN_STATUS.done);
-    expect(store.pin(settled, 'maintenance')).toBeDefined();
-    let managerWork = 1;
-    const manager = { pendingWork: () => managerWork } as unknown as RunManager;
-    const waitPolls = drainPolls(store);
-    const inFlight = admitProject(dataDir);
-    let held = false;
-    const fencing = fenceProjectContext(cockpit, { dataDir, store, manager }).then((fence) => { held = true; return fence; });
-    expect(() => admitProject(dataDir)).toThrow(ProjectMigrationFencedError);
-    await fenced(contextsFor(cockpit, { id: 'p', root: dataDir.slice(0, -'/.ai/cezar'.length) }).context('p'));
-    for (const finish of [() => inFlight(), () => store.unpin(settled, 'maintenance')]) {
-      await waitPolls(2);
-      expect(held).toBe(false);
-      finish();
-    }
-    await waitPolls(2);
-    expect(held).toBe(false);
-    managerWork = 0;
-    const fence = await fencing;
-    expect(() => admitProject(dataDir)).toThrow(ProjectMigrationFencedError);
-    fence.release();
-    admitProject(dataDir)();
-  });
-
-  it('stops by itself when work is still in flight at the drain bound, releasing the fence', async () => {
-    const { dataDir } = cockpitStore();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    const inFlight = admitProject(dataDir);
-    const refusal = await cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, drainMs: 100 }).catch((error: unknown) => error);
-    expect(refusal).toBeInstanceOf(ProjectMigrationBusyError);
-    expect((refusal as ProjectMigrationBusyError).reason).toBe('drain-timeout');
-    expect((refusal as Error).message).toContain('Nothing was moved');
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-    inFlight();
-  });
-
-  it('lets an operation admitted before the fence finish, and waits for it, while new ones are refused', async () => {
-    const { root, dataDir } = project();
-    seedRuns(dataDir, [makeRunRecord({ id: 'done', title: 'done', status: RUN_STATUS.done })]);
-    const cockpit = owner();
-    const contexts = contextsFor(cockpit, { id: 'p', root });
-    const ctx = await contexts.context('p');
-    let finish!: () => void;
-    const gate = new Promise<void>((resolve) => { finish = resolve; });
-    let started!: () => void;
-    const running = new Promise<void>((resolve) => { started = resolve; });
-    const insideLease: Array<string | undefined> = [];
-    const job = contexts.withMaintenanceStore('p', async () => {
-      started();
-      await gate;
-      // A task start or a context read inside the admitted job still passes.
-      insideLease.push(projectAdmissionRefusal(dataDir)?.reason);
-      return 'maintained';
-    });
-    await running;
-    const waitPolls = drainPolls(ctx.store);
-    let held = false;
-    const fencing = fenceProjectContext(cockpit, ctx).then((fence) => { held = true; return fence; });
-    await waitPolls(2);
-    expect(held).toBe(false);
-    expect(projectAdmissionRefusal(dataDir)?.reason).toBe('migrating');
-    expect(await contexts.withMaintenanceStore('p', async () => 'second')).toBeUndefined();
-    finish();
-    expect(await job).toBe('maintained');
-    expect(insideLease).toEqual([undefined]);
-    (await fencing).release();
   });
 
   it('skips an automation timer that meets the fence without recording anything, then fires it after release', async () => {
@@ -762,7 +592,7 @@ describe('the owning cockpit', () => {
     const seeded = AutomationStore.open(dataDir);
     seeded.create({ name: 'Nightly', enabled: true, kind: 'schedule', schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' } }, 'nightly');
     seeded.setState('nightly', (current) => ({ ...current, nextRunAt: '2026-09-14T04:00:00.000Z' }));
-    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
+    const files = () => readdirSync(dataDir).filter((name) => name.startsWith('automation') && !name.endsWith('.lock')).sort().map((name) => [name, readFileSync(join(dataDir, name), 'utf8')]);
     const before = files();
     const migrator = owner();
     const fence = await migrator.fenceProject(dataDir, none);
@@ -820,70 +650,6 @@ describe('the owning cockpit', () => {
     } finally { fence.release(); }
   });
 
-  it('keeps detached work admitted and drained after the request that started it answers', async () => {
-    const { dataDir } = project();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    let finish!: () => void;
-    const gate = new Promise<void>((resolve) => { finish = resolve; });
-    let check!: Promise<string | undefined>;
-    let delivery!: Promise<string | undefined>;
-    // A request answers 202 and leaves a manual check and a webhook delivery running.
-    await withProjectAdmission(dataDir, async function request() {
-      check = withProjectAdmission(dataDir, async function manualCheck() { await gate; return projectAdmissionRefusal(dataDir)?.reason; }, () => 'refused');
-      delivery = holdProjectWork(dataDir, async function webhookDelivery() { await gate; return projectAdmissionRefusal(dataDir)?.reason; });
-    }, () => undefined);
-    let polls = 0;
-    let wake: (() => void) | undefined;
-    const waitPolls = async (count: number) => {
-      const target = polls + count;
-      while (polls < target) await new Promise<void>((resolve) => { wake = resolve; });
-    };
-    let held = false;
-    const fencing = cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => { polls += 1; wake?.(); return 0; } })
-      .then((fence) => { held = true; return fence; });
-    await waitPolls(2);
-    expect(held).toBe(false);
-    expect(projectAdmissionRefusal(dataDir)?.reason).toBe('migrating');
-    finish();
-    expect(await check).toBeUndefined();
-    expect(await delivery).toBeUndefined();
-    (await fencing).release();
-  });
-
-  it('waits for work that settles on its own inside the drain bound and the abort', async () => {
-    const { dataDir } = project();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    let finish!: () => void;
-    const scan = new Promise<void>((resolve) => { finish = resolve; });
-    let asked!: () => void;
-    const settling = new Promise<void>((resolve) => { asked = resolve; });
-    let held = false;
-    const fencing = cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: () => { asked(); return scan; } })
-      .then((fence) => { held = true; return fence; });
-    await settling;
-    expect(held).toBe(false);
-    finish();
-    (await fencing).release();
-    const never = () => new Promise<void>(() => undefined);
-    const timedOut = await cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: never, drainMs: 100 }).catch((error: unknown) => error);
-    expect((timedOut as ProjectMigrationBusyError).reason).toBe('drain-timeout');
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-    const abort = new AbortController();
-    await expect(cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => 0, settle: () => { abort.abort(); return never(); }, signal: abort.signal })).rejects.toThrow();
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-  });
-
-  it('gives up the fence when its wait is aborted', async () => {
-    const { dataDir } = project();
-    const cockpit = owner();
-    await cockpit.acquire(dataDir);
-    const abort = new AbortController();
-    const fencing = cockpit.fenceProject(dataDir, { liveTasks: () => [], inFlight: () => { abort.abort(); return 1; }, signal: abort.signal });
-    await expect(fencing).rejects.toThrow();
-    expect(projectAdmissionRefusal(dataDir)).toBeUndefined();
-  });
 });
 
 describe('admission sweep', () => {
@@ -923,7 +689,7 @@ describe('admission sweep', () => {
     const ctx = await contexts.context(ownedId!);
     const app = createApp({ home: testHome(), repoRoot: owned.root, store: ctx.store, manager: ctx.manager, ownership: cockpit, version: '0.0.0-test' });
     const migrator = owner();
-    const fences = [await fenceProjectContext(cockpit, ctx), await migrator.fenceProject(cold.dataDir, none)];
+    const fences = [await cockpit.fenceProject(ctx.dataDir, { liveTasks: () => projectLiveTasks(ctx.store) }), await migrator.fenceProject(cold.dataDir, none)];
     const leftover = join(cold.dataDir, 'preview', 'run-x', '3000.pid.json');
     mkdirSync(join(cold.dataDir, 'preview', 'run-x'), { recursive: true });
     writeFileSync(leftover, '{}');

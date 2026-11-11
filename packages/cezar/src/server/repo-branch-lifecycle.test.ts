@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -181,7 +182,7 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
         expect(cls['fix/y'], label).toBe('other');
       }
       const result = await deleteBranches(input({ runs: cases[0]!.runs, forge: fakeForge({ prs: [cases[0]!.pr] }).forge }), ['fix/y']);
-      expect(result.refused).toEqual([{ name: 'fix/y', reason: 'not a cezar task branch' }]);
+      expect(result.refused).toEqual([{ name: 'fix/y', reason: `not a ${productName('cezar')} task branch` }]);
     });
 
     it('matches a recorded PR URL despite whitespace, case and multiple trailing slashes', async () => {

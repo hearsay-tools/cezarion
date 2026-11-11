@@ -27,7 +27,12 @@ export function createRunner(backend: AgentBackend | RunnerId | undefined, optio
       return new OmpRunner();
     case 'claude':
     case 'claude-cli':
+    case undefined:
+      return new ClaudeCliRunner();
     default:
+      // Fails to compile when a backend id has no case above. At run time an unknown string
+      // from stored state still gets the Claude runner.
+      backend satisfies never;
       return new ClaudeCliRunner();
   }
 }

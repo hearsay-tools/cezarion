@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { projectPaths, readProjectPath } from '../project-paths.ts';
 import { existsSync } from 'node:fs';
 import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
@@ -55,7 +56,7 @@ export class AutomationCoordinator {
       if (!this.unfenced(project.id, projectPaths(project.root).write)) continue;
       // A store this process already holds is re-read when another cockpit changed its files;
       // a project whose definitions file appeared since the last refresh is opened here.
-      const existing = this.stores.get(project.id);
+      const existing = this.currentStore(project.id, projectPaths(project.root).write);
       if (existing) this.reloadQuietly(existing);
       else if (existsSync(readProjectPath(project.root, 'automations.json'))) this.store(project.id, project.root);
     }
@@ -88,16 +89,24 @@ export class AutomationCoordinator {
     }
   }
 
-  /** None for a project under a migration fence, unless the caller holds its admission lease. */
+  /** None for a project under a migration fence or with an unfinished migration journal. */
   store(projectId: string, root?: string): AutomationStore | undefined {
     const projectRoot = root ?? this.roots.get(projectId);
     if (!projectRoot || projectAdmissionRefusal(projectPaths(projectRoot).write)) return undefined;
-    const existing = this.stores.get(projectId);
+    const existing = this.currentStore(projectId, projectPaths(projectRoot).write);
     if (existing) return existing;
     const store = AutomationStore.open(projectPaths(projectRoot).write, { warn: this.options.warn });
     this.stores.set(projectId, store);
     this.roots.set(projectId, projectRoot);
     return store;
+  }
+
+  /** A move changes the write root; never reload or return a handle for the old directory. */
+  private currentStore(projectId: string, dataDir: string): AutomationStore | undefined {
+    const existing = this.stores.get(projectId);
+    if (existing?.dataDir === dataDir) return existing;
+    this.stores.delete(projectId);
+    return undefined;
   }
 
   enabledProjectIds(): string[] {
@@ -119,7 +128,7 @@ export class AutomationCoordinator {
     }
     if (!this.fenceLogged.has(projectId)) {
       this.fenceLogged.add(projectId);
-      (this.options.warn ?? console.warn)(`[cez] automations of project ${projectId} are deferred until its migration ends: ${refusal.message}`);
+      (this.options.warn ?? console.warn)(`${logPrefix()} automations of project ${projectId} are deferred until its migration ends: ${refusal.message}`);
     }
     return false;
   }

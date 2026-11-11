@@ -1,3 +1,5 @@
+import { projectPaths } from '../../src/project-paths.ts';
+import { REBRAND_SWITCH } from '../../src/home/switch.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { once } from 'node:events';
@@ -46,6 +48,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
     assert.equal(shell.code, 1); assert.equal(JSON.parse(shell.stdout).code, 'unavailable_transport');
 
     const repo = join(root, 'repo'); await mkdir(repo);
+    const expectedDataDir = projectPaths(repo).write;
     await execFile('git', ['init', '-q', '-b', 'main'], { cwd: repo });
     await execFile('git', ['config', 'gc.auto', '0'], { cwd: repo });
     await execFile('git', ['config', 'maintenance.auto', 'false'], { cwd: repo });
@@ -54,7 +57,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
       cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
     });
     assert.match(run.stdout, /run (done|review)/);
-    const records = readPersistedRuns(join(repo, '.ai/cezar'));
+    const records = readPersistedRuns(expectedDataDir);
     assert.equal(records.length, 1); assert.equal(records[0].delegation.role, 'root');
     assert.deepEqual(records[0].delegation.receipts, []);
     assert.doesNotMatch(JSON.stringify(records), /CEZ_DELEGATION_TOKEN|CEZ_DELEGATION_URL/);
@@ -188,10 +191,16 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     assert.ok(invocation.includes(installed.replaceAll("'", "'\\''")), 'provisioned invocation points inside installed tarball');
     const command = async (args: string[], discard = false) => {
       const quoted = args.map(arg => `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
+      const env: NodeJS.ProcessEnv = { ...process.env, ...environments.get(parent.id), PATH: '' };
+      if (REBRAND_SWITCH) for (const name of Object.keys(env)) {
+        if (!name.startsWith('CEZ_')) continue;
+        env['HSQ_' + name.slice(4)] = env[name];
+        delete env[name];
+      }
       const result = await execFile('/bin/sh', ['-c', `${invocation} ${quoted}`], {
-        cwd: consumer, env: { ...process.env, ...environments.get(parent.id), PATH: '' }, timeout: 45_000,
+        cwd: consumer, env, timeout: 45_000,
       });
-      assert.equal(result.stderr, '');
+      assert.equal(result.stderr, REBRAND_SWITCH ? "[cez] 'cez' is deprecated; use 'hsq' instead.\n" : '');
       return discard ? undefined : JSON.parse(result.stdout);
     };
     const request = randomUUID(); const spawn = ['spawn', '--baseline', 'parent-head', '--request-id', request, 'package worker'];
@@ -250,7 +259,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
       await once(holder.stdout, 'data');
       await assert.rejects(command(['destroy', workerId]), error => {
         const failure = error as Error & { code: number; stdout: string; stderr: string };
-        assert.equal(failure.code, 1); assert.equal(failure.stderr, '');
+        assert.equal(failure.code, 1); assert.equal(failure.stderr, REBRAND_SWITCH ? "[cez] 'cez' is deprecated; use 'hsq' instead.\n" : '');
         const result = JSON.parse(failure.stdout);
         assert.equal(result.workerId, workerId); assert.equal(result.state, 'incomplete');
         assert.deepEqual(result.remaining, ['worktree', 'branch']); assert.deepEqual(result.deleted, []);

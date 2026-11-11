@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts'
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -213,7 +214,7 @@ describe('peer conversations', () => {
     const b = peer();
     const commit = vi.spyOn(f.store, 'commitConversation').mockImplementation(() => { throw new RunWriteRefusedError(b.id, 'foreign'); });
     await expect(f.service.send(f.caller, message(b.id, 'progress'))).rejects.toMatchObject({ code: 'incompatible_state',
-      message: `Not delivered: run ${b.id} is controlled by another cezar process. Messages reach only tasks this cezar process runs.` });
+      message: `Not delivered: run ${b.id} is controlled by another ${productName("cezar")} process. Messages reach only tasks this ${productName("cezar")} process runs.` });
     commit.mockRestore();
     expect(ledger(f.parent.id)).toBeUndefined();
     expect(f.store.getRun(b.id)?.agentInputs ?? []).toEqual([]);

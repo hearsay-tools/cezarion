@@ -1,3 +1,4 @@
+import { commandText } from '../home/command.ts';
 import type { AgentInput, ConversationMessage, ConversationSendRequest, ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import { MAX_CONVERSATION_REQUEST_SECONDS } from '@open-mercato/cezar-contract/conversations';
 import { messagingAllowed } from '@open-mercato/cezar-contract/task-options';
@@ -25,7 +26,7 @@ export function assertReplyDirection(state: ConversationState, request: Conversa
   const original = state.messages.find(message => message.id === request.requestId && message.kind === 'request' &&
     message.state === 'accepted' && message.senderRunId === sender.id && message.recipientRunId === recipient.id);
   if (original) throw new DelegationPolicyError('incompatible_state',
-    `Cannot reply to your own request. Use cez message follow-up ${recipient.id} "<text>" --id <new-message-UUID> --request-id ${original.id}; for a new request, use cez message request ${recipient.id} "<text>" --id <new-message-UUID>.`);
+    commandText(`Cannot reply to your own request. Use cez message follow-up ${recipient.id} "<text>" --id <new-message-UUID> --request-id ${original.id}; for a new request, use cez message request ${recipient.id} "<text>" --id <new-message-UUID>.`));
 }
 export function sendAdmission(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest) {
   const { recipient, relationship } = pair;

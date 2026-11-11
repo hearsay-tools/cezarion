@@ -21,6 +21,6 @@ for inventory reads, not fresh authorization decisions.
 - **Refuse from an aging negative cache entry.** Rejected because a terminal login may have changed it.
 - **Require a human retry for every runtime incident.** Native verification now also permits recovery, while generation checks protect newer failures.
 
-Implementation: [provider-auth.ts](../../packages/cezar/src/core/provider-auth.ts), [server.ts](../../packages/cezar/src/server/server.ts), [provider-auth-runtime.ts](../../packages/cezar/src/server/provider-auth-runtime.ts).
+Implementation: [provider-auth.ts](../../packages/cezar/src/core/provider-auth.ts), [server.ts](../../packages/cezar/src/server/server.ts), [server-deps.ts](../../packages/cezar/src/server/server-deps.ts), [provider-auth-runtime.ts](../../packages/cezar/src/server/provider-auth-runtime.ts).
 
 Coverage: [provider-auth.test.ts](../../packages/cezar/src/core/provider-auth.test.ts).

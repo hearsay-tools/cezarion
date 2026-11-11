@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { MODEL_DISCOVERY_RUNNERS } from '@open-mercato/cezar-contract/workspace';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
+import { exemptionReasonProblem } from './exemption-reason.testkit.ts';
 import { hostModelCatalogAdapters } from './host-model-catalog.ts';
 
 interface ModelDiscoveryExemption {
@@ -38,8 +39,7 @@ describe('host model discovery guard (AGENT_PROTOCOL.md §10)', () => {
     // remaining set must be non-empty so the it.each blocks below actually run.
     for (const exemption of MODEL_DISCOVERY_EXEMPTIONS) {
       expect(RUNNER_IDS).toContain(exemption.runner);
-      expect(exemption.reason.trim().length).toBeGreaterThan(0);
-      expect(exemption.reason).not.toMatch(/not implemented/i);
+      expect(exemptionReasonProblem(exemption.reason), exemption.runner).toBeUndefined();
     }
     expect(required.length).toBeGreaterThan(0);
   });

@@ -110,9 +110,16 @@ export const MONITORING_PARTITIONS = {
       "M14"
     ]
   },
-  "ask-idle-closure": {
+  "ask-idle-closure-fresh": {
     "modes": [
-      "fresh",
+      "fresh"
+    ],
+    "rows": [
+      "M7"
+    ]
+  },
+  "ask-idle-closure-continuation": {
+    "modes": [
       "continuation"
     ],
     "rows": [

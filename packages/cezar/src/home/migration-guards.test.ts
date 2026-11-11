@@ -219,3 +219,6 @@ it('the migration command provides help without resolving homes and reports inva
   expect(await runMigrationCommand(['--bad-flag'], {})).toBe(1);
   expect(error).toHaveBeenCalledWith(expect.stringContaining('migration failed'));
 });
+
+// These cases pin the shipped disabled gate; enabled cases use the explicit rebrand seam.
+vi.mock('./switch.ts', () => ({ REBRAND_SWITCH: false }));

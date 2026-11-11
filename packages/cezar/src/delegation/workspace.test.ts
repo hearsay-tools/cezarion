@@ -1,3 +1,4 @@
+import { projectPaths } from '../project-paths.ts';
 import { copyWorkspaceSeed, workspaceSeed } from './workspace-seed.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -96,7 +97,7 @@ describe('owned workspace committed isolation', { timeout: WORKSPACE_TEST_TIMEOU
     expect(existsSync(workspace.path)).toBe(false);
     expect(git(root, 'branch', '--list', workspace.branch)).toBe('');
     const { run } = durableRun(root, workspace);
-    expect(RunStore.open(join(root, '.ai/cezar')).getRun(run.id)?.delegation).toEqual(run.delegation);
+    expect(RunStore.open(projectPaths(root).write).getRun(run.id)?.delegation).toEqual(run.delegation);
     expect(await ensureOwnedWorkspace(root, run)).toEqual(workspace);
     expect(await ensureOwnedWorkspace(root, run)).toEqual(workspace);
     expect(await verifyOwnedWorkspace(root, run)).toEqual(workspace);

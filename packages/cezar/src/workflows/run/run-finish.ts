@@ -1,4 +1,5 @@
-import type { WaitCancellation } from './wait-cancellation.ts';
+import { logPrefix } from '../../home/display.ts';
+import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { cezarDoneRequestSchema, type CezarDoneRequest, type CezarDoneAnswer, type DoneErrorCode } from '@open-mercato/cezar-contract/waits';
@@ -21,7 +22,7 @@ import type { RunLine } from './run-line.ts';
 interface RunFinishHost {
   move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;
   dropActive(id: string): void;
-  waitCancellation: WaitCancellation;
+  waitEngine: WaitEngine;
   reconcileWorkerWaits(id?: string): void;
   executionBlockedByRootFinish(run: RunRecord): boolean;
   hasUnansweredHumanAsk(id: string): boolean;
@@ -46,7 +47,7 @@ export class RunFinish {
     const open_waits = openWaitList(this.context.store.getRun(runId)?.waits ?? []);
     const refuse = (code: DoneErrorCode, message: string, workers: { worker_id: string; reason: 'outstanding' | 'uncollected' | 'question' }[] = []): CezarDoneAnswer => {
       // Fixed codes only, as for wait registration.
-      console.warn(`[cez] cezar_done refused: ${code}`);
+      console.warn(`${logPrefix()} cezar_done refused: ${code}`);
       return { ok: false, code, message, ...(workers.length ? { workers: workers.slice(0, 64) } : {}), open_waits };
     };
     const session = toolSessionRefusal(this.context.store.getRun(runId), state, this.completionGateHost.active.get(runId), generation, signal, this.context.disposed());
@@ -154,7 +155,7 @@ export class RunFinish {
       this.host.reconcileWorkerWaits(runId);
       await this.runSettlement.settleSuccess(runId, true);
     }
-    catch { console.warn('[cez] parent finish checkpoint failed; intent retained for retry'); }
+    catch { console.warn(`${logPrefix()} parent finish checkpoint failed; intent retained for retry`); }
   }
 
   /** Close the open session gracefully — the run then completes as `done`
@@ -171,7 +172,7 @@ export class RunFinish {
     const state = this.completionGateHost.active.get(runId);
     if (decision.action === 'session' && state?.liveSession.session) {
       try {
-        this.host.waitCancellation.cancelAll(runId);
+        this.host.waitEngine.cancelAll(runId);
         this.acceptRootRequestFinish(runId);
       } catch { return false; }
       this.closeQuestionOnFinish(runId);

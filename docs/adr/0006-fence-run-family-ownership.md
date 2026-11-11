@@ -8,8 +8,9 @@ proven dead owner can be replaced.
 ## Consequences
 
 Each transaction checks row revisions and claim generations. An unexpected conflict first
-saves original, proposed and current evidence, then quarantines the affected writer until
-restart. Failure to save evidence leaves the pending write for another attempt.
+saves original, proposed and current evidence, then quarantines the conflicting rows in that
+store until restart. Other rows are not quarantined. After a lost family claim, the next
+write to another row of that family must claim the family again, and that write can fail. Failure to save evidence leaves the pending write for another attempt.
 
 Read routes remain available for foreign runs. Controls refuse a live foreign owner. A control
 can adopt a dead family and settle its live rows without launching agents. Continue can then

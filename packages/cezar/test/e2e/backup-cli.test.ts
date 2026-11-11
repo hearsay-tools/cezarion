@@ -11,13 +11,14 @@ import { pathToFileURL } from 'node:url';
 // Exercise the built CLI dispatch and writer path with a pre-change JSON file.
 test('backup list and restore work without a cockpit', async () => {
   const home = mkdtempSync(join(tmpdir(), 'cez-backup-cli-'));
-  const env = { ...process.env, CEZ_HOME: home };
+  const env = { ...process.env, CEZ_HOME: home, HSQ_HOME: home };
   try {
     const cli = resolve('dist/index.js');
     const call = (...args: string[]) => execFileSync(process.execPath, [cli, 'backup', ...args], { env, encoding: 'utf8' });
     assert.deepEqual(JSON.parse(call('list')), []);
-    const accounts = join(home, 'agent-accounts.json');
-    Home.seed(Home.sandbox(home), accounts, { version: 1, accounts: [], legacy: 'before' });
+    const sandbox = Home.sandbox(home);
+    const accounts = sandbox.agentAccounts;
+    Home.seed(sandbox, accounts, { version: 1, accounts: [], legacy: 'before' });
     const probe = join(home, 'backup-probe.mjs');
     const bootstrap = join(home, 'backup-smoke.mjs');
     await emitProbe(new URL('../fixtures/backup-accounts-probe.ts', import.meta.url), probe);

@@ -16,6 +16,6 @@ Repository discovery stays off the boot path. Once known, it can correct old con
 retained evidence. Unknown repository identity retains the existing degraded rule rather than
 inventing a repository. These rules describe attribution, not proof that a GitHub object exists.
 
-Implementation: [store.ts](../../packages/cezar/src/runs/store.ts).
+Implementation: [run-references.ts](../../packages/cezar/src/runs/run-references.ts), [task-refs.ts](../../packages/cezar/src/runs/task-refs.ts), [store.ts](../../packages/cezar/src/runs/store.ts).
 
 Coverage: [run-index.test.ts](../../packages/cezar/src/runs/run-index.test.ts), [store.test.ts](../../packages/cezar/src/runs/store.test.ts).

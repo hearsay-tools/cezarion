@@ -3,7 +3,8 @@
 Cursor print qualification for fork #590 is recorded in
 [`print-qualification.md`](print-qualification.md). CLI
 `2026.10.01-e373342` auto-skips native questions; the revised design accepts
-that visible limit and uses Cezar `CEZ:ASK` for its own questions. The
+that visible limit, and Cezar's own questions use the `cezar_ask` tool. The
+`CEZ:ASK` marker that the qualification record names is no longer read. The
 per-invocation native tool allowlist passed a harmless live control. The
 qualification record contains the remaining live probes. `print-mcp.json` and
 `print-portable-ask.json` record fresh/resume bindings; `print-plugins.json`
@@ -32,6 +33,7 @@ response and failed tool result were inspected on `2026.10.01-e373342`.
 two exact-resume print turns, including one logical `session.started`.
 Native subagent tools remain callable. Print reports the parent Task call but
 no child-session transcript; child attribution remains a named unsupported print case.
+Print runs with `--force`: Cursor permissions auto-resolve and create no human ask.
 
 `print-tools.ndjson` is a constructed fixture for hearsay-tools/cezarion#1267, so
 the UI parity matrix reads Cursor's tool rows from print alone. Text, IDs and
