@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { applicationUpdateStateSchema } from './application-update.ts';
 import { repoInfoSchema } from './repo-info.ts';
 import { runnerSchema } from './runner.ts';
 
@@ -105,6 +104,5 @@ export const healthResponseSchema = z.object({
   // optional, which was wider than the server has ever been.
   projects: z.array(z.object({ id: z.string(), name: z.string() })),
   bootProject: z.string(),
-  applicationUpdate: applicationUpdateStateSchema.optional(),
 });
 export type HealthResponse = z.infer<typeof healthResponseSchema>;

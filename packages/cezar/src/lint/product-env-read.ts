@@ -226,7 +226,6 @@ export function productEnvReads(source: string, file = 'file.ts'): EnvRead[] {
  * keep new indexing sites visible; named product settings can never use this exemption. */
 export const nonSettingEnvReads = [
   { file: 'packages/cezar/src/ci-wait/tools.ts', form: 'computed', expression: 'env[preferred]', reason: 'Include a defined preferred controller entry in native adapter allowlists, including clears.' },
-  { file: 'packages/cezar/src/application-update/npm-process.ts', form: 'computed', expression: "process.env[Object.keys(process.env).find(key => key.toLowerCase() === 'path') ?? 'PATH']", reason: 'OS PATH lookup preserves Windows casing.' },
   { file: 'packages/cezar/src/core/agent-env.ts', form: 'computed', expression: 'source[name]', reason: 'Generic case-insensitive Bedrock/Vertex third-party toggle lookup.' },
   { file: 'packages/cezar/src/core/cursor-print-runner.ts', form: 'computed', expression: 'this.spec.env?.[name]', reason: 'Forward controller tool-authority entries to the native MCP adapter.' },
   { file: 'packages/cezar/src/home/kind-roots.ts', form: 'computed', expression: 'env[name]', reason: 'XDG kind-root lookup; not a product setting.' },

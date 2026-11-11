@@ -8,7 +8,6 @@ export * from './pending-ask.ts';
 export * from './delegation.ts';
 export * from './effort.ts';
 export * from './health.ts';
-export * from './application-update.ts';
 export * from './runs.ts';
 export * from './task-options.ts';
 export * from './run-labels.ts';
@@ -64,7 +63,6 @@ export * from './repo-requests.ts';
 export * from './config-requests.ts';
 export * from './workflow-file.ts';
 export * from './automation-storage.ts';
-export * from './self-update.ts';
 
 export * from './reports.ts';
 export * from './report-title.ts';

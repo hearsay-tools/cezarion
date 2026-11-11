@@ -341,51 +341,6 @@ describe('mobile drawer', () => {
     })
   })
 
-  describe('update row', () => {
-    const update = { applicationUpdate: { supported: true, status: 'idle' } as never, onApplyUpdate: async () => {} }
-
-    it('is absent when up to date: the identity row alone shows the version', () => {
-      renderShell('/p/cezarion/', nav(), { latestVersion: '0.14.9', ...update })
-      fireEvent.click(menuButton())
-      expect(drawer().querySelector('[data-slot="drawer-update"]')).toBeNull()
-    })
-
-    it('sits directly under the identity row with the 44px Update button', () => {
-      renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', ...update })
-      fireEvent.click(menuButton())
-      const row = drawer().querySelector('[data-slot="drawer-update"]') as HTMLElement
-      expect(drawer().querySelector('[data-slot="drawer-identity"]')?.nextElementSibling).toBe(row)
-      expect(row.textContent).toContain('Update available · v0.15.0')
-      expect(within(row).getByRole('button', { name: 'Update application' }).className).toContain('size-11')
-    })
-
-    it.each([
-      ['preparing', 'Preparing update…'],
-      ['ready', 'Restart to finish updating'],
-      ['restarting', 'Restart to finish updating'],
-    ])('labels the %s state honestly when the version gap is already closed', (status, label) => {
-      renderShell('/p/cezarion/', nav(), { latestVersion: '0.14.9', applicationUpdate: { supported: true, status } as never, onRestart: async () => {} })
-      fireEvent.click(menuButton())
-      expect(drawer().querySelector('[data-slot="drawer-update"]')?.textContent).toContain(label)
-    })
-
-    it('says Preparing, not Restart, while a newer version is still downloading', () => {
-      renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', applicationUpdate: { supported: true, status: 'preparing' } as never })
-      fireEvent.click(menuButton())
-      const text = drawer().querySelector('[data-slot="drawer-update"]')?.textContent ?? ''
-      expect(text).toContain('Preparing update…')
-      expect(text).not.toContain('Restart to finish')
-    })
-
-    it('offers Restart, and hosts the feedback line, inside the row', () => {
-      renderShell('/p/cezarion/', nav(), { latestVersion: '0.15.0', applicationUpdate: { supported: true, status: 'ready' } as never, onRestart: async () => {}, applicationUpdateError: 'Update failed.' })
-      fireEvent.click(menuButton())
-      const row = drawer().querySelector('[data-slot="drawer-update"]') as HTMLElement
-      expect(within(row).getByRole('button', { name: 'Restart application' })).toBeTruthy()
-      expect(row.textContent).toContain('Update failed.')
-    })
-  })
-
   describe('current project menu', () => {
     const trigger = () => within(document.querySelector('[data-slot="drawer-project-current"]') as HTMLElement).getByRole('button', { name: 'Project menu' })
     const open = () => fireEvent.pointerDown(trigger(), { button: 0, ctrlKey: false })

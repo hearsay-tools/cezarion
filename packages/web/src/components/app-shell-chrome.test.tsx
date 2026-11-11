@@ -136,33 +136,6 @@ describe('desktop sidebar slots', () => {
   })
 })
 
-describe('update props reach the sidebar footer and the drawer row', () => {
-  const newer = { version: '1.0.0', latestVersion: '2.0.0', applicationUpdate: { status: 'idle', supported: true } as const, onApplyUpdate: vi.fn() }
-  const footerFeedback = () => slot('application-update-feedback', slot('sidebar-footer') as HTMLElement)
-  const drawerRow = () => slot('drawer-update', drawer() as HTMLElement)
-
-  it('says the connection is lost in both places while offline', () => {
-    renderShell('/', { ...newer, applicationUpdateOffline: true })
-    expect(footerFeedback()?.textContent).toBe('Connection lost. Reconnect to continue.')
-    openDrawer()
-    expect(drawerRow()?.textContent).toContain('Connection lost. Reconnect to continue.')
-  })
-
-  it('says the update is preparing in both places while busy', () => {
-    renderShell('/', { ...newer, applicationUpdateBusy: true })
-    expect(footerFeedback()?.textContent).toBe('Preparing update.')
-    openDrawer()
-    expect(drawerRow()?.textContent).toContain('Preparing update.')
-  })
-
-  it('shows the update error in both places', () => {
-    renderShell('/', { ...newer, applicationUpdateError: 'Network down.' })
-    expect(footerFeedback()?.textContent).toContain('Network down.')
-    openDrawer()
-    expect(drawerRow()?.textContent).toContain('Network down.')
-  })
-})
-
 describe('mobile tab bar More sheet', () => {
   const openMore = () => fireEvent.click(document.querySelector('[data-tab="more"]') as HTMLElement)
 

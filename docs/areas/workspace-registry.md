@@ -128,8 +128,8 @@ Tests can select either layout explicitly; do not mock the switch. `Home.sandbox
 creates a test marker under `<dir>/config` and keeps every kind under dir.
 
 In split layout, registry, accounts and remote settings use config. UI state,
-server files and locks, backups and application updates use state. Managed
-versions and bin use data. Skills and dry caches use cache. Runtime has no file
+server files and locks and backups use state. Managed
+versions and bin use data. Skills use cache. Runtime has no file
 consumer yet. Legacy paths and managed launcher fixtures remain unchanged.
 `home/file-location.ts` exports the single `homeFileKind(key)` map and
 `homeFileLocation(home, key)` for unchanged HomeFile keys. Config, its `.bak`,
@@ -326,7 +326,7 @@ and split-layout Windows ACLs. Every tree copy keeps the owner-execute bit:
 a file is 0700 when its owner could execute the source (managed executables,
 launchers, account profile hooks) and 0600 otherwise. The old launchers remain
 unchanged. Archive entries record the same 0700 or 0600 mode. Launchers come from `writeLaunchers`, and the PATH line update
-replaces the line `pathHook` defines for `hsq install`.
+replaces the line `pathHook` defines, which the removed `hsq install` wrote.
 The managed package link at `versions/<id>/node_modules/@wjarka/cezarion`
 keeps an external checkout only when its version manifest records that same
 checkout with `source: 'link'`. Other escaping links refuse migration.

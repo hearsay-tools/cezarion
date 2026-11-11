@@ -13,10 +13,10 @@
       "reason": "Read OS-user browser caches and Applications paths."
     },
     {
-      "file": "packages/cezar/src/self-update/launcher.ts",
+      "file": "packages/cezar/src/managed-install/launcher.ts",
       "kind": "homedir",
-      "calls": 2,
-      "reason": "Display PATH with a tilde and locate the OS-user shell rc file."
+      "calls": 1,
+      "reason": "Locate the OS-user shell rc file."
     },
     {
       "file": "packages/cezar/src/server-install/npx-cache.ts",

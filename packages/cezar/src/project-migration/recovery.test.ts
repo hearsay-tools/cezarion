@@ -85,8 +85,8 @@ function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array
 function cliDeps(root: string, args: string[]) {
   return { ...defaultCliDeps, process: { argv: ['/bin/node', '/bin/cez', ...args, '--repo', root], env: {}, cwd: () => root, exitCode: undefined as number | undefined },
     console: { log: vi.fn(), error: vi.fn() }, productEnv: () => undefined, resolveCliHome: () => testHome(), prepareOperatorHome: () => testHome(),
-    runManagedCommand: vi.fn().mockResolvedValue(undefined), runSubcommand: vi.fn().mockResolvedValue(undefined), getRepoInfo: vi.fn().mockResolvedValue(null),
-    runProjectsCommand: vi.fn().mockResolvedValue(0), readOwnName: () => '@wjarka/cezarion', readOwnVersion: () => '1.2.3', serveCommand: vi.fn(), serverCommand: vi.fn(),
+    runSubcommand: vi.fn().mockResolvedValue(undefined), getRepoInfo: vi.fn().mockResolvedValue(null),
+    runProjectsCommand: vi.fn().mockResolvedValue(0), readOwnVersion: () => '1.2.3', serveCommand: vi.fn(), serverCommand: vi.fn(),
     runCommand: vi.fn(async () => { expect(existsSync(join(root, '.ai/squawk-migration.json'))).toBe(false); }),
     initCommand: vi.fn(), initWorkspace: vi.fn().mockResolvedValue(undefined) };
 }

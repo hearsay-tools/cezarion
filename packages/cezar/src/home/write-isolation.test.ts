@@ -9,7 +9,6 @@ import { loadAgentAccounts, mergeWriteAgentAccounts, storeSchema } from '../work
 import { listBackups } from '../workspace/backups.ts';
 import { restoreBackup } from '../workspace/backup-cli.ts';
 import { runMigrations } from '../workspace/migrations.ts';
-import { SelfUpdateService } from '../self-update/service.ts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -83,22 +82,6 @@ it('imports legacy accounts from the injected Home without writing to the ambien
 
   expect((await loadAgentAccounts(selected)).accounts).toEqual([account]);
   expect(JSON.parse(readFileSync(selected.agentAccounts, 'utf8')).accounts).toEqual([account]);
-  expect(readFileSync(ambient.workspaceConfig, 'utf8')).toBe(before);
-  expect(readdirSync(ambient.root)).toEqual(ambientFiles);
-});
-
-it('reads and writes the update channel in the injected Home', async () => {
-  const { selected, ambient } = homes();
-  Home.seed(selected, selected.workspaceConfig, { updateChannel: 'nightly' });
-  Home.seed(ambient, ambient.workspaceConfig, { updateChannel: 'stable' });
-  const before = readFileSync(ambient.workspaceConfig, 'utf8');
-  const ambientFiles = readdirSync(ambient.root);
-  useTestHome(ambient);
-  const service = new SelfUpdateService({ pkgName: '@wjarka/cezarion', version: '1.2.3', entry: '/entry', home: selected, restart: () => {} });
-
-  expect(await service.channel()).toBe('nightly');
-  await service.setChannel('development');
-  expect(await service.channel()).toBe('development');
   expect(readFileSync(ambient.workspaceConfig, 'utf8')).toBe(before);
   expect(readdirSync(ambient.root)).toEqual(ambientFiles);
 });

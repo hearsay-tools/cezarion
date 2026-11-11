@@ -48,8 +48,6 @@ function fixture() {
     recoverServeProject: vi.fn().mockResolvedValue(undefined),
     checkForUpdate: vi.fn().mockResolvedValue(undefined),
     warnServeBind: vi.fn(),
-    createServeSelfUpdate: vi.fn(),
-    createServeApplicationUpdate: vi.fn(),
     startServer: vi.fn(() => server),
     printServeBanner: vi.fn(),
     stopServe: vi.fn().mockResolvedValue(undefined),

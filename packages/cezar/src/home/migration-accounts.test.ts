@@ -9,7 +9,7 @@ import { prepareMigrationHome } from './migration-boot.ts';
 import { HomeStore } from './store.ts';
 import { getHomeRecovery } from './recovery.ts';
 import { resolveHome } from './resolve.ts'; // test-home-read: injected CEZ_HOME selects only the sandbox.
-import { writeLaunchers } from '../self-update/launcher.ts';
+import { writeLaunchers } from '../managed-install/launcher.ts';
 import { RunStore } from '../runs/store.ts';
 import { loadAgentAccounts } from '../workspace/agent-accounts.ts';
 import { migrationFixture, rawJson, json } from './migration.testkit.ts';

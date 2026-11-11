@@ -5,7 +5,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from '../home/home.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
-import { isSupervised } from '../self-update/restart.ts';
 import { agentModelsLocked } from './agent-model-policy.ts';
 import { providerAuthChecksDisabled } from './provider-auth.ts';
 import { workspaceConfigSchema } from '../workspace/config.ts';
@@ -47,16 +46,6 @@ it('reads the preferred native model lock for both auth and model policy', () =>
   const cleared = {HSQ_AGENT_MODELS_LOCKED: '', CEZ_AGENT_MODELS_LOCKED: '1'};
   expect(agentModelsLocked(undefined, cleared, home)).toBe(false);
   expect(providerAuthChecksDisabled(cleared)).toBe(false);
-});
-
-it('supervised restart preserves shell pins and accepts preferred-only signals (D11)', () => {
-  expect(isSupervised({HSQ_SUPERVISED: '1'})).toBe(true);
-  expect(isSupervised({HSQ_DESKTOP: '1'})).toBe(true);
-  for (const inherited of ['', '0', '1']) {
-    expect(isSupervised({HSQ_SUPERVISED: inherited, CEZ_SUPERVISED: '1'})).toBe(true);
-    expect(isSupervised({HSQ_DESKTOP: inherited, CEZ_DESKTOP: '1'})).toBe(true);
-  }
-  expect(isSupervised({CEZ_SUPERVISED: '', HSQ_SUPERVISED: '1', CEZ_DESKTOP: '0', HSQ_DESKTOP: '1'})).toBe(false);
 });
 
 it('workspace path defaults use preferred aliases, keep empty fallback and honor saved values', () => {

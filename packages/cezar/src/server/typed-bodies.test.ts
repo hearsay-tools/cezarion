@@ -87,10 +87,6 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedBody<'/api/v1/skills/sources/retry', '$post'>>,
     Assert<HasTypedBody<'/api/v1/workspace/config', '$put'>>,
     Assert<HasTypedBody<'/api/v1/workspace/ui-state', '$put'>>,
-    Assert<HasTypedBody<'/api/v1/workspace/self-update/channel', '$put'>>,
-    Assert<HasTypedBody<'/api/v1/workspace/self-update/apply', '$post'>>,
-    Assert<HasTypedBody<'/api/v1/workspace/application-update/apply', '$post'>>,
-    Assert<HasTypedBody<'/api/v1/workspace/application-update/restart', '$post'>>,
   ];
 
   type _PermissionInput = Assert<Mutual<z.infer<typeof permissionDecisionSchema>, Schema['/api/v1/runs/:id/permissions']['$post']['input']['json']>>;

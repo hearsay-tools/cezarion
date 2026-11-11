@@ -4,7 +4,6 @@ const dispatch = vi.hoisted(() => ({
   projects: vi.fn(async (..._args: unknown[]) => 0),
   register: vi.fn(async () => ({id: 'boot-project'})),
 }));
-vi.mock('../self-update/cli.ts', () => ({runManagedCommand: async () => undefined}));
 vi.mock('../subcommands.ts', () => ({runSubcommand: async () => undefined}));
 vi.mock('../server/git.ts', async original => ({...await original<typeof import('../server/git.ts')>(), getRepoInfo: async () => null}));
 vi.mock('../workspace/migrations.ts', () => ({runMigrations: async () => {}}));

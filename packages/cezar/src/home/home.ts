@@ -21,10 +21,7 @@ export interface Home {
   readonly serverInstances: string;
   readonly versions: string;
   readonly bin: string;
-  readonly dryCache: string;
-  readonly dryPrefix: string;
   readonly backups: string;
-  readonly applicationUpdates: string;
   readonly cache: string;
   readonly skillsCache: string;
   readonly skillFilesCache: string;
@@ -39,12 +36,11 @@ export function homePaths(root: string, cache: string, override: string | undefi
   return kindHomePaths({ config: root, state: root, data: root, runtime: root, cache }, 'legacy', nativePathPlatform, override);
 }
 
-/** The only constructor for named paths. Legacy dry directories deliberately stay at root. */
+/** The only constructor for named paths. */
 export function kindHomePaths(roots: HomeRoots, layout: HomeLayout, platform: NodeJS.Platform, override?: string): Home {
   const { join } = platform === 'win32' ? win32 : posix;
   const { config, state, data, cache } = roots;
   const serverInstances = join(state, 'server-instances');
-  const dryRoot = layout === 'legacy' ? config : cache;
   const paths = {
     root: config,
     workspaceConfig: join(config, 'config.json'),
@@ -54,10 +50,7 @@ export function kindHomePaths(roots: HomeRoots, layout: HomeLayout, platform: No
     serverInstances,
     versions: join(data, 'versions'),
     bin: join(data, 'bin'),
-    dryCache: join(dryRoot, 'dry-cache'),
-    dryPrefix: join(dryRoot, 'dry-prefix'),
     backups: join(state, 'backups'),
-    applicationUpdates: join(state, 'application-updates'),
     cache,
     skillsCache: join(cache, 'skills'),
     skillFilesCache: join(cache, 'skill-files'),

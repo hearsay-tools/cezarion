@@ -1,24 +1,14 @@
 import { productName } from './home/display.ts';
-import { currentEntry } from './self-update/layout.ts';
 import { testHome } from './home/test-home.testkit.ts';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_WORKTREE_RETENTION } from './config.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner, restartServe, stopServe, createServeSelfUpdate } from './serve-boot.ts';
-import * as sessionProcesses from './core/session-process.ts';
-import { spawnSessionLeader } from './core/session-process.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, printServeBanner, stopServe } from './serve-boot.ts';
 import type { RunStore } from './runs/store.ts';
 import type { RunManager } from './workflows/run.ts';
 import type { getRepoInfo } from './server/git.ts';
 import type { DelegationController } from './delegation/provision.ts';
 import type { ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
 import type { detectEnvironment } from './core/backend-detect.ts';
-import type { startServer } from './server/server.ts';
-import { ApplicationUpdateService } from './application-update/service.ts';
-import { armRestartHelper } from './application-update/launcher.ts';
-import { SelfUpdateService } from './self-update/service.ts';
-import { restartProcess } from './self-update/restart.ts';
 import type { PreviewHost } from './preview/host.ts';
 
 function reconcileFixture(unavailable = false) {
@@ -79,10 +69,6 @@ describe('reconcileServeWorktrees', () => {
   );
 });
 
-vi.mock('./application-update/service.ts', () => ({ ApplicationUpdateService: vi.fn(class {}) }));
-vi.mock('./application-update/launcher.ts', () => ({ armRestartHelper: vi.fn() }));
-vi.mock('./self-update/service.ts', () => ({ SelfUpdateService: vi.fn(class {}) }));
-vi.mock('./self-update/restart.ts', async (original) => ({ ...await original<typeof import('./self-update/restart.ts')>(), restartProcess: vi.fn() }));
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
@@ -170,111 +156,6 @@ describe('printServeBanner', () => {
   });
 });
 
-describe('createServeApplicationUpdate', () => {
-  it('degrades to manual update without npm metadata', () => {
-    vi.stubEnv('CEZ_DRY_RUN', '0');
-    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined, undefined, testHome())).toBeUndefined();
-    expect(ApplicationUpdateService).not.toHaveBeenCalled();
-  });
-
-  it('keeps callbacks late-bound to the server and update', async () => {
-    vi.stubEnv('CEZ_DRY_RUN', '0');
-    const update: { latest?: string } = {};
-    const getServer = vi.fn();
-    const readNpm = vi.fn(() => ({ prefix: '/prefix', cache: '/cache', npmBin: '/bin/npm' }));
-    createServeApplicationUpdate('/repo', update, getServer, readNpm, undefined, testHome());
-    expect(getServer).not.toHaveBeenCalled();
-    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
-    expect(options).toMatchObject({ npmPrefix: '/prefix', npmCache: '/cache', npmBin: '/bin/npm', dryRun: false });
-    update.latest = '2.0.0';
-    expect(options.targetVersion()).toBe('2.0.0');
-    const shutdownForRestart = vi.fn().mockResolvedValue(undefined);
-    const server = { address: () => ({ address: '127.0.0.1', port: 4321 }), shutdownForRestart } as unknown as ReturnType<typeof startServer>;
-    getServer.mockReturnValue(server);
-    const plan = {} as Parameters<typeof armRestartHelper>[0];
-    await options.armRestart!(plan);
-    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/repo', host: '127.0.0.1', port: 4321, npmBin: '/bin/npm' });
-    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-    options.handoff!();
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0), { timeout: 10_000 });
-    expect(shutdownForRestart).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    { npmBin: '/npm', prefix: '', cache: '/cache' },
-    { npmBin: '/npm', prefix: '/prefix', cache: '' },
-  ])('requires both npm paths outside dry-run (%j)', (metadata) => {
-    vi.stubEnv('CEZ_DRY_RUN', '0');
-    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => metadata, undefined, testHome())).toBeUndefined();
-    expect(ApplicationUpdateService).not.toHaveBeenCalled();
-  });
-
-  it('uses discovered paths in dry-run and reads the latest version on each call', async () => {
-    vi.stubEnv('CEZ_DRY_RUN', '1');
-    const update: { latest?: string } = {};
-    const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 5432 }) })) as unknown as () => ReturnType<typeof startServer>;
-    const service = createServeApplicationUpdate('/different-repo', update, getServer,
-      () => ({ npmBin: '/custom/npm', prefix: '/custom/prefix', cache: '/custom/cache' }), undefined, testHome());
-    expect(service).toBeInstanceOf(ApplicationUpdateService);
-    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
-    expect(options).toMatchObject({ npmPrefix: '/custom/prefix', npmCache: '/custom/cache', npmBin: '/custom/npm', dryRun: true });
-    expect(options.targetVersion()).toBeUndefined();
-    update.latest = '3.0.0';
-    expect(options.targetVersion()).toBe('3.0.0');
-    const plan = {} as Parameters<typeof armRestartHelper>[0];
-    await options.armRestart!(plan);
-    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/different-repo', host: '127.0.0.1', port: 5432, npmBin: '/custom/npm' });
-  });
-
-  it('arms the restart helper with the default npm command in dry-run', async () => {
-    vi.stubEnv('CEZ_DRY_RUN', '1');
-    const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 4321 }) })) as unknown as () => ReturnType<typeof startServer>;
-    createServeApplicationUpdate('/repo', {}, getServer, () => undefined, undefined, testHome());
-    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
-    const plan = {} as Parameters<typeof armRestartHelper>[0];
-    await options.armRestart!(plan);
-    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/repo', host: '127.0.0.1', port: 4321, npmBin: 'npm' });
-  });
-
-  it('uses dry-run defaults when npm is missing', () => {
-    vi.stubEnv('CEZ_DRY_RUN', '1');
-    createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined, undefined, testHome());
-    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
-    expect(options.dryRun).toBe(true);
-    expect(options.npmPrefix).toMatch(/dry-prefix$/);
-    expect(options.npmCache).toMatch(/dry-cache$/);
-  });
-});
-
-// Agents lead their own process groups, so the server's shutdown does not reach them. A restart
-// that left one running would hand its run and worktree to the replacement while it still writes.
-describe.skipIf(process.platform === 'win32')('restartServe', () => {
-  it('signals every live agent session group after the server shut down, then restarts', async () => {
-    const agent = spawnSessionLeader('sh', ['-c', 'trap "exit 0" TERM; echo ready; while :; do sleep 1; done'], { cwd: process.cwd(), env: process.env });
-    const exited = new Promise<NodeJS.Signals | number | null>((resolve) => agent.once('exit', (code, signal) => resolve(signal ?? code)));
-    // The stub prints only after its trap is set, so a SIGTERM before then cannot kill it outright.
-    await new Promise<void>((resolve) => agent.stdout.on('data', (chunk: Buffer) => { if (chunk.toString().includes('ready')) resolve(); }));
-    const order: string[] = [];
-    const server = {
-      address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 4321 }),
-      shutdownForRestart: vi.fn(async () => { order.push(`shutdown, agent running: ${agent.exitCode === null && agent.signalCode === null}`); }),
-    };
-    const restart = vi.fn(() => { order.push('restart'); });
-    try {
-      await restartServe(server, restart, undefined, testHome());
-      // bound: the stub exits within milliseconds of its SIGTERM; the bound lets `finally` reap it when none came
-      const outcome = await Promise.race([exited, new Promise<string>((resolve) => setTimeout(() => resolve('still running'), 10_000))]);
-      expect(outcome).toBe(0);
-      expect(order).toEqual(['shutdown, agent running: true', 'restart']);
-      expect(restart).toHaveBeenCalledWith(expect.objectContaining({ server: null, port: 4321 }));
-    } finally {
-      if (agent.exitCode === null && agent.signalCode === null) agent.kill('SIGKILL');
-    }
-  });
-});
-
-// The stop every serve exit runs. A listener that never closes (a preview upgrade it still holds)
-// or a step that throws must not keep the store open or the agents running.
 describe('stopServe', () => {
   it('stops waiting at its bound, then closes the store and signals the agents', async () => {
     const store = { close: vi.fn() };
@@ -310,91 +191,6 @@ describe('serve boot mutation regressions', () => {
     const previewHost = {} as PreviewHost;
     await reconcileServeWorktrees('/repo', f.repo, f.store, f.manager, previewHost, f.steps, testHome());
     expect(f.steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', f.store, 7, { previewHost });
-  });
-
-  it('resolves the application package and launch entry, including absent argv', () => {
-    vi.stubEnv('CEZ_DRY_RUN', '1');
-    const argv = process.argv;
-    try {
-      for (const args of [['node', '/custom/entry.js'], []]) {
-        process.argv = args;
-        createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined, undefined, testHome());
-        const options = vi.mocked(ApplicationUpdateService).mock.lastCall![0];
-        expect(options.packageRoot).toBe(join(dirname(fileURLToPath(import.meta.url)), '..'));
-        expect(options.launchEntry).toBe(resolve(args[1] ?? ''));
-      }
-    } finally { process.argv = argv; }
-  });
-
-  it.each([false, true])('constructs self-update with live counts and path visibility (remote=%s)', (remote) => {
-    vi.stubEnv('CEZ_REMOTE', remote ? '1' : '0');
-    vi.stubEnv('CEZ_SUPERVISED', '1');
-    const f = recoveryFixture();
-    const getServer = vi.fn();
-    expect(createServeSelfUpdate({ home: testHome(), pkgName: 'test-package', version: '1.2.3', store: f.store, bindHost: undefined }, getServer)).toBeInstanceOf(SelfUpdateService);
-    expect(getServer).not.toHaveBeenCalled();
-    const options = vi.mocked(SelfUpdateService).mock.lastCall![0];
-    expect(options).toMatchObject({ pkgName: 'test-package', version: '1.2.3', supervised: true, entry: resolve(process.argv[1] ?? '') });
-    expect(options.activeRuns!()).toBe(3);
-    vi.mocked(f.store.listRuns).mockReturnValue([]);
-    expect(options.activeRuns!()).toBe(0);
-    expect(options.trimPaths!()).toBe(remote);
-  });
-
-  it('uses the working directory when self-update has no launch entry', () => {
-    const argv = process.argv;
-    try {
-      process.argv = [];
-      createServeSelfUpdate({ home: testHome(), pkgName: 'test', version: '1', store: recoveryFixture().store, bindHost: undefined }, vi.fn());
-      expect(vi.mocked(SelfUpdateService).mock.lastCall![0].entry).toBe(process.cwd());
-    } finally { process.argv = argv; }
-  });
-
-  it('shuts down the latest server before self-update restarts with the original arguments', async () => {
-    vi.stubEnv('CEZ_SUPERVISED', '0');
-    vi.stubEnv('CEZ_DESKTOP', '0');
-    const f = recoveryFixture();
-    const shutdownForRestart = vi.fn().mockResolvedValue(undefined);
-    const getServer = vi.fn();
-    createServeSelfUpdate({ home: testHome(), pkgName: 'test', version: '1', store: f.store, bindHost: '127.0.0.1' }, getServer);
-    const options = vi.mocked(SelfUpdateService).mock.lastCall![0];
-    getServer.mockReturnValue({ address: () => ({ address: '127.0.0.1', port: 5432 }), shutdownForRestart });
-    options.restart();
-    // bound: the restart callback returns void; observe its injected restart dependency after shutdown.
-    await vi.waitFor(() => expect(restartProcess).toHaveBeenCalledOnce(), { timeout: 10_000 });
-    expect(shutdownForRestart).toHaveBeenCalledBefore(vi.mocked(restartProcess));
-    expect(restartProcess).toHaveBeenCalledWith({ server: null, port: 5432, args: process.argv.slice(2), supervised: false, entry: currentEntry(process.env, testHome()) });
-  });
-
-  it('keeps the boot store in application restart cleanup when server shutdown fails', async () => {
-    vi.stubEnv('CEZ_DRY_RUN', '1');
-    const close = vi.fn();
-    const forward = vi.spyOn(sessionProcesses, 'forwardToSessionGroups').mockImplementation(() => {});
-    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-    const server = { shutdownForRestart: vi.fn().mockRejectedValue(new Error('shutdown failed')) } as unknown as ReturnType<typeof startServer>;
-    createServeApplicationUpdate('/repo', {}, () => server, () => undefined, { close }, testHome());
-    vi.mocked(ApplicationUpdateService).mock.lastCall![0].handoff!();
-    // bound: handoff returns void; process.exit is the completion signal after cleanup.
-    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0), { timeout: 10_000 });
-    expect(close).toHaveBeenCalledOnce();
-    expect(forward).toHaveBeenCalledWith('SIGTERM');
-    expect(close).toHaveBeenCalledBefore(forward);
-    expect(forward).toHaveBeenCalledBefore(exit);
-  });
-
-  it('keeps the boot store in self-update cleanup when server shutdown fails', async () => {
-    const f = recoveryFixture();
-    const close = vi.fn();
-    f.store.close = close;
-    const forward = vi.spyOn(sessionProcesses, 'forwardToSessionGroups').mockImplementation(() => {});
-    const server = { address: () => ({ address: '127.0.0.1', port: 4321 }), shutdownForRestart: vi.fn().mockRejectedValue(new Error('shutdown failed')) } as unknown as ReturnType<typeof startServer>;
-    createServeSelfUpdate({ home: testHome(), pkgName: 'test', version: '1', store: f.store, bindHost: undefined }, () => server);
-    vi.mocked(SelfUpdateService).mock.lastCall![0].restart();
-    // bound: restart returns void; the injected restart process signals completed cleanup.
-    await vi.waitFor(() => expect(restartProcess).toHaveBeenCalledOnce(), { timeout: 10_000 });
-    expect(close).toHaveBeenCalledOnce();
-    expect(forward).toHaveBeenCalledWith('SIGTERM');
-    expect(close).toHaveBeenCalledBefore(forward);
   });
 
   it('uses SIGTERM by default and cancels its bound after successful shutdown', async () => {

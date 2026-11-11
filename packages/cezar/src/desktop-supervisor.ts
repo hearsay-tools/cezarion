@@ -1,4 +1,4 @@
-import { shellProductEnv } from '../core/product-env.ts';
+import { shellProductEnv } from './core/product-env.ts';
 /** A desktop child follows its supervisor down, without confusing EPERM with death. */
 export function supervisorGone(pid: number, initialPpid: number, ppid: number, probe = process.kill): boolean {
   if (initialPpid > 1 && ppid !== initialPpid) return true;

@@ -21,8 +21,8 @@ function cli(args: string[], runSubcommand: CliDeps['runSubcommand'] = defaultCl
   const output: string[] = [];
   const deps = { ...defaultCliDeps, process: { argv: ['/bin/node', '/bin/cez', ...args], env: {}, cwd: () => tmpdir(), exitCode: undefined as number | undefined },
     console: { log: (line: string) => output.push(line), error: (line: string) => output.push(line) }, productEnv: () => undefined,
-    resolveCliHome: () => testHome(), prepareOperatorHome: () => testHome(), runManagedCommand: vi.fn().mockResolvedValue(undefined), runSubcommand,
-    getRepoInfo: vi.fn().mockResolvedValue(null), runProjectsCommand: vi.fn(), readOwnName: () => '@wjarka/cezarion', readOwnVersion: () => '1.2.3',
+    resolveCliHome: () => testHome(), prepareOperatorHome: () => testHome(), runSubcommand,
+    getRepoInfo: vi.fn().mockResolvedValue(null), runProjectsCommand: vi.fn(), readOwnVersion: () => '1.2.3',
     serveCommand: vi.fn(), serverCommand: vi.fn(), runCommand: vi.fn(), initCommand: vi.fn(), initWorkspace: vi.fn() };
   return { deps, output };
 }

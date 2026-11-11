@@ -6,7 +6,6 @@ import { useLocation } from 'react-router'
 import { useHealth, useProjectRuns, useProjects } from '@/api/queries'
 import type { HealthResponse, ProjectListEntry, ProjectsResponse, RunSummary } from '@open-mercato/cezar-api-client'
 import { AppShell, type RepoChip } from '@/components/app-shell'
-import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
@@ -157,7 +156,6 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   const lastKnownHealth = useRef<HealthResponse | undefined>(undefined)
   if (health.data) lastKnownHealth.current = health.data
   const shellHealth = health.data ?? lastKnownHealth.current
-  const applicationUpdate = useApplicationUpdate(shellHealth)
   // GitHub automations are opt-in too (#801) — same honesty rule: without the server's word for
   // it the nav must not offer a tab whose every request would 409.
   const automationsAvailable = shellHealth?.capabilities.automations === true
@@ -214,12 +212,6 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         breadcrumb={shellBreadcrumb(pathname, projectName, titleRun, pageLabel)}
         version={version}
         latestVersion={shellHealth?.latestVersion ?? null}
-        applicationUpdate={shellHealth?.applicationUpdate}
-        onApplyUpdate={applicationUpdate.apply}
-        onRestart={applicationUpdate.restart}
-        applicationUpdateError={applicationUpdate.error}
-        applicationUpdateBusy={applicationUpdate.busy}
-        applicationUpdateOffline={applicationUpdate.offline || health.isError}
         // Hidden until health confirms the forge driver (R6 Step 1.1) — same honesty rule as
         // the chips: the nav must not claim a GitHub tab it cannot back. The Tools menu's
         // forge note says why it is absent.

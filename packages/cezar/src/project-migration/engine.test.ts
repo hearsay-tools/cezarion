@@ -159,7 +159,7 @@ describe('without a release', () => {
       .map(path => ({ path, text: readFileSync(join(src, path), 'utf8') }));
     // P4b3 (hearsay-tools/cezarion#3089): early recovery at each entry, and the switch-gated starts.
     expect(sources.filter(({ text }) => /project-migration\//.test(text)).map(({ path }) => path).sort()).toEqual([
-      'artifacts/cli.ts', 'cli-dispatch.ts', 'project-commands.ts', 'self-update/checkouts.ts', 'serve-command.ts', 'server/project-context.ts',
+      'artifacts/cli.ts', 'cli-dispatch.ts', 'project-commands.ts', 'serve-command.ts', 'server/project-context.ts',
       'server/server.ts', 'server/workspace-projects.ts', 'subcommands.ts']);
     // The command, and the cockpit's prepare step (recovery, then the automatic move), each move behind the release switch.
     expect(sources.filter(({ text }) => /\bmigrateProject(?:Offline)?\(|\bmoveProjectWhenIdle\(|\bprepare(?:Project|Projects|BeforeTicks)\(|project-migration\/cli\.ts/.test(text))

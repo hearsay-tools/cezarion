@@ -51,6 +51,7 @@ import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createWorkspaceLiveRoutes } from './workspace-live-routes.ts';
 import { createActivityRoutes, type ActivityServerDeps } from './activity-routes.ts';
+import type { Home } from '../home/home.ts';
 import { createWorkspaceProjects, createWorkspaceProjectContexts, createTaskWebhooks, type WorkspaceProjects } from './workspace-projects.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
@@ -165,7 +166,6 @@ import {
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
-import { createSelfUpdateRoutes, type SelfUpdateServerDeps } from './self-update-routes.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { skillSourcesRoutes } from './skill-sources.ts';
 import { readHandoff, renderHandoffRecords } from '../handoff.ts';
@@ -268,8 +268,6 @@ import { armPreview, ProjectContexts, projectWarmupEnabled, sweepRegisteredPrevi
 import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
-import { applicationUpdateInputSchema } from '@open-mercato/cezar-contract/application-update';
-import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
 import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
@@ -317,7 +315,8 @@ import {
   isSafeAssetFilename,
   resolveGetRequest,
 } from './static-ui.ts';
-export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
+export interface ServerDeps extends ActivityServerDeps {
+  home: Home;
   /** Explicit fixture seam; production defaults to the disabled rebrand release switch. */
   legacyCanary?: boolean | undefined;
   /** Per-repository forge injection for embedded servers and tests. */
@@ -340,8 +339,6 @@ export interface ServerDeps extends SelfUpdateServerDeps, ActivityServerDeps {
   /** Mutable holder for the async npm-registry update check (#368) —
    *  `latest` appears once the registry answers with a newer version. */
   update?: { latest?: string };
-  /** Local npm update coordinator, absent for test/embedded servers. */
-  applicationUpdate?: ApplicationUpdateServiceLike | undefined;
   /** Host the HTTP server binds (default 127.0.0.1). A non-loopback host
    *  implies hosted mode — `capabilities.localHandoff:false`. */
   bindHost?: string | undefined;
@@ -1083,9 +1080,6 @@ export function createApp(deps: ServerDeps) {
       // the key as always-present, which is a shape no client ever receives. The contract schema
       // says `.optional()`, and contract-parity.test.ts holds the two together.
       ...(update?.latest !== undefined ? { latestVersion: update.latest } : {}),
-      ...(deps.applicationUpdate ? { applicationUpdate: caps.localHandoff
-        ? deps.applicationUpdate.snapshot()
-        : { status: 'idle' as const, supported: false, message: 'Update this installation manually.' } } : {}),
       // Health is CORS-open and, in hosted mode, reachable off the loopback —
       // so any site/host that reads it would learn the developer's absolute
       // checkout path and username (#431). Local mode keeps the full path (the
@@ -1162,10 +1156,6 @@ export function createApp(deps: ServerDeps) {
     })();
     return healthInFlight;
   };
-  deps.applicationUpdate?.onStateChange?.(() => {
-    healthCache = undefined;
-    void refreshHealth();
-  });
 
   // The read the GET and the topic snapshot share. On the live server (a hub is
   // injected) it answers from cache instantly and revalidates behind the
@@ -2563,20 +2553,6 @@ export function createApp(deps: ServerDeps) {
     return ctx.store.listRuns().filter((run) => ACTIVE_RUN_STATUSES.has(run.status)).length;
   };
 
-  // Workspace-level, server-selected target and executable. The empty JSON body is strict.
-  const applicationUpdateRoutes = new Hono()
-    .post('/workspace/application-update/apply', jsonZodValidator(applicationUpdateInputSchema), async (c) => {
-      if (!capabilities().localHandoff) return c.json({ error: 'Application updates require a local cockpit.' }, 409);
-      if (!deps.applicationUpdate) return c.json({ error: 'Application update is unavailable.' }, 409);
-      try { return c.json({ state: await deps.applicationUpdate.apply() }); }
-      catch (error) { return c.json({ error: error instanceof ApplicationUpdateConflictError || error instanceof ApplicationUpdateFailureError ? error.message : 'Application update preparation failed.' }, error instanceof ApplicationUpdateConflictError ? 409 : error instanceof ApplicationUpdateFailureError ? error.status : 500); }
-    })
-    .post('/workspace/application-update/restart', jsonZodValidator(applicationUpdateInputSchema), async (c) => {
-      if (!capabilities().localHandoff) return c.json({ error: 'Application updates require a local cockpit.' }, 409);
-      if (!deps.applicationUpdate) return c.json({ error: 'Application update is unavailable.' }, 409);
-      try { return c.json({ state: await deps.applicationUpdate.restart() }); }
-      catch (error) { return c.json({ error: error instanceof ApplicationUpdateConflictError ? error.message : 'Application restart is unavailable.' }, error instanceof ApplicationUpdateConflictError ? 409 : 500); }
-    });
 
   // ---- GUI clone (multi-project spec, step 4.3) ----------------------------
   // "Add project → Clone from GitHub": clone into the checkout root, then
@@ -4972,8 +4948,6 @@ export function createApp(deps: ServerDeps) {
     .route('/', providersRoutes)
     .route('/', projectsRoutes)
     .route('/', agentProfilesRoutes)
-    .route('/', createSelfUpdateRoutes(deps, () => capabilities().localHandoff, () => [deps.store, ...contexts.ids().flatMap((id) => contexts.peek(id)?.store ?? [])]))
-    .route('/', applicationUpdateRoutes)
     .route('/', workspaceConfigRoutes)
     .route('/', fsBrowseRoutes)
     .route('/', automationChecksRoutes)
@@ -5104,27 +5078,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // hosted/VPS deployment (which also flips CEZ_REMOTE to gate the local-handoff endpoints) —
   // The CLI passes it only when explicitly requested; normal startup stays on loopback.
   const serverOptions: Parameters<typeof serve>[0] = {
-    fetch: async (request, env) => {
-      const result = await app.fetch(request, env);
-      if (request.method === 'POST' && new URL(request.url).pathname === '/api/v1/workspace/application-update/restart'
-        && result.status === 200) {
-        // Arming is server-owned. A connected caller must receive the complete
-        // acknowledgement before shutdown; a caller that already disconnected
-        // cannot leave its explicitly requested, armed restart stranded.
-        const response = env.outgoing;
-        const handoff = () => {
-          response.off('finish', handoff);
-          response.off('close', handoff);
-          deps.applicationUpdate?.afterResponse?.();
-        };
-        if (response.destroyed) handoff();
-        else {
-          response.once('finish', handoff);
-          response.once('close', handoff);
-        }
-      }
-      return result;
-    },
+    fetch: (request, env) => app.fetch(request, env),
     port,
     hostname: deps.bindHost ?? '127.0.0.1',
   };

@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { Home } from '../../src/home/home.ts';
 import { BINARY_NAMES } from '../../src/home/identity.ts';
 import { shellQuote } from '../../src/core/shell-env.ts';
-import { posixLauncher, windowsLauncher } from '../../src/self-update/launcher.ts';
+import { posixLauncher, windowsLauncher } from '../../src/managed-install/launcher.ts';
 
 const execFile = promisify(execFileCallback);
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');

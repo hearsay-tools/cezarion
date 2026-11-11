@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { supervisorGone, watchSupervisor } from './supervisor.ts';
+import { supervisorGone, watchSupervisor } from './desktop-supervisor.ts';
 describe('desktop supervisor liveness', () => {
   const alive = (() => true) as typeof process.kill;
   it('detects reparenting even if a PID has been reused', () => expect(supervisorGone(22, 22, 1, alive)).toBe(true));

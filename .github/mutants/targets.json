@@ -120,10 +120,6 @@
       "parentFileRefusal"
     ]
   },
-  "packages/web/src/components/application-update-control.tsx": {
-    "tier": "component",
-    "guards": []
-  },
   "packages/cezar/src/preview/browser-launch.ts": {
     "tier": "logic",
     "guards": []

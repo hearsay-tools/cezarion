@@ -3,7 +3,6 @@ import { Link as RouterLink } from 'react-router'
 
 import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { AddProjectMenu } from '@/components/add-project-menu'
-import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUpdateControlProps } from '@/components/application-update-control'
 import { CheckIcon, FolderPlusIcon, LayersIcon, Settings2Icon, SunMoonIcon, WrenchIcon, XIcon } from '@/components/design-icons'
 import { ProjectMenu } from '@/components/sidebar-project-header'
 import { ProjectStateWords } from '@/components/project-state-words'
@@ -13,7 +12,6 @@ import { useTheme } from '@/components/theme-provider'
 import { NEXT_THEME } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
 import { SheetClose } from '@/components/ui/sheet'
-import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 import { scopeTo } from '@/lib/project-router'
 import { projectInitials, projectSignalParts, sumSignals, type ProjectSignal } from '@/lib/project-signal'
 import { cn } from '@/lib/utils'
@@ -76,42 +74,6 @@ export function DrawerIdentity({ version }: { version: string | null }) {
           <XIcon className="size-[19px]" aria-hidden="true" />
         </Button>
       </SheetClose>
-    </div>
-  )
-}
-
-/**
- * The update row (#621): nothing while up to date, since the identity row already shows the
- * version. When a newer release exists it earns a full-width row right under the identity, with
- * the Update or Restart action and the progress/failure feedback that used to live in the
- * sidebar footer this drawer no longer renders.
- */
-export function DrawerUpdate({ version, latestVersion, ...update }: Omit<ApplicationUpdateControlProps, 'version' | 'latestVersion'> & {
-  version: string | null
-  latestVersion: string | null
-}) {
-  // A ready or restarting update outlives the version gap (the new version is installed but not
-  // running yet), so the state, not only the comparison, keeps the row visible.
-  const pending = update.state?.status === 'ready' || update.state?.status === 'preparing' || update.state?.status === 'restarting'
-  const available = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
-  if (!available && !pending) return null
-  const status = update.state?.status
-  // Per state: "restart" is only true once the new version is installed; while it is still being
-  // fetched the row says so.
-  const label =
-    status === 'preparing' ? 'Preparing update…'
-    : status === 'ready' || status === 'restarting' ? 'Restart to finish updating'
-    : `Update available · v${latestVersion}`
-  return (
-    <div data-slot="drawer-update" className="shrink-0 border-b border-border px-[18px] py-[6px]">
-      <div className="flex min-h-[44px] items-center gap-[8px]">
-        <StatusDot tone="pending" className="size-[6px] shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-          {label}
-        </span>
-        <ApplicationUpdateControl version={version} latestVersion={latestVersion} {...update} />
-      </div>
-      <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={update.state} error={update.error} offline={update.offline} busy={update.busy} />
     </div>
   )
 }

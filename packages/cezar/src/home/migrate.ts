@@ -19,8 +19,8 @@ import { LEGACY_RECOVERY_COMMAND } from './migration-cli.ts';
 import { withHomeLock } from './write-lock.ts';
 import { digest, readBytes, VersionLog } from './version-log.ts';
 import { loadWorkspaceConfigSync, mergeWriteWorkspaceConfigSync } from '../workspace/config.ts';
-import { pathHook, writeLaunchers } from '../self-update/launcher.ts';
-import { readManifest, PACKAGE_NAME } from '../self-update/layout.ts';
+import { pathHook, writeLaunchers } from '../managed-install/launcher.ts';
+import { readManifest, PACKAGE_NAME } from '../managed-install/layout.ts';
 
 export type MigrationStep = 'recovered' | 'claimed' | 'pending' | 'archived' | 'copied' | 'recheck' | 'accounts' | 'committed';
 export interface MigrationOptions {
@@ -92,7 +92,7 @@ function copyManagedInstall(legacy: Home, target: Home, env: NodeJS.ProcessEnv):
   }
 }
 
-/** Replace the line `cez install` marked; never append one (the install command owns that). */
+/** Replace the PATH line the removed `cez install` marked; never append one. */
 function updateManagedPath(legacy: Home, target: Home, env: NodeJS.ProcessEnv): void {
   if (process.platform === 'win32' || !env.HOME) return;
   const { file: profile, line, marker } = pathHook(target.bin, env);

@@ -14,11 +14,11 @@ import { authorizeHomeEntry, registryFiles } from './entry-authorization.ts';
 import { isValidRestore } from '../workspace/backups.ts';
 
 export type HomeEntry = 'serve' | 'init' | 'run' | 'projects' | 'backup' | 'remote-settings'
-  | 'install' | 'update' | 'use' | 'link' | 'unlink' | 'server-install' | 'server-deploy' | 'server-uninstall' | 'migrate'
+  | 'server-install' | 'server-deploy' | 'server-uninstall' | 'migrate'
   | 'server-migrate';
 
 const entries: readonly string[] = ['serve', 'init', 'run', 'projects', 'backup', 'remote-settings',
-  'install', 'update', 'use', 'link', 'unlink', 'server-install', 'server-deploy', 'server-uninstall'];
+  'server-install', 'server-deploy', 'server-uninstall'];
 
 /** Backup listing, help and invalid restore input are pure reads; a valid restore retains its unconditional preparation. */
 export function operatorHomeEntry(argv: readonly string[]): string | undefined {

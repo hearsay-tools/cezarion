@@ -43,8 +43,8 @@ That is **host command execution as the cockpit's user**. Enable it only when th
 the people you would trust with a shell on this machine.
 
 It does not grant anything else. The terminal, file manager and editor buttons stay unavailable,
-and so do agent account administration, project browsing outside the projects folder and
-application updates. The cockpit shows a warning above both editors while it has a grant.
+and so do agent account administration and project browsing outside the projects folder.
+The cockpit shows a warning above both editors while it has a grant.
 
 ## When it applies
 
