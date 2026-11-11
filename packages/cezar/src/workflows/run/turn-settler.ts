@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary, type BoundaryCarry, type BoundaryCarrierEffects } from './turn-boundary.ts';
@@ -467,6 +468,6 @@ export class TurnSettler {
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
     const wait = WAIT_KINDS.timer.monitoringEntry(via, now, delay, minutes, state.waitIdentity.ciTurnId ?? 'monitoring');
-    this.host.waitEngine.open(runId, state, wait, { withdraw: true, onCommitFailure: { log: '[cez] monitoring timer checkpoint failed' }, park: false });
+    this.host.waitEngine.open(runId, state, wait, { withdraw: true, onCommitFailure: { log: `${logPrefix()} monitoring timer checkpoint failed` }, park: false });
   }
 }

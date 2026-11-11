@@ -1,4 +1,4 @@
-import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

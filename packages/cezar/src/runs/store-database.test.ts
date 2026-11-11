@@ -6,7 +6,8 @@ import {
   WAIT_PHASE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setRunStatus, openTestRunStore, runPersistence } from './run-store.testkit.ts';
+import { setRunStatus } from './run-store.testkit.ts';
+import { openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

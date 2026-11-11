@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { CiToolController } from './controller.ts';
 import { CiProgressRegistry } from './progress.ts';
 import { CiWatcherSupervisor } from './supervisor.ts';
@@ -32,7 +33,7 @@ export function acquireCiResources(workspace: object) {
       shared.controller = starting;
       starting.catch((error: unknown) => {
         if (shared.controller === starting) shared.controller = undefined;
-        console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`${logPrefix()} ${error instanceof Error ? error.message : String(error)}`);
       });
       return starting;
     },

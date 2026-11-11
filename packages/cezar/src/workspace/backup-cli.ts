@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import type { Home } from '../home/home.ts';
 import { readFileSync } from 'node:fs';
@@ -76,7 +77,7 @@ function refreshSnapshot(store: HomeStore, home: Home): void {
   } catch (error) {
     if (warnedSnapshots.has(home.workspaceConfig)) return;
     warnedSnapshots.add(home.workspaceConfig);
-    console.warn(`[cez] workspace backup unavailable after restore (${error instanceof Error ? error.message : String(error)})`);
+    console.warn(`${logPrefix()} workspace backup unavailable after restore (${error instanceof Error ? error.message : String(error)})`);
   }
 }
 
@@ -100,7 +101,7 @@ function restoreBytes(file: BackupFile, bytes: Buffer): Buffer {
 function warnDroppedEntries(raw: object, key: 'projects' | 'accounts', kept: number): void {
   const original: unknown = (raw as Record<string, unknown>)[key];
   if (Array.isArray(original) && original.length > kept) {
-    console.warn(`[cez] restore dropped ${original.length - kept} invalid ${key} entries from the snapshot`);
+    console.warn(`${logPrefix()} restore dropped ${original.length - kept} invalid ${key} entries from the snapshot`);
   }
 }
 

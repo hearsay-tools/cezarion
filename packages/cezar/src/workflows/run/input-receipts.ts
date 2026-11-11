@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import type { AgentEvent, AgentSession } from '../../core/agent-runner.ts';
 import { registerRunProcess } from '../../core/process-usage.ts';
@@ -35,7 +36,7 @@ export function handleAgentInputConsumed(context: RunModuleContext, host: InputR
     // The read and the failure count it ends are one commit (hearsay-tools/cezarion#1805).
     context.store.commitOutcome(runId, withFailuresCleared(context.store, runId, [{ kind: 'consumed', inputIds: read, at: new Date().toISOString() }], read));
     host.reconcileWorkerWaits(); // projects the consumed receipt
-  } catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  } catch (error) { console.warn(`${logPrefix()} agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 /** hearsay-tools/cezarion#505: input the harness accepted but will never read returns to the queue, so
@@ -51,7 +52,7 @@ export function retireUnreadInputs(context: RunModuleContext, host: InputReceipt
     state.inputState.recordInputError(`agent input requeue checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
     try { state.liveSession.session?.interrupt(); } finally {
       try { context.store.appendEvent(runId, { type: 'error', message: state.inputState.agentInputError }); }
-      catch { console.error(`[cez] ${state.inputState.agentInputError}`); }
+      catch { console.error(`${logPrefix()} ${state.inputState.agentInputError}`); }
     }
     return;
   }
@@ -75,7 +76,7 @@ export function recordOpeningAccepted(context: RunModuleContext, host: InputRece
     context.store.commitOutcome(runId, { kind: 'delivered', inputIds: [id], at: deliveredAt });
     host.reconcileWorkerWaits();
   }
-  catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  catch (error) { console.warn(`${logPrefix()} opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 /** Bundled messages and answer outcomes commit together. A refused write retries its
@@ -88,7 +89,7 @@ export function commitBundledDelivery(context: RunModuleContext, runId: string, 
   let refused: string | undefined;
   try { context.store.commitOutcome(runId, outcomes); } catch (error) {
     refused = error instanceof Error ? error.message : String(error);
-    console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
+    console.warn(`${logPrefix()} bundled delivery checkpoint failed: ${refused}`);
     const retry = retryDeliveryCheckpoint(context.store, runId, outcomes);
     if (retry.outcomes !== outcomes) return refused;
     if (retry.committed) refused = undefined;
@@ -121,7 +122,7 @@ export function readBundledInputs(context: RunModuleContext, host: InputReceipts
   state.inputState.clearBundledInputs();
   if (!ids.length || state.liveSession.cancelled) return;
   try { context.store.commitOutcome(runId, { kind: 'consumed', inputIds: ids, at: new Date().toISOString() }); host.reconcileWorkerWaits(); }
-  catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+  catch (error) { console.warn(`${logPrefix()} bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 /** hearsay-tools/cezarion#505: the session closed without reporting it read (failure, stop, exit): the input
@@ -138,7 +139,7 @@ export function requeueUnreadAtClose(context: RunModuleContext, host: InputRecei
   state.inputState.clearUnreadInputs();
   state.inputState.clearBundledInputs();
   try { context.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }
-  catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
+  catch (error) { console.warn(`${logPrefix()} agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 /** Manager callbacks shared by the three call-site adapters, separate from receipt policy. */

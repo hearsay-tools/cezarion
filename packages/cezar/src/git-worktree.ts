@@ -1,3 +1,4 @@
+import { logPrefix } from './home/display.ts';
 import { execFile } from 'node:child_process';
 import { projectPaths, isFallbackProjectPath, fallbackProjectWriteError } from './project-paths.ts';
 import { inspectGeneration } from './delegation/process-liveness.ts';
@@ -534,7 +535,7 @@ async function pendingAutosaveOperation(dir: string, reason: AutosaveReason, git
   for (const pending of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
     const found = await git(dir, ['rev-parse', '--verify', '-q', pending]);
     if (found.ok) {
-      console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
+      console.warn(`${logPrefix()} skipping ${reason} autosave in ${dir}: ${pending} is set, the operation is not concluded`);
       return 'refused';
     }
     if (found.code !== 1) return 'failed';
@@ -670,7 +671,7 @@ async function publishAutosaveCommit(
  */
 export async function autosaveCommit(dir: string, reason: AutosaveReason, options: AutosaveCommitOptions = {}): Promise<AutosaveResult> {
   if (fallbackProjectWriteError(dir)) {
-    console.info('[cez] Autosave skipped 1 read-only fallback worktree under .ai/squawk/.');
+    console.info(`${logPrefix()} Autosave skipped 1 read-only fallback worktree under .ai/squawk/.`);
     return 'skipped';
   }
   let key = resolve(dir);
@@ -704,7 +705,7 @@ export async function autosaveCommit(dir: string, reason: AutosaveReason, option
       // does not build. For the periodic and turn-end flushes the next one picks
       // the work up once the merge resolves; the pre-PR flush has no next one,
       // which is why callers get `refused` rather than a bare `false`.
-      console.warn(`[cezar] skipping ${reason} autosave in ${dir}: ${unresolved}`);
+      console.warn(`${logPrefix()} skipping ${reason} autosave in ${dir}: ${unresolved}`);
       return 'refused';
     }
     if (taskBranch !== undefined) {
@@ -939,7 +940,7 @@ async function pruneOrphansLocked(repoRoot: string, validIds: ReadonlySet<string
   }
   const fallbackEntries = await readdir(join(projectPaths(repoRoot).reads[1]!, 'worktrees'), { withFileTypes: true }).catch(() => []);
   const skipped = fallbackEntries.filter(entry => entry.isDirectory() && !validIds.has(entry.name)).length;
-  if (skipped) console.info(`[cez] Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under ${projectPaths(repoRoot).reads[1]}.`);
+  if (skipped) console.info(`${logPrefix()} Orphan cleanup skipped ${skipped} read-only fallback worktree(s) under ${projectPaths(repoRoot).reads[1]}.`);
   const removed: string[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || validIds.has(entry.name) || protection.paths.has(worktreePathFor(repoRoot, entry.name))) continue;

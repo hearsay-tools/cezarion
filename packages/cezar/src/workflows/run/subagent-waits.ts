@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -170,7 +171,7 @@ export class SubagentWaits {
    *  alias it would have opened before. */
   private openSubagentWait(runId: string, state: ActiveRun): void {
     const wait = WAIT_KINDS.subagent.entry(state.waitIdentity.ciTurnId ?? 'subagents', this.deadline(), this.children(state));
-    this.host.waitEngine.open(runId, state, wait, { withdraw: false, onCommitFailure: { log: '[cez] subagent wait checkpoint failed' }, park: false });
+    this.host.waitEngine.open(runId, state, wait, { withdraw: false, onCommitFailure: { log: `${logPrefix()} subagent wait checkpoint failed` }, park: false });
   }
 
   /** Save the children and move the deadline, then re-arm it. False when the checkpoint failed:
@@ -178,7 +179,7 @@ export class SubagentWaits {
   private refreshWait(runId: string, state: ActiveRun, wait: SubagentWaitEntry): boolean {
     const children = this.children(state);
     const next: SubagentWaitEntry = { ...wait, deadline: this.deadline(), children: children.length ? children : wait.children };
-    return this.host.waitEngine.refresh(runId, wait, next, { log: '[cez] subagent wait checkpoint failed' });
+    return this.host.waitEngine.refresh(runId, wait, next, { log: `${logPrefix()} subagent wait checkpoint failed` });
   }
 
   /** Every child ended: unless the runner starts a parent turn first, the wait resolves `settled`. */
@@ -285,7 +286,7 @@ export class SubagentWaits {
     for (const { item, stepId } of last.values()) {
       if (item.status !== 'running' && item.status !== 'pending') continue;
       try { this.context.store.appendEvent(runId, { type: 'item.completed', ...(stepId ? { stepId } : {}), item: { ...item, background: true, status: 'declined' } }); }
-      catch (error) { written = false; console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { written = false; console.warn(`${logPrefix()} subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
     return written;
   }

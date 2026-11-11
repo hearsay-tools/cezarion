@@ -20,7 +20,7 @@ For each commit, as it lands:
   keeps reaching Node's unhandled-rejection path.
 - No new blank-line padding, no wrong length pin, no missing direct import.
 
-Send all findings for one commit as one `cez message request`.
+Send all findings for one commit as one `hsq message request`.
 
 ## Standard answers
 

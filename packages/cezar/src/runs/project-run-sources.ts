@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { z } from 'zod';
 import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -27,7 +28,7 @@ const warned = new Set<string>();
 export function warnFallbackRunSource(path: string, error: unknown): void {
   if (warned.has(path)) return;
   warned.add(path);
-  console.warn(`[cez] Cannot read fallback runs from ${path}; fallback runs are unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  console.warn(`${logPrefix()} Cannot read fallback runs from ${path}; fallback runs are unavailable: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 function readFallbackSource(directory: string, database: string, parse: (bytes: Buffer) => readonly RunRowInput[] | undefined): ProjectRunSource | undefined {

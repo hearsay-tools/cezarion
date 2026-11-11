@@ -81,7 +81,7 @@ They use the normal origin guard and require `localHandoff`; hosted sessions rec
 
 Recovery actions apply only to the incident named by `detectedAt`. A newer incident returns 409; an already resolved incident returns the current snapshot without writing. Explicit CLI backup restore can still select retained backups when no incident is open.
 
-Behind `REBRAND_SWITCH`, a committed migrated home also reports `legacy-change` rows
+A committed migrated home also reports `legacy-change` rows
 with `canImport`. POST `/home/recovery/import` takes the same `{file, detectedAt}` and
 uses the same local-only and host-CLI grant guards. Import performs a three-way merge
 through HomeStore and requires its backup to succeed. `/accept` means Ignore for a
