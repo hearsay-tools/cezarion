@@ -380,3 +380,20 @@ symlink or file keeps legacy writes and is never marked fresh. The destination
 check is shared with migration planning. If a cockpit is known but its live tasks
 cannot be read, migration still refuses and lists both the cockpit and the read
 failure. It does not treat the failed read as an empty task list.
+
+### Switch fix: stored checkout under a removed project root
+
+Continue and restart recovery keep the shipped missing-checkout fallback when a
+repository was moved or copied and its recorded old root no longer exists. This
+does not make an existing migrated project's legacy state writable.
+
+| Switch | Recorded root | Recorded checkout | Continue / recovery |
+| --- | --- | --- | --- |
+| Off | Removed | Missing legacy checkout | Use current repository, as shipped |
+| On | Removed | Missing legacy checkout | Use current repository |
+| On | Existing, migrated | Missing or existing legacy checkout | Refuse read-only fallback writes |
+| Either | Existing | Existing writable checkout | Keep normal continuation |
+
+The fallback guard checks the root's directory entry. An unreadable or dangling
+entry still counts as present and keeps the existing guard. Registered projects
+whose own current root was deleted retain their separate admission refusal.
