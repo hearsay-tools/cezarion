@@ -1,3 +1,4 @@
+import { logPrefix } from './display.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,15 +29,15 @@ export function readInstallMarker(root: string): InstallMarker | undefined {
 
 export function assertHomeReadable(root: string): InstallMarker {
   const marker = readInstallMarker(root);
-  if (marker?.kind === 'live' && underTestRunner()) throw new Error(`[cez] refusing to write live home ${root} from a test runner`);
+  if (marker?.kind === 'live' && underTestRunner()) throw new Error(`${logPrefix()} refusing to write live home ${root} from a test runner`);
   assertCezarHomeWriteIsSandboxed(root);
-  if (!marker) throw new Error(`[cez] refusing to write home ${root} without an install marker; start it through a CLI entry point`);
+  if (!marker) throw new Error(`${logPrefix()} refusing to write home ${root} without an install marker; start it through a CLI entry point`);
   return marker;
 }
 
 export function assertHomeWritable(root: string): InstallMarker {
   const marker = assertHomeReadable(root);
-  if (marker.state === 'pending') throw new Error(`[cez] refusing to write pending migration home ${root}; finish or roll back the migration first`);
+  if (marker.state === 'pending') throw new Error(`${logPrefix()} refusing to write pending migration home ${root}; finish or roll back the migration first`);
   return marker;
 }
 

@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { isFallbackProjectPath, projectPaths } from '../project-paths.ts';
 // Count-based worktree retention (#483). A busy cockpit leaves one full repo
 // checkout per finished task under `.ai/cezar/worktrees/<runId>`; nothing bounds
@@ -169,7 +170,7 @@ export async function reclaimWorktrees(
   const selected = selectReclaimableWorktrees(runs, keep, (parentId) => store.getRun(parentId));
   const readonly = (id: string) => Boolean(byId.get(id) && readOnlyWorktree(repoRoot, store, byId.get(id)!));
   const skipped = selected.filter(readonly).length;
-  if (skipped) console.info(`[cez] Worktree retention skipped ${skipped} read-only fallback item(s) under ${projectPaths(repoRoot).reads[1]}.`);
+  if (skipped) console.info(`${logPrefix()} Worktree retention skipped ${skipped} read-only fallback item(s) under ${projectPaths(repoRoot).reads[1]}.`);
   for (const id of selected.filter(id => !readonly(id))) {
     const run = byId.get(id);
     if (run && (await reclaimWorktree(repoRoot, store, run, opts))) reclaimed.push(id);

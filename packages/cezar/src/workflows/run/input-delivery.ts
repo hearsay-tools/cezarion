@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS, waitDeliveryLabel } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
@@ -264,7 +265,7 @@ export class InputDelivery {
     state.inputState.recordInputError(message);
     try { transitionTurnBoundary(runId, state, { kind: 'input-error', phase: 'interrupt', session }, { interruptSession: wire => wire.interrupt() }); } finally {
       try { this.context.store.appendEvent(runId, { type: 'error', message }); }
-      catch { console.error(`[cez] ${message}`); }
+      catch { console.error(`${logPrefix()} ${message}`); }
     }
   }
 

@@ -1,3 +1,4 @@
+import { logPrefix } from './home/display.ts';
 import { productEnvEntries } from './core/product-env.ts';
 import { autosaveGroupExists, autosaveGroupSnapshotAlive, groupInspectionFailed } from './autosave-group.ts';
 import type { AutosaveCleanupProof } from './autosave-cleanup.ts';
@@ -63,7 +64,7 @@ export async function autosaveGit(cwd: string, args: string[], options: Autosave
     const confirmMs = options.confirmMs ?? 2_000;
     const warn = (message: string) => {
       const text = `autosave git ${args[0]} in ${cwd}: ${message}`;
-      console.warn(`[cezar] ${text}`);
+      console.warn(`${logPrefix()} ${text}`);
       try { options.onWarning?.(text); } catch { /* Reporting must not interrupt shutdown. */ }
     };
     if (!holdersAlive) {

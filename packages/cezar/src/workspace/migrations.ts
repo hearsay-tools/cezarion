@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import { readProjectPath } from '../project-paths.ts';
 import type { Home } from '../home/home.ts';
 import { readFile } from 'node:fs/promises';
@@ -164,7 +165,7 @@ export async function runMigrations(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[cez] workspace migration ${migration.id} failed (${message}) — booting with in-memory defaults`,
+        `${logPrefix()} workspace migration ${migration.id} failed (${message}) — booting with in-memory defaults`,
       );
       return;
     }

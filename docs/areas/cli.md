@@ -50,11 +50,12 @@ path the migration moved: `artifact publish` refuses (exit 1, nothing written, n
 recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff file moved to
 `.ai/squawk/` (`movedProjectPath`); the task gets its new paths when it continues.
 
-## Staged `migrate-project`
+## `migrate-project`
 
 `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is registered,
-listed in help and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it is an
-unknown command and its module is never loaded. Only the user runs it, and it runs
+listed in help and dispatched exactly when `REBRAND_SWITCH` is true, as it is since the
+switch release; a build with the switch off treats it as an unknown command and never loads
+its module. Only the user runs it, and it runs
 offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner, or a live
 cockpit of the user's legacy or split home whose registry lists the project) or any task of it is live, and
 names each pid, URL, port or task to stop. It cannot see a cockpit of another home that
@@ -81,35 +82,35 @@ Uses `node:util` `parseArgs`, no CLI framework. `serve` is the default command. 
 ## Task environments and the cockpit home
 
 `CEZ_HOME` and `HSQ_HOME` stay in the cockpit. No child receives either, including with
-`CEZ_AGENT_ENV_FULL=1` or `CEZ_ENV_PASSTHROUGH=CEZ_HOME,HSQ_HOME`. Task commands
+`HSQ_AGENT_ENV_FULL=1` (`CEZ_AGENT_ENV_FULL` fallback) or `HSQ_ENV_PASSTHROUGH=CEZ_HOME,HSQ_HOME` (`CEZ_ENV_PASSTHROUGH` fallback). Task commands
 (`artifact`, `job`, `message`, `worker`, `task`, `automation`, `webhook`, `discover`)
-do not read the cockpit home. Artifact links use the supplied `CEZ_PROJECT_ID`;
+do not read the cockpit home. Artifact links use the supplied `HSQ_PROJECT_ID` (`CEZ_PROJECT_ID` fallback);
 without it they keep the unprefixed task link.
 
 Operator commands (`projects`, nested `run`, `remote-settings`, `backup`,
 `install`, `update`, `versions`, `use`, `link`, `unlink`) retain their home access.
 Inside a task they now resolve the default home because the cockpit's
-`CEZ_HOME` override is absent. Their command behavior is otherwise unchanged.
+`HSQ_HOME` (`CEZ_HOME` fallback) override is absent. Their command behavior is otherwise unchanged.
 
-## Long commands (`cez job`)
+## Long commands (`hsq job`)
 
-`cez job start <name> -- <command>` runs a command under a supervisor that leads its own session,
+`hsq job start <name> -- <command>` runs a command under a supervisor that leads its own session,
 so it outlives the shell call, the turn and the agent session on every runner
 (hearsay-tools/cezarion#3097). `jobs/job.ts` owns the supervisor, its claim of the name and the
 `<name>.<run>.log`, `<name>.<run>.exit` and `<name>.job.db` files; they live in `$TMPDIR` unless
 `--dir` names another directory, and `$TMPDIR` goes when the task ends. The launch prompt's
 "Long commands" part (`jobs/command.ts`) gives agents the full command; the `cezar_wait`
-description names it only as `cez job start`, because the tool list also loads inside omp. A result is one JSON object on stdout and an error is one on stderr; `--help` prints text. The rules are in
+description names it only as `hsq job start`, because the tool list also loads inside omp. A result is one JSON object on stdout and an error is one on stderr; `--help` prints text. The rules are in
 [the unified waits spec](../../.ai/specs/2026-10-17-unified-waits.md#the-job-command-2026-11-10).
 
-## Legacy home recovery (staged)
+## Legacy home recovery
 
-Behind `REBRAND_SWITCH`, the host operator can use `cez backup import <file>` or
-`cez backup ignore <file>` for a legacy-change row. Both use the same recovery
+The host operator can use `hsq backup import <file>` or
+`hsq backup ignore <file>` for a legacy-change row. Both use the same recovery
 writer as the cockpit. Import applies legacy deltas after a required backup;
 Ignore keeps the live file. Both record the current legacy hash and next merge
-base. Deleted legacy files allow Ignore only. `cez backup --help` lists these
-actions only when the switch is enabled; both refuse while it is disabled.
+base. Deleted legacy files allow Ignore only. `hsq backup --help` lists these
+actions. A build with the release switch off omits them from help and refuses both.
 
 Remote-settings grants remain host-CLI-only, even for a local cockpit. Their
 legacy banner rows show these commands. Existing `backup list` and `backup
@@ -121,7 +122,8 @@ or acceptance writer directly, without preparing or migrating the split home.
 Help lists both actions. The command is registered only with `REBRAND_SWITCH`
 enabled. See `BACKWARD_COMPATIBILITY.md` for output and exit codes.
 
-Product task-context reads accept `HSQ_*` first with permanent `CEZ_*` fallback.
+Product task-context reads accept `HSQ_*` first with `CEZ_*` fallback during
+the deprecation window. The `CEZ_HOME` fallback is permanent.
 Generated child entries keep the legacy names with the release switch off; with
 it on they carry both names and the same value. Empty context values remain
 intentional clears. `core/product-env.ts` owns both selection and generation.
