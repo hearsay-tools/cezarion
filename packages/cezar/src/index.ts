@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { logPrefix } from './home/display.ts';
 import { projectPaths } from './project-paths.ts';
 import { commandText } from './home/command.ts';
 import { readFileSync } from 'node:fs';
@@ -43,7 +44,7 @@ async function initWorkspace(repoRoot: string, home: Home): Promise<string | und
     if (await shouldRegisterProject(repoRoot)) return (await registerProject(repoRoot, 'local', home)).id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[cez] workspace registry unavailable (${message}) — continuing without it`);
+    console.warn(`${logPrefix()} workspace registry unavailable (${message}) — continuing without it`);
   }
   return undefined;
 }

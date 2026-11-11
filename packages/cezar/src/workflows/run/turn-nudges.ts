@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
@@ -101,7 +102,7 @@ export class TurnNudges {
       enqueueAgentInput(this.context.store.getRun(runId)!, input);
       this.context.store.commitOutcome(runId, { kind: 'charged', automaticWakes: spent }, { enqueue: [input] });
     } catch (error) {
-      console.warn(`[cez] completion refusal not queued: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${logPrefix()} completion refusal not queued: ${error instanceof Error ? error.message : String(error)}`);
       return true;
     }
     this.context.store.appendEvent(runId, { type: 'agent-input', input });
@@ -118,7 +119,7 @@ export class TurnNudges {
     if (kept.length === inputs.length) return false;
     try { this.context.store.commitAgentInputs(runId, kept); }
     catch (error) {
-      console.warn(`[cez] completion refusal not retired: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${logPrefix()} completion refusal not retired: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
     return true;

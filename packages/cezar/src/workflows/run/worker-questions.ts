@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -102,7 +103,7 @@ export class WorkerQuestions {
   private answerForUnreadableParent(workerId: string, parentId: string, askSeq: number): void {
     if (!this.context.store.isUnreadable(parentId)) return;
     try { for (const id of this.queuedAnswerIds(workerId)) this.host.retireUnreadParentQuestion(workerId, id); }
-    catch (error) { console.warn(`[cez] parent reply not retired: ${error instanceof Error ? error.message : String(error)}`); return; }
+    catch (error) { console.warn(`${logPrefix()} parent reply not retired: ${error instanceof Error ? error.message : String(error)}`); return; }
     if (this.queuedAnswerIds(workerId).length) return;
     this.answerUndelivered(workerId, askSeq, 'the parent record cannot be read');
   }
@@ -143,7 +144,7 @@ export class WorkerQuestions {
       enqueueAgentInput(run, input);
       this.context.store.commitOutcome(workerId, { kind: 'charged', automaticWakes: spent }, { enqueue: [input] });
     } catch (error) {
-      console.warn(`[cez] undelivered question answer not queued: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${logPrefix()} undelivered question answer not queued: ${error instanceof Error ? error.message : String(error)}`);
       this.closeQuestion(workerId, askSeq, 'undeliverable', reason);
       return;
     }
@@ -177,7 +178,7 @@ export class WorkerQuestions {
     // An answer accepted for it and not yet taken goes first, so no later turn reads it as an
     // unrelated message. A failed write leaves the question pending for the next sweep.
     try { for (const id of this.queuedAnswerIds(workerId)) this.host.retireUnreadParentQuestion(workerId, id); }
-    catch (error) { console.warn(`[cez] worker question not closed: ${error instanceof Error ? error.message : String(error)}`); return; }
+    catch (error) { console.warn(`${logPrefix()} worker question not closed: ${error instanceof Error ? error.message : String(error)}`); return; }
     if (detail) this.context.store.appendEvent(workerId, { type: 'note', tone: 'warning', message: `Question not delivered to the parent: ${detail}.` });
     this.context.store.appendEvent(workerId, { type: 'human-ask-closed', askSeq, reason });
     this.host.withdrawCezarHumanWaits(workerId);
@@ -427,7 +428,7 @@ export class WorkerQuestions {
         }
         this.host.retireUnreadParentQuestion(root.id, requestId);
       } catch (error) {
-        console.warn(`[cez] fallback question not superseded: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(`${logPrefix()} fallback question not superseded: ${error instanceof Error ? error.message : String(error)}`);
         return false;
       }
     }

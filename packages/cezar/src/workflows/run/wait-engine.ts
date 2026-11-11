@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { Wait, WaitErrorCode, AskErrorCode, WorkerWaitEntry, PrWaitEntry, ProcessWaitEntry, ProcessWaitResult, PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
@@ -18,7 +19,7 @@ import { registrationReceipt, type RegistrationIdentity } from './wait-registrat
 import { watchDeadline } from './wait-watches.ts';
 
 export function warnRegistrationRefused(code: WaitErrorCode | AskErrorCode): void {
-  console.warn(`[cez] wait registration refused: ${code}`);
+  console.warn(`${logPrefix()} wait registration refused: ${code}`);
 }
 
 // Deadline timers stop through clearTimeout on waitTimers (disarm and dispose); this signal never fires.
@@ -239,7 +240,7 @@ export class WaitEngine {
         this.waitTimers.delete(wait.id);
         try { this.host.reconcileWorkerWaits(family); }
         catch {
-          if (!warned) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
+          if (!warned) console.warn(`${logPrefix()} worker wait checkpoint failed; retrying in 1 second`);
           warned = true;
           if (!this.context.disposed() && this.context.store.getRun(runId)?.waits?.some(entry => entry.id === wait.id && entry.phase === 'open')) arm(1_000);
         }
@@ -308,7 +309,7 @@ export class WaitEngine {
     try { this.resolveWait(runId, waitId, result); }
     catch {
       if (this.ciRetries.has(waitId)) return;
-      console.warn('[cez] wait checkpoint unavailable; retaining result for retry.');
+      console.warn(`${logPrefix()} wait checkpoint unavailable; retaining result for retry.`);
       const timer = setTimeout(() => { this.ciRetries.delete(waitId); this.settleWait(runId, waitId, result); }, 1000);
       timer.unref(); this.ciRetries.set(waitId, { runId, timer });
     }
@@ -387,7 +388,7 @@ export class WaitEngine {
     // second, since nothing else may touch this family again before the deadline.
     try { this.resolveWait(runId, entry.id, undefined, observed); }
     catch {
-      if (!this.workerResolveRetries.has(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
+      if (!this.workerResolveRetries.has(entry.id)) console.warn(`${logPrefix()} worker wait checkpoint failed; retrying in 1 second`);
       this.disarmWait(entry.id);
       this.workerResolveRetries.add(entry.id);
       this.armWorkerDeadline(runId, entry, 1_000);
@@ -404,7 +405,7 @@ export class WaitEngine {
       ({ settled } = this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: ids, ...(opts.superseded ? { superseded: true } : {}) }));
     } catch (error) {
       if (opts.onCommitFailure !== 'skip') throw error;
-      console.warn(`${opts.log ?? '[cez] wait cancellation failed'}: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${opts.log ?? `${logPrefix()} wait cancellation failed`}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
     for (const id of ids) this.disarmWait(id);
@@ -421,7 +422,7 @@ export class WaitEngine {
     const before = this.context.store.getRun(runId)?.waits ?? [];
     const remaining = (this.context.store.getRun(runId)?.waits ?? []).map(wait => wait.id);
     try { if (remaining.length) this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: remaining }); }
-    catch (error) { console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { console.warn(`${logPrefix()} wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`); }
     for (const wait of before) this.disarmWait(wait.id);
     this.forgetRun(runId);
   }

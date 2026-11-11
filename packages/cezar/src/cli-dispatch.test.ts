@@ -75,7 +75,7 @@ describe('main dispatch', () => {
     expect(f.deps.serveCommand).toHaveBeenCalledWith(f.home, '/work', 4321, true, undefined, false);
   });
 
-  it.each(['--help', '-h'])('prints help for %s before repo or Home access', async (flag) => {
+  it.each(['--help', '-h'])('prints help for %s before repo access or Home preparation', async (flag) => {
     const f = fixture([flag]);
     await f.run();
     const help = f.deps.console.log.mock.calls[0]![0];
@@ -84,7 +84,9 @@ describe('main dispatch', () => {
     expect(help).toContain('      --no-workers');
     expect(help).toContain('      --no-messaging');
     expect(f.deps.getRepoInfo).not.toHaveBeenCalled();
-    expect(f.deps.resolveCliHome).not.toHaveBeenCalled();
+    // With the switch on, help resolves (never prepares) Home to name its versions directory.
+    expect(f.deps.resolveCliHome).toHaveBeenCalledTimes(REBRAND_SWITCH ? 1 : 0);
+    expect(f.deps.prepareOperatorHome).not.toHaveBeenCalled();
     expect(f.processStub.exitCode).toBeUndefined();
   });
 
@@ -252,7 +254,9 @@ describe('binary help and notices', () => {
       expect(help).toContain(`host ${rebrand ? 'Squawk' : 'cezar'} on a server`);
       expect(help).toContain(`resume ${rebrand ? 'Squawk' : 'Cezar'} workers`);
       expect(help).toContain(`scaffold .ai/${rebrand ? 'squawk' : 'cezar'}/`);
-      expect(help).toContain('.ai/cezar/config.json');
+      expect(help).toContain(`"skillsRepos" in .ai/${rebrand ? 'squawk' : 'cezar'}/config.json`);
+      expect(help).toContain(`workflows in .ai/${rebrand ? 'squawk' : 'cezar'}/workflows/.`);
+      expect(help.includes('A project also reads .ai/cezar/')).toBe(rebrand);
       expect(help).toContain(rebrand ? f.home.versions : '~/.cezar/versions');
     }
   });

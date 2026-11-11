@@ -1,4 +1,4 @@
-import { productName } from './home/display.ts';
+import { productName, logPrefix } from './home/display.ts';
 import type { Home } from './home/home.ts';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -122,7 +122,7 @@ function warnUnsafeRemoteOnce(repo: string): void {
   if (warnedUnsafeRemotes.has(repo)) return;
   warnedUnsafeRemotes.add(repo);
   console.warn(
-    `[cez] ignoring skills repo ${JSON.stringify(repo)} — not an accepted source shape ` +
+    `${logPrefix()} ignoring skills repo ${JSON.stringify(repo)} — not an accepted source shape ` +
       `(${SKILLS_REPO_FORMATS}). Check "skillsRepos" in .ai/cezar/config.json, or remove it on the Skills page.`,
   );
 }

@@ -1,3 +1,4 @@
+import { logPrefix } from './display.ts';
 import { projectPaths } from '../project-paths.ts';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -95,7 +96,7 @@ export function copyMigrationAccounts(legacy: Home, target: Home, accounts: Migr
   for (const account of accounts) {
     if (accountMigrationPolicy(account) === 'keep') {
       record.notMoved.push({ id: account.id, configDir: account.configDir, reason: 'omp-profile-root-inside-legacy-home' });
-      console.warn(`[cez] account ${account.id} stays at ${account.configDir}; move omp's root (PI_CONFIG_DIR) outside ${legacy.root}`);
+      console.warn(`${logPrefix()} account ${account.id} stays at ${account.configDir}; move omp's root (PI_CONFIG_DIR) outside ${legacy.root}`);
     } else if (accountInUse(legacy, account.id)) record.deferredAccounts.push({ id: account.id, configDir: account.configDir });
     else {
       replacePrivateTree(account.source, account.target);

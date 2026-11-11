@@ -1005,7 +1005,7 @@ from the exit file's first line, or `exited, code unknown`, and never signals or
 process. A PID that was already gone at registration, with no exit file, is reported as not
 running when the wait was registered, so a launcher's PID is not read as a finished command
 (hearsay-tools/cezarion#3097). The tool description tells the agent to start the command with
-`cez job start <name> -- <command>`, whose supervisor leads its own session: Codex ends a shell
+`hsq job start <name> -- <command>`, whose supervisor leads its own session: Codex ends a shell
 command's process group when the command returns, so a plain `&` job dies there. `exit_file` must resolve inside the task worktree or the task temp directory
 (`exit_file_outside`); Cezar's own PID and a session leader are `process_not_allowed`, and
 another user's process is `process_not_owned`. A process wait keeps its slot and counts
