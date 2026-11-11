@@ -18,6 +18,10 @@ Every other project, and every project with
 the switch off, writes `.ai/cezar/` and reads `.ai/squawk/` as its fallback. "Fallback"
 below means `projectPaths(root).reads[1]`; `fallbackProjectWriteError` and
 `isFallbackProjectPath` ask `projectPaths` too. Context `dataDir` is the write root.
+With the switch on, a stored checkout under an absent old project root is not read-only fallback
+state. Continue and restart recovery keep the missing-checkout fallback to the current
+repository. A missing checkout under an existing project root still obeys the fallback
+write guard, including after migration.
 `RunStore` and cold indexes merge the read roots internally. History, artifacts, handoffs,
 attachments and cleanup checks use `store.sourceDataDir(runId)`. Inspect fallback
 cockpit ownership before claiming legacy state; never reclaim a fallback claim.
