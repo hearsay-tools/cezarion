@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from '@babel/parser';
-import { declaredRunnerIds, literalText, parserPlugins, visit } from './runner-id-branch.ts';
+import { visit } from './home-boundary.ts';
+import { declaredRunnerIds, literalText, parserPlugins } from './runner-id-branch.ts';
 import { lineAt, repoRoot, type SourceRule } from './source-rule.ts';
 
 /**

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from '@babel/parser';
 import type { Node } from '@babel/types';
+import { visit } from './home-boundary.ts';
 import { lineAt, repoRoot, type SourceRule } from './source-rule.ts';
 
 /**
@@ -65,15 +66,6 @@ export function literalText(node: Node): string | undefined {
   if (target.type === 'StringLiteral') return target.value;
   if (target.type === 'TemplateLiteral' && target.expressions.length === 0) return target.quasis[0]?.value.cooked ?? undefined;
   return undefined;
-}
-
-export function visit(node: Node, accept: (node: Node) => void): void {
-  accept(node);
-  for (const value of Object.values(node)) {
-    for (const child of Array.isArray(value) ? value : [value]) {
-      if (child && typeof child === 'object' && typeof (child as Node).type === 'string') visit(child as Node, accept);
-    }
-  }
 }
 
 /** Babel plugins for a path: JSX only where the extension says so, because `<T>x` is a cast in `.ts`. */
