@@ -65,8 +65,9 @@ recovery runs in both switch states: an entry that finds an unfinished
 cannot finish keeps the project refused with the cause. A journal that names anything
 outside the project's own state, or that Git tracks, is refused unchanged before any step.
 The command prints the plan text and a closing line, exits 0, and prints the `git mv`
-commands for tracked files without running them; a refusal prints one message to stderr
-and exits 1. Its last step writes the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` (new runtime state inside the Git directory, never in the work tree). With the switch true,
+commands for tracked files without running them. A dry run with plan blockers or conflicts
+keeps that output on stdout and exits 1. Other refusals print one message to stderr
+and exit 1. Its last step writes the marker `<git common dir>/cezar-moved-projects/<sha256 of the real root>.json` (new runtime state inside the Git directory, never in the work tree). With the switch true,
 a project with that marker writes `.ai/squawk/` and reads `.ai/cezar/` as its fallback
 (hearsay-tools/cezarion#3150); a second run on it changes nothing and says the project was
 already moved. With the switch false the marker is ignored and writes stay under

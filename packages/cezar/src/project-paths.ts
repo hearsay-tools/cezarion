@@ -121,11 +121,14 @@ export function isFallbackProjectPath(repoRoot: string, path: string): boolean {
 
 /**
  * Existing fallback checkouts and state stay read only: a path inside the fallback directory of
- * the project that holds it, as `projectPaths` of that project decides.
+ * the project that holds it, as `projectPaths` of that project decides. An absent recorded
+ * project root is not fallback state with the switch on: missing-checkout callers keep their normal fallback.
  */
 export function fallbackProjectWriteError(path: string): string | undefined {
   for (const match of path.matchAll(/(?:^|[\\/])\.ai[\\/](cezar|squawk)(?=[\\/]|$)/g)) {
-    if (basename(projectPaths(path.slice(0, match.index) || '.').reads[1]!) !== match[1]) continue;
+    const root = path.slice(0, match.index) || '.';
+    if (REBRAND_SWITCH && !pathPresent(root)) continue;
+    if (basename(projectPaths(root).reads[1]!) !== match[1]) continue;
     return `Cannot write read-only project data in ${path}. Use the binary that migrated the project.`;
   }
   return undefined;

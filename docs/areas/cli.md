@@ -66,11 +66,12 @@ unfinished migration, if one exists. It then holds `cockpit.lock`, passes admiss
 plans; planning the remaining migration changes nothing. It prints the plan, then `Dry run:
 nothing was moved or rewritten.` (or, after such a recovery, `Dry run: planning changed
 nothing; the completed migration above did.`) or `Migration complete.`; it prints the `git mv` commands for
-tracked files and never runs them. Refusals (in use, a held fence, conflicts, an untrusted
+tracked files and never runs them. A dry run with plan blockers or conflicts keeps
+that output on stdout and exits 1, including when the plan has no moves. Other refusals (in use, a held fence, conflicts, an untrusted
 journal) print one message to stderr and exit 1. A cockpit with the switch on moves each
 registered project by itself at start, and a project added later when it is added, when
 nothing else is live and its plan has no blocker or conflict; otherwise the project stays
-in place
+in place and its single notice names the blocker or conflict, even with no planned moves
 ([automatic move](project-routes.md#project-migration-command-and-early-recovery)); CLI
 entries (`run`, `init`, `artifact`, ...) only recover journals and never start a move.
 

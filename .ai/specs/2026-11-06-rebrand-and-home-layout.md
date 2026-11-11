@@ -228,6 +228,14 @@ legacy home, so a launch with only `HSQ_HOME` neither fails nor migrates again.
 every instance that shares the legacy home, migrates that home once, then for each instance in
 `server.json` and `server-instances/`: install
 `hearsay-squawk[-<slug>].service` and the nginx site on the same port, start, check health.
+A macOS (`macosx-ngrok`) server install is a server-migrate install too: the stop is
+`launchctl bootout` of each recorded label, the move writes and bootstraps the
+`tools.hearsay.squawk.*` plist and keeps the old plist as `*.plist.migrated`, and the health
+check reloads each agent, then waits for the cockpit on its loopback port and, when the install
+owns the tunnel agent, for a tunnel in the ngrok local API (about 30 s; each probe is time-bounded).
+A rollback restores the old plist and leaves the old label unloaded until the home has rolled back,
+so the restarted cockpit reads the legacy home. Only owned agents move, stop or start, as section 2
+says.
 The instances that share a home form one group and succeed or fail together. Until every
 instance passes its health check, the new marker stays in state `pending` and `HomeStore`
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
@@ -253,10 +261,12 @@ home is not committed: it keeps the legacy home and prints one notice to run
 rollback. `hsq server-migrate --dry-run` prints the stop, every move, each health check, the
 group, the pending marker and the rollback, and writes nothing, not even to the legacy home.
 
-**Desktop installs**: the bundled server runs the same migration at boot. launchd labels move
-as in section 2. A first boot that cannot write the legacy home or the new home (`EROFS`,
-`EACCES`, `EPERM`) logs one line and serves the legacy home, or the migrated home when the
-commit already happened, instead of failing (zero config).
+**Desktop installs**: the bundled server runs the same migration at boot. A Mac that records a
+completed `macosx-ngrok` server install is not a desktop install: its launchd labels move only
+through `hsq server-migrate`, as in section 2 and under "Server installs".
+A first boot that cannot write the legacy home or the new home (`EROFS`, `EACCES`, `EPERM`)
+logs one line and serves the legacy home, or the migrated home when the commit already
+happened, instead of failing (zero config).
 
 ### 4.1 New bundle IDs
 
@@ -387,3 +397,20 @@ symlink or file keeps legacy writes and is never marked fresh. The destination
 check is shared with migration planning. If a cockpit is known but its live tasks
 cannot be read, migration still refuses and lists both the cockpit and the read
 failure. It does not treat the failed read as an empty task list.
+
+### Switch fix: stored checkout under a removed project root
+
+Continue and restart recovery keep the shipped missing-checkout fallback when a
+repository was moved or copied and its recorded old root no longer exists. This
+does not make an existing migrated project's legacy state writable.
+
+| Switch | Recorded root | Recorded checkout | Continue / recovery |
+| --- | --- | --- | --- |
+| Off | Removed | Missing legacy checkout | Use current repository, as shipped |
+| On | Removed | Missing legacy checkout | Use current repository |
+| On | Existing, migrated | Missing or existing legacy checkout | Refuse read-only fallback writes |
+| Either | Existing | Existing writable checkout | Keep normal continuation |
+
+The fallback guard checks the root's directory entry. An unreadable or dangling
+entry still counts as present and keeps the existing guard. Registered projects
+whose own current root was deleted retain their separate admission refusal.

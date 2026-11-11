@@ -1,4 +1,3 @@
-import { productIdentity } from '../home/identity.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { buildChildEnv } from './agent-env.ts';
@@ -8,6 +7,7 @@ import { ProviderAuthService } from './provider-auth.ts';
 import { defaultAgentProfile } from '../workspace/agent-profiles.ts';
 import { agentHomePaths } from '../paths.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
+import { productIdentity } from '../home/identity.ts';
 
 vi.mock('node:child_process', () => {
   const execFile = vi.fn((bin, _args, _opts, callback) => {
@@ -47,9 +47,10 @@ describe('Cursor product integration', () => {
     expect(defaultAgentProfile('cursor', { HOME: '/home/test' }).path).toBe('/home/test/.cursor');
   });
   it('reports Cursor in dry-run without an installed executable', async () => {
-    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const dryRun = `${productIdentity().envPrefix}DRY_RUN`;
+    vi.stubEnv(dryRun, '1');
     vi.stubEnv('CEZ_CURSOR_BIN', '/missing/cursor-agent');
-    expect((await detectEnvironment()).find((row) => row.name === 'cursor')).toMatchObject({ available: true, version: `mock (${productIdentity().envPrefix}DRY_RUN=1)` });
+    expect((await detectEnvironment()).find((row) => row.name === 'cursor')).toMatchObject({ available: true, version: `mock (${dryRun}=1)` });
   });
   it('degrades gracefully when Cursor is absent', async () => {
     vi.stubEnv('CEZ_DRY_RUN', '0');

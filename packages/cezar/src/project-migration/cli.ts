@@ -22,7 +22,8 @@ the project. Tracked files are never moved: the command prints the
 git mv commands to run and commit.
 
     --dry-run     print every move, repair and rewrite; only an unfinished
-                  migration is completed (and reported) first
+                  migration is completed (and reported) first; exits 1
+                  if the plan has blockers or conflicts
     --repo <dir>  the project (default: the current directory)
 -h, --help        show this help`);
 
@@ -52,8 +53,9 @@ export async function runMigrateProjectCommand(argv: string[], deps: MigrateProj
     // A missing --repo is a refusal like any other: one line on stderr, exit 1.
     const cwd = resolve(values.repo ?? deps.cwd());
     const root = realpathSync((await deps.getRepoInfo(cwd))?.root ?? cwd);
-    deps.log(migrationAnswerText(await migrateProjectOffline(root, { homes: deps.homes, dryRun: values['dry-run'] === true, fault: deps.fault, self: deps.self })));
-    return 0;
+    const answer = await migrateProjectOffline(root, { homes: deps.homes, dryRun: values['dry-run'] === true, fault: deps.fault, self: deps.self });
+    deps.log(migrationAnswerText(answer));
+    return answer.blocked ? 1 : 0;
   } catch (error) {
     deps.error(error instanceof Error ? error.message : String(error));
     return 1;
