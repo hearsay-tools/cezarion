@@ -1,19 +1,10 @@
-import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { execFile, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { ContentBlock } from '../core/agent-runner.ts';
-import { shellQuote } from '../core/shell-env.ts';
 import { handoffInstructions } from '../handoff.ts';
-import { RunStore } from '../runs/store.ts';
-import { setRunStatus } from '../runs/run-store.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 import {
-  RunManager,
   contentBlocksOf,
   mediaTypeFor,
   pastedAttachmentsNote,
@@ -22,90 +13,12 @@ import {
   type PastedContent,
 } from './run.ts';
 import { attachmentExtension, isAttachmentMediaType, isImageAttachmentName } from '@open-mercato/cezar-contract/attachments';
+import { BRIEF_MD, BRIEF_MD_B64, slotHolder, TINY_PDF, TINY_PDF_B64, TINY_PNG_B64, usePastedAttachmentsFixture } from './pasted-attachments.testkit.ts';
+
+// Task start, queued, follow-up and live/deferred/continuation delivery. The Continue cases live in
+// pasted-attachments-continue.test.ts; shared setup in pasted-attachments.testkit.ts.
 
 const HANDOFF_INSTRUCTIONS = handoffInstructions();
-
-const run = promisify(execFile);
-const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
-let gateSequence = 0;
-const pendingHolderReleases = new Set<() => void>();
-
-/** A real check-step subprocess that holds a slot until the test releases it. */
-function slotHolder(root: string, name: string): { workflow: WorkflowDef; release: () => void } {
-  const gate = join(root, `.release-${gateSequence++}`);
-  const script =
-    "const fs=require('node:fs');const gate=process.argv[1];" +
-    'const poll=()=>fs.existsSync(gate)?undefined:setTimeout(poll,5);poll()';
-  let released = false;
-  const release = () => {
-    if (released) return;
-    released = true;
-    writeFileSync(gate, '');
-    pendingHolderReleases.delete(release);
-  };
-  pendingHolderReleases.add(release);
-  return {
-    workflow: {
-      name,
-      source: 'built-in',
-      steps: [
-        {
-          id: 'hold',
-          command: `${shellQuote(process.execPath)} -e ${shellQuote(script)} ${shellQuote(gate)}`,
-        },
-      ],
-    },
-    release,
-  };
-}
-
-/** Exit in the same turn that accepts Continue, before its first asynchronous launch. */
-async function crashAfterContinue(repoRoot: string, dataDir: string, runId: string, mode: string, images: PastedContent[]): Promise<void> {
-  const script = `
-    import { RunStore } from ${JSON.stringify(new URL('../runs/store.ts', import.meta.url).href)};
-    import { RunManager } from ${JSON.stringify(new URL('./run.ts', import.meta.url).href)};
-    import { createRunner } from ${JSON.stringify(new URL('../core/runner-factory.ts', import.meta.url).href)};
-    import { WorkspaceSemaphore } from ${JSON.stringify(new URL('../workspace/semaphore.ts', import.meta.url).href)};
-    import { Home } from ${JSON.stringify(new URL('../home/home.ts', import.meta.url).href)};
-    const home = Home.sandbox(process.env.CEZ_HOME);
-    const input = JSON.parse(process.argv[1]);
-    const store = RunStore.open(input.dataDir, { keepLive: true });
-    const semaphore = new WorkspaceSemaphore({ home, initial: { maxParallel: 0 } });
-    const manager = new RunManager(store, input.repoRoot, { home, createRunner, semaphore });
-    const accepted = manager.continueRun(input.runId, { text: 'read my durable continuation brief', images: input.images }, input.mode === 'capacity');
-    if (!accepted.ok) throw new Error(accepted.error);
-    process.exit(0);
-  `;
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script,
-    JSON.stringify({ repoRoot, dataDir, runId, mode, images })], { stdio: ['ignore', 'ignore', 'pipe'] });
-  let stderr = '';
-  child.stderr.on('data', chunk => { stderr += String(chunk); });
-  const exit = new Promise<number | null>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', resolve);
-  });
-  let guard: ReturnType<typeof setTimeout> | undefined;
-  // bound: only the owned child's exit event completes this wait; 15 s detects a stuck startup.
-  const hung = new Promise<never>((_resolve, reject) => { guard = setTimeout(() => reject(new Error('Continue crash child did not exit')), 15_000); });
-  try {
-    expect(await Promise.race([exit, hung]), stderr).toBe(0);
-  } finally {
-    clearTimeout(guard);
-    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exit; }
-  }
-}
-
-// 1x1 transparent PNG — small enough to inline, real enough to round-trip through base64.
-const TINY_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-
-// A markdown brief and a minimal PDF (#950) — the two non-image attachments the composer takes.
-// Their CONTENT is the thing every assertion below is about: it must reach disk and never the
-// prompt, which is the whole point of handing the agent a path instead of the bytes.
-const BRIEF_MD = '# Brief\n\nShip the alpha-particle report.\n';
-const BRIEF_MD_B64 = Buffer.from(BRIEF_MD).toString('base64');
-const TINY_PDF = '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n';
-const TINY_PDF_B64 = Buffer.from(TINY_PDF).toString('base64');
 
 /** The static system-prompt note every agent step gets (#357) — the agent
  *  contract that says "use the on-disk path, the inline image is view-only". */
@@ -235,80 +148,12 @@ describe('attachment media types, extensions and blocks (#950)', () => {
  * CEZ_MOCK_STDIN_FILE hook, which captures the untruncated inbound text.
  */
 describe('pasted screenshots materialize to disk and reach the agent as file paths', () => {
-  let repoRoot: string;
-  let dataDir: string;
-  let store: RunStore;
-  let manager: RunManager;
-  let argsFile: string;
-  let stdinFile: string;
-  const savedEnv: Record<string, string | undefined> = {};
-
-  beforeAll(async () => {
-    repoRoot = mkdtempSync(join(tmpdir(), 'cez-pasted-'));
-    dataDir = join(repoRoot, '.ai/cezar');
-    argsFile = join(repoRoot, 'mock-args.ndjson');
-    stdinFile = join(repoRoot, 'mock-stdin.ndjson');
-    savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
-    savedEnv.CEZ_MOCK_ARGS_FILE = process.env.CEZ_MOCK_ARGS_FILE;
-    savedEnv.CEZ_MOCK_STDIN_FILE = process.env.CEZ_MOCK_STDIN_FILE;
-    process.env.CEZ_DRY_RUN = '1';
-    process.env.CEZ_MOCK_ARGS_FILE = argsFile;
-    process.env.CEZ_MOCK_STDIN_FILE = stdinFile;
-    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
-    await run('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
-    await run('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
-    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
-    await run('git', ['add', '-A'], { cwd: repoRoot });
-    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ maxParallel: 1 }));
-    store = RunStore.open(dataDir);
-    manager = createFixtureManager(store, repoRoot);
-  });
-
-  afterEach(async () => {
-    for (const release of [...pendingHolderReleases]) release();
-    for (const run of store.listRuns()) {
-      if (!['done', 'review', 'failed', 'cancelled'].includes(run.status)) manager.cancel(run.id);
-    }
-    await Promise.all(
-      store.listRuns().map((run) =>
-        waitForStatus(run.id, ['done', 'review', 'failed', 'cancelled'], 5_000),
-      ),
-    );
-  });
-
-  afterAll(async () => {
-    for (const release of [...pendingHolderReleases]) release();
-    await drainFixtureManagers(repoRoot);
-    for (const [key, value] of Object.entries(savedEnv)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    rmSync(repoRoot, { recursive: true, force: true });
-  });
-
-  function readStdinLines(): Array<{ userText: string; imageCount: number }> {
-    return readFileSync(stdinFile, 'utf8')
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
-  }
-
-  async function waitForStatus(runId: string, statuses: string[], timeoutMs = 20_000): Promise<string> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const status = store.getRun(runId)?.status;
-      if (status && statuses.includes(status)) return status;
-      if (Date.now() > deadline) throw new Error(`run did not reach ${statuses.join('/')} in time (was ${status})`);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
+  const fx = usePastedAttachmentsFixture();
+  const { readStdinLines, waitForStatus } = fx;
 
   it('a task-start pasted image is saved as pasted-1.png and its path lands in the opening prompt', async () => {
-    writeFileSync(argsFile, '', 'utf8');
-    writeFileSync(stdinFile, '', 'utf8');
+    writeFileSync(fx.argsFile, '', 'utf8');
+    writeFileSync(fx.stdinFile, '', 'utf8');
     // Agent step + trailing check so the run reaches a terminal status
     // instead of parking at `waiting` (same shape as system-prompt.test.ts).
     // The agent step signals done, which an earlier step needs since hearsay-tools/cezarion#1620.
@@ -324,32 +169,32 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       type: 'image',
       source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
     };
-    const holder = slotHolder(repoRoot, 'hold-slot');
-    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
-    const record = manager.startRun(workflow, {
+    const holder = slotHolder(fx.repoRoot, 'hold-slot');
+    fx.manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
+    const record = fx.manager.startRun(workflow, {
       task: 'save the pasted screenshot to disk',
       images: [image],
       worktree: false,
     });
 
     // The task image is durable and renderable before `execute()` gets a slot.
-    const queued = store.getRun(record.id);
+    const queued = fx.store.getRun(record.id);
     expect(queued?.status).toBe('queued');
     expect(queued?.taskImages).toEqual([`/api/v1/runs/${record.id}/images/pasted-1.png`]);
-    expect(existsSync(join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.png'))).toBe(true);
+    expect(existsSync(join(fx.dataDir, 'runs', `${record.id}-images`, 'pasted-1.png'))).toBe(true);
 
     holder.release();
     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
 
-    const after = store.getRun(record.id);
+    const after = fx.store.getRun(record.id);
     expect(after?.status, after?.error).toMatch(/^(done|review)$/);
     expect(after?.taskImages?.length).toBe(1);
     expect(after?.taskImages?.[0]).toMatch(/\/images\/pasted-1\.png$/);
 
-    const filePath = join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.png');
+    const filePath = join(fx.dataDir, 'runs', `${record.id}-images`, 'pasted-1.png');
     expect(existsSync(filePath)).toBe(true);
     expect(readFileSync(filePath).equals(Buffer.from(TINY_PNG_B64, 'base64'))).toBe(true);
-    expect(readdirSync(join(dataDir, 'runs', `${record.id}-images`)).filter((name) => name.startsWith('pasted-'))).toEqual([
+    expect(readdirSync(join(fx.dataDir, 'runs', `${record.id}-images`)).filter((name) => name.startsWith('pasted-'))).toEqual([
       'pasted-1.png',
     ]);
 
@@ -360,7 +205,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     expect(lines[0]?.userText).toContain(`- ${filePath}`);
 
     // The base64 bytes never enter the NDJSON event log (only the name/url pair does).
-    const ndjson = readFileSync(join(dataDir, 'runs', `${record.id}.ndjson`), 'utf8');
+    const ndjson = readFileSync(join(fx.dataDir, 'runs', `${record.id}.ndjson`), 'utf8');
     expect(ndjson).not.toContain(TINY_PNG_B64);
   }, 30_000);
 
@@ -371,8 +216,8 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
    * agent gets, and on codex/opencode it is the only one that would survive anyway.
    */
   it('task-start PDF and markdown attachments land on disk and reach the agent as paths, not bytes', async () => {
-    writeFileSync(argsFile, '', 'utf8');
-    writeFileSync(stdinFile, '', 'utf8');
+    writeFileSync(fx.argsFile, '', 'utf8');
+    writeFileSync(fx.stdinFile, '', 'utf8');
     const workflow: WorkflowDef = {
       name: 'pasted-files-test',
       source: 'built-in',
@@ -381,9 +226,9 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
         { id: 'verify', command: 'true' },
       ],
     };
-    const holder = slotHolder(repoRoot, 'hold-slot-files');
-    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
-    const record = manager.startRun(workflow, {
+    const holder = slotHolder(fx.repoRoot, 'hold-slot-files');
+    fx.manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
+    const record = fx.manager.startRun(workflow, {
       task: 'read the attached brief',
       images: [
         { type: 'file', mediaType: 'text/markdown', data: BRIEF_MD_B64 },
@@ -394,7 +239,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
 
     // Durable and listed before a slot opens, exactly like a pasted screenshot — and named by
     // media type, in the numbering space the screenshots share.
-    const queued = store.getRun(record.id);
+    const queued = fx.store.getRun(record.id);
     expect(queued?.status).toBe('queued');
     expect(queued?.taskImages).toEqual([
       `/api/v1/runs/${record.id}/images/pasted-1.md`,
@@ -403,11 +248,11 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
 
     holder.release();
     await waitForStatus(record.id, ['done', 'review', 'failed', 'cancelled']);
-    const after = store.getRun(record.id);
+    const after = fx.store.getRun(record.id);
     expect(after?.status, after?.error).toMatch(/^(done|review)$/);
 
-    const mdPath = join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.md');
-    const pdfPath = join(dataDir, 'runs', `${record.id}-images`, 'pasted-2.pdf');
+    const mdPath = join(fx.dataDir, 'runs', `${record.id}-images`, 'pasted-1.md');
+    const pdfPath = join(fx.dataDir, 'runs', `${record.id}-images`, 'pasted-2.pdf');
     expect(readFileSync(mdPath, 'utf8')).toBe(BRIEF_MD);
     expect(readFileSync(pdfPath, 'utf8')).toBe(TINY_PDF);
 
@@ -422,7 +267,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     // run a path, not a fifth of its prompt budget.
     expect(lines[0]?.userText).not.toContain('Ship the alpha-particle report');
     expect(lines[0]?.userText).not.toContain(BRIEF_MD_B64);
-    const ndjson = readFileSync(join(dataDir, 'runs', `${record.id}.ndjson`), 'utf8');
+    const ndjson = readFileSync(join(fx.dataDir, 'runs', `${record.id}.ndjson`), 'utf8');
     expect(ndjson).not.toContain(BRIEF_MD_B64);
     expect(ndjson).not.toContain(TINY_PDF_B64);
   }, 30_000);
@@ -431,7 +276,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
    *  prompt too: a stacked screenshot could at least fall back on its inline block, a stacked
    *  `.md` has nothing to fall back on. */
   it('a file stacked onto a queued run reaches the opening prompt as a path', async () => {
-    writeFileSync(stdinFile, '', 'utf8');
+    writeFileSync(fx.stdinFile, '', 'utf8');
     const workflow: WorkflowDef = {
       name: 'stacked-file-test',
       source: 'built-in',
@@ -440,12 +285,12 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
         { id: 'verify', command: 'true' },
       ],
     };
-    const holder = slotHolder(repoRoot, 'hold-slot-stacked');
-    manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
-    const record = manager.startRun(workflow, { task: 'wait for my brief', worktree: false });
-    expect(store.getRun(record.id)?.status).toBe('queued');
+    const holder = slotHolder(fx.repoRoot, 'hold-slot-stacked');
+    fx.manager.startRun(holder.workflow, { task: 'occupy the only slot', worktree: false });
+    const record = fx.manager.startRun(workflow, { task: 'wait for my brief', worktree: false });
+    expect(fx.store.getRun(record.id)?.status).toBe('queued');
 
-    const queuedMessage = manager.enqueueMessage(record.id, [
+    const queuedMessage = fx.manager.enqueueMessage(record.id, [
       { type: 'text', text: 'here is the brief' },
       { type: 'file', mediaType: 'text/plain', data: Buffer.from('two lines\n').toString('base64') },
     ]);
@@ -458,26 +303,26 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     const opening = readStdinLines().find((line) => line.userText.includes('wait for my brief'));
     expect(opening).toBeDefined();
     expect(opening?.userText).toContain('here is the brief');
-    expect(opening?.userText).toContain(`- ${join(dataDir, 'runs', `${record.id}-images`, stackedName)}`);
+    expect(opening?.userText).toContain(`- ${join(fx.dataDir, 'runs', `${record.id}-images`, stackedName)}`);
   }, 30_000);
 
   it('notes a queued document deleted before same-process execution and still delivers text', async () => {
-    writeFileSync(stdinFile, '');
-    const holder = slotHolder(repoRoot, 'hold-delete');
-    manager.startRun(holder.workflow, { task: 'hold slot', worktree: false });
+    writeFileSync(fx.stdinFile, '');
+    const holder = slotHolder(fx.repoRoot, 'hold-delete');
+    fx.manager.startRun(holder.workflow, { task: 'hold slot', worktree: false });
     const workflow: WorkflowDef = { name: 'missing-file', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}} mock:cezar-done' }, { id: 'verify', command: 'true' }] };
-    const record = manager.startRun(workflow, { task: 'read my missing brief', worktree: false, images: [{ type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 }] });
-    const path = join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.pdf');
+    const record = fx.manager.startRun(workflow, { task: 'read my missing brief', worktree: false, images: [{ type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 }] });
+    const path = join(fx.dataDir, 'runs', `${record.id}-images`, 'pasted-1.pdf');
     rmSync(path);
     holder.release();
     await waitForStatus(record.id, ['done', 'review']);
     const message = readStdinLines().find((line) => line.userText.includes('read my missing brief'))!;
     expect(message.userText).not.toContain(path);
-    expect(store.readEvents(record.id).some((event) => event.type === 'note' && String(event.message).includes('pasted-1.pdf could not be read'))).toBe(true);
+    expect(fx.store.readEvents(record.id).some((event) => event.type === 'note' && String(event.message).includes('pasted-1.pdf could not be read'))).toBe(true);
   }, 30_000);
 
   it('a follow-up pasted image is saved and its path is appended to the delivered message', async () => {
-    writeFileSync(stdinFile, '', 'utf8');
+    writeFileSync(fx.stdinFile, '', 'utf8');
     // A single agent step with no trailing check stays interactive — it parks
     // at `waiting` after its first turn so a follow-up can be sent.
     const workflow: WorkflowDef = {
@@ -485,14 +330,14 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       source: 'built-in',
       steps: [{ id: 'work', prompt: '{{task}}' }],
     };
-    const record = manager.startRun(workflow, { task: 'chat with me' });
+    const record = fx.manager.startRun(workflow, { task: 'chat with me' });
     await waitForStatus(record.id, ['waiting']);
 
     const image: ContentBlock = {
       type: 'image',
       source: { type: 'base64', media_type: 'image/jpeg', data: TINY_PNG_B64 },
     };
-    const delivered = manager.sendMessage(record.id, [{ type: 'text', text: 'here is a screenshot' }, image]);
+    const delivered = fx.manager.sendMessage(record.id, [{ type: 'text', text: 'here is a screenshot' }, image]);
     expect(delivered).toBe(true);
 
     // Back to `waiting` once the mock's follow-up turn completes.
@@ -509,67 +354,16 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     const pathMatch = followUp?.userText.match(/- (.*pasted-\d+\.jpg)/);
     expect(pathMatch).toBeTruthy();
     const filePath = pathMatch?.[1] as string;
-    expect(filePath).toMatch(new RegExp(`^${join(dataDir, 'runs', `${record.id}-images`).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pasted-\\d+\\.jpg$`));
+    expect(filePath).toMatch(new RegExp(`^${join(fx.dataDir, 'runs', `${record.id}-images`).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/pasted-\\d+\\.jpg$`));
     expect(existsSync(filePath)).toBe(true);
     expect(readFileSync(filePath).equals(Buffer.from(TINY_PNG_B64, 'base64'))).toBe(true);
 
-    manager.finish(record.id);
+    fx.manager.finish(record.id);
   }, 30_000);
-
-  /** Continue takes a prompt of its own, and the composer that writes it is a full composer —
-   *  so a screenshot pasted into a CLOSED run's composer has to travel the same road as one
-   *  pasted mid-session: onto disk, into the thread's bubble, and into the reopened session's
-   *  opening message as both an inline image and an absolute path. */
-  it('a Continue pasted image is saved, rendered on the bubble, and reaches the reopened session', async () => {
-    writeFileSync(stdinFile, '', 'utf8');
-    const workflow: WorkflowDef = {
-      name: 'pasted-continue-test',
-      source: 'built-in',
-      steps: [{ id: 'work', prompt: '{{task}}' }],
-    };
-    const record = manager.startRun(workflow, { task: 'do a thing' });
-    await waitForStatus(record.id, ['waiting']);
-    manager.finish(record.id);
-    await waitForStatus(record.id, ['done', 'review']);
-
-    writeFileSync(stdinFile, '', 'utf8');
-    const image: ContentBlock = {
-      type: 'image',
-      source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
-    };
-    expect(manager.continueRun(record.id, { text: 'fix what this shows', images: [image] })).toEqual({
-      ok: true,
-    });
-    await waitForStatus(record.id, ['waiting']);
-
-    const reopened = readStdinLines().find((line) => line.userText.includes('fix what this shows'));
-    expect(reopened).toBeDefined();
-    // Inline, so the model can view it…
-    expect(reopened?.imageCount).toBe(1);
-    // …and on disk, so it can operate on it.
-    const pathMatch = reopened?.userText.match(/- (.*pasted-\d+\.png)/);
-    expect(pathMatch).toBeTruthy();
-    const filePath = pathMatch?.[1] as string;
-    expect(existsSync(filePath)).toBe(true);
-    expect(readFileSync(filePath).equals(Buffer.from(TINY_PNG_B64, 'base64'))).toBe(true);
-
-    // The thread renders the bubble's image, not a bare count — and the base64 stays out of
-    // the event log, exactly as on the task-start and follow-up paths.
-    const ndjson = readFileSync(join(dataDir, 'runs', `${record.id}.ndjson`), 'utf8');
-    const userMessage = ndjson
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { type: string; text?: string; images?: string[] })
-      .find((event) => event.type === 'user-message' && event.text === 'fix what this shows');
-    expect(userMessage?.images?.[0]).toBe(`/api/v1/runs/${record.id}/images/${filePath.split('/').pop()}`);
-    expect(ndjson).not.toContain(TINY_PNG_B64);
-
-    manager.finish(record.id);
-  }, 40_000);
   it.each(['live', 'deferred', 'continuation'] as const)('delivers mixed PDF/image attachments through %s without a file runner block', async (mode) => {
-    writeFileSync(stdinFile, '');
+    writeFileSync(fx.stdinFile, '');
     const workflow: WorkflowDef = { name: 'mixed-delivery', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}}' }] };
-    const record = manager.startRun(workflow, { task: 'mixed delivery start', worktree: false });
+    const record = fx.manager.startRun(workflow, { task: 'mixed delivery start', worktree: false });
     const attachments: PastedContent[] = [
       { type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } },
@@ -578,18 +372,18 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       const deadline = Date.now() + 10_000;
       let deferred = false;
       while (!deferred && Date.now() < deadline) {
-        deferred = manager.deferMessage(record.id, [{ type: 'text', text: 'mixed delivery followup' }, ...attachments]);
+        deferred = fx.manager.deferMessage(record.id, [{ type: 'text', text: 'mixed delivery followup' }, ...attachments]);
         if (!deferred) await new Promise((resolve) => setTimeout(resolve, 1));
       }
       expect(deferred).toBe(true);
     } else {
       await waitForStatus(record.id, ['waiting']);
       if (mode === 'continuation') {
-        manager.finish(record.id);
+        fx.manager.finish(record.id);
         await waitForStatus(record.id, ['done', 'review']);
-        expect(manager.continueRun(record.id, { text: 'mixed delivery followup', images: attachments }).ok).toBe(true);
+        expect(fx.manager.continueRun(record.id, { text: 'mixed delivery followup', images: attachments }).ok).toBe(true);
       } else {
-        expect(manager.sendMessage(record.id, [{ type: 'text', text: 'mixed delivery followup' }, ...attachments])).toBe(true);
+        expect(fx.manager.sendMessage(record.id, [{ type: 'text', text: 'mixed delivery followup' }, ...attachments])).toBe(true);
       }
     }
     await waitForStatus(record.id, ['waiting']);
@@ -605,75 +399,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     expect(readFileSync(pdfPath!, 'utf8')).toBe(TINY_PDF);
     expect(message.userText).not.toContain(TINY_PDF_B64);
     expect(message.userText).not.toContain('%PDF-1.4');
-    manager.finish(record.id);
+    fx.manager.finish(record.id);
     await waitForStatus(record.id, ['done', 'review']);
   }, 40_000);
-
-  it('keeps a fresh Continue image viewable when its disk write fails', async () => {
-    writeFileSync(stdinFile, '');
-    const record = store.createRun({ title: 'image failure', workflow: 'image failure', task: 'original', steps: [] });
-    store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
-    store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
-    setRunStatus(store, record.id, RUN_STATUS.done, { worktree: false });
-    writeFileSync(join(dataDir, 'runs', `${record.id}-images`), 'not a directory');
-    expect(manager.continueRun(record.id, {
-      text: 'view this unsaved image',
-      images: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } }],
-    }).ok).toBe(true);
-    await waitForStatus(record.id, ['waiting']);
-    expect(readStdinLines().find((line) => line.userText.includes('view this unsaved image'))?.imageCount).toBe(1);
-    manager.finish(record.id);
-    await waitForStatus(record.id, ['done', 'review']);
-  }, 30_000);
-
-  it.each(['immediate', 'capacity', 'running', 'missing'] as const)(
-    'recovers fresh mixed Continue attachments after a %s pre-spawn restart', async (mode) => {
-      writeFileSync(stdinFile, '');
-      const record = store.createRun({ title: 'restart', workflow: 'restart', task: 'original', steps: [] });
-      store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
-      store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
-      setRunStatus(store, record.id, RUN_STATUS.done, { worktree: false });
-      await drainFixtureManagers(repoRoot);
-      store.close();
-      await crashAfterContinue(repoRoot, dataDir, record.id, mode, [
-        { type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 },
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 } },
-      ]);
-      store = RunStore.open(dataDir, { keepLive: true });
-      expect(store.getRun(record.id)?.status).toBe(mode === 'capacity' ? 'queued' : 'running');
-      expect(store.getRun(record.id)?.continuationMessage?.text).toBe('read my durable continuation brief');
-      expect(readStdinLines().some(line => line.userText.includes('read my durable continuation brief'))).toBe(false);
-      const directory = join(dataDir, 'runs', `${record.id}-images`);
-      expect(readdirSync(directory).sort()).toEqual(['pasted-1.pdf', 'pasted-2.png']);
-      if (mode === 'missing') rmSync(join(directory, 'pasted-1.pdf'));
-      if (mode === 'running') {
-        store.updateStep(record.id, 'continue-1', { status: STEP_STATUS.running, sessionId: 'new-session', backend: 'claude' });
-        store.close();
-        store = RunStore.open(dataDir, { keepLive: true });
-      }
-      manager = createFixtureManager(store, repoRoot);
-      await manager.recover();
-      await waitForStatus(record.id, ['waiting']);
-      const opening = readStdinLines().find((line) => line.userText.includes('read my durable continuation brief'));
-      expect(opening).toBeDefined();
-      expect(opening?.imageCount).toBe(1);
-      expect(opening?.userText).toContain(join(directory, 'pasted-2.png'));
-      if (mode === 'missing') {
-        expect(opening?.userText).not.toContain(join(directory, 'pasted-1.pdf'));
-        expect(store.readEvents(record.id).some((event) => event.type === 'note' && String(event.message).includes('pasted-1.pdf could not be read'))).toBe(true);
-      } else {
-        expect(opening?.userText).toContain(join(directory, 'pasted-1.pdf'));
-        expect(readFileSync(join(directory, 'pasted-1.pdf'), 'utf8')).toBe(TINY_PDF);
-      }
-      expect(readdirSync(directory).filter((name) => name.startsWith('pasted-')).sort()).toEqual(
-        mode === 'missing' ? ['pasted-2.png'] : ['pasted-1.pdf', 'pasted-2.png'],
-      );
-      expect(opening?.userText).not.toContain(TINY_PDF_B64);
-      expect(store.getRun(record.id)?.continuationMessage).toBeUndefined();
-      expect(RunStore.open(dataDir, { keepLive: true }).getRun(record.id)?.continuationMessage).toBeUndefined();
-      manager.finish(record.id);
-      await waitForStatus(record.id, ['done', 'review']);
-    }, 30_000,
-  );
-
 });
