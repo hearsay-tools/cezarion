@@ -789,8 +789,8 @@ jobs:
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && github.event_name == 'merge_group'
         continue-on-error: true
         env: &squeal-release
-          SQUEAL_TAG: squeal--v0.1.426
-          SQUEAL_COMMIT: f20fd5f33f682ff0895cc152af9660df2b9a848a
+          SQUEAL_TAG: squeal--v0.1.431
+          SQUEAL_COMMIT: 2778dc03fce20f40e743c49e860c32f1fd06a277
         run: &fetch-squeal |
           git clone --quiet --depth 1 --branch "$SQUEAL_TAG" https://github.com/hearsay-tools/squeal.git "$RUNNER_TEMP/squeal"
           test "$(git -C "$RUNNER_TEMP/squeal" rev-parse HEAD)" = "$SQUEAL_COMMIT"
