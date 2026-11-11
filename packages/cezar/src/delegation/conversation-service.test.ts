@@ -6,7 +6,8 @@ import {
   WAIT_SOURCE,
   WAIT_VIA,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setRunStatus, runPersistence } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

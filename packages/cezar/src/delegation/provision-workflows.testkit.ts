@@ -1,7 +1,8 @@
 import { testHome } from '../home/test-home.testkit.ts';
 import { registrationGroups } from '../core/registration-coverage.testkit.ts';
 import type { Caller } from './credentials.ts';
-import { setRunStatus, openTestRunStore } from '../runs/run-store.testkit.ts';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
+import { openTestRunStore } from '../runs/run-store-open.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager, fixtureWork, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { type WorkerSpawnRequest } from '@open-mercato/cezar-contract/delegation';

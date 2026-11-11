@@ -1,7 +1,7 @@
 id: run-store-testkit-import
 language: TypeScript
 severity: warning
-message: Production must use RunStore.move for status changes; run-store.testkit is for fixtures only.
+message: Production must use RunStore.move for status changes; run-store.testkit and run-store-open.testkit are for fixtures only.
 files:
   - packages/cezar/src/**/*.ts
 ignores:
@@ -16,4 +16,4 @@ rule:
     - has:
         kind: string
         stopBy: end
-        regex: 'run-store\.testkit(\.ts|\.js)?["'']$'
+        regex: 'run-store(-open)?\.testkit(\.ts|\.js)?["'']$'
