@@ -65,7 +65,7 @@ Two facts decide the shape:
    duties. CI runs them.
 4. The changed-function quality check (`.ai/skills/check-code-quality/`) runs beside the
    push, like the reviewer, until hearsay-tools/squeal#190 lets it reuse imported coverage.
-   Its findings follow the rules of § Review.
+   An incomplete report blocks, as the skill's pre-PR guidance says; § Merge waits for it.
 5. The agent opens the PR ready, not draft.
 
 Regression proof (`docs/sdlc/regression-proof.md`) stays. It is part of writing the test.
@@ -96,6 +96,11 @@ The rule text lives in the owner's Cezar prompt, outside this repository (§ Own
 4. A full fallback runs on 8 Vitest and 8 browser shards.
 5. Docs-only and infra-only changes keep today's skips.
 
+`scripts/e2e-affected.mjs` reads the spec map that `.github/workflows/e2e-spec-map.yml`
+captures after source changes reach `main`. That workflow runs the browser specs again,
+outside the merge path and the required checks. It stays as it is: it costs runner time,
+not merge time. Without a map, the selector picks every spec, which is the full fallback.
+
 The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
 `docs/sdlc/ci.md`), because a PR run with selected tests is not a full run.
 
@@ -106,7 +111,8 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
    admission uses current-head CodeRabbit admission without the 180 s window, as it does
    today for such PRs.
 2. For a PR that qualifies for auto-merge, the agent arms `gh pr merge --auto --squash`
-   once the review round has no blocking finding. GitHub enqueues the PR when the required
+   once the review round has no blocking finding and the changed-function quality report
+   for the current head is complete with no blocker. GitHub enqueues the PR when the required
    checks pass. Other PRs wait for the owner, as today.
 
 ### Queue (about 10 minutes)
@@ -121,7 +127,12 @@ The queue no longer reuses PR suites (§ Merge queue and exact-commit reuse in
    too, into the same parts, so the export records the final result of each file. The
    export's shard pattern, its condition and `.github/scripts/ci-squeal-results.workflow.test.cjs`
    change with the shard count.
-4. A merged commit with no `refs/squeal/<sha>` within 30 minutes gets a warning in the
+4. Every reader of the shard job names changes with the count in the same change: the
+   required and skipped rosters in `.github/scripts/queue-ci-proof.cjs` (with four-shard
+   names it rejects the queue proof, and `main` repeats the full verification),
+   `.github/scripts/fetch-ci-results.cjs` and the workflow parity tests that expand the
+   matrices.
+5. A merged commit with no `refs/squeal/<sha>` within 30 minutes gets a warning in the
    `main` push run summary. Publication stays outside the required checks.
 
 ### `main`
