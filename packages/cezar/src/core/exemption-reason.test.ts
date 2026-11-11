@@ -23,7 +23,9 @@ describe('exemptionReasonProblem', () => {
     ['TBD', 'TBD'],
     ['The mock does not answer this scenario; we add it later.', 'later'],
     ['Skipped for now.', 'for now'],
-    ['The runner does not yet send this frame.', 'not yet'],
+    ['The runner does not yet send this frame.', 'yet'],
+    ['Not supported yet.', 'yet'],
+    ['The cockpit cannot read this fact from the wire yet.', 'yet'],
   ])('refuses a put-off reason: %s', (reason, wording) => {
     expect(exemptionReasonProblem(reason)).toBe(`"${wording}" says the work is put off; name what the wire cannot carry`);
   });
