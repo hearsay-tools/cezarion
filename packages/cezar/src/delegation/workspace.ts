@@ -1,11 +1,12 @@
 import { projectPaths, fallbackProjectWriteError } from '../project-paths.ts';
 import { inspectGeneration } from './process-liveness.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
-import { windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } from './windows-workspace-identity.ts';
+import { identityFileStore } from './identity-file-store.ts';
+import { entryExists as exists } from './entry-exists.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { mkdtemp, open, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize } from 'node:path';
 import { z } from 'zod';
@@ -20,8 +21,6 @@ import type { RunRecord } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
 
 const RECEIPT_CAP = 16_384;
-// Filesystem primitives belong to the host that loaded this module.
-const windowsIdentities = process.platform === 'win32';
 // Identify owned branches by tip and reflog contents, not inode identity.
 // Keep file/logFile fields for older strict checkpoint readers.
 const fileIdentitySchema = z.object({ dev: z.number(), ino: z.number(), birthtimeMs: z.number() }).strict();
@@ -65,12 +64,7 @@ async function writeCleanup(path: string, value: Cleanup, assertCurrent?: () => 
 }
 async function replaceIdentityFile(path: string, content: string, assertCurrent?: () => void): Promise<void> {
   assertCurrent?.();
-  if (windowsIdentities) { windowsWriteIdentity(path, content, true); return; }
-  if (await exists(path)) await readIdentityFile(path, RECEIPT_CAP);
-  assertCurrent?.();
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeIdentityFile(temporary, content);
-  try { assertCurrent?.(); await rename(temporary, path); } finally { await rm(temporary, { force: true }); }
+  await identityFileStore().replace(path, content, RECEIPT_CAP, assertCurrent);
 }
 
 type Receipt = z.infer<typeof receiptSchema>;
@@ -93,12 +87,6 @@ async function checkedGit(cwd: string, args: string[], index?: string): Promise<
 /** The repository's shared Git directory (where refs, reflogs and linked-worktree admin dirs live), resolved. */
 export async function gitCommonDir(cwd: string): Promise<string> {
   return realpath(await checkedGit(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
-}
-async function exists(path: string): Promise<boolean> {
-  return lstat(path).then(() => true, (error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return false;
-    throw error;
-  });
 }
 
 /** Reads only committed state in the server-known parent cwd; never flushes its edits. */
@@ -154,19 +142,7 @@ async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, cre
 }
 async function receiptDirectory(repoRoot: string, create: boolean): Promise<string> {
   const dir = join(await gitCommonDir(repoRoot), 'cezar-owned-workspaces');
-  if (windowsIdentities) {
-    windowsIdentityDirectory(dir, create);
-    return dir;
-  }
-  if (create) await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
-    if (error.code !== 'EEXIST') throw error;
-  });
-  if (await exists(dir)) {
-    const info = await lstat(dir);
-    if (!info.isDirectory() || info.isSymbolicLink() || await realpath(dir) !== dir || (info.mode & 0o077) !== 0) {
-      throw new Error('Unsafe owned workspace receipt directory');
-    }
-  }
+  await identityFileStore().directory(dir, create);
   return dir;
 }
 /** The receipt and cleanup checkpoint files in the repository's shared receipt directory, checked
@@ -184,24 +160,11 @@ export function readOwnedWorkspaceRecord(path: string): Promise<string> {
 export function replaceOwnedWorkspaceRecord(path: string, content: string): Promise<void> {
   return replaceIdentityFile(path, content);
 }
-async function readIdentityFile(path: string, cap: number, privateParent = true): Promise<string> {
-  if (windowsIdentities) return windowsReadIdentity(path, cap, privateParent);
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe owned workspace identity file');
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  try {
-    const opened = await file.stat();
-    if (!opened.isFile() || opened.size > cap || (opened.mode & 0o077) !== 0) throw new Error('Unsafe owned workspace identity file');
-    const buffer = Buffer.alloc(cap + 1);
-    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-    if (bytesRead > cap) throw new Error('Oversized owned workspace identity file');
-    return buffer.subarray(0, bytesRead).toString('utf8');
-  } finally { await file.close(); }
+function readIdentityFile(path: string, cap: number, privateParent = true): Promise<string> {
+  return identityFileStore().read(path, cap, privateParent);
 }
-async function writeIdentityFile(path: string, content: string, privateParent = true): Promise<void> {
-  if (windowsIdentities) { windowsWriteIdentity(path, content, false, privateParent); return; }
-  const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  try { await file.writeFile(content); await file.sync(); } finally { await file.close(); }
+function writeIdentityFile(path: string, content: string, privateParent = true): Promise<void> {
+  return identityFileStore().write(path, content, privateParent);
 }
 async function readReceipt(path: string): Promise<Receipt | undefined> {
   if (!await exists(path)) return undefined;

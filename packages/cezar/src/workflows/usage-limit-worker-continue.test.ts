@@ -2,7 +2,7 @@ import { ensureOwnedWorkspace } from '../delegation/workspace.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
-import { manager, parent, root, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { manager, parent, root, store, until, useWorkerWaitFixture, worker } from './worker-wait-claude.testkit.ts';
 
 /** A human Continue of an owned worker on a usage-limit hold joins the line (hearsay-tools/cezarion#1236).
  *  Its execution must be reserved unadmitted, or `canLeaveLine` refuses it forever: the pump admits it. */

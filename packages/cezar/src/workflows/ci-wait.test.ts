@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type Wait } from '@open-mercato/cezar-contract/waits';
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
-import { controlledWire, manager, parent, root, restart, store, until, worker, waitOf, useWorkerWaitFixture, work, toolGenerationOf, reopenRuntime } from './worker-wait.testkit.ts';
+import { controlledWire, manager, parent, root, restart, store, until, worker, waitOf, useWorkerWaitFixture, work, toolGenerationOf, reopenRuntime } from './worker-wait-claude.testkit.ts';
 
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 
