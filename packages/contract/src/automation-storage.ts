@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { completionControlsShape, taskAccessShape } from './task-options.ts';
 import { automationKindSchema, automationHistoryScanSchema } from './automations.ts';
 import { automationScheduleSchema, type AutomationSchedule } from './automation-schedule.ts';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
 const RUNNER_IDS = runnerSchema.options;
 import { workflowStepDefSchema as workflowStepSchema } from './workflows.ts';
 
