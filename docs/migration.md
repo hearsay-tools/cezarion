@@ -5,6 +5,57 @@ This guide describes the release with `REBRAND_SWITCH` enabled. It does not
 instruct you to change that internal switch. Release operators must follow the
 [publishing runbook](publishing.md).
 
+## Release notes
+
+What changes in the Squawk release:
+
+- **Command.** The CLI is `hsq`. The old `cez` and `cezarion` commands still work
+  during the deprecation window. Each process started through an old name prints
+  one notice to stderr; JSON on stdout stays valid.
+- **Package.** The npm package is `@hearsay-tools/squawk`, with the unscoped alias
+  `hsq`. During the window, `@wjarka/cezarion` and `cezarion` releases forward to
+  the same version of the new package.
+- **Environment.** Settings use `HSQ_*` names. A `CEZ_*` name still works as a
+  fallback, and boot prints one warning that lists the old names that are set
+  (names only, never values). `CEZ_HOME` stays supported after the window.
+- **Home.** At its first start, the new build moves the home from `~/.cezar`
+  (or `CEZ_HOME`) to the platform layout (XDG on Linux, `~/Library` on macOS,
+  `%APPDATA%` and `%LOCALAPPDATA%` on Windows). It first saves a full backup
+  archive. Registry and account files then get rotating backups. A recovery
+  banner shows a reset or an outside write. The old home stays in place as a
+  canary: a later write there shows a banner row that can import it.
+- **Projects.** The cockpit moves each registered project's `.ai/cezar/` state to
+  `.ai/squawk/` at start, when the project is idle. A busy project stays in place,
+  is served from both folders and moves at a later start. `hsq migrate-project`
+  moves a project offline. Tracked files under `.ai/cezar/` (workflows, skills,
+  `context.yaml`) are not moved: the move prints the `git mv` commands for you to
+  commit. A new project starts in `.ai/squawk/`.
+- **Servers.** An install made with `server-install` does not migrate at boot.
+  It keeps the old home until you run `hsq server-migrate`.
+- **Desktop and mobile.** The apps get new IDs. A bridge build of the old desktop
+  app installs the new app and hands over its state. The mobile app is a new
+  store listing.
+- **Older binaries.** An older build opens `.ai/cezar/` directly. It does not see
+  the tasks of a project that a newer cockpit moved, but no data is lost.
+
+The deprecation window is two minor releases or 60 days, whichever is later
+([details](#rollback-and-the-deprecation-window)). After it, the old command
+names and the `CEZ_*` fallbacks go, except `CEZ_HOME`. Boot still logs any
+`CEZ_*` name that is set, so no setting is lost silently.
+
+### Release steps for the owner
+
+The switch PR merges first. Then the owner:
+
+1. publishes the stable release;
+2. publishes `@hearsay-tools/squawk` and `hsq`, then the exact-pinned forwarding
+   releases `@wjarka/cezarion` and `cezarion` of the same version
+   ([publishing runbook](publishing.md#owner-runbook-for-the-npm-rename));
+3. renames the repository to `hearsay-tools/squawk`;
+4. publishes the desktop and mobile store listings for the new IDs;
+5. runs `hsq server-migrate` on each server install that `server-install`
+   recorded.
+
 ## Install and command names
 
 ```sh
@@ -46,9 +97,31 @@ caches and temporary files are excluded from that archive. Managed versions
 are copied separately and launchers are rewritten. Unknown files stay in the
 old home. Read the plan for deferred or excluded account directories.
 
-Project state stays in `.ai/cezar/`. This release does not move `runs.db`, run
-logs, worktrees, workflows or project skills to `.ai/squawk/`. Keep those paths
-in scripts and do not rename the directory by hand.
+Project state moves separately; see [project folders](#project-folders).
+
+## Project folders
+
+Each project keeps its state in `.ai/squawk/` (runs, logs, worktrees, artifacts).
+A project that has no `.ai/cezar` path starts there. For a project that has one,
+the cockpit moves the state at start when nothing else uses the project: no other
+cockpit, live task, headless run or automation lease. When something is live, the
+project stays in place, the cockpit serves it from both folders, logs what blocks
+the move and tries again at the next start. A finished move logs the `git mv`
+commands for tracked files.
+
+To move a project yourself, stop its cockpit and run:
+
+```sh
+hsq migrate-project --dry-run
+hsq migrate-project
+```
+
+The command refuses while a cockpit or a task of the project is live, and names
+what to stop. It never moves tracked files under `.ai/cezar/` (workflows, skills,
+`context.yaml`): it prints the `git mv` commands, and you commit them. Until you
+do, the project reads those files from `.ai/cezar/`. Do not rename the directory
+by hand, and keep older binaries off a project while it moves. An older binary
+opens `.ai/cezar/` directly and does not see the tasks of a moved project.
 
 ## Inspect and migrate a local install
 
@@ -209,7 +282,7 @@ Hosted mode is an exception: `HSQ_REMOTE=1` or `CEZ_REMOTE=1` enables it.
 Native sidecar controls have their own precedence; do not configure them.
 
 After the window, old binaries and ordinary env fallbacks are scheduled for
-removal in the cleanup release. `CEZ_HOME` keeps its permanent fallback. Do not
-assume that the window ending renames `.ai/cezar/`; project migration is a
-separate, opt-in step. Keep the old home until account deferrals and recovery
-notices are resolved.
+removal in the cleanup release. `CEZ_HOME` keeps its permanent fallback. The
+window ending does not rename `.ai/cezar/`: a project moves at an idle cockpit
+start or with `hsq migrate-project`. Keep the old home until account deferrals
+and recovery notices are resolved.

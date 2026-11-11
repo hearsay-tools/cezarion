@@ -40,8 +40,8 @@ npx hsq         # → cockpit at http://localhost:4321
 ```
 
 That's the whole setup. If your `claude` CLI is logged in (Pro/Max) and `gh` is
-authenticated, there is nothing else to configure. State lives in `.ai/cezar/`
-inside your repo: your runs in one embedded SQLite file (`runs.db`, built into
+authenticated, there is nothing else to configure. State lives in `.ai/squawk/`
+inside your repo (`.ai/cezar/` in a project that has not moved yet): your runs in one embedded SQLite file (`runs.db`, built into
 Node: no server, no install, no config), event logs in NDJSON and journals in
 Markdown. Everything except the run file you can `cat` and fix by hand.
 
@@ -61,7 +61,8 @@ those locks, so avoid one while an update is preparing or restarting.
 Upgrading from Cezarion? Read the [migration guide](docs/migration.md) before
 moving a desktop, server or custom-home install. User paths such as `<config>`
 and `<state>` below refer to its [platform roots](docs/migration.md#home-directories).
-Project state remains in `.ai/cezar/`. Release operators use the [publishing runbook](docs/publishing.md).
+A cockpit moves each idle project's state from `.ai/cezar/` to `.ai/squawk/` at start
+([project folders](docs/migration.md#project-folders)). Release operators use the [publishing runbook](docs/publishing.md).
 
 ## A look inside
 
@@ -221,7 +222,7 @@ Type a task, pick a workflow, hit **Start**. That's it.
 
 ```bash
 npx hsq run "add a --json flag to the export command"   # headless, CI-friendly
-npx hsq init                                            # scaffold .ai/cezar/
+npx hsq init                                            # scaffold .ai/squawk/
 ```
 
 For a global install, run `npm i -g @hearsay-tools/squawk`, then use `hsq`.
@@ -428,8 +429,8 @@ One `hsq serve` hosts **every repo you work in**, not just the one you started
 it in. Each repo Squawk boots in registers itself in a per-user registry at
 `<config>/config.json` — the workspace file that also holds the global knobs
 (the parallel cap, the memory ceiling, the browse root, and the checkout root). Nothing is added to
-the repo: per-project state stays exactly where it was, in that repo's
-`.ai/cezar/`.
+the repo: per-project state stays in that repo's `.ai/squawk/` (or `.ai/cezar/`
+until the project moves).
 
 Every view is project-scoped:
 

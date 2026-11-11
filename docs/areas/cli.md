@@ -50,11 +50,12 @@ path the migration moved: `artifact publish` refuses (exit 1, nothing written, n
 recreating the old directory) when its `CEZ_ARTIFACTS_DIR` or its task's handoff file moved to
 `.ai/squawk/` (`movedProjectPath`); the task gets its new paths when it continues.
 
-## Staged `migrate-project`
+## `migrate-project`
 
 `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is registered,
-listed in help and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it is an
-unknown command and its module is never loaded. Only the user runs it, and it runs
+listed in help and dispatched exactly when `REBRAND_SWITCH` is true, as it is since the
+switch release; a build with the switch off treats it as an unknown command and never loads
+its module. Only the user runs it, and it runs
 offline: it refuses while a cockpit serves the project (the `cockpit.lock` owner, or a live
 cockpit of the user's legacy or split home whose registry lists the project) or any task of it is live, and
 names each pid, URL, port or task to stop. It cannot see a cockpit of another home that
@@ -103,12 +104,12 @@ description names it only as `hsq job start`, because the tool list also loads i
 
 ## Legacy home recovery
 
-Behind `REBRAND_SWITCH`, the host operator can use `hsq backup import <file>` or
+The host operator can use `hsq backup import <file>` or
 `hsq backup ignore <file>` for a legacy-change row. Both use the same recovery
 writer as the cockpit. Import applies legacy deltas after a required backup;
 Ignore keeps the live file. Both record the current legacy hash and next merge
 base. Deleted legacy files allow Ignore only. `hsq backup --help` lists these
-actions only when the switch is enabled; both refuse while it is disabled.
+actions. A build with the release switch off omits them from help and refuses both.
 
 Remote-settings grants remain host-CLI-only, even for a local cockpit. Their
 legacy banner rows show these commands. Existing `backup list` and `backup

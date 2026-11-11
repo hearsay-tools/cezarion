@@ -333,7 +333,7 @@ The archive writes one gzip member per tar entry, followed by tar end blocks.
 This standard concatenated gzip stream bounds buffers by the largest file,
 while retaining legacy journal history and backups in the archive.
 
-## Legacy home canary (staged)
+## Legacy home canary
 
 The canary shares the recovery snapshot, journal and demand-owned watchers. It runs
 only with `REBRAND_SWITCH` enabled and a committed marker with `migratedFrom`.
@@ -366,5 +366,5 @@ Remote sessions see the global banner read-only, with the existing host instruct
 Legacy grant rows remain read-only in every cockpit. The host operator resolves
 them with `hsq backup import remote-settings/<id>.json` or `hsq backup ignore
 remote-settings/<id>.json`. The banner shows Import only for an importable source
-and always names Ignore. These staged CLI actions use the same recovery writer
-and are unavailable while the release switch is disabled.
+and always names Ignore. These CLI actions use the same recovery writer. A build
+with the release switch off refuses them.

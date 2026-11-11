@@ -118,8 +118,11 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    entry points call `resolveHome({ purpose })` once and pass a `Home` object down. Tests
    build `Home.sandbox(tmpdir)`. A module that needs a path and has no `Home` cannot get one.
 3. **Install marker.** The config dir holds `install.json`
-   (`{ installId, kind: "live" | "dev" | "test", createdAt, migratedFrom? }`). Only
-   `serve`, `init` and the migration create a `live` marker. One `HomeStore` writer handles
+   (`{ installId, kind: "live" | "dev" | "test", createdAt, migratedFrom? }`). The migration
+   writes the `live` marker of a migrated home. Without one, every home-writing entry (serve,
+   init, run, backup restore, the first authorized registry write) creates the fresh `live`
+   marker on its first authorized write; read-only and invalid commands create no marker and
+   write nothing (section 4 step 1). One `HomeStore` writer handles
    every registry-type write and refuses:
    - a write to a home whose marker is `live` from a process that runs under a test runner
      (`VITEST`, `NODE_TEST_CONTEXT`, `JEST_WORKER_ID`, `STRYKER_*`), whatever the env object
@@ -168,8 +171,8 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    first authorized registry write) record the fresh decision and write a `live` marker
    in the new home. A deferred first write that finds a legacy server install refuses
    and names `hsq server-migrate`. Never create the absent legacy directory to publish `MOVED.json`. An
-   existing empty legacy directory keeps the committed empty inventory and
-   `MOVED.json`. Later legacy data reaches the canary and is never copied over
+   existing empty legacy directory gets a committed marker (an empty inventory) and
+   `MOVED.json`, so a later legacy write reaches the canary and is never copied over
    the fresh home. Before a split marker exists, `hsq backup list` reads legacy
    backups without migration or writes. Every later lock and marker of this migration lives in the resolved legacy
    home.

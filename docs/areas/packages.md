@@ -22,7 +22,7 @@ Rules that follow from that:
 - npm release identities come from `home/identity.ts`. With the rebrand switch
   enabled, publication projects the new scoped name into a disposable pack copy;
   source workspace names remain unchanged so builds and version-only bump PRs
-  still work. See [publishing](../publishing.md#staged-package-identity).
+  still work. See [publishing](../publishing.md#package-identity).
 
 - **The CLI is not a separate package and should not become one.** It is the same program as the service — `packages/cezar/src/index.ts` boots `startServer`, but also `RunManager`, the workspace registry and the worktree machinery, and `hsq run` executes a workflow with no server at all.
 - A dependency belongs to the workspace that imports it. The root carries only what spans all four (`typescript`, `vitest`, `tsx`). A build script counts as an importer: `scripts/inline-contract.mjs` reaches for `esbuild`, so `esbuild` is a devDependency of `packages/cezar` rather than something inherited from whatever vite happens to hoist.

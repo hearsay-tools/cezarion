@@ -100,7 +100,7 @@ plus start-token liveness and token-checked release.
 
 `packages/cezar/src/project-migration/` (P4b2, hearsay-tools/cezarion#3088) moves a
 project's runtime state from `.ai/cezar/` to `.ai/squawk/`. P4b3 wires `migrateProject`
-into the offline `migrate-project`, behind `REBRAND_SWITCH`, and `resumeProjectMigration` into
+into the offline `migrate-project` (registered with the release switch on) and `resumeProjectMigration` into
 every project entry ([below](#project-migration-command-and-early-recovery)).
 
 - **Fence.** It runs only under a fence its own process holds (`holdsProjectFence`), and
@@ -195,8 +195,8 @@ every project entry ([below](#project-migration-command-and-early-recovery)).
 P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
 
 - **Command.** `migrate-project [--dry-run] [--repo <dir>]` (`project-migration/cli.ts`) is
-  registered, advertised and dispatched exactly when `REBRAND_SWITCH` is true; as shipped it
-  is an unknown command. Only the user runs it, with the cockpit stopped: it covers CLI-only
+  registered, advertised and dispatched exactly when `REBRAND_SWITCH` is true; with the
+  switch off it is an unknown command. Only the user runs it, with the cockpit stopped: it covers CLI-only
   users and projects the automatic move left in place. Tests pass the switch as a parameter
   (`loadSubcommand`, `main`); the constant never changes.
 - **Offline run.** `migrateProjectOffline` (`project-migration/offline.ts`): refuse while
