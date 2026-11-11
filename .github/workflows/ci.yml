@@ -861,7 +861,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
-    # Runs the queued code (install, server build, `ci export`), so it only reads.
+    # Runs the queued code (install, `ci export`), so it only reads.
     permissions:
       contents: read
 
@@ -976,7 +976,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
 
-    # Runs the dispatched code (install, server build, the gate's own test runs), so it only reads.
+    # Runs the dispatched code (install, the gate's own test runs), so it only reads.
     permissions:
       contents: read
 
