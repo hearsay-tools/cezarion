@@ -12,7 +12,7 @@ import { thenSay, toolCall } from './waits-parity.testkit.ts';
 import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, semaphore, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /** hearsay-tools/cezarion#1327: the single-runner paths of the park notice. The RUNNER_IDS cells
- *  U3n, U3r and U3d (`waits-parity-cells.testkit.ts`) pin it on every native wire. */
+ *  U3n, U3r and U3d (`waits-parity-mixed-cells.testkit.ts`) pin it on every native wire. */
 describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1327)', { timeout: 45_000 }, () => {
   afterEach(() => vi.restoreAllMocks());
   useWorkerWaitFixture();

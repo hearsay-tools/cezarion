@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { runnerSchema } from './health.ts';
+import { runnerSchema } from './runner.ts';
 
 /**
  * The agent-config surface (spec #404): the settings / memory / MCP files the installed agent
