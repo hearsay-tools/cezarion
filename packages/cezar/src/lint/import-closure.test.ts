@@ -14,6 +14,14 @@ describe('runtimeImports', () => {
     ["export type { H } from './h.ts';", []],
     ["// import { i } from './i.ts';", []],
     ["const j = \"import('./j.ts')\";", []],
+    // A property or method named `import` is not the import keyword.
+    ['const k = loader.import(name);', []],
+    ['const l = loader?.import(name);', []],
+    ['const m = { import(name) { return name; } };', []],
+    ['class N { async import(name: string) { return name; } }', []],
+    ['class O {\n  import(name: string): string { return name; }\n}', []],
+    ["const p = ready ? await import('./p.ts') : undefined;", ['./p.ts']],
+    ["import('./q.ts');\n{ import('./r.ts'); }", ['./q.ts', './r.ts']],
   ])('reads %s', (source, expected) => {
     expect(runtimeImports(source)).toEqual(expected);
   });

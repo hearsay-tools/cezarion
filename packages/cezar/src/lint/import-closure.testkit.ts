@@ -15,6 +15,26 @@ function dynamicSpecifier(source: string, start: number): string {
 }
 
 /**
+ * Whether the `import(` at `at` in the blanked `code` is the import keyword: a property call
+ * (`loader.import(x)`, `loader?.import(x)`) and a method definition (`import(x) { … }`) are not.
+ */
+function isImportCall(code: string, at: number, argStart: number): boolean {
+  if (/\.\s*$/.test(code.slice(0, at))) return false;
+  let depth = 1;
+  let end = argStart;
+  while (end < code.length && depth > 0) {
+    if (code[end] === '(') depth++;
+    else if (code[end] === ')') depth--;
+    end++;
+  }
+  // A method's parameter list is followed by its body, or by a TypeScript return type where the
+  // method starts a member. A `:` after a call is a ternary or object value: `c ? import('a') : b`.
+  const after = code.slice(end);
+  if (/^\s*\{/.test(after)) return false;
+  return !(/^\s*:/.test(after) && /(?:^|[{;},*]|\b(?:async|static|get|set))\s*$/.test(code.slice(0, at)));
+}
+
+/**
  * Every module specifier `source` imports for its values; type-only imports are erased. A dynamic
  * `import()` whose specifier is not one literal throws: a closure pin that skipped it would fail
  * open.
@@ -27,7 +47,7 @@ export function runtimeImports(source: string): string[] {
     if (match[1]) continue;
     const start = match.index + match[0].length;
     if (match[2]) found.push(source.slice(start, source.indexOf(source[start - 1]!, start)));
-    else found.push(dynamicSpecifier(source, start));
+    else if (isImportCall(code, match.index, start)) found.push(dynamicSpecifier(source, start));
   }
   return found;
 }
