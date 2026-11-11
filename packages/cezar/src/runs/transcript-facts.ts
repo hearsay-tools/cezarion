@@ -2,6 +2,7 @@
  * Incremental transcript facts for delivery and delegation reconciliation. Keep history
  * authoritative and sidecars rebuildable; avoid whole-transcript reads on hot paths.
  */
+import { logPrefix } from '../home/display.ts';
 import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { RunEvent } from '@open-mercato/cezar-contract';
@@ -178,7 +179,7 @@ export class TranscriptFactsIndex {
       rmSync(tmp, { force: true });
       if (!this.warnedWrite.has(runId)) {
         this.warnedWrite.add(runId);
-        console.warn(`[cez] could not save transcript facts for ${runId}: ${(error as Error).message}`);
+        console.warn(`${logPrefix()} could not save transcript facts for ${runId}: ${(error as Error).message}`);
       }
     }
   }

@@ -3,6 +3,7 @@
  * .ai/specs/2026-11-03-run-store-owns-exits.md): one `run cancelled` per cancellation. `RunStore`
  * keeps one of these and asks it, at each exit it applies, whether that write owes the event.
  */
+import { logPrefix } from '../home/display.ts';
 import type { RunStatus } from '@open-mercato/cezar-contract';
 import { exitEvent, RUN_CANCELLED, settlesRun, type ExitCall, type RunExitId } from './run-exits.ts';
 
@@ -37,6 +38,6 @@ export class ExitEvents {
    *  still has to interrupt its session, and never stops the store from opening. */
   write(id: string, message: string): void {
     this.written.add(id);
-    try { this.append(id, { type: 'lifecycle', message }); } catch (error) { console.warn(`[cez] run ${id}: lifecycle event "${message}" not written: ${String(error)}`); }
+    try { this.append(id, { type: 'lifecycle', message }); } catch (error) { console.warn(`${logPrefix()} run ${id}: lifecycle event "${message}" not written: ${String(error)}`); }
   }
 }

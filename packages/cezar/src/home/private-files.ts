@@ -1,9 +1,10 @@
+import { POWERSHELL, powershellEnv } from '../detached-process.ts';
 import { execFileSync } from 'node:child_process';
 import { REBRAND_SWITCH } from './switch.ts';
 import type { HomeLayout } from './kind-roots.ts';
 import { randomBytes } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 export interface PrivateFileOptions {
   platform?: NodeJS.Platform;
@@ -27,7 +28,7 @@ $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User;
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', '${inheritance}', 'None', 'Allow');
 $acl.AddAccessRule($rule);
 Set-Acl -LiteralPath ${literal} -AclObject $acl;`;
-  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: 'pipe' });
+  execFileSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script], { env: powershellEnv(), windowsHide: true, stdio: 'pipe' });
 }
 
 const protectedDirectories = new Map<string, { dev: bigint; ino: bigint }>();
@@ -53,18 +54,29 @@ function protectDirectoryOnce(path: string, options: PrivateFileOptions, created
   if (identity) protectedDirectories.set(canonical, identity);
 }
 
+/** The directories from `path`'s nearest existing ancestor down to `path`, outermost first. */
+function missingDirectories(path: string): string[] {
+  const missing: string[] = [];
+  for (let directory = resolve(path); !existsSync(directory);) {
+    missing.unshift(directory);
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return missing;
+}
+
 export function privateDirectory(path: string, options: PrivateFileOptions = {}): void {
+  // Walk from `path` itself: on Windows the first-created path that mkdirSync returns does not
+  // share `path`'s form, so a walk relative to it named a drive as a child directory.
+  const missing = missingDirectories(path);
   const created = mkdirSync(path, { recursive: true, mode: 0o700 });
-  if (!created) { protectDirectoryOnce(path, options, false); return; }
-  syncDirectory(dirname(created));
-  let directory = created;
-  for (const part of relative(created, path).split(/[\\/]/).filter(Boolean)) {
+  if (!created || !missing.length) { protectDirectoryOnce(path, options, false); return; }
+  syncDirectory(dirname(missing[0]!));
+  for (const directory of missing) {
     protectDirectoryOnce(directory, options, true);
     syncDirectory(directory);
-    directory = join(directory, part);
   }
-  protectDirectoryOnce(directory, options, true);
-  syncDirectory(directory);
 }
 
 export function atomicTmpPath(path: string): string {

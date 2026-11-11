@@ -1,3 +1,4 @@
+import { POWERSHELL, powershellEnv } from '../detached-process.ts';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -122,7 +123,7 @@ function writerDiagnostic(files: MigrationFile[]): Error {
     const args = process.platform === 'win32'
       ? ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | Format-List']
       : ['-axo', 'pid=,command='];
-    const output = execFileSync(process.platform === 'win32' ? 'powershell.exe' : 'ps', args, { encoding: 'utf8', timeout: 5_000 });
+    const output = execFileSync(process.platform === 'win32' ? POWERSHELL : 'ps', args, { env: powershellEnv(), encoding: 'utf8', timeout: 5_000 });
     processes = output.split('\n').filter(line => /cezarion|\bcez\b|@wjarka\/cezarion/.test(line)).join('\n') || 'none found';
   } catch { /* The changed filename remains useful when process enumeration is unavailable. */ }
   return new Error(`Legacy files kept changing after three checks: ${files.map(file => file.path).join(', ')}. Stop older binaries and retry. Running processes (pid and command):\n${processes}`);

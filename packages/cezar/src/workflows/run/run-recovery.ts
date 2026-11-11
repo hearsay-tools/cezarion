@@ -1,3 +1,4 @@
+import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { atContinue } from './launch-read-resolver.ts';
@@ -261,7 +262,7 @@ export class RunRecovery {
     this.host.humanWaits.withdrawCezarHumanWaits(runId);
     if (WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {})).length) return false;
     return this.host.waitEngine.open(runId, undefined, WAIT_KINDS.human.recoveredEntry(askSeq), {
-      withdraw: false, onCommitFailure: { log: '[cez] human wait checkpoint failed' }, park: false,
+      withdraw: false, onCommitFailure: { log: `${logPrefix()} human wait checkpoint failed` }, park: false,
     }).status === 'opened';
   }
 
@@ -277,7 +278,7 @@ export class RunRecovery {
     try {
       return this.context.store.commitOutcome(runId, { kind: 'answered', waitIds: legacy.map(wait => wait.id) }).answered.length > 0;
     } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`${logPrefix()} human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }

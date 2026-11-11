@@ -1,3 +1,4 @@
+import { logPrefix } from './display.ts';
 import { lstatSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
@@ -18,7 +19,7 @@ export function protectedRootsFor(accountHome: string, env: { TMPDIR?: string | 
  */
 export function accountProtectedRoots(): string[] {
   const accountHome = userInfo().homedir;
-  if (!accountHome || !isAbsolute(accountHome)) throw new Error('[cez] the OS gives no absolute account home');
+  if (!accountHome || !isAbsolute(accountHome)) throw new Error(`${logPrefix()} the OS gives no absolute account home`);
   return protectedRootsFor(accountHome, { TMPDIR: process.env.TMPDIR }, nativePathPlatform);
 }
 
@@ -74,7 +75,7 @@ export function assertOutsideAccountHome(path: string, refusal: () => Error): vo
 /** A test install marker belongs to a sandbox. Refuse an account root in every process, test runner or not. */
 export function assertTestHomeOutsideAccountHome(root: string): void {
   assertOutsideAccountHome(root, () => new Error(
-    `[cez] refusing to write a test install marker to ${root}: it is the account's real cezar home, ` +
+    `${logPrefix()} refusing to write a test install marker to ${root}: it is the account's real cezar home, ` +
       'or the OS gives no account home to check it against. ' +
       'Use a sandbox directory for a test home.',
   ));

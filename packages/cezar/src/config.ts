@@ -3,7 +3,7 @@ import { assertProjectWritable, projectAdmissionRefusal } from './server/cockpit
 import type { Home } from './home/home.ts';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { loadWorkspaceConfig, type WorkspaceConfig } from './workspace/config.ts';
 import { RUNNER_IDS } from './core/agent-runner.ts';
@@ -219,9 +219,10 @@ function withoutRefused(raw: Record<string, unknown>, path: readonly PropertyKey
   return next;
 }
 
-/** Why `.ai/cezar/config.json` cannot be read, as the Skills page shows it. */
-function configIssue(error: unknown): string {
-  return `.ai/cezar/config.json cannot be read: ${error instanceof Error ? error.message : String(error)}. Fix the file, then reload.`;
+/** Why the project's config file cannot be read, as the Skills page shows it: the file that was read. */
+function configIssue(path: string, error: unknown): string {
+  const shown = basename(dirname(dirname(path))) === '.ai' ? `.ai/${basename(dirname(path))}/config.json` : path;
+  return `${shown} cannot be read: ${error instanceof Error ? error.message : String(error)}. Fix the file, then reload.`;
 }
 
 /** A failed read keeps `raw` when the file is a JSON object that only the schema refuses. */
@@ -234,26 +235,27 @@ export type RawConfigRead = { ok: true; raw: Record<string, unknown> } | { ok: f
  */
 export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
   let text: string;
+  const path = readDataPath(dataDir, 'config.json');
   try {
-    text = await readFile(readDataPath(dataDir, 'config.json'), 'utf8');
+    text = await readFile(path, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, raw: {} };
-    return { ok: false, issue: configIssue(error) };
+    return { ok: false, issue: configIssue(path, error) };
   }
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch (error) {
-    return { ok: false, issue: configIssue(error) };
+    return { ok: false, issue: configIssue(path, error) };
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, issue: configIssue('it is not a JSON object') };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, issue: configIssue(path, 'it is not a JSON object') };
   // The Skills page edits `skillsRepos` as written, so an entry it cannot show blocks its writes.
   // A bad value in another key is kept as written: `loadConfig` drops only that key.
   const sources = configSchema.shape.skillsRepos.safeParse((raw as Record<string, unknown>).skillsRepos);
   if (!sources.success) {
     const first = sources.error.issues[0];
     const where = ['skillsRepos', ...(first?.path ?? [])].join('.');
-    return { ok: false, issue: configIssue(`${where}: ${first?.message ?? 'invalid'}`), raw: raw as Record<string, unknown> };
+    return { ok: false, issue: configIssue(path, `${where}: ${first?.message ?? 'invalid'}`), raw: raw as Record<string, unknown> };
   }
   return { ok: true, raw: raw as Record<string, unknown> };
 }

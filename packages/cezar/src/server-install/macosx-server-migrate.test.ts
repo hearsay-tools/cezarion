@@ -232,7 +232,9 @@ describe('hsq server-migrate on macOS (launchd)', () => {
       `default: launchd ${OLD[1]} → ${NEW[1]} (${f.plist(NEW[1]!)}; old plist kept as ${f.plist(OLD[1]!)}.migrated)`,
       `default: health check: ${NEW[0]} is loaded and http://127.0.0.1:4321/ answers`,
       `default: health check: ${NEW[1]} is loaded and the ngrok API at http://localhost:4040/api/tunnels lists a tunnel`,
+      'rollback: any failure restores every old service definition (systemd units and nginx sites, launchd plists), starts the old services and renames the marker to install.json.failed; the legacy home stays in use. A restore error leaves its instance stopped and the rollback journal in place: fix the reported error and re-run server-migrate to finish the rollback. A restored service that fails its start check is reported as a warning.',
     ]));
+    expect(result.lines.join('\n')).not.toContain('unit and site');
     expect(result.lines.join('\n')).not.toContain('secret');
     expect(f.launchd.commands).toEqual([]);
     expect(f.launchd.loaded).toEqual(new Set(OLD));

@@ -1,3 +1,4 @@
+import { productIdentity } from '../home/identity.ts';
 import { productEnv } from '../core/product-env.ts';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -95,11 +96,11 @@ const LENT_IDENTITY = ['-c', 'user.name=cezar dry run', '-c', 'user.email=dry-ru
  */
 export const dryRunCommandRunner: CommandRunner = async (cmd, args, opts) => {
   if (cmd === 'git' && args[0] === 'push') {
-    opts.onLine?.(`(CEZ_DRY_RUN=1) git ${args.join(' ')}`);
+    opts.onLine?.(`(${productIdentity().envPrefix}DRY_RUN=1) git ${args.join(' ')}`);
     return { ok: true, stdout: '' };
   }
   if (cmd === 'git') return spawnCommandRunner(cmd, args[0] === 'commit' ? [...LENT_IDENTITY, ...args] : args, opts);
-  opts.onLine?.(`(CEZ_DRY_RUN=1) gh ${args.join(' ')}`);
+  opts.onLine?.(`(${productIdentity().envPrefix}DRY_RUN=1) gh ${args.join(' ')}`);
   if (args[0] === 'api') {
     const path = args[1] ?? '';
     if (path === 'user') return { ok: true, stdout: 'dry-run-user\n' };

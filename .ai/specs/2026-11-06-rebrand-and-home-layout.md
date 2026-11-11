@@ -118,8 +118,11 @@ Resolved once, at the process entry point, from the platform. No setting is requ
    entry points call `resolveHome({ purpose })` once and pass a `Home` object down. Tests
    build `Home.sandbox(tmpdir)`. A module that needs a path and has no `Home` cannot get one.
 3. **Install marker.** The config dir holds `install.json`
-   (`{ installId, kind: "live" | "dev" | "test", createdAt, migratedFrom? }`). Only
-   `serve`, `init` and the migration create a `live` marker. One `HomeStore` writer handles
+   (`{ installId, kind: "live" | "dev" | "test", createdAt, migratedFrom? }`). The migration
+   writes the `live` marker of a migrated home. Without one, every home-writing entry (serve,
+   init, run, backup restore, the first authorized registry write) creates the fresh `live`
+   marker on its first authorized write; read-only and invalid commands create no marker and
+   write nothing (section 4 step 1). One `HomeStore` writer handles
    every registry-type write and refuses:
    - a write to a home whose marker is `live` from a process that runs under a test runner
      (`VITEST`, `NODE_TEST_CONTEXT`, `JEST_WORKER_ID`, `STRYKER_*`), whatever the env object
@@ -168,8 +171,8 @@ One code path, `migrateLegacyHome()`, runs at the first boot of the new build an
    first authorized registry write) record the fresh decision and write a `live` marker
    in the new home. A deferred first write that finds a legacy server install refuses
    and names `hsq server-migrate`. Never create the absent legacy directory to publish `MOVED.json`. An
-   existing empty legacy directory keeps the committed empty inventory and
-   `MOVED.json`. Later legacy data reaches the canary and is never copied over
+   existing empty legacy directory gets a committed marker (an empty inventory) and
+   `MOVED.json`, so a later legacy write reaches the canary and is never copied over
    the fresh home. Before a split marker exists, `hsq backup list` reads legacy
    backups without migration or writes. Every later lock and marker of this migration lives in the resolved legacy
    home.
@@ -217,7 +220,9 @@ After commit, a watcher on the migrated legacy files reports a later change as a
 stays an accepted home variable after P5, unlike the other `CEZ_*` names: `resolveHome` uses
 `HSQ_HOME`, then `CEZ_HOME`, then the default, and a boot warning asks the operator to
 rename it. So every custom install, container or not, keeps its own home with no pointer
-file. A test covers a restart after P5 with only `CEZ_HOME` set.
+file. A test covers a restart after P5 with only `CEZ_HOME` set. A committed home records its
+source (`migratedFrom`); a later boot uses that source even when the env names another
+legacy home, so a launch with only `HSQ_HOME` neither fails nor migrates again.
 
 **Server installs** (apptension-host serves 12 projects): `hsq server-migrate` first stops
 every instance that shares the legacy home, migrates that home once, then for each instance in
@@ -235,8 +240,11 @@ The instances that share a home form one group and succeed or fail together. Unt
 instance passes its health check, the new marker stays in state `pending` and `HomeStore`
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
 in the group fails its health check, every instance in the group stops, the old units and old
-sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
-migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
+sites (on macOS the old launchd plists and labels) come back, and the new home's marker is renamed to `install.json.failed` so the next run
+migrates again from the untouched legacy home. A rollback is an attempt: an instance whose old
+unit, site or plist cannot be restored stays stopped, the rollback journal stays and the marker
+is not renamed, so the operator fixes the reported error and re-runs `hsq server-migrate`; a
+restored service that fails its start check is a warning. Old unit files stay as `*.migrated` after
 success. When the install owns its nginx site, `/etc/cezar/htpasswd[-<slug>]` is copied to
 `/etc/hearsay-squawk/` (the old file stays). The new site is the old site file copied as is (TLS listeners,
 certificates, redirects and operator edits kept) with only its name and the
@@ -259,6 +267,9 @@ group, the pending marker and the rollback, and writes nothing, not even to the 
 **Desktop installs**: the bundled server runs the same migration at boot. A Mac that records a
 completed `macosx-ngrok` server install is not a desktop install: its launchd labels move only
 through `hsq server-migrate`, as in section 2 and under "Server installs".
+A first boot that cannot write the legacy home or the new home (`EROFS`, `EACCES`, `EPERM`)
+logs one line and serves the legacy home, or the migrated home when the commit already
+happened, instead of failing (zero config).
 
 ### 4.1 New bundle IDs
 
@@ -406,3 +417,14 @@ does not make an existing migrated project's legacy state writable.
 The fallback guard checks the root's directory entry. An unreadable or dangling
 entry still counts as present and keeps the existing guard. Registered projects
 whose own current root was deleted retain their separate admission refusal.
+
+### Known limits at the switch
+
+- The one-time automatic move of a project that the cockpit prepares after the listener starts
+  runs synchronous file and Git work on the event loop. In CI (`transcript-facts-responsiveness`,
+  head 06169742d of hearsay-tools/cezarion#3240) the move of a project with an empty run store
+  blocked health requests for 568 ms, 542 ms of it waiting on synchronous I/O; on a local disk the
+  same move blocked 20–27 ms. The boot project moves before the listener, so this applies to
+  other registered projects and to projects added later. The move stays synchronous in the
+  switch release; the timing check seeds its fixture where a switch-on cockpit reads it, so it
+  measures the cold history open, not the move.

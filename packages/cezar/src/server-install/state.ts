@@ -1,3 +1,4 @@
+import { logPrefix } from '../home/display.ts';
 import type { Home } from '../home/home.ts';
 import { existsSync, readdirSync } from 'node:fs';
 import { HomeOutsideWriteError, HomeStore, readHomeFile } from '../home/store.ts';
@@ -92,7 +93,7 @@ export function deleteServerState(instance: string, home: Home): void {
   try {
     new HomeStore(home).replace(serverStatePath(instance, home), null);
   } catch (error) {
-    if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; instance state was kept`);
+    if (error instanceof HomeOutsideWriteError) console.warn(`${logPrefix()} ${error.message}; instance state was kept`);
     // non-fatal — an empty record left behind is harmless
   }
 }
@@ -148,7 +149,7 @@ function lockRelease(store: HomeStore, path: string, home: Home): () => void {
     try {
       store.transaction(() => { if (readLockPid(path, home) === process.pid) store.replace(path, null); }, [path]);
     } catch (error) {
-      if (error instanceof HomeOutsideWriteError) console.warn(`[cez] ${error.message}; install lock was kept`);
+      if (error instanceof HomeOutsideWriteError) console.warn(`${logPrefix()} ${error.message}; install lock was kept`);
       // Release has always been best-effort.
     }
   };
