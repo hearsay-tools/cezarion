@@ -969,463 +969,41 @@ runner DOES — is §7, and a new backend has to satisfy both.
 
 ## Waits (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1234; CI since hearsay-tools/cezarion#474)
 
-A run's waits live in one list on its record (`waits`, settled ones in `lastWaits`),
-typed by `packages/contract/src/waits.ts`; spec `.ai/specs/2026-10-17-unified-waits.md`.
-There are five agent kinds: `pr`, `timer`, `human` (since phase 2), `process`
-(hearsay-tools/cezarion#1446) and `peer` (hearsay-tools/cezarion#1995); Cezar also opens `worker`
-waits. The agent opens `pr`, `timer`, `process`, `worker` and `peer` waits with `cezar_wait`
-and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
-it never grants merge, review acceptance, or task-completion authority. There is no
-wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
+A run keeps its waits in one list on its record. The agent opens and closes them with the cezar
+tools. Read each fact from its owner:
 
-`cezar_wait({ kind: 'pr', pr, until?, wake_on_conflict?, timeout_seconds? })` registers an
-external PR observation (hearsay-tools/cezarion#1425 renamed `kind: 'ci'` to `'pr'`; `'ci'` is
-`invalid_request`). `pr` is an HTTPS GitHub PR URL (at most 2,048 characters, positive PR
-number, no userinfo, port, query or fragment); `timeout_seconds` is an integer
-1–7,200, default 1,800. `until: 'checks'` (default) watches the PR's checks; `until: 'merge'`
-polls the PR's state every 30 seconds, outside the watcher slots, and resolves `merged` only on
-GitHub's `MERGED` state (with `mergedAt` and `mergeCommitSha` when GitHub gives them) or
-`closed` when the PR closed without merge. `wake_on_conflict` (default `true`) ends either
-target as `conflicting` on merge conflicts; an agent watching a PR it does not own sets it
-`false`. `until: 'merge_or_blocked'` follows an initiated merge: it resolves `blocked`
-on a conflict (regardless of `wake_on_conflict`) or when neither queue membership
-nor enabled auto-merge remains. Normal waiting for checks or queue admission keeps
-it open. A first poll can report no pending merge, including rejection before
-registration. `mergeBlock` carries current pending-state flags and, if known, the
-latest removal/disable event; its reason is external evidence, not permission to
-retry. Current pending state overrides historical rejection. Only `merged` confirms
-success. Each target on one PR is a separate wait. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
-timer of 60–7,200 seconds with a note of at most 512 characters. Unknown keys, a
-field that does not fit its kind, and `kind: "human"` are `invalid_request`; the last one's
-message names `cezar_ask`. `cezar_wait({ kind: 'process', pid, exit_file?, timeout_seconds?, note? })`
-waits for a background job the agent started to end (hearsay-tools/cezarion#1446). Cezar checks
-the exit file, then whether the PID, with its recorded start identity, still runs, every
-5 seconds until the deadline (default 1,800, at most 7,200 seconds). It reports `exited with code N`
-from the exit file's first line, or `exited, code unknown`, and never signals or stops the
-process. A PID that was already gone at registration, with no exit file, is reported as not
-running when the wait was registered, so a launcher's PID is not read as a finished command
-(hearsay-tools/cezarion#3097). The tool description tells the agent to start the command with
-`cez job start <name> -- <command>`, whose supervisor leads its own session: Codex ends a shell
-command's process group when the command returns, so a plain `&` job dies there. `exit_file` must resolve inside the task worktree or the task temp directory
-(`exit_file_outside`); Cezar's own PID and a session leader are `process_not_allowed`, and
-another user's process is `process_not_owned`. A process wait keeps its slot and counts
-against the automatic-wake budget, like a timer. The tool advertises one flat object schema, because the Anthropic
-tool API refuses a top-level union; the server validates the discriminated union. Every
-answer carries the wait id, its kind, its absolute deadline and `open_waits`.
+- `packages/contract/src/waits.ts`, `ci-wait.ts` and `ask-schema.ts`: the stored wait shapes, and
+  each tool's request, answer, limits and error codes.
+- `WAIT_KINDS` in `packages/cezar/src/workflows/run/wait-kinds.ts`: one typed row for each wait
+  kind, with its deadline, slot, wake budget, resolvers, cancel paths and texts. A new kind is a
+  new row ([ADR 0061](docs/adr/0061-one-wait-engine-executes-wait-kind-rows.md)).
+- `cezarTools` in `packages/cezar/src/ci-wait/tools.ts`: the one list of cezar tools, with the
+  descriptions that the agent reads. Every runner's adapter, extension and allow-list read
+  it, and `cezarToolEnvNames` lists the environment names a harness forwards. A new tool is
+  one entry there. `errors.ts` beside it and `workflows/completion-policy.ts` hold the refusal
+  messages.
+- The `CI_*` constants in `packages/cezar/src/ci-wait/supervisor.ts` and `github.ts`: the PR
+  watcher bounds. `packages/cezar/src/workflows/run/constants.ts`: the wake and delivery bounds.
+- `.ai/specs/2026-10-17-unified-waits.md`: the model (the turn-end rule, waking, slots and
+  liveness bounds).
 
-`cezar_wait({ kind: 'worker', worker_ids, mode?, timeout_seconds? })` waits on owned workers, and
-`cezar_wait({ kind: 'request', request_ids, mode?, timeout_seconds? })` on the replies to requests
-the run sent, to a worker, its parent or a peer task (hearsay-tools/cezarion#1995). Kind `worker`
-takes `worker_ids` only: `request_ids` there is `invalid_request`, whose message names kind
-`request`. A request wait is still stored as a `worker` entry with `requestIds`; the answer's
-`kind` is `request`, and the footer and `open_waits` call it a `request wait`.
-`cezar_wait({ kind: 'peer', peer_ids, timeout_seconds? })`, or
-`cez message wait --peer <task-id> [--peer <task-id> …] [--timeout-seconds <1-1800>]`
-(`via: 'cez-message-wait'`), waits for named peer root tasks (hearsay-tools/cezarion#1995, spec
-`2026-10-27-task-communication-protocol` § 7). It names 1–32 peers; each must pass the
-relationship resolver as a peer, so an unknown task, the run itself, a worker, or a family
-deleting its history is `denied_scope`, and a worker cannot register one. The deadline is
-1–1,800 s, default 600, and there is no "any peer" form. The first of these resolves it: a
-message of any kind from a named peer that the run has not received (`result.reason: 'message'`,
-with `peerRunId` and `messageId`), a named peer reaching `review`, `done`, `failed` or
-`cancelled` or being deleted (`settled`, with `peerRunId`), or the deadline (`timeout`). A message
-comes before a settlement, so a peer that wrote and then finished reports what it wrote. A peer whose record the store cannot read is not settled: it may still be live, so the wait stays open. A
-matching message or settlement already there at registration resolves it at once, and recovery
-re-reads it the same way. It is the one wait a message closes: a human message, a message from
-the run's parent or workers, a peer it does not name, and any other wait resolving wake the run
-and leave it open. The same peers in any order return the open wait. A park whose top wait is a
-peer wait (`waiting:peer`) holds no slot, arms the idle timer, and reads **waiting on N tasks**
-(`waitingOn: { kind: 'peers', count }`, bucket `none`, never Needs you); the order is human >
-usage limit > workers > peers > PR > process > timer. A resolution that opens a wake turn spends
-one unit of the automatic-wake budget, as a peer message does; with the budget spent it is
-cancelled with the note `automatic peer wake-up cap reached`, and Cezar's `budget` human wait
-opens. A root's request wait on a request to a peer task reads **waiting on replies**, not
-**waiting on worker replies** (`waitingOn.peers`). `cez message cancel-wait` and
-`cezar_cancel_wait` cancel it through the list. Tests: `workflows/peer-waits.test.ts` drives each
-`waiting:peer` row of `workflows/run-states.ts`, and parity row **U19w** in
-`workflows/waits-parity-cells.testkit.ts` runs it on every `RUNNER_IDS` native wire.
-
-An older cezar reads a stored peer wait as an unreadable entry: its strict wait union has no
-`peer` arm, so the store drops that entry, keeps the run and its other waits, and sets
-`lastWaitsError`. A run parked only on a peer wait then reads as a plain park: Needs you. A
-stored summary whose `waitingOn` is `peers` fails the older
-summary schema, so its run index reads the full record instead. `runs/peer-wait-downgrade.test.ts`
-pins this read (hearsay-tools/cezarion#1993).
-
-Native subagents (hearsay-tools/cezarion#2431). A runner mapper marks a native subagent that
-outlives its spawn call with `background: true` on its root task item, keeps it `running`, and
-ends it with one `item.completed` (`completed`, `failed`, or `declined` for a stopped child).
-When a turn ends with such a child still running, and with no done, question or permission
-request, Cezar opens its own `subagent` wait (`source: 'cezar'`, `via: 'native-subagents'`) in
-place of the monitoring timer, also after `CEZ:MONITORING` or `ScheduleWakeup`, and sends no
-nudge. The park (`waiting:subagents`) keeps its session and a monitoring slot and reads
-**waiting for N subagents** (`waitingOn: { kind: 'subagents', count }`, bucket `none`, the robot
-glyph, webhook state `waiting-workers`); the order is human > usage limit > workers > peers >
-subagents > PR > process > timer. Each child event saves the children and moves the 30-minute
-deadline. When the last child ends and the runner starts no parent turn within 15 s, the wait
-resolves `settled` and wakes the parent once for free; the deadline resolves `timeout` and spends
-one wake. A parent `turn.started` the runner sends itself, outside Cezar's own write, closes the
-subagent wait (`superseded`) and every open timer; PR, process, worker and peer waits stay. A lost
-session or a restart resolves it `interrupted`, and the run continues once for free. Claude and
-Codex report their children; Pi, Cursor, OMP and OpenCode keep the monitoring timer. Tests:
-`workflows/subagent-waits.test.ts` drives each `waiting:subagents` row, and rows **U30**–**U37** in
-`workflows/waits-subagents-parity-cells.testkit.ts` run on every `RUNNER_IDS` native wire, with
-the named exemptions there.
-
-An older cezar reads a stored subagent wait as an unreadable entry, as it reads a peer wait: the
-store drops that entry, keeps the run and its other waits, and sets `lastWaitsError`. A run parked
-only on it reads as a plain park: Needs you. A stored summary whose `waitingOn` is `subagents`
-fails the older summary schema, so its run index reads the full record.
-`runs/subagent-wait-downgrade.test.ts` pins this read.
-
-`cezar_ask({ context, questions })` waits for the user (hearsay-tools/cezarion#1234). Both are
-required. `context` is 1–20,000 characters of Markdown that the cockpit shows above the card.
-`questions` is a card in the ask format, 1–4 questions, each with a header of at most 12
-characters, the question, and 2–4 options with unique labels. A question with its `options`
-left out is open: the cockpit shows only an answer field and sends `header: text`. An empty or
-one-option list is `invalid_request`, never an open question, and `multiSelect` applies only
-to options. The answer carries the wait id and `open_waits`, with no deadline. Native asks
-carry no `context`.
-
-On Claude, assistant text written between tool calls can reach Cezar only as a short server
-summary (hearsay-tools/cezarion#1458), and the user never sees the agent's reasoning or a
-rejected call's arguments (hearsay-tools/cezarion#1428). So the lifecycle instructions, the
-tool description and its hints tell the agent to put the full draft, findings, evidence and
-option meanings in `context`. Cezar stores `context` on the human wait and the
-`ask.requested` event, and a worker's routed question carries it to the parent. An
-`invalid_request` names every failing field with its limit from `ASK_LIMITS`, `context`
-included.
-
-At most 16 waits are open at once. A
-timer is refused with `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is
-`null`, and with `wake_budget_spent` once the run's automatic-wake budget
-(`MAX_AUTO_CONTINUES`, 40) is spent. `cezar_cancel_wait({ wait_id })` moves an open wait
-to `lastWaits` as cancelled and answers `open_waits`; a resolved but undelivered wait
-answers `already_resolved` and its result is still delivered with the next wake, and a
-human wait the user has already seen answers `human_question`.
-
-A run holds at most one human wait. A second registration in the turn that opened it
-replaces its card and keeps its `wait_id`; one after the user saw it returns it unchanged.
-A human wait is shown to the user at the end of the turn that registered it (an
-`ask.requested` event, recorded as its `askSeq`), at once when registered at a boundary,
-or by the failure, close or recovery path, never mid-turn. Any human message settles every
-human wait as `delivered`: it is never `resolved`, so it queues no wake, and a message to a
-run whose only open wait is human is delivered as the answer. `cezar_ask` in an autonomous run
-is refused with `autonomous_run` until its automatic-wake budget is spent. A worker's card
-reaches its parent, and an open question asks the parent for its own words. Until
-phase 4, the transcript's question facts stay authoritative for attention, and
-`computeWaitingOn` reads both them and the human wait.
-
-`cezar_done({ summary? })` finishes the task at the end of the current turn. In a workflow
-agent step that is not the last, it finishes that step instead, and Cezar then starts the next
-step (hearsay-tools/cezarion#1620). `summary` is at most 2,000 characters and unknown keys are
-`invalid_request`. It answers `{ ok: true, finishes: 'at_turn_end', completes: 'task',
-open_waits }`, `{ ok: true, finishes: 'at_turn_end', completes: 'step', next_step, open_waits }`
-with the next step's name, or `{ ok: false, code, message, workers?, open_waits? }`. It is
-refused, in this order, by the session refusals `cezar_wait` answers, then `root_finish_pending`,
-`human_question_pending` (an earlier turn's question is unanswered), and for a root parent
-`worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
-`{ worker_id, reason }` and naming the command that clears them (a general form of the
-command when listing every worker would pass `WAIT_MESSAGE_MAX`, 4,096 characters). The answer
-a Continue opened with is not a pending question while its turn runs. The turn end that reads an
-accepted done takes it, and a human message clears it. An earlier workflow step's turn that ends
-without a done is handled as the last step's is: the no-wait nudge, then Cezar's human wait. A
-session that closes without a done leaves the step `waiting`, and Continue resumes that step.
-`not_final_step` stays in the code enum for old clients and is never returned since
-hearsay-tools/cezarion#1620. `worker_wait_pending` stays in the code enum for old clients and is never
-returned (it was the old completion wait's refusal, removed by hearsay-tools/cezarion#1301). A done
-refused at the turn end becomes the refusal nudge described below. The close writes `summary` as a `note`, then the
-lifecycle event `goal achieved — session closed` with `via: 'cezar_done'`, and cancels
-every open wait, a human wait from the same turn included. Events recorded before
-hearsay-tools/cezarion#2397 may carry `via: 'done-line'` from the retired `CEZ:DONE` line.
-
-Only github.com is currently accepted; the forge has no enterprise-host resolver. CI
-registration resolves canonical repository, PR and head with a ten-second metadata
-budget, persists the intent before acknowledging, and returns immediately without
-waiting for checks. Invalid, unauthorized, conflicting or unpersisted requests create
-no durable wait. A CI registration repeats an **open** CI wait for the same PR: the PR
-URLs are compared normalised (`identicalWait` in `workflows/waits.ts`), whatever either
-call's `timeout_seconds`, and the open wait is returned with its deadline unchanged.
-Concurrent calls for the same PR share one metadata lookup, and the lookup checks again
-for an open wait under another spelling of the URL. A wait that has resolved, been
-delivered or been cancelled matches nothing, so a later call for that PR opens a new
-wait. A timer repeats an open timer only with the same seconds and note in the same turn.
-
-The aliases land in the same list, each recorded in the entry's `via`.
-The deprecated `cezar_wait_for_ci` tool was removed in phase 4b (hearsay-tools/cezarion#1236);
-`via: 'cezar_wait_for_ci'` remains only on stored entries it opened.
-At a turn end, Claude's `ScheduleWakeup` opens a timer of its `delaySeconds` clamped to
-60–3,600, or of `resources.monitoringWakeIntervalMinutes` × 60 seconds when it gave none
-(`via: 'schedule-wakeup'`), and a turn that ends with live workers and no other wait opens
-the interval timer with `via: 'monitoring-line'` and the note `Opened while workers run.`
-An alias opens at most one open timer per run and `via`: a later turn keeps the timer
-already open. With re-checks off an alias opens a `monitoring-line` human wait instead, and
-with the budget spent a `budget` one (`source: 'cezar'`); either adds a note and the run
-reads as Needs you. An autonomous run whose nudge would fire skips the alias. A native ask
-(Codex, OpenCode) opens a `native-ask` human wait.
-
-Every agent session gets the cezar tools (hearsay-tools/cezarion#2397). The `CEZ:DONE`,
-`CEZ:ASK` and `CEZ:MONITORING` lines are no longer read: a turn that ends on one is a turn
-with no wait and gets the no-wait nudge, which names the tools. Stored `ask-line` and
-`monitoring-line` entries and `done-line` events from older runs still load. When the
-private tool controller cannot start, the launch spawns nothing and fails with
-`Cezar tools could not start: <cause>` and the fix: a fresh step and the task fail, a
-Continue fails, and a continuation that owes wait results parks with them open and retries
-under the wake-delivery backoff. A failed start is not cached, so the next launch after the
-repair starts the controller again (U26). `cez worker wait` is an alias too (hearsay-tools/cezarion#1235 phase 3a):
-it opens the same `worker` entry as `cezar_wait({ kind: 'worker' })` (or kind `request`), with
-`via: 'cez-worker-wait'`, and answers the legacy `WorkerWait` shape; the same workers (or
-requests) and mode return the open entry, and `cez worker cancel-wait` cancels through the list
-as `cezar_cancel_wait` does. A worker wait sits beside CI, timer and human waits and cancels
-none of them. A park whose top wait is workers holds no slot, reads as the workers and
-idle-closes after `IDLE_TIMEOUT_MS`; a resolution or a message reopens it through the scheduler
-continuation. Messages are not waits: a worker message or reply wakes the run with every wait
-still open and in the footer, and beside a pending `cezar_ask` question it is delivered next to the
-card, which stays answerable; beside a pending native question it waits for the answer's turn end.
-
-A root's done that the completion check refuses at a turn end (hearsay-tools/cezarion#1301, phase
-3b) opens no wait. The agent gets the refusal `cezar_done` would return (`worker_questions`,
-`workers_outstanding`, else `workers_uncollected`, one helper builds both) as one automatic turn,
-charged to the automatic-wake budget and bounded by the no-wait nudge's reply timer; its settled
-outcome is a completion nudge. When live workers block it, the nudge adds one sentence:
-*If you end your turn with done again while these workers are live, Cezar will wait on them for
-you and wake you when they have all settled.* The mid-turn `cezar_done` answer never carries it.
-An open agent wait or owed input comes first: no nudge, the refusal is a note, and the run parks
-on its waits. A block found after the session closed (or a legacy accepted Finish) queues the
-refusal as one lifecycle input that the scheduler continuation reopens the session to deliver.
-Its reply is bounded like the live nudge's, a run owes one refusal at a time, and the owed refusal
-holds a closing session like a wait: a reopened session that closes or fails before the refusal is
-submitted is a failed delivery, bounded by `MAX_WAKE_DELIVERY_ATTEMPTS`. The input carries
-`purpose: 'completion-refusal'` on the run record, so a Continue after the run failed at that bound
-and a restart deliver it under the same two bounds. Stop retires it while undelivered, so no later
-Continue delivers a stale refusal (U22x).
-One nudge per cycle: a human message or a wake starts a fresh one. When the turn that answers it
-ends on a blocked done again, Cezar registers
-a list `worker` wait on the live workers (`source: 'cezar'`, `via: 'completion'`, `mode: 'all'`,
-no deadline, no slot; it idle-closes like any worker park), or with only uncollected results or
-unanswered worker questions opens its own human wait (`via: 'completion'`), which parks for the
-user; once every worker has settled and only uncollected results remain, only a human action ends
-it. An autonomous run is nudged again until the budget. Finish refuses either park while any
-blocker remains (`delegationFinishBlockedReason`); Stop and delete settle it. Settlement resolves the worker wait; worker messages wake the
-parent beside it. `delegation.wait`, `delegation.completion` and `activity: 'monitoring'` are no
-longer written; store schema 7 reads a stored completion wait into the list
-(`upgradeLegacyWaits`), keeping an already-queued wake input as `wakeInputId`.
-
-The agent ends its turn after registering. At a turn end, in both turn-end handlers:
-a question or a permission gate parks for the human, an accepted `cezar_done` finishes,
-a worker wait parks on its workers, and only then do open waits park the run, after
-the owed-input checks (held human input, unread agent input, an admitted wake) have
-found nothing. The parked run is `waiting` with its waits open, and `deriveAttention`
-reads it from `waitingOn`: **waiting for CI**, **waiting for merge** or **monitoring**, the running bucket
-and a ring, never Needs you. A `waiting` run whose only waits are resolved reads
-**waiting for capacity** until its wake turn starts.
-
-A CI or timer park keeps one slot, so its wake runs at once: a monitoring slot when
-one of `maxMonitoringSessions` is free, otherwise its regular slot.
-`busySlots` is `active + starting − (waiting runs outside the pool) − min(pool,
-maxMonitoringSessions) − worker-parked runs`, so a pool member beyond the monitoring
-cap holds a regular slot, and a member that leaves the pool frees one and pumps the
-line. Pool membership changes only at a turn end or on a terminal path, and always
-releases the slot it held; a pool member running its wake turn keeps its slot until
-that turn ends. A question or a permission park leaves the pool and keeps its waits.
-
-A wait resolves when its event fires, its deadline passes or a terminal path cancels
-it. At the next turn boundary every resolved wait is delivered in one turn, through
-scheduler admission (a pool member is admitted immediately) and the session's native
-`sendAgentMessage`; the provider acknowledgement checkpoints delivery and moves the
-waits to `lastWaits` as delivered. Settled results retry admission and refused
-delivery once per second without human input; cancellation, terminal state and
-disposal stop retries. A result that lands mid-turn waits for the boundary. An automatic
-batch that carries a timer result reserves one wake of the automatic-wake budget when it
-is submitted, however many timers it carries; a refused submission or a rejected
-acknowledgement gives it back, and the acknowledgement keeps it. A peer message that opens an
-admitted wake turn reserves and spends one unit the same way (hearsay-tools/cezarion#1990). A CI result spends none,
-and a human message resets the budget. The count, reservations included, is checked when
-a timer comes due and before a batch with timer results is sent: at the budget, those
-timers are cancelled with a cap note and wake nothing, and CI results beside them are
-still delivered. A parked run left with no wait becomes a plain park that reads as Needs
-you and gives its slot back: a `budget` human wait opens and is shown. The budget is the
-run record's `automaticWakes` (hearsay-tools/cezarion#1234): a restart and a scheduler
-continuation keep it, a human message and a human Continue reset it, and a parent's answer
-to its worker does not. A batch's reserved unit stays in memory and is charged to the record
-on the provider acknowledgement, in the delivery's own commit, so a batch a restart cuts off
-is charged once and a crash cannot keep the delivery without its charge.
-
-That budget cannot stop a delivery whose session keeps failing, since every retry is a
-new session, so failed deliveries have their own bound. A session that fails (a provider
-error on the opening or resume prompt, a rejected acknowledgement beside a question, a crash)
-or closes cleanly while the run owes resolved, unacknowledged results counts one failed delivery, and the next
-attempt starts after `WAKE_RETRY_BACKOFF` (15 s, then 30 s), not at once. The third
-consecutive failure (`MAX_WAKE_DELIVERY_ATTEMPTS`) settles the run `failed` through the
-ordinary failure path, with the last error and the note `could not deliver wait results
-after 3 attempts — continue this task to retry`; after a clean close the error is `the session
-closed before the wait results were delivered`. The count is the run record's
-`waitDeliveryFailures`, so a restart keeps it; a delivery acknowledgement, human input or a
-question answer, Continue, Stop, Finish and cancel reset it. A failure or clean close with
-nothing resolved is not counted and parks as before. A usage-limit failure that owes results
-settles `failed` at once, uncounted, so the usage-limit hold and its automatic resume take
-it. A `failed` run that owes results is the one terminal run that keeps its waits: they stay
-resolved and undelivered, its open waits stay armed (across a restart too) and still
-resolve, and nothing wakes it. Continue delivers them once; a pending `cezar_ask` question
-stays answerable, and its answer opens the turn that also delivers them. Stop discards them:
-every wait, open and resolved, moves to `lastWaits` as `cancelled`, the backoff, the admission
-retry, the count and any automatic resume are cleared, no session starts, the run stays
-`failed`, and the note `Stop discarded the waits this task held and their results; the task
-stays failed` is written. The cockpit offers Stop for that record beside Continue, Archive and
-Delete; Finish stays unavailable, as on every failed run.
-
-Human input never cancels a wait. A human message, `resumeParkedRun`, a question and
-a permission request leave every open wait, whatever its `via`, and its deadline as
-they were; the message is delivered and the wait's result arrives in a later turn.
-Every delivered turn, human or automatic, including a continuation's opening prompt,
-ends with the open-waits footer: `Still open: CI wait <id> for <repo>#<n>, deadline
-<iso>; timer <id> at <iso> (<note>). Call cezar_cancel_wait for any you no longer
-need.` An open question is listed as `your question <id> to the user`, and the closing
-sentence then says the user's reply answers it, offering `cezar_cancel_wait` only for the
-CI waits and timers (a question the user saw cannot be cancelled). A turn with nothing open
-gets no footer. The footer replaces the CI withdrawal notice.
-
-A pending `cezar_ask` question never takes CI data as its answer:
-a wake at a boundary is delivered beside it, the card stays answerable, and the
-answer keeps its `askSeq`. That wake goes through `sendAgentMessage`, never the answer
-transport, and its provider acknowledgement is the
-checkpoint as for any wake. A rejected acknowledgement delivers nothing and fails the
-session like any rejected agent input (Codex, OpenCode, Pi and OMP report it as a provider
-error). The waits stay resolved and the question stays pending, the run stays `waiting` on
-its waits, and a scheduler continuation delivers them after the wake backoff and re-parks
-as Needs you; a rejection that persists stops at the delivery bound. An
-acknowledgement that lands after the wake turn ended parks the run for the question again. A pending native question (Codex, OpenCode, Cursor)
-delivers nothing mid-turn: the wake waits for the answer and that turn's end. A
-question whose session closed idle reopens through the scheduler-owned continuation
-to deliver the wake, then re-parks as Needs you.
-
-Stop, finish, review and deletion cancel open waits without waking the agent, and so does
-every other terminal status except a `failed` run that owes results (above).
-Project disposal aborts owned processes while retaining durable intent for recovery.
-Recovery preserves the absolute deadline and the stable lifecycle input id (the wait
-id) and re-arms every open wait; a parked run stays parked and its wake folds in any
-queued messages, and a terminal run never reopens. A crash after provider acceptance
-but before the acknowledgement checkpoint can replay that id: delivery is **not
-exactly once**. The resumed agent must treat it as an observation, not a new
-instruction.
-
-The shared supervisor captures the registered head and checks attribution before
-and after final structured observations. Outcomes are `passed`, `failed`,
-`cancelled`, `skipped`, `no_checks`, `head_changed`, `deadline` and `error`.
-Changed-head observations carry original and observed SHAs. No checks never means
-passed, and `gh` exit status alone cannot distinguish check failure from command
-failure. Mixed final outcomes prioritize failure, cancellation, skips, then pass.
-Even passed observed checks do not prove every expected workflow has appeared or
-that the PR is merge-ready.
-
-Bounds are implementation constants: four concurrent watchers and four short
-queries per shared supervisor; ten seconds per metadata/head/snapshot command,
-always bounded by the remaining deadline; at most 60 seconds discovering absent
-checks; `command_failed` and `query_timeout` retry at 1/5/15 seconds, then every
-30 seconds until the original deadline. A successful observation resets backoff.
-A deadline after unresolved query failures includes the last sanitized error in
-`diagnostic`; cancellation has no retry diagnostic. Authentication, inaccessible
-PRs, missing gh, malformed data and output limits still end with `error`.
-Retry state is memory-only; recovery keeps the persisted deadline and starts
-fresh backoff without requiring a live agent session. R92 in
-`workflows/ci-wait-retry-parity.test.ts` covers retry-to-verdict delivery across
-`RUNNER_IDS`, fresh and recovered.
-Check-status polling (`gh pr checks --watch --interval`) and periodic PR-head
-probes both use 30 seconds. The first observation still runs immediately. Those
-intervals do not stretch the ten-second command timeout, the 60-second discovery
-deadline, or the absolute wait deadline.
-Registered watcher queues retain their original deadlines. Capture is bounded to
-64 KiB per subprocess, with watch redraws discarded. Results contain at most 100
-rows (256-character names, 2,048-character links), 4 KiB sanitized diagnostics and
-32 KiB serialized data, with total counts and truncation reported. Compute the
-aggregate before row truncation; structured-output overflow is an error. Teardown
-stops the owned process tree with a two-second force-kill bound, including controller
-pipe closure after a hard exit. Never recover ownership from a stale PID alone.
+A wait result is an observation. It grants no merge, review-acceptance or task-completion
+authority.
 
 ### Private transport and required harness evidence
 
-The tools are provisioned through `AgentRunSpec.cezarTools` independently of worker
-permissions. Claude, Codex, OpenCode and Cursor use the bundled stdio MCP adapter;
-Pi and OMP use a bundled extension over the same shared client. The private chained Hono
-family accepts `POST /api/v1/tools/wait`, `POST /api/v1/tools/cancel-wait`,
-`POST /api/v1/tools/done` over a Unix-domain socket or Windows
-named pipe; authenticated `GET /api/v1/tools/ci-wait` holds the adapter lifetime connection
-(the path is historical: its POST was removed with `cezar_wait_for_ci`, hearsay-tools/cezarion#1236). It is **not** a cockpit HTTP route or network listener. Middleware
-validates the shared schema. A memory-only session capability binds project, run
-and generation; the model supplies neither a run ID nor a filesystem path.
-`CEZ_TOOL_TOKEN` and `CEZ_TOOL_SOCKET` are internal child-environment wiring, never
-prompts, persisted records, descriptor snapshots or user-authored settings.
-Capabilities are revoked on session replacement, stop and controller disposal.
-This is cooperative same-user authorization, not isolation from unrestricted shell.
-
-Wait registration refusals name the blocking state (hearsay-tools/cezarion#713), with separate contract
-codes for manager disposal, capability revocation, missing/inactive/stopping runs,
-missing/replaced/closed sessions, cancellation/finish, stale session generation,
-worker waits, stopped worker execution and parent finish. A pending or unanswered
-human question refuses nothing in phase 1 (hearsay-tools/cezarion#1233): the wait opens,
-and its result is delivered beside the question at a boundary; phase 4b
-(hearsay-tools/cezarion#1236) removed the unused `human_ask_pending` and
-`human_ask_unanswered` codes from the contract. Registration checks again after metadata lookup, distinguishing an
-aborted registration from a changed turn. Only missing or revoked transport
-capabilities are `unauthorized`; an unknown registration failure is `unavailable`.
-Safe messages never forward request contents or raw provider errors.
-
-Since hearsay-tools/cezarion#1235 phase 3a an agent-registered worker wait is a `worker`
-entry in the run's wait list, and a settled one no longer blocks CI registration: CI,
-timer, human and worker waits register beside each other up to `WAIT_LIMIT`. Cancellation
-(`cezar_cancel_wait`, `cez worker cancel-wait`) and completed destruction move the entry
-to `lastWaits`; a queued wake stays load-bearing for a parked parent, so cleanup must not
-strand it. R80 in `workflows/ci-wait-refusal.test.ts` holds each `RUNNER_IDS` native mock
-turn open, settles its worker, cancels or records completed destruction, then registers a
-new worker wait and CI wait before releasing the turn; R27 reproduces the delivery
-sequence through the real private CI controller and verifies CI registration succeeds
-beside the worker wait (the old refusal is gone, so these now pin the absence of a block).
-`worker_wait_pending` is no longer returned by any tool since hearsay-tools/cezarion#1301 (phase
-3b) removed the completion gate's own wait; it stays in the error-code enums for old clients.
-
-Every cezar tool comes from one list (`packages/cezar/src/ci-wait/tools.ts`, hearsay-tools/cezarion#781):
-the adapter's `tools/list` and server instructions, Pi's and OMP's extensions, Claude's
-generated allow-list entries, Pi's and OMP's tool admission and the environment names each
-harness forwards to the adapter all read it. `cezar_preview_serve` and
-`cezar_preview_stop` (hearsay-tools/cezarion#803) are on that list only under `CEZ_PREVIEW=1`, and
-`cezar_schedule_task` and `cezar_scheduled_tasks` (hearsay-tools/cezarion#1465) by default;
-`CEZ_AUTOMATIONS=0` disables them. The provisioned session environment carries an explicit
-`CEZ_AUTOMATIONS=0` or `1` plus the preview opt-in. Claude, Codex and Cursor forward these because they start MCP servers
-from an environment allowlist. Harness row R35 lists the tools through every
-runner's native mock wire and the real bundled adapter, with the flag on and off.
-Under `CEZ_PREVIEW=1` the session environment also carries `CEZ_PREVIEW_CDP_URL`, the agent's
-address for the task's preview browser (hearsay-tools/cezarion#784, spec
-`2026-10-26-preview-agent-cdp`); its grant ends when the session's tool capability is revoked.
-Harness row R125 reads it in every runner's native process, with the flag on and off.
-The stop tool uses the same run-scoped session capability on fresh, continued and
-recovered launches. It accepts only a port and optional restart, stops only owned
-servers, and reuses owner approval only while command, cwd and path remain unchanged.
-Replacement, release or capability revocation during teardown prevents restart.
-
-Startup and tool listing do no GitHub work. IPC failure preserves ordinary boot
-and execution, surfaces a bounded unavailable diagnostic, and never substitutes
-model polling. Explicit tool denial remains denial. Preserve existing MCP servers,
-extensions and permissions when adding a collision-resistant per-session tool name:
-
-| Harness | Injection and evidence required before shipping |
-| --- | --- |
-| Claude / `claude-cli` | Add `--mcp-config` without `--strict-mcp-config`; admit only the added tool when tools are restricted; exercise fresh and resumed argv. |
-| Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; set `default_tools_approval_mode = "approve"` on that entry so Codex never asks before a cezar tool (hearsay-tools/cezarion#1294); verify discovery and invocation on both paths. |
-| OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
-| Cursor | Supply the run's cezar tools through the private temporary plugin directory of each print turn, fresh and resumed; verify invocation and existing permission routing. |
-| Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
-| OMP | Add an explicit CI `--extension scripts/omp-ci-wait.mjs` alongside the user's discovered extensions (never `--no-extensions`); registration is proven by `get_state.dumpTools` listing the then-current CI tool on the real binary (v18.4.11; see `core/__fixtures__/omp/README.md`). `--tools` admits exactly the names the extension registers, since OMP exits 2 on an unknown name. The extension imports `src/ci-wait/tools.ts` in a source checkout; real OMP cannot resolve the workspace contract package there, so it falls back to `dist/ci-wait/tools.js` only when that file exists and otherwise rethrows the source error. MCP injection is rejected: OMP has no CLI flag for it, only `.omp/mcp.json` files. |
-
-These are **release requirements**, not a claim that a configuration fixture alone
-proves tool discovery. Every `RUNNER_IDS` backend needs named executable parity
-coverage, installed upstream interface/version evidence, and real bundled
-`tools/list`/`tools/call` transport (Pi and OMP registration/call for the extension runners) over its offline
-wire on fresh, Continue and recovery paths. A wire limitation requires owner
-review before shipping; there is no silent skip, permission widening or marker
-fallback. Pack/install and `CEZ_DRY_RUN=1` checks must exercise the bundled helpers
-without downloads, credentials or live GitHub, in both headless and cockpit paths.
-The integration verification ledger must record actual outcomes separately from
-this normative contract.
+- A memory-only session capability binds project, run and generation. The capability, not the
+  model, names the calling run. `CEZ_TOOL_TOKEN` and `CEZ_TOOL_SOCKET` exist only in the child
+  environment: never write them to a prompt, a record, a descriptor snapshot or a setting.
+- This is cooperative same-user authorization, not isolation from an unrestricted shell.
+- An explicit tool denial stays a denial.
+- Before a runner ships, the parity rows must list and call the tools through its native mock
+  wire and the real bundled adapter or extension, on fresh, Continue and recovery paths. An argv
+  or configuration snapshot is not transport proof.
+- A wire limitation needs owner review and a named exemption. Do not skip the row silently,
+  widen a permission, or fall back to a marker or to model polling.
+- Record the installed interface and version that you checked in
+  `packages/cezar/src/ci-wait/__fixtures__/README.md` or in the runner's fixture README.
 
 ## 7. Harness parity — session and lifecycle (`packages/cezar/src/core/harness-parity.test.ts`)
 
@@ -2637,212 +2215,32 @@ the cockpit as a clean end of turn.
 
 ### Governed delegation controls (D1)
 
-hearsay-tools/cezarion#2279. In a governed session (every session the always-on delegation listener
-provisions, hearsay-tools/cezarion#2784), root tasks and owned workers may
-use the native subagents their runner supports, subject to the user's tool settings.
-The two mechanisms have separate purposes: a native subagent does work that needs no
-separate worktree (research, code reading, focused analysis) and needs no Cezar worker,
-worktree, collection or destruction; a Cezar worker does work that needs its own
-worktree, its own commits or a lifecycle Cezar tracks. Workers may use native subagents
-but cannot spawn Cezar workers. An agent may message its own subagents with its runner's
-tools; it reaches another Cezar task only through `cez message`, which the provisioned
-root and worker instructions say.
+The `restrictCrossSessionMessaging` doc comment in `core/agent-runner.ts` says what a governed
+session is and what its launch turns off. The same row of each runner's `*_SPEC_SUPPORT` names
+that runner's control. The D1 entries in `PARITY_EXEMPTIONS` name, for each runner without a
+control, the reason and the version inspected. The Owned workers part of `README.md` states
+the limits that a user meets, and § 11 of
+`.ai/specs/2026-10-27-task-communication-protocol.md` holds the probe evidence.
 
-D1 inspects real runner argv, JSON-RPC and HTTP boundaries on ordinary versus governed
-start/Continue launches. A governed launch carries `restrictCrossSessionMessaging`, and
-an adapter adds a control only where the runner's native tool for reaching another
-session is separate from subagent messaging. These controls add no tool grants and
-write no global harness configuration. `provision-intent-catalog.test.ts` covers every
-backend's initial, nonfinal, Continue, recovery and disabled paths.
-
-| Backend (locally verified version) | Per-invocation control | Evidence and limitation |
-| --- | --- | --- |
-| Claude Code 2.1.312 | None (`honored: false`) | `SendMessage` and `ListAgents` also reach the session's own subagents, background agents and teammates, so no outbound tool is separate from subagent messaging. Inbound messages from other sessions are refused on every launch (`crossSessionInbound: refuse`, D3), so a native send from one Cezar task to another ends as not sent. **Known limitation:** a session Cezar starts can still list and message Claude sessions that Cezar did not start, and sessions on other machines. |
-| Codex 0.164.0 | `thread/start` and `thread/resume` `config: { "features.agent_message_board": false }` | The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session and stay as the user configured them. The cross-thread `agent_message_board` feature is "under development" and off by default; a governed session keeps it off even when the user's config turns it on. `codex -c features.<unknown>=false features list` exits 0, so a renamed key does not fail a launch. Existing sandbox, approval, account and model settings remain unchanged. |
-| OpenCode 1.19.4 | `scripts/opencode-task-scope.mjs`, appended to the `plugin` list of `OPENCODE_CONFIG_CONTENT` | The `task` tool starts the session's own subagents, and with `task_id` it resumes any session by ID without a parent check (installed `TaskTool.execute`), which can reach another Cezar task's session. The plugin's `tool.execute.before` hook walks `session.get` parent links and refuses a `task_id` whose session tree differs from the caller's, pointing at `cez message`; a `task_id` that names no session passes (OpenCode starts a fresh subagent), and a failed lookup is refused. OpenCode appends runtime plugins to the ones its config files name, so the user's plugins keep loading. A live 1.19.4 `opencode serve` with throwaway data directories loaded the plugin next to a second plugin; its client's `session.get` returned a child's `parentID`, and 404 for an unknown ID. No session permission rule is sent. **Known limitation:** an OpenCode session that an older Cezar created or resumed under delegation carries a `task` deny, and keeps it on Continue and restart recovery: OpenCode appends permission rules and has no remove. New OpenCode sessions allow subagents. The same-user shell can still reach another session directly (`opencode run --session <id>`). |
-| Cursor 2026.10.22-27dcf5f | None (`honored: false`); print sends no `--allowed-tools` | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. The native agent tools reach the session's own subagents. |
-| OMP 18.13.1 | None (`honored: false`) | The default set (`get_state.dumpTools`) holds no cross-session tool. `irc` is an in-process bus (`irc/bus.ts`) that resolves recipients from the process's own agent registry, so it reaches only agents inside the same OMP process. `task`, `wait` and `eval` stay. |
-| pi 1.4.0 | None (`honored: false`) | No built-in cross-session tool. An extension may add one, and its name cannot be discovered as messaging. The `subagent` extension stays. |
-
-Each runner without a control carries a named `capability-absent` exemption in the D1
-parity cell, pinned the other way round: its governed wire equals the ordinary one,
-with no `--disallowedTools`, `--exclude-tools`, `--allowed-tools` or OMP overlay. The
-day cezar adds a control for one, its exemption must go.
-
-**Replaced guarantee.** Before hearsay-tools/cezarion#2279, D1 also suppressed native
-subagents (Claude `Agent`/`Task`/`Workflow`, Codex multi-agent, OpenCode `task`, pi
-`subagent`, Cursor native agent entries, OMP `task`/`wait`/`eval`), and D2 pinned the one
-gap in that ban: a Claude skill with `context: fork` started a subagent anyway. The issue
-dropped the subagent ban on purpose, and D2 with it. The other half of the old guarantee,
-no unrecorded cross-task messages, is held by the controls above, Claude's inbound
-refusal and the instructions. Native subagents are not Cezar tasks: Cezar does not own,
-collect, wait on or clean them up.
+A control adds no tool grant and writes no harness configuration file. The controls are
+cooperative same-user supervision, not isolation.
 
 ### Native cross-session messaging at shipped defaults (D3)
 
-Spec `.ai/specs/2026-10-27-task-communication-protocol.md` § 11 and
-hearsay-tools/cezarion#1994. A runner's native cross-session messages bypass cezar's
-recorded conversations: they carry no ledger, cockpit attribution, receipt or deadline,
-and no protection for human questions. Cezar tasks talk through `cez message` when the
-task's messaging setting is on (hearsay-tools/cezarion#2784). Every session's instructions (`handoffInstructions` in
-`packages/cezar/src/handoff.ts`, "Messaging other tasks") say so at shipped defaults
-and under D1. The table records each runner's entry points, as inspected on the
-installed versions on 2026-10-27.
+A runner's native cross-session messages bypass Cezar's recorded conversations, so Cezar tasks
+talk through `cez message`. The "Messaging other tasks" text of `handoffInstructions`
+(`packages/cezar/src/handoff.ts`) tells every session so. The D3 cells and the D3 entries in
+`PARITY_EXEMPTIONS` hold each runner's control at shipped defaults; § 11 of the same spec
+holds the probe evidence.
 
-| Runner (inspected version) | Native cross-session entry points | Ungoverned session (listener unavailable) | Under D1 |
-| --- | --- | --- | --- |
-| Claude Code 2.1.311 | Outbound: `SendMessage` and `ListAgents`. They reach other local sessions, cloud and Remote Control sessions, and also the session's own subagents, background agents and teammates. Inbound: other sessions' `SendMessage`, governed by the `crossSessionInbound` setting (`accept`, `hold`, `refuse`; unset delivers when the sender's permission-mode class matches). | Inbound refused: every launch passes `--settings {"crossSessionInbound":"refuse"}`. Outbound tools stay callable, because a deny would also stop follow-ups to the session's own subagents and teammates, and break plugin agents and skills that call `SendMessage`. | Inbound refused, as at defaults. Outbound `SendMessage` and `ListAgents` stay callable, as at defaults, because they also reach the session's own subagents (hearsay-tools/cezarion#2279). |
-| Codex 0.164.0 | None at defaults. The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session. The cross-thread `agent_message_board` feature is "under development" and off by default. | No control: cezar sends no flag for an unstable feature key. | `features.agent_message_board` off (D1); multi-agent tools stay. |
-| OpenCode 1.19.4 | No messaging tool and no inbound channel. The `task` tool with `task_id` resumes any session by ID without checking its parent. | No control. The `task` permission pattern matches only `subagent_type`, so no session rule blocks a foreign `task_id`, and a deny on `task` removes native subagents. Only the shell finds another session's ID, and the shell reaches that session directly (`opencode run --session <id>`); the same-user shell is outside hard isolation (spec § Out of scope). Blocking `task_id` alone would need a new OpenCode plugin and would not close the shell path. | The task-scope plugin refuses a `task_id` outside the caller's session tree (D1); `task` stays for the session's own subagents. |
-| pi 1.4.0 | None built in. An extension may add a messaging tool. | No control: an extension's name cannot be discovered as messaging. | No control (D1 exemption). |
-| Cursor 2026.10.22-27dcf5f | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. | Unreachable; no control needed. | No control (D1 exemption). |
-| OMP 18.13.1 | None in the default set (`get_state.dumpTools`: read, bash, edit, eval, glob, grep, find, task, wait, todo, web_search, write). `vibe_*` and `irc` are opt-in in the user's own config. | No control. | No control (D1 exemption); `irc` reaches only agents in the same OMP process. |
-
-**Verification limits.** A bounded Claude Code 2.1.311 probe on 2026-10-27 sent only
-`/reload-plugins` as a stream-json user message (no model turn) with
-`--settings '{"crossSessionInbound":"refuse"}'` and got a normal init. This verifies
-that Claude accepts the flag. It does not verify the cross-session effect: that needs a
-model-driven `SendMessage` between two live sessions, which no probe here made. Claude
-ignores an unknown value of this setting without a warning (the same probe with
-`"bogus"` also started normally), so a renamed key or value fails open: other
-sessions' messages would reach the task again, and only the session instructions would
-remain.
-
-**User setup.** No row changes a user's MCP servers, plugins or tool settings. MCP
-tools are named `mcp__<server>__<tool>`, and the Claude flag is one setting in the
-`--settings` layer, which Claude merges with the user, project and local settings.
-The only behavior a user loses at shipped defaults is sending messages from their own
-other Claude sessions into a cezar task; human input reaches a task through the cockpit
-or `cez task send`.
-
-**D3** (hearsay-tools/cezarion#1994), in the per-runner `core/harness-*-parity.test.ts`
-files, drives each runner's `baseline` scenario on start and Continue with no
-`restrictCrossSessionMessaging`. Claude's row is live: the argv carries the
-`crossSessionInbound: refuse` settings and no `--disallowedTools`. The other runners
-carry `capability-absent` exemptions naming the version inspected, pinned the other way
-round: their default wire carries no cross-session control. The day cezar adds one,
-that exemption must go.
-
-**Compatibility (2026-10-27, deliberate).** The one changed default is Claude's inbound
-refusal. Every Claude launch, governed or not, passes the setting, so
-the user's other Claude sessions can no longer send `SendMessage` text into a cezar task.
-That path was never a cezar surface: the text bypassed the cockpit, the ledger and the
-handling of human questions. Human input still reaches a task through the cockpit and
-`cez task send` outside a task. Outbound `SendMessage` and `ListAgents` stay callable at
-shipped defaults and, since hearsay-tools/cezarion#2279, under D1 too. No runner's MCP servers, plugins or tool
-grants change, and the other runners send no new flag. The "Messaging other tasks"
-section is prose, not a marker: an older cezar never parses it. The setting is per launch
-and writes no file, so a revert restores the old behavior on the next launch, and no state
-migrates.
-
-Provisioning supplies the bundled absolute CLI invocation and fresh environment
-credentials for both parent and worker sessions; it never copies the parent's
-credential to a worker. With the listener unavailable, the intent is absent
-and ordinary execution keeps its prior settings. Start/Continue/recovery share the
-same provisioner, including nonfinal workflow steps.
-
-The governed command protocol is documented with runnable forms in [README](README.md#owned-workers).
-Spawn supports selected context (`--context` or UTF-8 `--context-file`) and backend/
-model selection; omitted backend follows the active parent, same-backend omitted
-model/account/effort inherit, and mixed-backend defaults resolve independently.
-Inspect reports materialized input paths. Wait defaults to `any`; `one` requires
-one worker and `all` every selected worker. All waits have finite 1–1800 second
-deadlines (600 default), return immediately, and release capacity at turn end.
-`cancel-wait <wait-id>` cancels only waiting, preserving worker work.
-
-`collect <worker-id>` returns typed availability and persists the latest execution
-revision's summary, HEAD, bounded diff and artifact descriptors under the parent.
-An available `diff.path` names a JSON `{ result, diffSnapshot }` document, **not a
-raw patch**. Latest settled collection is required for parent readiness; running
-or obsolete collected output cannot satisfy it. Collection is observation, not
-integration. Automatic completion wakes for inspection/collection without silently
-accepting review. A done blocked by live or uncollected workers is refused once as an automatic
-turn; a repeated one parks on Cezar's deadline-less worker wait on the live workers, or, with only
-uncollected results, on Cezar's human wait (hearsay-tools/cezarion#1301). Human
-Finish refuses unmet readiness. Continue a settled parent before its worker (hearsay-tools/cezarion#2410).
-
-Review and deliberately integrate desired worker commits with Git before cleanup.
-Collect/integrate, destroy owned resources, explicitly delete child histories, then
-delete the parent. Summary and bounded diff snapshots survive child deletion until
-parent deletion; general artifacts are not archived. Removed paths, branch names
-and historical SHAs do not promise live resources. A worker's pending human ask is
-never answered by lifecycle input, and no automatic merge/review acceptance exists.
-
----
-
-### Claude selected-model refusals (hearsay-tools/cezarion#1351)
-
-A live Claude process can retry the exact “There's an issue with the selected
-model (...)” result after that same reported session and model completed a
-successful turn with usage. Eligibility requires an `is_error` result with
-explicit zero input/output usage, zero other accounting counters and no work in
-that attempt. The refusal's own assistant text is diagnostic; tools, reasoning,
-other text, background-task or hook system frames, tool progress, nonzero usage
-or cost forbid replay. Missing identity or usage,
-changed model, authentication, rate limits and other errors keep their existing
-failure paths. A resumed session id alone proves no success: eligibility starts
-afresh in every runner process.
-
-The shipped default is two extra submissions, after 5 and 15 seconds, on the
-same session with the exact input content and unchanged model, account and grants.
-Each retry records its reason, attempt and delay as a note. Each native attempt
-has balanced v2 turn events, but intermediate refusals emit no v1 fatal error or
-workflow `turn-end`. Retry state is process-local; there is no durable wake,
-new run status, configuration or migration. A successful retry settles the input
-once and drains later human input; new worker input is refused during backoff
-and retry. Later human input is held in order. Exhaustion preserves the first
-refusal and follows the existing failure path. Stop, Finish, timeout, process
-exit and output closure cancel the retry timer. An unexpected exit during
-backoff preserves the refusal rather than returning false success.
-
-| State | Trigger | Who fires it | Behavior at shipped defaults |
-|---|---|---|---|
-| Active attempt | Eligible result | Claude reader | Bounded backoff; keep logical input pending |
-| Backoff | 5s or 15s expires | Runner timer | Same input, fresh native UUID, same logical delivery IDs |
-| Retry attempt | Success | Claude reader | Normal settlement; release later input |
-| Retry attempt | Exhaustion or other error | Claude reader | Existing fatal path, first refusal retained |
-| Attempt or backoff | Stop, Finish, timeout, process exit or output closure | Existing teardown and reader | Cancel retry; settle through existing cleanup |
-| Recovery without session | Restart | Existing recovery | No inferred success; no retry until live success is observed |
-
-`claude-model-refusal.test.ts` drives Claude's native mock with controlled time.
-Shared row **S32**, in `model-refusal-parity.test.ts`, uses every `RUNNER_IDS`
-entry's own `HARNESS_ADAPTERS` wire after a successful turn. Claude exhausts its
-two retries; the other runners retain their native terminal-rejection policy.
-Every cell must preserve a diagnosis and settle. This does not assert that the
-other protocols expose Claude's exact zero-usage selected-model result.
+Cezar changes no MCP server, plugin or tool setting of the user.
 
 <a id="codex-retrying-stream-errors-550"></a>
 
-### Codex retrying stream errors (hearsay-tools/cezarion#550)
+### Codex retrying stream errors
 
-App-server `error` notifications map `error.message` plus nonempty
-`error.additionalDetails` to a v1 `note` and v2 `session.error` with `fatal: false`
-while `willRetry: true`. A `warning` notification's message uses the same
-nonfatal channels. `willRetry: false` fails the session immediately and maps to
-`session.error` with `fatal: true`. Malformed errors have no effect.
-
-The first retry error for the active main-thread turn starts a fixed 60-second
-no-progress deadline, enabled by default with no configuration. Later errors
-update the retained failure reason without extending the deadline. Nonempty
-assistant/reasoning/tool-output deltas, model/tool item lifecycle events and a
-valid current-turn native question prove recovery and clear the deadline.
-User input, metadata, warnings, repeated errors, stale turn output and child
-thread activity do not. A later retry episode gets a fresh deadline. Completion,
-new-turn start and session shutdown clear retry state; recovered turns complete
-normally, and human-question waiting has no retry deadline.
-
-Expiry emits v2 `turn.completed` with `stopReason: error`, then uses the existing
-TERM/KILL teardown and rejects the session result with the latest error, failing
-the run only after process exit. It never converts the error to a successful
-turn-end or leaves a live child holding capacity.
-
-Harness row R17 runs against every `RUNNER_IDS` adapter's native wire. Codex
-replays the recorded reconnect errors without a terminal notification; the other
-adapters use their native terminal provider rejections. Every cell must leave
-`running` as `failed` with a reason, never park for user input. Exact deadline,
-recovery, stale/foreign traffic and cleanup regressions use the real Codex RPC
-reader with a controlled process clock. `__fixtures__/codex/stream-retry.md`
-records the real probe's provenance and the limits of the captured excerpt.
+`core/codex-startup.test.ts` holds the retry rules, and
+`core/__fixtures__/codex/stream-retry.md` records the probe.
 
 ---
 
