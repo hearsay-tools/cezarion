@@ -61,8 +61,8 @@ plus start-token liveness and token-checked release.
   in either directory, plus the runs of families another live store claims in `run_claims` (a
   headless `cez run`, another binary), read from both physical claim tables so a stale legacy
   claim never hides a live fallback one. An agent process belongs to a live task. Only the
-  claimed families and a cockpit refuse a move; every other live task keeps its own items in
-  place (**Leftover tasks** below). Not seen: a
+  claimed families and a cockpit refuse a move; every other task that is not archived keeps its
+  own items in place (**Leftover tasks** below). Not seen: a
   cockpit of another home that lists the project but never opened it. The user stops it; during
   the move, admission and the write backstop refuse its project entries and its store and
   listed state writes.
@@ -230,9 +230,9 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   claims), nothing moves: the project is served from both folders as before, a log
   notice names what blocks the move, and the next start tries again (one attempt per project
   per cockpit run; a caller that comes while it runs waits for it). The notice of a finished
-  move lists the `git mv` commands for tracked files and the live tasks that keep their files
-  in `.ai/cezar/`. A marked project whose `.ai/cezar/` holds more than `cockpit.lock*` plans
-  again at each start and moves what no live task owns now. Any failure before the journal exists
+  move lists the `git mv` commands for tracked files and the tasks that keep their files
+  in `.ai/cezar/` until they are archived. A marked project whose `.ai/cezar/` holds more than `cockpit.lock*` plans
+  again at each start and moves what no kept task owns now. Any failure before the journal exists
   only delays the move; a failure after it leaves the journal, so admission refuses the
   project until recovery finishes it. Every cockpit
   path that touches a project before or without its context runs the same prepare step
@@ -247,7 +247,10 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
   runs are fallback runs.
 - **Leftover tasks** (owner decision A, hearsay-tools/cezarion#2778). The plan takes the ids
-  of the tasks live at planning (`keep`, read under the fence). Their own items stay in
+  of the tasks that can still resume at planning (`keep`, read under the fence by
+  `projectKeptRunIds`): every live task and every task not archived, since a human can Continue
+  a done, review, failed or cancelled task from its stored worktree. Live-ness alone does not
+  select items; an archived task's items move, and a deleted task's items move or are gone. Their own items stay in
   `.ai/cezar/`: `worktrees/<id>`, `tmp/<id>`, `preview/<id>`, `t/<first 8 of id>` and every
   `runs/<id>…` entry (`legacyItemOwner` in `legacy-runs.ts`). The directory around such an item
   merges item by item; no stored path into one is rewritten, so a session resumes at its old
@@ -259,8 +262,8 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   attachments, worker results, scratch and control directories, preview profile, autosave
   cleanup, `RunStore.sourceDataDir`) calls it, and `fallbackProjectWriteError` and
   `isFallbackProjectPath` exempt such items, so the task and its cleanup (a worker's destroy
-  retry) work at the stored paths. A later move carries a task's items once it is no longer
-  live and drops it from the list; no task left removes the file.
+  retry) work at the stored paths. A later move carries a task's items once it is archived or
+  deleted and drops it from the list; no task left removes the file.
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
   before the entry that finds it reads the project, in both switch states. Without a journal it costs one

@@ -5,7 +5,7 @@ import { REBRAND_SWITCH } from '../home/switch.ts';
 import type { Home } from '../home/home.ts';
 import { noticeLegacyProject, pathPresent, projectMoveMarked, projectPaths } from '../project-paths.ts';
 import { CockpitOwnership, migrationFencePaths } from '../server/cockpit-ownership.ts';
-import { projectCockpits, projectForeignTasksOffline, projectLiveRunIds } from './live.ts';
+import { projectCockpits, projectForeignTasksOffline, projectKeptRunIds } from './live.ts';
 import { moveUnderFence } from './offline.ts';
 import { LEGACY_PROJECT_DIR, legacyItemsPresent, planProjectMigration } from './plan.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
@@ -19,10 +19,10 @@ import type { MigrationFault } from './steps.ts';
  * project (or earlier, when a request reaches it first), and a project added later when it is added;
  * after journal recovery and before any ordinary read or task start. It moves the legacy state under
  * `.ai/cezar/` with the same offline move as `migrate-project` when no other writer is live and the
- * plan has no blocker or conflict. A task live from before the restart (running, parked, waiting,
- * a worker whose destroy is unfinished) does not stop the move: its own items stay in `.ai/cezar/`
- * (`legacy-runs.ts`), and the notice lists it. A later start moves them once it is no longer live,
- * and removes the old directories that leaves empty. When another writer is live (another cockpit,
+ * plan has no blocker or conflict. A task that can still resume does not stop the move: a live
+ * task (running, parked, waiting, a worker whose destroy is unfinished) or any task not archived,
+ * since a human can Continue a finished one. Its own items stay in `.ai/cezar/` (`legacy-runs.ts`),
+ * and the notice lists it. A later start moves them once it is archived or deleted, and removes the old directories that leaves empty. When another writer is live (another cockpit,
  * a family another process claims, an automation lease of this cockpit) or the plan has a blocker
  * or conflict, it does not move: the project is served from both folders as before, a notice names
  * what blocks the move, and the next start tries again. One attempt per project per cockpit run
@@ -57,7 +57,7 @@ async function blocker(root: string, homes: readonly Home[], self: number): Prom
 /** 'nothing' when there is nothing to move, a reason when the move must wait, or undefined to go ahead. */
 async function precheck(root: string, homes: readonly Home[], self: number): Promise<'nothing' | { reason: string } | undefined> {
   try {
-    const plan = await planProjectMigration(root, { keep: projectLiveRunIds(root) });
+    const plan = await planProjectMigration(root, { keep: projectKeptRunIds(root) });
     const refusals = [...plan.blockers, ...plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)];
     if (refusals.length > 0) return { reason: refusals.join('; ') };
     if (plan.alreadyMoved || (!projectMoveMarked(root) && plan.moves.length === 0)) return 'nothing';
@@ -89,10 +89,10 @@ function nothingLeft(): AutomaticMove {
   return { status: 'nothing' };
 }
 
-/** What a finished move says: that the project moved, and which live tasks keep their files where they were. */
+/** What a finished move says: that the project moved, and which unarchived tasks keep their files where they were. */
 export function movedNotice(root: string, leftovers: readonly string[]): string {
   const kept = leftovers.length === 0 ? ''
-    : ` ${leftovers.length} live task${leftovers.length === 1 ? ' keeps its' : 's keep their'} files in .ai/cezar/ until ${leftovers.length === 1 ? 'it ends' : 'they end'}: ${leftovers.join(', ')}.`;
+    : ` ${leftovers.length} task${leftovers.length === 1 ? ' keeps its' : 's keep their'} files in .ai/cezar/ until ${leftovers.length === 1 ? 'it is' : 'they are'} archived: ${leftovers.join(', ')}.`;
   return `Moved the state of ${root} from .ai/cezar/ to .ai/squawk/.${kept}`;
 }
 

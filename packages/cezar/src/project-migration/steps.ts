@@ -258,7 +258,7 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
     rewrite.kind !== 'run-row' && rewrite.kind !== 'receipt' && rewrite.kind !== 'cleanup-checkpoint');
   let index = 0;
   for (const [file, fields] of byFile(rewrites)) {
-    // A live task's own file stays in the old directory and is rewritten there.
+    // A kept task's own file stays in the old directory and is rewritten there.
     const kept = file.startsWith(join(journal.source, 'runs') + sep);
     contained('run-files', join(kept ? journal.source : journal.destination, 'runs'), file);
     regularFile('run-files', file);
@@ -279,7 +279,7 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
 
 /**
  * Remove the directories under `directory` (at `parts` below the old directory) that the move left
- * empty, deepest first: never a live task's item, never a directory that still holds anything,
+ * empty, deepest first: never a kept task's item, never a directory that still holds anything,
  * never through a symlink. A directory something else fills in the meantime stays.
  */
 function pruneEmptied(directory: string, parts: readonly string[], keep: ReadonlySet<string>, top: boolean): void {
@@ -293,7 +293,7 @@ function pruneEmptied(directory: string, parts: readonly string[], keep: Readonl
 }
 
 /**
- * Name the live tasks whose own items stay in the old directory (`legacy-runs.ts`), in the new
+ * Name the kept tasks (live or not archived) whose own items stay in the old directory (`legacy-runs.ts`), in the new
  * one, then remove the old directories the move emptied; no task left removes the file. Written
  * before the mark, so the project is never marked moved while a task's items resolve elsewhere.
  */

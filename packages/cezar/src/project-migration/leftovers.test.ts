@@ -7,6 +7,7 @@ import { handoffPath } from '../handoff.ts';
 import { LEGACY_RUNS_FILE } from '../legacy-runs.ts';
 import { isFallbackProjectPath } from '../project-paths.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
+import { RunStore } from '../runs/store.ts';
 import { fence, moved, rows, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject } from './engine.ts';
 import { describeProjectMigrationPlan, planProjectMigration } from './plan.ts';
@@ -15,9 +16,10 @@ import {
 } from './project-migration.testkit.ts';
 
 /**
- * A project move with live tasks (owner decision A, hearsay-tools/cezarion#2778): the store and
- * every item no live task owns move; a live task's own items stay in `.ai/cezar/` with their stored
- * paths, and a later move carries them once the task is no longer live.
+ * A project move with tasks that can still resume (owner decision A, hearsay-tools/cezarion#2778):
+ * the store and every item no kept task owns move; a kept task's own items (a live task's, or a
+ * task's that is not archived) stay in `.ai/cezar/` with their stored paths, and a later move
+ * carries them once the task is archived or deleted.
  */
 
 async function checkpoint(root: string, workspace: WorkerWorkspace): Promise<void> {
@@ -26,18 +28,23 @@ async function checkpoint(root: string, workspace: WorkerWorkspace): Promise<voi
 
 const rowsById = (path: string) => new Map(rows(path).map(row => [row.id, row]));
 
-async function migrateWith(project: MigrationProject, live: readonly string[]) {
+async function migrateWith(project: MigrationProject, kept?: readonly string[]) {
   const held = await fence(project);
-  try { return await migrateProject({ repoRoot: project.root, fence: held, liveRunIds: () => new Set(live) }); }
+  try { return await migrateProject({ repoRoot: project.root, fence: held, ...kept ? { keptRunIds: () => new Set(kept) } : {} }); }
   finally { held.release(); }
 }
 
-describe('a project move with live tasks', { timeout: TIMEOUT }, () => {
+function setArchived(dataDir: string, id: string, archived: boolean): void {
+  const store = RunStore.open(dataDir, { keepLive: true });
+  try { store.setArchived(id, archived); store.flush(); } finally { store.close(); }
+}
+
+describe('a project move with tasks that can still resume', { timeout: TIMEOUT }, () => {
   let project: MigrationProject;
   beforeAll(async () => { project = await buildMigrationProject({ linked: false, checkpoint }); }, TIMEOUT);
   afterAll(() => { if (project) removeMigrationProject(project); });
 
-  it('the dry run lists the live tasks that keep their items, and writes nothing', async () => {
+  it('the dry run lists the tasks that keep their items, and writes nothing', async () => {
     project.restore();
     const before = projectSnapshot(project, { databaseBytes: true });
     const plan = await planProjectMigration(project.root, { keep: new Set([PARENT, CHECKPOINTED]) });
@@ -46,7 +53,7 @@ describe('a project move with live tasks', { timeout: TIMEOUT }, () => {
     expect(plan.moves.map(move => move.from)).not.toContain(project.checkpointed.path);
     expect(plan.moves.map(move => move.from)).not.toContain(join(project.dataDir, 'runs', `${PARENT}-worker-results`));
     expect(plan.worktrees.map(worktree => worktree.from)).not.toContain(project.checkpointed.path);
-    expect(describeProjectMigrationPlan(plan)).toContain(`Kept in .ai/cezar/ for live tasks until they end:\n  ${[PARENT, CHECKPOINTED].sort().join('\n  ')}`);
+    expect(describeProjectMigrationPlan(plan)).toContain(`Kept in .ai/cezar/ for tasks until they are archived:\n  ${[PARENT, CHECKPOINTED].sort().join('\n  ')}`);
   });
 
   it('keeps a live parent\'s results and a live worker\'s worktree in place, rewrites only paths to moved items, and moves them once they end', async () => {
@@ -103,6 +110,33 @@ describe('a project move with live tasks', { timeout: TIMEOUT }, () => {
     // The task's items are gone: the next move drops it from the list and removes the emptied directories.
     const next = await migrateWith(project, [CHECKPOINTED]);
     expect(next.journal.leftovers).toEqual([]);
+    expect(existsSync(join(project.newDir, LEGACY_RUNS_FILE))).toBe(false);
+    expect(existsSync(join(project.dataDir, 'worktrees'))).toBe(false);
+  });
+
+  it('keeps a finished task that is not archived in place, and moves it at the next move once it is archived', async () => {
+    project.restore();
+    // The worker is done but not archived: a human can still Continue it from its worktree.
+    setArchived(project.dataDir, WORKER, false);
+    const first = await migrateWith(project);
+    expect(first.journal.leftovers).toEqual([WORKER]);
+    expect(existsSync(project.worker.path)).toBe(true);
+    expect(rowsById(join(project.newDir, RUNS_DB_FILE)).get(WORKER)?.worktreePath).toBe(project.worker.path);
+    // Archived tasks moved, whatever their state.
+    expect(existsSync(moved(project, project.taskPath))).toBe(true);
+    expect(existsSync(moved(project, project.checkpointed.path))).toBe(true);
+
+    // Still not archived: the next move keeps it.
+    const second = await migrateWith(project);
+    expect(second.alreadyMoved).toBe(true);
+    expect(existsSync(project.worker.path)).toBe(true);
+
+    // Archived: the next move carries its worktree and removes what that left empty.
+    setArchived(project.newDir, WORKER, true);
+    const third = await migrateWith(project);
+    expect(third.journal.leftovers).toEqual([]);
+    expect(existsSync(project.worker.path)).toBe(false);
+    expect(rowsById(join(project.newDir, RUNS_DB_FILE)).get(WORKER)?.worktreePath).toBe(moved(project, project.worker.path));
     expect(existsSync(join(project.newDir, LEGACY_RUNS_FILE))).toBe(false);
     expect(existsSync(join(project.dataDir, 'worktrees'))).toBe(false);
   });

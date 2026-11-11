@@ -18,10 +18,11 @@ import type { PathRewrite } from './journal.ts';
  * plus what blocks it. Planning writes nothing: no directory, Git metadata, receipt, run record or
  * journal changes, and the run store is read so that no SQLite sidecar is created.
  *
- * The own items of a task live at planning (`keep`: its worktree, `runs/<id>…` files and scratch
- * directories, `legacy-runs.ts`) stay in `.ai/cezar/`, and no stored path into them is rewritten.
- * A moved project whose `.ai/cezar/` still holds items plans again: what no live task owns now
- * moves, so the items of a task that ended follow the rest.
+ * The own items of a task that can still resume at planning (`keep`: live or not archived; its
+ * worktree, `runs/<id>…` files and scratch directories, `legacy-runs.ts`) stay in `.ai/cezar/`, and
+ * no stored path into them is rewritten. A moved project whose `.ai/cezar/` still holds items plans
+ * again: what no kept task owns now moves, so the items of a task archived or deleted since follow
+ * the rest.
  */
 
 export const LEGACY_PROJECT_DIR = '.ai/cezar';
@@ -59,12 +60,12 @@ export interface ProjectMigrationPlan {
   notRewritten: readonly string[];
   /** A completed migration marked the project moved, and nothing is left to move or rewrite. */
   alreadyMoved: boolean;
-  /** The live tasks whose own items stay in the old directory after this plan, sorted. */
+  /** The kept tasks (live or not archived) whose own items stay in the old directory after this plan, sorted. */
   leftovers: string[];
 }
 
 export interface ProjectMigrationPlanOptions {
-  /** The tasks live at planning: their own items stay where they are. */
+  /** The tasks that can still resume at planning (live or not archived): their own items stay where they are. */
   keep?: ReadonlySet<string>;
 }
 
@@ -350,7 +351,7 @@ class Planner {
         continue;
       }
       const kind = moveKind(entry);
-      // A live task's own item stays where its agent knows it; the directory around it merges.
+      // A kept task's own item stays where its agent knows it; the directory around it merges.
       const owner = legacyItemOwner(path.split('/').slice(2), this.keep);
       if (owner) { this.leftovers.add(owner); continue; }
       if (kind === 'directory' && top && this.holdsKeptItem(path, source)) { this.mergeInto(source, target, path); continue; }
@@ -444,7 +445,7 @@ class Planner {
 
   /**
    * Run files with stored paths: each one the move carries, rewritten at its new place, and each
-   * one that stays (a live task's own file, or a moved project's newer file) rewritten in place.
+   * one that stays (a kept task's own file, or a moved project's newer file) rewritten in place.
    */
   private evidenceRewrites(map: (path: string) => string | undefined): void {
     const roots = [join(this.plan.source, 'runs'), ...this.keep.size > 0 || this.marked ? [join(this.plan.destination, 'runs')] : []];
@@ -523,7 +524,7 @@ export function describeProjectMigrationPlan(plan: ProjectMigrationPlan): string
     ...section('Blockers', plan.blockers),
     ...section('Destination conflicts', plan.conflicts.map(conflict => `${conflict.path}: ${conflict.reason}`)),
     ...section('Moves', plan.moves.map(move => `${move.from} -> ${move.to}`)),
-    ...section('Kept in .ai/cezar/ for live tasks until they end', plan.leftovers),
+    ...section('Kept in .ai/cezar/ for tasks until they are archived', plan.leftovers),
     ...section('Worktree repairs (git worktree repair)', plan.worktrees.map(worktree => `${worktree.from} -> ${worktree.to}`)),
     ...section('Path rewrites', plan.rewrites.map(rewrite => `${rewriteLocation(rewrite)}: ${rewrite.from} -> ${rewrite.to}`)),
     ...section('Tracked files left in place; run these and commit', plan.gitMv),

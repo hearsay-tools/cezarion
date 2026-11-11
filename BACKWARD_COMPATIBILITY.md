@@ -57,9 +57,9 @@ moved project's runs stay writable. With the switch false (builds before the swi
 help and dispatch omit it (`cez migrate-project` is an unknown command, exit 1), no
 route or setting exposes it, and every ordinary write stays under `.ai/cezar/`. Only the user
 runs it, offline: it refuses while a cockpit it can see serves the project or another live
-process claims a task of it, and names what to stop. A task live otherwise keeps its own items
-(worktree, `runs/<id>…` files, scratch directories) in `.ai/cezar/` with their stored paths,
-listed in `.ai/squawk/legacy-runs.json`, until a later move carries them; a cockpit of another home that lists the project but never opened it
+process claims a task of it, and names what to stop. A task that is not archived keeps its own
+items (worktree, `runs/<id>…` files, scratch directories) in `.ai/cezar/` with their stored paths,
+listed in `.ai/squawk/legacy-runs.json`, until a later move after it is archived carries them; a cockpit of another home that lists the project but never opened it
 is not seen, so the user stops it. An older binary checks neither the fence nor the journal
 and opens `.ai/cezar/` directly: on a moved project it sees no earlier task but loses no data. Early
 recovery runs in both switch states: an entry that finds an unfinished

@@ -3,13 +3,14 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 /**
- * Live tasks whose own files stay in `.ai/cezar/` after a project move (owner decision A,
+ * Tasks whose own files stay in `.ai/cezar/` after a project move (owner decision A,
  * hearsay-tools/cezarion#2778). A move carries the run store and everything else to `.ai/squawk/`,
- * but a task that is live at the move keeps its own items where its agent knows them: its
- * worktree, its handoff file and other `runs/<id>…` files, its scratch directories. The moved
- * store keeps their absolute paths. The move writes the ids of those tasks to
- * `<root>/.ai/squawk/legacy-runs.json`; a later move carries their items once they are no longer
- * live, and removes the file when no task is left.
+ * but a task that can still resume at the move (live, or not archived: a human can Continue a
+ * finished task) keeps its own items where its agent knows them: its worktree, its handoff file
+ * and other `runs/<id>…` files, its scratch directories. The moved store keeps their absolute
+ * paths. The move writes the ids of those tasks to `<root>/.ai/squawk/legacy-runs.json`; a later
+ * move carries their items once the task is archived or deleted, and removes the file when no
+ * task is left.
  *
  * Every path helper of a run's own items resolves its directory with `runDataDir`, so the cockpit
  * reads and writes a leftover task's items in `.ai/cezar/`, and the read-only rule of the fallback

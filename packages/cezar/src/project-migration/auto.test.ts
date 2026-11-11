@@ -90,9 +90,9 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
   }
 
   const movedState = () => existsSync(join(project.newDir, 'runs.db')) && !existsSync(join(project.dataDir, 'runs.db'));
-  const setTask = (status: 'waiting' | 'review') => {
+  const setTask = (status: 'waiting' | 'review', archived = true) => {
     const store = RunStore.open(project.dataDir, { keepLive: true });
-    try { setRunStatus(store, TASK, status); store.flush(); } finally { store.close(); }
+    try { setRunStatus(store, TASK, status, { archived }); store.flush(); } finally { store.close(); }
   };
 
   it('moves an idle legacy project at cockpit start, before the listener, and its task data stays readable', async () => {
@@ -130,8 +130,8 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     } finally { release(); }
   });
 
-  it('moves a project with a task live from before the restart, keeps the task\'s own files in place, names it, and moves them at the next start', async () => {
-    setTask('waiting');
+  it('moves a project with a task live from before the restart, keeps the task\'s own files in place while it is not archived, names it, and moves them at the start after it is archived', async () => {
+    setTask('waiting', false);
     const handoff = join(project.dataDir, 'runs', `${TASK}.handoff.md`);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
@@ -153,18 +153,27 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(context.store.getRun(WORKER)?.worktreePath).toBe(moved(project, project.worker.path));
       expect(JSON.parse(readFileSync(join(project.newDir, LEGACY_RUNS_FILE), 'utf8'))).toEqual({ version: 1, runs: [TASK] });
       const notice = warn.mock.calls.flat().join('\n');
-      expect(notice).toContain(`[hsq] Moved the state of ${project.root} from .ai/cezar/ to .ai/squawk/. 1 live task keeps its files in .ai/cezar/ until it ends: ${TASK}.`);
+      expect(notice).toContain(`[hsq] Moved the state of ${project.root} from .ai/cezar/ to .ai/squawk/. 1 task keeps its files in .ai/cezar/ until it is archived: ${TASK}.`);
       // A live task's own items stay writable for this cockpit, although .ai/cezar/ is the fallback now.
       expect(fallbackProjectWriteError(project.taskPath)).toBeUndefined();
       expect(fallbackProjectWriteError(handoff)).toBeUndefined();
       expect(fallbackProjectWriteError(join(project.dataDir, 'runs.db'))).toMatch(/read-only project data/);
-      // The task ends; one attempt per cockpit run, so the same run does not move its files.
+      // The task ends in review; a human can still Continue it, so the next start keeps its files.
       setRunStatus(context.store, TASK, 'review');
       context.store.flush();
-      first.contexts.dispose('p');
-      await first.contexts.context('p');
-      expect(existsSync(project.taskPath)).toBe(true);
       first.stop();
+      const second = cockpit(true);
+      const kept = await second.contexts.context('p');
+      expect(kept.store.getRun(TASK)?.worktreePath).toBe(project.taskPath);
+      expect(existsSync(join(project.taskPath, 'report.html'))).toBe(true);
+      expect(JSON.parse(readFileSync(join(project.newDir, LEGACY_RUNS_FILE), 'utf8'))).toEqual({ version: 1, runs: [TASK] });
+      // The task is archived; one attempt per cockpit run, so the same run does not move its files.
+      kept.store.setArchived(TASK, true);
+      kept.store.flush();
+      second.contexts.dispose('p');
+      await second.contexts.context('p');
+      expect(existsSync(project.taskPath)).toBe(true);
+      second.stop();
       // The next start moves them, rewrites their stored paths and removes what the move emptied.
       const next = cockpit(true);
       const reopened = await next.contexts.context('p');

@@ -252,22 +252,26 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
     } finally { release(); }
   });
 
-  it('migrates while a task is live, keeps the task\'s own files in place and lists it, and moves them once the task ends', async () => {
-    const live = (status: 'waiting' | 'review') => {
-      const store = RunStore.open(project.dataDir, { keepLive: true });
-      try { setRunStatus(store, TASK, status); store.flush(); } finally { store.close(); }
-    };
-    live('waiting');
+  it('migrates while a task is live, keeps the task\'s own files in place and lists it, and moves them once the task is archived', async () => {
+    const store = RunStore.open(project.dataDir, { keepLive: true });
+    try { setRunStatus(store, TASK, 'waiting', { archived: false }); store.flush(); } finally { store.close(); }
     const first = await cli([]);
     expect(first.code).toBe(0);
-    expect(first.out).toContain(`Kept in .ai/cezar/ for live tasks until they end:\n  ${TASK}`);
-    expect(first.out).toContain('The live tasks listed above keep their files in .ai/cezar/');
+    expect(first.out).toContain(`Kept in .ai/cezar/ for tasks until they are archived:\n  ${TASK}`);
+    expect(first.out).toContain('The tasks listed above keep their files in .ai/cezar/; a later migration moves them once they are archived.');
     expect(existsSync(join(project.newDir, 'runs.db'))).toBe(true);
     expect(migratedTask()?.worktreePath).toBe(project.taskPath);
     expect(existsSync(project.taskPath)).toBe(true);
     expectReleased();
-    const store = RunStore.open(project.newDir, { keepLive: true });
-    try { setRunStatus(store, TASK, 'review'); store.flush(); } finally { store.close(); }
+    // In review, a human can still Continue it: its files stay.
+    const reviewed = RunStore.open(project.newDir, { keepLive: true });
+    try { setRunStatus(reviewed, TASK, 'review'); reviewed.flush(); } finally { reviewed.close(); }
+    const second = await cli([]);
+    expect(second.code).toBe(0);
+    expect(migratedTask()?.worktreePath).toBe(project.taskPath);
+    expect(existsSync(project.taskPath)).toBe(true);
+    const archived = RunStore.open(project.newDir, { keepLive: true });
+    try { archived.setArchived(TASK, true); archived.flush(); } finally { archived.close(); }
     const migrated = await cli([]);
     expect(migrated.code).toBe(0);
     expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));

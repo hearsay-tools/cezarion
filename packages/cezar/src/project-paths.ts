@@ -116,7 +116,7 @@ export function readProjectPath(repoRoot: string, ...parts: string[]): string {
 export const MANAGED_WORKTREE = /(?:^|\/)\.ai\/(?:cezar|squawk)\/worktrees\//;
 
 /** Guard every destructive path, including rows already copied to the write root's database. An
- *  item a live task kept in `.ai/cezar/` at the project move (`legacy-runs.ts`) is not guarded. */
+ *  item a task kept in `.ai/cezar/` at the project move (`legacy-runs.ts`) is not guarded. */
 export function isFallbackProjectPath(repoRoot: string, path: string): boolean {
   const inside = relative(resolve(projectPaths(repoRoot).reads[1]!), resolve(path));
   const fallback = inside === '' || (inside !== '..' && !inside.startsWith('../') && !inside.startsWith('..\\')) && !isAbsolute(inside);
@@ -133,7 +133,7 @@ export function fallbackProjectWriteError(path: string): string | undefined {
     const root = path.slice(0, match.index) || '.';
     if (REBRAND_SWITCH && !pathPresent(root)) continue;
     if (basename(projectPaths(root).reads[1]!) !== match[1]) continue;
-    // A live task's own items stay in `.ai/cezar/` after the move, and stay writable.
+    // A kept task's own items stay in `.ai/cezar/` after the move, and stay writable.
     if (match[1] === 'cezar' && legacyRunItem(root, path)) continue;
     return `Cannot write read-only project data in ${path}. Use the binary that migrated the project.`;
   }

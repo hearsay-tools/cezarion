@@ -12,7 +12,7 @@ import type { MigrationFault } from './steps.ts';
  * see serves the project (`live.ts`). It then takes the project's `cockpit.lock` and its migration
  * fence, so no cockpit boots on the project and no process that checks admission is admitted; under the fence it
  * refuses while another live process claims a task, then runs the engine and releases both claims.
- * A task live otherwise keeps its own items in `.ai/cezar/`. An unfinished
+ * Every other task that is not archived keeps its own items in `.ai/cezar/`. An unfinished
  * journal finishes first and is reported as the migration. A dry run holds only `cockpit.lock`
  * while it plans and writes nothing.
  */
@@ -44,7 +44,7 @@ export async function migrateProjectOffline(root: string, options: {
  * The move itself, shared by the command and the cockpit's automatic move: take the fence with
  * `ownership` (which owns, or then owns, `cockpit.lock`), refuse while another live process claims
  * a task (the check reads the run stores without writing, so a refusal writes nothing), run the
- * engine, which leaves the own items of the live tasks in place, release the fence. The caller
+ * engine, which leaves the own items of the kept tasks (live or not archived) in place, release the fence. The caller
  * keeps or releases `cockpit.lock`.
  */
 export async function moveUnderFence(root: string, ownership: CockpitOwnership, fault?: MigrationFault): Promise<ProjectMigrationAnswer> {

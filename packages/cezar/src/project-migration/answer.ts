@@ -1,5 +1,5 @@
 import type { ProjectMigrationResult } from './engine.ts';
-import { projectLiveRunIds } from './live.ts';
+import { projectKeptRunIds } from './live.ts';
 import { describeProjectMigrationPlan, gitMvCommands, NOT_REWRITTEN, planProjectMigration } from './plan.ts';
 
 /** What `migrate-project` reports. */
@@ -17,7 +17,7 @@ export interface ProjectMigrationAnswer {
   gitMv: string[];
   /** The project was already moved: nothing changed. */
   alreadyMoved: boolean;
-  /** The live tasks whose own items stay in `.ai/cezar/` until they end. */
+  /** The unarchived tasks whose own items stay in `.ai/cezar/` until they are archived. */
   leftovers: string[];
 }
 
@@ -32,7 +32,7 @@ function journalReport(result: ProjectMigrationResult): string {
 
 /** A dry run: the engine's whole plan, after any unfinished journal it had to finish first. */
 export async function dryRunAnswer(repoRoot: string, recovered: ProjectMigrationResult | undefined): Promise<ProjectMigrationAnswer> {
-  const plan = await planProjectMigration(repoRoot, { keep: projectLiveRunIds(repoRoot) });
+  const plan = await planProjectMigration(repoRoot, { keep: projectKeptRunIds(repoRoot) });
   return { dryRun: true, blocked: plan.blockers.length > 0 || plan.conflicts.length > 0, resumed: recovered !== undefined, ...(recovered ? { recovered: journalReport(recovered) } : {}),
     report: describeProjectMigrationPlan(plan), gitMv: plan.gitMv, alreadyMoved: plan.alreadyMoved, leftovers: plan.leftovers };
 }
@@ -53,6 +53,6 @@ export function migrationAnswerText(answer: ProjectMigrationAnswer): string {
   const next = answer.gitMv.length ? ' Run the git mv commands above and commit them.' : '';
   if (answer.alreadyMoved && !answer.dryRun) lines.push(`The project was already moved; nothing changed.${next}`);
   else if (answer.dryRun) lines.push(answer.recovered ? 'Dry run: planning changed nothing; the completed migration above did.' : 'Dry run: nothing was moved or rewritten.');
-  else lines.push(`Migration complete.${answer.leftovers.length ? ` The live tasks listed above keep their files in .ai/cezar/; a later migration moves them once they end.` : ''}${next}`);
+  else lines.push(`Migration complete.${answer.leftovers.length ? ` The tasks listed above keep their files in .ai/cezar/; a later migration moves them once they are archived.` : ''}${next}`);
   return lines.join('\n');
 }

@@ -14,7 +14,7 @@ import { replaceAtomically, settle } from './durable.ts';
  */
 
 /**
- * `leftovers` writes which live tasks keep their own items in `.ai/cezar/` (`legacy-runs.ts`) and
+ * `leftovers` writes which kept tasks (live or not archived) keep their own items in `.ai/cezar/` (`legacy-runs.ts`) and
  * removes the old directories the move emptied. `mark-moved` is last: from its marker on,
  * `projectPaths` writes the project under `.ai/squawk/`.
  */
@@ -55,7 +55,7 @@ export const projectMigrationJournalSchema = z.object({
   tracked: z.array(trackedFileSchema),
   worktrees: z.array(worktreeRepairSchema),
   rewrites: z.array(pathRewriteSchema),
-  /** The live tasks whose own items stay in `source`; absent in a journal of an older build: none. */
+  /** The kept tasks (live or not archived) whose own items stay in `source`; absent in a journal of an older build: none. */
   leftovers: z.array(z.uuid()).optional(),
 }).strict();
 export type ProjectMigrationJournal = z.infer<typeof projectMigrationJournalSchema>;

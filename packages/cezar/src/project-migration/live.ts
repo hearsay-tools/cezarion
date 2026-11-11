@@ -85,7 +85,7 @@ function record(value: unknown): RunRecord | undefined {
  * JSON. The legacy directory wins an id both hold. Live: rows not terminal, and the runs of
  * families a live process claims. Throws when a live id's record cannot be read.
  */
-export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'> {
+export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'> & { allRuns: () => RunRecord[] } {
   const runs = new Map<string, RunRecord>();
   const live = new Set<string>(), foreign = new Set<string>();
   const add = (run: RunRecord | undefined) => { if (run && !runs.has(run.id)) runs.set(run.id, run); };
@@ -117,7 +117,8 @@ export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'per
     throw new Error(`Cannot migrate ${root}: these tasks are marked live but their records cannot be read: ${unreadable.join(', ')}. `
       + 'Open the project with the binary that wrote them, finish or cancel each one, then retry');
   }
-  return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id) };
+  return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id),
+    allRuns: () => [...runs.values()] };
 }
 
 /** Refuse when a cockpit serves the project; include live tasks in that first refusal. The fence checks them again. */
@@ -144,7 +145,15 @@ export function projectForeignTasksOffline(root: string): LiveProjectTask[] {
   return projectLiveTasks({ ...view, persistedLiveRunIds: () => ({ live: [], foreign }) });
 }
 
-/** The ids of every live task of the project: a migration leaves their own items in place. */
-export function projectLiveRunIds(root: string): ReadonlySet<string> {
-  return new Set(projectLiveTasksOffline(root).map(task => task.id));
+/**
+ * The ids of every task of the project that can still resume: each live task, and each task not
+ * archived, since a human can Continue a done, review, failed or cancelled task from its stored
+ * worktree. A migration leaves their own items in place. A deleted task has no record, so its
+ * items move.
+ */
+export function projectKeptRunIds(root: string): ReadonlySet<string> {
+  const view = readLiveTaskView(root);
+  const kept = new Set(projectLiveTasks(view).map(task => task.id));
+  for (const run of view.allRuns()) if (!run.archived) kept.add(run.id);
+  return kept;
 }
