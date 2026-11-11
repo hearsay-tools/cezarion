@@ -115,7 +115,7 @@ function describePlan(group: Group, members: Member[]): void {
   }
   group.say(`group: ${names} succeed or fail together. Each instance starts under its new name and passes its health check before the group commits.`);
   if (!homeCommitted) group.say(`marker: ${join(target.config, 'install.json')} stays pending (the new home is read-only) until every instance passes, then commits.`);
-  group.say(`rollback: any failure restores every old unit and site, starts the old services${homeCommitted ? '' : ' and renames the marker to install.json.failed; the legacy home stays in use'}.`);
+  group.say(`rollback: any failure restores every old service definition (systemd units and nginx sites, launchd plists), starts the old services${homeCommitted ? '' : ' and renames the marker to install.json.failed; the legacy home stays in use'}.`);
 }
 
 function journalFor(group: Group, members: Member[], phase: ServerMigrateJournal['phase']): ServerMigrateJournal {

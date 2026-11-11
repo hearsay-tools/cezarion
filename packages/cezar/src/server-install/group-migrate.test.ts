@@ -295,7 +295,7 @@ describe('server-migrate dry run and environment', () => {
       'api: health check: http://127.0.0.1:4400/ answers (the bind address; the proxy is not checked)',
       'group: default, api, shop succeed or fail together. Each instance starts under its new name and passes its health check before the group commits.',
       `marker: ${marker} stays pending (the new home is read-only) until every instance passes, then commits.`,
-      'rollback: any failure restores every old unit and site, starts the old services and renames the marker to install.json.failed; the legacy home stays in use.',
+      'rollback: any failure restores every old service definition (systemd units and nginx sites, launchd plists), starts the old services and renames the marker to install.json.failed; the legacy home stays in use.',
     ]) expect(result.lines).toContain(line);
     expect(f.host.commands).toEqual([]);
   });

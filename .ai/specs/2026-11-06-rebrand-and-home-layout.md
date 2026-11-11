@@ -240,7 +240,7 @@ The instances that share a home form one group and succeed or fail together. Unt
 instance passes its health check, the new marker stays in state `pending` and `HomeStore`
 refuses every write, so the cockpits serve read-only and no write can be lost by a rollback. If any instance
 in the group fails its health check, every instance in the group stops, the old units and old
-sites come back, and the new home's marker is renamed to `install.json.failed` so the next run
+sites (on macOS the old launchd plists and labels) come back, and the new home's marker is renamed to `install.json.failed` so the next run
 migrates again from the untouched legacy home. Old unit files stay as `*.migrated` after
 success. When the install owns its nginx site, `/etc/cezar/htpasswd[-<slug>]` is copied to
 `/etc/hearsay-squawk/` (the old file stays). The new site is the old site file copied as is (TLS listeners,
