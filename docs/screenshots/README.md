@@ -26,7 +26,7 @@ is folded, because the table lists it before the running and queued tasks.
   [ensure-installed](../../.ai/browsers/agent-browser.md#ensure-installed) fills.
   `npm run test:e2e` installs it too.
 - A `gh` login, for `github-issues.png` only. That image shows the public open issues of
-  `hearsay-tools/cezarion`, so it changes with each capture.
+  `hearsay-tools/squawk`, so it changes with each capture.
 - Linux or macOS. The command runs its agent through a shell launcher.
 
 No agent login and no running cockpit are needed.
