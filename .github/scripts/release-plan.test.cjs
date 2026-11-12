@@ -54,18 +54,41 @@ test('a rollback runs past the blocker of the release it replaces, and only past
     { ...blocker(7), pull_request: {} },
   ];
   assert.deepEqual(plan.blockingIssues(issues).map(issue => issue.number), [1, 2, 3, 4, 5]);
-  assert.deepEqual(plan.blockingIssues(issues, { rollback: true, latest: '1.2.1' }).map(issue => issue.number), [3, 4, 5]);
-  assert.deepEqual(plan.blockingIssues(issues, { rollback: true, latest: '1.2.1', ignore: [4, 5] }).map(issue => issue.number), [3]);
+  // Only the blocker of the replaced `latest` is exempt; a newer candidate's blocker must be named.
+  assert.deepEqual(plan.blockingIssues(issues, { rollback: true, latest: '1.2.1' }).map(issue => issue.number), [2, 3, 4, 5]);
+  assert.deepEqual(plan.blockingIssues(issues, { rollback: true, latest: '1.2.1', ignore: [2, 4, 5] }).map(issue => issue.number), [3]);
   assert.deepEqual(plan.parseIssueNumbers('#4, 5 6'), [4, 5, 6]);
   assert.deepEqual(plan.parseIssueNumbers(''), []);
   assert.throws(() => plan.parseIssueNumbers('4, five'), /Expected issue numbers/);
 });
 
-test('the newest finished Nightly decides the rehearsal gate', () => {
-  const run = (conclusion, hour) => ({ status: 'completed', conclusion, created_at: new Date(NOW - hour * HOUR).toISOString(), html_url: `run-${hour}` });
-  assert.equal(plan.rehearsalVerdict([run('cancelled', 1), run('success', 2), run('failure', 26)]).passed, true);
-  assert.match(plan.rehearsalVerdict([run('failure', 2), run('success', 26)]).reason, /ended failure: run-2/);
-  assert.match(plan.rehearsalVerdict([{ status: 'in_progress' }]).reason, /No finished Nightly/);
+const RESULT_JOB = { name: 'Rehearse the release tests / Release candidate result', conclusion: 'success' };
+
+function nightlyGithub(runs, jobsByRun) {
+  const listed = [];
+  return {
+    listed,
+    paginate: async (method, args) => (await method(args)).data,
+    rest: { actions: {
+      listWorkflowRuns: async () => ({ data: { workflow_runs: runs } }),
+      listJobsForWorkflowRun: async ({ run_id }) => { listed.push(run_id); return { data: jobsByRun[run_id] ?? [] }; },
+    } },
+  };
+}
+
+test('the newest Nightly that tested a published package decides the rehearsal gate', async () => {
+  const run = (id, conclusion, hour) => ({ id, status: 'completed', conclusion, created_at: new Date(NOW - hour * HOUR).toISOString(), html_url: `run-${id}` });
+  // A cancelled run and a run that skipped the rehearsal (main did not move, or a dry run) say nothing.
+  const skipped = { 2: [{ name: 'Rehearse the release tests / Release candidate result', conclusion: 'skipped' }], 3: [RESULT_JOB] };
+  let gh = nightlyGithub([run(1, 'cancelled', 1), run(2, 'success', 2), run(3, 'success', 26), run(4, 'failure', 50)], skipped);
+  assert.deepEqual(await plan.rehearsalVerdict({ github: gh, repo: {} }), { passed: true, url: 'run-3' });
+  assert.deepEqual(gh.listed, [2, 3]);
+  gh = nightlyGithub([run(5, 'failure', 2), run(3, 'success', 26)], skipped);
+  assert.match((await plan.rehearsalVerdict({ github: gh, repo: {} })).reason, /ended failure: run-5/);
+  // A green Nightly without the published-package tests is not a passed rehearsal.
+  gh = nightlyGithub([run(2, 'success', 2)], skipped);
+  assert.match((await plan.rehearsalVerdict({ github: gh, repo: {} })).reason, /No recent Nightly run tested a published package/);
+  assert.equal(plan.rehearsalOutcome(run(3, 'success', 1), [RESULT_JOB]), 'passed');
 });
 
 test('the candidate is the newest first-parent commit whose own ci.yml push run passed', () => {
@@ -88,9 +111,10 @@ function fixture({ issues = [], nightly = 'success', time = { '1.2.0': '2026-11-
       actions: {
         listWorkflowRuns: async args => {
           calls.push(['runs', args]);
-          if (args.workflow_id === 'nightly.yml') return { data: { workflow_runs: [{ status: 'completed', conclusion: nightly, created_at: '2026-11-12T03:30:00Z', html_url: 'nightly-run' }] } };
+          if (args.workflow_id === 'nightly.yml') return { data: { workflow_runs: [{ id: 99, status: 'completed', conclusion: nightly, created_at: '2026-11-12T03:30:00Z', html_url: 'nightly-run' }] } };
           return { data: { workflow_runs: [{ event: 'push', head_branch: 'main', status: 'completed', conclusion: 'success', head_sha: sha(2) }] } };
         },
+        listJobsForWorkflowRun: async () => ({ data: [RESULT_JOB] }),
       },
     },
   };
@@ -171,9 +195,16 @@ test('only a rollback can name blockers, and only main or release/** can release
 
 test('the promotion re-check refuses a blocker opened during the candidate tests', async () => {
   const { calls } = fixture();
-  const github = { paginate: async () => [blocker(11, 'opened during tests')], rest: { issues: { listForRepo() {} }, actions: { listWorkflowRuns: async () => ({ data: { workflow_runs: [{ status: 'completed', conclusion: 'success', created_at: '2026-11-12T00:00:00Z' }] } }) } } };
+  let open = [blocker(11, 'opened during tests')];
+  const github = {
+    paginate: async (method, args) => (method === github.rest.issues.listForRepo ? open : (await method(args)).data),
+    rest: { issues: { listForRepo() {} }, actions: {
+      listWorkflowRuns: async () => ({ data: { workflow_runs: [{ id: 1, status: 'completed', conclusion: 'success', created_at: '2026-11-12T00:00:00Z' }] } }),
+      listJobsForWorkflowRun: async () => ({ data: [RESULT_JOB] }),
+    } },
+  };
   await assert.rejects(plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '' }), /Promotion refused:\n- Open release-blocker issue #11/);
-  github.paginate = async () => [];
+  open = [];
   await plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '' });
   assert.equal(calls.length, 0);
 });

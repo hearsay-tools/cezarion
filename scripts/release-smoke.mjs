@@ -9,7 +9,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { get } from 'node:http';
+import { get, request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -106,6 +106,29 @@ function localGet(url) {
   });
 }
 
+function localPost(url, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const call = request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } }, response => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { text += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body: text }));
+      response.on('error', reject);
+    });
+    call.on('error', reject);
+    call.setTimeout(10_000, () => call.destroy(new Error(`Timed out: ${url}`)));
+    call.end(payload);
+  });
+}
+
+// The workspace registry, as the cockpit's project switcher reads it.
+async function projectIds(base) {
+  const response = await localGet(`${base}/api/v1/projects`);
+  if (response.status !== 200) throw new Error(`GET /api/v1/projects answered HTTP ${response.status}`);
+  return JSON.parse(response.body).projects.map(project => project.id);
+}
+
 async function boot({ bin, home, repo }) {
   const port = await freePort();
   const child = spawn(process.execPath, [bin, '--port', String(port), '--no-open', '--repo', repo],
@@ -144,26 +167,35 @@ async function checkCockpit(base) {
 async function run({ name, version, upgradeFrom }) {
   const root = mkdtempSync(join(tmpdir(), 'release-smoke-'));
   try {
-    const repo = join(root, 'repo');
-    mkdirSync(repo);
-    const git = (...args) => execFileSync('git', ['-c', 'user.name=Release smoke', '-c', 'user.email=smoke@example.invalid', ...args], { cwd: repo, stdio: 'ignore' });
-    git('init', '-q', '-b', 'main');
-    git('commit', '--allow-empty', '-qm', 'fixture');
+    const repository = name => {
+      const dir = join(root, name);
+      mkdirSync(dir);
+      const git = (...args) => execFileSync('git', ['-c', 'user.name=Release smoke', '-c', 'user.email=smoke@example.invalid', ...args], { cwd: dir, stdio: 'ignore' });
+      git('init', '-q', '-b', 'main');
+      git('commit', '--allow-empty', '-qm', 'fixture');
+      return dir;
+    };
+    const repo = repository('repo');
     const home = join(root, 'home');
     let before = [];
     if (upgradeFrom) {
       await install(join(root, 'previous'), `${name}@${upgradeFrom}`);
       const server = await boot({ bin: binary(join(root, 'previous'), name), home, repo });
-      before = server.health.projects.map(project => project.id);
-      await server.stop();
-      if (!before.length) throw new Error(`${upgradeFrom} registered no project; the upgrade check has no state to keep`);
+      try {
+        // A second project only the saved registry knows: the new version boots the first
+        // repository, so a lost registry would register that one again and drop this one.
+        const added = await localPost(`${server.base}/api/v1/projects`, { root: repository('saved') });
+        if (added.status !== 200) throw new Error(`${upgradeFrom} refused to register a second project (HTTP ${added.status}): ${added.body.slice(0, 200)}`);
+        before = await projectIds(server.base);
+      } finally { await server.stop(); }
+      if (before.length < 2) throw new Error(`${upgradeFrom} kept ${before.length} project(s); the upgrade check needs the boot project and a saved one`);
       console.log(`release-smoke: ${upgradeFrom} booted with projects ${before.join(', ')}.`);
     }
     await install(join(root, 'current'), `${name}@${version}`);
     const server = await boot({ bin: binary(join(root, 'current'), name), home, repo });
     try {
       if (server.health.version !== version) throw new Error(`Booted version ${server.health.version}, expected ${version}`);
-      const after = new Set(server.health.projects.map(project => project.id));
+      const after = new Set(await projectIds(server.base));
       const lost = before.filter(id => !after.has(id));
       if (lost.length) throw new Error(`The upgrade lost projects: ${lost.join(', ')}`);
       if (!after.size) throw new Error('The booted server registered no project');

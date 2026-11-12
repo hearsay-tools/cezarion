@@ -173,8 +173,8 @@ must be above `latest`: merge the pending version-bump PR first.
 | Gate | Release | Rollback |
 |---|---|---|
 | The last stable version was published 24 hours ago or more (npm `time`) | refused within 24 hours | not checked |
-| No open issue carries `release-blocker` | refused | refused, except a blocker the Release workflow filed for `latest` or a newer version, and blockers named in `ignore_blockers` |
-| The newest finished Nightly rehearsal passed | refused | not checked: a failed rehearsal files a blocker, and the blocker rule decides |
+| No open issue carries `release-blocker` | refused | refused, except the blocker the Release workflow filed for the `latest` version it replaces, and blockers named in `ignore_blockers` |
+| The newest finished Nightly run that tested a published package passed (its `Release candidate result` job) | refused | not checked: a failed rehearsal files a blocker, and the blocker rule decides |
 
 The plan checks every gate; the promotion checks the blocker and rehearsal gates
 again. A retry after a failed candidate is not a second stable release, so the

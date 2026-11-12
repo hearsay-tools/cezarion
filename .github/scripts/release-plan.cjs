@@ -98,8 +98,8 @@ function parseIssueNumbers(text) {
   return numbers.map(Number);
 }
 
-// A rollback is the remedy for a failed release, so the blockers the Release workflow
-// filed for the release it replaces (or for a newer candidate) do not stop it. Every
+// A rollback is the remedy for a failed release, so the blocker the Release workflow
+// filed for the release it replaces (the current `latest`) does not stop it. Every
 // other blocker does, unless the owner names it in the dispatch.
 function blockingIssues(issues, { rollback = false, latest, ignore = [] } = {}) {
   return issues.filter(issue => issue.state === 'open' && !issue.pull_request
@@ -108,19 +108,33 @@ function blockingIssues(issues, { rollback = false, latest, ignore = [] } = {}) 
       if (!rollback) return true;
       if (ignore.includes(issue.number)) return false;
       const version = blockerVersion(issue.body);
-      return !(version && latest && compareVersions(version, latest) >= 0);
+      return !(version && latest && compareVersions(version, latest) === 0);
     });
 }
 
-// The newest Nightly that ran to an end decides; a cancelled run says nothing.
-function rehearsalVerdict(runs) {
-  const finished = runs.filter(run => run.status === 'completed' && !['cancelled', 'skipped'].includes(run.conclusion))
+// The job that passes only when every test of the published nightly passed; a reusable
+// workflow's jobs are named `<caller job> / <job>`.
+const REHEARSAL_JOB = / \/ Release candidate result$/;
+
+// One Nightly run's say on the rehearsal: 'failed', 'passed', or 'none' when it tested no
+// published package (main had not moved, or the publish was a dry run).
+function rehearsalOutcome(run, jobs) {
+  if (run.conclusion !== 'success') return 'failed';
+  return jobs.some(job => REHEARSAL_JOB.test(job.name) && job.conclusion === 'success') ? 'passed' : 'none';
+}
+
+// The newest Nightly that ran to an end and tested a published package decides; a
+// cancelled run says nothing, and neither does a run that skipped the rehearsal.
+async function rehearsalVerdict({ github, repo }) {
+  const { data } = await github.rest.actions.listWorkflowRuns({ ...repo, workflow_id: 'nightly.yml', branch: 'main', per_page: 30 });
+  const finished = data.workflow_runs.filter(run => run.status === 'completed' && !['cancelled', 'skipped'].includes(run.conclusion))
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-  if (!finished.length) return { passed: false, reason: 'No finished Nightly rehearsal on main. Dispatch Nightly and let it pass first.' };
-  const run = finished[0];
-  return run.conclusion === 'success'
-    ? { passed: true, url: run.html_url }
-    : { passed: false, reason: `The last Nightly rehearsal ended ${run.conclusion}: ${run.html_url}` };
+  for (const run of finished) {
+    if (run.conclusion !== 'success') return { passed: false, reason: `The last Nightly rehearsal ended ${run.conclusion}: ${run.html_url}` };
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...repo, run_id: run.id, filter: 'latest', per_page: 100 });
+    if (rehearsalOutcome(run, jobs) === 'passed') return { passed: true, url: run.html_url };
+  }
+  return { passed: false, reason: 'No recent Nightly run tested a published package. Dispatch Nightly with NPM_TOKEN configured and let it pass first.' };
 }
 
 // Every `main` commit passed the full suite in the merge queue; the candidate is the
@@ -137,8 +151,7 @@ async function readGates({ github, repo, rollback, latest, ignore }) {
   const reasons = blockers.map(issue => `Open ${BLOCKER_LABEL} issue #${issue.number}: ${issue.html_url}`);
   // The rehearsal files a blocker when it fails; a rollback reads that blocker, not the run.
   if (!rollback) {
-    const { data } = await github.rest.actions.listWorkflowRuns({ ...repo, workflow_id: 'nightly.yml', branch: 'main', per_page: 30 });
-    const rehearsal = rehearsalVerdict(data.workflow_runs);
+    const rehearsal = await rehearsalVerdict({ github, repo });
     if (!rehearsal.passed) reasons.push(rehearsal.reason);
   }
   return reasons;
@@ -234,6 +247,6 @@ async function recheckGates({ github, context, mode, previous, ignoreBlockers })
 
 module.exports = {
   compareVersions, nextCandidateVersion, candidateDistTag, stableDistTag, lastStablePublish, rollbackVersion, rollbackTag,
-  parseIssueNumbers, blockingIssues, rehearsalVerdict, newestVerifiedCommit, verifiedMainCommit, npmView,
+  parseIssueNumbers, blockingIssues, rehearsalOutcome, rehearsalVerdict, newestVerifiedCommit, verifiedMainCommit, npmView,
   planRelease, recheckGates, COOLDOWN_MS,
 };
