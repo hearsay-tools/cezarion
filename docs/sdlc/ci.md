@@ -214,18 +214,19 @@ The path-filtered `Windows test environment lease` workflow also runs the worker
 cleanup regression on native Windows when its cleanup code changes. It checks the pre-fix
 failure and the fixed result, including lease and checkout isolation.
 
-Required verification has ten verification jobs, plus the complexity and clone
-gates. Typecheck, workflow lint, citations, classification and policy ratchets
+Required verification includes the unit groups, build/package and shard jobs,
+plus the complexity and clone gates. Typecheck, workflow lint, citations, classification and policy ratchets
 feed the `Review preflight` gate. Heavy jobs wait only for their skip inputs:
-build/package needs queue proof and immutable PR inputs; Vitest and browser shards
+unit tests and build/package need queue proof and immutable PR inputs; Vitest and browser shards
 also need change-surface and PR-shape classification. They run beside typecheck and
 preflight. Native review admission follows preflight; `verify` requires all of them. Other events keep their existing test inventory. The eight Vitest shards use the exact Node version in
-`.node-version`, the eight cockpit browser shards the current Node LTS; typecheck and build/package use
+`.node-version`, the eight cockpit browser shards the current Node LTS; typecheck, unit tests and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
 - Eight Vitest shards on `ubuntu-24.04` each install dependencies and run `npm test -- --shard=N/8 --maxWorkers=4` for N=1..8. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs Node unit tests from source, then the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. Only the packaged tests and their typecheck read build output. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- Two unit jobs on `ubuntu-24.04` run package unit tests and repository script tests from source on exactly Node 24.21.0. Each installs dependencies and runs beside build/package.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. Only the packaged tests and their typecheck read build output. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Eight cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/8`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
@@ -255,7 +256,7 @@ reports both. The pull request for that issue records the queue run time before 
 The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
 
 The required check keeps its name, **Unit, build, E2E, and package**. It requires
-typecheck and build/package on every change surface. Full-matrix changes also
+typecheck, both unit groups and build/package on every change surface. Full-matrix changes also
 require all eight Vitest shards and all eight cockpit browser shards. Pull requests
 and merge groups require the complexity and clone gates. Packaged CLI E2E and
 cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs
@@ -384,13 +385,13 @@ numeric timeout option alone is ignored by github-script v9. The job has a
 Actions runner during the wait. Readiness, queue admission and reconciliation
 still use the immediate reader. See [the pending-review plan](../../.ai/specs/2026-11-03-coderabbit-pending-plan.md).
 
-Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy build/package, Vitest and browser jobs do not depend on this gate; they start once their skip inputs are ready and run beside typecheck, preflight and review admission. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
+Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy unit, build/package, Vitest and browser jobs do not depend on this gate; they start once their skip inputs are ready and run beside typecheck, preflight and review admission. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
 
 Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. Readiness never changes draft state (hearsay-tools/cezarion#3288): agents open PRs ready, and a human's draft stays a draft, so the readiness job holds only read repository permissions. Under the same lock it syncs the PR and closing-linked issue cards: In review when the PR is ready and its live head is verified, In progress otherwise, a draft included. Done cards remain protected. An unverified new head moves the cards to In progress; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation. On the next readiness trigger, a new pending same-head execution or reopened thread moves a same-repository PR's cards back to In progress. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if the board needs refreshing. Fork PRs get no board sync. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue suites always run on full-matrix entries. Exact-push reuse keeps its existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
 
 Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]` or the exact bot configured in `RELEASE_APP_BOT_LOGIN`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `pnpm-lock.yaml`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head manifests differ only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets), and the pnpm lockfile stays byte-identical except matching local workspace specifiers (including its pnpm package-manager document).
 
- The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr`; the shared CodeRabbit reader applies the same classifier to complete live files and exact base/head content. The required CI aggregate still runs `typecheck` and `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. The named **Automated Code Review** gate bypasses provider evidence only on that verified shape, and still requires every review thread resolved. A human-authored `release/v*` PR still runs the full matrix and review. Reconciliation never calls a reviewer.
+ The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr`; the shared CodeRabbit reader applies the same classifier to complete live files and exact base/head content. The required CI aggregate still runs `typecheck`, `unit-tests` and `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. The named **Automated Code Review** gate bypasses provider evidence only on that verified shape, and still requires every review thread resolved. A human-authored `release/v*` PR still runs the full matrix and review. Reconciliation never calls a reviewer.
 
 Release finalization creates bump PRs with a repository-scoped GitHub App token,
 which emits native `pull_request_target` CI. It waits for that run and never
@@ -666,8 +667,8 @@ The change-surface classifier treats only `.ai/upstream/ledger.yaml`,
 `.ai/upstream/LEDGER.md`, and `.ai/upstream/scans/YYYY-MM-DD.md` (including numeric
 same-day suffixes starting at `-2`) as scan data eligible for `docs-only`. A complete allowlisted diff skips Vitest and cockpit
 browser shards; mixed code changes, unsafe renames, and incomplete API results
-keep the full matrix. `build-and-package` stays unconditional, so malformed ledger
-entries, missing reports, and an out-of-date render fail its Node unit tests and
+keep the full matrix. `unit-tests` stays unconditional, so malformed ledger
+entries, missing reports, and an out-of-date render fail the repository script tests and
 the required **Unit, build, E2E, and package** check.
 
 A maintainer must close/reopen legacy `GITHUB_TOKEN`-created scan PRs once after
