@@ -414,16 +414,18 @@ describe('sidebar wiring', () => {
     const { client } = renderShell('/p/cezar/new')
     await waitFor(() => expect(document.querySelector('[data-run-id="boot-task"]')).not.toBeNull())
     expect(client.getQueryData(['cezar', 'runs', 'list'])).toEqual([boot])
+    // A tap needs the SAME element: a row that unmounts and mounts again also drops the tap.
+    const row = document.querySelector('[data-run-id="boot-task"]')
 
     // Health names `cezar` as the boot project: the sidebar's key becomes `['default', …]`,
     // which has no data yet, and its fetch is held.
     await act(async () => { releaseHealth() })
     await waitFor(() => expect(client.getQueryState(['default', 'runs', 'list'])?.fetchStatus).toBe('fetching'))
-    expect(document.querySelector('[data-run-id="boot-task"]')).not.toBeNull()
+    expect(document.querySelector('[data-run-id="boot-task"]')).toBe(row)
 
     await act(async () => { releaseDefaultList() })
     await waitFor(() => expect(client.getQueryData(['default', 'runs', 'list'])).toEqual([boot]))
-    expect(document.querySelector('[data-run-id="boot-task"]')).not.toBeNull()
+    expect(document.querySelector('[data-run-id="boot-task"]')).toBe(row)
   })
 
   it('counts only current-project sessions in Active/Automations', async () => {
