@@ -179,14 +179,14 @@ failure and the fixed result, including lease and checkout isolation.
 Required verification has ten verification jobs, plus the complexity and clone
 gates. Typecheck, workflow lint, citations, classification and policy ratchets
 feed the `Review preflight` gate. On PRs into main, the other nine jobs start after
-preflight and run beside the protected review result; `verify` requires both. Other events keep their existing test inventory. The four Vitest shards use the exact Node version in
-`.node-version`, the four cockpit browser shards the current Node LTS; typecheck and build/package use
+preflight and run beside the protected review result; `verify` requires both. Other events keep their existing test inventory. The eight Vitest shards use the exact Node version in
+`.node-version`, the eight cockpit browser shards the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
-- Four Vitest shards on `ubuntu-24.04` each install dependencies and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
+- Eight Vitest shards on `ubuntu-24.04` each install dependencies and run `npm test -- --shard=N/8 --maxWorkers=4` for N=1..8. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs Node unit tests from source, then the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. Only the packaged tests and their typecheck read build output. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
-- Four cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
+- Eight cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/8`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
 minutes. A seven-day sample projects about 2,833 PR/dispatch typecheck jobs per
@@ -198,20 +198,25 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-The full Vitest suite runs once across the four LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+The full Vitest suite runs once across the eight LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
 comparison, runner cost, failures and coverage investigation. Four workers per shard,
 coverage settings, duration weights and all required gates remain unchanged. Manual
 review context still recognizes exact skipped three-shard names from older native
-base workflows. Queue reuse requires the complete current four-shard roster; old
-three-shard proof falls back to full verification.
+base workflows. Queue reuse requires the complete current eight-shard roster; old
+three- and four-shard proof falls back to full verification.
+
+Since hearsay-tools/cezarion#3292 the Vitest and browser suites run on eight shards each,
+where four ran before. The setup of a shard (install, build, server start) does not shrink,
+so a queue run gets shorter and its runner-minutes rise. `node .github/scripts/queue-metrics.cjs`
+reports both. The pull request for that issue records the queue run time before and after.
 
 The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
 
 The required check keeps its name, **Unit, build, E2E, and package**. It requires
 typecheck and build/package on every change surface. Full-matrix changes also
-require all four Vitest shards and all four cockpit browser shards. Pull requests
+require all eight Vitest shards and all eight cockpit browser shards. Pull requests
 and merge groups require the complexity and clone gates. Packaged CLI E2E and
 cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs
 remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
@@ -232,7 +237,7 @@ Local `npm run test:e2e:local` builds once and runs four duration-weighted shard
 concurrently, with separate worktrees, app ports, `CEZ_HOME` directories, descriptors,
 and browser namespaces. It is the final local full-suite gate and retains lane logs
 under `.ai/qa/local-runs/`. A skipped browser exits nonzero there, since it did not
-verify the full suite. CI keeps four separate serial shards on its matrix.
+verify the full suite. CI keeps eight separate serial shards on its matrix.
 `npm run test:e2e` without arguments still runs the full sequential suite,
 with the existing environment reuse. A missing browser exits 3 unless the caller
 passes `--allow-skip` to permit exit 0. For iteration use
@@ -436,8 +441,8 @@ dispatch proves the job too.
 
 ### Vitest coverage artifact
 
-Eligible pull request runs and manual dispatches collect V8 coverage in the four required
-`Vitest shard N/4` jobs (hearsay-tools/cezarion#1958). A Squeal gate trial dispatch collects
+Eligible pull request runs and manual dispatches collect V8 coverage in the eight required
+`Vitest shard N/8` jobs (hearsay-tools/cezarion#1958). A Squeal gate trial dispatch collects
 Squeal's coverage instead and has no V8 artifact (§ Squeal quality gate trial). Each shard runs its tests once, with
 `--coverage.enabled`; there is no separate coverage test matrix. Main pushes and merge groups
 keep the command without coverage. Docs-only, infra-only, verified queue-proof and bump-PR
@@ -475,7 +480,7 @@ Merge groups publish their Vitest results for Squeal, so a new worktree at a mai
 can import those passes instead of running the same test files again
 (hearsay-tools/squeal spec 018, D8, D9, D13 and D17).
 
-- In a merge group, each `Vitest shard N/4` job fetches the pinned Squeal release (tag and
+- In a merge group, each `Vitest shard N/8` job fetches the pinned Squeal release (tag and
   commit in the `Fetch the Squeal release` step) and runs its unchanged `npm test` command
   under `squeal ci record --out "$RUNNER_TEMP/squeal-parts" --`. The command's output and
   exit code are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3
@@ -485,7 +490,7 @@ can import those passes instead of running the same test files again
   the rerun into `$RUNNER_TEMP/squeal-parts-rerun`, and only those parts upload. Each shard
   so has one complete part, which `squeal ci export` needs: it refuses two parts for one
   shard or one file.
-- The `Export Squeal results` job (`squeal-export`) runs after all four shards pass in a
+- The `Export Squeal results` job (`squeal-export`) runs after all eight shards pass in a
   merge group, with `contents: read` and no stored credentials. It checks out
   `merge_group.head_sha`, installs dependencies, downloads the parts, runs
   `squeal ci export` and uploads `squeal-results.json.gz` as the `squeal-results` artifact,
@@ -524,7 +529,7 @@ gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
   dispatch, including the bare proof of a `ci.yml` change (§ Proving a `ci.yml` change) and
   its V8 coverage artifact, is unchanged. Dispatches of one branch share a concurrency group
   and cancel each other, so start the trial after the bare proof ends.
-- Each `Vitest shard N/4` runs `npm test -- --shard=N/4 --maxWorkers=4` under
+- Each `Vitest shard N/8` runs `npm test -- --shard=N/8 --maxWorkers=4` under
   `squeal ci record`, as in a merge group, but without `--coverage.enabled`: Squeal's coverage
   provider yields to a project's own coverage, so only then does it write coverage records
   into the parts. The shard's output and exit code stay its own. The parts upload as
@@ -879,8 +884,8 @@ target workflow before opening PRs against it.
 
 CI accepts `merge_group: checks_requested` for `main`. It verifies the immutable
 combined commit before merge. Typecheck, citations, complexity, clones, build,
-Node tests and packaged CLI tests always run on that commit. The four Vitest
-and four browser jobs can reuse native PR suites for an unchanged queue entry
+Node tests and packaged CLI tests always run on that commit. The eight Vitest
+and eight browser jobs can reuse native PR suites for an unchanged queue entry
 built directly on `main`.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
 
@@ -906,7 +911,7 @@ hearsay-tools/cezarion#3046 for the observed first-ready race.
 
 ### Rerun of a failed queue shard
 
-In a merge group, a `Vitest shard N/4` or `Cockpit browser E2E shard N/4` job whose
+In a merge group, a `Vitest shard N/8` or `Cockpit browser E2E shard N/8` job whose
 first test run fails runs the whole shard once more, in the same job and in the same
 order. The shard passes only when the rerun passes. Most failed queue entries were
 flakes: 34 of 42 passed again with no new commit
@@ -966,7 +971,7 @@ hearsay-tools/cezarion#3291).
   report itself: it runs queued code with a read-only token, and a queued PR could forge
   test names.
 - **The signal.** It reads the run attempt's jobs through the Actions API. A
-  `Vitest shard N/4` or `Cockpit browser E2E shard N/4` job is a flake when its rerun
+  `Vitest shard N/8` or `Cockpit browser E2E shard N/8` job is a flake when its rerun
   step concluded `success`: the rerun runs only after a failed first run (§ Rerun of a
   failed queue shard). A shard whose rerun failed is a failure, not a flake.
 - **The names.** It downloads the shard's `failed-test-files-*-shard-N` artifact through
@@ -1017,8 +1022,8 @@ Confirm the first real flake report after the merge; do not force a flake for th
 A merge group classifies its own diff, as native PR CI classifies a PR.
 `Classify pull request change surface` checks out the group's `base_sha`, fetches
 `head_sha` as Git data, and passes `git diff --name-only --no-renames` between them to
-the base's `change-surface.cjs`. A `docs-only` or `infra-only` entry skips the four
-Vitest and four browser jobs, and the aggregate accepts those skips. Typecheck,
+the base's `change-surface.cjs`. A `docs-only` or `infra-only` entry skips the eight
+Vitest and eight browser jobs, and the aggregate accepts those skips. Typecheck,
 workflow lint, citations, complexity, clones, build, Node tests (including
 `agents-md-budget.test.cjs` and the ledger checks) and packaged CLI tests still run
 on the combined commit. The bump-PR skip stays off in the queue.
@@ -1073,8 +1078,8 @@ records). It reuses only the newest same-repository queue run's latest successfu
 attempt for the **exact pushed SHA**, after every classifier, verification leaf (including a verified native-suite
 reuse receipt), aggregate and review admission job succeeds. A final reread checks for races.
 A queue run of a docs-only entry lists each skipped suite once, under its unexpanded
-name (`Vitest shard ${{ matrix.shard }}/4`). The probe accepts those two skipped jobs in
-place of the eight shards only when the pushed commit is docs-only or infra-only by
+name (`Vitest shard ${{ matrix.shard }}/8`). The probe accepts those two skipped jobs in
+place of the sixteen shards only when the pushed commit is docs-only or infra-only by
 this check: the queue ref (`gh-readonly-queue/main/pr-<N>-<base SHA>`) names the group
 base, the pushed commit's first parent is that base, and the base's `change-surface.cjs`,
 run on the diff between them, says `docs-only` or `infra-only`. The checkout fetches

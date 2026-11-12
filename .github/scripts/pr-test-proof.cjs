@@ -1,11 +1,8 @@
 'use strict';
 const { mergeQueueAdmission, entryFrom, QUEUE_QUERY, nativeSuccess } = require('./merge-queue-admission.cjs');
-const { reader, readCiRuns, readCiJobs, successfulJobs, newest, validSha, CI_PATH } = require('./queue-ci-proof.cjs');
+const { reader, readCiRuns, readCiJobs, successfulJobs, newest, validSha, CI_PATH, SUITE_JOBS } = require('./queue-ci-proof.cjs');
 const { attestationName } = require('./pr-test-input.cjs');
-const PR_TEST_JOBS = [
-  ...[1, 2, 3, 4].map(n => `Vitest shard ${n}/4`),
-  ...[1, 2, 3, 4].map(n => `Cockpit browser E2E shard ${n}/4`),
-];
+const PR_TEST_JOBS = [...SUITE_JOBS];
 async function buildEntry(read, owner, repo, group) {
   // Entries behind this one do not block reuse; matchingMain limits reuse to an entry built on main.
   const response = await read('POST /graphql', { query: QUEUE_QUERY, variables: { owner, repo } });

@@ -87,7 +87,7 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
   // command adds: Squeal's provider yields to a project's coverage (squeal spec 020 D13.1).
   const command = record.run.split('\n')[0];
   const COVERAGE = " ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}";
-  assert.equal(command, 'set -- npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4');
+  assert.equal(command, 'set -- npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4');
   assert.equal(`set -- ${collect.run}`, `${command}${COVERAGE}`);
   const upload = step(vitest, 'Upload Squeal parts');
   assert.equal(upload['continue-on-error'], true);
@@ -117,11 +117,11 @@ test('the merge-group step returns the test command\'s exit code and output, rec
     });
     const recorded = run('success');
     assert.equal(recorded.status, 7, 'squeal ci record returns the command\'s code');
-    assert.equal(recorded.stdout.trim(), 'node /runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci record --out /runner/temp/squeal-parts -- npm test -- --shard=2/4 --maxWorkers=4');
+    assert.equal(recorded.stdout.trim(), 'node /runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci record --out /runner/temp/squeal-parts -- npm test -- --shard=2/8 --maxWorkers=4');
     const plain = run('failure');
     assert.equal(plain.status, 3);
-    assert.match(plain.stdout, /::warning title=Squeal release not fetched::Shard 2\/4/);
-    assert.match(plain.stdout, /^npm test -- --shard=2\/4 --maxWorkers=4$/m);
+    assert.match(plain.stdout, /::warning title=Squeal release not fetched::Shard 2\/8/);
+    assert.match(plain.stdout, /^npm test -- --shard=2\/8 --maxWorkers=4$/m);
     // A trial dispatch records the same command, with no --coverage.enabled for Squeal's provider to yield to.
     const trial = spawnSync('bash', ['-e', '-c', script(record.run, 'workflow_dispatch', 2)], {
       encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: 'success', PARTS_DIR: record.env.PARTS_DIR },
@@ -238,7 +238,13 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
   const builds = (j) => j.steps.some((s) => s.run === 'npm run build:server');
   assert.equal(builds(job), builds(jobs.vitest), 'the export checkout holds what the shards read');
   assert.equal(runs.some((run) => /npm (test|run test)|vitest run/.test(run)), false, 'the job runs no test command');
-  assert.equal(step(job, 'Download Squeal parts').with.pattern, 'squeal-parts-shard-*');
+  const pattern = step(job, 'Download Squeal parts').with.pattern;
+  assert.equal(pattern, 'squeal-parts-shard-*');
+  // `squeal ci export` refuses parts that lack a shard of their count, so the download takes every matrix shard's parts.
+  const uploaded = step(jobs.vitest, 'Upload Squeal parts').with.name;
+  const parts = jobs.vitest.strategy.matrix.shard.map((n) => uploaded.replace('${{ matrix.shard }}', String(n)));
+  assert.equal(parts.length, 8);
+  assert.deepEqual(parts.filter((name) => !name.startsWith(pattern.slice(0, -1))), []);
   assert.match(step(job, 'Export Squeal results').run,
     /squeal\.mjs" ci export --parts "\$RUNNER_TEMP"\/squeal-parts\/squeal-parts-shard-\* --out "\$RUNNER_TEMP\/squeal-results\.json\.gz"$/);
   const upload = step(job, 'Upload Squeal results');

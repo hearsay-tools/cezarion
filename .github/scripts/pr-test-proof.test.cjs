@@ -144,3 +144,11 @@ test('changed queue suite commands require full queue tests despite successful n
   h.s.workflows[BASE].sha = blob(original); h.s.workflows[SHA].sha = blob(changed);
   assert.equal((await h.run()).verified, false);
 });
+test('the native suites reuse needs are every expanded Vitest and browser shard of ci.yml', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const { jobs } = require('yaml').parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
+  const expanded = ['vitest', 'cockpit-browser'].flatMap(id => jobs[id].strategy.matrix.shard
+    .map(n => jobs[id].name.replace('${{ matrix.shard }}', String(n))));
+  assert.equal(expanded.length, 16);
+  assert.deepEqual(PR_TEST_JOBS, expanded);
+});

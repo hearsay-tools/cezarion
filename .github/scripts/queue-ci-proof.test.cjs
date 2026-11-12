@@ -8,9 +8,12 @@ const SHA = 'a'.repeat(40);
 const EXPECTED_QUEUE_JOBS = [
   'Classify pull request change surface', 'Classify PR shape', 'Check function complexity',
   'Check new code clones', 'Review preflight', 'Typecheck', 'Unit, build, and package',
-  'Vitest shard 1/4', 'Vitest shard 2/4', 'Vitest shard 3/4', 'Vitest shard 4/4',
-  'Cockpit browser E2E shard 1/4', 'Cockpit browser E2E shard 2/4',
-  'Cockpit browser E2E shard 3/4', 'Cockpit browser E2E shard 4/4',
+  'Vitest shard 1/8', 'Vitest shard 2/8', 'Vitest shard 3/8', 'Vitest shard 4/8',
+  'Vitest shard 5/8', 'Vitest shard 6/8', 'Vitest shard 7/8', 'Vitest shard 8/8',
+  'Cockpit browser E2E shard 1/8', 'Cockpit browser E2E shard 2/8',
+  'Cockpit browser E2E shard 3/8', 'Cockpit browser E2E shard 4/8',
+  'Cockpit browser E2E shard 5/8', 'Cockpit browser E2E shard 6/8',
+  'Cockpit browser E2E shard 7/8', 'Cockpit browser E2E shard 8/8',
   'Unit, build, E2E, and package', 'Automated Code Review', 'Validate reviewed queue entry',
 ];
 function fixture() {
@@ -53,7 +56,7 @@ for (const [label, change] of Object.entries({
   'failed latest attempt': s => { s.run.run_attempt = 2; s.run.conclusion = 'failure'; },
   'skipped aggregate': s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'skipped'; },
   'missing typecheck': s => { s.jobs = s.jobs.filter(j => j.name !== 'Typecheck'); },
-  'missing browser shard': s => { s.jobs = s.jobs.filter(j => j.name !== 'Cockpit browser E2E shard 4/4'); },
+  'missing browser shard': s => { s.jobs = s.jobs.filter(j => j.name !== 'Cockpit browser E2E shard 8/8'); },
   'duplicate required job': s => { s.jobs.push({ ...s.jobs[0], id: 999 }); },
   'missing history': s => { s.runs = []; },
   'incomplete pagination': s => { s.count = 201; },
@@ -99,23 +102,25 @@ test('newer run arriving after jobs are read invalidates proof', async () => {
 });
 
 for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out']) {
-  test(`fourth unit shard ${conclusion} forces full CI fallback`, async () => {
+  test(`eighth unit shard ${conclusion} forces full CI fallback`, async () => {
     const h = fixture();
-    h.state.jobs.find(job => job.name === 'Vitest shard 4/4').conclusion = conclusion;
+    h.state.jobs.find(job => job.name === 'Vitest shard 8/8').conclusion = conclusion;
     assert.equal((await queueCiProof(h.options)).verified, false);
   });
 }
-test('missing or duplicate fourth unit shard and legacy three-cell proof force fallback', async () => {
+test('missing or duplicate eighth unit shard and legacy three- and four-cell proof force fallback', async () => {
   const missing = fixture();
-  missing.state.jobs = missing.state.jobs.filter(job => job.name !== 'Vitest shard 4/4');
+  missing.state.jobs = missing.state.jobs.filter(job => job.name !== 'Vitest shard 8/8');
   assert.equal((await queueCiProof(missing.options)).verified, false);
   const duplicate = fixture();
-  duplicate.state.jobs.push({ ...duplicate.state.jobs.find(job => job.name === 'Vitest shard 4/4'), id: 999 });
+  duplicate.state.jobs.push({ ...duplicate.state.jobs.find(job => job.name === 'Vitest shard 8/8'), id: 999 });
   assert.equal((await queueCiProof(duplicate.options)).verified, false);
-  const legacy = fixture();
-  legacy.state.jobs = legacy.state.jobs.filter(job => !job.name.startsWith('Vitest shard '));
-  legacy.state.jobs.push(...[1, 2, 3].map(n => ({ id: 200 + n, name: `Vitest shard ${n}/3`, status: 'completed', conclusion: 'success' })));
-  assert.equal((await queueCiProof(legacy.options)).verified, false);
+  for (const count of [3, 4]) {
+    const legacy = fixture();
+    legacy.state.jobs = legacy.state.jobs.filter(job => !job.name.startsWith('Vitest shard '));
+    legacy.state.jobs.push(...Array.from({ length: count }, (_, i) => ({ id: 200 + i, name: `Vitest shard ${i + 1}/${count}`, status: 'completed', conclusion: 'success' })));
+    assert.equal((await queueCiProof(legacy.options)).verified, false, `${count} cells`);
+  }
 });
 
 const os = require('node:os');
@@ -128,7 +133,7 @@ function skippedSuites(state) {
   skipSuiteJobs(state);
 }
 function skipSuiteJobs(state) {
-  state.jobs = state.jobs.filter(job => !/shard \d\/4$/.test(job.name));
+  state.jobs = state.jobs.filter(job => !/shard \d+\/\d+$/.test(job.name));
   state.jobs.push(...SKIPPED_SUITE_JOBS.map((name, i) => ({ id: 300 + i, name, status: 'completed', conclusion: 'skipped' })));
 }
 test('a docs-only or infra-only queued commit reuses a queue run that skipped both suites', async () => {
@@ -151,7 +156,7 @@ for (const [label, change] of Object.entries({
   'a queue ref without its base SHA': (s, o) => { s.run.head_branch = 'gh-readonly-queue/main/pr-7-base'; o.surfaceOf = () => assert.fail('classifier called'); },
   'a failed skipped placeholder': s => { s.jobs.find(j => j.name === SKIPPED_SUITE_JOBS[0]).conclusion = 'failure'; },
   'a duplicated placeholder': s => { s.jobs.push({ ...s.jobs.find(j => j.name === SKIPPED_SUITE_JOBS[1]), id: 999 }); },
-  'a placeholder beside an expanded shard': s => { s.jobs.push({ id: 998, name: 'Vitest shard 2/4', status: 'completed', conclusion: 'failure' }); },
+  'a placeholder beside an expanded shard': s => { s.jobs.push({ id: 998, name: 'Vitest shard 2/8', status: 'completed', conclusion: 'failure' }); },
   'a missing placeholder': s => { s.jobs = s.jobs.filter(j => j.name !== SKIPPED_SUITE_JOBS[1]); },
   'a failed aggregate': s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'failure'; },
   'a skipped build': s => { s.jobs.find(j => j.name === 'Unit, build, and package').conclusion = 'skipped'; },

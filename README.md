@@ -1831,7 +1831,7 @@ from this checkout. Run `pnpm install --frozen-lockfile` in each new worktree fi
 Packaged CLI tests import built modules; CI checks them with
 `npm run typecheck:package` after `npm run build`.
 
-CI runs four duration-balanced Vitest shards alongside the build and package checks.
+CI runs eight duration-balanced Vitest shards alongside the build and package checks.
 See [CI verification](docs/sdlc/ci.md) for the job graph and local commands.
 
 The stack is deliberately small: **TypeScript** (strict, ESM), **Hono** + SSE for

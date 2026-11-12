@@ -21,8 +21,8 @@ function shardJob(id, name, first, rerun, rerunConclusion) {
     { number: 10, name: rerun, conclusion: rerunConclusion },
   ] };
 }
-const vitestJob = (shard, rerun = 'success') => shardJob(100 + shard, `Vitest shard ${shard}/4`, VITEST_FIRST, VITEST_RERUN, rerun);
-const browserJob = (shard, rerun = 'success') => shardJob(200 + shard, `Cockpit browser E2E shard ${shard}/4`, 'Run cockpit browser E2E', 'Rerun cockpit browser E2E', rerun);
+const vitestJob = (shard, rerun = 'success') => shardJob(100 + shard, `Vitest shard ${shard}/8`, VITEST_FIRST, VITEST_RERUN, rerun);
+const browserJob = (shard, rerun = 'success') => shardJob(200 + shard, `Cockpit browser E2E shard ${shard}/8`, 'Run cockpit browser E2E', 'Rerun cockpit browser E2E', rerun);
 const listArchive = (names) => zip([{ name: 'failed-test-files.txt', data: names.map((name) => `${name}\n`).join('') }]);
 
 function run(id = 501) {

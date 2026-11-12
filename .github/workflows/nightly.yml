@@ -130,13 +130,13 @@ jobs:
         run: npm run test:package
 
   vitest:
-    name: Vitest shard ${{ matrix.shard }}/4
+    name: Vitest shard ${{ matrix.shard }}/8
     needs: decide
     if: needs.decide.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -159,7 +159,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run server and cockpit unit suites
-        run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4
+        run: npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4
 
   # Publishing stays on a GitHub-hosted runner: `--provenance` is refused from
   # any other kind.
