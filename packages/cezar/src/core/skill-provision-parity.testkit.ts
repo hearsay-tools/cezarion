@@ -244,9 +244,10 @@ describe('harness parity — skill provisioning (#1408)', () => {
         await waitFor(() => fixture.wire().includes(LIVE_NOTE) && fixture.wire().includes('again'), 30_000);
         await waitFor(() => parked(fixture), 30_000);
         // Wire capture and parking can precede the runner's delivery acknowledgement.
-        // bound: the matching input must finish delivery before its receipt is asserted.
+        // bound: wait for the matching input's delivery and, on Codex, consumption receipts.
         await waitFor(() => fixture.store.getRun(fixture.runId)?.agentInputs
-          ?.some(input => input.text === LIVE_NOTE && input.deliveredAt !== undefined) === true, 30_000);
+          ?.some(input => input.text === LIVE_NOTE && input.deliveredAt !== undefined
+            && (backend !== 'codex' || input.consumedAt !== undefined)) === true, 30_000);
         const notes = fixture.store.getRun(fixture.runId)?.agentInputs?.filter(input => input.text === LIVE_NOTE);
         expect(notes).toHaveLength(1);
         expect(notes![0]!.deliveredAt).toBeDefined();
