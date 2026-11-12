@@ -12,7 +12,7 @@ import type { RunExitId, ExitCall, RunPatch } from '../../runs/run-exits.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { openCompletionRequests, sentRequestInstructions, type CompletionRefusal } from '../completion-policy.ts';
 import { NO_WAIT_NOTE, COMPLETION_NUDGE_NOTE, decideTurnEnd, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from '../turn-end.ts';
-import { isCezarHumanWait, openWaits } from '../waits.ts';
+import { isSquawkHumanWait, openWaits } from '../waits.ts';
 import { classifyTurnEnd, discardQueuedMessagesOnAsk, emitAskRequested } from './turn-markers.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, harnessOwesInput, harnessHoldsHumanInput } from './input-timers.ts';
 import { canProceedWithRun } from './run-guards.ts';
@@ -218,7 +218,7 @@ export class TurnSettler {
       nativeAsk: !!state.boundary.pendingHumanAsk,
       question: !!turn.ask || turn.humanGate || !!state.boundary.pendingHumanAsk || hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)),
       agentWaits: this.host.humanWaits.holdsAgentWaits(runId),
-      cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
+      squawkHumanWait: (run?.waits ?? []).some(isSquawkHumanWait),
       stepScope: !!session && state.boundary.nextStep?.session === session,
       noWaitNudgedLastTurn: turn.nudgedLastTurn,
       completionNudgedLastTurn: (!!session && state.boundary.completionNudgeAnswered === session) || (!!refused?.requestIds?.length && !!state.boundary.sentRequestRefused),
@@ -277,7 +277,7 @@ export class TurnSettler {
     if (decisionRefused) noteRefusal();
     // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
     const settlesRefusal = !!refused && !decisionRefused && !(decision.kind === 'defer' && decision.keepDone);
-    if (settlesRefusal) this.host.humanWaits.withdrawCezarHumanWaits(runId);
+    if (settlesRefusal) this.host.humanWaits.withdrawSquawkHumanWaits(runId);
     return transitionTurnBoundary(runId, state, { kind: 'turn-end', phase: 'carry', session,
       carry: { runId, state, session, stepId, refused, noteRefusal, settlesRefusal }, decision }, this.boundaryEffects);
   }
@@ -328,7 +328,7 @@ export class TurnSettler {
   private carryOutCompletionHumanWait({ runId, state, stepId, refused, noteRefusal }: BoundaryCarry): TurnEndOutcome {
     noteRefusal();
     const wait = this.host.humanWaits.openHumanAlias(runId, state, 'completion');
-    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.host.humanWaits.showCezarHumanWait(runId, state, wait, refused!.message);
+    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.host.humanWaits.showSquawkHumanWait(runId, state, wait, refused!.message);
     this.parkForUser(runId, state, stepId);
     return this.parkedOutcome(runId);
   }
@@ -384,7 +384,7 @@ export class TurnSettler {
     const worker = this.context.store.getRun(runId)?.delegation?.role === 'worker';
     if (worker && via === 'no-wait' && turnEnd) { this.host.workerQuestions.askParentForWorker(runId, state, stepId); this.parkForUser(runId, state, stepId); return; }
     const wait = worker ? undefined : this.host.humanWaits.openHumanAlias(runId, state, via);
-    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.host.humanWaits.showCezarHumanWait(runId, state, wait, note);
+    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.host.humanWaits.showSquawkHumanWait(runId, state, wait, note);
     else {
       this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: note });
       if (wait) this.host.humanWaits.surfaceHumanWait(runId, state, wait);

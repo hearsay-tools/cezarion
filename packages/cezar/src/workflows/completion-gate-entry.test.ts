@@ -223,14 +223,14 @@ describe('completion refusal through a live runner', () => {
   let ready: () => void;
   let emitUi: (event: import('../core/ui-events.ts').UiEvent) => void;
   let semaphore: WorkspaceSemaphore;
-  let handlers: ReturnType<typeof f.manager.cezarToolHandlers>;
+  let handlers: ReturnType<typeof f.manager.squawkToolHandlers>;
   let started: boolean;
   beforeEach(() => {
     started = false;
     f.manager.dispose();
     semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     f.manager = createFixtureManager(f.store, f.repoRoot, { home: testHome(), semaphore });
-    const tools = vi.spyOn(f.manager, 'cezarToolHandlers');
+    const tools = vi.spyOn(f.manager, 'squawkToolHandlers');
     runnerHook.runner = {
       backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), interrupt: async () => {},

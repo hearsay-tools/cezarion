@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OPENCODE_TASK_SCOPE_PLUGIN, opencodeTaskScopeEnv } from './opencode-task-scope.ts';
-import { CezarTaskScope } from '../../scripts/opencode-task-scope.mjs';
+import { SquawkTaskScope } from '../../scripts/opencode-task-scope.mjs';
 
 type Sessions = Record<string, string | null>;
 
@@ -17,7 +17,7 @@ function client(sessions: Sessions, fail?: string) {
 }
 
 async function hook(sessions: Sessions, fail?: string) {
-  return (await CezarTaskScope({ client: client(sessions, fail) }))['tool.execute.before'];
+  return (await SquawkTaskScope({ client: client(sessions, fail) }))['tool.execute.before'];
 }
 
 const call = (sessionID: string, args: unknown, tool = 'task') => [{ tool, sessionID, callID: 'c1' }, { args }] as const;

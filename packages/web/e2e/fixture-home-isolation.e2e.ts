@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
 // hearsay-tools/cezarion#1699: a fixture server must not see the invoking HOME's skills.
@@ -27,7 +27,7 @@ it('excludes invoking HOME skills from a real fixture server while keeping proje
     if (previousHome === undefined) delete process.env.HOME
     else process.env.HOME = previousHome
     delete env.VITEST // Exercise production discovery, including the global directory walk.
-    server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'], { env })
+    server = spawnFixtureServer([squawkCli, 'serve', '--repo', repo, '--port', '0', '--no-open'], { env })
     const origin = await waitForFixtureServer(server)
     const project = await bootProjectId(origin)
     const response = await fetch(`${origin}/api/v1/p/${project}/skills`)

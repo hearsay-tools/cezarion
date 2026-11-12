@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, dismissWithEscape, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { settleVisual, waitForSettledSample } from './visual-ready'
@@ -27,7 +27,7 @@ beforeAll(async () => {
   git('commit', '-qm', 'Fixture')
   git('branch', 'feature/a-long-branch-name-that-widens-the-base-branch-search-menu')
   mkdirSync(artifacts, { recursive: true })
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

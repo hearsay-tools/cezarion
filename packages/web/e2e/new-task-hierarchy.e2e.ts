@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { revealControl } from './control-ready'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 // fixture-server starts: 1
 
 /** Real-browser geometry and state preservation for the New Task execution disclosure.
@@ -34,7 +34,7 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/skills/lint-fix.md'), '---\ndescription: Fix lint findings\n---\n\nFix lint findings.\n')
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

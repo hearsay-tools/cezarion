@@ -50,28 +50,28 @@ export function turnIdOf(obj: Record<string, unknown>): string | undefined {
 }
 
 /** A non-zero exit that is not cezar's own signal teardown still carries stderr. */
-export function sessionStderrIsUnexpected(exitCode: number | null, timedOut: boolean, terminatedByCezar: boolean): boolean {
-  return !timedOut && exitCode !== 0 && exitCode !== null && !(terminatedByCezar && isSignalTerminationExit(exitCode));
+export function sessionStderrIsUnexpected(exitCode: number | null, timedOut: boolean, terminatedBySquawk: boolean): boolean {
+  return !timedOut && exitCode !== 0 && exitCode !== null && !(terminatedBySquawk && isSignalTerminationExit(exitCode));
 }
 
 /** Startup died on a real non-signal exit, so the drained stderr owns the failure text. */
 export function startupCrashOwnsFailure(
-  session: { startupComplete: boolean; timedOut: boolean; terminatedByCezar: boolean },
+  session: { startupComplete: boolean; timedOut: boolean; terminatedBySquawk: boolean },
   stderr: string,
   exitCode: number | null,
 ): boolean {
   return !session.startupComplete && !session.timedOut && !!stderr.trim() && exitCode !== null && exitCode !== 0
-    && !(session.terminatedByCezar && isSignalTerminationExit(exitCode));
+    && !(session.terminatedBySquawk && isSignalTerminationExit(exitCode));
 }
 
 /** 143/137, or a signal with no code, is the teardown cezar asked for. */
-export function cezarAskedForExit(exitCode: number | null, signalCode: NodeJS.Signals | null): boolean {
+export function squawkAskedForExit(exitCode: number | null, signalCode: NodeJS.Signals | null): boolean {
   return isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null);
 }
 
 export interface SessionExit {
   timedOut: boolean;
-  terminatedByCezar: boolean;
+  terminatedBySquawk: boolean;
   exitCode: number | null;
   signalCode: NodeJS.Signals | null;
   limitMs: number;
@@ -86,7 +86,7 @@ export function sessionExitEvent(exit: SessionExit): { event: 'error' | 'note'; 
   }
   // Our own EOF watchdog / cancel signal coming back as 143/137 — the
   // teardown cezar asked for, not a codex failure (#703).
-  if (exit.terminatedByCezar && cezarAskedForExit(exit.exitCode, exit.signalCode)) {
+  if (exit.terminatedBySquawk && squawkAskedForExit(exit.exitCode, exit.signalCode)) {
     const how = exit.exitCode === null ? exit.signalCode : `code ${exit.exitCode}`;
     return { event: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` };
   }

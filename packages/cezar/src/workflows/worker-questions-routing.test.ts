@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { uuidFrom } from '../delegation/questions.ts';
 import { delegatingParent, manager, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { conversationOf, eventsOf, cezarAnswered, noHumanCard, steeringParent, parentAtLastSlot, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
+import { conversationOf, eventsOf, squawkAnswered, noHumanCard, steeringParent, parentAtLastSlot, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
@@ -31,10 +31,10 @@ it("sends a worker's cezar_ask question to its active parent as a request", asyn
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const slot = await parentAtLastSlot(service, callerFor, p.id);
     const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
-    await until(() => cezarAnswered(w.id).length === 1);
+    await until(() => squawkAnswered(w.id).length === 1);
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq, reason: 'the parent conversation is at capacity' })]);
-    expect(cezarAnswered(w.id)[0]).toMatchObject({ askSeq });
+    expect(squawkAnswered(w.id)[0]).toMatchObject({ askSeq });
     noHumanCard(w.id);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(slot.undelivered()).toBe(31);
@@ -66,7 +66,7 @@ it("sends a worker's cezar_ask question to its active parent as a request", asyn
     await manager.recover(p.id);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq, reason: expect.stringContaining('already in use') })]);
-    await until(() => cezarAnswered(w.id).length === 1);
+    await until(() => squawkAnswered(w.id).length === 1);
     noHumanCard(w.id);
     expect(conversationOf(p.id)?.messages.some(message => message.question) ?? false).toBe(false);
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === id)).toEqual([

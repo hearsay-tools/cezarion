@@ -74,15 +74,15 @@ export function upstreamHost(ctx: InstallContext): string {
 }
 
 /** True once cezar answers on <host>:<port> (any HTTP status = the process is up). */
-async function isCezarUp(ctx: InstallContext, port: number): Promise<boolean> {
+async function isSquawkUp(ctx: InstallContext, port: number): Promise<boolean> {
   const code = await curlCode(ctx, [`http://${upstreamHost(ctx)}:${port}/`]);
   return code !== '000';
 }
 
 /** Poll the upstream until cezar responds or the attempts run out. */
-async function waitForCezar(ctx: InstallContext, port: number, attempts = 15): Promise<boolean> {
+async function waitForSquawk(ctx: InstallContext, port: number, attempts = 15): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {
-    if (await isCezarUp(ctx, port)) return true;
+    if (await isSquawkUp(ctx, port)) return true;
     // `sleep 1` via the runner keeps this testable (no real timers in unit tests).
     if (i < attempts - 1) await ctx.runner.capture('sh', ['-c', 'sleep 1']);
   }
@@ -95,14 +95,14 @@ async function waitForCezar(ctx: InstallContext, port: number, attempts = 15): P
  * would otherwise leave nginx proxying to nothing (502) while the installer
  * claims success. On failure, point the operator at the service logs.
  */
-async function confirmCezarRunning(ctx: InstallContext, statusCmd: string, logsCmd: string): Promise<void> {
+async function confirmSquawkRunning(ctx: InstallContext, statusCmd: string, logsCmd: string): Promise<void> {
   if (ctx.dryRun) {
     ctx.ui.info(`DRY RUN — would wait for ${productName('cezar')} on ${upstreamHost(ctx)}:${ctx.state.primaryPort}.`);
     return;
   }
   const sp = ctx.ui.spinner();
   sp.start(`Waiting for ${productName('cezar')} to start on 127.0.0.1:${ctx.state.primaryPort}…`);
-  const up = await waitForCezar(ctx, ctx.state.primaryPort);
+  const up = await waitForSquawk(ctx, ctx.state.primaryPort);
   sp.stop(up ? `${productName('cezar')} is running.` : `${productName('cezar')} did not come up.`);
   if (!up) {
     ctx.ui.warn(
@@ -707,7 +707,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
             r.stdout.includes('Linger=yes'),
           ),
       });
-      await confirmCezarRunning(ctx, `systemctl --user status ${hint}`, `journalctl --user -u ${hint} -n 50 --no-pager`);
+      await confirmSquawkRunning(ctx, `systemctl --user status ${hint}`, `journalctl --user -u ${hint} -n 50 --no-pager`);
       const artifacts: StepArtifact[] = [owned('service', { name: UNIT_NAME, scope: 'user', path: unitPath })];
       if (!lingerWasOn) artifacts.push(owned('linger', { name: osUser }));
       return { artifacts };
@@ -721,7 +721,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
       extra: `systemctl daemon-reload && systemctl enable --now ${UNIT_NAME}`,
       verify: (c) => verifyCommand(c, 'systemctl', ['is-enabled', UNIT_NAME]),
     });
-    await confirmCezarRunning(ctx, `sudo systemctl status ${hint}`, `sudo journalctl -u ${hint} -n 50 --no-pager`);
+    await confirmSquawkRunning(ctx, `sudo systemctl status ${hint}`, `sudo journalctl -u ${hint} -n 50 --no-pager`);
     return { artifacts: [owned('service', { name: UNIT_NAME, scope: 'system', path: `/etc/systemd/system/${UNIT_NAME}` })] };
   },
   async undo(ctx, created) {
@@ -774,7 +774,7 @@ async function verifyBehindExternalProxy(ctx: InstallContext, unit: string): Pro
     return { artifacts: [] };
   }
 
-  if (!(await waitForCezar(ctx, port))) {
+  if (!(await waitForSquawk(ctx, port))) {
     ctx.ui.error(
       `${productName('cezar')} is not answering on ${target}.\n\n` +
         `Diagnostics on the server:\n` +
@@ -849,7 +849,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
     // 1) Is cezar actually listening on the loopback upstream? nginx challenges
     //    auth *before* proxying, so an anonymous 401 alone does NOT prove the
     //    backend is up — check the upstream directly.
-    const upstreamUp = await isCezarUp(ctx, port);
+    const upstreamUp = await isSquawkUp(ctx, port);
 
     // 2) An anonymous request through nginx must be challenged (auth is active).
     const anonCode = await curlCode(ctx, [...tls, ...host, base]);
@@ -913,7 +913,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
 
 export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStrategy {
   const steps = { proxy: nginxProxyStep(rebrand), ssl: sslStep(rebrand), autostart: autostartStep(rebrand), identity: identityStep(rebrand) };
-  const health = { identity: steps.identity, waitForCezar };
+  const health = { identity: steps.identity, waitForSquawk };
   return {
     id: 'ubuntu-vps',
     label: 'Ubuntu/Debian VPS',
@@ -989,7 +989,7 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
         : await restartSystemService(ctx, UNIT_NAME, before, sudo, fail);
       await freshRestartOrFail(before, after, fail);
       const { statusCmd, logsCmd } = serviceDiagnostics(scope, UNIT_NAME);
-      await confirmCezarRunning(ctx, statusCmd, logsCmd);
+      await confirmSquawkRunning(ctx, statusCmd, logsCmd);
       try {
         await steps.identity.run(ctx);
       } catch (err) {

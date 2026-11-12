@@ -24,7 +24,7 @@ type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost'
 export function createWorkspaceProjectContexts(
   deps: ContextServices,
   taskWebhooks: Pick<TaskWebhooks, 'attach'>,
-  options: Pick<ProjectContextDeps, 'listProjects' | 'ownership' | 'automationStore' | 'cezarPort'> & {
+  options: Pick<ProjectContextDeps, 'listProjects' | 'ownership' | 'automationStore' | 'squawkPort'> & {
     addressManager?: (project: Parameters<NonNullable<ProjectContextDeps['prepareManager']>>[0]) => void;
   },
 ): ProjectContexts {

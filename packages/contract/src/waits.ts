@@ -278,7 +278,7 @@ const waitTimeoutSeconds = z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS).de
  *  as a `worker` entry with `requestIds`. */
 const registrationFields = { operation_id: z.uuid().optional() };
 
-export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
+export const squawkWaitRequestSchema = z.discriminatedUnion('kind', [
   ciWaitRequestSchema.extend({ kind: z.literal('pr'), ...registrationFields }).strict(),
   z.object({
     kind: z.literal('worker'), ...registrationFields,
@@ -310,12 +310,12 @@ export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
     note: z.string().max(NOTE_MAX).optional(),
   }).strict(),
 ]);
-export type CezarWaitRequest = z.infer<typeof cezarWaitRequestSchema>;
+export type SquawkWaitRequest = z.infer<typeof squawkWaitRequestSchema>;
 /** What a caller may send: the defaults (`until`, `wake_on_conflict`, `timeout_seconds`) still unset. */
-export type CezarWaitRequestInput = z.input<typeof cezarWaitRequestSchema>;
+export type SquawkWaitRequestInput = z.input<typeof squawkWaitRequestSchema>;
 
-export const cezarCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
-export type CezarCancelWaitRequest = z.infer<typeof cezarCancelWaitRequestSchema>;
+export const squawkCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
+export type SquawkCancelWaitRequest = z.infer<typeof squawkCancelWaitRequestSchema>;
 
 /** One still-open wait as both tools list it back to the agent. A PR, timer, worker, process,
  *  peer or subagent wait carries its deadline; a human wait has none. */
@@ -344,7 +344,7 @@ export type WaitRegistrationReceipt = z.infer<typeof waitRegistrationReceiptSche
 const registrationAnswerFields = {
   operation_id: z.uuid().optional(),
 };
-export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
+export const squawkWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true), ...registrationAnswerFields,
     effect: z.enum(['applied', 'unchanged']).optional(),
@@ -364,15 +364,15 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT).optional(),
   }).strict(),
 ]);
-export type CezarWaitAnswer = z.infer<typeof cezarWaitAnswerSchema>;
+export type SquawkWaitAnswer = z.infer<typeof squawkWaitAnswerSchema>;
 
 /**
  * `cezar_ask` (hearsay-tools/cezarion#1234): the user's answer, asked with a card. A question
  * without options is open, and the user types its answer. The wait it opens has no deadline.
  * `context` is required here (hearsay-tools/cezarion#1458), optional in every stored shape.
  */
-export const cezarAskRequestSchema = askRequestSchema.extend({ context: askContextSchema });
-export type CezarAskRequest = z.infer<typeof cezarAskRequestSchema>;
+export const squawkAskRequestSchema = askRequestSchema.extend({ context: askContextSchema });
+export type SquawkAskRequest = z.infer<typeof squawkAskRequestSchema>;
 
 /** The refusals a question can meet: the session's, the run's capacity, and an autonomous run. */
 export const askErrorCodeSchema = z.enum([
@@ -383,7 +383,7 @@ export const askErrorCodeSchema = z.enum([
 ]);
 export type AskErrorCode = z.infer<typeof askErrorCodeSchema>;
 
-export const cezarAskAnswerSchema = z.discriminatedUnion('ok', [
+export const squawkAskAnswerSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), wait_id: z.uuid(), open_waits: z.array(openWaitSchema).max(WAIT_LIMIT) }).strict(),
   z.object({
     ok: z.literal(false),
@@ -392,11 +392,11 @@ export const cezarAskAnswerSchema = z.discriminatedUnion('ok', [
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT).optional(),
   }).strict(),
 ]);
-export type CezarAskAnswer = z.infer<typeof cezarAskAnswerSchema>;
+export type SquawkAskAnswer = z.infer<typeof squawkAskAnswerSchema>;
 
 /** `already_resolved`: the result is owed and arrives with the next wake; cancelling is a no-op.
  *  `human_question`: the question already reached the user, so only their answer ends it. */
-export const cezarCancelWaitAnswerSchema = z.discriminatedUnion('cancelled', [
+export const squawkCancelWaitAnswerSchema = z.discriminatedUnion('cancelled', [
   z.object({
     cancelled: z.literal(true),
     wait_id: z.uuid(),
@@ -409,11 +409,11 @@ export const cezarCancelWaitAnswerSchema = z.discriminatedUnion('cancelled', [
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT).optional(),
   }).strict(),
 ]);
-export type CezarCancelWaitAnswer = z.infer<typeof cezarCancelWaitAnswerSchema>;
+export type SquawkCancelWaitAnswer = z.infer<typeof squawkCancelWaitAnswerSchema>;
 
 /** `cezar_done`: the run finishes when this turn ends. The summary becomes the closing note. */
-export const cezarDoneRequestSchema = z.object({ summary: z.string().max(2000).optional() }).strict();
-export type CezarDoneRequest = z.infer<typeof cezarDoneRequestSchema>;
+export const squawkDoneRequestSchema = z.object({ summary: z.string().max(2000).optional() }).strict();
+export type SquawkDoneRequest = z.infer<typeof squawkDoneRequestSchema>;
 
 // `worker_wait_pending` (here and in the ask and CI wait codes) was the old completion wait's
 // refusal; it is kept for old clients and never returned since hearsay-tools/cezarion#1301.
@@ -435,7 +435,7 @@ const doneAccepted = {
 
 /** An accepted done finishes the task, or, in a workflow step that is not the last, completes that
  *  step and starts `next_step`, named as the run's rail names it (hearsay-tools/cezarion#1620). */
-export const cezarDoneAnswerSchema = z.discriminatedUnion('ok', [
+export const squawkDoneAnswerSchema = z.discriminatedUnion('ok', [
   z.discriminatedUnion('completes', [
     z.object({ ...doneAccepted, completes: z.literal('task') }).strict(),
     z.object({ ...doneAccepted, completes: z.literal('step'), next_step: z.string().min(1) }).strict(),
@@ -452,7 +452,7 @@ export const cezarDoneAnswerSchema = z.discriminatedUnion('ok', [
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT).optional(),
   }).strict(),
 ]);
-export type CezarDoneAnswer = z.infer<typeof cezarDoneAnswerSchema>;
+export type SquawkDoneAnswer = z.infer<typeof squawkDoneAnswerSchema>;
 
 // ---- what the run is waiting on -----------------------------------------------------------
 

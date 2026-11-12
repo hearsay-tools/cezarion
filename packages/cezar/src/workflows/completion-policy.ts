@@ -1,13 +1,13 @@
 import { commandText } from '../home/command.ts';
 import { transitionTurnBoundary } from './run/turn-boundary.ts';
-import type { CezarDoneAnswer, ConversationMessage } from '@open-mercato/cezar-contract';
+import type { SquawkDoneAnswer, ConversationMessage } from '@open-mercato/cezar-contract';
 import { WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../runs/store.ts';
 import { rootsAwaitingPeer } from '../delegation/conversations.ts';
 import { retiredFinishPatch } from '../runs/run-exits.ts';
 import type { ActiveRun } from './active-run.ts';
 
-type DoneRefusal = Extract<CezarDoneAnswer, { ok: false }>;
+type DoneRefusal = Extract<SquawkDoneAnswer, { ok: false }>;
 export type CompletionRefusal = {
   code: Extract<DoneRefusal['code'], 'worker_questions' | 'workers_outstanding' | 'workers_uncollected' | 'requests_outstanding' | 'requests_unanswered'>;
   message: string; workers: NonNullable<DoneRefusal['workers']>; liveWorkerIds: string[]; requestIds?: string[];

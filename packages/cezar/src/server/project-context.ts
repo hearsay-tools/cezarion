@@ -97,7 +97,7 @@ export interface ProjectContextDeps {
    *  manager registers against it, because ports are host-global. */
   preview?: PreviewHost | undefined;
   /** The cockpit's listening port, for the preview tool's `cezar_port` refusal. */
-  cezarPort?: (() => number | undefined) | undefined;
+  squawkPort?: (() => number | undefined) | undefined;
   /** The ONE tool activity tracker of the process: every project's manager feeds it. */
   toolActivity?: ToolActivityTracker | undefined;
   /** Builds each manager's runners: the entry point's choice (hearsay-tools/cezarion#2939). */
@@ -522,7 +522,7 @@ export class ProjectContexts {
     const manager: RunManager = new RunManager(store, project.root, {
       home: this.deps.home,
       createRunner: this.deps.createRunner,
-      semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort, toolActivity: this.deps.toolActivity,
+      semaphore: this.semaphore, preview: this.deps.preview, squawkPort: this.deps.squawkPort, toolActivity: this.deps.toolActivity,
       sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager, home: this.deps.home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
     });
     this.buildingManagers.set(projectId, manager);

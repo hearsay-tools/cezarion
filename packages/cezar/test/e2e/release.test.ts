@@ -148,16 +148,16 @@ test('a patch bump stamps every manifest, keeps the caret ranges, and emits the 
     );
 
     const clientPkg = await readPkg(root, 'packages', 'api-client');
-    const cezarPkg = await readPkg(root, 'packages', 'cezar');
+    const squawkPkg = await readPkg(root, 'packages', 'cezar');
     const webPkg = await readPkg(root, 'packages', 'web');
     const aliasPkg = await readPkg(root, 'alias-cezarion');
     assert.equal(clientPkg.version, '0.1.6');
-    assert.equal(cezarPkg.version, '0.1.6');
+    assert.equal(squawkPkg.version, '0.1.6');
     assert.equal(webPkg.version, '0.1.6');
     assert.equal(aliasPkg.version, '0.1.6');
     // Caret, not an exact pin — the stable-release contract, on both edges.
     assert.deepEqual(aliasPkg.dependencies, { '@scope/fake-root': '^0.1.6' });
-    assert.deepEqual(cezarPkg.devDependencies, { '@scope/fake-client': '^0.1.6' });
+    assert.deepEqual(squawkPkg.devDependencies, { '@scope/fake-client': '^0.1.6' });
     assert.deepEqual(webPkg.dependencies, { '@scope/fake-client': '^0.1.6' });
     assert.deepEqual(webPkg.devDependencies, { '@scope/fake-root': '^0.1.6' });
 

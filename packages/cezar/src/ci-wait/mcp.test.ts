@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createCiMcpServer } from './mcp.ts';
-import { cezarTools } from './tools.ts';
+import { squawkTools } from './tools.ts';
 
 async function connect(env: NodeJS.ProcessEnv) {
   const server = createCiMcpServer(env);
@@ -15,7 +15,7 @@ async function connect(env: NodeJS.ProcessEnv) {
 // A trigger line names a situation, never the schema. One exception: research task 77dfb5c4
 // tested the cezar_ask trigger that names its context field (hearsay-tools/cezarion#1458).
 function expectNoSchemaKeyIn(instructions: string, env: NodeJS.ProcessEnv) {
-  for (const { definition } of cezarTools(env)) {
+  for (const { definition } of squawkTools(env)) {
     const keys = Object.keys(definition.inputSchema.properties ?? {}).filter(key => !(definition.name === 'cezar_ask' && key === 'context'));
     for (const key of keys) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
   }
@@ -104,7 +104,7 @@ describe('cezar-ci MCP server instructions', () => {
   });
 
   it('tells the agent to pin the port and that cezar starts the command', () => {
-    const preview = cezarTools({ CEZ_PREVIEW: '1' }).find(tool => tool.definition.name === 'cezar_preview_serve')!;
+    const preview = squawkTools({ CEZ_PREVIEW: '1' }).find(tool => tool.definition.name === 'cezar_preview_serve')!;
     expect(preview.definition.description).toContain('pin the port (`vite --strictPort`, `next dev -p`)');
     expect(preview.definition.description).toMatch(/cezar starts the command itself when the user opens the preview/i);
   });

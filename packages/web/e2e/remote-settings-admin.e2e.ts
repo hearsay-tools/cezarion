@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
   execFileSync('git', ['-C', root, '-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture'], { stdio: 'ignore' })
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   env = fixtureServeEnv(root, { CEZ_REMOTE: '1' })
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env, stdio: 'ignore' })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env, stdio: 'ignore' })
   url = await waitForFixtureServer(server)
   project = await bootProjectId(url)
   browser = AgentBrowser.open(`remote-settings-${process.pid}`)
@@ -42,7 +42,7 @@ afterAll(async () => {
 
 /** The grant names this cockpit's listen port: the fixture listens on a random one. */
 function hostSwitch(command: 'enable' | 'disable') {
-  execFileSync(process.execPath, [cezarCli, 'remote-settings', command, '--port', new URL(url).port], { env, stdio: 'ignore' })
+  execFileSync(process.execPath, [squawkCli, 'remote-settings', command, '--port', new URL(url).port], { env, stdio: 'ignore' })
 }
 
 /** Moves between settings sections inside the app, so the browser's query cache stays. */

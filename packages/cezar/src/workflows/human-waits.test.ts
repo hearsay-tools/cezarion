@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
+import { squawkDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AskQuestion, HumanWaitEntry } from '@open-mercato/cezar-contract';
@@ -40,7 +40,7 @@ async function heldTurn(options: { autonomous?: boolean } = {}) {
   return { run, release: () => writeFileSync(gate, '') };
 }
 
-const tools = (id: string) => manager.cezarToolHandlers(id, toolGenerationOf(id));
+const tools = (id: string) => manager.squawkToolHandlers(id, toolGenerationOf(id));
 const ask = (id: string, questions: AskQuestion[], context = '## Draft\n\nThe plan.') => tools(id).ask({ context, questions }, new AbortController().signal);
 const turnStarted = (id: string) => store.readEvents(id).some(event => event.type === 'turn.started');
 const asks = (id: string) => store.readEvents(id).filter(event => event.type === 'ask.requested');
@@ -276,7 +276,7 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
 
   const done = (id: string) => tools(id).finishTurn({}, new AbortController().signal);
 
-  it('every refusal naming 32 workers parses as a CezarDoneAnswer', async () => {
+  it('every refusal naming 32 workers parses as a SquawkDoneAnswer', async () => {
     claudeWire();
     // A parent parked on a timer, not on a question of its own: the worker checks decide.
     const p = await parent(toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'recheck' }), 'claude');
@@ -294,19 +294,19 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
     }
     store.commitConversation(p.id, { messages, outcomes: [] });
     const questions = await done(p.id);
-    expect(cezarDoneAnswerSchema.safeParse(questions).success).toBe(true);
+    expect(squawkDoneAnswerSchema.safeParse(questions).success).toBe(true);
     expect(questions).toMatchObject({ ok: false, code: 'worker_questions' });
     expect(questions.ok === false && questions.workers).toHaveLength(32);
     // Each routed question now has a durable answer. The same live workers still block completion.
     store.commitConversation(p.id, { messages, outcomes: messages.map(message => ({ requestId: message.id,
       status: 'replied', observedAt: new Date().toISOString(), replyId: randomUUID() })) });
     const outstanding = await done(p.id);
-    expect(cezarDoneAnswerSchema.safeParse(outstanding).success).toBe(true);
+    expect(squawkDoneAnswerSchema.safeParse(outstanding).success).toBe(true);
     expect(outstanding).toMatchObject({ ok: false, code: 'workers_outstanding' });
     expect(outstanding.ok === false && outstanding.workers).toHaveLength(32);
     for (const w of workers) fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     const uncollected = await done(p.id);
-    expect(cezarDoneAnswerSchema.safeParse(uncollected).success).toBe(true);
+    expect(squawkDoneAnswerSchema.safeParse(uncollected).success).toBe(true);
     expect(uncollected).toMatchObject({ ok: false, code: 'workers_uncollected' });
     expect(uncollected.ok === false && uncollected.workers).toHaveLength(32);
   });

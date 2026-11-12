@@ -8,7 +8,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { settleVisual } from './visual-ready'
 // fixture-server starts: 1
@@ -42,7 +42,7 @@ beforeAll(async () => {
   const source = join(root, 'owned-report.md')
   writeFileSync(source, '# Owning project snapshot\n\nPublished outside both project roots.\n')
   const publish = (project: string, runId: string) => JSON.parse(execFileSync(process.execPath,
-    [cezarCli, 'artifact', 'publish', source], {
+    [squawkCli, 'artifact', 'publish', source], {
       // Deliberately publish from the boot cwd even when the owner is the other project.
       cwd: boot, env: { ...env, CEZ_PROJECT_ID: basename(project), CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) },
       encoding: 'utf8',
@@ -59,7 +59,7 @@ beforeAll(async () => {
   }
   mkdirSync(evidenceDir, { recursive: true })
   writeFileSync(join(evidenceDir, 'publication.json'), JSON.stringify(publication, null, 2))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', boot, '--port', '0', '--no-open'], { env })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', boot, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)
   expect(await bootProjectId(baseUrl)).toBe('boot')
   browser = AgentBrowser.open(`artifact-projects-${process.pid}`)

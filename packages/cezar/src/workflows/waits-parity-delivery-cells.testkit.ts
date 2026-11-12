@@ -43,7 +43,7 @@ async function timerBesideQuestion(runner: RunnerId, note: string) {
   await until(() => store.getRun(run.id)?.status === 'waiting');
   expect(manager.sendMessage(run.id, [{ type: 'text', text: askPrompt() }])).toBe(true);
   await until(() => pendingQuestion(run.id) && asks(run.id).length === 1);
-  const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+  const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
   const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note }, 'cezar_wait', new AbortController().signal);
   if (!('wait' in registered)) throw Error('registration refused');
   return { run, timer: registered.wait, askSeq: asks(run.id)[0]!.seq };
@@ -333,7 +333,7 @@ export function deliveryCells(runners: RunnerId[], it: typeof registerTest = reg
         const wire = gatedProviderFailure(root, runner);
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
         await until(wire.held);
-        const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+        const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
         const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
         const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
         expect(registered.answer).toMatchObject({ ok: true, kind });
@@ -357,7 +357,7 @@ export function deliveryCells(runners: RunnerId[], it: typeof registerTest = reg
         nativeWire(runner);
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => store.getRun(run.id)?.status === 'waiting');
-        const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+        const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
         const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
         const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
         if (!('wait' in registered)) throw Error('registration refused');

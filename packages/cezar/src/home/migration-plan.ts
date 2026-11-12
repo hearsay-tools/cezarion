@@ -20,7 +20,7 @@ const ignored = /^(?:install\.json(?:\.failed)?|MOVED\.json|\.locks|\.versions|\
 export const archiveExcludes = /^(?:versions|bin|dry-cache|dry-prefix|tmp|\.locks|\.migrating)(?:\/|$)/;
 
 /** Parse live cezar-owned JSON only. Historical snapshots and vendor trees are opaque bytes. */
-export function isCezarMigrationJson(path: string): boolean {
+export function isSquawkMigrationJson(path: string): boolean {
   if (path.split('/').includes('backups')) return false;
   return ['config.json', 'config.json.bak', 'agent-accounts.json', 'ui-state.json', 'server.json', 'migration.json'].includes(path)
     || /^(?:remote-settings|tracker-connections|server-instances|application-updates)\/.+\.json(?:\.bak)?$/.test(path);

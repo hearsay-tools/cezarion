@@ -9,7 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -173,7 +173,7 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
   seedRuns(dataRoot, FIXTURE)
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     // Dry-run + a pinned CEZ_HOME, exactly as the shared test env does — see `fixtureServeEnv`.
     // Nothing in this spec starts a run, but the boot probes the backends.
     env: fixtureServeEnv(dataRoot),
@@ -739,7 +739,7 @@ describe('the tasks table under worst-case row content', () => {
     mkdirSync(join(worstRoot, '.ai/cezar'), { recursive: true })
     seedRuns(worstRoot, WORST)
 
-    worstServer = spawnFixtureServer([cezarCli, 'serve', '--repo', worstRoot, '--port', '0', '--no-open'],
+    worstServer = spawnFixtureServer([squawkCli, 'serve', '--repo', worstRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(worstRoot), stdio: 'ignore' }
     )
     worstUrl = await waitForFixtureServer(worstServer)
@@ -1143,7 +1143,7 @@ describe('a row under width contention, in a column the user can widen', () => {
           } satisfies Partial<RunRecord>),
         ])
 
-    wideServer = spawnFixtureServer([cezarCli, 'serve', '--repo', wideRoot, '--port', '0', '--no-open'],
+    wideServer = spawnFixtureServer([squawkCli, 'serve', '--repo', wideRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(wideRoot), stdio: 'ignore' }
     )
     wideUrl = await waitForFixtureServer(wideServer)
@@ -1367,7 +1367,7 @@ describe('empty quick-list', () => {
   beforeAll(async () => {
     emptyRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-empty-'))
 
-    emptyServer = spawnFixtureServer([cezarCli, 'serve', '--repo', emptyRoot, '--port', '0', '--no-open'],
+    emptyServer = spawnFixtureServer([squawkCli, 'serve', '--repo', emptyRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(emptyRoot), stdio: 'ignore' }
     )
     emptyUrl = await waitForFixtureServer(emptyServer)
@@ -1465,7 +1465,7 @@ describe('archive from the sidebar (#780)', () => {
     mkdirSync(join(archiveRoot, '.ai/cezar'), { recursive: true })
     seedRuns(archiveRoot, ARCHIVE_FIXTURE)
 
-    archiveServer = spawnFixtureServer([cezarCli, 'serve', '--repo', archiveRoot, '--port', '0', '--no-open'], {
+    archiveServer = spawnFixtureServer([squawkCli, 'serve', '--repo', archiveRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(archiveRoot),
       stdio: 'ignore',
     })
@@ -1696,7 +1696,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
     mkdirSync(join(swipeRoot, '.ai/cezar'), { recursive: true })
     seedRuns(swipeRoot, SWIPE_FIXTURE)
 
-    swipeServer = spawnFixtureServer([cezarCli, 'serve', '--repo', swipeRoot, '--port', '0', '--no-open'], {
+    swipeServer = spawnFixtureServer([squawkCli, 'serve', '--repo', swipeRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(swipeRoot),
       stdio: 'ignore',
     })

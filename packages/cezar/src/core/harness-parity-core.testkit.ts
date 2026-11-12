@@ -345,17 +345,17 @@ const BASELINE_PROMPT = 'inspect the working tree';
 /** `mock:cezar-tool` (scripts/mock-ci-tool.mjs) calls one cezar tool over the session's own wire,
  *  then `mock:then` ends the turn with that text. Every mock answers it the same way, on a fresh
  *  turn and on a resumed one, so `cezar-ask` and `cezar-wait` are one prompt for every runner. */
-const cezarToolPrompt = (name: 'cezar_ask' | 'cezar_wait', args: Record<string, unknown>, then: string): string =>
+const squawkToolPrompt = (name: 'cezar_ask' | 'cezar_wait', args: Record<string, unknown>, then: string): string =>
   `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')} mock:then ${Buffer.from(then).toString('base64url')}`;
 /** The question every `cezar-ask` turn sends. */
-export const CEZAR_ASK_QUESTION = 'Which test library?';
-const CEZAR_ASK_PROMPT = cezarToolPrompt('cezar_ask', {
+export const SQUAWK_ASK_QUESTION = 'Which test library?';
+const SQUAWK_ASK_PROMPT = squawkToolPrompt('cezar_ask', {
   context: 'A choice is needed before I continue.',
-  questions: [{ header: 'Library', question: CEZAR_ASK_QUESTION, options: [{ label: 'Vitest' }, { label: 'Node test' }] }],
+  questions: [{ header: 'Library', question: SQUAWK_ASK_QUESTION, options: [{ label: 'Vitest' }, { label: 'Node test' }] }],
 }, 'Pick one.');
-const CEZAR_WAIT_PROMPT = cezarToolPrompt('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'Re-check the downstream work.' },
+const SQUAWK_WAIT_PROMPT = squawkToolPrompt('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'Re-check the downstream work.' },
   'parity cezar-wait: waiting on downstream work');
-const CEZAR_TOOL_SCENARIOS = { 'cezar-ask': CEZAR_ASK_PROMPT, 'cezar-wait': CEZAR_WAIT_PROMPT } as const;
+const SQUAWK_TOOL_SCENARIOS = { 'cezar-ask': SQUAWK_ASK_PROMPT, 'cezar-wait': SQUAWK_WAIT_PROMPT } as const;
 
 /** The id cezar pins on every session, mirroring `RunManager`. */
 export const PINNED_SESSION_ID = '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90';
@@ -387,7 +387,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
-      ...CEZAR_TOOL_SCENARIOS,
+      ...SQUAWK_TOOL_SCENARIOS,
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
@@ -438,7 +438,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     malformedApprovalEcho: 'Approval error: -32602',
     scenarios: {
-      ...CEZAR_TOOL_SCENARIOS,
+      ...SQUAWK_TOOL_SCENARIOS,
       approval: 'mock:approval',
       'approval-resolved': 'mock:approval-resolved',
       'approval-turn-end': 'mock:approval-turn-end',
@@ -495,7 +495,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     malformedApprovalEcho: 'Approval response: {"reply":"reject"}',
     scenarios: {
-      ...CEZAR_TOOL_SCENARIOS,
+      ...SQUAWK_TOOL_SCENARIOS,
       approval: 'mock:approval',
       'permission-default': 'mock:permission-default',
       'approval-resolved': 'mock:approval-resolved',
@@ -549,7 +549,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-print.mjs'),
     scenarios: {
-      ...CEZAR_TOOL_SCENARIOS,
+      ...SQUAWK_TOOL_SCENARIOS,
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
@@ -577,7 +577,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
-      ...CEZAR_TOOL_SCENARIOS,
+      ...SQUAWK_TOOL_SCENARIOS,
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
@@ -622,7 +622,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     binEnv: 'CEZ_OMP_BIN',
     mockBin: OMP_MOCK,
     scenarios: {
-      ...CEZAR_TOOL_SCENARIOS,
+      ...SQUAWK_TOOL_SCENARIOS,
       'input-closed-live': 'mock:no-progress-input-closed',
       'closed-input': 'mock:closed-input',
       'auto-resumed': BASELINE_PROMPT,

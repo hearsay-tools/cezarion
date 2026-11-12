@@ -3,15 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { type CezarWaitAnswer, cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
-import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition, waitAnswerHint } from './tools.ts';
+import { type SquawkWaitAnswer, squawkWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
+import { squawkServerInstructions, squawkToolEnvNames, squawkTools, doneToolDefinition, waitToolDefinition, waitAnswerHint } from './tools.ts';
 import { waitInvalidInput } from './errors.ts';
 
 const OBSOLETE_HUMAN_WAIT_KIND = 'human';
 
 describe('CI wait contract', () => {
   it('accepts merge supervision and requires bounded evidence for blocked results only', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/org/repo/pull/12', until: 'merge_or_blocked' }))
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/org/repo/pull/12', until: 'merge_or_blocked' }))
       .toMatchObject({ until: 'merge_or_blocked' });
     const blocked = { outcome: 'blocked', headSha: 'a'.repeat(40), observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false,
       mergeBlock: { reason: 'no_pending_merge', isInMergeQueue: false, autoMergeEnabled: false,
@@ -84,9 +84,9 @@ it.each([
 describe('cezar_done tool contract', () => {
   it('lists cezar_ask and cezar_done with the wait tools and gives each a trigger line', () => {
     for (const env of [{}, { CEZ_PREVIEW: '1' }]) {
-      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
-      expect(cezarServerInstructions(env)).toContain('- cezar_done: load when the task is complete and verified.');
-      expect(cezarServerInstructions(env)).toContain('- cezar_ask: load for a user decision or missing input');
+      expect(squawkTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+      expect(squawkServerInstructions(env)).toContain('- cezar_done: load when the task is complete and verified.');
+      expect(squawkServerInstructions(env)).toContain('- cezar_ask: load for a user decision or missing input');
     }
     expect(doneToolDefinition.description).toBe('Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait; after a step, Cezar starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.');
     expect(doneToolDefinition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false, properties: { summary: { type: 'string', maxLength: 2000 } } });
@@ -208,7 +208,7 @@ it('cezar_wait advertises worker, request and peer fields with their bounds', ()
   expect(waitToolDefinition.description).toMatch(/kind "request"/);
   expect(waitToolDefinition.description).toMatch(/kind "peer"/);
   expect(waitToolDefinition.description).toMatch(/worker/);
-  expect(cezarTools().find(tool => tool.definition.name === 'cezar_cancel_wait')!.definition.description).toMatch(/worker/);
+  expect(squawkTools().find(tool => tool.definition.name === 'cezar_cancel_wait')!.definition.description).toMatch(/worker/);
 });
 
 // hearsay-tools/cezarion#1446: the process kind, and the exit-file recipe every runner can follow.
@@ -235,9 +235,9 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(description).toContain('For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out.');
   expect(description).toContain('Never start a watcher or helper process to copy a file into $TMPDIR.');
   expect(schema.properties.exit_file.description).toMatch(/Leave it out for a command that is already running/);
-  const refused = cezarWaitRequestSchema.safeParse({ kind: OBSOLETE_HUMAN_WAIT_KIND });
+  const refused = squawkWaitRequestSchema.safeParse({ kind: OBSOLETE_HUMAN_WAIT_KIND });
   expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
-  const pid = cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 });
+  const pid = squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 });
   expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the `pid` that the job start command printed (kind "process").');
 });
 
@@ -251,23 +251,23 @@ it('accepts old observations and the new bounded conflict metadata', () => {
 
 // hearsay-tools/cezarion#1465: the Anthropic tool API refuses a top-level union in an input schema.
 it('advertises every cezar tool input as one flat object', () => {
-  for (const { definition } of cezarTools({ CEZ_AUTOMATIONS: '1', CEZ_PREVIEW: '1' })) {
+  for (const { definition } of squawkTools({ CEZ_AUTOMATIONS: '1', CEZ_PREVIEW: '1' })) {
     expect(definition.inputSchema.type, definition.name).toBe('object');
     for (const key of ['oneOf', 'anyOf', 'allOf']) expect(definition.inputSchema, definition.name).not.toHaveProperty(key);
   }
-  const scheduled = cezarTools({ CEZ_AUTOMATIONS: '1' }).find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.inputSchema;
+  const scheduled = squawkTools({ CEZ_AUTOMATIONS: '1' }).find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.inputSchema;
   expect((scheduled.properties as Record<string, { enum?: string[] }>).action!.enum).toEqual(['list', 'show', 'update', 'pause', 'enable', 'cancel']);
   expect(scheduled.required).toEqual(['action']);
 });
 
 it('forwards CEZ_AUTOMATIONS including the explicit opt-out to adapters', () => {
-  expect(cezarToolEnvNames({ CEZ_AUTOMATIONS: '1' })).toContain('CEZ_AUTOMATIONS');
-  expect(cezarToolEnvNames({})).toContain('CEZ_AUTOMATIONS');
-  expect(cezarToolEnvNames({ CEZ_AUTOMATIONS: '0' })).toContain('CEZ_AUTOMATIONS');
+  expect(squawkToolEnvNames({ CEZ_AUTOMATIONS: '1' })).toContain('CEZ_AUTOMATIONS');
+  expect(squawkToolEnvNames({})).toContain('CEZ_AUTOMATIONS');
+  expect(squawkToolEnvNames({ CEZ_AUTOMATIONS: '0' })).toContain('CEZ_AUTOMATIONS');
 });
 
 it('tells the agent when to enable a scheduled task and which ones to change', () => {
-  const tools = cezarTools({ CEZ_AUTOMATIONS: '1' });
+  const tools = squawkTools({ CEZ_AUTOMATIONS: '1' });
   expect(tools.find(tool => tool.definition.name === 'cezar_schedule_task')!.definition.description).toMatch(/enable: true only when the user/);
   expect(tools.find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.description).toMatch(/only the schedules the user asked you to manage/);
 });
@@ -282,7 +282,7 @@ it('keeps legacy unavailable wait hints uncertain without an effect receipt', ()
 describe('wait result guidance', () => {
   const receipt = { ok: true as const, wait_id: '4a6b6bf4-798c-4dc7-aede-e583428f667a', kind: WAIT_KIND.timer,
     deadline: '2026-11-05T14:00:00.000Z', open_waits: [] };
-  const cases: Array<[string, CezarWaitAnswer, string]> = [
+  const cases: Array<[string, SquawkWaitAnswer, string]> = [
     ['unknown transport outcome', { ok: false, effect: 'unknown', code: 'outcome_unknown', message: 'lost response' }, 'Outcome unknown. Retry the same operation_id'],
     ['retained deadline refusal', { ok: false, effect: 'refused', code: 'duplicate_deadline', message: 'retained' }, 'The retained wait remains active; do not cancel it'],
     ['known refusal', { ok: false, effect: 'refused', code: 'capacity', message: 'full' }, 'Not registered by this call'],
@@ -303,7 +303,7 @@ it.each([
   { kind: 'request', request_ids: ['11111111-1111-4111-8111-111111111111'] },
   { kind: WAIT_KIND.peer, peer_ids: ['11111111-1111-4111-8111-111111111111'] },
 ])('names the accepted timeout range above the $kind bound', request => {
-  const result = cezarWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 });
+  const result = squawkWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 });
   expect(result.success).toBe(false);
   expect(waitInvalidInput(result.success ? undefined : result.error)).toBe('`timeout_seconds` must be an integer between 1 and 7200 (kind "pr", "process", "worker", "request" or "peer").');
 });

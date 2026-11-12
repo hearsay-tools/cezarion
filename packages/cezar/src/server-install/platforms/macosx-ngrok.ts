@@ -288,7 +288,7 @@ const ngrokStep = (rebrand: boolean): InstallStep => ({
  *  helper can classify the launch form the same way ubuntu-vps classifies ExecStart.
  *  Empty string when the plist can't be read — callers then skip the cache refresh
  *  rather than guessing. */
-function readCezarProgramArguments(path: string): string {
+function readSquawkProgramArguments(path: string): string {
   try {
     const xml = readFileSync(path, 'utf8');
     const inner = xml.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1];
@@ -302,7 +302,7 @@ function readCezarProgramArguments(path: string): string {
 }
 
 /** Resolve the argv array for the cezar launchd agent, mirroring how the CLI was launched. */
-export async function resolveCezarArgv(ctx: InstallContext, rebrand = REBRAND_SWITCH): Promise<string[]> {
+export async function resolveSquawkArgv(ctx: InstallContext, rebrand = REBRAND_SWITCH): Promise<string[]> {
   const node = process.execPath;
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const entry = join(pkgRoot, 'dist', rebrand ? `${productIdentity(rebrand).command}.js` : 'index.js');
@@ -325,7 +325,7 @@ export async function resolveCezarArgv(ctx: InstallContext, rebrand = REBRAND_SW
 }
 
 /** launchd agent that keeps the cezar cockpit running on the given port. */
-export function cezarLaunchdPlist(repoRoot: string, port: number, argv: string[], rebrand = REBRAND_SWITCH): string {
+export function squawkLaunchdPlist(repoRoot: string, port: number, argv: string[], rebrand = REBRAND_SWITCH): string {
   // Give the agent the operator's PATH so cezar can spawn claude/gh/codex.
   const pathDirs = [dirname(process.execPath), ...(process.env.PATH ?? '').split(':'), '/usr/local/bin', '/usr/bin', '/bin']
     .filter((d, i, a) => d && d !== '.' && a.indexOf(d) === i);
@@ -382,14 +382,14 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
     return launchdRemoteEnv(current) === current;
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    const argv = await resolveCezarArgv(ctx, rebrand);
+    const argv = await resolveSquawkArgv(ctx, rebrand);
     const previous = agentArtifact(ctx, 'autostart', rebrand);
     const name = labelFor('cockpit', rebrand);
     const path = join(launchAgentsDir(ctx), `${name}.plist`);
     if (ctx.dryRun) {
       ctx.ui.info(`DRY RUN — would write ${path} and launchctl bootstrap it.`);
     } else {
-      await installAgent(ctx, previous, name, path, cezarLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), `the ${productName('cezar', rebrand)} cockpit agent`);
+      await installAgent(ctx, previous, name, path, squawkLaunchdPlist(ctx.repoRoot, ctx.state.primaryPort, argv, rebrand), `the ${productName('cezar', rebrand)} cockpit agent`);
     }
     return { artifacts: [owned('launchd', { name, path })] };
   },
@@ -457,7 +457,7 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
       // deploy that doesn't invalidate the npx cache never actually updates.
       // Clear the cezarion cache first (read the live ProgramArguments to know the
       // launch form); a checkout / global agent is left alone.
-      refreshNpxCacheForRedeploy(ctx, readCezarProgramArguments(agentArtifact(ctx, 'autostart', rebrand).path), {
+      refreshNpxCacheForRedeploy(ctx, readSquawkProgramArguments(agentArtifact(ctx, 'autostart', rebrand).path), {
         reconfigureHint: commandText(`  cez server-install --platform macosx-ngrok --reconfigure autostart`, undefined, rebrand),
       });
       // Restart both the cezar cockpit and the ngrok tunnel, then re-verify.
@@ -477,8 +477,8 @@ export function createMacosxNgrok({ rebrand = REBRAND_SWITCH } = {}): PlatformSt
         await bootstrapVerified(ctx, uid, cockpit.name, cockpit.path, `the ${productName('cezar', rebrand)} cockpit agent`);
       }
       ctx.ui.info(`Redeploying — restarting the ${productName('cezar', rebrand)} cockpit.`);
-      const cezarCode = await ctx.runner.interactive('launchctl', ['kickstart', '-k', `gui/${uid}/${cockpit.name}`]);
-      if (cezarCode !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${cockpit.name}\`.`);
+      const squawkCode = await ctx.runner.interactive('launchctl', ['kickstart', '-k', `gui/${uid}/${cockpit.name}`]);
+      if (squawkCode !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${cockpit.name}\`.`);
       ctx.ui.info('Redeploying — restarting the ngrok tunnel.');
       const code = await ctx.runner.interactive('launchctl', ['kickstart', '-k', `gui/${uid}/${ngrok.name}`]);
       if (code !== 0) ctx.ui.warn(`launchctl kickstart returned non-zero — check \`launchctl print gui/${uid}/${ngrok.name}\`.`);

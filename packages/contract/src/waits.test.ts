@@ -5,14 +5,14 @@ import type { RunRecord } from './runs.ts';
 import {
   asksQuestion,
   askErrorCodeSchema,
-  cezarAskAnswerSchema,
-  cezarAskRequestSchema,
-  cezarCancelWaitAnswerSchema,
-  cezarDoneAnswerSchema,
-  cezarDoneRequestSchema,
-  cezarCancelWaitRequestSchema,
-  cezarWaitAnswerSchema,
-  cezarWaitRequestSchema,
+  squawkAskAnswerSchema,
+  squawkAskRequestSchema,
+  squawkCancelWaitAnswerSchema,
+  squawkDoneAnswerSchema,
+  squawkDoneRequestSchema,
+  squawkCancelWaitRequestSchema,
+  squawkWaitAnswerSchema,
+  squawkWaitRequestSchema,
   computeWaitingOn,
   PROCESS_TIMEOUT_DEFAULT_SECONDS,
   processWaitEntrySchema,
@@ -269,27 +269,27 @@ describe('resolveWaitingOn', () => {
 
 describe('cezar_wait request', () => {
   it('accepts the ci and timer request shapes and refuses the rest', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
     // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, never cezar_wait.
-    expect(cezarWaitRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_WAIT_KIND, questions: CARD }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 59 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker }).success).toBe(false); // phase 3
+    expect(squawkWaitRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_WAIT_KIND, questions: CARD }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 59 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker }).success).toBe(false); // phase 3
   });
 
   it('keeps the ci bounds of cezar_wait_for_ci and refuses stray keys', () => {
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1', timeout_seconds: 0 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1', timeout_seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr: 'https://example.com/nope' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 60, pr: 'https://github.com/o/r/pull/1' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.timer, seconds: 7200, note: 'deploy' })).toEqual({ kind: WAIT_KIND.timer, seconds: 7200, note: 'deploy' });
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 60, note: 'x'.repeat(513) }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1', timeout_seconds: 0 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr: 'https://github.com/o/r/pull/1', timeout_seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr: 'https://example.com/nope' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 60, pr: 'https://github.com/o/r/pull/1' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.timer, seconds: 7200, note: 'deploy' })).toEqual({ kind: WAIT_KIND.timer, seconds: 7200, note: 'deploy' });
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 60, note: 'x'.repeat(513) }).success).toBe(false);
   });
 
   it('cancels by uuid only', () => {
-    expect(cezarCancelWaitRequestSchema.parse({ wait_id: CI_ID })).toEqual({ wait_id: CI_ID });
-    expect(cezarCancelWaitRequestSchema.safeParse({ wait_id: 'w1' }).success).toBe(false);
-    expect(cezarCancelWaitRequestSchema.safeParse({ wait_id: CI_ID, extra: 1 }).success).toBe(false);
+    expect(squawkCancelWaitRequestSchema.parse({ wait_id: CI_ID })).toEqual({ wait_id: CI_ID });
+    expect(squawkCancelWaitRequestSchema.safeParse({ wait_id: 'w1' }).success).toBe(false);
+    expect(squawkCancelWaitRequestSchema.safeParse({ wait_id: CI_ID, extra: 1 }).success).toBe(false);
   });
 });
 
@@ -297,32 +297,32 @@ describe('answers', () => {
   const openWait = { wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: '2026-10-17T15:40:00.000Z', summary: 'CI on o/r#12' };
 
   it('parses accepted and refused cezar_wait answers', () => {
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait] }).ok).toBe(true);
-    expect(cezarWaitAnswerSchema.parse({ ok: false, code: 'timers_disabled', message: 'no timers' }).ok).toBe(false);
-    expect(cezarWaitAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'x' }).success).toBe(false);
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline }).success).toBe(false);
+    expect(squawkWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait] }).ok).toBe(true);
+    expect(squawkWaitAnswerSchema.parse({ ok: false, code: 'timers_disabled', message: 'no timers' }).ok).toBe(false);
+    expect(squawkWaitAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'x' }).success).toBe(false);
+    expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline }).success).toBe(false);
   });
 
   it.each([undefined, 'applied', 'unchanged', 'refused', 'unknown'] as const)('ties wait answer effect %s to success or failure', effect => {
     const fields = effect === undefined ? {} : { effect };
     const success = { ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait], ...fields };
     const failure = { ok: false, code: 'timers_disabled', message: 'no timers', ...fields };
-    expect(cezarWaitAnswerSchema.safeParse(success).success).toBe(effect === undefined || effect === 'applied' || effect === 'unchanged');
-    expect(cezarWaitAnswerSchema.safeParse(failure).success).toBe(effect === undefined || effect === 'refused' || effect === 'unknown');
+    expect(squawkWaitAnswerSchema.safeParse(success).success).toBe(effect === undefined || effect === 'applied' || effect === 'unchanged');
+    expect(squawkWaitAnswerSchema.safeParse(failure).success).toBe(effect === undefined || effect === 'refused' || effect === 'unknown');
   });
 
   // hearsay-tools/cezarion#1234: a CI or timer wait always carries its deadline; a human wait never does.
   it('ties the deadline to the kind, in the answer and in every open wait', () => {
     const human = { wait_id: HUMAN_ID, kind: WAIT_KIND.human, summary: 'human: Which module?' };
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
+    expect(squawkWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
     // cezar_wait opens no human wait, so its answer never names one.
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_WAIT_KIND, open_waits: [human] }).success).toBe(false);
+    expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_WAIT_KIND, open_waits: [human] }).success).toBe(false);
     for (const kind of ['pr', 'timer'] as const) {
-      expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
-      expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
+      expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
+      expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
     }
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
-    expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
+    expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: WAIT_KIND.pr, deadline: openWait.deadline, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
+    expect(squawkCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
   });
 
   it('extends the CI error codes with the timer refusals', () => {
@@ -331,10 +331,10 @@ describe('answers', () => {
   });
 
   it('parses cancel answers, with the open waits on either branch', () => {
-    expect(cezarCancelWaitAnswerSchema.parse({ cancelled: true, wait_id: CI_ID, open_waits: [] }).cancelled).toBe(true);
-    expect(cezarCancelWaitAnswerSchema.parse({ cancelled: false, code: 'already_resolved', message: 'delivered with the next wake', open_waits: [openWait] }).cancelled).toBe(false);
-    expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: false, code: 'capacity', message: 'x' }).success).toBe(false);
-    expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...openWait, summary: 'x'.repeat(257) }] }).success).toBe(false);
+    expect(squawkCancelWaitAnswerSchema.parse({ cancelled: true, wait_id: CI_ID, open_waits: [] }).cancelled).toBe(true);
+    expect(squawkCancelWaitAnswerSchema.parse({ cancelled: false, code: 'already_resolved', message: 'delivered with the next wake', open_waits: [openWait] }).cancelled).toBe(false);
+    expect(squawkCancelWaitAnswerSchema.safeParse({ cancelled: false, code: 'capacity', message: 'x' }).success).toBe(false);
+    expect(squawkCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...openWait, summary: 'x'.repeat(257) }] }).success).toBe(false);
   });
 });
 
@@ -360,36 +360,36 @@ describe('human waits', () => {
 
   it('lists an open human wait without a deadline in every answer', () => {
     const human = { wait_id: HUMAN_ID, kind: WAIT_KIND.human, summary: 'human: Which test library?' };
-    expect(cezarAskAnswerSchema.parse({ ok: true, wait_id: HUMAN_ID, open_waits: [human] }).ok).toBe(true);
-    expect(cezarCancelWaitAnswerSchema.parse({ cancelled: false, code: 'human_question', message: 'm', open_waits: [human] }).cancelled).toBe(false);
+    expect(squawkAskAnswerSchema.parse({ ok: true, wait_id: HUMAN_ID, open_waits: [human] }).ok).toBe(true);
+    expect(squawkCancelWaitAnswerSchema.parse({ cancelled: false, code: 'human_question', message: 'm', open_waits: [human] }).cancelled).toBe(false);
   });
 });
 
 // hearsay-tools/cezarion#1234: the user is asked with its own tool, which always carries a card.
 describe('cezar_ask', () => {
   it('requires a card within the ask bounds and takes nothing else', () => {
-    expect(cezarAskRequestSchema.parse({ context: 'c', questions: CARD })).toEqual({ context: 'c', questions: CARD });
-    expect(cezarAskRequestSchema.safeParse({}).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ questions: CARD }).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [] }).success).toBe(false);
+    expect(squawkAskRequestSchema.parse({ context: 'c', questions: CARD })).toEqual({ context: 'c', questions: CARD });
+    expect(squawkAskRequestSchema.safeParse({}).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ questions: CARD }).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ context: 'c', questions: [] }).success).toBe(false);
     const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
-    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: five }).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_ASK_KIND, context: 'c', questions: CARD }).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ context: 'c', questions: five }).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ kind: UNSUPPORTED_HUMAN_ASK_KIND, context: 'c', questions: CARD }).success).toBe(false);
   });
 
   it('takes an open question as a question without options', () => {
     const open = [{ header: 'Name', question: 'What should the command be called?' }];
-    expect(cezarAskRequestSchema.parse({ context: 'c', questions: open })).toEqual({ context: 'c', questions: open });
-    expect(cezarAskRequestSchema.parse({ context: 'c', questions: [...CARD, ...open] }).questions).toHaveLength(2);
+    expect(squawkAskRequestSchema.parse({ context: 'c', questions: open })).toEqual({ context: 'c', questions: open });
+    expect(squawkAskRequestSchema.parse({ context: 'c', questions: [...CARD, ...open] }).questions).toHaveLength(2);
     // A list of options keeps its bounds: an empty or one-option list is not an open question.
-    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [{ ...open[0], options: [] }] }).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [{ ...open[0], options: [{ label: 'Only' }] }] }).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ context: 'c', questions: [{ ...open[0], options: [] }] }).success).toBe(false);
+    expect(squawkAskRequestSchema.safeParse({ context: 'c', questions: [{ ...open[0], options: [{ label: 'Only' }] }] }).success).toBe(false);
   });
 
   it('answers with the wait id and the open waits, or a refusal the agent can act on', () => {
-    expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_ASK_KIND, open_waits: [] }).success).toBe(false);
-    expect(cezarAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, deadline: '2026-10-17T15:40:00.000Z', open_waits: [] }).success).toBe(false);
-    expect(cezarAskAnswerSchema.parse({ ok: false, code: 'autonomous_run', message: 'm' }).ok).toBe(false);
+    expect(squawkAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: UNSUPPORTED_HUMAN_ASK_KIND, open_waits: [] }).success).toBe(false);
+    expect(squawkAskAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, deadline: '2026-10-17T15:40:00.000Z', open_waits: [] }).success).toBe(false);
+    expect(squawkAskAnswerSchema.parse({ ok: false, code: 'autonomous_run', message: 'm' }).ok).toBe(false);
     expect(askErrorCodeSchema.options).toEqual(expect.arrayContaining(['invalid_request', 'capacity', 'autonomous_run', 'session_closed', 'worker_wait_pending', 'unavailable']));
     // Only refusals a question can meet: no CI lookup failures, no timer refusals.
     for (const code of ['inaccessible_pr', 'gh_missing', 'timers_disabled', 'wake_budget_spent', 'questions_required']) {
@@ -400,24 +400,24 @@ describe('cezar_ask', () => {
 
 describe('cezar_done', () => {
   it('takes an optional bounded summary and nothing else', () => {
-    expect(cezarDoneRequestSchema.parse({})).toEqual({});
-    expect(cezarDoneRequestSchema.parse({ summary: 'shipped' })).toEqual({ summary: 'shipped' });
-    expect(cezarDoneRequestSchema.safeParse({ summary: 'x'.repeat(2001) }).success).toBe(false);
-    expect(cezarDoneRequestSchema.safeParse({ force: true }).success).toBe(false);
+    expect(squawkDoneRequestSchema.parse({})).toEqual({});
+    expect(squawkDoneRequestSchema.parse({ summary: 'shipped' })).toEqual({ summary: 'shipped' });
+    expect(squawkDoneRequestSchema.safeParse({ summary: 'x'.repeat(2001) }).success).toBe(false);
+    expect(squawkDoneRequestSchema.safeParse({ force: true }).success).toBe(false);
   });
 
   it('cezar_done answers round-trip', () => {
-    expect(cezarDoneAnswerSchema.parse({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }).ok).toBe(true);
+    expect(squawkDoneAnswerSchema.parse({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }).ok).toBe(true);
     // hearsay-tools/cezarion#1620: a step's done names the step it starts; a task's names none.
     const step = { ok: true, finishes: 'at_turn_end', completes: 'step', next_step: 'Review', open_waits: [] };
-    expect(cezarDoneAnswerSchema.parse(step)).toEqual(step);
-    expect(cezarDoneAnswerSchema.safeParse({ ...step, next_step: undefined }).success).toBe(false);
-    expect(cezarDoneAnswerSchema.safeParse({ ...step, completes: 'task' }).success).toBe(false);
-    expect(cezarDoneAnswerSchema.safeParse({ ok: true, finishes: 'at_turn_end', open_waits: [] }).success).toBe(false);
+    expect(squawkDoneAnswerSchema.parse(step)).toEqual(step);
+    expect(squawkDoneAnswerSchema.safeParse({ ...step, next_step: undefined }).success).toBe(false);
+    expect(squawkDoneAnswerSchema.safeParse({ ...step, completes: 'task' }).success).toBe(false);
+    expect(squawkDoneAnswerSchema.safeParse({ ok: true, finishes: 'at_turn_end', open_waits: [] }).success).toBe(false);
     const refused = { ok: false, code: 'workers_outstanding', message: 'm', workers: [{ worker_id: 'w', reason: 'outstanding' }] };
-    expect(cezarDoneAnswerSchema.parse(refused)).toEqual(refused);
-    expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'm' }).success).toBe(false);
-    expect(cezarDoneAnswerSchema.safeParse({ ok: true, finishes: 'now', open_waits: [] }).success).toBe(false);
+    expect(squawkDoneAnswerSchema.parse(refused)).toEqual(refused);
+    expect(squawkDoneAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'm' }).success).toBe(false);
+    expect(squawkDoneAnswerSchema.safeParse({ ok: true, finishes: 'now', open_waits: [] }).success).toBe(false);
   });
 });
 
@@ -513,52 +513,52 @@ describe('cezar_wait worker request', () => {
     { kind: 'request', request_ids: [R1] },
     { kind: WAIT_KIND.peer, peer_ids: [W1] },
   ])('accepts a two-hour $kind wait and refuses the next second', request => {
-    expect(cezarWaitRequestSchema.parse({ ...request, timeout_seconds: 7200 })).toMatchObject({ timeout_seconds: 7200 });
-    expect(cezarWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.parse({ ...request, timeout_seconds: 7200 })).toMatchObject({ timeout_seconds: 7200 });
+    expect(squawkWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 }).success).toBe(false);
   });
 
   it('cezar_wait worker request: mode one needs one id; timeout defaults to 600; 7201 refused', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.worker, worker_ids: [W1] })).toEqual({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 600 });
-    expect(cezarWaitRequestSchema.parse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'all', timeout_seconds: 1800 }))
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.worker, worker_ids: [W1] })).toEqual({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 600 });
+    expect(squawkWaitRequestSchema.parse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'all', timeout_seconds: 1800 }))
       .toMatchObject({ mode: 'all', timeout_seconds: 1800 });
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
     // mode one: exactly one id, of either kind.
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], mode: 'one' }).success).toBe(true);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1, W2], mode: 'one' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'one' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'request', request_ids: [R1], mode: 'one' }).success).toBe(true);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], mode: 'one' }).success).toBe(true);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1, W2], mode: 'one' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'one' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: 'request', request_ids: [R1], mode: 'one' }).success).toBe(true);
   });
 
   // hearsay-tools/cezarion#1995: request ids moved to their own kind, so "worker" never names a reply.
   it('kind worker takes worker_ids only, and kind request takes request_ids only', () => {
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, request_ids: [R1] }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'request', worker_ids: [W1] }).success).toBe(false);
-    expect(cezarWaitRequestSchema.parse({ kind: 'request', request_ids: [R1] })).toEqual({ kind: 'request', request_ids: [R1], timeout_seconds: 600 });
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, request_ids: [R1] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: 'request', worker_ids: [W1] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.parse({ kind: 'request', request_ids: [R1] })).toEqual({ kind: 'request', request_ids: [R1], timeout_seconds: 600 });
   });
 
   it('kind peer names 1 to 32 unique peers, with a deadline of 1 to 7200 seconds, default 600', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.peer, peer_ids: [W1] })).toEqual({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 600 });
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [] }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1, W1] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.peer, peer_ids: [W1] })).toEqual({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 600 });
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1, W1] }).success).toBe(false);
     const ids = Array.from({ length: 33 }, (_, i) => `99999999-9999-4999-8999-${String(i).padStart(12, '0')}`);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids.slice(0, 32) }).success).toBe(true);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids.slice(0, 32) }).success).toBe(true);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
     // No "any peer" form, and no mode: every named peer ends it.
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], mode: 'all' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], mode: 'all' }).success).toBe(false);
   });
 
   it('takes exactly one id list, unique, 1 to 32, and nothing else', () => {
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], request_ids: [R1] }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [] }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1, W1] }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], mode: 'some' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], seconds: 60 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 60, worker_ids: [W1] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], request_ids: [R1] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1, W1] }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], mode: 'some' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], seconds: 60 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.timer, seconds: 60, worker_ids: [W1] }).success).toBe(false);
   });
 });
 
@@ -568,13 +568,13 @@ describe('worker waits in the answers', () => {
   it('lists a worker wait with its deadline and answers its registration', () => {
     expect(openWaitSchema.parse(workerOpen)).toEqual(workerOpen);
     expect(openWaitSchema.safeParse({ ...workerOpen, deadline: undefined }).success).toBe(false);
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind: WAIT_KIND.worker, deadline: workerOpen.deadline, open_waits: [workerOpen] }).ok).toBe(true);
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: WORKER_WAIT_ID, kind: WAIT_KIND.worker, open_waits: [] }).success).toBe(false);
+    expect(squawkWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind: WAIT_KIND.worker, deadline: workerOpen.deadline, open_waits: [workerOpen] }).ok).toBe(true);
+    expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: WORKER_WAIT_ID, kind: WAIT_KIND.worker, open_waits: [] }).success).toBe(false);
   });
 
   it('refuses a worker the caller does not own with denied_scope', () => {
     expect(waitErrorCodeSchema.options).toContain('denied_scope');
-    expect(cezarWaitAnswerSchema.parse({ ok: false, code: 'denied_scope', message: 'not your worker' }).ok).toBe(false);
+    expect(squawkWaitAnswerSchema.parse({ ok: false, code: 'denied_scope', message: 'not your worker' }).ok).toBe(false);
   });
 });
 
@@ -738,12 +738,12 @@ describe('process waits', () => {
 
   it('defaults the timeout to 1800 and bounds it to 7200', () => {
     expect(PROCESS_TIMEOUT_DEFAULT_SECONDS).toBe(1800);
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.process, pid: 42 })).toEqual({ kind: WAIT_KIND.process, pid: 42, timeout_seconds: 1800 });
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.process, pid: 42, exit_file: 'x.exit', note: 'n', timeout_seconds: 7200 }))
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.process, pid: 42 })).toEqual({ kind: WAIT_KIND.process, pid: 42, timeout_seconds: 1800 });
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.process, pid: 42, exit_file: 'x.exit', note: 'n', timeout_seconds: 7200 }))
       .toEqual({ kind: WAIT_KIND.process, pid: 42, exit_file: 'x.exit', note: 'n', timeout_seconds: 7200 });
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 42, timeout_seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 42, exit_file: 'x'.repeat(4097) }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 42, timeout_seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 42, exit_file: 'x'.repeat(4097) }).success).toBe(false);
   });
 
   it('ranks after a PR wait and before a timer in waitingOn', () => {
@@ -756,10 +756,10 @@ describe('process waits', () => {
   });
 
   it('answers with the process kind, its deadline and its refusals', () => {
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: PROCESS_ID, kind: WAIT_KIND.process, deadline: '2026-10-17T15:30:00.000Z', open_waits: [
+    expect(squawkWaitAnswerSchema.safeParse({ ok: true, wait_id: PROCESS_ID, kind: WAIT_KIND.process, deadline: '2026-10-17T15:30:00.000Z', open_waits: [
       { wait_id: PROCESS_ID, kind: WAIT_KIND.process, deadline: '2026-10-17T15:30:00.000Z', summary: 'process 4242' }] }).success).toBe(true);
     for (const code of ['exit_file_outside', 'process_not_allowed', 'process_not_owned']) {
-      expect(cezarWaitAnswerSchema.safeParse({ ok: false, code, message: 'no' }).success).toBe(true);
+      expect(squawkWaitAnswerSchema.safeParse({ ok: false, code, message: 'no' }).success).toBe(true);
     }
   });
 });
@@ -770,15 +770,15 @@ describe('PR waits', () => {
   const openPr = (over: Record<string, unknown> = {}) => ({ ...openCi(), kind: WAIT_KIND.pr, until: 'checks' as const, wakeOnConflict: true, ...over });
 
   it('defaults a pr request to the checks target, conflicts waking, 1800 seconds', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr })).toEqual({ kind: WAIT_KIND.pr, pr, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
-    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 7200 }))
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr })).toEqual({ kind: WAIT_KIND.pr, pr, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
+    expect(squawkWaitRequestSchema.parse({ kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 7200 }))
       .toEqual({ kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 7200 });
   });
 
   it('refuses kind ci, an unknown target and merge waits past 7200 seconds', () => {
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'ci', pr }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr, until: 'land' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 7201 }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: 'ci', pr }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr, until: 'land' }).success).toBe(false);
+    expect(squawkWaitRequestSchema.safeParse({ kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 7201 }).success).toBe(false);
   });
 
   it('stores until and wakeOnConflict on a pr entry, both required', () => {
@@ -883,7 +883,7 @@ describe('peer waits', () => {
     const open = { wait_id: WORKER_WAIT_ID, kind: WAIT_KIND.peer, deadline: '2026-10-19T10:10:00.000Z', summary: 'peer wait on 1 task' };
     expect(openWaitSchema.parse(open)).toEqual(open);
     for (const kind of [WAIT_KIND.peer, 'request'] as const) {
-      expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind, deadline: open.deadline, open_waits: [open] }).ok).toBe(true);
+      expect(squawkWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind, deadline: open.deadline, open_waits: [open] }).ok).toBe(true);
     }
   });
 });
@@ -923,13 +923,13 @@ describe('worker wait guard selection', () => {
 describe('wait guard outputs', () => {
   it.each(['worker', 'request'] as const)('names the mode error for a multi-id %s request', kind => {
     const target = kind === 'worker' ? { worker_ids: [W1, W2] } : { request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'] };
-    const result = cezarWaitRequestSchema.safeParse({ kind, ...target, mode: 'one' });
+    const result = squawkWaitRequestSchema.safeParse({ kind, ...target, mode: 'one' });
     expect(result.error?.issues).toContainEqual({ code: 'custom', message: 'one mode requires exactly one id', path: ['mode'] });
     for (const mode of [undefined, 'all', 'any']) {
-      expect(cezarWaitRequestSchema.safeParse({ kind, ...target, mode }).success).toBe(true);
+      expect(squawkWaitRequestSchema.safeParse({ kind, ...target, mode }).success).toBe(true);
     }
     const single = kind === 'worker' ? { worker_ids: [W1] } : { request_ids: [R1] };
-    expect(cezarWaitRequestSchema.safeParse({ kind, ...single, mode: 'one' }).success).toBe(true);
+    expect(squawkWaitRequestSchema.safeParse({ kind, ...single, mode: 'one' }).success).toBe(true);
   });
 
   it('counts only matching outcomes, including fully answered and sparse streamed entries', () => {

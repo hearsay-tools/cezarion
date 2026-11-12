@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, sym
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Home } from '../../home/home.ts';
-import { createMacosxNgrok, cezarLaunchdPlist, launchdPlist } from './macosx-ngrok.ts';
+import { createMacosxNgrok, squawkLaunchdPlist, launchdPlist } from './macosx-ngrok.ts';
 import { applyMigrationReport } from '../migration-report.ts';
 import { createAutoUi } from '../ui.ts';
 import { STEP_STATUSES, freshServerState, type InstallContext, type StepArtifact } from '../types.ts';
@@ -57,7 +57,7 @@ describe('macOS launchd migration', () => {
   function plant(agent: 'cockpit' | 'ngrok', owned = true, argv = ['/n/npx', '--yes', 'cezarion']): StepArtifact {
     const name = `ai.cezar.${agent}`;
     const path = join(dir, `${name}.plist`);
-    writeFileSync(path, agent === 'cockpit' ? cezarLaunchdPlist('/repo', 4321, argv, false) : launchdPlist(4321, 'ops:secret', undefined, '/opt/homebrew/bin/ngrok', false), { mode: 0o600 });
+    writeFileSync(path, agent === 'cockpit' ? squawkLaunchdPlist('/repo', 4321, argv, false) : launchdPlist(4321, 'ops:secret', undefined, '/opt/homebrew/bin/ngrok', false), { mode: 0o600 });
     loaded.add(name);
     const artifact: StepArtifact = { kind: 'owned', type: 'launchd', name, path };
     ctx.state.steps[agent === 'cockpit' ? 'autostart' : 'ngrok'] = { status: STEP_STATUSES[1], created: owned ? { artifacts: [artifact] } : null };
@@ -349,7 +349,7 @@ describe('macOS launchd migration', () => {
     const old = plant(agent, false);
     const legacyXml = readFileSync(old.path!, 'utf8');
     const path = join(dir, `tools.hearsay.squawk.${agent}.plist`);
-    writeFileSync(path, agent === 'cockpit' ? cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true) : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
+    writeFileSync(path, agent === 'cockpit' ? squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true) : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
     loaded.add(`tools.hearsay.squawk.${agent}`);
     const step = strategy.steps(ctx).find((s) => s.id === (agent === 'cockpit' ? 'autostart' : 'ngrok'))!;
     await step.check(ctx);
@@ -368,7 +368,7 @@ describe('macOS launchd migration', () => {
     const name = `tools.hearsay.squawk.${agent}`;
     const path = join(dir, `${name}.plist`);
     writeFileSync(path, agent === 'cockpit'
-      ? cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)
+      ? squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)
       : launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true));
     loaded.add(name);
     const stepId = agent === 'cockpit' ? 'autostart' : 'ngrok';
@@ -409,7 +409,7 @@ describe('macOS launchd migration', () => {
     const oldXml = readFileSync(old.path!, 'utf8');
     const name = `tools.hearsay.squawk.${agent}`;
     const path = join(dir, `${name}.plist`);
-    const foreignXml = cezarLaunchdPlist('/foreign', 9876, ['/usr/bin/foreign'], true).replace('tools.hearsay.squawk.cockpit', name);
+    const foreignXml = squawkLaunchdPlist('/foreign', 9876, ['/usr/bin/foreign'], true).replace('tools.hearsay.squawk.cockpit', name);
     writeFileSync(path, foreignXml);
     loaded.add(name);
     ctx.ui = { ...ctx.ui, password: async () => 'secret', text: async () => 'ops' };
@@ -427,7 +427,7 @@ describe('macOS launchd migration', () => {
     plant('cockpit');
     const name = 'tools.hearsay.squawk.cockpit';
     const path = join(dir, `${name}.plist`);
-    writeFileSync(path, cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true));
+    writeFileSync(path, squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true));
     loaded.add(name);
     const created = await strategy.steps(ctx).find((s) => s.id === 'autostart')!.run(ctx);
     expect(created!.artifacts[0]!.name).toBe(name);
@@ -505,7 +505,7 @@ describe('macOS launchd migration', () => {
       expect(readFileSync(artifact.path!, 'utf8')).toContain(`<string>${artifact.name}</string>`);
       expect(statSync(artifact.path!).mode & 0o777).toBe(0o600);
     }
-    expect(cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)).toContain('<string>tools.hearsay.squawk.cockpit</string>');
+    expect(squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], true)).toContain('<string>tools.hearsay.squawk.cockpit</string>');
     expect(launchdPlist(4321, 'ops:secret', undefined, '/n/ngrok', true)).toContain('<string>tools.hearsay.squawk.ngrok</string>');
   });
 });

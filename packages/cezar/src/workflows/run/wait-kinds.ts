@@ -4,8 +4,8 @@ import type { CiWaitResult, ProcessWaitResult, PeerWaitResult, SubagentWaitResul
 import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, TIMER_MIN_SECONDS, TIMER_MAX_SECONDS } from '@open-mercato/cezar-contract/waits';
 import { randomUUID } from 'node:crypto';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
-import type { TimerWaitEntry, PrWaitEntry, ProcessWaitEntry, PeerWaitEntry, WorkerWaitEntry, HumanWaitEntry, CezarWaitRequestInput, WaitVia, SubagentWaitEntry, SubagentChild } from '@open-mercato/cezar-contract';
-import type { Wait, WaitPhase, CezarWaitRequest } from '@open-mercato/cezar-contract';
+import type { TimerWaitEntry, PrWaitEntry, ProcessWaitEntry, PeerWaitEntry, WorkerWaitEntry, HumanWaitEntry, SquawkWaitRequestInput, WaitVia, SubagentWaitEntry, SubagentChild } from '@open-mercato/cezar-contract';
+import type { Wait, WaitPhase, SquawkWaitRequest } from '@open-mercato/cezar-contract';
 import type { FiredBy } from '../run-states.ts';
 
 /** Each wait kind: its deadline, whether it keeps a slot while it is the top wait, who resolves it. */
@@ -30,11 +30,11 @@ const PR_UNTIL_TEXT = {
 const ENDS_WAITS = ['cezar_cancel_wait', 'a done is accepted', 'Stop', 'Finish', 'delete'] as const;
 
 type RegistrationRequest = {
-  timer: Extract<CezarWaitRequest, { kind: 'timer' }>;
-  pr: Extract<CezarWaitRequest, { kind: 'pr' }>;
-  process: Extract<CezarWaitRequest, { kind: 'process' }>;
-  peer: Extract<CezarWaitRequest, { kind: 'peer' }>;
-  'worker-list': Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>;
+  timer: Extract<SquawkWaitRequest, { kind: 'timer' }>;
+  pr: Extract<SquawkWaitRequest, { kind: 'pr' }>;
+  process: Extract<SquawkWaitRequest, { kind: 'process' }>;
+  peer: Extract<SquawkWaitRequest, { kind: 'peer' }>;
+  'worker-list': Extract<SquawkWaitRequest, { kind: 'worker' | 'request' }>;
 };
 type RegistrationPath = { pr: 'pr'; timer: 'timer'; process: 'process'; peer: 'peer'; worker: 'worker-list'; human: 'none'; subagent: 'none' };
 
@@ -55,7 +55,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   answerKind: (wait: Wait) => Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' | undefined;
   hasDeadline: (wait: Wait) => boolean;
   registration: RegistrationPath[K];
-  requestKinds: readonly CezarWaitRequest['kind'][];
+  requestKinds: readonly SquawkWaitRequest['kind'][];
   delegation: boolean;
 
   entry: {
@@ -64,10 +64,10 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
     human: typeof askWaitEntry; subagent: typeof subagentWaitEntry;
   }[K];
 
-  duplicate: (wait: Wait, request: CezarWaitRequestInput, turnId: string, context: { startToken?: string; exitFile?: string }) => boolean;
-  canonicalize: (request: CezarWaitRequest) => void;
+  duplicate: (wait: Wait, request: SquawkWaitRequestInput, turnId: string, context: { startToken?: string; exitFile?: string }) => boolean;
+  canonicalize: (request: SquawkWaitRequest) => void;
   repeatTimeout: (wait: Wait) => number | undefined;
-  requestedTimeout: (request: CezarWaitRequest) => number | undefined;
+  requestedTimeout: (request: SquawkWaitRequest) => number | undefined;
 
   chargesWake: K extends 'process' | 'peer' | 'subagent' ? (wait: Wait) => boolean : boolean;
   refusesSpentBudget: boolean;
@@ -84,7 +84,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   worker: {
     completionEntry: typeof completionWaitEntry;
     duplicateWorker: typeof identicalWorkerWait;
-    workerListTarget: (request: Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>) => {
+    workerListTarget: (request: Extract<SquawkWaitRequest, { kind: 'worker' | 'request' }>) => {
       workerIds?: string[]; requestIds?: string[]; mode?: 'one' | 'any' | 'all'; timeoutSeconds: number;
     };
   };
@@ -321,21 +321,21 @@ export function normalizePrUrl(url: string): string {
   return url.replace(/\/+$/, '').toLowerCase();
 }
 
-export function timerWaitEntry(parsed: Extract<CezarWaitRequest, { kind: 'timer' }>, via: WaitVia, turnId: string, now: number) {
+export function timerWaitEntry(parsed: Extract<SquawkWaitRequest, { kind: 'timer' }>, via: WaitVia, turnId: string, now: number) {
   const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
         deadline: new Date(now + parsed.seconds * 1000).toISOString(), phase: 'open', turnId, seconds: parsed.seconds,
         ...(parsed.note === undefined ? {} : { note: parsed.note }) };
   return wait;
 }
 
-export function prWaitEntry(identity: Awaited<ReturnType<CiWatcherSupervisor['resolve']>>, parsed: Extract<CezarWaitRequest, { kind: 'pr' }>, via: WaitVia, generation: string, turnId: string, now: number) {
+export function prWaitEntry(identity: Awaited<ReturnType<CiWatcherSupervisor['resolve']>>, parsed: Extract<SquawkWaitRequest, { kind: 'pr' }>, via: WaitVia, generation: string, turnId: string, now: number) {
   const wait: PrWaitEntry = { ...identity, id: randomUUID(), kind: 'pr', source: 'agent', via, generation, turnId,
         timeoutSeconds: parsed.timeout_seconds, until: parsed.until, wakeOnConflict: parsed.wake_on_conflict, registeredAt: new Date(now).toISOString(),
         deadline: new Date(now + parsed.timeout_seconds * 1000).toISOString(), phase: 'open' };
   return wait;
 }
 
-export function processWaitEntry(request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, now: number, startToken: string | undefined, exitFile: string | undefined) {
+export function processWaitEntry(request: Extract<SquawkWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, now: number, startToken: string | undefined, exitFile: string | undefined) {
   const wait: ProcessWaitEntry = { id: randomUUID(), kind: 'process', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeout_seconds * 1000).toISOString(), phase: 'open', turnId, timeoutSeconds: request.timeout_seconds,
       pid: request.pid, ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }),
@@ -350,7 +350,7 @@ export function processWaitEntry(request: Extract<CezarWaitRequest, { kind: 'pro
  * Process: the same PID, start token and resolved exit file in `context`, whatever its timeout or
  * note (hearsay-tools/cezarion#1446).
  */
-export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string,
+export function identicalWait(waits: readonly Wait[], request: SquawkWaitRequestInput, turnId: string,
   context: { startToken?: string; exitFile?: string } = {}): PrWaitEntry | TimerWaitEntry | ProcessWaitEntry | undefined {
   const row = waitRequestRow(request.kind);
   if (row.delegation) return undefined;
@@ -376,7 +376,7 @@ export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly stri
 }
 
 /** The stored row that serves a tool request kind, including request waits in the worker row. */
-export function waitRequestRow(kind: CezarWaitRequest['kind']): WaitKindRow<Wait['kind']> {
+export function waitRequestRow(kind: SquawkWaitRequest['kind']): WaitKindRow<Wait['kind']> {
   const row = Object.values(WAIT_KINDS).find(row => row.requestKinds.includes(kind));
   if (!row) throw new Error(`no wait row registers ${kind}`);
   return row;
@@ -445,7 +445,7 @@ export function isMonitoringTimer(wait: Wait): boolean {
 /** Cezar's own human wait (`no-wait`, `budget`): it stands in for a wait the agent never registered
  *  and is replaced by the agent's own (hearsay-tools/cezarion#1234), so the agent is never told of
  *  it as one of its waits. */
-export function isCezarHumanWait(wait: Wait): boolean {
+export function isSquawkHumanWait(wait: Wait): boolean {
   return WAIT_KINDS.human.is(wait) && wait.source === 'cezar';
 }
 
@@ -550,7 +550,7 @@ export function describeWait(wait: Wait): string {
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
  *  offered only for CI, worker, request, peer, process and subagent waits and timers (hearsay-tools/cezarion#1234). */
 export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
-  const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
+  const open = waits.filter((wait) => wait.phase === 'open' && !isSquawkHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map(describeWait);
   const asked = open.some((wait) => WAIT_KINDS[wait.kind].userAnswers);
@@ -579,8 +579,8 @@ export function waitDeliveryLabel(waits: readonly Wait[]): string | undefined {
 export type RegistrationRoutes<R> = { readonly [P in keyof RegistrationRequest]: (request: RegistrationRequest[P]) => R };
 
 /** Request dispatch follows the typed registration cell of its stored-kind row. */
-export function routeRegistration<R>(request: CezarWaitRequest, routes: RegistrationRoutes<R>): R {
+export function routeRegistration<R>(request: SquawkWaitRequest, routes: RegistrationRoutes<R>): R {
   const path = waitRequestRow(request.kind).registration;
   if (path === 'none') throw new Error('Unsupported wait registration');
-  return (routes[path] as (request: CezarWaitRequest) => R)(request);
+  return (routes[path] as (request: SquawkWaitRequest) => R)(request);
 }

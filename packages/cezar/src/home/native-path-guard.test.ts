@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { tmpdir, type } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 
 const account = join(tmpdir(), 'cez-native-guard-account');
 vi.mock('node:os', async original => {
@@ -20,7 +20,7 @@ it('keeps protected filesystem lookups native when process.platform is mocked', 
   const platform = process.platform;
   Object.defineProperty(process, 'platform', { configurable: true, value: sep === '\\' ? 'linux' : 'win32' });
   try {
-    expect(() => assertCezarHomeWriteIsSandboxed(join(tmpdir(), 'cez-native-guard-sandbox', 'config.json'))).not.toThrow();
+    expect(() => assertSquawkHomeWriteIsSandboxed(join(tmpdir(), 'cez-native-guard-sandbox', 'config.json'))).not.toThrow();
     const lookedUp = vi.mocked(realpathSync).mock.calls.map(([path]) => String(path));
     const config = sep === '\\' ? join(account, 'AppData', 'Roaming', 'Hearsay Squawk')
       : type() === 'Darwin' ? join(account, 'Library', 'Application Support', 'Hearsay Squawk', 'config')

@@ -39,8 +39,8 @@ function fixture() {
     turnEndHumanWait: call<object | undefined>('humanWait', undefined),
     prepareHumanAsk: call('prepareAsk', undefined), raiseHumanGate: call('raiseGate', undefined),
     recordTurnEndQuestion: call('recordQuestion', undefined), holdsAgentWaits: call('agentWaits', false),
-    humanWaitShown: call('shown', false), withdrawCezarHumanWaits: vi.fn((_id: string) => { log.push('withdraw'); }),
-    openHumanAlias: call('humanAlias', { source: WAIT_SOURCE.cezar }), showCezarHumanWait: call('show', undefined),
+    humanWaitShown: call('shown', false), withdrawSquawkHumanWaits: vi.fn((_id: string) => { log.push('withdraw'); }),
+    openHumanAlias: call('humanAlias', { source: WAIT_SOURCE.cezar }), showSquawkHumanWait: call('show', undefined),
     surfaceHumanWait: call('surface', undefined),
   };
   const host = {
@@ -60,7 +60,7 @@ function fixture() {
   const semaphore = { monitoringWakeIntervalMinutes: call<number | null>('interval', 1) };
   const context = { store, semaphore } as unknown as RunModuleContext;
   const waitEngine = new WaitEngine(context, unused<ConstructorParameters<typeof WaitEngine>[1]>('engine', {
-    withdrawCezarHumanWaits: id => host.humanWaits.withdrawCezarHumanWaits(id),
+    withdrawSquawkHumanWaits: id => host.humanWaits.withdrawSquawkHumanWaits(id),
   }), 10);
   const engine = { armWait: vi.spyOn(waitEngine as unknown as { armWait(id: string, wait: Wait): void }, 'armWait').mockImplementation((_id: string, _wait: Wait) => { log.push('armWait'); }) };
   vi.spyOn(waitEngine, 'cancelAll').mockImplementation(() => { log.push('cancelWaits'); });
@@ -268,7 +268,7 @@ describe('turn settler carrier orders', () => {
     decide({ kind: 'park', refused: true });
     f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
     order(f, ['event:note', 'parkWaits', 'notice', 'inPool', 'outcome']);
-    expect(f.host.humanWaits.withdrawCezarHumanWaits).not.toHaveBeenCalled();
+    expect(f.host.humanWaits.withdrawSquawkHumanWaits).not.toHaveBeenCalled();
   });
 
   it('done marks the step before summary, lifecycle, wait cancellation, and session close, without an outcome', () => {

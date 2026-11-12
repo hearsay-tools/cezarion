@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
+import { squawkDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { stepLabel } from './run.ts';
 import { workflowStepSchema } from './types.ts';
 
@@ -15,6 +15,6 @@ describe('stepLabel', () => {
   it.each([undefined, '', '   '])('falls back to the step id for the name %j, so the done answer stays valid', name => {
     const label = stepLabel(workflowStepSchema.parse({ id: 'review', ...(name === undefined ? {} : { name }), prompt: 'p' }));
     expect(label).toBe('review');
-    expect(cezarDoneAnswerSchema.safeParse(answer(label)).success).toBe(true);
+    expect(squawkDoneAnswerSchema.safeParse(answer(label)).success).toBe(true);
   });
 });

@@ -5,7 +5,7 @@ import { homeChanged } from './changes.ts';
 import { flagResetFromBackup, flagResetOnWrite } from './reset-detection.ts';
 import { basename, dirname, join } from 'node:path';
 import { backupBeforeWrite } from '../workspace/backups.ts';
-import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from '../paths.ts';
 import { assertHomeReadable, assertHomeWritable, createInstallMarker, readInstallMarker, underTestRunner } from './install-marker.ts';
 import { digest, OUTSIDE_WRITE_ENFORCEMENT, readBytes, VersionLog, type OutsideWrite } from './version-log.ts';
 import { withHomeLock } from './write-lock.ts';
@@ -118,7 +118,7 @@ export class HomeStore {
     try {
       const marker = readInstallMarker(this.root);
       if (!marker || marker.state === 'pending' || (marker.kind === 'live' && underTestRunner())) return false;
-      assertCezarHomeWriteIsSandboxed(this.root);
+      assertSquawkHomeWriteIsSandboxed(this.root);
       return true;
     } catch {
       // Invalid marker or protected passwd-home: reads remain read-only and keep saved data visible.

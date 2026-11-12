@@ -147,15 +147,15 @@ describe('ProjectContexts', () => {
     vi.stubEnv('CEZ_PREVIEW', '1');
     const release = vi.fn(async () => undefined);
     const preview = { portOwner: () => undefined, probe: async () => false, release, ownsServer: () => false } as unknown as PreviewHost;
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview, cezarPort: () => 4321 });
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], preview, squawkPort: () => 4321 });
     try {
       const ctx = await contexts.context('a');
       const run = ctx.store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
       ctx.store.updateRun(run.id, { worktreePath: rootA });
       // Without the host every registration answers `headless`, and without the port getter the
       // cockpit's own port registers.
-      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, observed.options.get(ctx.manager)?.cezarPort, () => false, run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
-      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, observed.options.get(ctx.manager)?.cezarPort, () => false, run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
+      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, observed.options.get(ctx.manager)?.squawkPort, () => false, run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
+      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, observed.options.get(ctx.manager)?.squawkPort, () => false, run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
       ctx.store.deleteRun(run.id);
       expect(release).toHaveBeenCalledWith(run.id, { deleteProfile: true, dataDir: ctx.dataDir });
     } finally {

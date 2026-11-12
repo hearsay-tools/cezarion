@@ -140,7 +140,7 @@ function consumerConfig(tests) {
     const include = tests.filter(f => f.startsWith(`packages/${pkg}/`)).map(f => f.slice(`packages/${pkg}/`.length));
     return include.length ? [`{ ...${pkg}Config, root: resolve('packages/${pkg}'), test: { ...${pkg}Config.test, include: ${JSON.stringify(include)} } }`] : [];
   });
-  return `import { defineConfig } from 'vitest/config';\nimport { resolve } from 'node:path';\nimport cezarConfig from './packages/cezar/vitest.config';\nimport webConfig from './packages/web/vitest.config';\nexport default defineConfig({ test: { projects: [${projects.join(',')}] } });\n`;
+  return `import { defineConfig } from 'vitest/config';\nimport { resolve } from 'node:path';\nimport squawkConfig from './packages/cezar/vitest.config';\nimport webConfig from './packages/web/vitest.config';\nexport default defineConfig({ test: { projects: [${projects.join(',')}] } });\n`;
 }
 
 const reportKey = m => JSON.stringify([m.location, m.mutatorName, m.replacement]);

@@ -144,7 +144,7 @@ import {
   getApiScope,
   queryScope,
 } from '@open-mercato/cezar-api-client/utils/project-scope'
-import { createCezarClient } from '@open-mercato/cezar-api-client/client'
+import { createSquawkClient } from '@open-mercato/cezar-api-client/client'
 import {
   runHistoryContextSchema,
   runHistoryPageSchema,
@@ -276,7 +276,7 @@ function errorFor(status: number, statusText: string, body: string): ApiError {
  * `Record<string, unknown>`) infers a weaker response than the DTO it replaces, so those wait
  * until the server tightens its own return types.
  */
-export const cez = createCezarClient<AppType>({
+export const cez = createSquawkClient<AppType>({
   // The base URL is resolved per request, not baked in at construction: this module is imported
   // before `main.tsx` configures it, and a `<meta>`-configured deployment must still take
   // effect. `hc` builds a root-relative URL, so prefixing here is the whole job.

@@ -2,7 +2,7 @@ import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/ceza
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import type { PrWaitEntry, HumanWaitEntry, ProcessWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { chargesBudget, ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import { chargesBudget, ciWatchRequest, identicalWait, isSquawkHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in the waits-parity-<part>-cells.testkit.ts modules.
@@ -162,8 +162,8 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
   it('leaves Cezar\'s own human wait out of the list and the footer the agent reads', () => {
     const noWait: HumanWaitEntry = { id: '66666666-6666-4666-8666-666666666666', kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'],
       registeredAt: '2026-10-17T10:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'no-wait', askSeq: 7 };
-    expect(isCezarHumanWait(noWait)).toBe(true);
-    expect(isCezarHumanWait({ ...noWait, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask })).toBe(false);
+    expect(isSquawkHumanWait(noWait)).toBe(true);
+    expect(isSquawkHumanWait({ ...noWait, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask })).toBe(false);
     expect(openWaitList([noWait])).toEqual([]);
     expect(openWaitsFooter([noWait])).toBeUndefined();
     expect(openWaitsFooter([noWait, ci()])).toBe(

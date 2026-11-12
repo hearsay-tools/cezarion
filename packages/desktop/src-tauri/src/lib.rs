@@ -1230,7 +1230,7 @@ fn probe_ipc(window: &WebviewWindow) {
 // ---- splash page ---------------------------------------------------------------------------
 
 fn splash_log(window: &WebviewWindow, line: &str) {
-    let _ = window.eval(&format!("window.cezarSplash && window.cezarSplash.log({})", js_string(line)));
+    let _ = window.eval(&format!("window.squawkSplash && window.squawkSplash.log({})", js_string(line)));
 }
 
 /// Back to the splash from the cockpit (a different origin), then set the message.

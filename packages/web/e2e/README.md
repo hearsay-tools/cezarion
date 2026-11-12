@@ -484,7 +484,7 @@ Linux and macOS only.
 ## Forcing a race with a delayed route
 
 To force a race that CI hits and your machine does not, delay the built route that the
-spec races. The shared env and specs that boot their own cezar (`cezarCli`) both run
+spec races. The shared env and specs that boot their own cezar (`squawkCli`) both run
 `.ai/qa/build/cezar`, but the environment-variable delay below reaches only the shared
 server. For a spec that boots its own server, use
 [the file-read delay](#specs-that-boot-their-own-server). Use the shared env in this order,

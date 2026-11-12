@@ -5,7 +5,7 @@ import { atContinue } from './launch-read-resolver.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
+import { holdsOwedResults, isSquawkHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
 import type { HumanWaits } from './human-waits.ts';
@@ -263,8 +263,8 @@ export class RunRecovery {
   private adoptTranscriptAsk(runId: string): boolean {
     const askSeq = pendingHumanAskSeq(this.context.store, runId);
     const human = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {}));
-    if (askSeq === undefined || !this.context.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
-    this.host.humanWaits.withdrawCezarHumanWaits(runId);
+    if (askSeq === undefined || !this.context.store.getRun(runId) || human.some(wait => !isSquawkHumanWait(wait) || wait.askSeq === askSeq)) return false;
+    this.host.humanWaits.withdrawSquawkHumanWaits(runId);
     if (WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? {})).length) return false;
     return this.host.waitEngine.open(runId, undefined, WAIT_KINDS.human.recoveredEntry(askSeq), {
       withdraw: false, onCommitFailure: { log: `${logPrefix()} human wait checkpoint failed` }, park: false,

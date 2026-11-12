@@ -39,7 +39,7 @@ export const askQuestionSchema = z
   .strict();
 
 /** The stored shape: asks recorded before hearsay-tools/cezarion#1458, saved asks from the retired
- *  `CEZ:ASK` marker and a routed question may carry no context. `cezar_ask` requires it (`cezarAskRequestSchema`). */
+ *  `CEZ:ASK` marker and a routed question may carry no context. `cezar_ask` requires it (`squawkAskRequestSchema`). */
 export const askRequestSchema = z
   .object({
     context: askContextSchema.optional(),

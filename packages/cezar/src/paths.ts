@@ -12,7 +12,7 @@ import type { Home } from './home/home.ts';
  * sandbox, so read the account home from the OS. Runner detection belongs to
  * the process: a caller's custom env must not disable this guard.
  */
-export function assertCezarHomeWriteIsSandboxed(path: string, _env: NodeJS.ProcessEnv = process.env): void {
+export function assertSquawkHomeWriteIsSandboxed(path: string, _env: NodeJS.ProcessEnv = process.env): void {
   const testing = process.env.VITEST || process.env.NODE_TEST_CONTEXT || process.env.JEST_WORKER_ID
     || Object.keys(process.env).some((key) => key.startsWith('STRYKER_'));
   if (!testing) return;

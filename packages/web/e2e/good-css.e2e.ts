@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 import { focusWithKeyboard, contrastSampleExpression, type ContrastSample } from './contrast'
 import { waitForSettledSample } from './visual-ready'
 // fixture-server starts: 1
@@ -29,7 +29,7 @@ beforeAll(async () => {
   git('commit', '-qm', 'Fixture')
   writeFileSync(join(root, 'comments.ts'), '// The updated comment remains readable.\n')
   for (let i = 0; i < 30; i++) mkdirSync(join(root, `folder-${i}`))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_BROWSE_ROOT: root }), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

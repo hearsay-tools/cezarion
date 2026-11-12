@@ -2,14 +2,14 @@ import { logPrefix } from '../../home/display.ts';
 import type { WaitEngine } from './wait-engine.ts';
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { transitionTurnBoundary } from './turn-boundary.ts';
-import { cezarDoneRequestSchema, type CezarDoneRequest, type CezarDoneAnswer, type DoneErrorCode } from '@open-mercato/cezar-contract/waits';
+import { squawkDoneRequestSchema, type SquawkDoneRequest, type SquawkDoneAnswer, type DoneErrorCode } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { doneErrorMessage } from '../../ci-wait/errors.ts';
 import { openCompletionRequests, recordRequestRefusal, type CompletionRefusal } from '../completion-policy.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunExitId, ExitCall } from '../../runs/run-exits.ts';
 import { openWaitList, openWaits } from '../waits.ts';
-import { toolSessionRefusal } from './cezar-tools.ts';
+import { toolSessionRefusal } from './squawk-tools.ts';
 import { clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';
 import { hasPendingHumanAsk } from './pending-ask-facts.ts';
 import * as completionGateReads from './completion-gate.ts';
@@ -41,11 +41,11 @@ export class RunFinish {
    * first. The gate is the completion gate, in order: the session, a root finish, the user's
    * question, then for a root its workers' questions, live workers and uncollected results. The turn end re-checks it (`deferParentCompletion`).
    */
-  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer {
-    const parsed = cezarDoneRequestSchema.parse(request);
+  acceptDone(runId: string, generation: string, request: SquawkDoneRequest, signal?: AbortSignal): SquawkDoneAnswer {
+    const parsed = squawkDoneRequestSchema.parse(request);
     const state = this.completionGateHost.active.get(runId);
     const open_waits = openWaitList(this.context.store.getRun(runId)?.waits ?? []);
-    const refuse = (code: DoneErrorCode, message: string, workers: { worker_id: string; reason: 'outstanding' | 'uncollected' | 'question' }[] = []): CezarDoneAnswer => {
+    const refuse = (code: DoneErrorCode, message: string, workers: { worker_id: string; reason: 'outstanding' | 'uncollected' | 'question' }[] = []): SquawkDoneAnswer => {
       // Fixed codes only, as for wait registration.
       console.warn(`${logPrefix()} cezar_done refused: ${code}`);
       return { ok: false, code, message, ...(workers.length ? { workers: workers.slice(0, 64) } : {}), open_waits };

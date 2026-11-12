@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
 
@@ -116,7 +116,7 @@ beforeAll(async () => {
   } satisfies Partial<RunRecord>)
   seedRuns(dataRoot, [run])
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

@@ -11,7 +11,7 @@ import { RUNNER_FACTS } from './runner-facts.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
 import { cursorPrintToolGrantArgs } from './runner-tool-grants.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { cezarToolEnvNames } from '../ci-wait/tools.ts';
+import { squawkToolEnvNames } from '../ci-wait/tools.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 import { cursorArgs } from './cursor-cli-flags.ts';
 import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
@@ -22,7 +22,7 @@ import { AUTO_END_DELAY_MS, DEFAULT_NO_PROGRESS_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_
 
 /** Cursor print fields with live-qualified invocation mechanisms. */
 export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'private local --plugin-dir with mcp.json env placeholders on every turn' },
+  squawkTools: { honored: true, via: 'private local --plugin-dir with mcp.json env placeholders on every turn' },
   systemPrompt: { honored: true, via: 'prepended to each print prompt' },
   userPrompt: { honored: true, via: 'print stdin' },
   images: { honored: true, via: 'private temporary image files passed with --image' },
@@ -135,7 +135,7 @@ class CursorPrintSession implements AgentSession {
     }
     try {
       this.model = this.resolveModel();
-      if (spec.cezarTools) this.prepareCezarPlugin();
+      if (spec.squawkTools) this.prepareSquawkPlugin();
     } catch (error) {
       this.fail(error instanceof Error ? error.message : 'Cursor print invocation is unsupported');
       return;
@@ -175,15 +175,15 @@ class CursorPrintSession implements AgentSession {
     return this.scratch ??= mkdtempSync(join(tmpdir(), 'cez-cursor-print-'));
   }
 
-  private prepareCezarPlugin(): void {
-    const tools = this.spec.cezarTools;
+  private prepareSquawkPlugin(): void {
+    const tools = this.spec.squawkTools;
     if (!tools) return;
     const dir = join(this.ensureScratch(), 'cezar-tools');
     mkdirSync(dir, { mode: 0o700 });
     writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
       name: 'cezar-tools', version: '0.0.1', description: 'Cezar task tools',
     }), { mode: 0o600 });
-    const env = Object.fromEntries(cezarToolEnvNames(this.spec.env ?? {}).filter(name => this.spec.env?.[name] !== undefined)
+    const env = Object.fromEntries(squawkToolEnvNames(this.spec.env ?? {}).filter(name => this.spec.env?.[name] !== undefined)
       .map(name => [name, '${' + name + '}']));
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: {
       [tools.name]: { type: 'stdio', command: tools.command, args: tools.args, env },

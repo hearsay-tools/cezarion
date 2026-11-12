@@ -101,13 +101,13 @@ describe('serveCommand', () => {
     const f = fixture();
     let portAtRecovery: number | undefined;
     f.effects.recoverServeProject.mockImplementation(async () => {
-      portAtRecovery = f.effects.RunManager.mock.calls[0]![2]!.cezarPort?.();
+      portAtRecovery = f.effects.RunManager.mock.calls[0]![2]!.squawkPort?.();
     });
     await f.run();
     const options = f.effects.RunManager.mock.calls[0]![2]!;
     expect(options.cockpit).toEqual({ origin: 'http://127.0.0.1:4322', projectId: 'boot-id' });
     expect(portAtRecovery).toBeUndefined();
-    expect(options.cezarPort?.()).toBe(4322);
+    expect(options.squawkPort?.()).toBe(4322);
     expect(f.delegation.attachProject).toHaveBeenCalledWith({ id: 'boot-id', root: '/repo', store: f.store, manager: f.manager, home: f.home });
     options.sweepBranches?.(7);
     expect(f.effects.sweepMergedBranches).toHaveBeenCalledWith(

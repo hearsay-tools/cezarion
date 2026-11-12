@@ -384,7 +384,7 @@ export class StepLoop {
     if (this.host.active.get(runId) !== state &&
       !(this.context.disposed() && (state.liveSession.cancelled || state.liveSession.finishRequested))) return 'handed-off';
     if (state.liveSession.cancelled || preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) return 'settle';
-    this.humanWaits.withdrawCezarHumanWaits(runId);
+    this.humanWaits.withdrawSquawkHumanWaits(runId);
     this.expireStepDeadlineWaits(runId, step, failure, attempt.startedAt);
     const current = this.context.store.getRun(runId);
     if (current && this.host.executionBlockedByRootFinish(current) && !state.liveSession.sessionEverOpened) {

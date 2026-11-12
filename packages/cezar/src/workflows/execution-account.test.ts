@@ -126,8 +126,8 @@ describe('account holds read the execution account', () => {
   it('holds a live session\'s wake by the step it runs, not the task-level runner', async () => {
     const launched = controlledSessions();
     const generations = new Map<string, string>();
-    const handlers = manager.cezarToolHandlers.bind(manager);
-    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    const handlers = manager.squawkToolHandlers.bind(manager);
+    vi.spyOn(manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
       generations.set(id, generation); return handlers(id, generation);
     });
     observeWaitTimers(manager, store);

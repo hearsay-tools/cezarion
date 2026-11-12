@@ -181,9 +181,9 @@ class IdleElapses implements Command {
   check = (m: Readonly<Model>) => m.session && RUN_TRIGGERS.find((candidate) => candidate.id === 'waiting.idle')!.states.includes(m.state);
   async run(m: Model, r: Real) {
     // Cezar's own question ends with the session; the agent's stays open.
-    const cezarAsks = m.state === 'waiting:human' && m.question === 'cezar';
-    m.state = target(cezarAsks ? 'human.idle-cezar-question' : 'waiting.idle', m.state);
-    if (cezarAsks) m.question = false;
+    const squawkAsks = m.state === 'waiting:human' && m.question === 'cezar';
+    m.state = target(squawkAsks ? 'human.idle-cezar-question' : 'waiting.idle', m.state);
+    if (squawkAsks) m.question = false;
     m.session = false;
     await idleClose(idleClock, r.id, manager, store, until);
     await settle(r, m, turnEnds(r.id), 0);

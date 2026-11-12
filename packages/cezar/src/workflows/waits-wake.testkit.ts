@@ -3,7 +3,7 @@ import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import type { CezarWaitRequestInput, CiWait, CiWaitResult, Wait } from '@open-mercato/cezar-contract';
+import type { SquawkWaitRequestInput, CiWait, CiWaitResult, Wait } from '@open-mercato/cezar-contract';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -58,8 +58,8 @@ export async function pump() {
   await semaphore.release();
   await Promise.all([...work.pending].filter(([, label]) => label === 'pump').map(([task]) => task));
 }
-export async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
-  const tools = manager.cezarToolHandlers(id, toolGenerationOf(id));
+export async function openWait(id: string, request: SquawkWaitRequestInput): Promise<TimedWait> {
+  const tools = manager.squawkToolHandlers(id, toolGenerationOf(id));
   const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
   if (!('wait' in registered)) throw Error('registration refused');
   return timed(registered.wait);

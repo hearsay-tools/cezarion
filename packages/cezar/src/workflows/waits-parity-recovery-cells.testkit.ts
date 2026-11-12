@@ -27,7 +27,7 @@ export function recoveryCells(runners: RunnerId[], it: typeof registerTest = reg
       store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       await until(wire.held);
       const w = await worker(run.id);
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
       expect(registered.answer).toMatchObject({ ok: true, kind: WAIT_KIND.worker });
       if (!('wait' in registered)) throw Error('registration refused');
@@ -45,7 +45,7 @@ export function recoveryCells(runners: RunnerId[], it: typeof registerTest = reg
 
     it(`${runner} U9w clean close with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
       const { p, w } = await parentWithWorker(runner);
-      const tools = manager.cezarToolHandlers(p.id, toolGenerationOf(p.id));
+      const tools = manager.squawkToolHandlers(p.id, toolGenerationOf(p.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
       const wait = registered.wait;

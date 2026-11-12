@@ -8,7 +8,7 @@ import { migrationFixture } from '../home/migration.testkit.ts';
 import { cleanStoreRoots } from '../home/store.testkit.ts';
 import { runServerMigrate } from './group-migrate.ts';
 import { readServerMigrateJournal } from './migrate-journal.ts';
-import { cezarLaunchdPlist, createMacosxNgrok, launchdPlist } from './platforms/macosx-ngrok.ts';
+import { squawkLaunchdPlist, createMacosxNgrok, launchdPlist } from './platforms/macosx-ngrok.ts';
 import { loadServerState } from './state.ts';
 import { getStrategy, supportsServerMigration } from './strategies.ts';
 import { createAutoUi } from './ui.ts';
@@ -95,7 +95,7 @@ function macInstall({ ngrokRecorded = true } = {}) {
   mkdirSync(dir, { recursive: true });
   const launchd = new FakeLaunchd();
   const plist = (label: string) => join(dir, `${label}.plist`);
-  writeFileSync(plist(OLD[0]!), cezarLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], false), { mode: 0o600 });
+  writeFileSync(plist(OLD[0]!), squawkLaunchdPlist('/repo', 4321, ['/n/npx', '--yes', 'cezarion'], false), { mode: 0o600 });
   writeFileSync(plist(OLD[1]!), launchdPlist(4321, 'ops:secret', 'cockpit.ngrok.app', '/opt/homebrew/bin/ngrok', false), { mode: 0o600 });
   for (const label of OLD) launchd.loaded.add(label);
   const agent = (label: string) => ({ kind: 'owned' as const, type: 'launchd', name: label, path: plist(label) });

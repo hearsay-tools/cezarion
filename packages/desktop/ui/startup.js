@@ -1,12 +1,12 @@
 document.getElementById("local-start").onclick = () => {
-  window.cezarSplash.set("Starting local cockpit", "Preparing your workspace…");
+  window.squawkSplash.set("Starting local cockpit", "Preparing your workspace…");
   window.__TAURI_INTERNALS__
     .invoke("retry_start")
     .catch((message) =>
-      window.cezarSplash.fail("Could not start", String(message), ""),
+      window.squawkSplash.fail("Could not start", String(message), ""),
     );
 };
-window.cezarSplash = {
+window.squawkSplash = {
   set(title, detail) {
     document.getElementById("title").textContent = title;
     document.getElementById("detail").textContent = detail;
@@ -31,7 +31,7 @@ window.cezarSplash = {
 };
 const params = new URLSearchParams(location.search);
 if (params.get("needs_node") || params.get("error")) {
-  window.cezarSplash.fail(
+  window.squawkSplash.fail(
     params.get("title") || "Local cockpit unavailable",
     params.get("error") || "",
     params.get("log") || "",
@@ -39,6 +39,6 @@ if (params.get("needs_node") || params.get("error")) {
   if (params.get("needs_node"))
     document.getElementById("actions").classList.remove("hidden");
 } else if (params.get("title"))
-  window.cezarSplash.set(params.get("title"), params.get("detail") || "");
+  window.squawkSplash.set(params.get("title"), params.get("detail") || "");
 document.getElementById("retry").onclick = () =>
   document.getElementById("local-start").click();

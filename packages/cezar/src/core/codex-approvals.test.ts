@@ -51,7 +51,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
   // A hang guard only: each wait ends on the runner's own UI event.
   const seen = (ui: UiEvent[], type: UiEvent['type']) => vi.waitFor(() => expect(ui.some(e => e.type === type)).toBe(true), { timeout: 15_000 });
   const mcpSession = (userPrompt: string, ui: UiEvent[]) => new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt,
-    cezarTools: { name: 'cezar_ci_test', command: 'node', args: ['/never/started.mjs'] } }, undefined, { onUiEvent: event => ui.push(event) });
+    squawkTools: { name: 'cezar_ci_test', command: 'node', args: ['/never/started.mjs'] } }, undefined, { onUiEvent: event => ui.push(event) });
 
   it.each(mcpReplies)('asks before another server\'s MCP tool and %s reaches Codex exactly', async (label, kind, reply) => {
     const ui: UiEvent[] = [];

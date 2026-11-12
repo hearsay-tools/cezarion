@@ -4,7 +4,7 @@ import type { RunStore } from '../runs/store.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from './registration.ts';
 
-export async function stopPreviewServer(store: RunStore, preview: PreviewHostLike | undefined, cezarPort: (() => number | undefined) | undefined, disposed: () => boolean, runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
+export async function stopPreviewServer(store: RunStore, preview: PreviewHostLike | undefined, squawkPort: (() => number | undefined) | undefined, disposed: () => boolean, runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
     const parsed = previewStopRequestSchema.parse(request);
     if (!previewToolEnabled()) return previewStopResult('preview_disabled');
     if (!preview) return previewStopResult('headless');
@@ -21,7 +21,7 @@ export async function stopPreviewServer(store: RunStore, preview: PreviewHostLik
    * #781: record a dev server the agent registered. One probe at registration becomes
    * `answeredAtRegistration`; the run is re-validated after it, since the probe awaits.
    */
-export async function registerPreviewServer(store: RunStore, preview: PreviewHostLike | undefined, cezarPort: (() => number | undefined) | undefined, disposed: () => boolean, runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult> {
+export async function registerPreviewServer(store: RunStore, preview: PreviewHostLike | undefined, squawkPort: (() => number | undefined) | undefined, disposed: () => boolean, runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult> {
     const parsed = previewServeRequestSchema.parse(request);
     const validate = () => {
       const run = store.getRun(runId);
@@ -29,7 +29,7 @@ export async function registerPreviewServer(store: RunStore, preview: PreviewHos
       const result = validateRegistration({
         request: parsed,
         worktreePath: run?.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : undefined,
-        cezarPort: cezarPort?.(),
+        squawkPort: squawkPort?.(),
         existing: run?.previewServers ?? [],
         owner,
         runId,
@@ -41,9 +41,9 @@ export async function registerPreviewServer(store: RunStore, preview: PreviewHos
     };
     const first = validate();
     if (!first.server || !preview) return first.answer();
-    // A server process supplies `cezarPort`, but recovered runs can call before the cockpit binds:
+    // A server process supplies `squawkPort`, but recovered runs can call before the cockpit binds:
     // until it knows its port, `cezar_port` cannot be checked, so the tool asks for a retry instead.
-    if (cezarPort && cezarPort() === undefined) return previewResult('unavailable', parsed);
+    if (squawkPort && squawkPort() === undefined) return previewResult('unavailable', parsed);
     const answered = await preview.probe(parsed.port).catch(() => false);
     // A session revoked during the probe (cancel, stop) must leave no card behind.
     signal?.throwIfAborted();

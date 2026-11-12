@@ -6,7 +6,7 @@ import { lineAt, repoRoot, type SourceRule } from './source-rule.ts';
 
 export const homeReadersFile = 'packages/cezar/src/lint/home-readers.baseline.json';
 export interface HomeReader { file: string; kind: 'homedir'; calls: number; reason: string }
-export interface HomeSite { kind: 'cezarHomeDir' | 'resolveHome' | 'homedir' | 'test-selection'; offset: number }
+export interface HomeSite { kind: 'squawkHomeDir' | 'resolveHome' | 'homedir' | 'test-selection'; offset: number }
 const ENTRY_POINTS = new Set(['packages/cezar/src/index.ts', 'packages/cezar/src/subcommands.ts']);
 const SHARED_SETUP = 'packages/cezar/vitest.setup.ts';
 const HOME_DIR = 'packages/cezar/src/home/';
@@ -139,10 +139,10 @@ export function homeSites(source: string, file = 'file.ts'): HomeSite[] {
   const sites: HomeSite[] = [];
   visit(ast, node => {
     const id = name(node);
-    if (node.type === 'Identifier' && (id === 'cezarHomeDir' || id === 'resolveHome')) sites.push({ kind: id, offset: node.start ?? 0 });
+    if (node.type === 'Identifier' && (id === 'squawkHomeDir' || id === 'resolveHome')) sites.push({ kind: id, offset: node.start ?? 0 });
     if ((node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') && node.computed) {
       const member = property(node);
-      if (member === 'cezarHomeDir' || member === 'resolveHome') sites.push({ kind: member, offset: node.start ?? 0 });
+      if (member === 'squawkHomeDir' || member === 'resolveHome') sites.push({ kind: member, offset: node.start ?? 0 });
     }
     if (callsHomedir(node, aliases)) sites.push({ kind: 'homedir', offset: node.start ?? 0 });
     if (selectsHome(node)) sites.push({ kind: 'test-selection', offset: node.start ?? 0 });
@@ -161,7 +161,7 @@ export function scanHomeBoundary(file: string, source: string, exemptions = (rea
   const allowed = exemptions.find(entry => entry.file === file)?.calls ?? 0;
   let calls = 0;
   return sites.filter(site => {
-    if (site.kind === 'cezarHomeDir') return true;
+    if (site.kind === 'squawkHomeDir') return true;
     if (site.kind === 'resolveHome') return !file.startsWith(HOME_DIR) && !ENTRY_POINTS.has(file);
     if (site.kind === 'homedir') return ++calls > allowed && !file.startsWith(HOME_DIR);
     return false;

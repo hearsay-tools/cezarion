@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { eventCheckpoint, manager, restart, root, store, until } from './worker-wait-claude.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { conversationOf, eventsOf, cezarAnswered, noHumanCard, askedPair, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
+import { conversationOf, eventsOf, squawkAnswered, noHumanCard, askedPair, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
@@ -22,9 +22,9 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     await restart(false, disk, events);
     expect(store.isUnreadable(f.p.id)).toBe(true);
     // The mock asks again after the answer; each question it raises gets Cezar's answer.
-    await until(() => cezarAnswered(f.w.id).length >= 1);
+    await until(() => squawkAnswered(f.w.id).length >= 1);
     expect(eventsOf(f.w.id, 'worker-question-undelivered')[0]).toMatchObject({ askSeq, reason: 'the parent record cannot be read' });
-    expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
+    expect(squawkAnswered(f.w.id)[0]).toMatchObject({ askSeq });
     expect(eventsOf(f.w.id, 'human-input-delivered').filter(event => event.source !== 'cezar')).toEqual([]);
     noHumanCard(f.w.id);
   });
@@ -44,7 +44,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
     for (const run of disk) if (run.id === f.p.id) run.status = 'unknown-status';
     await restart(false, disk, events);
-    await until(() => cezarAnswered(f.w.id).length >= 1);
+    await until(() => squawkAnswered(f.w.id).length >= 1);
     expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === id) ?? false).toBe(false);
     expect(said(f.w.id, 'Use the parser')).toBe(false);
     expect(eventsOf(f.w.id, 'human-input-delivered').filter(event => event.source === 'parent')).toEqual([]);
@@ -92,8 +92,8 @@ it('refuses human input on a routed question whose parent record cannot be read'
       }] });
       expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question' && !input.deliveredAt)).toBe(true);
       manager.deliverConversationInput(f.w.id);
-      await until(() => cezarAnswered(f.w.id).length === 1);
-      expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
+      await until(() => squawkAnswered(f.w.id).length === 1);
+      expect(squawkAnswered(f.w.id)[0]).toMatchObject({ askSeq });
       noHumanCard(f.w.id);
     } finally { f.close(); }
   });

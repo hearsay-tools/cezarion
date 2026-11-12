@@ -156,7 +156,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const clock = idleClock();
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
-    const tools = manager.cezarToolHandlers(p.id, toolGenerationOf(p.id));
+    const tools = manager.squawkToolHandlers(p.id, toolGenerationOf(p.id));
     const ci = (await tools.registerWait({ kind: WAIT_KIND.pr, pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
     const workers = (await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
     if (!ci.ok || !workers.ok) throw Error('refused');

@@ -40,7 +40,7 @@ it.each([false, true])('blocks retained grant restoration in hosted mode, includ
   const before = granted ? readFileSync(file) : null;
   const store = RunStore.open(repoRoot);
   try {
-    const app = createApp({ home, repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
+    const app = createApp({ home, repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', squawkPort: () => 4321 });
     for (const action of ['restore', 'accept']) {
       const response = await app.request(`/api/v1/home/recovery/${action}`, { method: 'POST',
         headers: { host: 'remote.example', origin: 'https://remote.example', 'content-type': 'application/json' },

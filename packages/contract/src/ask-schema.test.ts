@@ -1,7 +1,7 @@
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { ASK_LIMITS, askRequestSchema } from './ask-schema.ts';
-import { cezarAskRequestSchema, humanWaitEntrySchema } from './waits.ts';
+import { squawkAskRequestSchema, humanWaitEntrySchema } from './waits.ts';
 
 const questions = [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }];
 
@@ -19,10 +19,10 @@ describe('ask context', () => {
   });
 
   it('requires context in the cezar_ask input', () => {
-    const missing = cezarAskRequestSchema.safeParse({ questions });
+    const missing = squawkAskRequestSchema.safeParse({ questions });
     expect(missing.success).toBe(false);
     expect(missing.error?.issues.map(issue => issue.path)).toEqual([['context']]);
-    expect(cezarAskRequestSchema.safeParse({ context: 'a'.repeat(ASK_LIMITS.context), questions }).success).toBe(true);
+    expect(squawkAskRequestSchema.safeParse({ context: 'a'.repeat(ASK_LIMITS.context), questions }).success).toBe(true);
   });
 
   it('stores context on a human wait, and parses a wait recorded without it', () => {

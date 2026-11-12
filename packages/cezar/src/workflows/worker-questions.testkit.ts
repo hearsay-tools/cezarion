@@ -18,7 +18,7 @@ export const conversationOf = (rootId: string) => { const d = store.getRun(rootI
 
 export const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
 
-export const cezarAnswered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'cezar');
+export const squawkAnswered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'cezar');
 
 export const closedAs = (runId: string) => eventsOf(runId, 'human-ask-closed').map(event => event.reason);
 

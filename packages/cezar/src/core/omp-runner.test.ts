@@ -116,8 +116,8 @@ describe('ompTools', () => {
   });
 
   it('exclude narrows before the cezar tools are appended, so it never turns --no-tools into a CI-only list', () => {
-    expect(ompTools(explicitToolGrant(['TodoWrite']), { cezarTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
-    expect(ompTools(explicitToolGrant(['Read', 'TodoWrite']), { cezarTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    expect(ompTools(explicitToolGrant(['TodoWrite']), { squawkTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
+    expect(ompTools(explicitToolGrant(['Read', 'TodoWrite']), { squawkTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
   });
 
   it('undefined passes no flag, [] passes --no-tools, all-dropped passes --no-tools', () => {
@@ -126,26 +126,26 @@ describe('ompTools', () => {
     expect(ompTools(explicitToolGrant(['NotebookEdit']), {})).toMatchObject({ flag: 'no-tools', dropped: ['NotebookEdit'] });
   });
 
-  it('cezarTools admits the preview tools exactly when the extension registers it (CEZ_PREVIEW=1)', () => {
-    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
-    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+  it('squawkTools admits the preview tools exactly when the extension registers it (CEZ_PREVIEW=1)', () => {
+    expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true, env: { CEZ_PREVIEW: '1', CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
+    expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
     expect(ompTools(explicitToolGrant(['Read']), { env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read']);
   });
 
   // hearsay-tools/cezarion#1465: the schedule tools are present by default and honor the opt-out.
-  it('cezarTools admits schedule tools by default and honors CEZ_AUTOMATIONS=0', () => {
-    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: {} }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
-    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+  it('squawkTools admits schedule tools by default and honors CEZ_AUTOMATIONS=0', () => {
+    expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true, env: {} }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
-  it('bashAllowlist drops bash; cezarTools appends the cezar tools', () => {
+  it('bashAllowlist drops bash; squawkTools appends the cezar tools', () => {
     expect(ompTools(explicitToolGrant(['Read', 'Bash'], ['npm test']), {}).tools).toEqual(['read']);
     expect(ompTools(explicitToolGrant(['Read', 'Bash'], []), {}).tools).toEqual(['read', 'bash']);
-    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    expect(ompTools(explicitToolGrant(['Read']), { squawkTools: true }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
   });
 
   it('fails closed when every granted tool is narrowed away, and adds no cezar tool to --no-tools', () => {
-    expect(ompTools(explicitToolGrant(['Bash'], ['npm test']), { cezarTools: true })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
+    expect(ompTools(explicitToolGrant(['Bash'], ['npm test']), { squawkTools: true })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
   });
 
   // hearsay-tools/cezarion#2279: governed sessions keep OMP's subagent tools.
@@ -190,8 +190,8 @@ describe('buildOmpArgs', () => {
     }
   });
 
-  it('cezarTools adds --extension omp-ci-wait.mjs before other flags', () => {
-    expect(buildOmpArgs({ ...base, cezarTools: ciServer, systemPrompt: 'S' })).toEqual([
+  it('squawkTools adds --extension omp-ci-wait.mjs before other flags', () => {
+    expect(buildOmpArgs({ ...base, squawkTools: ciServer, systemPrompt: 'S' })).toEqual([
       '--mode', 'rpc',
       '--extension', expect.stringMatching(/scripts\/omp-ci-wait\.mjs$/),
       '--append-system-prompt', 'S',
@@ -883,7 +883,7 @@ process.exit(2);
   it('an unknown non-MCP --tools name stays fatal and surfaces OMP stderr in the thrown error', async () => {
     const events: AgentEvent[] = [];
     const bin = refusingBin('Error: Unknown tool in --tools: cezar_wait.\nBuilt-in tools: read.\n');
-    const failed = new OmpRunner({ bin }).run(spec('x', { toolGrant: explicitToolGrant(['Read']), cezarTools: { name: 'cezar', command: process.execPath, args: [] } }), event => events.push(event));
+    const failed = new OmpRunner({ bin }).run(spec('x', { toolGrant: explicitToolGrant(['Read']), squawkTools: { name: 'cezar', command: process.execPath, args: [] } }), event => events.push(event));
     await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: cezar_wait.');
     expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('omp CLI stderr:\nError: Unknown tool in --tools: cezar_wait.') });
     expect(invocations()).toHaveLength(1);
@@ -1309,7 +1309,7 @@ await import(${JSON.stringify(MOCK)});
     expect(Date.now() - started).toBeLessThan(8_000);
   });
 
-  // The killed-by-signal branch also checks !terminatedByCezar; the teardown branch before it
+  // The killed-by-signal branch also checks !terminatedBySquawk; the teardown branch before it
   // already takes every signal exit cezar caused (hearsay-tools/cezarion#2002 pin).
   it('a SIGKILL cezar sent is a teardown note, never an error', async () => {
     const events: AgentEvent[] = [];

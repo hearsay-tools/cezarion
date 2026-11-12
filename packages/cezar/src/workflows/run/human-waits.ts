@@ -8,7 +8,7 @@ import type { AskRequest } from '../../core/ask.ts';
 import { PROSE_HUMAN_GATE } from '../../runs/transcript-facts.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { NO_WAIT_NOTE } from '../turn-end.ts';
-import { isCezarHumanWait, openWaits } from '../waits.ts';
+import { isSquawkHumanWait, openWaits } from '../waits.ts';
 import { clearHeldHumanInputTimer, clearUnreadInputTimer } from './input-timers.ts';
 import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
 import { askCardFields, humanWaitCard } from './turn-markers.ts';
@@ -64,7 +64,7 @@ export class HumanWaits {
     const run = this.context.store.getRun(runId);
     if (!run) return undefined;
     const source = WAIT_KINDS.human.aliasSource(via);
-    if (source === 'agent') this.withdrawCezarHumanWaits(runId);
+    if (source === 'agent') this.withdrawSquawkHumanWaits(runId);
     const existing = WAIT_KINDS.human.select(openWaits(this.context.store.getRun(runId) ?? run))[0];
     if (existing) return existing;
     if (!this.host.waitEngine.hasRoom(this.context.store.getRun(runId) ?? {})) return undefined;
@@ -89,11 +89,11 @@ export class HumanWaits {
    * budget, or from the failure, close and recovery paths, where no turn end will. A card raises
    * `ask.requested` and goes to a worker's parent; a wait without one raises the human gate. A
    * question already pending is the one it waits on. A wait already shown is left alone. Cezar's
-   * own wait is shown as its note instead (`showCezarHumanWait`).
+   * own wait is shown as its note instead (`showSquawkHumanWait`).
    */
   surfaceHumanWait(runId: string, state: ActiveRun | undefined, wait = this.unsurfacedHumanWait(runId)): void {
     if (!wait || wait.askSeq !== undefined) return;
-    if (wait.source === 'cezar') { this.showCezarHumanWait(runId, state, wait); return; }
+    if (wait.source === 'cezar') { this.showSquawkHumanWait(runId, state, wait); return; }
     if (pendingHumanAskSeq(this.context.store, runId) === undefined) {
       const run = this.context.store.getRun(runId);
       const stepId = state?.liveSession.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
@@ -114,9 +114,9 @@ export class HumanWaits {
    * raises no human gate (hearsay-tools/cezarion#1234). The agent asked nothing: the run waits for
    * the user as the plain park did before these waits, so worker messages still wake it and its
    * wait registrations, `cezar_done` and the user's Finish are not refused. The user's message
-   * settles it, and the agent's own wait or question replaces it (`withdrawCezarHumanWaits`).
+   * settles it, and the agent's own wait or question replaces it (`withdrawSquawkHumanWaits`).
    */
-  showCezarHumanWait(runId: string, state: ActiveRun | undefined, wait: HumanWaitEntry, note?: string): void {
+  showSquawkHumanWait(runId: string, state: ActiveRun | undefined, wait: HumanWaitEntry, note?: string): void {
     const run = this.context.store.getRun(runId);
     const stepId = state?.liveSession.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
     const shown = this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}),
@@ -131,16 +131,16 @@ export class HumanWaits {
   /** Cezar waited on the user only because the agent had nothing to wait on: the agent's own wait
    *  or question replaces that wait (hearsay-tools/cezarion#1234). It also ends with the session
    *  that opened it, so a close, an idle close or a failure settles as the plain park did. */
-  withdrawCezarHumanWaits(runId: string): void {
-    const ids = openWaits(this.context.store.getRun(runId) ?? {}).filter(isCezarHumanWait).map(wait => wait.id);
+  withdrawSquawkHumanWaits(runId: string): void {
+    const ids = openWaits(this.context.store.getRun(runId) ?? {}).filter(isSquawkHumanWait).map(wait => wait.id);
     if (!ids.length) return;
     this.host.waitEngine.cancel(runId, ids, { onCommitFailure: 'skip', log: `${logPrefix()} human wait checkpoint failed` });
   }
 
   /** Whether a closing session leaves the run waits to park on. Cezar's own human waits end with the
-   *  session, even when the store refused their cancellation (`withdrawCezarHumanWaits`). */
+   *  session, even when the store refused their cancellation (`withdrawSquawkHumanWaits`). */
   holdsAgentWaits(runId: string): boolean {
-    return (this.context.store.getRun(runId)?.waits ?? []).some(wait => !isCezarHumanWait(wait));
+    return (this.context.store.getRun(runId)?.waits ?? []).some(wait => !isSquawkHumanWait(wait));
   }
 
   /** Read fresh: a boundary the turn end re-enters (Cursor print's ready callback from

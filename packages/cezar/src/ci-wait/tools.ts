@@ -1,17 +1,17 @@
 import { productEnv } from '../core/product-env.ts';
-import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
+import { squawkAskRequestSchema, squawkCancelWaitRequestSchema, squawkDoneRequestSchema, squawkWaitRequestSchema, type SquawkAskAnswer, type SquawkWaitAnswer } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
 import { scheduleTaskRequestSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { z } from 'zod';
-import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop, callScheduleTask, callScheduledTasks } from './client.ts';
+import { callSquawkAsk, callSquawkCancelWait, callSquawkDone, callSquawkWait, callPreviewServe, callPreviewStop, callScheduleTask, callScheduledTasks } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
  * every allow-list or admission site reads its names, so adding a tool is one edit here.
  */
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean; details: unknown };
-export type CezarTool = {
+export type SquawkTool = {
   definition: { name: string; description: string; inputSchema: { type: 'object'; properties?: Record<string, unknown>; [key: string]: unknown } };
   /** #497: deferred-tool harnesses show a bare name, so the server instructions carry this line. */
   trigger: string;
@@ -39,14 +39,14 @@ function flatWaitInputSchema() {
   const properties: Record<string, unknown> = {};
   // `timeout_seconds` is in the pr, worker, request, peer and process kinds: the pr schema's bounds
   // (1–7200, default 1800) are the advertised ones, and the others ride in the description.
-  for (const option of [...cezarWaitRequestSchema.options].reverse()) {
+  for (const option of [...squawkWaitRequestSchema.options].reverse()) {
     Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
   }
   const field = (key: string, description: string) => ({ ...(properties[key] as object), description });
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"pr" waits for a GitHub pull request: its checks or its merge (see `until`); "worker" waits for workers you own; "request" waits for replies to requests you sent; "peer" waits for named peer tasks to message you or settle; "timer" wakes you after `seconds`; "process" wakes you when a background command ends.' },
+      kind: { type: 'string', enum: squawkWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"pr" waits for a GitHub pull request: its checks or its merge (see `until`); "worker" waits for workers you own; "request" waits for replies to requests you sent; "peer" waits for named peer tasks to message you or settle; "timer" wakes you after `seconds`; "process" wakes you when a background command ends.' },
       operation_id: field('operation_id', 'Optional retry identity. Reuse it with exactly the same arguments after an unknown outcome; never use it for a different registration.'),
       pr: field('pr', 'kind "pr": the HTTPS GitHub pull request URL.'),
       until: field('until', 'kind "pr": "checks" (default) watches checks; "merge" waits for merge or closure and ignores queue removal. After requesting a merge, use "merge_or_blocked": wakes on merge, closure, conflict, or neither queue membership nor enabled auto-merge remaining. Pending checks or a queue slot alone do not end it. All targets retain their deadline and query-error exits. Only "merged" confirms success; "blocked" requires inspection and grants no permission to retry or merge.'),
@@ -93,30 +93,30 @@ export const waitToolDefinition = {
 export const askToolDefinition = {
   name: 'cezar_ask',
   description: `Ask the user for a decision or missing input. Put the full draft, findings, evidence and option meanings needed for the decision in context. Cezar renders context as Markdown above the question card. The user cannot see your reasoning or rejected tool calls. The question is a short choice, not the place for supporting detail. Each question takes a header of at most ${ASK_LIMITS.header} characters, a short question of at most ${ASK_LIMITS.question} characters, and ${ASK_LIMITS.minOptions}–${ASK_LIMITS.maxOptions} options shown as choices; leave the options out to let the user type the answer. The user can always type a reply of their own. Other open waits keep running while you wait. Then end your turn; the user's answer wakes you.`,
-  inputSchema: { ...z.toJSONSchema(cezarAskRequestSchema, { io: 'input' }), type: 'object' as const },
+  inputSchema: { ...z.toJSONSchema(squawkAskRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 /**
  * hearsay-tools/cezarion#1428: agents asked about drafts they never sent, and treated the context
  * they cut from a rejected card as sent. Both hints say where that context belongs: `context`.
  */
-export function askAnswerHint(answer: CezarAskAnswer): string {
+export function askAnswerHint(answer: SquawkAskAnswer): string {
   if (answer.ok) return 'Asked. Cezar shows the context and question card to the user. End your turn; the user\'s answer wakes you.';
   if (answer.code === 'invalid_request') return 'Not asked. The user never sees a rejected call. Fix the call from the message: put the detail in context and keep each question short.';
   return 'Not asked. Fix the call from the message, or continue without asking.';
 }
 export async function invokeAskTool(input: unknown) {
-  const answer = await callCezarAsk(input);
+  const answer = await callSquawkAsk(input);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${askAnswerHint(answer)}` }], isError: !answer.ok, details: answer };
 }
 
 export const cancelWaitToolDefinition = {
   name: 'cezar_cancel_wait',
   description: 'Close a wait you opened with cezar_wait (PR, worker, request, peer, process or timer) or cezar_ask, by its wait_id, so it never wakes you. A question the user already sees cannot be cancelled; only their answer ends it. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
-  inputSchema: { ...z.toJSONSchema(cezarCancelWaitRequestSchema, { io: 'input' }), type: 'object' as const },
+  inputSchema: { ...z.toJSONSchema(squawkCancelWaitRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
 /** JSON first, then one hint sentence, as `invokePreviewTool` answers. */
-export function waitAnswerHint(answer: CezarWaitAnswer): string {
+export function waitAnswerHint(answer: SquawkWaitAnswer): string {
   if (!answer.ok) return answer.effect === undefined || answer.effect === 'unknown' ? 'Outcome unknown. Retry the same operation_id and arguments; do not add a fallback wait.'
     : answer.code === 'duplicate_deadline' ? 'Deadline change refused. The retained wait remains active; do not cancel it as a duplicate.'
       : 'Not registered by this call. Follow the message; previously registered waits remain unchanged.';
@@ -126,12 +126,12 @@ export function waitAnswerHint(answer: CezarWaitAnswer): string {
     : 'Registered. End your turn to wait; any open wait wakes you when it resolves.';
 }
 export async function invokeWaitTool(input: unknown) {
-  const answer = await callCezarWait(input);
+  const answer = await callSquawkWait(input);
   const hint = waitAnswerHint(answer);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
 }
 export async function invokeCancelWaitTool(input: unknown) {
-  const answer = await callCezarCancelWait(input);
+  const answer = await callSquawkCancelWait(input);
   const hint = answer.cancelled ? 'Cancelled. The waits in open_waits stay open.' : 'Not cancelled. Check the message and the waits in open_waits.';
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.cancelled, details: answer };
 }
@@ -141,10 +141,10 @@ export async function invokeCancelWaitTool(input: unknown) {
 export const doneToolDefinition = {
   name: 'cezar_done',
   description: 'Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait; after a step, Cezar starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
-  inputSchema: { ...z.toJSONSchema(cezarDoneRequestSchema, { io: 'input' }), type: 'object' as const },
+  inputSchema: { ...z.toJSONSchema(squawkDoneRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 export async function invokeDoneTool(input: unknown) {
-  const answer = await callCezarDone(input);
+  const answer = await callSquawkDone(input);
   const hint = !answer.ok ? 'Not finished. Do what the message says, then call cezar_done again.'
     : answer.completes === 'step' ? `Accepted. End your turn; Cezar completes this step at its end and starts "${answer.next_step}".`
     : 'Accepted. End your turn; Cezar finishes the task at its end.';
@@ -173,7 +173,7 @@ export async function invokePreviewStopTool(input: unknown) {
   const result = await callPreviewStop(input);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(result)}\n${result.hint}` }], isError: !result.ok, details: result };
 }
-const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, trigger: 'load when your Cezar-started preview server needs stopping or restarting.', label: 'Stop live preview', invoke: invokePreviewStopTool };
+const PREVIEW_STOP_TOOL: SquawkTool = { definition: previewStopToolDefinition, trigger: 'load when your Cezar-started preview server needs stopping or restarting.', label: 'Stop live preview', invoke: invokePreviewStopTool };
 
 /**
  * hearsay-tools/cezarion#1465: a one-time schedule starts later as an ordinary task, so the agent
@@ -218,38 +218,38 @@ export async function invokeScheduledTasksTool(input: unknown) {
   const answer = await callScheduledTasks(input);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${scheduleHint(answer)}` }], isError: !answer.ok, details: answer };
 }
-const SCHEDULE_TASK_TOOL: CezarTool = { definition: scheduleTaskToolDefinition, trigger: 'load when work should start later as a new task (in an hour, tomorrow, next week) instead of keeping this session waiting.', label: 'Schedule a task', invoke: invokeScheduleTaskTool };
-const SCHEDULED_TASKS_TOOL: CezarTool = { definition: scheduledTasksToolDefinition, trigger: 'load when you need to list, change, pause, resume or cancel a one-time scheduled task.', label: 'Scheduled tasks', invoke: invokeScheduledTasksTool };
+const SCHEDULE_TASK_TOOL: SquawkTool = { definition: scheduleTaskToolDefinition, trigger: 'load when work should start later as a new task (in an hour, tomorrow, next week) instead of keeping this session waiting.', label: 'Schedule a task', invoke: invokeScheduleTaskTool };
+const SCHEDULED_TASKS_TOOL: SquawkTool = { definition: scheduledTasksToolDefinition, trigger: 'load when you need to list, change, pause, resume or cancel a one-time scheduled task.', label: 'Scheduled tasks', invoke: invokeScheduledTasksTool };
 
-const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
-const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load for a user decision or missing input; provide the full draft or findings in its rendered context field.', label: 'Ask the user', invoke: invokeAskTool };
-const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
-const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
-const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
+const WAIT_TOOL: SquawkTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
+const ASK_TOOL: SquawkTool = { definition: askToolDefinition, trigger: 'load for a user decision or missing input; provide the full draft or findings in its rendered context field.', label: 'Ask the user', invoke: invokeAskTool };
+const CANCEL_WAIT_TOOL: SquawkTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
+const DONE_TOOL: SquawkTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
+const PREVIEW_TOOL: SquawkTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
-export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
+export function squawkTools(env: NodeJS.ProcessEnv = process.env): SquawkTool[] {
   return [
     WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL,
     ...(previewToolEnabled(env) ? [PREVIEW_TOOL, PREVIEW_STOP_TOOL] : []),
     ...(automationsToolEnabled(env) ? [SCHEDULE_TASK_TOOL, SCHEDULED_TASKS_TOOL] : []),
   ];
 }
-export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
-  return cezarTools(env).map(tool => tool.definition.name);
+export function squawkToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
+  return squawkTools(env).map(tool => tool.definition.name);
 }
 
 /**
  * Env names a harness must forward to the adapter process. Several harnesses spawn MCP servers
  * from an allowlist, so preview opt-in and automations opt-out must both reach the adapter.
  */
-export function cezarToolEnvNames(env: NodeJS.ProcessEnv = process.env): string[] {
+export function squawkToolEnvNames(env: NodeJS.ProcessEnv = process.env): string[] {
   return ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', 'CEZ_AUTOMATIONS', ...(previewToolEnabled(env) ? ['CEZ_PREVIEW'] : [])]
     .flatMap(name => { const preferred = name.replace(/^CEZ_/, 'HSQ_'); return env[preferred] === undefined ? [name] : [name, preferred]; });
 }
 
-export function cezarServerInstructions(env: NodeJS.ProcessEnv = process.env): string {
+export function squawkServerInstructions(env: NodeJS.ProcessEnv = process.env): string {
   return [
     'The interface to Cezarion, the orchestrator running this session. Load a tool below when its situation comes up.',
-    ...cezarTools(env).map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
+    ...squawkTools(env).map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
   ].join('\n');
 }

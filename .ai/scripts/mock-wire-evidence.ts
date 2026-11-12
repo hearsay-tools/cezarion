@@ -246,7 +246,7 @@ async function recordRecipe(runner: RunnerId, scenario: string) {
       cwd, userPrompt: prompt(scenario, runner, join(cwd, 'park')), toolGrant: { kind: 'unset' },
       sessionId: PINNED_SESSION_ID, timeoutMs: 0,
       // The real tool transport returns a stable unavailable receipt without a controller.
-      cezarTools: { name: 'cezar_ci_evidence', command: process.execPath, args: [fileURLToPath(new URL('../../packages/cezar/scripts/mock-wire-tools.mjs', import.meta.url))] },
+      squawkTools: { name: 'cezar_ci_evidence', command: process.execPath, args: [fileURLToPath(new URL('../../packages/cezar/scripts/mock-wire-tools.mjs', import.meta.url))] },
       env: { CEZ_MOCK_WIRE_FILE: file, CEZ_MOCK_NOTES: '0', CEZ_MOCK_RELEASE_FILE: join(cwd, 'release'),
         CEZ_MOCK_STEER_MS: '2000',
         CEZ_MOCK_STEER_LINES: scenario === 'steer-tool' ? '1' : '0',

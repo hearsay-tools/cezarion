@@ -8,7 +8,7 @@ import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contra
 import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client/contract/live-coordination'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { seedTranscript } from './seed-transcript'
@@ -49,10 +49,10 @@ beforeAll(async () => {
   Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: projectId, root: project }] })))
   const source = join(root, 'published-results.html')
   writeFileSync(source, '<!doctype html><title>Published research results</title><main><h1>Research results</h1><p style="height:3000px">Long report body</p><p>End of report</p></main>')
-  publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+  publication = JSON.parse(execFileSync(process.execPath, [squawkCli, 'artifact', 'publish', source], {
     cwd: project, env: { ...env, CEZ_PROJECT_ID: projectId, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
   }))
-  unreferencedPublication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+  unreferencedPublication = JSON.parse(execFileSync(process.execPath, [squawkCli, 'artifact', 'publish', source], {
     cwd: project, env: { ...env, CEZ_PROJECT_ID: projectId, CEZ_TASK_ID: otherRunId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${otherRunId}-artifacts`) }, encoding: 'utf8',
   }))
   rmSync(source)
@@ -81,7 +81,7 @@ beforeAll(async () => {
     seq: n + 1, ts: '2026-11-01T08:01:00Z', type: 'item.completed', item: { kind: 'message', id: `long-message-${n}`, role: 'assistant', text: message },
   })).join('\n') + '\n')
   mkdirSync(evidence, { recursive: true })
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
   base = await waitForFixtureServer(server)
   expect(await bootProjectId(base)).toBe(projectId)
   browser = AgentBrowser.open(`report-cards-${process.pid}`)

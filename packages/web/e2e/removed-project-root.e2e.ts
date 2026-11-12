@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { recordedRun, seedRuns } from './seed-runs'
 import { waitForStatus } from './poll'
@@ -31,7 +31,7 @@ beforeAll(async () => {
       worktreePath: join(oldRoot, '.ai/cezar/worktrees', MANUAL), steps: [record.steps[0]!] },
   ])
   renameSync(oldRoot, root)
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(root), stdio: ['ignore', 'pipe', 'pipe'] })
   baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)

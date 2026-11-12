@@ -2,7 +2,7 @@ import { scheduledTaskSchema } from '@open-mercato/cezar-contract/scheduled-task
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import type { ScheduleTaskAnswer, ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { CiToolController, type CezarToolHandlers } from './controller.ts';
+import { CiToolController, type SquawkToolHandlers } from './controller.ts';
 import { callScheduleTask, callScheduledTasks } from './client.ts';
 
 // hearsay-tools/cezarion#1465: `cezar_schedule_task` and `cezar_scheduled_tasks` on the session's
@@ -14,7 +14,7 @@ const notUsed = async (): Promise<never> => { throw new Error('not used'); };
 const controllers: CiToolController[] = [];
 afterEach(async () => { vi.unstubAllEnvs(); await Promise.all(controllers.splice(0).map(owner => owner.close())); });
 
-async function session(overrides: Partial<CezarToolHandlers> = {}) {
+async function session(overrides: Partial<SquawkToolHandlers> = {}) {
   const owner = await CiToolController.start(); controllers.push(owner);
   return owner.provision({ registerWait: notUsed, ask: notUsed, cancelWait: notUsed, finishTurn: notUsed, ...overrides });
 }

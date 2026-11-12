@@ -398,7 +398,7 @@ describe('nudge bounds through a live runner', () => {
   });
 
   it('expiry after a completion nudge names the completion nudge', async () => {
-    const tools = vi.spyOn(f.manager, 'cezarToolHandlers');
+    const tools = vi.spyOn(f.manager, 'squawkToolHandlers');
     const { id } = await start(false);
     f.store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [] } }]);
     const handlers = tools.mock.results.find(result => result.type === 'return')?.value;

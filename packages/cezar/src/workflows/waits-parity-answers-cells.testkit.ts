@@ -173,7 +173,7 @@ export function answersCells(runners: RunnerId[], it: typeof registerTest = regi
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
       const [human] = humanOpen(run.id);
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered) || registered.wait.kind !== 'timer') throw Error('registration refused');
       // A result already resolved below the cap may still be owed when the budget reaches it.

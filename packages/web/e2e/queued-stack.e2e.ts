@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { revealControl } from './control-ready'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus, pollFor, pollJson } from './poll'
 // fixture-server starts: 1
 
@@ -73,7 +73,7 @@ beforeAll(async () => {
   const home = Home.sandbox(cezHome)
   Home.seed(home, home.workspaceConfig, { resources: { maxParallel: 1 } })
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },
     { deadline })
   baseUrl = await waitForFixtureServer(server)

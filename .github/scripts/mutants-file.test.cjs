@@ -159,7 +159,7 @@ test('direct consumers include package subpaths, relative js and ts imports, and
   assert.equal(m.importsModule("import {x} from '@open-mercato/cezar-contract/sample-other'", files[0], file), false);
   assert.throws(() => m.consumerTests(file, files, () => '', ['outside.test.ts']), /committed/);
   const config = m.consumerConfig(files.slice(0, 2));
-  assert.match(config, /\.\.\.cezarConfig/);
+  assert.match(config, /\.\.\.squawkConfig/);
   assert.match(config, /\.\.\.webConfig/);
   assert.match(config, /src\/a.test.ts/);
 });

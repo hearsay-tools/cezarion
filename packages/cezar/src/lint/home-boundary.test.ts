@@ -23,9 +23,9 @@ function fixture(entries: HomeReader[], files: Record<string, string> = {}): str
 
 describe('explicit Home boundaries', () => {
   it.each([
-    ['cezarHomeDir()', 'cezarHomeDir'],
-    ["import { cezarHomeDir as oldHome } from './paths.ts'; oldHome()", 'cezarHomeDir'],
-    ["paths['cezarHomeDir']()", 'cezarHomeDir'],
+    ['squawkHomeDir()', 'squawkHomeDir'],
+    ["import { squawkHomeDir as oldHome } from './paths.ts'; oldHome()", 'squawkHomeDir'],
+    ["paths['squawkHomeDir']()", 'squawkHomeDir'],
     ["resolveHome({ purpose: 'cli' })", 'resolveHome'],
     ["import { resolveHome as home } from './home/resolve.ts'; home()", 'resolveHome'],
     ["homes['resolveHome']()", 'resolveHome'],
@@ -120,8 +120,8 @@ describe('explicit Home boundaries', () => {
     ['os["home" + "dir"]()', 'homedir'],
     ['homes[`resolveHome`]()', 'resolveHome'],
     ['homes["resolve" + "Home"]()', 'resolveHome'],
-    ['paths[`cezarHomeDir`]()', 'cezarHomeDir'],
-    ['paths["cezar" + "HomeDir"]()', 'cezarHomeDir'],
+    ['paths[`squawkHomeDir`]()', 'squawkHomeDir'],
+    ['paths["cezar" + "HomeDir"]()', 'squawkHomeDir'],
   ])('rejects a statically known callee key: %s', (source, kind) => {
     expect(scanHomeBoundary(product, source, [])).toEqual([expect.objectContaining({ kind })]);
   });
@@ -180,7 +180,7 @@ describe('explicit Home boundaries', () => {
   });
 
   it('ignores text and comments and fails closed on a parse error', () => {
-    expect(homeSites('const text = "homedir() resolveHome() cezarHomeDir()"; // process.env.CEZ_HOME = dir')).toEqual([]);
+    expect(homeSites('const text = "homedir() resolveHome() squawkHomeDir()"; // process.env.CEZ_HOME = dir')).toEqual([]);
     expect(() => homeSites('let x = ;')).toThrow();
   });
 });

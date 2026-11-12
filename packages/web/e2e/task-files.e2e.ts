@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus } from './poll'
 import { focusWithKeyboard } from './contrast'
 // fixture-server starts: 1
@@ -60,7 +60,7 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     // CEZ_REVIEW_GATE=1 because this spec is ABOUT the gate: it is opt-in (#489, default OFF),
     // so pinning it here is what makes the parked-at-review fixture reproducible instead of
     // depending on whatever the operator happens to export.
@@ -227,7 +227,7 @@ describe('the Files tab against a live dry-run worktree', () => {
     try {
       const source = join(outside, 'decision.md')
       writeFileSync(source, '# Published ADR\n\nSnapshot survives source removal.\n![blocked](https://example.invalid/tracker.png)\n')
-      const artifact = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+      const artifact = JSON.parse(execFileSync(process.execPath, [squawkCli, 'artifact', 'publish', source], {
         env: { ...fixtureServeEnv(dataRoot), CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(projectPaths(dataRoot).write, 'runs', `${runId}-artifacts`) }, encoding: 'utf8',
       })) as { id: string; link: string }
       rmSync(outside, { recursive: true, force: true })
