@@ -83,8 +83,9 @@ Two facts decide the shape:
    reason per file (friction report hearsay-tools/squeal#205). Two limits: a PR run
    records only the tests
    `scripts/test-changed.mjs` selected, so files the gate selects beyond them run locally;
-   and CI records no node:test parts, so the gate's node:test files (154 in that run) run
-   locally. For the rest it reuses the daemon's results at the branch's own content: one
+   and CI records no node:test parts, so the gate's node:test files stay local (154
+   selected in that run: 151 ran here, 3 came from the stores). For the rest it reuses the
+   daemon's results at the branch's own content: one
    report on 2026-11-11 took 136 s with 681 of 755 files from the store, and 661 s with
    none. Coverage imported from `main` cannot shorten it, because every file it selects
    loads changed code, so no key equals a `main` key (Squeal research on
