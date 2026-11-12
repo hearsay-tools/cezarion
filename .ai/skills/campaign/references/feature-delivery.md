@@ -71,7 +71,7 @@ covered suites, and run build, typecheck and packaged checks when required.
 For a regression fix, prove the regression fails at proof_base and passes
 with the fix. Record preserved guarantees when changing a test's expectation.
 
-Report the draft PR, head, criterion-to-check results, changed contracts,
+Report the PR, head, criterion-to-check results, changed contracts,
 limitations and friction. Fix in-scope CI/review findings; report inherited
 failures with evidence. Register a PR wait. Rebase only when the coordinator
 requests it, push with --force-with-lease, then refresh affected evidence.
