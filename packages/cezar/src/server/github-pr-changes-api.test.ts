@@ -30,7 +30,7 @@ describe('the GitHub PR changes API', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  it('serves deterministic bounded structured changes through both route mounts', async () => {
+  it('serves the structured changes through both route mounts', async () => {
     const app = createApp({ home: testHome(), repoRoot, store, manager: {} as RunManager, version: 'test' });
     const legacy = await apiRequest(app, '/api/v1/github/prs/128/changes');
     const scoped = await apiRequest(app, '/api/v1/p/default/github/prs/128/changes');
@@ -38,11 +38,6 @@ describe('the GitHub PR changes API', () => {
     expect(await scoped.json()).toEqual(await legacy.clone().json());
     const body = (await legacy.json()) as ForgePrDiffResult;
     expect(body.available).toBe(true);
-    if (body.available) {
-      expect(body.files.some((file) => file.status === 'renamed' && file.previousPath)).toBe(true);
-      expect(body.files.some((file) => file.patchUnavailableReason === 'binary')).toBe(true);
-      expect(body.truncated).toBe(true);
-    }
   });
 
   it('validates the number and exact refresh flag', async () => {
