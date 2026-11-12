@@ -1,3 +1,5 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { testHome } from '../home/test-home.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -11,18 +13,17 @@ import type { PreviewServeRequest, PreviewServeResult } from '@open-mercato/ceza
 import { CiToolController } from '../ci-wait/controller.ts';
 import type { PreviewHostLike } from '../preview/registration.ts';
 import { RunStore } from '../runs/store.ts';
-import { RunManager } from './run.ts';
+import type { RunManager } from './run.ts';
 import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { createRunner } from '../core/runner-factory.ts';
+import { createFixtureManager } from './fixture-manager.testkit.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 /** Each session stays open until the test releases it, so the run is `running` while it registers. */
 const sessions = vi.hoisted(() => ({ release: [] as Array<() => void> }));
-vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: () => ({
+useRunners(fakeRunnerFactory(() => ({
     backend: 'claude' as const,
     systemPromptOnResume: 'resent' as const,
     run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),
@@ -33,8 +34,7 @@ vi.mock('../core/runner-factory.ts', () => ({
       return { result, sendMessage: () => false, discardQueuedMessages: () => {}, holdsHumanInput: () => false, end: () => {}, interrupt: () => {}, open: true };
     },
     interrupt: async () => {},
-  }),
-}));
+  })));
 
 type PreviewCallback = (request: PreviewServeRequest, signal?: AbortSignal) => Promise<PreviewServeResult>;
 
@@ -58,7 +58,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), preview, squawkPort: () => 4321 });
+    manager = createFixtureManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, home: testHome(), preview, squawkPort: () => 4321 });
   });
 
   afterEach(async () => {
@@ -179,7 +179,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
     // Recovered runs launch before `startServer` binds: `squawkPort()` is undefined in that window.
     let boundPort: number | undefined;
     manager!.dispose();
-    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), preview, squawkPort: () => boundPort });
+    manager = createFixtureManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, home: testHome(), preview, squawkPort: () => boundPort });
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
     const record = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
     const register = await callbackAt(provision, 0);
@@ -195,7 +195,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
 
   it('answers headless without a preview host', async () => {
     manager!.dispose();
-    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
+    manager = createFixtureManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, home: testHome() });
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
     const record = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
     const register = await callbackAt(provision, 0);

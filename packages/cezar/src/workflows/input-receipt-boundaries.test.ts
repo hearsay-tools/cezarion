@@ -19,14 +19,12 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import * as processes from '../core/process-usage.ts';
 import { RunStore } from '../runs/store.ts';
 import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { createFixtureManager, drainFixtureManagers, fixtureWork, fixtureWorkSettled, unused } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWork, fixtureWorkSettled, unused } from './fixture-manager.testkit.ts';
 import type { RunManager } from './run.ts';
-import { noRunners } from '../core/runners-under-test.testkit.ts';
+import { noRunners, useRunners } from '../core/runners-under-test.testkit.ts';
 
 const hook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
-vi.mock('../core/runner-factory.ts', async original => ({
-  ...await original<typeof import('../core/runner-factory.ts')>(), createRunner: () => hook.runner!,
-}));
+useRunners(() => hook.runner!);
 
 function signal<T = void>() {
   let resolve!: (value: T) => void;

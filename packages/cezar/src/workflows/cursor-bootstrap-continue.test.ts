@@ -1,6 +1,8 @@
+import { fakeRunnerFactory } from '../core/fake-runner-factory.testkit.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers } from './fixture-manager.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,8 +20,7 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 /** Every spec a (mocked) Cursor runner's `startSession` receives, in spawn order. */
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], options: [] as Array<{ sessionTransport?: string }> }));
 
-vi.mock('../core/runner-factory.ts', () => ({
-  createRunner: (_backend: string, options: { sessionTransport?: string } = {}) => {
+useRunners(fakeRunnerFactory((_backend: string, options: { sessionTransport?: string } = {}) => {
     captured.options.push(options);
     return ({
     backend: 'cursor' as const,
@@ -38,8 +39,7 @@ vi.mock('../core/runner-factory.ts', () => ({
     },
     interrupt: async () => {},
     });
-  },
-}));
+  }));
 
 /**
  * Continue after a Cursor bootstrap crash must open a fresh session.
