@@ -180,9 +180,9 @@ gh search prs --repo {owner}/{repo} "#{issueId}" --state open --json number,titl
 ```
 
 #### create-pr
-Base branch, draft flag, title, body → PR.
+Base branch, draft flag, title, body → PR. Add `--draft` only when the draft flag is set; this repository opens PRs ready (`AGENTS.md` § Dev flow bindings, Board).
 ```bash
-gh pr create --repo {owner}/{repo} --base "$BASE_BRANCH" --draft --title "<title>" --body "<body>"
+gh pr create --repo {owner}/{repo} --base "$BASE_BRANCH" --title "<title>" --body "<body>"
 PR_URL=$(gh pr view --json url --jq .url)
 PR_NUMBER=$(gh pr view --json number --jq .number)
 ```

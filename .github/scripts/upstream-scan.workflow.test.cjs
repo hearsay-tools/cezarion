@@ -140,7 +140,7 @@ test('openScanPr commits the ledger on a dated branch and opens exactly one PR a
   const pr = h.created[0];
   assert.equal(pr.base, 'main');
   assert.equal(pr.head, 'upstream-scan/2026-09-18');
-  assert.equal(pr.draft, true);
+  assert.equal(pr.draft, false, 'readiness never marks a draft ready, so the scan opens its PR ready');
   assert.match(pr.title, /^chore\(upstream\): scan 2026-09-18 — 12 new upstream commits$/);
   assert.match(pr.body, /\| row \|/, 'the scan report is the body');
   assert.match(pr.body, /ledger\.yaml/, 'tells the reviewer where to decide');

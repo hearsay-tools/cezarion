@@ -48,8 +48,8 @@ invalidates release: request a fresh check under campaign/references/hot-file-re
 Use implement-issue from its current approved Plan handoff. Follow its
 verification, code-quality, PR-body and PR-checks rules. The coordinator owns
 the issue claim, board, labels, landing and friction posts. Send required label
-requests to it before the first push that needs them. Keep draft-state control
-with pr-readiness.yml. Read auto-merge before opening the PR; owner-merge mode
+requests to it before the first push that needs them. Open the PR ready, not
+draft. Read auto-merge before opening the PR; owner-merge mode
 requires owner review, and this worker leaves landing to the coordinator/owner.
 
 Deliver: <acceptance criteria and evidence checks>.
