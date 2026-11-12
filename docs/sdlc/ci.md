@@ -971,8 +971,8 @@ hearsay-tools/cezarion#3291).
   attempt of a run uploads under the same name and overwrites the last, and the API
   names no attempt, so it takes only an artifact created while the flaked job ran. It
   reads the archive as untrusted bytes: exactly one `failed-test-files.txt`, stored or
-  deflated, valid UTF-8. It keeps only paths with safe characters and a `.test.*` or
-  `.spec.*` suffix that are regular files in the merge group's tree, read through the
+  deflated, valid UTF-8. It keeps only paths with safe characters and a `.test.*`,
+  `.spec.*` or `.e2e.*` suffix that are regular files in the merge group's tree, read through the
   Git API (`git/trees/<sha>?recursive=1`). A report quotes each name as code and names
   at most 50.
 - **No names.** With no artifact from the attempt, an expired or malformed one, a list emptied by the
@@ -984,7 +984,8 @@ hearsay-tools/cezarion#3291).
   other file, and every flaked shard without a name, goes into one new issue with the
   label `flake-report`. The occurrence marker
   `<!-- cez-flake-occurrence:v1:<owner>/<repo>:<run-id>:<attempt> -->` makes a rerun
-  of the job write nothing twice. The concurrency group `queue-flake-reports` is the
+  of the job write nothing twice: before any write it reads the reports and comments
+  of that attempt, on open and closed reports alike. The concurrency group `queue-flake-reports` is the
   write lock.
 - **Labels.** `flake-report` and `flaky-test` must exist. When a flaked shard needs a
   report and either label is missing, the job fails before any write and names the

@@ -11,7 +11,8 @@ const MAX_ARCHIVE_BYTES = 64 * 1024;
 const MAX_LIST_BYTES = 64 * 1024;
 const MAX_PATH_LENGTH = 300;
 const SEGMENT = /^(?!\.{1,2}$)[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
-const TEST_SUFFIX = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+// `.e2e.ts` is the cockpit browser suite's suffix (packages/web/e2e/vitest.config.ts).
+const TEST_SUFFIX = /\.(?:test|spec|e2e)\.[cm]?[jt]sx?$/;
 const END_RECORD = 0x06054b50;
 const CENTRAL_ENTRY = 0x02014b50;
 const LOCAL_ENTRY = 0x04034b50;

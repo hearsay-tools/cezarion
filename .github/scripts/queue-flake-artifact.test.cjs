@@ -43,18 +43,18 @@ test('refuses a list that inflates past its limit before it holds the whole outp
 test('keeps only repository-relative test file paths, sorted and once', () => {
   const text = [
     'packages/web/src/b.test.tsx', 'packages/cezar/src/a.test.ts', 'packages/cezar/src/a.test.ts', '',
-    'packages/web/e2e/specs/board.spec.ts\r', '../etc/passwd.test.ts', '/abs/x.test.ts', 'a/./b.test.ts',
+    'packages/web/e2e/activity.e2e.ts\r', '../etc/passwd.test.ts', '/abs/x.test.ts', 'a/./b.test.ts',
     'src/not-a-test.ts', 'src/`tick`.test.ts', 'src/<b>.test.ts', 'src/@owner.test.ts', 'src/x.test.ts -->',
     `src/${'a'.repeat(400)}.test.ts`, 'scripts/tool.test.mjs', '.github/scripts/x.test.cjs',
   ].join('\n');
   assert.deepEqual(parseNames(text), {
-    names: ['.github/scripts/x.test.cjs', 'packages/cezar/src/a.test.ts', 'packages/web/e2e/specs/board.spec.ts', 'packages/web/src/b.test.tsx', 'scripts/tool.test.mjs'],
+    names: ['.github/scripts/x.test.cjs', 'packages/cezar/src/a.test.ts', 'packages/web/e2e/activity.e2e.ts', 'packages/web/src/b.test.tsx', 'scripts/tool.test.mjs'],
     dropped: 9,
   });
   assert.deepEqual(parseNames(''), { names: [], dropped: 0 });
 });
 
 test('a test path has safe characters, no dot segment and a test suffix', () => {
-  for (const name of ['a.test.ts', 'x/y-z_1.spec.tsx', 'p/q.test.cjs', 'p/q.test.mts', 'p/.hidden/q.test.js']) assert.ok(isTestPath(name), name);
+  for (const name of ['a.test.ts', 'packages/web/e2e/activity.e2e.ts', 'x/y-z_1.spec.tsx', 'p/q.test.cjs', 'p/q.test.mts', 'p/.hidden/q.test.js']) assert.ok(isTestPath(name), name);
   for (const name of ['a.ts', 'a.test.ts/b', '..', 'a/../b.test.ts', './a.test.ts', 'a//b.test.ts', 'a b.test.ts', 'a.test.ts\n', '-a.test.ts', 'a@b.test.ts']) assert.ok(!isTestPath(name), name);
 });

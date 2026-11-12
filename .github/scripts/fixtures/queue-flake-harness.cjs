@@ -88,7 +88,7 @@ function harness({ jobs = [vitestJob(2)], artifacts, tree } = {}) {
   const state = {
     run: run(), jobs, labels: ['flake-report', 'flaky-test'], truncated: false, issues: [], comments: [],
     artifacts: artifacts ?? { 'failed-test-files-vitest-shard-2': listArchive(names) },
-    tree: tree ?? [...names, 'packages/web/src/board.test.tsx', 'packages/web/e2e/specs/board.spec.ts', 'README.md'],
+    tree: tree ?? [...names, 'packages/web/src/board.test.tsx', 'packages/web/e2e/activity.e2e.ts', 'README.md'],
     blobs: {},
     artifactTimes: {},
   };

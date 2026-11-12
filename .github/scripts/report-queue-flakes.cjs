@@ -209,12 +209,28 @@ function details(base, run, flakes, names) {
 const listReports = (github, base, query) => github.paginate('GET /repos/{owner}/{repo}/issues', { ...base, labels: LABEL, creator: BOT, per_page: 100, ...query });
 const ours = (item) => item.user?.login === BOT && !item.pull_request && (item.body ?? '').includes(MARK.report);
 
+const FILE_MARK = /<!-- cez-flake-file:v1:(\S+) -->/g;
+const markedFiles = (text) => [...text.matchAll(FILE_MARK)].map((match) => match[1]);
+
+// What earlier deliveries of this run attempt already wrote, on open and closed reports alike:
+// the new report, if any, and every file a comment of the attempt names. A report or comment
+// updated after the run started is updated at or after `run.created_at`.
+async function recordedWrites({ github, base, run, key }) {
+  const recent = (await listReports(github, base, { state: 'all', since: run.created_at })).filter(ours);
+  const created = recent.some((item) => item.body.includes(MARK.occurrence(key)));
+  const names = new Set();
+  for (const issue of recent) {
+    const comments = await github.paginate('GET /repos/{owner}/{repo}/issues/{issue_number}/comments', { ...base, issue_number: issue.number, per_page: 100 });
+    for (const comment of comments) {
+      if (comment.user?.login === BOT && (comment.body ?? '').includes(MARK.occurrence(key))) markedFiles(comment.body).forEach((name) => names.add(name));
+    }
+  }
+  return { created, names };
+}
+
 async function addOccurrence({ github, base, run, key, issue, flakes, names }) {
-  if (issue.body.includes(MARK.occurrence(key))) return 0;
-  const comments = await github.paginate('GET /repos/{owner}/{repo}/issues/{issue_number}/comments', { ...base, issue_number: issue.number, per_page: 100 });
-  if (comments.some((comment) => comment.user?.login === BOT && (comment.body ?? '').includes(MARK.occurrence(key)))) return 0;
   const body = [
-    MARK.occurrence(key), '',
+    MARK.occurrence(key), ...[...names].map(MARK.file), '',
     'A later merge group flaked on test files this report names: they failed the first run and passed the whole-shard rerun.', '',
     ...details(base, run, flakes.filter((flake) => flake.names.some((name) => names.has(name))), names),
   ].join('\n');
@@ -223,8 +239,6 @@ async function addOccurrence({ github, base, run, key, issue, flakes, names }) {
 }
 
 async function fileReport({ github, base, run, key, flakes, left }) {
-  const recent = await listReports(github, base, { state: 'all', since: run.created_at });
-  if (recent.some((item) => ours(item) && item.body.includes(MARK.occurrence(key)))) return 0;
   const names = [...left];
   const title = names.length
     ? `Flaky test in the merge queue: ${path.posix.basename(names[0])}${names.length > 1 ? ` and ${names.length - 1} more` : ''}`
@@ -241,13 +255,17 @@ async function fileReport({ github, base, run, key, flakes, left }) {
 }
 
 // A file an open report names gets one comment there per run attempt. Every other file, and
-// every flaked shard without a name, goes into one new report for the run attempt.
+// every flaked shard without a name, goes into one new report for the run attempt. Comments
+// come first, so a report for the attempt means every write of the attempt is done.
 async function writeReports({ github, base, run, flakes }) {
   const key = `${base.owner}/${base.repo}:${run.id}:${run.run_attempt}`;
+  const recorded = await recordedWrites({ github, base, run, key });
+  if (recorded.created) return 0;
   const open = (await listReports(github, base, { state: 'open' })).filter(ours).sort((a, b) => a.number - b.number);
   const held = new Map();
   const left = new Set();
   for (const name of flakes.flatMap((flake) => flake.names)) {
+    if (recorded.names.has(name)) continue;
     const issue = open.find((item) => item.body.includes(MARK.file(name)));
     if (!issue) left.add(name);
     else held.set(issue.number, { issue, names: (held.get(issue.number)?.names ?? new Set()).add(name) });

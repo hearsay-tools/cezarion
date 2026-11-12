@@ -9,7 +9,7 @@ const { harness, vitestJob, browserJob, listArchive, SHA } = require('./fixtures
 
 const MANAGER = 'packages/cezar/src/runs/manager.test.ts';
 const BOARD = 'packages/web/src/board.test.tsx';
-const SPEC = 'packages/web/e2e/specs/board.spec.ts';
+const SPEC = 'packages/web/e2e/activity.e2e.ts';
 const KEY = 'hearsay-tools/squawk:501:1';
 
 test('a shard that passed only on its rerun files one flake-report issue that names its files', async () => {
@@ -115,6 +115,32 @@ test('a replay of an earlier attempt never quotes a later attempt\'s files', asy
   assert.ok(replay.includes(MARK.occurrence(KEY)));
   assert.ok(!replay.includes(BOARD), 'the second attempt\'s file stays out of the first attempt\'s report');
   assert.match(replay, /No failed-file list from this run attempt/);
+});
+
+test('a replay after the commented report closed writes nothing again', async () => {
+  const h = harness();
+  await reportQueueFlakes(h.options());
+  h.state.run.id = 502;
+  await reportQueueFlakes(h.options());
+  h.state.issues[0].state = 'closed';
+  assert.deepEqual(await reportQueueFlakes(h.options()), { flakes: 1, reported: 0 });
+  assert.equal(h.state.issues.length, 1);
+  assert.equal(h.state.comments.length, 1);
+});
+
+test('a replay after a comment landed and the new report failed files only the report', async () => {
+  const h = harness();
+  await reportQueueFlakes(h.options());
+  h.state.run.id = 502;
+  h.state.artifacts['failed-test-files-vitest-shard-2'] = listArchive([MANAGER, BOARD]);
+  h.state.failCreate = true;
+  await assert.rejects(reportQueueFlakes(h.options()));
+  assert.equal(h.state.comments.length, 1);
+  h.state.failCreate = false;
+  assert.deepEqual(await reportQueueFlakes(h.options()), { flakes: 1, reported: 1 });
+  assert.equal(h.state.comments.length, 1);
+  assert.equal(h.state.issues.length, 2);
+  assert.ok(h.state.issues[1].body.includes(MARK.file(BOARD)) && !h.state.issues[1].body.includes(MARK.file(MANAGER)));
 });
 
 test('a name that is not a test file in the merge group\'s tree is dropped', async () => {
