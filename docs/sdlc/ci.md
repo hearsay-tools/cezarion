@@ -338,7 +338,7 @@ still use the immediate reader. See [the pending-review plan](../../.ai/specs/20
 
 Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy build/package, Vitest and browser jobs do not depend on this gate; they start after preflight and run beside it. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
 
-Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. An unverified new head returns to draft; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation; verified heads become ready and unverified heads become draft. There is no durable manual draft override. The board sync runs under the same lock even when draft state is unchanged, and Done cards remain protected. On the next readiness trigger, a new pending same-head execution or reopened thread returns a same-repository ready PR to draft. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if draft state needs refreshing. Fork PRs retain their author's draft state. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue-suite reuse and exact-push reuse keep their existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
+Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. Readiness never changes draft state (hearsay-tools/cezarion#3288): agents open PRs ready, and a human's draft stays a draft, so the readiness job holds only read repository permissions. Under the same lock it syncs the PR and closing-linked issue cards: In review when the PR is ready and its live head is verified, In progress otherwise, a draft included. Done cards remain protected. An unverified new head moves the cards to In progress; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation. On the next readiness trigger, a new pending same-head execution or reopened thread moves a same-repository PR's cards back to In progress. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if the board needs refreshing. Fork PRs get no board sync. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue-suite reuse and exact-push reuse keep their existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
 
 Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]` or the exact bot configured in `RELEASE_APP_BOT_LOGIN`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `pnpm-lock.yaml`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head manifests differ only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets), and the pnpm lockfile stays byte-identical except matching local workspace specifiers (including its pnpm package-manager document).
 
@@ -456,8 +456,8 @@ exit code or reruns tests. Local coverage failures remain fatal. Upload and merg
 The merge job stays outside `verify.needs` and the merge-queue roster.
 
 Coverage now adds time to the required test jobs. PR and dispatch shards have a 25-minute
-hang bound, matching the former separate coverage jobs; main and merge groups have a
-20-minute bound. Removing the duplicate matrix saves three dependency installs, server builds
+hang bound, matching the former separate coverage jobs; main has a 20-minute bound, and
+merge groups have 40 minutes for a rerun (§ Rerun of a failed queue shard). Removing the duplicate matrix saves three dependency installs, server builds
 and test executions. It does not promise a shorter time to the required test verdict.
 
 `.github/scripts/ci-coverage.workflow.test.cjs` pins the event selection, single test run,
@@ -478,6 +478,10 @@ can import those passes instead of running the same test files again
   exit code are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3
   days. If the fetch fails, the shard runs the plain command with a warning. Other events run
   the command exactly as before.
+- A shard that reruns after a failed first run (§ Rerun of a failed queue shard) records
+  the rerun into `$RUNNER_TEMP/squeal-parts-rerun`, and only those parts upload. Each shard
+  so has one complete part, which `squeal ci export` needs: it refuses two parts for one
+  shard or one file.
 - The `Export Squeal results` job (`squeal-export`) runs after all four shards pass in a
   merge group, with `contents: read` and no stored credentials. It checks out
   `merge_group.head_sha`, installs dependencies, downloads the parts, runs
@@ -622,7 +626,7 @@ CodeRabbit owns review execution and finding discussion. CI never requests a mod
 
 Independent automatic discovery uses official PR associations from the verified native CI run or provider check, or the validated review signal PR number. CI run or signal merge SHAs never filter the live PR head. An empty provider association alone permits the bounded two-page open-main listing, which selects only eligible current heads equal to the verified provider head. Old associated events still wake their PR and read its newest proof. An unassociated stale head with no current match is a no-op. At most four association rows or matching targets are accepted per event; duplicates are removed. Missing/malformed CI/check associations, target overflow and incomplete inventory fail closed with explicit `pr_number` dispatch recovery. Trusted discovery emits only these eligible PR numbers in its matrix. Unrelated PRs receive no native/provider proof work. This bounds target work per event, not the repository-wide hourly token budget; four-way parallelism only bounds concurrency. Each job has its own 120-second deadline and PR-number concurrency lock, with at most four jobs running and fail-fast disabled. The admitted event is a wake hint. Only the trusted PR number enters the queue; each job reads the live head and proves its newest native run at its lock head. Manual dispatch scopes its requested PR. It validates the latest native CI workflow/run/attempt and successful preflight, then reruns only the completed `review-result` job if live admission differs from its result. Equal outcomes are no-ops. Both completion orders work: CI completion catches an earlier provider finish, and provider completion catches an earlier CI finish. On the next admission read, reopened threads and new pending same-head reviews revoke historical green results. For same-repository PRs, provider check completion automatically wakes reconciliation; manual thread reopening or resolution needs a **Reconcile CodeRabbit admission** dispatch with `pr_number`. Fork PRs receive no automated reruns, including from this dispatch. For fork PRs, a maintainer must rerun the native **Automated Code Review** job in Actions after provider completion or a manual thread change. Existing queue fork verification remains supported.
 
-Writes are serialized per discovered PR. The reconciler rechecks admission and native identity before the write, then observes the accepted attempt under a bounded deadline before releasing serialization. It observes both successful and ambiguous POST responses without retrying the write. This is a bounded observation barrier, not a durable cross-execution reservation; unresolved acceptance needs manual inspection before further retries. Inspect the native run if acceptance is not visible. GitHub can coalesce pending jobs for one PR; each surviving job reads live evidence. A and B have independent event discovery and separate PR locks; neither discovery job shares a cross-PR pending slot. Manual `pr_number` dispatch recovers dropped or eventless changes. An old valid event cannot select historical proof; its job independently proves the newest native run. Delivery and scheduling still depend on GitHub, so this is not a lossless-delivery claim. GitHub Actions has no review-thread event for manual reopening or resolution, so neither change triggers readiness or the review signal. After either manual change, dispatch **Reconcile CodeRabbit admission** with `pr_number` to refresh native admission. Dispatch **PR Readiness** separately if draft state needs refreshing. It cannot restart a disabled workflow, a run at least 30 days old or one at the 50-attempt limit. Promotion requires the step marker **Require fresh CodeRabbit admission and resolved threads**. A green historical **Require fresh CodeRabbit execution and resolved threads** job can only be revoked after fresh validated admission rejects it under both policies, such as a reopened thread, pending provider, latest failure or generic skip. An admitted decision, including no-files, leaves that old green job unchanged. A failed historical job always requires a fresh native run; it cannot be promoted by a retry. This prevents a no-files retry loop after revocation. Admission read errors alone cannot authorize a historical retry. Reusable `automated-code-review.yml` model jobs remain refused in every direction. Reruns keep their original definition and immutable source checkout; push a new head or start a new native run after rollout when promotion needs the new policy. No whole-CI dispatch or model fallback occurs.
+Writes are serialized per discovered PR. The reconciler rechecks admission and native identity before the write, then observes the accepted attempt under a bounded deadline before releasing serialization. It observes both successful and ambiguous POST responses without retrying the write. This is a bounded observation barrier, not a durable cross-execution reservation; unresolved acceptance needs manual inspection before further retries. Inspect the native run if acceptance is not visible. GitHub can coalesce pending jobs for one PR; each surviving job reads live evidence. A and B have independent event discovery and separate PR locks; neither discovery job shares a cross-PR pending slot. Manual `pr_number` dispatch recovers dropped or eventless changes. An old valid event cannot select historical proof; its job independently proves the newest native run. Delivery and scheduling still depend on GitHub, so this is not a lossless-delivery claim. GitHub Actions has no review-thread event for manual reopening or resolution, so neither change triggers readiness or the review signal. After either manual change, dispatch **Reconcile CodeRabbit admission** with `pr_number` to refresh native admission. Dispatch **PR Readiness** separately if the board needs refreshing. It cannot restart a disabled workflow, a run at least 30 days old or one at the 50-attempt limit. Promotion requires the step marker **Require fresh CodeRabbit admission and resolved threads**. A green historical **Require fresh CodeRabbit execution and resolved threads** job can only be revoked after fresh validated admission rejects it under both policies, such as a reopened thread, pending provider, latest failure or generic skip. An admitted decision, including no-files, leaves that old green job unchanged. A failed historical job always requires a fresh native run; it cannot be promoted by a retry. This prevents a no-files retry loop after revocation. Admission read errors alone cannot authorize a historical retry. Reusable `automated-code-review.yml` model jobs remain refused in every direction. Reruns keep their original definition and immutable source checkout; push a new head or start a new native run after rollout when promotion needs the new policy. No whole-CI dispatch or model fallback occurs.
 
 ### Native review recovery
 
@@ -887,12 +891,60 @@ window, then use existing current-head admission. CodeRabbit restarted after
 no signal that it will not re-review. A later ready transition does not reset
 the window. The shared reader is `.github/scripts/queue-coderabbit-admission.cjs`;
 `land-pr` uses the same order. A non-draft PR with no ready event was opened
-ready and uses current-head admission without a cutoff. Malformed or unreadable
+ready and uses current-head admission without a cutoff. Agents open PRs ready,
+so their PRs take this path and wait for no settle window; a PR opened as a
+draft and later marked ready keeps the window. Malformed or unreadable
 timeline proof blocks actual-review admission. Existing trusted no-files,
 release-stamps and upstream-ledger exceptions remain unchanged.
-Readiness still returns a PR to draft when a new same-head review is pending.
+A new same-head review that is pending blocks admission; readiness moves the
+PR's cards to In progress and leaves its draft state alone.
 See `.ai/specs/2026-11-09-post-first-ready-queue-review.md` and
 hearsay-tools/cezarion#3046 for the observed first-ready race.
+
+### Rerun of a failed queue shard
+
+In a merge group, a `Vitest shard N/4` or `Cockpit browser E2E shard N/4` job whose
+first test run fails runs the whole shard once more, in the same job and in the same
+order. The shard passes only when the rerun passes. Most failed queue entries were
+flakes: 34 of 42 passed again with no new commit
+(`.ai/specs/2026-11-11-one-full-run-delivery-pipeline.md` § Queue;
+hearsay-tools/cezarion#3290).
+
+- The first test step (id `record` in the Vitest job, `e2e` in the browser job)
+  continues on error only in a merge group. Pull request runs, `main` pushes and
+  dispatches fail on it, as before.
+- When it fails, `Reset Vitest's results cache for the rerun` runs
+  `.github/scripts/vitest-rerun-reset.cjs`. It writes the test files that failed in the
+  first run to `$RUNNER_TEMP/failed-test-files.txt`, one repository-relative path per
+  line, and deletes Vitest's results cache under the config root
+  (`node_modules/.vite/vitest/`, or `packages/web/e2e/node_modules/.vite/vitest/` for the
+  browser config). Vitest's sequencer runs cached failures first and orders the other
+  files by cached duration, so without the cache the rerun keeps the first run's order.
+- The rerun step (id `rerun`, `Rerun server and cockpit unit suites with Squeal
+  recording`; id `e2e-rerun`, `Rerun cockpit browser E2E`) runs the first step's script
+  again: the whole shard, not only the failed files, because a failure can depend on
+  the state another file leaves. A failed rerun, or a failed reset, fails the entry, as
+  a failure does today.
+- Before the rerun, the job uploads the list as `failed-test-files-vitest-shard-N` or
+  `failed-test-files-cockpit-browser-shard-N`, kept 7 days, only when the first run
+  failed. The upload comes first so that a rerun that reaches the job's time limit,
+  which cancels every later step, cannot lose it. A run that failed before any test
+  file finished leaves the list empty. The browser job also uploads the first run's
+  failure bundles as
+  `cockpit-failures-first-run-shard-N`, because each spec clears its old bundles when it
+  runs again.
+- The rerun step's conclusion in the Actions API tells the cases apart: `skipped` when
+  the first run passed, `success` when the first run failed and the rerun passed (a
+  flake), and `failure` when both failed.
+- In a merge group both jobs have a 40-minute limit, room for two runs inside the queue's
+  45-minute check timeout. In merge-group runs of 2026-11-11, a Vitest shard's tests took
+  up to 16 minutes and a browser shard's up to 13.
+- A Vitest rerun records its own Squeal parts (§ Squeal shared results).
+
+`.github/scripts/ci-queue-rerun.workflow.test.cjs` pins the events, the conditions, the
+step order, the rerun's Squeal parts, the artifacts and the time limits.
+`.github/scripts/vitest-rerun-reset.test.cjs` runs Vitest on a fixture to pin the cache's
+place and format and the order the reset gives back.
 
 ### Docs-only queue entries
 

@@ -24,7 +24,7 @@ const BLOCKED_TYPES = new Set(['feat'])
 const NEVER = [
   { why: 'gate or test harness', globs: [
     '.coderabbit.yaml', '.coderabbit.yml', '.github/workflows/**', '.github/codex/**', '.github/schemas/**', '.github/actionlint.yaml',
-    '.github/scripts/{baseline-growth*,change-surface,change-surface-readers,coderabbit-*,native-review-proof,queue-ci-proof,pr-test-proof,pr-test-input,review-threads,review-signal,pr-readiness,require-e2e-passed,fetch-ci-results,release-*,pr-snapshot,node-floor-reporter,ci-test-sequencer,cockpit-test-sequencer,merge-queue-admission,merge-recommendation*}.*',
+    '.github/scripts/{baseline-growth*,change-surface,change-surface-readers,coderabbit-*,native-review-proof,queue-ci-proof,pr-test-proof,pr-test-input,review-threads,review-signal,pr-readiness,require-e2e-passed,fetch-ci-results,release-*,pr-snapshot,node-floor-reporter,ci-test-sequencer,cockpit-test-sequencer,vitest-rerun-reset,merge-queue-admission,merge-recommendation*}.*',
     '.github/scripts/*.workflow.test.cjs',
     '**/vitest.config.ts', '**/vitest.setup.ts',
     'packages/web/e2e/{agent-browser,failure-setup,environment,fixture-server,held-browser-daemon,poll}.ts',

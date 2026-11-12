@@ -249,9 +249,9 @@ needs a rerun; no background retry task is created outside the bounded transport
 
 | Handling label | Result |
 | --- | --- |
-| `friction-auto` | Verify established intent, implement a bounded remedy, verify, open a draft PR |
-| `friction-guarded` | Name the approved guarantee, reproduce the violation, prove regression red/green, verify neighboring and boundary-specific guarantees, open a draft PR |
-| `friction-design` | Run `/dev-flow` on its Design Track, prefer a bounded design in chat, ask for approval in the same task, then implement and verify before a draft implementation PR |
+| `friction-auto` | Verify established intent, implement a bounded remedy, verify, open a ready PR |
+| `friction-guarded` | Name the approved guarantee, reproduce the violation, prove regression red/green, verify neighboring and boundary-specific guarantees, open a ready PR |
+| `friction-design` | Run `/dev-flow` on its Design Track, prefer a bounded design in chat, ask for approval in the same task, then implement and verify before a ready implementation PR |
 
 All three require an open issue by `wjarka`, `friction`, their own handling label,
 no other handling label, exactly one recognized category, and no existing claim,
@@ -300,7 +300,7 @@ and verification. Run-state changes include a **Transitions out** table covering
 failure and no-session recovery. Automatic launch and labels never grant design
 approval. The task pauses for questions and explicit approval before product
 implementation; after approval, **Continue the same task** through `/dev-flow`'s
-implementation, verification and draft implementation PR. The approved design
+implementation, verification and ready implementation PR. The approved design
 stays in the session, with the handoff maintained for resumption. Recheck
 eligibility on Continue while recognizing the same task's own assignment and
 claim; competing work still blocks it. Relabeling is not a new-stage handoff:

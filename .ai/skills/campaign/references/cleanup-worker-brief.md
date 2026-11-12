@@ -18,7 +18,7 @@ workers: across 25 PRs of hearsay-tools/cezarion#2051, dev-flow's own steps
 caught nothing, and the coordinator's gate does its checks.
 
 ```text
-Work hearsay-tools/cezarion#<N> to a draft PR with green CI. This brief replaces
+Work hearsay-tools/cezarion#<N> to a ready PR with green CI. This brief replaces
 dev-flow: load none of dev-flow, plan-issue, implement-issue, run-preflight,
 pr-checks or log-friction. This shortcut applies only to approved cleanup work.
 The coordinator owns the board, the claim, labels, landing and the friction log.
@@ -63,7 +63,7 @@ Repeat steps 2 to 5 after any later code change, and step 3 before every push.
 Leave full suites to Squeal and CI. Missing or incomplete one-shot evidence
 blocks the PR; there is no bundled pre-PR fallback.
 
-PR: git push, then gh pr create --draft --base main. Title in Conventional
+PR: git push, then gh pr create --base main (ready, not draft). Title in Conventional
 Commits, for example refactor(<area>): <what moved>. Write the body in
 .ai/qa/<N>/pr-body.md with: Closes hearsay-tools/cezarion#<N>; Summary (at most
 3 sentences); Changed names (against the issue's list, and the reason for every
@@ -80,7 +80,7 @@ with --force-with-lease. When the required checks are green and no thread is
 open, send the same progress message and finish the worker with cezar_done.
 
 The coordinator owns landing, board and label changes, issue comments and
-friction posts. pr-readiness.yml alone changes draft state. Put each friction
+friction posts. Do not change the PR's draft state. Put each friction
 finding in your final message as one line. Print config keys and paths only,
 never their values.
 Keep your branch: stay on cez/<your 8-char id>, and keep your handoff current.

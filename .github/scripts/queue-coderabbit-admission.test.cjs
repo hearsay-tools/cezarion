@@ -57,6 +57,12 @@ for (const elapsed of [0, 179999, 180000, 480000]) test(`no post-ready execution
   assert.equal(result.admitted, elapsed >= 180000);
   if (elapsed < 180000) assert.equal(result.reason, 'provider re-review settle window open, until 2026-11-09T07:01:07.000Z');
 });
+test('a PR opened ready has no settle window, even one second after its review', async () => {
+  const h = fixture(); h.s.firstReady = null;
+  h.s.checks[0].started_at = '2026-11-09T06:42:47Z';
+  const result = await read(h, () => Date.parse('2026-11-09T06:42:48Z'));
+  assert.equal(result.admitted, true);
+});
 test('newest failed post-first-ready execution cannot use an older success after settle', async () => {
   const h = fixture(); h.s.checks.push({ ...h.s.checks[0], id: 101, conclusion: 'failure' });
   const result = await read(h);

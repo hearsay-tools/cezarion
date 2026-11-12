@@ -725,8 +725,9 @@ jobs:
         shard: [ 1, 2, 3, 4 ]
     runs-on: ubuntu-24.04
     # Coverage now shares the required test run on PRs and dispatches. Keep the
-    # previous coverage job bound there; main and merge groups get 20 minutes.
-    timeout-minutes: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 25 || 20 }}
+    # previous coverage job bound there; main gets 20 minutes. A merge group gets 40,
+    # room for the shard to run twice (docs/sdlc/ci.md § Rerun of a failed queue shard).
+    timeout-minutes: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 25 || github.event_name == 'merge_group' && 40 || 20 }}
 
     permissions:
       contents: read
@@ -796,27 +797,61 @@ jobs:
 
       - name: Run server and cockpit unit suites with Squeal recording
         id: record
+        # In a merge group a failed first run does not fail the job: the rerun below decides.
+        continue-on-error: ${{ github.event_name == 'merge_group' }}
         env:
           VITEST_FILE_DURATION_CAP: '1'
           SQUEAL_FETCHED: ${{ steps.squeal.outcome }}
-        run: |
+          PARTS_DIR: squeal-parts
+        run: &record-shard |
           set -- npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4
           if [ "$SQUEAL_FETCHED" = success ]; then
-            exec node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" ci record --out "$RUNNER_TEMP/squeal-parts" -- "$@"
+            exec node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" ci record --out "$RUNNER_TEMP/$PARTS_DIR" -- "$@"
           fi
           echo "::warning title=Squeal release not fetched::Shard ${{ matrix.shard }}/4 runs its tests without recording Squeal results."
           exec "$@"
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == ''))
 
+      # A merge-group shard whose first run fails runs the whole shard once more, in the same
+      # order, recorded into new parts; the shard passes only when the rerun passes. The reset
+      # lists the first run's failed files and deletes Vitest's results cache, which would
+      # otherwise reorder the rerun. See docs/sdlc/ci.md § Rerun of a failed queue shard.
+      - name: Reset Vitest's results cache for the rerun
+        id: reset
+        if: github.event_name == 'merge_group' && steps.record.outcome == 'failure'
+        run: node .github/scripts/vitest-rerun-reset.cjs . "$RUNNER_TEMP/failed-test-files.txt"
+
+      # Before the rerun, so a rerun that reaches the job's time limit cannot cancel it.
+      - name: Upload the first run's failed test files
+        if: "!cancelled() && github.event_name == 'merge_group' && steps.record.outcome == 'failure'"
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: failed-test-files-vitest-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/failed-test-files.txt
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
+
+      - name: Rerun server and cockpit unit suites with Squeal recording
+        id: rerun
+        if: github.event_name == 'merge_group' && steps.record.outcome == 'failure'
+        env:
+          VITEST_FILE_DURATION_CAP: '1'
+          SQUEAL_FETCHED: ${{ steps.squeal.outcome }}
+          PARTS_DIR: squeal-parts-rerun
+        run: *record-shard
+
       - name: Upload Squeal parts
         # A status function: without one GitHub adds success(), and a shard whose tests failed
-        # would lose its parts and recording cost, which the gate trial reads.
+        # would lose its parts and recording cost, which the gate trial reads. After a rerun only
+        # its parts upload: `squeal ci export` refuses two parts for one shard.
         if: "!cancelled() && (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == '')) && steps.squeal.outcome == 'success'"
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: squeal-parts-shard-${{ matrix.shard }}
-          path: ${{ runner.temp }}/squeal-parts/
+          path: ${{ runner.temp }}/${{ steps.rerun.outcome == 'skipped' && 'squeal-parts' || 'squeal-parts-rerun' }}/
           if-no-files-found: error
           retention-days: 3
           overwrite: true
@@ -1225,7 +1260,8 @@ jobs:
       matrix:
         shard: [ 1, 2, 3, 4 ]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A merge group gets room for the shard to run twice (§ Rerun of a failed queue shard).
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 40 || 30 }}
 
     permissions:
       contents: read
@@ -1263,11 +1299,47 @@ jobs:
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Run cockpit browser E2E
-        run: |
+        id: e2e
+        # In a merge group a failed first run does not fail the job: the rerun below decides.
+        continue-on-error: ${{ github.event_name == 'merge_group' }}
+        run: &browser-shard |
           set -o pipefail
           npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
           node .github/scripts/require-e2e-passed.cjs < e2e.log
         if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
+
+      # The rerun clears each spec's old failure bundles, so the first run's ship first.
+      - name: Upload the first run's failure bundles
+        if: github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cockpit-failures-first-run-shard-${{ matrix.shard }}
+          path: .ai/qa/failures/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The same rerun as a Vitest shard's, for the browser config's own results cache.
+      - name: Reset Vitest's results cache for the rerun
+        id: reset
+        if: github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'
+        run: node .github/scripts/vitest-rerun-reset.cjs packages/web/e2e "$RUNNER_TEMP/failed-test-files.txt"
+
+      - name: Upload the first run's failed test files
+        if: "!cancelled() && github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'"
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: failed-test-files-cockpit-browser-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/failed-test-files.txt
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
+
+      - name: Rerun cockpit browser E2E
+        id: e2e-rerun
+        if: github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'
+        run: *browser-shard
 
       # A red spec writes `.ai/qa/failures/<spec>/<test>-<n>/` (screenshot, snapshot, probe)
       # through the e2e seam (#408). Ship it so the flake can be read instead of guessed at;

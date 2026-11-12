@@ -4,7 +4,7 @@ The coordinator owns PR-opening release. Planned files and line distance predict
 work; they do not prove a ready branch conflicts. The old per-file cap protected
 against patch collisions by serializing PRs. This check replaces that default
 with actual patch evidence while preserving semantic dependencies, worker-slot
-limits and every review, QA and land-pr gate. Release permits opening a draft
+limits and every review, QA and land-pr gate. Release permits opening a ready
 PR, never merging it.
 
 ## Capture complete evidence

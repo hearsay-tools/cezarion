@@ -124,8 +124,9 @@ includes waiting for its required checks. A changed head invalidates the gate.
 
 ## 3. Merge or wait
 
-`pr-readiness.yml` owns draft state. Let it mark the PR ready; do not run
-`gh pr ready`. When the gate holds but owner action is required, send the
+Agents open PRs ready, and `pr-readiness.yml` never changes draft state. A
+draft PR is a human's: leave it as it is and tell the owner it needs promotion,
+because no workflow promotes a draft. When the gate holds but owner action is required, send the
 owner the PR, `H`, gate evidence and the specific missing approval. Register
 a PR merge wait, or use `cezar_ask` when an explicit decision is needed.
 
