@@ -4,7 +4,7 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { spawn } from 'node:child_process';
 import { onTestFinished, it as registerTest, expect } from 'vitest';
 import { WAIT_KIND, WAIT_PHASE, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import type { Wait } from '@open-mercato/cezar-contract';
+import type { CezarWaitRequestInput, Wait } from '@open-mercato/cezar-contract';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { manager, until, store, toolGenerationOf } from './worker-wait-core.testkit.ts';
@@ -36,9 +36,9 @@ export function deadlineCells(runners: RunnerId[], it: typeof registerTest = reg
           for (let index = 0; index < 4; index++) {
             const peer = kind === 'peer' ? store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] }) : undefined;
             if (peer) setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['wait', 'steer'], receipts: [] } });
-            const request = kind === 'process'
-              ? { kind, pid: pid!, exit_file: `u29-${index}.exit`, timeout_seconds: 600 + index } as const
-              : { kind, peer_ids: [peer!.id], timeout_seconds: 600 + index } as const;
+            const request: CezarWaitRequestInput = kind === 'process'
+              ? { kind, pid: pid!, exit_file: `u29-${index}.exit`, timeout_seconds: 600 + index }
+              : { kind, peer_ids: [peer!.id], timeout_seconds: 600 + index };
             const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
             if (!('wait' in registered)) throw Error('registration refused');
             waits.push(registered.wait);
