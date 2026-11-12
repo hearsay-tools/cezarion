@@ -18,7 +18,12 @@ export function paintClasses(el: Element, property: PaintedProperty): string[] {
   return resting.filter((cls) => cls.startsWith('text-') && !NOT_INK.test(cls))
 }
 
-/** Present and not see-through: at least one class, none transparent, none at zero opacity. */
+/** Present and not see-through: at least one class, none transparent or none (at any opacity), none at zero opacity. */
 export function isPainted(classes: readonly string[]): boolean {
-  return classes.length > 0 && classes.every((cls) => !/-(?:transparent|none)$/.test(cls) && !cls.endsWith('/0'))
+  return classes.length > 0 && classes.every((cls) => {
+    // `bg-danger/15` is the colour `bg-danger` at 15%. Only a trailing number or bracketed value is an
+    // opacity, so a slash inside an arbitrary value such as `bg-[url(/a.png)]` stays part of the colour.
+    const [, color = cls, opacity = '1'] = /^(.*)\/(\d+(?:\.\d+)?|\[[^\]]*\])$/.exec(cls) ?? []
+    return !/-(?:transparent|none)$/.test(color) && !/^(?:0|\[0(?:\.0*)?%?\])$/.test(opacity)
+  })
 }

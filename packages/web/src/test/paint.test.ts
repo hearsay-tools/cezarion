@@ -27,4 +27,15 @@ describe('isPainted', () => {
     expect(isPainted(['bg-none'])).toBe(false)
     expect(isPainted(['bg-danger/0'])).toBe(false)
   })
+
+  it('reads the colour before its opacity suffix', () => {
+    expect(isPainted(['bg-danger/15'])).toBe(true)
+    expect(isPainted(['border-accent-strong/25'])).toBe(true)
+    expect(isPainted(['bg-transparent/15'])).toBe(false)
+    expect(isPainted(['border-transparent/20'])).toBe(false)
+    expect(isPainted(['text-transparent/50'])).toBe(false)
+    expect(isPainted(['bg-none/40'])).toBe(false)
+    expect(isPainted(['bg-danger/[0]'])).toBe(false)
+    expect(isPainted(['bg-[url(/a/b.png)]'])).toBe(true)
+  })
 })
