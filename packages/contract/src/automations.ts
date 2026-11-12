@@ -3,7 +3,9 @@ import { z } from 'zod';
 // run-creation input minus the keys an automation supplies itself. Consumed rather than
 // redeclared — the same one-way direction `./runs.ts` takes towards `./workflows.ts`.
 import { createRunInputBaseSchema, singleRunVariantsSchema } from './runs.ts';
-import { automationScheduleSchema } from './automation-schedule.ts';
+import { automationScheduleSchema, onceStatusSchema } from './automation-schedule.ts';
+
+export { onceStatusSchema, type OnceStatus } from './automation-schedule.ts';
 
 /**
  * Closed automation wire schemas. Storage schemas preserve unknown keys separately. Parity
@@ -91,10 +93,6 @@ export const automationArchiveSchema = z.object({
   trigger: z.enum(['schedule', 'late', 'manual', 'retry']).optional(),
 });
 export type AutomationArchive = z.infer<typeof automationArchiveSchema>;
-
-/** Where a one-time schedule stands, derived by the server so clients never re-derive it. */
-export const onceStatusSchema = z.enum(['paused', 'waiting', 'failed', 'missed', 'archived']);
-export type OnceStatus = z.infer<typeof onceStatusSchema>;
 
 /** One stored automation, as every route that answers a single definition serves it. */
 export const automationDefinitionSchema = z.object({

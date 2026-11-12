@@ -5,11 +5,6 @@
       "file": "packages/contract/src/runner.ts",
       "count": 1,
       "reason": "the contract's own roster: the package is Node-free and cannot import the service; runner-roster-literal.test.ts holds it equal to RUNNER_IDS"
-    },
-    {
-      "file": "packages/contract/src/workspace.ts",
-      "count": 1,
-      "reason": "a capability list, not the roster: the runners whose model list the host discovers; today that is every runner"
     }
   ]
 }
