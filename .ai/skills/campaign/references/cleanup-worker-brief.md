@@ -96,11 +96,10 @@ At the end: git checkout cez/<your 8-char id>; squeal stop in this worktree;
    spy on or wrap them. Reach module internals in tests through the existing
    internals testkit; a `as unknown as` cast to reach private members breaks
    silently on the next move.
-   Require parity results for a risky PR: one that splits or merges
-   functions, changes call order, shares code between two paths, or changes
-   tests. Run npm run test:parity. A verbatim move relies on CI's
-   Vitest shards unless the repo's area gate requires local results. Say which
-   case applies in Verification.
+   For a risky PR (one that splits or merges functions, changes call order,
+   shares code between two paths, or changes tests), CI's Vitest shards give
+   the parity results. Run npm run test:parity only to debug a parity failure.
+   Say in Verification which case applies.
    A changed or added test or guard needs the regression proof in
    docs/sdlc/regression-proof.md; record the command in the PR body.
 ```

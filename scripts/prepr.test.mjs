@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { daemonAlive, judgeSqueal, SQUEAL_WAIT_MS } from './prepr.mjs';
 
 const file = (path, state, verdict) => ({ path, state, ...(verdict ? { verdict } : {}) });
-const status = (testFiles, extra = {}) => ({ selection: { testFiles, verdict: { failures: { tests: 0, testFiles: 0 } } }, lint: { failing: 0 }, ...extra });
+const status = (testFiles, extra = {}) => ({ selection: { testFiles, verdict: { failures: { tests: 0, testFiles: 0 } } }, lint: { failing: 0, linting: { done: 1, total: 1 } }, ...extra });
 
 test('the Squeal wait bound is 2 minutes', () => assert.equal(SQUEAL_WAIT_MS, 120_000));
 
@@ -51,4 +51,13 @@ test('a skipped current file is not a failure', () => {
 test('an input that selects no test is named as missing', () => {
   const r = judgeSqueal(3, { ...status([]), selection: { testFiles: [], unmatched: ['src/x.ts'] } });
   assert.deepEqual([r.state, r.missing], ['incomplete', ['src/x.ts (selects no test file)']]);
+});
+
+test('a setup failure fails the gate', () => {
+  const r = judgeSqueal(3, { ...status([]), selection: { testFiles: [], verdict: { failures: { setups: 1 } } } });
+  assert.equal(r.state, 'fail');
+});
+
+test('absent lint evidence is incomplete', () => {
+  assert.equal(judgeSqueal(0, { selection: { testFiles: [] } }).state, 'incomplete');
 });

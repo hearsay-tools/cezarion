@@ -18,7 +18,7 @@ export function judgeSqueal(exitCode, status, ignorePath = () => false) {
   const unmatched = (selection.unmatched ?? []).map(u => u?.path ?? String(u)).filter(p => !ignorePath(p));
   const failed = files.filter(f => f.state === 'current' && !['pass', 'skip'].includes(f.verdict)).map(f => f.path);
   const failures = selection.verdict?.failures ?? {};
-  if (exitCode === 1 || failed.length || failures.tests || failures.testFiles) {
+  if (exitCode === 1 || failed.length || failures.tests || failures.testFiles || failures.setups) {
     return { state: 'fail', failed, missing: [], lint: lintOf(status) };
   }
   const missing = [...files.filter(f => f.state !== 'current').map(f => f.path), ...unmatched.map(p => `${p} (selects no test file)`)];
@@ -28,8 +28,10 @@ export function judgeSqueal(exitCode, status, ignorePath = () => false) {
 }
 
 function lintOf(status) {
-  const l = status?.lint ?? {};
-  return { failing: l.failing ?? 0, unfinished: (l.pending ?? 0) + (l.stale ?? 0) + (l.unknown ?? 0) };
+  const l = status?.lint;
+  if (!l) return { failing: 0, unfinished: 1 };
+  const notDone = Math.max(0, (l.linting?.total ?? 0) - (l.linting?.done ?? 0));
+  return { failing: l.failing ?? 0, unfinished: (l.pending ?? 0) + (l.stale ?? 0) + (l.unknown ?? 0) + notDone };
 }
 
 /** True when the parsed status shows a live Squeal daemon for this worktree. */
@@ -39,7 +41,8 @@ export function daemonAlive(status) {
 
 function run(cmd, args, options = {}) {
   return new Promise(resolve => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options });
+    const win = process.platform === 'win32';
+    const child = spawn(win && cmd === 'npm' ? 'npm.cmd' : cmd, args, { shell: win, stdio: ['ignore', 'pipe', 'pipe'], ...options });
     let out = '';
     let err = '';
     child.stdout.on('data', d => { out += d; });
