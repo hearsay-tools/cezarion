@@ -1,4 +1,4 @@
-import { openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
+import { crashAfterNextCommit, openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,10 +46,11 @@ describe('commitOutcome', () => {
     store.commitWait(id, wait, input({ id: wait.id }));
     store.commitAgentInputs(id, [...store.getRun(id)!.agentInputs!, message]);
     const refusal = input({ purpose: 'completion-refusal' });
-    const commits = vi.spyOn(runPersistence(store), 'persist');
+    crashAfterNextCommit(store);
     store.commitOutcome(id, [{ kind: 'delivered', inputIds: [wait.id, message.id], at }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }],
       { exit: 'start', enqueue: [refusal] });
-    expect(commits).toHaveBeenCalledTimes(1);
+    crashStore(store);
+    store = openTestRunStore(directory, { keepLive: true });
     const row = committed();
     expect(row).toMatchObject({ status: RUN_STATUS.running, automaticWakes: 7 });
     expect(row.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.delivered, deliveredAt: at })]);
