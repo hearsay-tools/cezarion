@@ -21,18 +21,31 @@ Read queue membership separately with GraphQL (the `gh pr view --json` field lis
 does not include it):
 
 ```bash
-gh api graphql -f owner='<owner>' -f repo='<repo>' -F number=<n> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){isInMergeQueue}}}' --jq '.data.repository.pullRequest.isInMergeQueue'
+gh api graphql -f owner='<owner>' -f repo='<repo>' -F number=<n> -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){id isInMergeQueue}}}' --jq '.data.repository.pullRequest.isInMergeQueue'
 ```
+
+`gh pr merge <n> --disable-auto` clears the auto-merge request only: a PR
+already in the merge queue stays queued and still merges when its checks
+pass. When a step must stop the merge, dequeue the PR with its node `id`
+from the query above, then read `isInMergeQueue` again and continue only
+after it is false:
+
+```bash
+gh api graphql -f id='<PR node id>' -f query='mutation($id: ID!){dequeuePullRequest(input:{id:$id}){pullRequest{isInMergeQueue}}}'
+```
+
+A push of a new head drops the queue entry on its own, so the pre-push rows
+below need no dequeue.
 
 Act on the first row that matches:
 
 | State | Action |
 | --- | --- |
 | `MERGED` | Finished. |
-| No `auto-merge` label | The owner took the PR back. If `autoMergeRequest` is set, turn the request off first: `gh pr merge <n> --disable-auto`. Then follow it as an ordinary PR. |
+| No `auto-merge` label | The owner took the PR back. If `autoMergeRequest` is set, turn the request off first: `gh pr merge <n> --disable-auto`, and dequeue the PR when it sits in the merge queue. Then follow it as an ordinary PR. |
 | A push is about to happen | Do not arm on this visit. If auto-merge is armed, turn it off first: `gh pr merge <n> --disable-auto`; an armed request never carries across a push. Push, then act on this table again for the new head. |
 | New head or title since your last decision | Run the decision in [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) again. On `DOES NOT QUALIFY`, leave auto-merge. A request left armed across the new head does not carry: turn it off (`gh pr merge <n> --disable-auto`) and arm it again only as the `autoMergeRequest is null` row says. |
-| `isInMergeQueue` is true | A reviewer round on this head with a finding scored 5 or more takes the request off (`gh pr merge <n> --disable-auto`), which dequeues the PR; fix and push as the rows below say. Otherwise the merge is pending. Keep following it with `until: "merge_or_blocked"`; a null `autoMergeRequest` does not mean it needs another merge command. |
+| `isInMergeQueue` is true | A reviewer round on this head with a finding scored 5 or more takes the request off (`gh pr merge <n> --disable-auto`) and dequeues the PR; fix and push as the rows below say. Otherwise the merge is pending. Keep following it with `until: "merge_or_blocked"`; a null `autoMergeRequest` does not mean it needs another merge command. |
 | `autoMergeRequest` is null | Arm it only when both preconditions of [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) hold for this head: the reviewer round has no finding scored 5 or more, and the changed-function quality report is complete with no blocker. Then run `gh pr merge <n> --auto --squash --match-head-commit <headRefOid>`: the request arms only the head the preconditions were checked on. When the command reports the head moved, start this table again for the new head. When GitHub refuses because the PR is a draft, leave it as a draft and tell the owner it needs promotion: no workflow promotes a draft, including one a saved automation opened. When GitHub answers that the PR is in clean status, merge it now: `gh pr merge <n> --squash --match-head-commit <headRefOid>`. |
 | `autoMergeRequest` is set | A later reviewer round on this head with a finding scored 5 or more takes the request off: `gh pr merge <n> --disable-auto`. Fix, push, and arm again for the new head. Otherwise wait for the next event. |
 
@@ -75,6 +88,8 @@ changes:
 gh pr merge <n> --disable-auto
 gh pr edit <n> --remove-label auto-merge
 ```
+
+When the PR sits in the merge queue, dequeue it as this file says above.
 
 Then say in a PR comment which rule or event took the PR back, and follow it as an
 ordinary PR.
