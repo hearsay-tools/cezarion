@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { daemonAlive, fallbackLines, focusedTests, gitIo, judgeSqueal, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+import { daemonAlive, fallbackLines, focusedTests, gitIo, judgeSqueal, numstatRows, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
 
 const { GITHUB_PATCH_LIMITS } = createRequire(import.meta.url)('../.github/scripts/missing-patches.cjs');
 
@@ -270,4 +270,12 @@ test('patch limits measure a renamed file by its rename patch, as GitHub does', 
   assert.deepEqual(rest, []);
   assert.equal(line.ok, true, line.text);
   assert.match(line.text, /1 changed lines \(\+1\/-0\) in 2 files/);
+});
+
+test('numstat rows keep tabs in a path and read a rename row as two paths', () => {
+  assert.deepEqual(numstatRows('1200\t0\tdocs/large\tfile.md\0' + '3\t1\t\0old\tname.md\0new name.md\0' + '-\t-\tbin\0'), [
+    { added: '1200', deleted: '0', paths: ['docs/large\tfile.md'] },
+    { added: '3', deleted: '1', paths: ['old\tname.md', 'new name.md'] },
+    { added: '-', deleted: '-', paths: ['bin'] },
+  ]);
 });

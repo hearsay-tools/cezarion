@@ -151,7 +151,7 @@ export function numstatRows(numstat) {
   const tokens = numstat.split('\0');
   const rows = [];
   for (let i = 0; i < tokens.length && tokens[i]; i++) {
-    const [added, deleted, path] = tokens[i].split('\t');
+    const [, added, deleted, path] = /^([^\t]*)\t([^\t]*)\t(.*)$/s.exec(tokens[i]);
     const paths = path === '' ? [tokens[++i], tokens[++i]] : [path];
     rows.push({ added, deleted, paths });
   }
