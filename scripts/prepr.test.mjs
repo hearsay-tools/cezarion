@@ -258,18 +258,23 @@ test('prepr fails on a patch-limit refusal', async () => {
 
 test('patch limits measure a renamed file by its rename patch, as GitHub does', async t => {
   const large = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10);
-  const io = fixtureRepo(t, cwd => {
+  const io = fixtureRepo(t, (cwd, git) => {
+    // A user rename limit below the candidates would turn the edited rename into a delete and an add.
+    git.git('config', 'diff.renameLimit', '1');
     fs.renameSync(path.join(cwd, 'moved.md'), path.join(cwd, 'dir moved.md'));
     fs.renameSync(path.join(cwd, 'edited.md'), path.join(cwd, 'edited-new.md'));
     fs.appendFileSync(path.join(cwd, 'edited-new.md'), 'one more line\n');
+    fs.renameSync(path.join(cwd, 'second.md'), path.join(cwd, 'second-new.md'));
+    fs.appendFileSync(path.join(cwd, 'second-new.md'), 'one more line\n');
   }, cwd => {
     fs.writeFileSync(path.join(cwd, 'moved.md'), large);
     fs.writeFileSync(path.join(cwd, 'edited.md'), large + 'edited\n');
+    fs.writeFileSync(path.join(cwd, 'second.md'), large + 'second\n');
   });
   const [line, ...rest] = patchLimitLines('main', io);
   assert.deepEqual(rest, []);
   assert.equal(line.ok, true, line.text);
-  assert.match(line.text, /1 changed lines \(\+1\/-0\) in 2 files/);
+  assert.match(line.text, /2 changed lines \(\+2\/-0\) in 3 files/);
 });
 
 test('numstat rows keep tabs in a path and read a rename row as two paths', () => {

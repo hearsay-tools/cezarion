@@ -5,11 +5,13 @@ const { execFileSync } = require('node:child_process');
 // this repository's PRs; docs/sdlc/ci.md § GitHub patch limits names it, and scripts/prepr.mjs reads it.
 const GITHUB_PATCH_LIMITS = Object.freeze({ fileBytes: 102_400 });
 
-// The `git` arguments that give GitHub's patch shape, whatever the user's settings: every
-// option a diff.* or color.* setting can change that changes the patch's bytes.
-const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', 'diff', '--no-ext-diff',
-  '--no-textconv', '--no-color', '--no-relative', '--unified=3', '--inter-hunk-context=0',
-  '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/', '--dst-prefix=b/']);
+// The `git` arguments that give GitHub's patch shape, whatever the user's settings: each
+// diff.*, color.* or core.quotePath key in `git help -c` that changes a patch's bytes is
+// pinned here. Renames, where a caller turns them on, use git's default limit of 1000.
+const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', '-c', 'core.quotePath=true',
+  'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--unified=3',
+  '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/',
+  '--dst-prefix=b/', '--submodule=short', '--ignore-submodules=none', '-l1000']);
 
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 << 20, stdio: 'pipe' });
