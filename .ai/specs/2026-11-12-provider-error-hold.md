@@ -86,7 +86,7 @@ failed". The parent sees its workers after a Continue (`worker list`, `collect`)
 session-less worker's resume starts a fresh session (`sessionRefusal`'s `freshAllowed`), and its
 instruction starts with `FRESH_SESSION_NOTICE`. A worker whose private execution checkpoint is
 missing is still refused: that checkpoint is the proof no earlier process holds the worktree
-(#469), and a checkpoint stuck in `starting` is already finalized by the orphan check when its
+(hearsay-tools/cezarion#469), and a checkpoint stuck in `starting` is already finalized by the orphan check when its
 processes are gone.
 
 ### Collect
