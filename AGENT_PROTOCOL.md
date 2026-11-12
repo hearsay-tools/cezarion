@@ -160,9 +160,9 @@ Owners. Paths are relative to `packages/cezar/src/`.
   `core/harness-parity-core.testkit.ts`, the row lists in
   `core/harness-parity-rows.testkit.ts` and `WAIT_CRITERIA` in
   `workflows/waits-parity.testkit.ts`.
-- **Cells:** `core/harness-parity-<part>.cells.testkit.ts` (one module per part, joined by
-  `core/harness-parity-cells.testkit.ts`), `workflows/waits-parity-cells.testkit.ts` and the
-  testkit of each other family.
+- **Cells:** `core/harness-parity-cells.testkit.ts`,
+  `workflows/waits-parity-<part>-cells.testkit.ts` (one module per wait part, registered
+  together in `workflows/waits-parity-cells.testkit.ts`) and the testkit of each other family.
   `PARITY_FILES` in `core/parity-classes.testkit.ts` maps every parity test file to its
   family.
 - **Exemptions and their kinds:** `PARITY_EXEMPTIONS` and `ExemptionKind` in
@@ -176,10 +176,10 @@ Owners. Paths are relative to `packages/cezar/src/`.
   `packages/cezar/scripts/mock-scenario.mjs`.
 - **Row classes and the derived runner set:** `SHARED_RUNNERS` in
   `core/parity-classes.testkit.ts`.
-- **Spec-support rows:** `SPEC_FIELD_PROBES` in `core/harness-parity-session.cells.testkit.ts`.
+- **Spec-support rows:** `SPEC_FIELD_PROBES` in `core/harness-parity-cells.testkit.ts`.
 - **Per-runner files:** `core/harness-<runner>-<part>-parity.test.ts`
   (`harnessParityFile`) and `workflows/waits-<runner>-<part>-parity.test.ts`
-  (`WAIT_PARITY_FILES`, `WAIT_PARITY_FAMILIES`).
+  (`WAIT_PARITY_FILES`, `WAIT_PARITY_FAMILIES` in `workflows/waits-parity-catalog.testkit.ts`).
 - **Matrix guards and single-runner cells:** `core/harness-parity.test.ts` and
   `workflows/waits-parity.test.ts`.
 
@@ -276,7 +276,7 @@ force, or force only in part. The item numbers are stable: code cites them.
    existing runner's wire, read the fork's own protocol documents for the turn boundary,
    the session id and the tool flags before you copy code.
 2. **Factory** — the compiler and the guard tests name each place: the `case` in
-   `createRunner`, `runnerSchema` (`packages/contract/src/runner.ts`), and `UiBackend` in
+   `createRunner`, `runnerSchema` (`packages/contract/src/health.ts`), and `UiBackend` in
    `ui-events.ts` and in its api-client copy (§3).
 3. **Detection** — add the runner's probe to `RUNNER_PROBES` (`core/backend-detect.ts`).
    An absent CLI never fails the boot.

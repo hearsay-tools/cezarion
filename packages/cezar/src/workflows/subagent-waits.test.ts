@@ -17,7 +17,7 @@ import { controlledWire, manager, parent, restart, root, store, semaphore, work,
 /**
  * Cezar's wait on native subagents (hearsay-tools/cezarion#2431): one test per `waiting:subagents`
  * row of its Transitions out table, on the controlled Claude wire. The runner's own mapping of a
- * backgrounded child is the parity cells' (`waits-parity-cells.testkit.ts` U30–U37); here the
+ * backgrounded child is the parity cells' (`waits-subagents-parity-cells.testkit.ts` U30–U37); here the
  * child's UI events reach the engine through the same handler the runners feed.
  */
 
