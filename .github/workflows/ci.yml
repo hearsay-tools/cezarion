@@ -601,9 +601,22 @@ jobs:
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
       - name: Set up Node.js without node-dist
-        # The checked-out ref predates the node-dist action: the previous setup.
+        id: setup-node
+        # The checked-out ref predates the node-dist action: the previous setup, with its
+        # bounded download retry (hearsay-tools/cezarion#1214). A second failure fails this job.
         if: hashFiles('.github/actions/node-dist/action.yml') == ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Retry Node.js setup without node-dist
+        if: hashFiles('.github/actions/node-dist/action.yml') == '' && steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
         with:
           node-version: '24.21.0'
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
@@ -736,9 +749,22 @@ jobs:
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
       - name: Set up Node.js without node-dist
-        # The checked-out ref predates the node-dist action: the previous setup.
+        id: setup-node
+        # The checked-out ref predates the node-dist action: the previous setup, with its
+        # bounded download retry (hearsay-tools/cezarion#1214). A second failure fails this job.
         if: hashFiles('.github/actions/node-dist/action.yml') == ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Retry Node.js setup without node-dist
+        if: hashFiles('.github/actions/node-dist/action.yml') == '' && steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
         with:
           node-version: '24.21.0'
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
@@ -807,9 +833,22 @@ jobs:
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
 
       - name: Set up Node.js without node-dist
-        # The checked-out ref predates the node-dist action: the previous setup.
+        id: setup-node
+        # The checked-out ref predates the node-dist action: the previous setup, with its
+        # bounded download retry (hearsay-tools/cezarion#1214). A second failure fails this job.
         if: hashFiles('.github/actions/node-dist/action.yml') == ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Retry Node.js setup without node-dist
+        if: hashFiles('.github/actions/node-dist/action.yml') == '' && steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
         with:
           node-version: '24.21.0'
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
@@ -1642,7 +1681,9 @@ jobs:
         with:
           version: '12.11.2'
 
+      # The trial commit can predate the node-dist action.
       - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: ./.github/actions/node-dist
         continue-on-error: true
         with:
@@ -1651,11 +1692,23 @@ jobs:
       # After the trial commits: the measured tree's Node and lockfile.
       - name: Set up Node.js
         id: node
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Node.js without node-dist
+        id: node_fallback
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
+        continue-on-error: true
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -1677,7 +1730,7 @@ jobs:
         id: gate
         # Never on the unchanged checkout, nor on an unprepared environment: a failed setup step
         # keeps its outcome under continue-on-error, so each one is checked.
-        if: steps.commits.outcome == 'success' && steps.pnpm.outcome == 'success' && steps.node.outcome == 'success' && steps.install.outcome == 'success' && steps.squeal_setup.outcome == 'success'
+        if: steps.commits.outcome == 'success' && steps.pnpm.outcome == 'success' && (steps.node.outcome == 'success' || steps.node_fallback.outcome == 'success') && steps.install.outcome == 'success' && steps.squeal_setup.outcome == 'success'
         continue-on-error: true
         run: |
           out="$RUNNER_TEMP/squeal-package-trial"
@@ -1694,7 +1747,7 @@ jobs:
         continue-on-error: true
         env:
           GATE: ${{ steps.gate.outcome }}
-          SETUP: "pnpm ${{ steps.pnpm.outcome }}, Node.js ${{ steps.node.outcome }}, install ${{ steps.install.outcome }}, Squeal ${{ steps.squeal_setup.outcome }}"
+          SETUP: "pnpm ${{ steps.pnpm.outcome }}, Node.js ${{ steps.node.outcome == 'skipped' && steps.node_fallback.outcome || steps.node.outcome }}, install ${{ steps.install.outcome }}, Squeal ${{ steps.squeal_setup.outcome }}"
           PACKAGED_TESTS: packages/cezar/test/e2e/
         run: |
           report_filter='

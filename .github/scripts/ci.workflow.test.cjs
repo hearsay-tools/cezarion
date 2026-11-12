@@ -533,23 +533,56 @@ test('build and package verifies the engines minimum without a second full unit 
 });
 
 test('a stalled minimum Node download is bounded and retried once inside the job budget (#1214)', () => {
+  const { runInNewContext } = require('node:vm');
   const { ATTEMPTS, ATTEMPT_TIMEOUT_MS } = require('../actions/node-dist/index.cjs');
-  const job = workflow().jobs['build-and-package'];
-  assert.equal(job['timeout-minutes'], 15);
-  // The fallback runs only when the checked-out merge ref predates node-dist (setup-node-api-free.workflow.test.cjs).
+  const guard = "hashFiles('.github/actions/node-dist/action.yml') != ''";
   const fallback = "hashFiles('.github/actions/node-dist/action.yml') == ''";
-  const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@') && s.if !== fallback);
-  assert.equal(setups.length, 1, 'setup-node downloads nothing, so it needs no retry step');
-  assert.equal(setups[0]['continue-on-error'], undefined, 'a failed setup must fail the job');
-  const install = job.steps.findIndex(s => s.uses === './.github/actions/node-dist');
-  assert.ok(install >= 0 && install < job.steps.indexOf(setups[0]), 'the download happens before setup-node looks it up');
-  assert.equal(job.steps[install].with['node-version'], setups[0].with['node-version']);
-  assert.equal(job.steps[install]['continue-on-error'], undefined, 'a second failed download fails the job');
-  assert.equal(ATTEMPTS, 2, 'one retry');
-  // SHASUMS256.txt and the archive each get ATTEMPTS tries of at most ATTEMPT_TIMEOUT_MS.
-  assert.ok(2 * ATTEMPTS * ATTEMPT_TIMEOUT_MS <= 5 * 60_000, 'a stalled download must not spend the job budget');
-  const firstInstall = job.steps.findIndex(s => /^(?:npm ci|pnpm install)/.test(s.run || ''));
-  assert.ok(firstInstall > job.steps.indexOf(setups[0]), 'Node is ready before anything installs');
+  for (const id of ['typecheck', 'unit-tests', 'build-and-package']) {
+    const job = workflow().jobs[id];
+    assert.equal(job['timeout-minutes'], 15, id);
+    const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@'));
+    const firstInstall = job.steps.findIndex(s => /^(?:npm ci|pnpm install)/.test(s.run || ''));
+    // With node-dist in the checked-out tree: its download holds the retry, setup-node downloads nothing.
+    const install = job.steps.findIndex(s => s.uses === './.github/actions/node-dist');
+    const [primary, setup, retry] = setups;
+    assert.equal(setups.length, 3, `${id}: setup-node, then the fallback setup and its one retry`);
+    assert.equal(job.steps[install].if, guard, id);
+    assert.equal(primary.if, guard, id);
+    assert.ok(install < job.steps.indexOf(primary), `${id}: the download happens before setup-node looks it up`);
+    assert.equal(job.steps[install].with['node-version'], primary.with['node-version'], id);
+    for (const step of [job.steps[install], primary]) assert.equal(step['continue-on-error'], undefined, `${id}: a failed download fails the job`);
+    assert.equal(ATTEMPTS, 2, 'one retry');
+    // SHASUMS256.txt and the archive each get ATTEMPTS tries of at most ATTEMPT_TIMEOUT_MS.
+    assert.ok(2 * ATTEMPTS * ATTEMPT_TIMEOUT_MS <= 5 * 60_000, 'a stalled download must not spend the job budget');
+    // A checked-out merge ref without node-dist: the previous setup and its bounded retry.
+    assert.equal(setup.if, fallback, id);
+    for (const step of [setup, retry]) {
+      assert.equal(typeof step['timeout-minutes'], 'number', `${id}: ${step.name}`);
+      assert.ok(step['timeout-minutes'] < 5, `${id}: ${step.name} must not spend the job budget on a stalled download`);
+      assert.equal(step.with['node-version'], primary.with['node-version'], id);
+      assert.equal(step.with.token, undefined, `${id}: the previous step, unchanged`);
+    }
+    assert.equal(setup['continue-on-error'], true, `${id}: a stalled first attempt must hand over to the retry`);
+    assert.equal(retry['continue-on-error'], undefined, `${id}: a second failure must fail the job`);
+    assert.deepEqual(retry.with, setup.with, id);
+    assert.equal(job.steps.indexOf(retry), job.steps.indexOf(setup) + 1, id);
+    assert.ok(firstInstall > job.steps.indexOf(retry), `${id}: Node is ready before anything installs`);
+    // A step without a status function runs under an implicit success(), so a first
+    // attempt skipped after an earlier failure must keep the retry skipped too.
+    assert.ok(setup.id, `${id}: the retry reads the first attempt by id`);
+    assert.doesNotMatch(retry.if, /\b(?:success|failure|cancelled|always)\(/);
+    // continue-on-error reports a failed attempt's conclusion as success; only outcome tells.
+    const runs = (actionPresent, outcome, jobOk = true) => runInNewContext(`success() && (${retry.if})`, {
+      hashFiles: () => (actionPresent ? 'abc' : ''),
+      steps: { [setup.id]: { outcome, conclusion: outcome === 'skipped' ? 'skipped' : 'success' } }, success: () => jobOk,
+    });
+    assert.equal(runs(true, 'skipped'), false, `${id}: no retry when node-dist runs`);
+    assert.equal(runs(false, 'success'), false, id);
+    // A timeout fails the first attempt; a cancelled attempt must retry too.
+    assert.equal(runs(false, 'failure'), true, id);
+    assert.equal(runs(false, 'cancelled'), true, id);
+    assert.equal(runs(false, 'skipped', false), false, id);
+  }
 });
 
 test('genuine failure and cancellation never green the aggregate', () => {

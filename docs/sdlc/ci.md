@@ -484,8 +484,10 @@ commit into `node-dist-tooling`, install Node, and then check out their ref.
 Other jobs that check out a commit other than the workflow's own (the merge-group base in the
 complexity and clone gates, a PR merge ref, a nightly or release candidate) keep their
 checkout and run the action only under `if: hashFiles('.github/actions/node-dist/action.yml') != ''`.
-When the tree lacks it, the step before this change runs instead, so a base-checkout gate
-never runs tooling from the queued head. `setup-node-api-free.workflow.test.cjs` enforces both
+When the tree lacks it, the step before this change runs instead, with its bounded retry in
+the minimum-Node jobs, so a base-checkout gate never runs tooling from the queued head. A run
+step that moves the workspace with `git checkout` or `git switch` (the Squeal packaged test
+trial) counts as such a checkout. `setup-node-api-free.workflow.test.cjs` enforces both
 patterns.
 
 The only job that still follows `lts/*` is the `lts/*` leg of the release-candidate install

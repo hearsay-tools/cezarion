@@ -24,12 +24,18 @@ const jobs = fs.readdirSync(dir).filter((file) => /\.ya?ml$/.test(file)).flatMap
   const workflow = yaml.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
   return Object.entries(workflow.jobs ?? {}).map(([id, job]) => ({ name: `${file} ${id}`, job }));
 });
+// The fallback branch: the previous setup-node step and, in the minimum-Node jobs, its retry.
+const inFallback = (step) => String(step.if ?? '').startsWith(FALLBACK);
 const setups = jobs.flatMap(({ name, job }) => (job.steps ?? [])
-  .filter((step) => step.uses?.startsWith('actions/setup-node@') && step.if !== FALLBACK)
+  .filter((step) => step.uses?.startsWith('actions/setup-node@') && !inFallback(step))
   .map((step) => ({ name, job, step })));
 const isInstall = (step) => step.uses?.endsWith(`/${ACTION}`);
+// A run step that moves the workspace to another commit counts as a checkout of an unknown ref.
+const SHELL_CHECKOUT = /\bgit\s+(?:checkout|switch)\b/;
 const checkoutBefore = (steps, at, root) => steps.slice(0, at)
-  .filter((s) => s.uses?.startsWith('actions/checkout@') && (s.with?.path ?? '.') === root).pop();
+  .map((s) => (root === '.' && SHELL_CHECKOUT.test(s.run ?? '') ? { ...s, with: { ref: `run: ${s.name}` } } : s))
+  .filter((s) => s.with?.ref?.startsWith('run: ') || (s.uses?.startsWith('actions/checkout@') && (s.with?.path ?? '.') === root))
+  .pop();
 const rootOf = (install) => install.uses.slice(2, -ACTION.length - 1) || '.';
 
 const versionOf = (step) => step.with?.['node-version'] ?? step.with?.['node-version-file'];
@@ -91,21 +97,26 @@ test('after a checkout of another commit, node-dist runs only if that tree holds
       const setupAt = steps.findIndex((s, i) => i > at && s.uses?.startsWith('actions/setup-node@'));
       if (OWN_COMMIT.has(ref)) {
         assert.notEqual(install.if, GUARD, `${name}: the workflow's own commit holds the action`);
-        assert.equal(steps.some((s) => s.if === FALLBACK), false, `${name}: no fallback after a checkout of the workflow's own commit`);
+        assert.equal(steps.some(inFallback), false, `${name}: no fallback after a checkout of the workflow's own commit`);
         return;
       }
       guarded += 1;
       assert.equal(rootOf(install), '.', `${name}: only the workspace checkout can predate the action`);
       assert.equal(install.if, GUARD, `${name}: node-dist runs only when ${ref} holds it`);
       assert.equal(steps[setupAt].if, GUARD, name);
-      const fallbacks = steps.filter((s) => s.if === FALLBACK);
-      assert.equal(fallbacks.length, 1, `${name}: one fallback`);
-      const [fallback] = fallbacks;
-      assert.ok(steps.indexOf(fallback) > setupAt, name);
-      assert.match(fallback.uses, /^actions\/setup-node@/, name);
-      assert.equal(fallback.with.token, undefined, `${name}: the fallback is the previous step, unchanged`);
-      for (const key of ['cache', 'cache-dependency-path', 'registry-url', 'package-manager-cache']) {
-        assert.equal(fallback.with[key], steps[setupAt].with[key], `${name}: ${key}`);
+      const fallbacks = steps.filter(inFallback);
+      assert.equal(steps.filter((s) => s.if === FALLBACK).length, 1, `${name}: one fallback`);
+      for (const fallback of fallbacks) {
+        assert.ok(steps.indexOf(fallback) > setupAt, name);
+        assert.match(fallback.uses, /^actions\/setup-node@/, name);
+        assert.equal(fallback.with.token, undefined, `${name}: the fallback is the previous step, unchanged`);
+        for (const key of ['cache', 'cache-dependency-path', 'registry-url', 'package-manager-cache']) {
+          assert.equal(fallback.with[key], steps[setupAt].with[key], `${name}: ${key}`);
+        }
+      }
+      // Only the previous retry joins the fallback: it runs after a failed fallback attempt.
+      for (const retry of fallbacks.filter((s) => s.if !== FALLBACK)) {
+        assert.equal(retry.if, `${FALLBACK} && steps['setup-node'].outcome != 'success'`, name);
       }
     });
   }
