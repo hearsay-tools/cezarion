@@ -704,6 +704,49 @@ gh workflow run ci.yml --ref <branch> -f squeal_coverage_proof=true
 their artifacts and the steps' scripts; `.github/scripts/squeal-coverage-proof.test.cjs` pins the
 comparison.
 
+### Squeal packaged test trial
+
+A manual trial checks whether Squeal's one-shot quality gate can measure code that only the
+packaged tests load, with configuration Squeal already supports: a node:test entry with a
+`prepare` command, and child-process coverage (hearsay-tools/squeal spec 020 D12 and D15, row
+020-32; hearsay-tools/squeal#194). Today `squeal code --base origin/main` reads such functions
+as `no-loader`, because no runner lists `packages/cezar/test/e2e`. The trial runs only on request.
+To replay the change that hearsay-tools/squeal#194 reports, hearsay-tools/cezarion#3297:
+
+```bash
+gh workflow run ci.yml --ref <branch> -f squeal_package_trial=true \
+  -f squeal_package_trial_commit=b12aed82bd9e3f7d96d8fd868fd641c9d874b307
+```
+
+- Only a dispatch with `squeal_package_trial` and no `pr_number` takes the trial. Every other
+  dispatch, including the bare proof of a `ci.yml` change (§ Proving a `ci.yml` change), is
+  unchanged. Dispatches of one branch share a concurrency group and cancel each other, so start
+  the trial after the bare proof ends.
+- Without `squeal_package_trial_commit`, the trial measures the dispatched commit against
+  `origin/main`. With a full commit SHA, it measures that commit against its first parent.
+- `squeal.config.json` in the repository does not change. The gate reads `prepare` and
+  `coverage.children` at the merge base, so the `Squeal packaged test trial` job
+  (`squeal-package-trial`) builds two local commits: the merge base, and the measured commit's
+  tree on top of it, each with two keys added to its `squeal.config.json`. The keys are a
+  node:test entry `test:package` (`npm run test:package` without its wrapper: the `cwd` and
+  `argv` of `test:unit`, `include: ["test/e2e/*.test.ts"]`, and `prepare`
+  `npm --prefix ../.. run build`, 600 seconds) and `coverage.children: true`.
+- The job checks out the local head, installs its dependencies, sets up Squeal's action and runs
+  `squeal code --base squeal-package-trial-base --json --timeout 1200`. The gate runs the
+  `prepare` build before the first selected packaged test file; its output goes to the log.
+- Its job summary gives the measured commit, the verdict and exit code, the changed functions by
+  state, each runner's run with its `prepare` result and child coverage files, and a table of the
+  changed functions that the packaged tests load or that are not `pass`. The
+  `squeal-package-trial` artifact holds `report.json` (`squeal-code-gate/1`), the gate's stderr,
+  exit code and time, the two `squeal.config.json` files the gate read and `commits.json`, kept
+  14 days.
+- Nothing depends on it. The job is outside `verify.needs` and the merge-queue roster, only a
+  manual dispatch runs it, every step continues on error and the job sets `continue-on-error`.
+
+`.github/scripts/ci-squeal-package-trial.workflow.test.cjs` pins the trigger, the trial keys
+against `scripts/test-package.mjs` and `test:unit`, the local commits, the gate command and the
+summary.
+
 ### Upstream scan PRs
 
 The weekly upstream scan also creates PRs with the repository's existing release
