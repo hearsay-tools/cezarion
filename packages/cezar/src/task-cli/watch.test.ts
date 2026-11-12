@@ -392,14 +392,19 @@ describe('cez task watching against a scripted cockpit', () => {
   });
 
   it('wait reports a connection lost mid-budget as unavailable (exit 2), not a timeout', async () => {
-    // The socket dies 750ms into a 1s budget — inside the abort grace window,
+    // The socket dies 800ms into a 1s budget on a fake clock: inside the abort grace window,
     // but not an abort, so the exact deadline check still applies.
-    handler = (req, res) => {
-      if (req.url === '/api/v1/p/default/run-summaries') setTimeout(() => res.destroy(), 750);
-      else { res.statusCode = 404; res.end(); }
-    };
-    expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(2);
-    expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'unavailable' });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      handler = (req, res) => {
+        if (req.url === '/api/v1/p/default/run-summaries') {
+          vi.setSystemTime(Date.now() + 800);
+          res.destroy();
+        } else { res.statusCode = 404; res.end(); }
+      };
+      expect(await run(['wait', 'r1', '--timeout-seconds', '1'])).toBe(2);
+      expect(JSON.parse(out.at(-1)!)).toMatchObject({ code: 'unavailable' });
+    } finally { vi.useRealTimers(); }
   });
 
   it('falls back to GET /runs when an older cockpit has no summary route (#817)', async () => {

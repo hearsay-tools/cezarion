@@ -325,9 +325,9 @@ describe('a run stopped by a usage limit resumes itself', () => {
         { timeout: 20_000 },
       )
       .toBe(2);
-    // Give a stampede every chance to happen before asserting it did not.
-    // bound: negative window. A stampede starts the queued runs in the same pump, so 1 s covers that pump and the runs' setup.
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    // A stampede would start the queued runs from the pump the parks kick; once every engine call
+    // has settled, any run that pump started carries `startedAt`.
+    await fixtureWorkSettled(repoRoot);
     const started = runs.filter((r) => store.getRun(r.id)?.startedAt !== undefined);
     expect(started).toHaveLength(2);
     expect(runs.filter((r) => store.getRun(r.id)?.status === 'queued')).toHaveLength(3);
@@ -365,8 +365,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
         { timeout: 20_000 },
       )
       .toBe(1);
-    // bound: negative window, as above: a second start would come in the same pump as the first.
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    // As above: a second start would come from the pump the first park kicks.
+    await fixtureWorkSettled(repoRoot);
     expect(runs.filter((r) => store.getRun(r.id)?.startedAt !== undefined)).toHaveLength(1);
     // Handed back untouched — plain `queued`, no half-started record left behind.
     expect(runs.filter((r) => store.getRun(r.id)?.status === 'queued')).toHaveLength(4);
@@ -476,8 +476,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // touch it — otherwise the failsafe becomes the stampede.
     await vi.advanceTimersByTimeAsync(QUEUE_WATCHDOG_MS);
     await Promise.all([...fixtureWork(manager).pending].filter(([, label]) => label === 'rescueStalledQueue').map(([work]) => work));
-    // bound: negative window. `rescueStalledQueue` has returned, so a start it triggered would be recorded in the pump it kicked; 500 ms covers that.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // A start the watchdog triggered would come from the pump it kicked; settle that and its launch.
+    await fixtureWorkSettled(repoRoot);
     expect(store.getRun(waiting.id)?.startedAt).toBeUndefined();
 
     // Now the wedge: the holder keeps holding but has no deadline anyone is waiting for, and
@@ -517,8 +517,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await expect.poll(() => store.getRun(waiting.id)?.startedAt, { timeout: 20_000 }).toBeDefined();
     // …and it STAYS started. A bounce at the second gate shows up as a return to `queued` with
     // `startedAt` cleared, which is exactly what the first assertion alone would miss.
-    // bound: negative window. The second gate runs in the same start path, right after the first; 500 ms covers it.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // The second gate runs in the same start path, right after the first: settle that path.
+    await fixtureWorkSettled(repoRoot);
     expect(store.getRun(waiting.id)?.status).not.toBe('queued');
     expect(
       store
@@ -597,8 +597,10 @@ describe('a run stopped by a usage limit resumes itself', () => {
     first.dispose();
 
     const runs = [a, b];
+    // Cancelling a's resume settled it `failed` (owner, 2026-10-21); put it back on hold, or only b
+    // could ever probe and the count below could not tell a held resume from a missing one.
     for (const run of runs) {
-      store.updateRun(run.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
+      setRunStatus(store, run.id, RUN_STATUS.waiting, { autoResumeAt: new Date(Date.now() - 1_000).toISOString(), finishedAt: undefined });
     }
     manager = createFixtureManager(store, repoRoot, { home: testHome(), semaphore });
     await manager.recover();
@@ -609,8 +611,8 @@ describe('a run stopped by a usage limit resumes itself', () => {
         store.getRun(r.id)?.steps.some((s) => s.id.startsWith('continue-') && s.status === 'failed'),
       ).length;
     await expect.poll(spawned, { timeout: 30_000 }).toBe(1);
-    // bound: negative window. The second probe would spawn in the same pump as the first, so 1.5 s covers that pump and its spawn.
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    // The second probe would spawn from the pump the first one's park kicks; settle it and its spawn.
+    await fixtureWorkSettled(repoRoot);
     expect(spawned()).toBe(1);
   }, 90_000);
 
