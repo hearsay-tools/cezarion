@@ -390,6 +390,14 @@ CI and review recognize the configured `RELEASE_APP_BOT_LOGIN`
 as well as legacy `github-actions[bot]` bumps, with the same file and version
 checks. See [release App setup](../publishing.md#release-app-setup).
 
+### Pinned actions
+
+Workflows pin each action to a full commit SHA, most with the release tag in a comment
+(`uses: owner/action@<commit> # v<version>`). Dependabot (`.github/dependabot.yml`) checks
+these actions weekly and opens one pull request that moves every outdated pin, and its
+version comment, to a newer release. That includes Squeal's action, which it follows through
+Squeal's `v<version>` tags (§ Squeal shared results).
+
 ### Checking issue citations
 
 The build/package job's `Check issue citations` step runs
@@ -554,8 +562,9 @@ can import those passes instead of running the same test files again
 unchanged command and exit code, the action's pin and its place after Node in each job, both
 jobs' permissions, the publish job's token handling and their absence from required checks.
 `.github/scripts/main-ci-escalation.test.cjs` pins the ref check.
-To move to another Squeal release, change the commit and the `# v<version>` comment on every
-`Set up Squeal` step in `ci.yml` together; the workflow test requires one pin.
+Dependabot's weekly actions pull request moves the Squeal pin to a newer `v<version>` tag
+(§ Pinned actions). To move it by hand, change the commit and the `# v<version>` comment on
+every `Set up Squeal` step in `ci.yml` together; the workflow test requires one pin.
 
 ### Squeal quality gate trial
 

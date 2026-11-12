@@ -1,0 +1,11 @@
+# Dependabot moves the commit SHAs every workflow pins its actions to, Squeal's
+# action included, along their release tags. See docs/sdlc/ci.md § Pinned actions.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

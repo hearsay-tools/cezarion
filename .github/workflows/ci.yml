@@ -793,9 +793,9 @@ jobs:
       # A squeal_gate_trial dispatch records too, without its own V8 coverage, so Squeal's
       # provider writes coverage records into the parts for squeal-gate-trial.
       # Squeal's action puts `squeal` on the PATH and runs it with the Node set up above. It is
-      # pinned to a release commit, its version in the comment, and never fails the job: when
-      # Squeal cannot run, `squeal ci record` runs the command alone with its exit code
-      # (hearsay-tools/squeal spec 018 D20).
+      # pinned to a release commit, its version in the comment (Dependabot moves both), and
+      # never fails the job: when Squeal cannot run, `squeal ci record` runs the command alone
+      # with its exit code (hearsay-tools/squeal spec 018 D20).
       - name: Set up Squeal
         if: (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == ''))
         uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
