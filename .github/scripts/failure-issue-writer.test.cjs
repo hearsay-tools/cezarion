@@ -162,39 +162,6 @@ test('a test that fails on rate-limit text still reports',async()=>{
   assert.equal(result.reported,true);assert.equal(result.cause.kind,'test');assert.equal(h.state.issues.length,1);
 });
 
-// A cause whose signature changed (the GitHub request sentence normalization)
-// is one identity under both signatures. Seeds: what the earlier writer, or
-// this one, left; replays: what a rerun of the reporter sees.
-const requestLog='##[error]Resource not accessible by integration. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
-function legacyInput(h) {
-  const current=input(h,requestLog), [{legacySignatures,...cause}]=current.causes;
-  return {...current,causes:[{...cause,signature:legacySignatures[0]}]};
-}
-const seeds={
-  'old complete report':async h=>{await (await create(h)).reportStep(legacyInput(h));},
-  'old reservation with a failed comment':async h=>{h.state.failComment=true;await assert.rejects((await create(h)).reportStep(legacyInput(h)),/comment secret/);},
-  'new report':async h=>{await (await create(h)).reportStep(input(h,requestLog));},
-};
-const replays={
-  'replay with logs':['logs'],
-  'replay without logs':['none'],
-  'repeated replay':['logs','none','logs','none'],
-  'repeated replay, logs last':['none','logs','none','logs'],
-};
-for(const [seedName,seed] of Object.entries(seeds)) for(const [replayName,sequence] of Object.entries(replays)) {
-  test(`${seedName}, ${replayName}: one issue and one occurrence comment`,async()=>{
-    const h=harness();await seed(h);
-    for(const logs of sequence) await (await create(h)).reportStep(input(h,logs==='logs'?requestLog:''));
-    assert.equal(h.state.issues.length,1);
-    const step=h.state.jobs[0].steps.find(entry=>entry.conclusion==='failure').number;
-    const occurrence=new RegExp(`cez-failure-occurrence:v1:${h.state.run.id}:${h.state.run.run_attempt}:${h.state.jobs[0].id}:${step}:`);
-    assert.equal(h.state.comments.filter(comment=>occurrence.test(comment.body)).length,1);
-    // Once a run's logs name the current signature, later runs find the owner
-    // by it in the body. A replay without logs cannot know it.
-    if(seedName==='new report' || sequence.includes('logs')) assert.ok(h.state.issues[0].body.includes(`cez-failure-signature:v1:${input(h,requestLog).causes[0].signature}`));
-  });
-}
-
 test('a quota error before an independent error still reports the independent error',async()=>{
   const h=harness();
   const [result,...rest]=await (await create(h)).reportStep(input(h,rateLimited('08C0:1C9592:4FCCB:842A3:6AF6010B','2026-11-12 18:10:19')+'\nTypeError: build failed'));

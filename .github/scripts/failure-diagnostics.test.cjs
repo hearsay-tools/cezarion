@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fixture = require('./fixtures/release-failure.json');
-const { causesForStep, sanitize, hash, isQuotaCause } = require('./failure-diagnostics.cjs');
+const { causesForStep, sanitize, isQuotaCause } = require('./failure-diagnostics.cjs');
 const release = () => ({run: fixture.run, job: fixture.jobs[0], step: fixture.jobs[0].steps.find(s => s.conclusion === 'failure'), log: fixture.log});
 
 test('real Release test failure matches Nightly despite different job and step names', () => {
@@ -119,22 +119,10 @@ test('excerpt boundaries cannot expose private key tails',()=>{
  assert.doesNotMatch(causesForStep(a)[0].excerpt,/short-private-fragment/);
 });
 
-test('GitHub request IDs and timestamps do not split one error into many causes',()=>{
- // hearsay-tools/squawk#3416 to hearsay-tools/squawk#3423: eight shards, one error, eight signatures.
- const line=(id,at)=>`##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID ${id} and timestamp ${at}. For more on scraping GitHub, review our Terms of Service.`;
- const causes=[['D078:25955F:A505FA:204CE77:6AF6013F','2026-11-12 18:11:11 UTC'],['08C0:1C9592:4FCCB:842A3:6AF6010B','2026-11-12 18:10:19 UTC'],['1440:4495E:83B2DE:1A20552:6AF6012D','2026-11-12 18:10:53 UTC']]
-  .map(([id,at])=>causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Set up Node.js'},log:line(id,at)})[0]);
- assert.equal(new Set(causes.map(cause=>cause.signature)).size,1);
- assert.equal(causes[0].failureIdentity,'##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID <request-id> and timestamp <timestamp>. For more on scraping GitHub, review our Terms of Service.');
- const other=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Set up Node.js'},log:'##[error]Unable to find Node version 24.21.0 for platform linux'})[0];
- assert.notEqual(other.signature,causes[0].signature);
-});
-
-test('timestamps outside the GitHub request sentence still identify tests',()=>{
+test('timestamps in test names still identify tests',()=>{
  const log='FAIL src/a.test.ts > formats 2026-11-12T18:10:53Z\nAssertionError: expected format\nFAIL src/a.test.ts > formats 2026-11-13T18:10:53Z\nAssertionError: expected format';
  const causes=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Run unit tests'},log});
  assert.equal(causes.length,2);assert.notEqual(causes[0].signature,causes[1].signature);
- assert.ok(causes.every(cause=>!cause.legacySignatures));
 });
 test('a GitHub quota error never hides an independent error in the same step',()=>{
  const step={number:5,name:'Build application'};
@@ -144,9 +132,12 @@ test('a GitHub quota error never hides an independent error in the same step',()
  const [quota]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:log.split('\n')[0]});
  assert.equal(isQuotaCause(quota),true);
 });
-test('a cause whose GitHub request sentence was normalized keeps its earlier signature',()=>{
- const step={number:5,name:'Publish'}, log='##[error]Resource not accessible by integration. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
- const [cause]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log});
- assert.deepEqual(cause.legacySignatures,[hash(`publishing:Publish:${log}`)]);
- assert.notEqual(cause.signature,cause.legacySignatures[0]);
+test('non-quota signatures stay exactly as before quota filtering, so replays find existing reports',()=>{
+ // Golden values computed on main before this change; a different value
+ // would make every reporter replay miss its existing issue.
+ const step={number:5,name:'Publish'};
+ const [error]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step,log:'##[error]Resource not accessible by integration. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.'});
+ assert.equal(error.signature,'74547ae640086bd81b68b625b1ac1e1a06c5923b9e435d627424f0bfa3d83c06');
+ const [testCause]=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:8,name:'Run unit tests'},log:'FAIL src/a.test.ts > formats 2026-11-12T18:10:53Z\nAssertionError: expected 0x1f after 12ms'});
+ assert.equal(testCause.signature,'64a6c7691f8b8ac74558237bf32bf2a7a924d6f1a013cfe27fc55a4cdea0753e');
 });

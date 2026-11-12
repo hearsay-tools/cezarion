@@ -78,44 +78,25 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
   }
 
   // Replaces recorded empty-log causes with merged evidence, or with the
-  // previously recorded causes when this step's own log matches them. All
-  // signatures one issue recorded for the step are aliases of one cause; the
-  // one already in the issue body leads.
+  // previously recorded causes when this step's own log matches them.
   function effectiveCausesFor(causes,fallback,recorded) {
     if(fallback && recorded.has(fallback.signature)) {
       return [{...fallback,excerpt:causes.map(cause=>cause.excerpt).join('\n').slice(0,4000)}];
     }
     if(fallback && causes[0]?.signature===fallback.signature && recorded.size) {
-      const byIssue=new Map();
-      for(const [signature,issue] of recorded) byIssue.set(issue.number,{issue,signatures:[...(byIssue.get(issue.number)?.signatures||[]),signature]});
-      return [...byIssue.values()].map(({issue,signatures})=>{
-        const inBody=signature=>(issue.body||'').includes(marker('signature',signature));
-        const [signature,...aliases]=[...signatures.filter(inBody),...signatures.filter(value=>!inBody(value))];
-        return {...fallback,signature,...(aliases.length?{legacySignatures:aliases}:{}),title:sanitize(issue.title)};
-      });
+      return [...recorded].map(([signature,issue])=>({...fallback,signature,title:sanitize(issue.title)}));
     }
     return causes;
   }
 
-  // An owner found through an alias also takes the cause's current signature
-  // marker, so later runs find it from the body alone.
-  async function claimSignature(issue,signature) {
-    const body=issue.body||'';
-    if(body.includes(signature)) return;
-    if(body.length+signature.length+1>60000) {log(`Issue #${issue.number} is too long to take a signature marker; later runs may not find it.`);return;}
-    await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}',{...base,issue_number:issue.number,body:`${body}\n${signature}`});
-    issue.body=`${body}\n${signature}`;written.add(issue.number);
-  }
-
   // An issue that already carries this occurrence marker, and whether a
   // comment (not just the body) recorded it.
-  async function findExistingTarget(matches,occurrences,run) {
+  async function findExistingTarget(matches,occurrence,run) {
     let target,alreadyReported=false;
-    const holds=text=>occurrences.some(occurrence=>text?.includes(occurrence));
     for(const issue of matches.filter(entry=>mayHoldOccurrence(entry,run))) {
       const entries=await commentsFor(issue);
-      if(entries.some(comment=>holds(comment.body))) {target=issue;alreadyReported=true;break;}
-      if(holds(issue.body||'')) target=issue;
+      if(entries.some(comment=>comment.body?.includes(occurrence))) {target=issue;alreadyReported=true;break;}
+      if((issue.body||'').includes(occurrence)) target=issue;
     }
     return {target,alreadyReported};
   }
@@ -131,24 +112,15 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
   }
 
   // Deduplicates, reports and logs one cause of one step. Returns its single result.
-  // A cause is one identity under all its signatures: the current one and
-  // those records written before a signature change carry. An issue that
-  // records any alias in its body, or in this step's occurrence markers,
-  // owns every alias.
-  async function reportCause({cause,failureIssues,recorded,run,job,step,runUrl,labels,bodyFor}) {
-    const signatures=[cause.signature,...(cause.legacySignatures||[])];
-    const signatureMarkers=signatures.map(value=>marker('signature',value));
-    const occurrences=signatures.map(value=>marker('occurrence',`${run.id}:${run.run_attempt}:${job.id}:${step.number}:${value}`));
-    const [signature]=signatureMarkers, [occurrence]=occurrences;
-    const owns=issue=>signatureMarkers.some(value=>(issue.body||'').includes(value))
-      || signatures.some(value=>recorded.get(value)?.number===issue.number);
-    const matches=failureIssues.filter(owns).sort((a,b)=>b.number-a.number);
-    const {target:found,alreadyReported}=await findExistingTarget(matches,occurrences,run);
-    if(alreadyReported) {await claimSignature(found,signature);return {issue:found,cause,reported:false};}
+  async function reportCause({cause,failureIssues,run,job,step,runUrl,labels,bodyFor}) {
+    const signature=marker('signature',cause.signature);
+    const occurrence=marker('occurrence',`${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature}`);
+    const matches=failureIssues.filter(issue=>(issue.body||'').includes(signature)).sort((a,b)=>b.number-a.number);
+    const {target:found,alreadyReported}=await findExistingTarget(matches,occurrence,run);
+    if(alreadyReported) return {issue:found,cause,reported:false};
     if(createdOccurrences>=maxOccurrences) throw new FailureWriterLimitError('occurrence-limit');
     let target=found||matches.find(issue=>issue.state==='open');
-    if(target) await claimSignature(target,signature);
-    else target=await createTargetIssue({cause,matches,failureIssues,runUrl,signature,occurrence,labels,bodyFor});
+    if(!target) target=await createTargetIssue({cause,matches,failureIssues,runUrl,signature,occurrence,labels,bodyFor});
     const comment=commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/${owner}/${repo}/actions/runs/${run.id}/job/${job.id}`,occurrence});
     await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments',{...base,issue_number:target.number,body:comment});
     createdOccurrences++;written.add(target.number);comments.get(target.number)?.push({body:comment});
@@ -167,7 +139,7 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
     const effectiveCauses=effectiveCausesFor(causes,causesForStep({run,job,step,log:''})[0],recorded);
     const results=[];
     for(const cause of effectiveCauses) {
-      results.push(await reportCause({cause,failureIssues,recorded,run,job,step,runUrl,labels,bodyFor}));
+      results.push(await reportCause({cause,failureIssues,run,job,step,runUrl,labels,bodyFor}));
     }
     return results;
   }
