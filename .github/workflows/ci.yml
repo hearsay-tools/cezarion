@@ -1007,12 +1007,14 @@ jobs:
     steps:
       - name: Check out the pushed commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        continue-on-error: true
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Warn when the Squeal ref is missing
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        continue-on-error: true
         with:
           script: |
             const { squealRefWarning } = require('./.github/scripts/squeal-ref-warning.cjs');

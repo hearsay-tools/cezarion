@@ -91,6 +91,8 @@ test('the Squeal ref check runs on main pushes only, reads only, and is not requ
   assert.equal(job.if, "github.event_name == 'push' && github.ref == 'refs/heads/main'");
   assert.deepEqual(job.permissions, { contents: 'read' });
   assert.equal(job['continue-on-error'], undefined);
+  // A warning-only job never turns the push run red: each step continues on error instead.
+  for (const s of job.steps) assert.equal(s['continue-on-error'], true, s.name);
   const needs = (id) => [].concat(jobs[id].needs ?? []);
   for (const id of Object.keys(jobs)) assert.ok(!needs(id).includes('squeal-ref-check'), `${id} must not need it`);
 });
