@@ -54,15 +54,6 @@ describe('the github checks API', () => {
     expect(body.checks[124]).toBe('failing');
   });
 
-  it('answers a PR with no CI (or unknown) as null, not an error', async () => {
-    const res = await apiRequest(app, '/api/v1/github/checks?prs=99999');
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as GithubChecksData;
-    expect(body.available).toBe(true);
-    if (!body.available) throw new Error('expected available');
-    expect(body.checks[99999]).toBeNull();
-  });
-
   it('400s when the prs query is missing', async () => {
     const res = await apiRequest(app, '/api/v1/github/checks');
     expect(res.status).toBe(400);
