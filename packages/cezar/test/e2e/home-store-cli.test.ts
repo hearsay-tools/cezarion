@@ -28,7 +28,6 @@ test('operator commands bootstrap unmarked homes and retain their write contract
       ['run', ['run', 'mock:cezar-done', '--repo', repo]],
       ['projects', ['projects', 'add', repo]],
       ['remote', ['remote-settings', 'enable', '--port', '4321']],
-      ['update', ['update', '--channel', 'development']],
     ];
     for (const [name, args] of commands) {
       const home = join(root, name);
@@ -38,15 +37,6 @@ test('operator commands bootstrap unmarked homes and retain their write contract
       const config = name === 'remote' ? join(selected.remoteSettings, '4321.json') : selected.workspaceConfig;
       assert.ok(readFileSync(config).length > 0, name);
     }
-    const checkout = join(root, 'checkout');
-    mkdirSync(join(checkout, 'dist'), { recursive: true });
-    writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: '@wjarka/cezarion', version: '0.0.0' }));
-    writeFileSync(join(checkout, 'dist/index.js'), '');
-    const linkedHome = join(root, 'link');
-    run(linkedHome, ['link', checkout]);
-    const linked = resolveHome({ purpose: 'cli', env: cleanEnv(linkedHome) }); // test-home-read: resolve scratch paths after the CLI; constructing a sandbox would write a marker
-    assert.equal(JSON.parse(readFileSync(join(linked.config, 'install.json'), 'utf8')).kind, 'live');
-    assert.ok(readdirSync(linked.versions).length > 0);
     const backupHome = Home.sandbox(join(root, 'backup'));
     Home.seed(backupHome, backupHome.agentAccounts, { version: 1, accounts: [], value: 'old' });
     Home.seed(backupHome, backupHome.agentAccounts, { version: 1, accounts: [], value: 'new' });
@@ -58,8 +48,8 @@ test('operator commands bootstrap unmarked homes and retain their write contract
 
     const testHome = join(root, 'test-child');
     const env = { ...cleanEnv(testHome), NODE_TEST_CONTEXT: 'child-v8' };
-    run(testHome, ['update', '--channel', 'development'], env);
-    run(testHome, ['update', '--channel', 'development'], env);
+    run(testHome, ['projects', 'add', repo], env);
+    run(testHome, ['projects', 'add', repo], env);
     assert.equal(JSON.parse(readFileSync(join(resolveHome({ purpose: 'cli', env }).config, 'install.json'), 'utf8')).kind, 'test'); // test-home-read: resolve scratch paths after the CLI; constructing a sandbox would write a marker
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

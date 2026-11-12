@@ -68,16 +68,22 @@ test('a shipped restart helper sees the listener acknowledgement and matching he
     env: { ...process.env, CEZ_HOME: home, HSQ_HOME: home, CEZ_DRY_RUN: '1', HSQ_DRY_RUN: '1', CEZ_REMOTE: '0', HSQ_REMOTE: '0' },
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
+  let deadline: NodeJS.Timeout | undefined;
   try {
     const [message] = await Promise.race([
       once(child, 'message') as Promise<[unknown]>,
       once(child, 'exit').then(([code]) => { throw new Error(`the new release exited before acknowledging: ${String(code)}`); }),
+      new Promise<never>((_, reject) => {
+        // bound: the shipped helper gives up after 20 s; a silent child must still reach the kill below.
+        deadline = setTimeout(() => reject(new Error('the new release did not acknowledge within 20 seconds')), 20_000);
+      }),
     ]);
     assert.deepEqual(message, { type: 'application-update-listening', host: '127.0.0.1', port, repoRoot, version });
     const answer = await health(port);
     assert.equal(answer.version, version);
     assert.equal(answer.repoRoot, repoRoot);
   } finally {
+    clearTimeout(deadline);
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit');
       child.kill('SIGKILL');

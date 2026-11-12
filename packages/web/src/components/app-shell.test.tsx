@@ -968,11 +968,18 @@ describe('AppShell', () => {
       })
     })
 
-    it('shows the version in the identity row and no update row', () => {
+    it('shows the version in the identity row and marks a newer release without an update action', () => {
       renderShell('/', { version: '1.0.0', latestVersion: '1.2.0' })
       openMenu()
-      expect(drawer()?.querySelector('[data-slot="drawer-update"]')).toBeNull()
-      expect(drawer()?.querySelector('[data-slot="drawer-version"]')?.textContent).toBe('v1.0.0')
+      const version = drawer()?.querySelector('[data-slot="drawer-version"]') as HTMLElement
+      expect(version.textContent).toBe('v1.0.0')
+      expect(version.getAttribute('data-update-available')).toBe('true')
+      expect(version.getAttribute('title')).toBe('v1.0.0 — update available: v1.2.0')
+      expect(within(drawer() as HTMLElement).queryByRole('button', { name: /update|restart/i })).toBeNull()
+      cleanup()
+      renderShell('/', { version: '1.2.0', latestVersion: '1.2.0' })
+      openMenu()
+      expect(drawer()?.querySelector('[data-slot="drawer-version"]')?.getAttribute('data-update-available')).toBeNull()
     })
 
     it('closes when the viewport widens past md, where the real sidebar takes over', async () => {

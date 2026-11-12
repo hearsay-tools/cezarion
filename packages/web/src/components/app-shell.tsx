@@ -559,7 +559,7 @@ function MobileNavDrawer({
     >
       {/* The dialog's accessible name. Visually redundant with the identity row below. */}
       <SheetTitle className="sr-only">Navigation</SheetTitle>
-      <DrawerIdentity version={release.version} />
+      <DrawerIdentity version={release.version} latestVersion={release.latestVersion} />
       {/* One scroll: Projects, then the workspace links. The safe-area insets are the identity
           row's and the global rows', so the content between them takes none of its own. */}
       <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">

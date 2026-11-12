@@ -7,6 +7,7 @@ import { CheckIcon, FolderPlusIcon, LayersIcon, Settings2Icon, SunMoonIcon, Wren
 import { ProjectMenu } from '@/components/sidebar-project-header'
 import { ProjectStateWords } from '@/components/project-state-words'
 import { StatusDot } from '@/components/status-dot'
+import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 import { SignalPill, signalPillSegments } from '@/components/signal-pill'
 import { useTheme } from '@/components/theme-provider'
 import { NEXT_THEME } from '@/components/theme-toggle'
@@ -59,15 +60,21 @@ export function MenuButtonPills({ elsewhere }: { elsewhere: ProjectSignal | null
 }
 
 /** Brand row: app mark, name, version and the close button. The brand lives here and on the rail. */
-export function DrawerIdentity({ version }: { version: string | null }) {
+export function DrawerIdentity({ version, latestVersion = null }: { version: string | null; latestVersion?: string | null }) {
   const { resolvedTheme } = useTheme()
+  const updateAvailable = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
   return (
     <div data-slot="drawer-identity" className="flex shrink-0 items-center gap-[12px] border-b border-border pt-[env(safe-area-inset-top)] pr-[14px] pb-[14px] pl-[18px]">
       <img src={`/cezarion-mark-${resolvedTheme}.svg`} alt="" aria-hidden="true" className="mt-[14px] size-[32px] rounded-lg" />
       <span className="mt-[14px] text-[18px] leading-none font-bold tracking-[-0.02em] text-foreground">{productName('Cezarion')}</span>
       {/* A nightly or preview build's version is long: it truncates (full text on hover) instead of
           pushing the Close button out of the row. */}
-      {version ? <span data-slot="drawer-version" title={`v${version}`} className="mt-[14px] min-w-0 truncate text-[11px] leading-none text-soft-foreground">v{version}</span> : null}
+      {version ? <span data-slot="drawer-version" data-update-available={updateAvailable ? 'true' : undefined}
+        title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
+        className="mt-[14px] min-w-0 truncate text-[11px] leading-none text-soft-foreground">
+        {updateAvailable ? <StatusDot tone="pending" className="mr-1 inline-block size-[5px] align-middle" /> : null}
+        v{version}
+      </span> : null}
       <SheetClose asChild>
         {/* 44px, not the mock's 40: the spec's mobile touch-target floor wins. */}
         <Button variant="ghost" size="icon" aria-label="Close menu" className="mt-[14px] ml-auto size-[44px] text-foreground">
