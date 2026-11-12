@@ -46,6 +46,24 @@ it. A different attempt gets a separate summary, even when it reuses signature
 reports. The reporter never reopens a closed report. It changes no Cezar run state
 and adds no database or required configuration.
 
+## Escalation after 60 minutes
+
+The scheduled workflow `main-ci-escalation.yml` runs every 10 minutes on the default
+branch (and on dispatch). It lists open issues with `main-ci-failure`. For each summary
+open 60 minutes or longer, it posts one comment that mentions the repository's admins
+(the collaborators with the admin role, read from the API) and carries the marker
+`<!-- cez-main-ci-escalation:v1 -->`. A later run finds the marker and writes nothing, so a
+summary is mentioned once. A closed summary is not listed and gets no mention. A pull
+request never gets one.
+
+- The 60 minutes count from the summary's creation, not from the label.
+- With no admin to mention, the run fails before any write, and the next run tries again.
+- It changes no label, closes nothing and starts no task. The repair automation runs as before.
+- It holds `issues: write` and `contents: read`, and it runs trusted default-branch code only.
+  The concurrency group `main-ci-escalation` is the write lock.
+
+`.github/scripts/main-ci-escalation.test.cjs` pins these rules.
+
 ## Local automation and repair ownership
 
 The Cezar automation **Main CI — guarded repair** polls `issue.labeled` every five

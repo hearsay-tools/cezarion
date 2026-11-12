@@ -1,0 +1,44 @@
+# Mentions the owner once on a `main-ci-failure` summary that is still open 60 minutes after
+# it opened (docs/sdlc/main-ci-repair.md § Escalation; hearsay-tools/cezarion#3293). It runs
+# trusted default-branch code and executes no failed-run artifact.
+name: Escalate Main CI Failure
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+# The comment write lock: two runs never both find the marker absent.
+concurrency:
+  group: main-ci-escalation
+  cancel-in-progress: false
+
+jobs:
+  escalate:
+    # A dispatch from another branch never runs its own revision against the issue API.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out trusted escalation code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Mention the owner on stale summaries
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          # A comment may have been written before an HTTP error reached us; the next run
+          # reads the marker before it writes.
+          retries: 0
+          script: |
+            const { escalateMainCiFailures } = require('./.github/scripts/main-ci-escalation.cjs');
+            const result = await escalateMainCiFailures({ github, ...context.repo, log: core.info });
+            core.summary.addRaw(`Open \`main-ci-failure\` summaries: ${result.open}; past 60 minutes: ${result.due}; newly mentioned: ${result.mentioned.length}.\n`);
+            await core.summary.write();
