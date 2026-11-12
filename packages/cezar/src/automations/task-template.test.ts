@@ -1,5 +1,6 @@
 import { productName } from '../home/display.ts';
 import { testHome } from '../home/test-home.testkit.ts';
+import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -180,6 +181,26 @@ describe('automation task templates', () => {
       expect(startRun).not.toHaveBeenCalled();
       expect(result).toMatchObject({ runId: existing.id, existing: true });
       expect(store.getRun(existing.id)?.automation?.receiptId).not.toBe('new');
+    } finally { store.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
+  it('finds a task that names the issue under the old name origin still carries after a rename', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-renamed-launch-'));
+    execFileSync('git', ['init', '-q', root]);
+    execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'init']);
+    execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/acme/old-demo.git']);
+    let store = RunStore.open(join(root, '.ai/cezar'));
+    try {
+      const existing = store.createRun({ title: 'Manual task', workflow: 'quick-task', task: 'Work', steps: [] });
+      store.updateRun(existing.id, { referencedIssueUrl: 'https://github.com/acme/old-demo/issues/7' });
+      store.close();
+      store = RunStore.open(join(root, '.ai/cezar'));
+      const startRun = vi.fn(() => store.createRun({ title: 'Duplicate', workflow: 'quick-task', task: 'Duplicate', steps: [] }));
+      const result = await launchAutomationRun({ root, store, manager: { startRun } as unknown as RunManager,
+        definition: { ...definition, filters: { ...definition.filters, includeExisting: true } }, candidate, receiptId: 'new',
+      });
+      expect(startRun).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ runId: existing.id, existing: true });
     } finally { store.close(); await rm(root, { recursive: true, force: true }); }
   });
 
