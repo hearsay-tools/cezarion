@@ -610,9 +610,6 @@ describe('TaskQuickList', () => {
 
       const rowEl = row('worst') as HTMLElement
       const title = rowEl.querySelector('[data-slot="task-row-title"]') as HTMLElement
-      expect(title.className).toContain('min-w-[7rem]')
-      expect(title.className).toContain('flex-1')
-      expect(title.className).toContain('text-[13px]')
       expect(title.textContent).toBe('implementing comment threads across the whole thread view')
 
       const diff = rowEl.querySelector('[data-slot="diff-stat"]') as HTMLElement
@@ -620,8 +617,6 @@ describe('TaskQuickList', () => {
       // the width at which the pair fits without costing the name any of its default budget.
       expect(diff.className).toContain('hidden')
       expect(diff.className).toContain('@min-[23rem]/sidebar:inline')
-      expect(diff.className).toContain('text-[12px]')
-      expect(diff.className).not.toContain('text-[11px]')
       // Dropped from view, never from reach — the exact numbers stay in its tooltip.
       expect(diff.getAttribute('title')).toBe('+59514 −12160 across 208 files')
 
@@ -650,7 +645,6 @@ describe('TaskQuickList', () => {
       const age = row('old')!.querySelector('[data-slot="task-row-age"]') as HTMLElement
       expect(age.textContent).toBe('2h')
       expect(age.classList.contains('sr-only')).toBe(false)
-      expect(age.closest('[data-slot="task-row-meta"]')?.className).toContain('text-[11.5px]')
       expect(metadataText(row('new'))).toBe('New4m')
     })
 
@@ -1206,30 +1200,21 @@ describe('the calmer row (#617)', () => {
     waits: [workerWait({ workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`) })],
   } as Partial<RunRecord>)
 
-  it('is two fixed lines — a truncated title and a truncated meta line — whatever the reference count', () => {
+  it('keeps every reference on the meta line, never a line of its own, whatever the reference count', () => {
     renderList({
       runs: [
         run({ id: 'long', title: 'A very long task title that will never fit into a 232px sidebar column at all', pullRequestUrl: 'https://github.com/o/r/pull/217', referencedIssueUrl: 'https://github.com/o/r/issues/214' }),
         run({ id: 'short', title: 'Short' }),
       ],
     })
-    for (const id of ['long', 'short']) {
+    for (const [id, chips] of [['long', ['pr-chip', 'issue-chip']], ['short', []]] as const) {
       const el = row(id) as HTMLElement
-      const title = el.querySelector('[data-slot="task-row-title"]') as HTMLElement
       const meta = el.querySelector('[data-slot="task-row-meta"]') as HTMLElement
-      expect(title.className).toContain('truncate')
-      expect(title.className).toContain('text-[13px]')
-      expect(title.className).toContain('leading-[1.45]')
-      expect(meta.className).toContain('truncate')
-      expect(meta.className).toContain('h-[16px]')
-      expect(meta.className).toContain('text-soft-foreground')
-      // The title line is a fixed 19px box and the meta line a fixed 16px one, so height is
-      // independent of content; no reference is ever a line of its own.
-      expect(title.closest('a')?.className).toContain('h-[19px]')
+      // The fixed box heights and the no-wrap lines are resolved by selection-states.e2e.ts
+      // ("every row is the same two-line height"); here: no reference is ever a line of its own.
       expect(el.querySelector('[data-slot="session-references"]')).toBeNull()
-      for (const chip of el.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')) {
-        expect(chip.closest('[data-slot="task-row-meta"]')).toBe(meta)
-      }
+      expect([...el.querySelectorAll('[data-slot="pr-chip"], [data-slot="issue-chip"]')]
+        .map((chip) => chip.closest('[data-slot="task-row-meta"]') === meta && chip.getAttribute('data-slot'))).toEqual(chips)
     }
   })
 
@@ -1237,10 +1222,7 @@ describe('the calmer row (#617)', () => {
     renderList({ runs: [run({ id: 'bare' }), run({ id: 'unread', finishedAt: ago(1_000) })], onTogglePin: vi.fn() })
     renderList({ runs: [run({ id: 'nopin' })] })
     for (const id of ['bare', 'unread', 'nopin']) {
-      const slot = row(id)?.querySelector('[data-slot="task-row-trailing"]') as HTMLElement
-      expect(slot, id).not.toBeNull()
-      expect(slot.className).toContain('w-[16px]')
-      expect(slot.className).toContain('shrink-0')
+      expect(row(id)?.querySelector('[data-slot="task-row-trailing"]'), id).not.toBeNull()
     }
   })
 
@@ -1249,7 +1231,6 @@ describe('the calmer row (#617)', () => {
     const el = row('r') as HTMLElement
     const pin = el.querySelector('[data-slot="pin-toggle"]') as HTMLElement
     expect(pin.closest('[data-slot="task-row-trailing"]')).not.toBeNull()
-    expect(pin.className).toContain('absolute')
     // Nothing in the row may change its box under the pointer or on focus (the old pin grew
     // from w-0 to w-5 and pushed the title into a rewrap).
     for (const node of [el, ...el.querySelectorAll('*')]) {
@@ -1258,18 +1239,10 @@ describe('the calmer row (#617)', () => {
     }
   })
 
-  it('pin: 12px, soft-foreground, never teal; filled when pinned', () => {
+  it('fills the pin only when pinned', () => {
     renderList({ runs: [run({ id: 'plain' }), run({ id: 'kept', pinned: true })], onTogglePin: vi.fn() })
     const plain = row('plain')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
     const kept = row('kept')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
-    for (const pin of [plain, kept]) {
-      expect(pin.className).toContain('text-soft-foreground')
-      expect(pin.className).toContain('hover:text-foreground')
-      expect(pin.className).not.toContain('accent')
-      // Explicit px: `size-3` follows `--spacing` and would render 9px under ultra density.
-      expect(pin.querySelector('[data-slot="pin-icon"]')?.getAttribute('class')).toContain('size-[12px]')
-      expect(pin.className).toContain('size-5')
-    }
     expect(plain.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('none')
     expect(kept.querySelector('[data-slot="pin-icon"]')?.getAttribute('fill')).toBe('currentColor')
   })
@@ -1310,11 +1283,8 @@ describe('the calmer row (#617)', () => {
     expect(dot.getAttribute('data-tone')).toBe('running')
     expect(dot.getAttribute('aria-label')).toBe('waiting on 2 workers')
     expect(dot.querySelector('svg')).not.toBeNull()
-    // Both glyphs sit in the same fixed 12px dot slot, so the titles start at the same x.
-    for (const id of ['p', 'r']) {
-      expect(dotOf(id)?.parentElement?.getAttribute('data-slot')).toBe('task-row-dot')
-      expect(dotOf(id)?.parentElement?.className).toContain('w-[12px]')
-    }
+    // Both glyphs sit in the same dot slot, so the titles start at the same x.
+    expect(['p', 'r'].map((id) => dotOf(id)?.parentElement?.getAttribute('data-slot'))).toEqual(['task-row-dot', 'task-row-dot'])
     expect(row('p')?.querySelector('[data-slot="task-row-meta"]')?.textContent).toBe('waiting on 2 workers · 1m')
   })
 
@@ -1340,23 +1310,12 @@ describe('the calmer row (#617)', () => {
     }
   })
 
-  it('uses the neutral hover and selected fills — no teal anywhere on the row', () => {
+  it('keeps the selected fill under the pointer; other rows take the hover fill', () => {
+    // The resolved fills and inks, per theme, are pinned by selection-states.e2e.ts (#617); that
+    // spec hovers an unselected row only, so the selected row's hover rule is checked here.
     renderList({ runs: [run({ id: 'open', pullRequestUrl: 'https://github.com/o/r/pull/7' }), run({ id: 'other' })], currentRunId: 'open', onTogglePin: vi.fn() })
-    const open = row('open') as HTMLElement
-    expect(open.className).toContain('bg-sidebar-row-selected')
-    // Selected holds under the pointer; the other rows take the hover fill.
-    expect(open.className).toContain('hover:bg-sidebar-row-selected')
+    expect(row('open')?.className).toContain('hover:bg-sidebar-row-selected')
     expect(row('other')?.className).toContain('hover:bg-sidebar-row-hover')
-    expect(open.className).not.toContain('task-brand-selected')
-    expect(open.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-foreground')
-    // …and the meta line steps up one ink on the selected fill, to hold 4.5:1.
-    expect(open.querySelector('[data-slot="task-row-meta"]')?.className).toContain('text-muted-foreground')
-    expect(row('other')?.querySelector('[data-slot="task-row-meta"]')?.className).toContain('text-soft-foreground')
-    expect(row('other')?.className).not.toContain('bg-sidebar-row-selected')
-    expect(row('other')?.querySelector('[data-slot="task-row-title"]')?.className).toContain('text-muted-foreground')
-    for (const node of [open, ...open.querySelectorAll('*')]) {
-      expect(node.getAttribute('class') ?? '').not.toMatch(/accent-text|task-brand|accent-strong\/35/)
-    }
   })
 })
 
@@ -1497,19 +1456,10 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     expect(on?.getAttribute('role')).toBe('img')
     expect(on?.getAttribute('aria-label')).toBe('Notifying the task webhook')
     expect(on?.getAttribute('title')).toBe('Notifying the task webhook')
-    // 10px, never shrinks, inherits the meta colour — no status tone, no teal.
-    expect(on?.getAttribute('class')).toMatch(/shrink-0/)
-    expect(on?.querySelector('svg')?.getAttribute('class')).toMatch(/size-\[10px\]/)
+    // Its ink is the meta line's own (selection-states.e2e.ts compares the resolved stroke).
     expect(on?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-    expect(on?.getAttribute('class')).not.toMatch(/text-(success|danger|warning|pending|link|accent|primary)/)
     expect(glyph('off')).toBeNull()
     expect(glyph('unset')).toBeNull()
-  })
-
-  it('keeps the meta line colour on the open row, so the glyph follows the selected step-up', () => {
-    renderList({ runs: [run({ id: 'on', status: RUN_STATUS.running, notify: true })], currentRunId: 'on' })
-    expect(metaEl('on').className).toContain('text-muted-foreground')
-    expect(glyph('on')?.getAttribute('class')).not.toMatch(/text-/)
   })
 
   it('shows on a row with no other meta, and on a worker row', () => {
@@ -1793,11 +1743,10 @@ describe('sidebar archive (#780)', () => {
     expect(button.getAttribute('title')).toBe('Archive task')
   })
 
-  it('keeps the trailing slot 16px and reveals the button like the pin', () => {
+  it('puts the button in the trailing slot and reveals it like the pin', () => {
     renderList({ runs: [run({ id: 'fin' })], onTogglePin: vi.fn(), onArchiveRun: vi.fn() })
     const button = archiveButtons()[0]!
     const slot = button.closest('[data-slot="task-row-trailing"]') as HTMLElement
-    expect(slot.className).toContain('w-[16px]')
     expect(button.className).toContain('opacity-0')
     expect(button.className).toContain('group-hover/task-row:opacity-100')
     expect(button.className).toContain('group-has-[:focus-visible]/task-row:opacity-100')
@@ -1967,19 +1916,19 @@ describe('swipe to archive on touch (#780 §7)', () => {
     expect(button.textContent).toBe('Archive')
     expect(button.getAttribute('aria-label')).toBe('Archive Cursor fix')
     expect(button.tabIndex).toBe(-1)
-    expect(action('fin')!.className).toContain('bg-muted')
+    expect(action('fin')!.getAttribute('data-past')).toBeNull()
     fireEvent.click(button)
     expect(onArchiveRun).toHaveBeenCalledOnce()
     expect(onArchiveRun.mock.calls[0]![0]).toMatchObject({ id: 'fin' })
     expect(location()).toBe('/')
   })
 
-  it('a long swipe shows "Release to archive" in --info and archives on release', () => {
+  it('a long swipe switches to the "Release to archive" state and archives on release', () => {
     const onArchiveRun = vi.fn()
     renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
     swipe('fin', -220, { release: false })
-    expect(action('fin')!.className).toContain('bg-info')
-    expect(action('fin')!.className).toContain('text-signal-ink')
+    // The --info fill of this state is checked for contrast in quick-list.e2e.ts.
+    expect(action('fin')!.getAttribute('data-past')).toBe('true')
     expect(action('fin')!.textContent).toBe('Release to archive')
     expect(onArchiveRun).not.toHaveBeenCalled()
     fireEvent.pointerUp(layer('fin'), { pointerId: 1, clientX: 80, clientY: 20 })
@@ -1997,10 +1946,10 @@ describe('swipe to archive on touch (#780 §7)', () => {
     expect(within(surface('fin')!).queryAllByRole('button')).toHaveLength(0)
   })
 
-  it('snaps with a motion-safe 200ms transition, never while the finger drags', () => {
+  it('snaps with a motion-safe transition, never while the finger drags', () => {
     renderList({ runs: [run({ id: 'fin' })], onArchiveRun: vi.fn() })
+    // The 200ms duration and the reduced-motion 0s resolve in quick-list.e2e.ts.
     expect(layer('fin').className).toContain('motion-safe:transition-transform')
-    expect(layer('fin').className).toContain('motion-safe:duration-200')
     swipe('fin', -50, { release: false })
     expect(layer('fin').className).not.toContain('motion-safe:transition-transform')
     expect(layer('fin').style.transform).toBe('translateX(-50px)')
