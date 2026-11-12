@@ -150,6 +150,20 @@ test('design handling selects dev-flow and allows its human approval gate', () =
   }
 });
 
+test('the design route opens with a recorded live probe per runner and sends back a design without one', () => {
+  const definitions = buildAutomations();
+  const design = definitions.find(d => d.filters.changedLabels.includes('friction-design'));
+  const probe = 'Start with a reproduction. Before you design, run a minimal live probe of the reported failure on each runner the issue names, or on the runner this task runs on when it names none. When the failure is not runtime behaviour, the probe is the smallest command that shows the current state. Record each probe command and its outcome, per runner, in the design.';
+  const sentBack = 'A design that does not record a probe for each runner is sent back at the design gate: do not ask for approval without one.';
+  const { prompt } = design.task;
+  assert.ok(prompt.includes(probe), 'probe step');
+  assert.ok(prompt.includes(sentBack), 'sent-back rule');
+  assert.ok(prompt.indexOf(probe) < prompt.indexOf('Invoke /dev-flow'), 'the probe is the first design step');
+  for (const implementation of definitions.filter(d => d !== design)) {
+    assert.ok(!implementation.task.prompt.includes('live probe'), implementation.name);
+  }
+});
+
 test('the daily digest is a non-autonomous weekday schedule that uses only schedule placeholders', () => {
   const digest = buildDigestAutomation();
   assert.equal(digest.kind, 'schedule');

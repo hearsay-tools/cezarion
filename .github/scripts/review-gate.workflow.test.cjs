@@ -36,17 +36,22 @@ function ancestors(id, chain = []) {
 function descendants(id) {
   return Object.keys(ci.jobs).filter(other => ancestors(other).includes(id));
 }
-test('heavy jobs start after preflight beside review, never behind it', () => {
+test('heavy jobs start without waiting for typecheck, preflight or review', () => {
   for (const id of Object.keys(ci.jobs)) ancestors(id);
   for (const id of heavy) {
-    assert.ok(ancestors(id).includes('preflight'), `${id} must follow preflight`);
+    for (const gate of ['typecheck', 'preflight']) {
+      assert.ok(!ancestors(id).includes(gate), `${id} must not wait for ${gate}`);
+      assert.doesNotMatch(ci.jobs[id].if, new RegExp(gate), `${id} must not read ${gate}`);
+    }
     assert.ok(!ancestors(id).includes('review-result'), `${id} must not wait for review`);
     assert.ok(!ancestors('review-result').includes(id), `${id} must not hold review`);
     assert.doesNotMatch(ci.jobs[id].if, /review-result/, `${id} must not read the review result`);
     assert.match(ci.jobs[id].if, /!cancelled\(\)/, 'intentional skips cannot invoke implicit success()');
   }
   assert.equal(ci.jobs['review-result'].needs, 'preflight');
-  assert.ok(ancestors('verify').includes('review-result'), 'verify must still require review');
+  for (const gate of ['preflight', 'typecheck', 'review-result']) {
+    assert.ok(ci.jobs.verify.needs.includes(gate), `verify must still require ${gate}`);
+  }
 });
 for (const result of ['failure', 'cancelled', 'skipped', '']) {
   test(`review ${result} leaves heavy jobs running but keeps the aggregate red`, () => {
@@ -88,14 +93,36 @@ test('only existing trusted docs/infra/bump exemptions skip shards, never build/
   const ctx = context(); ctx.needs['classify-pr'].outputs.bump_pr = 'true';
   for (const id of heavy.slice(1)) assert.equal(evaluate(ci.jobs[id].if, ctx), false);
 });
-test('cancellation and failed preflight cannot release work or green required gates', () => {
+test('cancellation cannot release work or green required gates', () => {
   const ctx = context(); ctx.cancelled = () => true;
   for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), false);
   for (const id of ['preflight', 'review-result', 'verify', 'queue-review-result']) assert.notEqual(shell(id, { CANCELLED: 'true' }).status, 0);
-  ctx.cancelled = () => false; ctx.needs.preflight.result = 'failure';
-  for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), false);
-  assert.notEqual(shell('verify', { PREFLIGHT_RESULT: 'failure' }).status, 0);
 });
+
+for (const event of ['pull_request_target', 'merge_group', 'workflow_dispatch', 'push']) {
+  for (const result of ['failure', 'cancelled', 'skipped', '', 'pending']) {
+    test(`${event}: typecheck/preflight ${result} lets heavy jobs start but fails the aggregate`, () => {
+      const ctx = context(event);
+      ctx.needs.typecheck = { result };
+      ctx.needs.preflight.result = result;
+      for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), true, id);
+      for (const key of ['TYPECHECK_RESULT', 'PREFLIGHT_RESULT']) {
+        assert.notEqual(shell('verify', { EVENT_NAME: event, [key]: result }).status, 0, key);
+      }
+    });
+  }
+}
+test('heavy PR jobs require immutable test inputs, while non-PR jobs tolerate the skipped resolver', () => {
+  for (const result of ['failure', 'cancelled', 'skipped', '']) {
+    const ctx = context(); ctx.needs['pr-test-input'].result = result;
+    for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
+  }
+  for (const event of ['merge_group', 'workflow_dispatch', 'push']) {
+    const ctx = context(event); ctx.needs['pr-test-input'].result = 'skipped';
+    for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, ctx), true, id);
+  }
+});
+
 test('preflight requires all applicable cheap gates and permits only exact queue proof typecheck reuse', () => {
   assert.equal(shell('preflight').status, 0);
   for (const key of ['CLASSIFY_RESULT', 'SURFACE_RESULT', 'COMPLEXITY_RESULT', 'CLONE_RESULT', 'TYPECHECK_RESULT']) {

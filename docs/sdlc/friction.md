@@ -251,7 +251,7 @@ needs a rerun; no background retry task is created outside the bounded transport
 | --- | --- |
 | `friction-auto` | Verify established intent, implement a bounded remedy, verify, open a ready PR |
 | `friction-guarded` | Name the approved guarantee, reproduce the violation, prove regression red/green, verify neighboring and boundary-specific guarantees, open a ready PR |
-| `friction-design` | Run `/dev-flow` on its Design Track, prefer a bounded design in chat, ask for approval in the same task, then implement and verify before a ready implementation PR |
+| `friction-design` | Probe the failure live on each named runner and record the result, run `/dev-flow` on its Design Track, prefer a bounded design in chat, ask for approval in the same task, then implement and verify before a ready implementation PR |
 
 All three require an open issue by `wjarka`, `friction`, their own handling label,
 no other handling label, exactly one recognized category, and no existing claim,
@@ -285,9 +285,14 @@ The design route selects the `dev-flow` skill in an agent step and sets
 Implementation routes can escalate to a design proposal whenever investigation
 exposes an unresolved decision.
 
+Design tasks start with a reproduction: a minimal live probe of the reported failure on
+each runner the issue names, or on the task's own runner when it names none. The design
+records each probe command and its outcome per runner, and the design gate sends back a
+design without them. For a failure that is not runtime behaviour, the probe is the
+smallest command that shows the current state.
 Design tasks explicitly select `/dev-flow`'s **Design Track**, even when a Direct
 or Micro track might otherwise apply. Prefer a bounded design in chat when the
-investigated remedy is small and clear: state behavior, scope, files, acceptance
+investigated remedy is small and clear: state the probe record, behavior, scope, files, acceptance
 criteria and verification, then request explicit human approval through
 `cezar_ask`. Architectural changes follow the skill's spec-and-plan path, with
 working files left untracked. Neither path opens a design-only or plan-only PR,
