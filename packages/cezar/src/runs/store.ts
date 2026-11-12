@@ -4,7 +4,6 @@ import { addRunSource, copyFallbackFamily, fallbackRunSource, bindWorkerResultPa
 import { productName, logPrefix } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { registeredWaitRecord, registeredReceiptRecord } from './wait-registration-write.ts';
-import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText, clearPin, type RecordPatch } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { workerResourceAbsentHolders, workerResourceAuthorized, workerResourceLiveHolders, workerResourcePathsGone } from './worker-resource-holders.ts';
@@ -558,7 +557,6 @@ export class RunStore extends EventEmitter {
   /** `null` once the store is closed, and in a `RunStore.unavailable` store (nothing is written,
    *  nothing is evicted). */
   private db: RunDatabase | null = null;
-  get reports(): ReportsIndex { return reportsIndex(this); }
   /** Persistence source for consumers that build the reports index. No index is created here. */
   reportSource() { return { db: this.db, dataDir: this.dataDir, openFailure: this.openFailure }; }
   /** Why `open` failed, in a `RunStore.unavailable` store. */

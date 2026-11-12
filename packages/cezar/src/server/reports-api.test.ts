@@ -15,7 +15,7 @@ import { reportsResponseSchema, reportsStateSchema, REPORTS_QUERY_MAX } from '@o
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { artifactDirectory, publishArtifact, readArtifact } from '../artifacts/store.ts';
-import { REPORTS_BACKFILL_KEY } from '../artifacts/reports-index.ts';
+import { reportsIndex, REPORTS_BACKFILL_KEY } from '../artifacts/reports-index.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
@@ -36,7 +36,7 @@ describe('project reports', () => {
   const page = async (query = '') => reportsResponseSchema.parse(await (await get(query)).json());
 
   it('serves the project state twin and marks finite watch demand', async () => {
-    const index = store.reports;
+    const index = reportsIndex(store);
     const mark = vi.spyOn(index, 'markRead');
     const response = await get('/state');
     expect(response.status).toBe(200);
@@ -67,7 +67,7 @@ describe('project reports', () => {
 
   it('reconciles publications made by live tasks after backfill and on committed settlement without a query', async () => {
     const run = task();
-    store.reports.start();
+    reportsIndex(store).start();
     await page();
     const first = await publish(run.id);
     expect((await page()).reports.map(a => a.id)).toContain(first.id);
@@ -98,16 +98,16 @@ describe('project reports', () => {
 
   it('indexes only the settling task and ignores archive events from finished tasks', async () => {
     const settled = task('Settling'), active = task('Still running');
-    store.reports.start(); await page();
+    reportsIndex(store).start(); await page();
     const a = await publish(settled.id), b = await publish(active.id);
     setRunStatus(store, settled.id, RUN_STATUS.done); store.flush();
     // The public serialized barrier completes the settlement work without including live tasks.
-    await store.reports.reconcile(false);
+    await reportsIndex(store).reconcile(false);
     const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
     try {
       expect(raw.prepare('SELECT id FROM artifacts').all().map(row => row.id)).toEqual([a.id]);
       store.updateRun(settled.id, { archived: true }); store.flush();
-      await store.reports.reconcile(false);
+      await reportsIndex(store).reconcile(false);
       expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(b.id)).toBeUndefined();
     } finally { raw.close(); }
   });
@@ -208,7 +208,7 @@ describe('project reports', () => {
     renameSync(directory, saved); symlinkSync(empty, directory, 'dir');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     setRunStatus(store, run.id, RUN_STATUS.done); store.flush();
-    await store.reports.reconcile(false, run.id);
+    await reportsIndex(store).reconcile(false, run.id);
     const raw = new DatabaseSync(join(dataDir, 'runs.db'));
     try {
       raw.prepare('DELETE FROM meta WHERE key = ?').run(REPORTS_BACKFILL_KEY);
@@ -218,7 +218,7 @@ describe('project reports', () => {
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined();
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
       rmSync(directory); writeFileSync(directory, 'not a directory');
-      await store.reports.backfill();
+      await reportsIndex(store).backfill();
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined();
       expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
       rmSync(directory); renameSync(saved, directory);
@@ -255,7 +255,7 @@ describe('project reports', () => {
       return actualOpen(...args);
     });
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await store.reports.reconcile(false, run.id);
+    await reportsIndex(store).reconcile(false, run.id);
     const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
     try {
       expect(raw.prepare('SELECT id FROM artifacts WHERE run_id = ?').all(run.id)).toEqual([{ id: cached.id }]);
@@ -276,7 +276,7 @@ describe('project reports', () => {
       return actualOpen(...args);
     });
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await store.reports.backfill();
+    await reportsIndex(store).backfill();
     const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
     try { expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined(); }
     finally { raw.close(); }
@@ -292,7 +292,7 @@ describe('project reports', () => {
     setRunStatus(store, run.id, RUN_STATUS.done); store.flush(); await page();
     const directoryFault = vi.spyOn(fs, 'opendir').mockRejectedValue(Object.assign(new Error('busy directory'), { code: 'EACCES' }));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await store.reports.reconcile(false, run.id);
+    await reportsIndex(store).reconcile(false, run.id);
     expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
     directoryFault.mockRestore(); await page();
     const actualStat = fs.lstat;
@@ -332,7 +332,7 @@ describe('project reports', () => {
   it('reports missing content and drops its cache row instead of serving it', async () => {
     const run = task(); const artifact = await publish(run.id);
     await page(); setRunStatus(store, run.id, RUN_STATUS.done); store.flush();
-    await store.reports.reconcile();
+    await reportsIndex(store).reconcile();
     rmSync(join(artifactDirectory(dataDir, run.id), artifact.id, 'content'));
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
@@ -344,7 +344,7 @@ describe('project reports', () => {
   it('removes cache rows atomically with history deletion and cannot restore them during reconciliation', async () => {
     const run = task(); await publish(run.id); await page();
     setRunStatus(store, run.id, RUN_STATUS.done); store.flush();
-    await store.reports.reconcile();
+    await reportsIndex(store).reconcile();
     expect(store.deleteRun(run.id)).toBe(true); store.flush();
     const db = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
     try {
@@ -367,8 +367,8 @@ describe('project reports', () => {
   });
 
   it('starts backfill without waiting on its completion', () => {
-    const backfill = vi.spyOn(store.reports, 'backfill').mockReturnValue(new Promise(() => {}));
-    expect(store.reports.start()).toBeUndefined();
+    const backfill = vi.spyOn(reportsIndex(store), 'backfill').mockReturnValue(new Promise(() => {}));
+    expect(reportsIndex(store).start()).toBeUndefined();
     expect(backfill).toHaveBeenCalledOnce();
     backfill.mockRestore();
   });
@@ -394,7 +394,7 @@ describe('project reports', () => {
       const runs = join(dataDir, 'runs'), saved = runs + '-saved', empty = join(root, 'empty-alias');
       mkdirSync(empty); renameSync(runs, saved); symlinkSync(empty, runs, 'dir');
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-      await store.reports.reconcile(false, run.id);
+      await reportsIndex(store).reconcile(false, run.id);
       expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
       expect(await readArtifact(artifactDirectory(dataDir, run.id), run.id, artifact.id)).toBeNull();
       rmSync(runs); renameSync(saved, runs);

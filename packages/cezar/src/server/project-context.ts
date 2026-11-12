@@ -1,3 +1,4 @@
+import { reportsIndex } from '../artifacts/reports-index.ts';
 import { logPrefix } from '../home/display.ts';
 import { noticeLegacyProject, projectPaths } from '../project-paths.ts';
 import { productEnv } from '../core/product-env.ts';
@@ -569,7 +570,7 @@ export class ProjectContexts {
       const repoHandleController = new AbortController();
       this.repoHandleControllers.set(store, repoHandleController);
       armRepoHandle(store, project.root, repoHandleController.signal, this.deps.forgeFactory);
-      store.reports.start();
+      reportsIndex(store).start();
       return { home: this.deps.home, id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.
