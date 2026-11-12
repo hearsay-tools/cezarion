@@ -157,6 +157,12 @@ describe('resolveReleaseTarget', () => {
       .toEqual({ version: '0.1.6', distTag: 'latest-0.1', exactPins: false });
   });
 
+  it('refuses a maintenance tag of another version line', () => {
+    expect(resolveReleaseTarget('patch', '0.18.0', { version: '0.18.1', distTag: 'latest-0.17' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.18.0', { version: '0.18.1-rc.1', distTag: 'next-0.17' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.18.0', { version: '1.18.1', distTag: 'latest-0.18' })).toHaveProperty('error');
+  });
+
   it('refuses a version that is neither stable nor a release candidate', () => {
     expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6-nightly.1' })).toHaveProperty('error');
     expect(resolveReleaseTarget('patch', 'garbage')).toHaveProperty('error');

@@ -100,5 +100,7 @@ export function resolveReleaseTarget(
   if (!(candidate ? CANDIDATE_TAG : STABLE_TAG).test(distTag)) {
     return { error: `dist-tag "${distTag}" does not fit ${candidate ? 'a release candidate (next or next-x.y)' : 'a stable version (latest or latest-x.y)'}.` };
   }
+  const line = /-(\d+\.\d+)$/.exec(distTag)?.[1];
+  if (line && !version.startsWith(`${line}.`)) return { error: `dist-tag "${distTag}" names another version line than ${version}.` };
   return { version, distTag, exactPins: candidate };
 }
