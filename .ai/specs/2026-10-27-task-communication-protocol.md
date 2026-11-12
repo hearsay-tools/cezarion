@@ -493,7 +493,9 @@ can start a turn. So peer messages charge the existing automatic-wake budget:
   resets the budget.
 - Family messages do not charge. Their behavior does not change.
 
-Worst case: 40 automatic turns per task for each human touch.
+The charged-wake budget allows 40 automatic turns per task for each human touch.
+Free empty dependency deadline wakes do not count against it, so total automatic
+turns between human touches can exceed 40.
 
 ## 9. Discovery
 

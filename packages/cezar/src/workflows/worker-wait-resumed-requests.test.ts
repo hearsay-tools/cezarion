@@ -19,7 +19,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const release = join(root, 'resume-receipt-release');
       try {
         await expect(f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id,
-          kind: 'request', text: 'Still active', resume: true, timeoutSeconds: 3600 })).rejects.toMatchObject({ code: 'incompatible_state' });
+          kind: 'request', text: 'Still active', resume: true, timeoutSeconds: 7201 })).rejects.toMatchObject({ code: 'incompatible_state' });
         manager.finish(f.w.id);
         await until(() => !manager.isActive(f.w.id));
         process.env.CEZ_MOCK_RELEASE_FILE = release;

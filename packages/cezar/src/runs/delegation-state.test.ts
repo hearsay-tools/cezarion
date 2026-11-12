@@ -61,14 +61,14 @@ function worker(parentId: string = parentRunId, id: string = workerId): Delegati
 describe('delegation schemas', () => {
   it('bounds and defaults unique wait selections without accepting caller identity', () => {
     expect(workerWaitRequestSchema.parse({ workerIds: [workerId] }).timeoutSeconds).toBe(600);
-    expect(workerWaitRequestSchema.safeParse({ workerIds: [workerId], timeoutSeconds: 1801 }).success).toBe(false);
+    expect(workerWaitRequestSchema.safeParse({ workerIds: [workerId], timeoutSeconds: 7201 }).success).toBe(false);
     for (const body of [
       { workerIds: [] }, { workerIds: [workerId, workerId] },
       { workerIds: Array.from({ length: 33 }, () => randomUUID()) }, { workerIds: ['bad'] },
       { workerIds: [workerId], timeoutSeconds: 0 }, { workerIds: [workerId], timeoutSeconds: 1.5 },
       { workerIds: [workerId], parentRunId },
     ]) expect(workerWaitRequestSchema.safeParse(body).success).toBe(false);
-    expect(workerWaitRequestSchema.parse({ workerIds: [workerId], timeoutSeconds: 1800 }).timeoutSeconds).toBe(1800);
+    expect(workerWaitRequestSchema.parse({ workerIds: [workerId], timeoutSeconds: 7200 }).timeoutSeconds).toBe(7200);
   });
 
   it('requires a bounded spawn task, explicit baseline and UUID retry ID with no elevation fields', () => {

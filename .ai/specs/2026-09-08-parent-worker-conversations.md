@@ -168,7 +168,7 @@ No automatic ready-for-review or merge.
 ## Deadline amendment — hearsay-tools/cezarion#1241
 
 Resume requests now accept an explicit deadline of up to 86,400 seconds; the
-600-second default and ordinary requests/waits' 1,800-second maximum remain.
+600-second default and ordinary requests/waits' 7,200-second maximum remain.
 A first reply after expiry amends only `timed-out` to `replied-late`, with the
 reply ID and observation time. Other settlements stay final, and settled waits
 never reopen. The transcript emits an idempotent amendment projection and accepts
