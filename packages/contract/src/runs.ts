@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { agentInputSchema, delegationStateSchema, runDelegationSummarySchema, workerDestroyRetrySchema } from './delegation.ts';
 import { runnerSchema } from './runner.ts';
+import { runStatusSchema, stepKindSchema, stepStatusSchema } from './run-status.ts';
 import { referenceStatusSchema } from './github.ts';
 import { previewServerSchema } from './preview.ts';
 import { isAttachmentMediaType } from './attachments.ts';
@@ -12,6 +13,8 @@ import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
 import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema, waitRegistrationReceiptSchema, withRootLedger } from './waits.ts';
 import { handoffRecordsSchema } from './handoff.ts';
 import { completionControlsShape, taskAccessShape } from './task-options.ts';
+
+export { runStatusSchema, type RunStatus, stepStatusSchema, type StepStatus, stepKindSchema, type StepKind } from './run-status.ts';
 
 /**
  * The RUNS family of `/api/v1` — a task's record, its lifecycle mutations, and the artifacts
@@ -46,35 +49,12 @@ export const autoArchiveReceiptSchema = z.object({
 
 // ---- the record --------------------------------------------------------------------------
 
-export const runStatusSchema = z.enum([
-  'queued',
-  'running',
-  'waiting',
-  'review',
-  'done',
-  'failed',
-  'cancelled',
-]);
-export type RunStatus = z.infer<typeof runStatusSchema>;
-
 /** Durable completion work. The id fences replies from a previous completion or setting. */
 export const completionActionSchema = z.object({
   id: z.string().uuid(),
   phase: z.enum(['pending', 'blocked', 'complete']),
   message: z.string().optional(),
 });
-
-export const stepStatusSchema = z.enum([
-  'pending',
-  'running',
-  'waiting',
-  'review',
-  'done',
-  'failed',
-  'cancelled',
-  'skipped',
-]);
-export type StepStatus = z.infer<typeof stepStatusSchema>;
 
 /** Cursor native session transport; legacy ones omit it (ACP). `cursor-acp` is only read (hearsay-tools/cezarion#1267). */
 export const sessionTransportSchema = z.enum(['cursor-acp', 'cursor-print']);
@@ -86,7 +66,7 @@ const usageCounterSchema = z.number().finite().nonnegative();
 export const stepStateSchema = z.object({
   id: z.string(),
   name: z.string(),
-  kind: z.enum(['agent', 'check']),
+  kind: stepKindSchema,
   status: stepStatusSchema,
   iterations: z.number(),
   /** Durable count of onFail retry loops consumed by this check. */

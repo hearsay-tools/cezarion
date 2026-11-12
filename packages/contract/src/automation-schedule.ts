@@ -27,6 +27,10 @@ const ONCE_KEYS = ['at', 'timeZone', 'latestStartMinutes'] as const;
 /** The refusal of a one-time schedule whose time has passed: the server's 400 and the editor's field message. */
 export const ONCE_PAST_DUE_MESSAGE = 'the due time has passed; choose a later time or use Run now';
 
+/** Where a one-time schedule stands, derived by the server so clients never re-derive it. */
+export const onceStatusSchema = z.enum(['paused', 'waiting', 'failed', 'missed', 'archived']);
+export type OnceStatus = z.infer<typeof onceStatusSchema>;
+
 export function unknownTimeZoneMessage(zone: string): string {
   return `unknown time zone "${zone}"; use an IANA name such as Europe/Warsaw`;
 }

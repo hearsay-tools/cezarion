@@ -491,7 +491,7 @@ export type ProviderConnectResponse = z.infer<typeof providerConnectResponseSche
  * through `pi --list-models`, Cursor through `agent --list-models`, and Claude through
  * stream-json `list_models`. One definition, used by the route's query validator and the picker.
  */
-export const modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp']);
+export const modelDiscoveryRunnerSchema = runnerSchema;
 export type ModelDiscoveryRunner = z.infer<typeof modelDiscoveryRunnerSchema>;
 export const MODEL_DISCOVERY_RUNNERS: readonly ModelDiscoveryRunner[] =
   modelDiscoveryRunnerSchema.options;
