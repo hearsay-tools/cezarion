@@ -3,7 +3,7 @@
 import { existsSync } from 'node:fs';
 const source = new URL('../src/ci-wait/tools.ts', import.meta.url);
 const { squawkTools } = await import(existsSync(source) ? source.href : new URL('../dist/ci-wait/tools.js', import.meta.url).href);
-// #781: the shared cezar tool list, read in Pi's own process, whose env carries the opt-in.
+// #781: the shared Squawk tool list, read in Pi's own process, whose env carries the opt-in.
 export default function ciWaitExtension(pi) {
   for (const tool of squawkTools(process.env)) {
     pi.registerTool({

@@ -124,7 +124,7 @@ afterEach(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-describe('fields this cezar does not know (the raw-record codec)', () => {
+describe('fields this Squawk does not know (the raw-record codec)', () => {
   it('survive import, an update and a reopen, while a removed known field stays removed', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', {
       pinned: true, pinnedAt: '2026-09-01T00:00:00.000Z',
@@ -343,7 +343,7 @@ describe('the pre-import backup', () => {
   });
 });
 
-describe('an older cezar still writing runs.json', () => {
+describe('an older Squawk still writing runs.json', () => {
   /** A live process holding cockpit.lock for `dataDir`, as an older cockpit does, until it exits
    *  by itself after `lifetimeMs` (open is synchronous: nothing in this process can stop it).
    *  `saving`: it also saves runs.json every 50 ms, by temp file and rename, as one at work does. */
@@ -443,7 +443,7 @@ describe('an older cezar still writing runs.json', () => {
 
   it('saving runs.json during the import: nothing is imported, and the next open imports what it saved', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
-    // An older cezar saves by temp file and rename.
+    // An older Squawk saves by temp file and rename.
     __setLegacyImportHookForTests({
       beforeCommit: () => {
         writeFileSync(join(dataDir, 'runs.json.tmp'), JSON.stringify([record('a'), record('saved-meanwhile')]));
@@ -571,7 +571,7 @@ describe('a store that cannot be opened is never an empty one', () => {
     expect(failure.message).toContain(`Give your user read and write access to ${dataDir}, then restart ${productName("cezar")}.`);
   });
 
-  it('a database written by a newer cezar: refused, left as it is', () => {
+  it('a database written by a newer Squawk: refused, left as it is', () => {
     open().close();
     const raw = new DatabaseSync(join(dataDir, RUNS_DB_FILE));
     raw.exec('PRAGMA user_version = 99');

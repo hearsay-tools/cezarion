@@ -153,7 +153,7 @@ function opencodeDurableInput(r: HarnessRegistrar): void {
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             manager.finish(runId);
             await waitFor(() => !manager.isActive(runId));
-            // The idle worker's park may already be Cezar's fallback question (hearsay-tools/cezarion#1301).
+            // The idle worker's park may already be Squawk's fallback question (hearsay-tools/cezarion#1301).
             asked = store.readEvents(runId).filter(e => e.type === 'ask.requested').length;
             expect(manager.continueRun(runId, { text: prompt }).ok).toBe(true);
           }
@@ -368,9 +368,9 @@ function matrixGuards(r: HarnessRegistrar): void {
 function opencodeRestrictedSessions(r: HarnessRegistrar): void {
   const { it, describe, scope } = r;
   if (scope === 'once') {
-    describe('harness parity — D1 OpenCode sessions an older cezar restricted', () => {
-      // OpenCode appends permission rules and has no remove, so a `task` deny an older cezar
-      // added stays on its session; cezar neither PATCHes it again nor tries to lift it.
+    describe('harness parity — D1 OpenCode sessions an older Squawk restricted', () => {
+      // OpenCode appends permission rules and has no remove, so a `task` deny an older Squawk
+      // added stays on its session; Squawk neither PATCHes it again nor tries to lift it.
       it('opencode governed Continue sends no PATCH when the session already denies task', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-sticky-'));
         const path = join(dir, 'wire.ndjson');

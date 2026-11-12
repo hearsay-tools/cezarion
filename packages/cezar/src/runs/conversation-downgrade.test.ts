@@ -33,7 +33,7 @@ const family = () => makeRunRecord({ id: senderRunId, agentInputs: [input], dele
   role: 'root', permissions: [], receipts: [], conversation: { messages: [message], outcomes: [] },
 } });
 
-describe('an older cezar reading stored task conversations', () => {
+describe('an older Squawk reading stored task conversations', () => {
   it('still reads a family ledger and input with no new fields', () => {
     const record = family();
     expect(parseRunRecords([record]).success).toBe(true);

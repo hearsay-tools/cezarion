@@ -36,7 +36,7 @@ export class MaintenanceClaims {
 
   /**
    * Hold `runIds` against Continue, reclaim, publish and branch cleanup here AND in every other
-   * cezar process for the length of an async operation (#779, plan step 3; PR #851 review). An
+   * Squawk process for the length of an async operation (#779, plan step 3; PR #851 review). An
    * ownership check alone is a moment: pinning claims each run's family, so another process
    * cannot claim and Continue it while this one rematerializes, publishes or deletes. Null when
    * any hold fails (another process took the claim first); nothing stays held then.

@@ -66,7 +66,7 @@ async function terminateGroup(leader: GroupLeader): Promise<void> {
   await stopGroup(leader, { graceMs: KILL_GRACE_MS, killWaitMs: KILL_SETTLE_MS });
 }
 
-/** Windows, once the shell leader exited on its own: `taskkill` the tree at its pid, as cezar did
+/** Windows, once the shell leader exited on its own: `taskkill` the tree at its pid, as Squawk did
  *  before the detached-process helper. By then the pid names no process, or one that reused it;
  *  a Job Object per started server replaces this (hearsay-tools/cezarion#1876). */
 function endExitedLeaderTree(pid: number): Promise<void> {
@@ -138,7 +138,7 @@ export class DevServer extends EventEmitter {
     const logFd = openSync(this.logPath, 'a');
     const cwd = resolve(this.worktreePath, this.server.cwd ?? '.');
     // stdin is closed: nobody can answer a prompt from the cockpit, so one fails fast into `exited` with its log.
-    // The command is the agent's and runs outside its sandbox: it gets the curated env, never cezar's secrets (#427).
+    // The command is the agent's and runs outside its sandbox: it gets the curated env, never Squawk's secrets (#427).
     const env = buildCommandEnv();
     const child = process.platform === 'win32'
       ? spawn(this.server.command, { cwd, env, shell: true, windowsHide: true, stdio: ['ignore', logFd, logFd] })
@@ -273,10 +273,10 @@ function previewRunDirectories(dataDir: string): Array<{ runId: string; director
 }
 
 /**
- * Boot sweep: a crashed cezar leaves pid records behind, `<port>.pid.json` for each dev server and
+ * Boot sweep: a crashed Squawk leaves pid records behind, `<port>.pid.json` for each dev server and
  * `chromium.pid.json` for the task's browser. Kill only when the recorded pid is still the process
  * we started (an exactly matching start token), so a reused pid is never hit; a missing or
- * unreadable token means skip. A dev server's whole group goes; Chromium shares cezar's group, so
+ * unreadable token means skip. A dev server's whole group goes; Chromium shares Squawk's group, so
  * only its pid is signalled.
  * The record goes either way, except one `keep` claims: a server or browser the live host still runs.
  * Returns how many processes were killed.
@@ -295,7 +295,7 @@ export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: ((ru
       const { pid, pgid, startToken } = (record ?? {}) as { pid?: unknown; pgid?: unknown; startToken?: unknown };
       if (typeof pid !== 'number' || typeof startToken !== 'string') continue;
       // A dev server leads its own group. The token verifies the pid only, so a record naming
-      // another group is not one cezar wrote, and that group is never signalled.
+      // another group is not one Squawk wrote, and that group is never signalled.
       if (what !== 'browser' && pgid !== pid) continue;
       // `recordedProcessLive` answers "alive" on any uncertainty; a kill needs an exact token match,
       // so a record without a token, or a pid whose token cannot be read now, is skipped.

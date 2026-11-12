@@ -67,7 +67,7 @@ export function queuedRecoveryInput(run: RunRecord): StartRunInput {
  * The wake instant as a human reads it — local, to the SECOND, with the zone named. The
  * transcript line is what someone scanning a stalled task actually reads, and "18:41" is not
  * enough to tell a wait that is nearly over from one that just started; the machine-readable ISO
- * copy lives on `RunRecord.autoResumeAt`. Server-side formatting is honest here because cezar is
+ * copy lives on `RunRecord.autoResumeAt`. Server-side formatting is honest here because Squawk is
  * local-first: the process and the browser reading it are the same machine.
  */
 export function formatWakeInstant(at: Date): string {

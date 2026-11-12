@@ -105,7 +105,7 @@ type RunEntry = {
   agentTarget?: string | undefined;
   /** The pane asked for the agent's page, and follows it while no other target is asked for. */
   followAgent: boolean;
-  /** cezar's own session on the agent's page, while that page is not the home page. */
+  /** Squawk's own session on the agent's page, while that page is not the home page. */
   followed?: { targetId: string; session: PreviewSession; off: () => void } | undefined;
 };
 
@@ -168,7 +168,7 @@ export class PreviewHost implements PreviewHostLike {
       entry.port = undefined;
       return this.showAgentPage(entry);
     }
-    // A server or a URL loads in cezar's own page; the agent's tab is left as it is.
+    // A server or a URL loads in Squawk's own page; the agent's tab is left as it is.
     this.leaveAgentPage(entry);
     if ('url' in target) return this.openUrl(entry, target.url);
     return this.openPort(entry, viewer, target.port);
@@ -206,7 +206,7 @@ export class PreviewHost implements PreviewHostLike {
       return this.showServer(entry, server, true, true);
     }
     if (current === 'adopted') entry.servers.delete(server.port);
-    // A server cezar ran and lost says so, with its log; Start again is the same approval.
+    // A server Squawk ran and lost says so, with its log; Start again is the same approval.
     if (owned(current)) return this.report(entry, server.port, current);
     this.tell(entry, { t: 'state', stage: 'needs-approval', server, wasRunning: current === 'adopted' || server.answeredAtRegistration });
   }
@@ -242,7 +242,7 @@ export class PreviewHost implements PreviewHostLike {
   }
 
   /**
-   * The agent re-registered `port` with a different command, cwd or path. A server cezar runs
+   * The agent re-registered `port` with a different command, cwd or path. A server Squawk runs
    * from the old registration stops, an adoption is forgotten, and a pane on that port is asked
    * to approve the new command: nothing runs it until the owner does.
    */
@@ -260,7 +260,7 @@ export class PreviewHost implements PreviewHostLike {
     }
   }
 
-  /** Stops a cezar-owned server. An adopted one is not cezar's to stop: refused with `false`. */
+  /** Stops a cezar-owned server. An adopted one is not Squawk's to stop: refused with `false`. */
   async stop(runId: string, port: number, reason: 'user' | 'idle'): Promise<boolean> {
     const dev = this.entries.get(runId)?.servers.get(port);
     if (!live(dev)) return false;
@@ -486,7 +486,7 @@ export class PreviewHost implements PreviewHostLike {
     return this.deps.probe(port);
   }
 
-  /** cezar shuts down: every run is released and every pane closed. */
+  /** Squawk shuts down: every run is released and every pane closed. */
   async close(): Promise<void> {
     this.download?.controller.abort();
     await Promise.all([...this.entries.values()].map(entry => this.releaseEntry(entry, false, false)));
@@ -541,7 +541,7 @@ export class PreviewHost implements PreviewHostLike {
     if (entry.followAgent) await this.followAgentPage(entry);
   }
 
-  /** Streams the agent's page: the home session cezar has, or a session of cezar's own on another page, dropped when the agent closes it. */
+  /** Streams the agent's page: the home session Squawk has, or a session of Squawk's own on another page, dropped when the agent closes it. */
   private async followAgentPage(entry: RunEntry): Promise<void> {
     const browser = entry.browser;
     const target = entry.agentTarget;
@@ -564,7 +564,7 @@ export class PreviewHost implements PreviewHostLike {
     this.streamFrom(entry, session);
   }
 
-  /** The pane shows cezar's own page. It cleared its stage for this open, so an unchanged stream restarts to announce itself. */
+  /** The pane shows Squawk's own page. It cleared its stage for this open, so an unchanged stream restarts to announce itself. */
   private showHome(entry: RunEntry): void {
     const shown = entry.session === entry.home;
     this.dropFollowed(entry);
@@ -573,13 +573,13 @@ export class PreviewHost implements PreviewHostLike {
     if (shown && entry.viewer) entry.home.attach(entry.viewer, entry.viewerDpr);
   }
 
-  /** The agent's page closed while the pane looked elsewhere: cezar's own page stands in for it. */
+  /** The agent's page closed while the pane looked elsewhere: Squawk's own page stands in for it. */
   private agentPageGone(entry: RunEntry, browser: BrowserHandle, target: string): void {
     if (entry.agentTarget === target) entry.agentTarget = undefined;
     if (entry.browser === browser && entry.followAgent && !entry.released) this.showHome(entry);
   }
 
-  /** A session of cezar's own on `targetId`, carrying the page's current URL. */
+  /** A session of Squawk's own on `targetId`, carrying the page's current URL. */
   private async openPageSession(entry: RunEntry, browser: BrowserHandle, targetId: string): Promise<{ session: PreviewSession; sessionId: string } | undefined> {
     const attached = await browser.connection.call('Target.attachToTarget', { targetId, flatten: true }, undefined);
     const sessionId = attachedSchema.safeParse(attached.result).data?.sessionId;
@@ -600,7 +600,7 @@ export class PreviewHost implements PreviewHostLike {
     return { session, sessionId };
   }
 
-  /** The agent closed the page the pane followed: the pane shows cezar's own page again. */
+  /** The agent closed the page the pane followed: the pane shows Squawk's own page again. */
   private followedGone(entry: RunEntry, session: PreviewSession): void {
     if (entry.followed?.session !== session) return;
     if (entry.agentTarget === entry.followed.targetId) entry.agentTarget = undefined;

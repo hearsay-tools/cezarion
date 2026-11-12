@@ -9,7 +9,7 @@ export const SILENT_TAIL_DONE = 'Filed #543.';
 export const TOOL_TAIL_OPENING = 'Inspecting the working tree.';
 export const FINAL_MESSAGE_STANDING = 'Here is where things stand.';
 export const SLOW_DONE_PREFIX = 'Working on the wrap-up.';
-// Cezar's no-wait nudge absorbed the final-message nudge (hearsay-tools/cezarion#1234).
+// Squawk's no-wait nudge absorbed the final-message nudge (hearsay-tools/cezarion#1234).
 export const FINAL_MESSAGE_NUDGE_PREFIX = 'Your turn ended without a wait or done.';
 /** F9/F11 gate replies on CEZ_MOCK_RELEASE_FILE; ungated callers use this delay. */
 export const LATE_REPLY_MS = 500;

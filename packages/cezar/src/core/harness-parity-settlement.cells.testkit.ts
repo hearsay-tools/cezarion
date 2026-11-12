@@ -637,7 +637,7 @@ export const SETTLEMENT_GROUPS = {
     });
   },
 
-  // cezar's own tools are covered where they run: the Codex U1 row of workflows/waits-parity parks only
+  // Squawk's own tools are covered where they run: the Codex U1 row of workflows/waits-parity parks only
   // when the mock's MCP tool gate lets cezar_wait through unasked.
   mcp(r: HarnessRegistrar) {
     const { describeRunners, runners, it } = r;

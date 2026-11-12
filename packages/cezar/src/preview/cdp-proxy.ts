@@ -3,9 +3,9 @@ import type { CdpConnection, CdpMessage } from './cdp.ts';
 
 /**
  * One agent connection to the task's Chromium (hearsay-tools/cezarion#784, spec
- * 2026-10-26-preview-agent-cdp). Chromium has no debug port, only cezar's pipe; each agent socket
+ * 2026-10-26-preview-agent-cdp). Chromium has no debug port, only Squawk's pipe; each agent socket
  * gets its own browser session on that pipe (`Target.attachToBrowserTarget`), so its Target domain
- * state, its ids and its events stay apart from cezar's own page session and from other agents.
+ * state, its ids and its events stay apart from Squawk's own page session and from other agents.
  *
  * - A message without `sessionId` is the agent's root: it goes to its browser session.
  * - A message naming a session goes through only when this link opened that session.
@@ -108,7 +108,7 @@ export class AgentCdpLink {
     if (CLOSES_PAGE.has(method) && named !== undefined && this.owned.get(named) === this.protectedTargetId && this.protectedTargetId !== undefined) {
       return `${productName('cezar')} refuses ${method} on the page the owner's preview pane shows.`;
     }
-    // Only this link's sessions: a foreign id could be cezar's own page session.
+    // Only this link's sessions: a foreign id could be Squawk's own page session.
     if (method === 'Target.detachFromTarget' && typeof p.sessionId === 'string' && !this.owned.has(p.sessionId)) {
       return 'Session with given id not found.';
     }

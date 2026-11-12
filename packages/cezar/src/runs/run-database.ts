@@ -379,13 +379,13 @@ export class RunDatabaseDiskFullError extends RunDatabaseError {}
 /** The file is not a database, or a page is malformed. Never reset by this module. */
 export class RunDatabaseCorruptError extends RunDatabaseError {}
 
-/** The database was written by a newer cezar whose schema this build does not know. */
+/** The database was written by a newer Squawk whose schema this build does not know. */
 export class RunDatabaseUnsupportedSchemaError extends RunDatabaseError {
   readonly found: number;
   readonly supported: number;
 
   constructor(found: number, supported: number) {
-    super('unsupported-schema', `runs database schema ${found} is newer than this cezar supports (${supported})`);
+    super('unsupported-schema', `runs database schema ${found} is newer than this build supports (${supported})`);
     this.found = found;
     this.supported = supported;
   }

@@ -11,7 +11,7 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
   return probeSquawkTool(backend, wire, 'cezar_wait', { kind: 'pr', pr });
 }
 
-// Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).
+// Calls one Squawk tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).
 export async function probeSquawkTool(backend, wire, name, args, record = true) {
   const result = backend === 'pi' || backend === 'omp'
     ? await probeExtensionTool(backend, wire, name, args)
@@ -43,7 +43,7 @@ async function probeExtensionTool(backend, wire, name, args) {
 const expandEnv = (env) => Object.fromEntries(Object.entries(env ?? {}).map(([key, value]) =>
   [key, value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '')]));
 
-/** The cezar MCP server a runner's wire names, with the environment it starts under. */
+/** The Squawk MCP server a runner's wire names, with the environment it starts under. */
 function mcpServerOf(backend, wire) {
   if (backend === 'claude') {
     const server = Object.values(JSON.parse(wire[wire.indexOf('--mcp-config') + 1]).mcpServers)[0];
@@ -80,7 +80,7 @@ async function probeMcpTool({ server, env }, name, args) {
   } finally { await client.close(); }
 }
 
-// hearsay-tools/cezarion#2397: a scripted reply that finishes, asks or waits calls the cezar
+// hearsay-tools/cezarion#2397: a scripted reply that finishes, asks or waits calls the Squawk
 // lifecycle tool over the session's own wire before its turn ends, as an agent does. It
 // returns '' (a refusal is the tool's answer, not the mock's failure), or a note for the turn
 // text when the tool could not be reached, so the transcript says why the turn did not settle.
@@ -95,7 +95,7 @@ export const DONE = ['cezar_done', {}];
 export const ask = (questions = LIBRARY_QUESTIONS, context = ASK_CONTEXT) => ['cezar_ask', { context, questions }];
 export const wait = (note = 'Re-check the downstream work.') => ['cezar_wait', { kind: 'timer', seconds: 60, note }];
 
-// pi reads --tools as an allowlist and --no-tools as an empty one; with neither (cezar's default
+// pi reads --tools as an allowlist and --no-tools as an empty one; with neither (Squawk's default
 // list sends --no-builtin-tools), an extension's tools are active once registered
 // (hearsay-tools/cezarion#1305).
 function piAdmits(wire, name) {
@@ -117,7 +117,7 @@ export function squawkToolName(text) {
   return new RegExp(`mock:${SQUAWK_TOOL_NAME.source}`).exec(text)?.[1];
 }
 
-// `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
+// `mock:cezar-tool <name> <base64-json-args>` calls any Squawk tool with those arguments
 // (hearsay-tools/cezarion#1233). Base64, standard or URL-safe, survives every wire's escaping.
 // Several calls run in order within one turn; `"wait_id": "last"` names the wait the previous
 // answer registered, so a turn can open a wait and cancel it. `mock:gate <base64 path>` between

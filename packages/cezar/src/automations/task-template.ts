@@ -59,7 +59,7 @@ const TRIGGER_TEXT: Record<ScheduleOccurrence['trigger'], string> = {
 
 /**
  * A run's stored provenance keeps its pre-#1465 trigger enum: a one-time schedule's late start is
- * a catch-up and its retry a manual start, which is what an older cezar reading the record expects.
+ * a catch-up and its retry a manual start, which is what an older Squawk reading the record expects.
  */
 const PROVENANCE_TRIGGER = { schedule: 'schedule', 'catch-up': 'catch-up', manual: 'manual', late: 'catch-up', retry: 'manual' } as const;
 

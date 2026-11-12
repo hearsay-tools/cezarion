@@ -10,6 +10,7 @@ import { gatedProviderFailure } from './waits-parity.testkit.ts';
 import { fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, worker, work, toolGenerationOf, controlledWire } from './worker-wait.testkit.ts';
 
 import { pr, identity, entryOf, settledOf, inputOf, heldParent } from './worker-waits-shared.testkit.ts';
+import { productName } from '../home/display.ts';
 
 /**
  * Parks, slots, idle close, failure and recovery (hearsay-tools/cezarion#1235 phase 3a): a park
@@ -81,7 +82,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const resumed = vi.spyOn(manager, 'continueRun');
     fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => settledOf(p.id, entry.id)?.phase === 'delivered');
-    expect(resumed).toHaveBeenCalledWith(p.id, { text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.', waitWake: true }, true);
+    expect(resumed).toHaveBeenCalledWith(p.id, { text: `Resume to receive the queued worker wait result. End this opening turn so ${productName('Cezar')} can deliver it.`, waitWake: true }, true);
     expect(inputOf(p.id, entry.id)?.deliveredAt).toBeDefined();
   });
 

@@ -28,9 +28,9 @@ it('answers the worker for the parent when the parent cannot take another messag
     noHumanCard(w.id);
   });
 
-// A worker that stops with Cezar's answer still queued: recovery closes its question and retires
+// A worker that stops with Squawk's answer still queued: recovery closes its question and retires
   // the answer, so neither stays behind to refuse a human Continue.
-  it("closes a stopped worker's question when Cezar's answer is still queued", async () => {
+  it("closes a stopped worker's question when Squawk's answer is still queued", async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     fillInbox(p.id);
     const w = await worker(p.id, 'mock:cezar-ask');
@@ -44,7 +44,7 @@ it('answers the worker for the parent when the parent cannot take another messag
     await until(() => eventsOf(w.id, 'ask.requested').length === 1 && store.getRun(w.id)?.status === 'waiting');
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
     const answer = uuidFrom(`undelivered-question:${w.id}:${askSeq}`);
-    // A crash checkpoint after Cezar queued its answer, before it reached the provider.
+    // A crash checkpoint after Squawk queued its answer, before it reached the provider.
     store.commitOutcome(w.id, { kind: 'charged', automaticWakes: 1 }, { enqueue: [{
       id: answer, source: 'lifecycle', purpose: 'undelivered-question', parentRunId: w.id,
       text: 'Choice: parent conversation at capacity', createdAt: new Date().toISOString(),
@@ -93,9 +93,9 @@ it('closes the question without an answer when the worker spent its automatic-wa
   });
 
 // hearsay-tools/cezarion#1301: a worker's second turn end with no wait or done asks its parent. A
-  // parent that cannot take Cezar's own question closes it, with no answer that would wake the worker
+  // parent that cannot take Squawk's own question closes it, with no answer that would wake the worker
   // again, and the worker parks (hearsay-tools/cezarion#2410).
-  it("closes Cezar's idle question when the parent cannot take it, and the worker parks", async () => {
+  it("closes Squawk's idle question when the parent cannot take it, and the worker parks", async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     fillInbox(p.id);
     const w = await worker(p.id); manager.enqueueOwnedRun(w.id);

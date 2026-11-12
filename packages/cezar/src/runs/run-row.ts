@@ -17,7 +17,7 @@ export function isLiveRecord(run: RunRecord): boolean {
   // Any resume time, not `isUsageLimitHold`: an older row can keep one on a finished status, and
   // the store's open must load that row to correct it.
   if (run.autoResumeAt !== undefined || run.waits?.some((wait) => wait.phase === 'open' || wait.phase === 'resolved')) return true;
-  // A worker wait, Cezar's completion wait included, is a list entry, covered above: store schema 7
+  // A worker wait, Squawk's completion wait included, is a list entry, covered above: store schema 7
   // reads every wait stored in the delegation state into the list on open, so none is left to ask about
   // (hearsay-tools/cezarion#1301), and every row the older predicate called live for one is read up
   // and rewritten by that open.

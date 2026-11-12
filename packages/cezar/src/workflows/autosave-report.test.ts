@@ -14,6 +14,7 @@ import { createWorktree } from '../git-worktree.ts';
 import { handoffPath, readHandoff, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import { noRunners } from '../core/runners-under-test.testkit.ts';
+import { productName } from '../home/display.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -99,7 +100,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     const sha = await out(['rev-parse', '--short', 'HEAD']);
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
-    const message = `turn end: cezar autosave committed ${sha} on ${branch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
+    const message = `turn end: ${productName('Cezar')} autosave committed ${sha} on ${branch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
     expectReported(message);
     expect(notes()).toContain(message);
   });
@@ -119,7 +120,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
-    const message = `turn end: cezar autosave committed on ${branch} (sha unavailable); to fold it into your own commits while it is HEAD, run \`git reset --soft HEAD~1\``;
+    const message = `turn end: ${productName('Cezar')} autosave committed on ${branch} (sha unavailable); to fold it into your own commits while it is HEAD, run \`git reset --soft HEAD~1\``;
     expectReported(message);
     expect(notes()).toContain(message);
   });
@@ -133,7 +134,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     expect(await out(['rev-parse', 'HEAD'])).toBe(tip);
     expect((await git(['status', '--porcelain'])).stdout).toBe('?? work.txt\n');
-    const message = `run finalize: 1 changed path(s) left uncommitted on fix/1004-x; cezar does not autosave on a branch other than the task branch ${branch}`;
+    const message = `run finalize: 1 changed path(s) left uncommitted on fix/1004-x; ${productName('Cezar')} does not autosave on a branch other than the task branch ${branch}`;
     expectReported(message);
     expect(notes()).toContain(message);
   });
@@ -144,14 +145,14 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
-    const message = `turn end: 1 changed path(s) left uncommitted on detached HEAD; cezar does not autosave on a branch other than the task branch ${branch}`;
+    const message = `turn end: 1 changed path(s) left uncommitted on detached HEAD; ${productName('Cezar')} does not autosave on a branch other than the task branch ${branch}`;
     expectReported(message);
     expect(notes()).toContain(message);
   });
 
   /** The coalesced line a run of periodic commits on the task branch leaves (#1004 review). */
   const periodicLine = (count: number, first: string, latest: string) =>
-    `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
+    `periodic: ${count} ${productName('Cezar')} autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
     `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${latest}~1\``;
   const autosaveLines = (id = runId) => autosave(id).split('\n').filter(Boolean);
   const editHandoff = (edit: (text: string) => string) => writeFileSync(handoffPath(dataDir, runId), edit(readHandoff(dataDir, runId)));
@@ -204,10 +205,10 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]).toMatch(/ — periodic: /);
     expect(lines[0]).toContain(periodicLine(1, three, three));
-    expect(lines[1]).toContain(`turn end: cezar autosave committed ${two} on ${branch};`);
+    expect(lines[1]).toContain(`turn end: ${productName('Cezar')} autosave committed ${two} on ${branch};`);
     expect(lines[2]).toContain(periodicLine(1, one, one));
     // Only the turn-end flush reaches the cockpit.
-    expect(autosaveNotes()).toEqual([expect.stringContaining(`turn end: cezar autosave committed ${two}`)]);
+    expect(autosaveNotes()).toEqual([expect.stringContaining(`turn end: ${productName('Cezar')} autosave committed ${two}`)]);
   });
 
   // The agent owns the file. Before hearsay-tools/cezarion#1809 it was the reports' only copy: a
@@ -222,8 +223,8 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     const two = await out(['rev-parse', '--short', 'HEAD']);
 
     const text = readHandoff(dataDir, runId);
-    expect(text).toContain(`turn end: cezar autosave committed ${two} on ${branch};`);
-    expect(text).toContain(`turn end: cezar autosave committed ${one} on ${branch};`);
+    expect(text).toContain(`turn end: ${productName('Cezar')} autosave committed ${two} on ${branch};`);
+    expect(text).toContain(`turn end: ${productName('Cezar')} autosave committed ${one} on ${branch};`);
     expect(text).toContain('- 10:00 — rewrote it');
   });
 
@@ -295,6 +296,6 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     expect(await out(['log', '-1', '--format=%s', 'fix/1004-x'])).toBe('cezar autosave (run finalize)');
     const sha = await out(['rev-parse', '--short', 'HEAD']);
-    expectReported(`run finalize: cezar autosave committed ${sha} on fix/1004-x;`, legacy);
+    expectReported(`run finalize: ${productName('Cezar')} autosave committed ${sha} on fix/1004-x;`, legacy);
   });
 });

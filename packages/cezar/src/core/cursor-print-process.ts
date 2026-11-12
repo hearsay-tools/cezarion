@@ -36,7 +36,7 @@ export function startCursorPrintProcess(
   const isNodeScript = /\.[cm]?js$/.test(options.bin);
   const command = isNodeScript ? process.execPath : options.bin;
   const args = isNodeScript ? [options.bin, ...options.args] : [...options.args];
-  // A registered session leader (hearsay-tools/cezarion#1286): cezar's own SIGINT/SIGTERM and the
+  // A registered session leader (hearsay-tools/cezarion#1286): Squawk's own SIGINT/SIGTERM and the
   // worker ledger reach its group, and every signal after its exit keeps the reuse guard.
   const child = spawnSessionLeader(command, args, { cwd: options.cwd, env: options.env });
   const pid = child.pid;

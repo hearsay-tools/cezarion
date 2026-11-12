@@ -16,7 +16,7 @@ export function settleLoadedStop(run: RunRecord): void {
 
 export function restoreLoadedUsageLimitHold(run: RunRecord): void {
   // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
-  // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
+  // schema-7 Squawk wrote kept it failed with the appointment; they read as the waiting run they are.
   if (run.status === 'failed' && run.autoResumeAt !== undefined) Object.assign(run, applyExit(run, 'hold'));
 }
 

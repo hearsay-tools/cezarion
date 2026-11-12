@@ -147,7 +147,7 @@ describe('RunStore transcript facts off the request path (#880)', () => {
     const { parentId, workerId } = seedSettledFamily(store, dir);
     store.appendEvent(workerId, { type: 'conversation-message', projectionId: 'p:worker' });
     store.close(); stores.pop();
-    // An archive an older cezar wrote: no sidecar describes it.
+    // An archive an older Squawk wrote: no sidecar describes it.
     const paths = historyPaths(dir, workerId);
     writeFileSync(paths.compressed, brotliCompressSync(readFileSync(paths.plain)));
     rmSync(paths.plain); rmSync(paths.facts, { force: true });

@@ -35,7 +35,7 @@ function load(dataDir: string, runId: string): FactsLoadResult {
   } else if (stored && sameStamp(stored.archive, stampOf(archive))) {
     return { facts: stored, written: stored.bytes, needsWrite: false };
   }
-  // No sidecar describes this transcript (a new run, a crash, an archive an older cezar wrote):
+  // No sidecar describes this transcript (a new run, a crash, an archive an older Squawk wrote):
   // one rebuild, with write intent for the index to persist so it is not repeated.
   const facts = emptyFacts();
   const text = readHistoryText(dataDir, runId);

@@ -3,6 +3,7 @@ import { agentTmpDirLocationEvidence } from '../../runs/agent-tmpdir.ts';
 import { processGroupAlive, processGroupOf, signalProcessGroup } from '../../core/session-process.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../../delegation/retry-backoff.ts';
 import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../../delegation/process-liveness.ts';
+import { productName } from '../../home/display.ts';
 
 /** How long a non-gone orphan probe stands before the next scan. */
 const ORPHAN_PROBE_CACHE_MS = 2_000;
@@ -87,7 +88,7 @@ export class WorkerOrphans {
   private readonly reportedOrphanBlockers = new Map<string, string>();
 
   /** #469: a survivor that dies after recovery has no other wake source (no exit callback for a
-   * process another cezar spawned). Unref'd; finalization's `run` event then lets worker waits and
+   * process another Squawk spawned). Unref'd; finalization's `run` event then lets worker waits and
    * outcomes observe it. Every 15 s for the first 15 minutes, then backing off to hourly
    * (hearsay-tools/cezarion#879), so a long-lived survivor is still noticed when it exits. One
    * timer serves every orphan, and a tick shares one `/proc` scan across them. A tick while this
@@ -154,7 +155,7 @@ export class WorkerOrphans {
     const orphan = this.orphanedWorkerGeneration(runId, true);
     const probe = orphan && this.orphanProbes.get(runId);
     if (!probe || probe.generation !== orphan.generation) return undefined;
-    if (probe.probe.controller !== undefined) return `the worker is still controlled by a live cezar (pid ${probe.probe.controller})`;
+    if (probe.probe.controller !== undefined) return `the worker is still controlled by a live ${productName('Cezar')} (pid ${probe.probe.controller})`;
     const pid = probe.probe.pids[0];
     return pid === undefined ? undefined : `a process of the previous execution is still running (pid ${pid})`;
   }
@@ -171,7 +172,7 @@ export class WorkerOrphans {
     const same = () => this.orphanedWorkerGeneration(runId)?.generation === orphan.generation;
     // >= 500 ms: every probe may be a synchronous darwin `lsof`.
     const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
-    // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
+    // A live controller is another Squawk's: nothing to signal or wait for. Otherwise signal only
     // recorded, token-verified survivors and recorded session groups (none for a legacy
     // record-less generation), then wait for readable cwd holders until the deadline.
     if (!orphan.record || !recordedProcessLive(orphan.record.controller)) {
@@ -222,7 +223,7 @@ export class WorkerOrphans {
 
   /** Destroy of a finished generation (hearsay-tools/cezarion#890): a dev server or watcher its
    * agent left in its process group holds the worktree, and nothing else ties it to the worker.
-   * A record whose controller is another live cezar is not ours to act on. */
+   * A record whose controller is another live Squawk is not ours to act on. */
   async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> {
     const proof = this.context.store.readWorkerExecution(runId);
     if (proof?.phase !== 'complete') return;

@@ -140,7 +140,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
       registeredAt: '2026-10-17T10:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', askSeq: 4 };
     expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI, worker, request, peer, process or subagent wait or timer you no longer need.');
-    // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
+    // Squawk's completion wait has no deadline (hearsay-tools/cezarion#1301).
     const { deadline: _deadline, timeoutSeconds: _timeout, ...undated } = byWorker;
     const completion: WorkerWaitEntry = { ...undated, source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, mode: 'all' };
     expect(openWaitsFooter([completion])).toBe(`Still open: worker wait ${completion.id} on 2 workers, no deadline. Call cezar_cancel_wait for any you no longer need.`);
@@ -157,9 +157,9 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
       `The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer, process or subagent wait or timer you no longer need.`);
   });
 
-  // Cezar's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):
+  // Squawk's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):
   // listing it back would tell the agent it asked the user something.
-  it('leaves Cezar\'s own human wait out of the list and the footer the agent reads', () => {
+  it('leaves Squawk\'s own human wait out of the list and the footer the agent reads', () => {
     const noWait: HumanWaitEntry = { id: '66666666-6666-4666-8666-666666666666', kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'],
       registeredAt: '2026-10-17T10:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'no-wait', askSeq: 7 };
     expect(isSquawkHumanWait(noWait)).toBe(true);

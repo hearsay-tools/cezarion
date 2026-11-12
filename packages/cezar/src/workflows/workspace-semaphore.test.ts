@@ -341,7 +341,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     expect(a.store.getRun(a2.id)?.status).toBe('done');
   }, 60_000);
 
-  it('applies the owning project cap when the manager runs from a cezar task worktree', async () => {
+  it('applies the owning project cap when the manager runs from a Squawk task worktree', async () => {
     const ownerRoot = fixtureRepo('cez-wsem-owner-cap-', roots);
     const taskRoot = join(ownerRoot, '.ai/cezar/worktrees/task-run');
     // The manager runs from taskRoot: teardown drains it there before it removes ownerRoot (hearsay-tools/cezarion#1804).

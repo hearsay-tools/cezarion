@@ -338,7 +338,7 @@ describe('reaping the per-run temp directories (#785)', () => {
  * #387: tools bind NAMED unix sockets under TMPDIR, and the kernel caps a
  * socket path at `sun_path` — 108 bytes on Linux, 104 on macOS, NUL included.
  * tsx alone builds `<tmpdir>/tsx-<uid>/<pid>.pipe` (~23 extra bytes) for its
- * IPC server, so a per-run directory from a deep checkout (Cezar's own task
+ * IPC server, so a per-run directory from a deep checkout (Squawk's own task
  * worktrees land well past 100) pushed every such bind past the cap and broke
  * `npm install`/typechecking inside the run. The directory must stay short
  * enough that those names still fit.
@@ -675,9 +675,9 @@ describe('socket-safe temp directory length (#387)', () => {
     expect(existsSync(resolveAgentTmpDir(dir, runId))).toBe(false);
   });
 
-  // #440: #785 gives every cezar task session a TMPDIR as deep as the
+  // #440: #785 gives every Squawk task session a TMPDIR as deep as the
   // checkout's own scratch tree, so a CLI booted inside that session (an e2e
-  // fixture, or cezar run by the agent itself) finds the env-honouring root's
+  // fixture, or Squawk run by the agent itself) finds the env-honouring root's
   // candidate over the cap too. The loud branch is right only when NO
   // socket-safe directory exists — and the platform default root is one.
   it.skipIf(process.platform === 'win32')(
@@ -772,7 +772,7 @@ describe('socket-safe temp directory length (#387)', () => {
   });
 
   it('never sweeps another dataDir’s fallback directory', () => {
-    // A second checkout is a second cezar project with live runs of its own;
+    // A second checkout is a second Squawk project with live runs of its own;
     // its fallback directories sit in the SAME shared root and must survive
     // this dataDir's startup sweep untouched.
     const mine = deepDataDir();

@@ -25,7 +25,7 @@ import { isOnceSchedule, type AutomationDefinition } from './types.ts';
  * hearsay-tools/cezarion#1465: `cezar_schedule_task` and `cezar_scheduled_tasks` over the same
  * service the HTTP routes call, bound to one project. The agent sees one-time schedules only: a
  * repeating automation's id answers `not_found`, so these tools never change one. The agent gives
- * and reads times in UTC, as in every other Cezar tool; the schedule is stored as a wall time in
+ * and reads times in UTC, as in every other Squawk tool; the schedule is stored as a wall time in
  * the cockpit's zone (or the zone it already has), so the cockpit shows it in local time.
  */
 type Refusal = { ok: false; code: ScheduledTaskRefusalCode; message: string };

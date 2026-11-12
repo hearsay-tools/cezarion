@@ -120,7 +120,7 @@ export type ToolGrant =
   /** An owned worker's grant, pinned at spawn from its parent's. The identity keeps
    *  only the list, so the parent's default and its written list look the same. */
   | ({ readonly kind: 'inherited' } & ToolList)
-  /** A list a workflow step or a cezar caller wrote out, an empty one included. */
+  /** A list a workflow step or a Squawk caller wrote out, an empty one included. */
   | ({ readonly kind: 'explicit' } & ToolList);
 export type ToolGrantKind = ToolGrant['kind'];
 
@@ -176,7 +176,7 @@ export function prependSystemPrompt(systemPrompt: string | undefined, userPrompt
  * `interrupt()` (#703): the CLIs install their own handlers, so a session the
  * runner tore down on purpose comes back as a NON-ZERO exit. Paired with a
  * "we sent the signal" flag, this predicate keeps that teardown out of the
- * error path — an exit cezar caused is never an agent failure.
+ * error path — an exit Squawk caused is never an agent failure.
  */
 export function isSignalTerminationExit(exitCode: number | null): boolean {
   return exitCode === 130 || exitCode === 137 || exitCode === 143;

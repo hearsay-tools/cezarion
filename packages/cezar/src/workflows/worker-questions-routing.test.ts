@@ -25,7 +25,7 @@ it("sends a worker's cezar_ask question to its active parent as a request", asyn
   });
 
 // hearsay-tools/cezarion#2410: a live parent that cannot take the question does not pass it to a
-  // human. Cezar answers the worker with the reason.
+  // human. Squawk answers the worker with the reason.
   it("answers the worker for the parent when an open peer request holds the parent's last inbox slot, and the reply still fits", async () => {
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -43,7 +43,7 @@ it("sends a worker's cezar_ask question to its active parent as a request", asyn
   });
 
 // hearsay-tools/cezarion#1990 review: a peer that sends first under the question's deterministic ID
-  // keeps its ID and its sender; Cezar answers the worker (hearsay-tools/cezarion#2410).
+  // keeps its ID and its sender; Squawk answers the worker (hearsay-tools/cezarion#2410).
   it('answers the worker for the parent when a peer message took its ID first', async () => {
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');

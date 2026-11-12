@@ -255,7 +255,7 @@ export class ContinuationChecks {
   }
 
   /** A worker resumes only beside a live parent (hearsay-tools/cezarion#2410): every Continue, the
-   *  human's and Cezar's own, is refused while its parent is settled, before anything is written.
+   *  human's and Squawk's own, is refused while its parent is settled, before anything is written.
    *  Restart recovery resumes a parent before its workers, so a recovering family is not refused. */
   private settledParentRefusal(run: RunRecord): ContinuationRefusal | undefined {
     if (run.delegation?.role !== 'worker') return;

@@ -1,4 +1,4 @@
-// OMP (Oh My Pi) extension: registers cezar's tools in OMP's own process (#595). Same shape as
+// OMP (Oh My Pi) extension: registers Squawk's tools in OMP's own process (#595). Same shape as
 // pi-ci-wait.mjs; OMP's `pi.registerTool` takes the JSON Schema `parameters` as Pi does.
 // Resolve beside this installed script; no private workspace dependency or download.
 import { existsSync } from 'node:fs';
@@ -10,11 +10,11 @@ const built = new URL('../dist/ci-wait/tools.js', import.meta.url);
 // otherwise the source error is the real cause and is rethrown, not hidden behind a missing dist.
 const loadBuilt = (error) => {
   if (!existsSync(fileURLToPath(built))) throw error;
-  process.stderr.write('cezar: loading built cezar tools from dist/; rebuild after changing src/ci-wait\n');
+  process.stderr.write('Squawk: loading built Squawk tools from dist/; rebuild after changing src/ci-wait\n');
   return import(built.href);
 };
 const { squawkTools } = await (existsSync(source) ? import(source.href).catch(loadBuilt) : import(built.href));
-// #781: the shared cezar tool list, read in OMP's own process, whose env carries the opt-in.
+// #781: the shared Squawk tool list, read in OMP's own process, whose env carries the opt-in.
 // `ompTools` admits exactly these names to `--tools`: OMP exits 2 on a name nothing registered.
 export default function ciWaitExtension(pi) {
   for (const tool of squawkTools(process.env)) {

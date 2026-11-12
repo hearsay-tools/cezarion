@@ -11,7 +11,7 @@ import { ownCommand } from './command.ts';
  * A long command an agent starts from its own shell and leaves running (hearsay-tools/cezarion#3097).
  * A supervisor process leads a session of its own, so the command outlives the shell call, the turn
  * and the agent session on every runner: Codex ends a command's process group when the command
- * returns, and Cezar ends a session's group when the session ends. The supervisor writes the
+ * returns, and Squawk ends a session's group when the session ends. The supervisor writes the
  * command's output to a log file and its exit code to an exit file, and its own PID is the one a
  * process wait watches. Each start has files of its own, `<name>.<run>.log` and `<name>.<run>.exit`:
  * a process wait still open on an earlier start of the name never reads a later start's exit code.
@@ -218,7 +218,7 @@ export async function superviseJob(dir: string, name: string, command: string[],
       for (const [signal, handler] of signals) process.off(signal, handler);
       if (note) writeFileSync(log, `${note}\n`);
       closeSync(log);
-      // The directory can be gone: Cezar removes a task's temp directory when the task ends.
+      // The directory can be gone: Squawk removes a task's temp directory when the task ends.
       try { writeAtomic(record.exitFile, `${code}\n`); } catch { /* no one can read it there */ }
       done(code);
     };

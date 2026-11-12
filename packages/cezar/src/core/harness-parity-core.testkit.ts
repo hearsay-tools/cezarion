@@ -54,13 +54,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `provider-rate-limit` | a 429 with no reset time in its native error shape; the run holds |
  * | `provider-not-found` | a 404 from the model endpoint in its native error shape; the run holds |
  * | `provider-credit` | a spent credit balance in its native error shape; the run holds |
- * | `approval` | a native permission request cezar routes to the cockpit; no turn end until it is answered |
- * | `permission-default` | a native built-in default permission ask cezar answers itself, then call `cezar_done` (#1266) |
+ * | `approval` | a native permission request Squawk routes to the cockpit; no turn end until it is answered |
+ * | `permission-default` | a native built-in default permission ask Squawk answers itself, then call `cezar_done` (#1266) |
  * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `cezar_done` |
  * | `approval-turn-end` | the `approval` request, still pending when the turn ends after `cezar_done` once `CEZ_MOCK_RELEASE_FILE` exists |
  * | `approval-reply-fails` | the `approval` request, whose first answer the backend refuses to accept; a later answer ends the turn |
  * | `approval-malformed` | a malformed native permission request; the backend calls `cezar_done` and ends the turn once it is refused |
- * | `permission-classify` | a request the backend settles while cezar reads its config, then a marker request (`CEZ_MOCK_RELEASE_FILE` gates) |
+ * | `permission-classify` | a request the backend settles while Squawk reads its config, then a marker request (`CEZ_MOCK_RELEASE_FILE` gates) |
  * | `permission-late` | the turn ends after `cezar_done`, then a native permission request from a run the server started; its answer resumes that run, which calls `cezar_done` |
  * | `ask` | an ask — native where the wire has one (Codex, OpenCode), a `cezar_ask` call (`mock:cezar-ask`) otherwise |
  * | `ask-resume` | accept one human answer, then call `cezar_done` without another prompt (`mock:resume-cezar-done`) |
@@ -164,7 +164,7 @@ export const SHUTDOWN_CRITERIA = [
   { id: 'S27', scenario: 'no-progress-leftover', name: "stop ends the leader's process group but not a setsid child" },
   { id: 'S28', scenario: 'no-progress-leftover', name: 'end escalation reaches the whole process group' },
   { id: 'S29', scenario: 'input-closed-live', name: 'settles a live native input transport failure without false success' },
-  // hearsay-tools/cezarion#1286: a session that ends without a signal from cezar.
+  // hearsay-tools/cezarion#1286: a session that ends without a signal from Squawk.
   { id: 'S30', scenario: 'no-progress-leftover', name: 'a leader that exits on its own leaves nothing in its process group' },
   { id: 'S31', scenario: 'no-progress-leftover', name: 'a leader killed from outside leaves nothing in its process group' },
   { id: 'S33', scenario: 'no-progress', name: 'preserves outside-signal failure when native exit notification follows EOF cleanup' },
@@ -294,7 +294,7 @@ export const ANSWER_DELIVERY_CRITERIA = [
 ] as const;
 
 /** Native approvals, exercised through the manager and HTTP route (P1), and a backend's own
- *  built-in permission asks, which cezar answers without parking (P2, hearsay-tools/cezarion#1266).
+ *  built-in permission asks, which Squawk answers without parking (P2, hearsay-tools/cezarion#1266).
  *  P3–P8 pin the pending request's lifecycle: it holds from receipt until the backend settles it.
  *  P9 routes an MCP tool approval for another server (hearsay-tools/cezarion#1294). */
 export const PERMISSION_CRITERIA = [
@@ -326,7 +326,7 @@ export interface HarnessAdapter {
   /** P1: the option to pick (matched case-insensitively against its label) and the text the
    *  mock echoes once that native reply arrives. Required with `scenarios.approval`. */
   readonly approvalDecisions?: readonly { pick: string; echo: string }[];
-  /** P6: the text the mock echoes once cezar refuses its malformed request. Required with
+  /** P6: the text the mock echoes once Squawk refuses its malformed request. Required with
    *  `scenarios['approval-malformed']`. */
   readonly malformedApprovalEcho?: string;
 }
@@ -342,7 +342,7 @@ const OPENCODE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-opencode-serve.mjs
 /** No marker: every mock's default branch answers this with its scripted turn. */
 const BASELINE_PROMPT = 'inspect the working tree';
 
-/** `mock:cezar-tool` (scripts/mock-ci-tool.mjs) calls one cezar tool over the session's own wire,
+/** `mock:cezar-tool` (scripts/mock-ci-tool.mjs) calls one Squawk tool over the session's own wire,
  *  then `mock:then` ends the turn with that text. Every mock answers it the same way, on a fresh
  *  turn and on a resumed one, so `cezar-ask` and `cezar-wait` are one prompt for every runner. */
 const squawkToolPrompt = (name: 'cezar_ask' | 'cezar_wait', args: Record<string, unknown>, then: string): string =>
@@ -357,7 +357,7 @@ const SQUAWK_WAIT_PROMPT = squawkToolPrompt('cezar_wait', { kind: WAIT_KIND.time
   'parity cezar-wait: waiting on downstream work');
 const SQUAWK_TOOL_SCENARIOS = { 'cezar-ask': SQUAWK_ASK_PROMPT, 'cezar-wait': SQUAWK_WAIT_PROMPT } as const;
 
-/** The id cezar pins on every session, mirroring `RunManager`. */
+/** The id Squawk pins on every session, mirroring `RunManager`. */
 export const PINNED_SESSION_ID = '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90';
 
 /** Pre-create a session the OpenCode mock will GET on resume, so a Continue cell
@@ -711,37 +711,37 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   })),
   ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'P1', backend, kind: 'scenario-unconstructible' as const,
-    reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
+    reason: `${backend}'s native wire does not carry a native permission request that Squawk answers through the cockpit permission card. This cell checks that native request/response protocol; ordinary human questions remain covered by R26.`,
   })),
   ...([
-    ['claude', 'Claude print mode settles every tool permission inside Claude under its headless --permission-mode and sends cezar no MCP tool approval request; cezar\'s own tools are pre-authorized through generated --allowedTools entries (R35).'],
+    ['claude', 'Claude print mode settles every tool permission inside Claude under its headless --permission-mode and sends Squawk no MCP tool approval request; Squawk\'s own tools are pre-authorized through generated --allowedTools entries (R35).'],
     ['opencode', 'OpenCode sends no MCP-specific approval request: an ask before any tool call arrives as an ordinary permission.asked from a rule the user wrote, which P1 routes to the cockpit card (hearsay-tools/cezarion#1266).'],
-    ['pi', 'Pi\'s RPC wire carries no tool approval request for cezar to answer; cezar\'s tools reach Pi as an --extension admitted through --tools (R35), not as an MCP server.'],
-    ['cursor', 'Cursor print runs with --force and its stream-json wire carries no MCP tool approval request; cezar\'s own tools load from a private --plugin-dir.'],
-    ['omp', 'OMP\'s RPC wire carries no tool approval request for cezar to answer: tool admission is its --tools list and --config overlay; cezar\'s tools reach OMP as an --extension admitted through --tools (R35), not as an MCP server.'],
+    ['pi', 'Pi\'s RPC wire carries no tool approval request for Squawk to answer; Squawk\'s tools reach Pi as an --extension admitted through --tools (R35), not as an MCP server.'],
+    ['cursor', 'Cursor print runs with --force and its stream-json wire carries no MCP tool approval request; Squawk\'s own tools load from a private --plugin-dir.'],
+    ['omp', 'OMP\'s RPC wire carries no tool approval request for Squawk to answer: tool admission is its --tools list and --config overlay; Squawk\'s tools reach OMP as an --extension admitted through --tools (R35), not as an MCP server.'],
   ] as const).map(([backend, reason]) => ({ criterion: 'P9', backend, kind: 'scenario-unconstructible' as const, reason })),
   {
     criterion: 'P2', backend: 'claude', kind: 'scenario-unconstructible',
-    reason: "dontAsk (the default) denies unapproved tools without emitting a permission request, so no built-in default ask reaches cezar to answer.",
+    reason: "dontAsk (the default) denies unapproved tools without emitting a permission request, so no built-in default ask reaches Squawk to answer.",
   },
   {
     criterion: 'P2', backend: 'codex', kind: 'scenario-unconstructible',
-    reason: "every app-server approval request comes from Codex's own approval policy or MCP tool approval mode, which cezar leaves to Codex and P1 and P9 route to the human; the wire has no built-in ask that cezar answers.",
+    reason: "every app-server approval request comes from Codex's own approval policy or MCP tool approval mode, which Squawk leaves to Codex and P1 and P9 route to the human; the wire has no built-in ask that Squawk answers.",
   },
   ...(['pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'P2', backend, kind: 'scenario-unconstructible' as const,
-    reason: `${backend}'s native wire carries no permission request at all, so there is no built-in default ask for cezar to answer.`,
+    reason: `${backend}'s native wire carries no permission request at all, so there is no built-in default ask for Squawk to answer.`,
   })),
   ...(['claude', 'pi', 'cursor', 'omp'] as const).flatMap(backend => { return ([
     ['P3', 'for the backend to settle itself'],
     ['P4', 'to outlive its turn'],
     ['P5', 'whose answer the backend could refuse'],
     ['P6', 'to arrive malformed'],
-    ['P7', 'to hold input while cezar classifies it'],
+    ['P7', 'to hold input while Squawk classifies it'],
     ['P8', 'to arrive after its turn ended'],
   ] as const).map(([criterion, situation]) => ({
     criterion, backend, kind: 'scenario-unconstructible' as const,
-    reason: `${backend}'s native wire does not carry a native permission request that cezar answers through the cockpit permission card, so there is no pending request ${situation}.`,
+    reason: `${backend}'s native wire does not carry a native permission request that Squawk answers through the cockpit permission card, so there is no pending request ${situation}.`,
   })); }),
   {
     criterion: 'P5', backend: 'codex', kind: 'scenario-unconstructible',
@@ -749,7 +749,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'P7', backend: 'codex', kind: 'scenario-unconstructible',
-    reason: "A Codex approval request is already Codex's own decision to ask (its approval policy runs server-side), so cezar shows the card on receipt with nothing to read first; there is no window between receipt and the card.",
+    reason: "A Codex approval request is already Codex's own decision to ask (its approval policy runs server-side), so Squawk shows the card on receipt with nothing to read first; there is no window between receipt and the card.",
   },
   {
     criterion: 'P8', backend: 'codex', kind: 'scenario-unconstructible',
@@ -817,7 +817,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     claude: 'Claude stream-json asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
     cursor: 'Cursor print auto-skips native AskQuestion before a human can answer. The executable native-question rejection and the A3/A4 cezar_ask cells cover the available paths.',
     pi: 'Pi RPC asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
-    omp: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. Asks go through cezar_ask (A3/A4 cover the cezar_ask policy).',
+    omp: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire Squawk uses. Asks go through cezar_ask (A3/A4 cover the cezar_ask policy).',
   })),
   {
     criterion: 'R15', backend: 'pi', kind: 'scenario-unconstructible',
@@ -930,7 +930,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
     reason: 'Cursor print has no input channel into a running print process: every mid-turn message waits for the next process (boundary delivery, always-held), which S38 and S39 hold on its wire.',
   })),
-  // D1 (hearsay-tools/cezarion#2279): a governed session keeps native subagents, and cezar adds a
+  // D1 (hearsay-tools/cezarion#2279): a governed session keeps native subagents, and Squawk adds a
   // control only where a runner's cross-session tool is separate from subagent messaging. Each
   // reason was checked against the installed CLI on 2026-10-30.
   ...([
@@ -944,7 +944,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   // D3 (hearsay-tools/cezarion#1994): no native cross-session messaging control at shipped
   // defaults. Each reason was checked against the installed CLI on 2026-10-27.
   ...([
-    ['codex', 'Codex 0.164.0 multi-agent tools reach only agents of the same session; the cross-thread agent_message_board feature is under development and off by default, so cezar sends no flag for an unstable key.'],
+    ['codex', 'Codex 0.164.0 multi-agent tools reach only agents of the same session; the cross-thread agent_message_board feature is under development and off by default, so Squawk sends no flag for an unstable key.'],
     ['opencode', 'OpenCode 1.19.4 has no messaging tool and no inbound channel. Its task tool resumes any session by task_id with no parent check, and the task permission pattern matches only subagent_type, so no session rule blocks a foreign task_id while subagents keep working. Only the shell finds another session\'s ID, and the shell reaches that session directly (opencode run --session); the same-user shell is outside hard isolation.'],
     ['pi', 'pi 1.4.0 has no built-in messaging tool; an extension may add one, and its name cannot be discovered as messaging.'],
     ['cursor', 'Cursor 2026.10.22-27dcf5f defines send_message (to cloud agents) in its protocol, but the CLI never sets sendMessageEnabled and has no handler for it.'],

@@ -228,7 +228,7 @@ export function deliveryCells(runners: RunnerId[], it: typeof registerTest = reg
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const { timer, later } = await timerWaits(run.id);
-      // Every session closes cleanly at a turn end while the result is owed, before Cezar can
+      // Every session closes cleanly at a turn end while the result is owed, before Squawk can
       // submit it, as U9's clean close does at a boundary. The first is the original session: the
       // timer resolves as its human turn ends. The others are the continuations that retry.
       let closing = true, resolving = true;

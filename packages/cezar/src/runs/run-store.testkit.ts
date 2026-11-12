@@ -54,7 +54,7 @@ function seedRow(record: Record<string, unknown>): RunRowInput {
     createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
     status: typeof record.status === 'string' ? record.status : '',
     archived: record.archived === true,
-    // A row with the pre-schema-4 `activity` was live to the cezar that wrote it, and the column
+    // A row with the pre-schema-4 `activity` was live to the Squawk that wrote it, and the column
     // is never recomputed on read (phase 4b dropped `activity` from `isLiveRecord`).
     live: 'activity' in record || (encoded?.live ?? ['queued', 'running', 'waiting'].includes(String(record.status))),
     data: JSON.stringify(record),

@@ -52,7 +52,7 @@ interface WaitEngineHost {
 
 /** The steps a registration path chooses; the row decides the arm, the park guard and the entry returned. */
 interface OpenOptions {
-  /** Withdraw Cezar's human waits after the compare, before the commit. */
+  /** Withdraw Squawk's human waits after the compare, before the commit. */
   withdraw: boolean;
   receipt?: RegistrationIdentity | undefined;
   onCommitFailure?: CommitFailure;
@@ -127,7 +127,7 @@ export class WaitEngine {
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
     this.host.reconcileWorkerWaits(familyOf(run));
     // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
-    // Cezar's completion wait tells its own workers; an agent's wait tells its family.
+    // Squawk's completion wait tells its own workers; an agent's wait tells its family.
     this.host.noticeParkedWorkers(wait.source === 'cezar' ? runId : familyOf(run));
   }
 
@@ -183,7 +183,7 @@ export class WaitEngine {
   }
 
   /** Where a process wait's exit file may sit: the run's worktree (the checkout for a run without
-   *  one) and, unless turned off, the Cezar temp directory its agent gets as `TMPDIR`. */
+   *  one) and, unless turned off, the Squawk temp directory its agent gets as `TMPDIR`. */
   exitFileRoots(runId: string, run = this.context.store.getRun(runId)): ExitFileRoots {
     return { worktree: run?.worktreePath ?? this.context.repoRoot, ...(agentTmpDirEnabled() ? { tmpDir: resolveAgentTmpDir(this.context.dataDir, runId) } : {}) };
   }
@@ -228,7 +228,7 @@ export class WaitEngine {
    * outcome whose resolution failed to commit arms the same retry with `firstDelay` 1 second.
    */
   private armWorkerDeadline(runId: string, wait: WorkerWaitEntry, firstDelay?: number): void {
-    // A deadline-less (Cezar completion) wait ends only when its workers settle (hearsay-tools/cezarion#1301).
+    // A deadline-less (Squawk completion) wait ends only when its workers settle (hearsay-tools/cezarion#1301).
     if (firstDelay === undefined && wait.deadline === undefined) return;
     const run = this.context.store.getRun(runId);
     if (!run) return;

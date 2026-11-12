@@ -9,6 +9,7 @@ import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { productName } from '../home/display.ts';
 
 // hearsay-tools/cezarion#1380: losing the saved cause before Continue, or preferring a
 // saved message over the restart explanation, must fail on every native input wire.
@@ -96,7 +97,7 @@ function humanText(runner: RunnerId, it: typeof registerTest = registerTest): vo
     it(`${runner} R91 preserves human text that equals the legacy restart fallback`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'cezar-done');
-      const text = 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
+      const text = `The ${productName('Cezar')} process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.`;
       const before = messages().length;
       expect(manager.continueRun(id, { text })).toEqual({ ok: true });
       await until(() => messages().length > before);
@@ -130,7 +131,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.split('\n')[0]).toContain(failed.error);
-      expect(prompt.split('\n')[0]).toContain('cezar process restarted');
+      expect(prompt.split('\n')[0]).toContain('process restarted while you were working');
       expect(prompt).toContain(`\n${text}`);
       expect(prompt).toContain(path);
       expect(readFileSync(path, 'utf8')).toBe('brief-1380');
@@ -151,7 +152,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       await semaphore.release();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
-      expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
+      expect(prompt.match(/process restarted while you were working/g)).toHaveLength(1);
       expect(prompt.split('\n')[0]).toContain('verify their state before restarting');
     }, 60_000);
 }
@@ -179,8 +180,8 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
         await semaphore.release();
         await until(() => messages().length > before);
         const prompt = messages()[before]!;
-        expect(prompt.split('\n')[0]).toContain('cezar process restarted');
-        expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
+        expect(prompt.split('\n')[0]).toContain('process restarted while you were working');
+        expect(prompt.match(/process restarted while you were working/g)).toHaveLength(1);
         expect(prompt).toContain(`\n${text}`);
       }, 60_000);
     }

@@ -48,7 +48,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     for (const proc of children.splice(0)) if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
   });
 
-  it('refuses PID 1, Cezar\'s own PID, an exit file outside the worktree, and the timer refusals', async () => {
+  it('refuses PID 1, Squawk\'s own PID, an exit file outside the worktree, and the timer refusals', async () => {
     processes();
     const run = await waitingParent();
     await expect(register(run.id, { pid: 1 })).rejects.toThrow();

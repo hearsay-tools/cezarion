@@ -112,7 +112,7 @@ export class ScheduleRunner {
     const state = this.handle.store.state(definition.id) ?? {};
     if (state.nextRunAt) return Date.parse(state.nextRunAt);
     // A once is due at its instant even when that has passed: a lost state file, or an instant
-    // that passed while cezar was down, must still reach `fireOnce`, which decides late or missed.
+    // that passed while Squawk was down, must still reach `fireOnce`, which decides late or missed.
     const next = isOnceSchedule(definition)
       ? onceInstant(definition.schedule)
       : nextOccurrence(definition.schedule, this.now(), this.handle.timeZone);

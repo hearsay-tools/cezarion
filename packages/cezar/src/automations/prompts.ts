@@ -3,6 +3,7 @@
  * automations. Use the current absolute CLI command; do not substitute another automation
  * mechanism.
  */
+import { productName } from '../home/display.ts';
 import { fileURLToPath } from 'node:url';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 
@@ -65,7 +66,7 @@ Top-level keys:
 - "events" (GitHub poll, required): 1-4 of pull_request.opened, issue.opened, issue.labeled, issue.unlabeled.
 - "intervalSeconds" (GitHub poll): how often GitHub is polled, 60-86400 seconds; default 300.
 - "filters" (GitHub poll): may be {}; every key is optional, and a candidate must pass ALL the given filters.
-- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. These repeating shapes run in the cockpit's own time zone. "once" runs a single time: "at" is the local wall time "YYYY-MM-DDTHH:MM" in "timeZone" (an IANA name such as Europe/Warsaw, required), and the optional "latestStartMinutes" (10-43200) is how late after "at" a start may still launch when Cezarion was not running; without it a late start always launches. Once its task exists, a one-time schedule is archived with the task's id ("archived": { "outcome": "launched", "runId": ... }) and never fires again. "run <id>" (Run now) consumes it the same way. "cancel <id>" archives it without a task ("outcome": "cancelled"). An archived schedule cannot change; "list --archived only" shows them. "at" must be in the future when it is created, moved or enabled.
+- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. These repeating shapes run in the cockpit's own time zone. "once" runs a single time: "at" is the local wall time "YYYY-MM-DDTHH:MM" in "timeZone" (an IANA name such as Europe/Warsaw, required), and the optional "latestStartMinutes" (10-43200) is how late after "at" a start may still launch when ${productName('Cezarion')} was not running; without it a late start always launches. Once its task exists, a one-time schedule is archived with the task's id ("archived": { "outcome": "launched", "runId": ... }) and never fires again. "run <id>" (Run now) consumes it the same way. "cancel <id>" archives it without a task ("outcome": "cancelled"). An archived schedule cannot change; "list --archived only" shows them. "at" must be in the future when it is created, moved or enabled.
 - "task": the ordinary task each match or occurrence launches.
 
 "filters" keys:
@@ -85,7 +86,7 @@ Top-level keys:
 - "autonomous": never park to ask; an automation has no one watching (recommended: true).
 - "archiveWhenDone": boolean (default false). Archive each launched task after Done. Without a PR, archive on Done even when autoMergePr is true.
 - "autoMergePr": boolean (default false). After Done, merge the task's PR only when current-head CI and GitHub rules pass. This may mark a draft ready. With archiveWhenDone, merge before archive. Pending or blocked actions show a reason on the task. These settings apply to future tasks; editing the automation does not change tasks it already launched.
-- "allowWorkers": boolean (default true). Agents in each launched task may start and resume Cezar workers, each a separate paid agent session.
+- "allowWorkers": boolean (default true). Agents in each launched task may start and resume ${productName('Cezar')} workers, each a separate paid agent session.
 - "allowMessaging": boolean (default true). Agents in each launched task may message other tasks in this project.
 - "systemPrompt": extra guidance for every launched run.
 

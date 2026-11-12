@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 /**
  * The old worker-wait engine is gone (hearsay-tools/cezarion#1301): the completion gate's
  * `delegation.wait`, its `delegation.completion` record and the `activity: 'monitoring'` park.
- * Cezar's completion wait is a `worker` entry in the wait list, so no source names the old engine's
+ * Squawk's completion wait is a `worker` entry in the wait list, so no source names the old engine's
  * pieces, writes the old fields or reads them. Old rows still parse: the contract keeps the fields
  * optional, and store schema 7 reads them into the list on open (`upgradeLegacyWaits`, legacy-waits.ts),
  * which with the schema history in run-database.ts and the cold index's re-derivation of an old

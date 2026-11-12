@@ -77,7 +77,7 @@ const GOLDEN_FIXTURES = [
   'bash-and-screenshot',
   'thinking-edit-write-todo',
   'subagent-task',
-  // A `context: fork` skill called through the Skill tool under cezar's restricted
+  // A `context: fork` skill called through the Skill tool under Squawk's restricted
   // argv (CLI 2.1.303, hearsay-tools/cezarion#1284): the forked subagent's items carry
   // the Skill call as their parent, as a Task call's do.
   'forked-skill',

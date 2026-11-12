@@ -251,8 +251,8 @@ export function spawnSessionLeader(
   const leader: Leader = { child };
   leaders.set(pid, leader);
   // Runners clear their own SIGKILL timers when the leader exits. A member that ignored the
-  // SIGTERM cezar sent outlives it, so the follow-up SIGKILL for the group lives here. A leader
-  // cezar never signalled is reaped after the exit drain, so a descendant's final crash
+  // SIGTERM Squawk sent outlives it, so the follow-up SIGKILL for the group lives here. A leader
+  // Squawk never signalled is reaped after the exit drain, so a descendant's final crash
   // diagnostic still lands first (harness row S19). The drain is referenced, and bounded by
   // EXIT_DRAIN_CAP_MS, so a host with nothing else to do stays up to reap.
   child.once('exit', (code) => {
@@ -310,7 +310,7 @@ export function sessionGroupOf(pid: number): number | undefined {
   return leader && !exited(leader.child) ? pid : undefined;
 }
 
-/** cezar's own SIGINT/SIGTERM, passed to every agent group that still has members. */
+/** Squawk's own SIGINT/SIGTERM, passed to every agent group that still has members. */
 export function forwardToSessionGroups(signal: NodeJS.Signals): void {
   for (const [pgid, leader] of [...leaders]) {
     if (stale(pgid, leader)) drop(pgid, leader);

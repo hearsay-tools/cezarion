@@ -108,7 +108,7 @@ export class RunSettlement {
   }
 
   /** A clean process exit cannot complete a workflow still blocked on a question.
-   * Keep its existing durable waiting step so Continue can resume the tail. Cezar's fallback
+   * Keep its existing durable waiting step so Continue can resume the tail. Squawk's fallback
    * question on a worker is not one: the clean exit supersedes it, so the workflow goes on as the
    * plain park it replaced did (hearsay-tools/cezarion#1301). */
   supersedeFallbackThenWorkflowAsk(runId: string, state: ActiveRun): boolean {
@@ -448,7 +448,7 @@ export class RunSettlement {
    * would produce so its parent can collect it. Explicit asks and worker waits
    * remain durable attention states. */
   async settleIdleClosedWorker(runId: string, keepStepId?: string): Promise<boolean> {
-    // An idle close supersedes Cezar's fallback question, so the worker settles as its plain park
+    // An idle close supersedes Squawk's fallback question, so the worker settles as its plain park
     // did (hearsay-tools/cezarion#1301).
     this.workerQuestions.supersedeWorkerFallback(runId);
     const run = this.context.store.getRun(runId);

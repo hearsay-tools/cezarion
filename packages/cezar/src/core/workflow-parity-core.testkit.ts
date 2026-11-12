@@ -100,8 +100,8 @@ export async function driveRun(
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  // The mock answers Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a row
-  // that ends a turn with no wait reaches Cezar's own wait rather than a question the mock made
+  // The mock answers Squawk's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a row
+  // that ends a turn with no wait reaches Squawk's own wait rather than a question the mock made
   // up. `options.env` may opt back in to the card.
   const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...extraEnv };
   const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
@@ -255,7 +255,7 @@ function prepareOwnedInputEnvironment(backend: RunnerId, options: OwnedInputOpti
   for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
   const savedDry = process.env.CEZ_DRY_RUN;
   const savedAutoName = process.env.CEZ_AUTONAME;
-  // The worker ignores Cezar's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
+  // The worker ignores Squawk's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
   // park, so input delivery is what these fixtures decide. `options.env` may opt back in.
   const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...options.env };
   const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);

@@ -105,7 +105,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         expect(contextLines(run.id)).toEqual([expect.stringMatching(/^session context: handoff applied \(\d+ B, .+\); vision applied \(\d+ B, docs\/vision\.md\); recipient applied \(\d+ B\)$/)]);
 
         writeFileSync(join(root, 'docs/vision.md'), 'VISION-V2\n');
-        // The agent's own line since the first launch; cezar writes none at a turn end (hearsay-tools/cezarion#1809).
+        // The agent's own line since the first launch; Squawk writes none at a turn end (hearsay-tools/cezarion#1809).
         const handoff = handoffPath(join(root, '.ai/cezar'), run.id);
         writeFileSync(handoff, readFileSync(handoff, 'utf8').replace('## Progress log\n\n', '## Progress log\n\n- 10:00 — R120 progress\n'));
         // A record the store committed before a crash, which never reached the file: the launch shows it.
@@ -174,7 +174,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         const recovered = messages()[before]!;
         expect(count(recovered, '<cezar-context id="handoff"')).toBe(1);
         expect(prefixOf(recovered)).toContain(handoffBlock(run.id));
-        expect(recovered).toContain('cezar process restarted');
+        expect(recovered).toContain('process restarted while you were working');
       }, 60_000);
 
       if (rows.includes('R124') && runsOn('session-context', 'R124', runner)) suite.it(`${runner} R124 renders an owned worker's own handoff and worker rules, never the parent's`, async () => {

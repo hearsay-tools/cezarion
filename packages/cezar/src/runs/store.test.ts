@@ -429,7 +429,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     setRunStatus(store, run.id, RUN_STATUS.running);
     store.close();
-    // An older cezar stored the park as `activity` (phase 4b dropped it from the schema).
+    // An older Squawk stored the park as `activity` (phase 4b dropped it from the schema).
     seedRuns(dataDir, readPersistedRuns(dataDir).map((row) => ({ ...row, activity: 'monitoring' })));
 
     // Schema 4 no longer keeps `activity`: a stored monitoring park reads as `waiting`, with no
@@ -830,7 +830,7 @@ describe('RunStore — secret redaction before persistence (#427)', () => {
     expect(raw).toContain('[REDACTED]');
   });
 
-  it('scrubs a token shape even when it never lived in cezar’s env', () => {
+  it('scrubs a token shape even when it never lived in Squawk’s env', () => {
     delete process.env.CEZ_REDACT_SECRETS;
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
@@ -2675,7 +2675,7 @@ describe('RunStore — pinned tasks (#935)', () => {
 
   it('unpinning DELETES both keys rather than writing pinned:false', () => {
     // The compatibility promise (BACKWARD_COMPATIBILITY.md): an unpinned record is
-    // byte-identical to one written by a cezar that never heard of pins.
+    // byte-identical to one written by a Squawk that never heard of pins.
     const store = RunStore.open(dataDir);
     const id = newRun(store);
     store.setPinned(id, true);

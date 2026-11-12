@@ -33,7 +33,7 @@ try {
   const { Home } = await import(new URL('home/home.js', runtime.url));
   Home.sandbox(home.rootOverride ?? home.root, { layout: home.layout });
   // Keep git discovery away from the user's parent repository, even if TMPDIR
-  // was set inside a cezar worktree. This repo contains only the experiment.
+  // was set inside a Squawk worktree. This repo contains only the experiment.
   execFileSync('git', ['init', '--initial-branch=main'], { cwd: root, stdio: 'ignore' });
   const fixtures = await seedColdHistories(dataDir, runtime);
   global.gc?.();

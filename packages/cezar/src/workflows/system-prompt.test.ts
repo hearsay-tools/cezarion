@@ -27,7 +27,7 @@ import { createRunner } from '../core/runner-factory.ts';
 
 // Publication guidance is additive for both fresh sessions and Continue; the
 // full prompt assertions below must still pin the unchanged handoff contract.
-// hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
+// hearsay-tools/cezarion#1234: the sessions below have Squawk's tools, so they are taught the tools.
 // hearsay-tools/cezarion#1584: their opening message carries the handoff, so step 1 points there.
 // The dry run's Claude reports its native subagents (hearsay-tools/cezarion#2431).
 const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), jobInstructions(), handoffInstructions({ handoffInjected: true, nativeSubagents: true }));
@@ -182,7 +182,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // heuristics in demos/e2e); '1' forces the mock path for these tests.
     process.env.CEZ_AUTONAME = '1';
     process.env.CEZ_MOCK_ARGS_FILE = argsFile;
-    // Simulate a nested cezar (an agent running `cez serve` / the test suite):
+    // Simulate a nested Squawk (an agent running `cez serve` / the test suite):
     // the parent process already carries CEZ_TODOS_FILE. Runners spawn with
     // `{ ...process.env, ...spec.env }`, so `agentEnv` must *shadow* this for
     // every run, so an older parent cannot pass a writable inbox into a child.
@@ -558,7 +558,7 @@ describe('generated inbox retirement (dry run)', () => {
     expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
     expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
     expect(existsSync(todosFile)).toBe(false);
-    // …and nothing leaked into the parent cezar's inbox either.
+    // …and nothing leaked into the parent Squawk's inbox either.
     expect(existsSync(inheritedTodos)).toBe(false);
     // New runs do not persist the retired preference.
     expect(store.getRun(id)?.generateFollowups).toBeUndefined();
@@ -567,7 +567,7 @@ describe('generated inbox retirement (dry run)', () => {
   it('keeps the per-task handoff journal and lifecycle tools', async () => {
     const id = await runToEnd({ task: 'do the thing mock:cezar-done' });
     expect(capturedSystemPrompt()).toContain('CEZ_HANDOFF_FILE');
-    // hearsay-tools/cezarion#1234: the lifecycle rides in the same contract, as cezar tool calls.
+    // hearsay-tools/cezarion#1234: the lifecycle rides in the same contract, as Squawk tool calls.
     expect(capturedSystemPrompt()).toContain('call cezar_done');
     expect(capturedSystemPrompt()).toContain('kind "timer" to re-check later');
     // The task-reference markers too (spec 2026-07-18-task-ref-markers).

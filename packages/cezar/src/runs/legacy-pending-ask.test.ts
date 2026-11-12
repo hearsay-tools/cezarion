@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 afterEach(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
 
-/** Rewrite the stored row as an older cezar left it, then reopen. */
+/** Rewrite the stored row as an older Squawk left it, then reopen. */
 function reopenWith(patch: Record<string, unknown>): RunStore {
   const [row] = readPersistedRuns(dir);
   seedRuns(dir, [{ ...row, ...patch }]);

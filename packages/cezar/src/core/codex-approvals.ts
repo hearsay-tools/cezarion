@@ -76,7 +76,7 @@ const CODEX_APPROVAL_METHODS = new Set([
 ]);
 const MCP_ELICITATION_METHOD = 'mcpServer/elicitation/request';
 
-/** True for a request cezar answers as an approval; every other elicitation stays unsupported. */
+/** True for a request Squawk answers as an approval; every other elicitation stays unsupported. */
 export function isCodexApprovalRequest(method: string, raw: unknown): boolean {
   if (CODEX_APPROVAL_METHODS.has(method)) return true;
   if (method !== MCP_ELICITATION_METHOD || !raw || typeof raw !== 'object') return false;
@@ -168,7 +168,7 @@ function mcpToolApproval(rpcId: number | string, raw: unknown, squawkServer: str
   // The reply shapes Codex's own TUI sends; a remembered scope rides in `_meta.persist`.
   add('Allow once', 'allow_once', { action: 'accept', content: null, _meta: null });
   if (remembers.has('session')) add('Allow this tool for this session', 'allow_always', { action: 'accept', content: null, _meta: { persist: 'session' } });
-  // `always` saves an approve rule in the user's Codex config. cezar's server name is per run.
+  // `always` saves an approve rule in the user's Codex config. Squawk's server name is per run.
   if (remembers.has('always') && serverName !== squawkServer) {
     add('Always allow this tool (saved in your Codex config)', 'allow_always', { action: 'accept', content: null, _meta: { persist: 'always' } });
   }

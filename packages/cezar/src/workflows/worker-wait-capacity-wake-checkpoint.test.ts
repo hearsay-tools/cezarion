@@ -33,7 +33,7 @@ describe("worker waits through RunManager", { timeout: 30_000 }, () => {
         const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
         manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
         // The wake turn's own frames reach the runner while its acknowledgement is held. The wake is
-        // cezar's text, so the mock answers it with its ordinary turn rather than an echo.
+        // Squawk's text, so the mock answers it with its ordinary turn rather than an echo.
         await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
         await Promise.all(bookkeeping);
         store.flush(); // Earlier turn bookkeeping/debounce cannot satisfy the measured ACK checkpoint.

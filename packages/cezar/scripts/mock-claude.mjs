@@ -19,7 +19,7 @@ const { answerNudge } = await import('./mock-nudge.mjs');
 
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that Squawk tool over
 // the session's MCP config before its turn ends. Returns '' or a failure note for the text.
 const tools = () => import('./mock-ci-tool.mjs');
 async function lifecycle(call) {
@@ -64,7 +64,7 @@ const emit = (obj) => {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
 };
 
-// `--help` lists the options cezar feature-detects (#505).
+// `--help` lists the options Squawk feature-detects (#505).
 if (process.argv.includes('--help')) {
   process.stdout.write('Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n  --include-hook-events  Include all hook lifecycle events in the output stream\n');
   process.exit(0);
@@ -610,7 +610,7 @@ const MULTI_QUESTIONS = [
   { header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Node test' }] },
   { header: 'Build', question: 'Which build tool?', options: [{ label: 'Vite' }, { label: 'Webpack' }] },
 ];
-/** The cezar tool calls a reply makes, in order, before its final text. */
+/** The Squawk tool calls a reply makes, in order, before its final text. */
 async function runCalls(calls) {
   let notes = '';
   for (const call of calls) notes += await lifecycle(call);

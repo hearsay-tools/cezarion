@@ -269,7 +269,7 @@ function beforeFailureScenario(prompt, context) {
 /**
  * Provider failures, one error class each (hearsay-tools/squawk#3337). `provider-error` above is a
  * request the provider rejects as invalid (HTTP 400), which fails the run. These are failures the
- * same request can survive later, so Cezar holds the run and retries it. Each mock's `end` writes
+ * same request can survive later, so Squawk holds the run and retries it. Each mock's `end` writes
  * the kind in its own native error shape.
  */
 export const PROVIDER_HOLD_SCENARIOS = [

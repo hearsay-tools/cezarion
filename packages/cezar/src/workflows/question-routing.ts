@@ -5,7 +5,7 @@ import { inboxSlotsUsed } from '../delegation/conversations.ts';
 
 /** Where a worker's question goes (hearsay-tools/cezarion#2410). It has one addressee, its parent:
  *  the conversation that admits it, a close when either end has stopped, or the reason a live parent
- *  cannot take it, which Cezar answers. No case hands it to a human. */
+ *  cannot take it, which Squawk answers. No case hands it to a human. */
 export type WorkerQuestionRouting =
   | { state: ConversationState }
   | { close: 'worker-stopped' | 'parent-stopped' }

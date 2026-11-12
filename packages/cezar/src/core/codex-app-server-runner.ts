@@ -75,7 +75,7 @@ export interface CodexRunnerOptions {
  * `thread/resume` to reopen a stored thread for "Continue".
  *
  * Auth = the host's logged-in ChatGPT/Codex session (or CODEX_API_KEY). The
- * agent inherits managed permissions; confirmed unmanaged sessions keep cezar's
+ * agent inherits managed permissions; confirmed unmanaged sessions keep Squawk's
  * full-access default. Approval policy always belongs to the app-server.
  * Codex has no per-tool allowlist, so
  * `spec.toolGrant` is ignored. `CEZ_CODEX_NETWORK=0` requires a confirmed
@@ -84,7 +84,7 @@ export interface CodexRunnerOptions {
 /**
  * What the codex app-server receives from each `AgentRunSpec` field (#284).
  * Tool access does not cross this wire: managed permissions belong to Codex;
- * unmanaged sessions use cezar's sandbox choice. The app-server has no per-tool
+ * unmanaged sessions use Squawk's sandbox choice. The app-server has no per-tool
  * allowlist, so `toolGrant` is declared dropped rather than mapped (spec
  * 2026-07-17-permission-modes). Held against the recorded JSON-RPC by the harness parity matrix.
  */
@@ -640,7 +640,7 @@ class CodexSession implements AgentSession {
         ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
         ...(this.spec.restrictCrossSessionMessaging ? { 'features.agent_message_board': false } : {}),
         // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
-        // server's mode is `approve`, and cezar's own tools must never wait on that.
+        // server's mode is `approve`, and Squawk's own tools must never wait on that.
         // approval_policy stays the user's (#381); older Codex ignores the unknown key.
         ...(this.spec.squawkTools ? { [`mcp_servers.${this.spec.squawkTools.name}`]: { command: this.spec.squawkTools.command, args: this.spec.squawkTools.args, env_vars: squawkToolEnvNames(this.spec.env ?? {}), default_tools_approval_mode: 'approve' } } : {}),
       } } : {}),

@@ -9,10 +9,11 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from './run.ts';
+import { productName } from '../home/display.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
-const REFUSED = 'This Cursor session was started on the ACP transport, which Cezarion no longer supports, '
+const REFUSED = `This Cursor session was started on the ACP transport, which ${productName('Cezarion')} no longer supports, `
   + 'so it cannot resume. Start a new task to continue this work.';
 
 /**

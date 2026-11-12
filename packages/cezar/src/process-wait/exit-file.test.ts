@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { confineExitFile, readExitCode } from './exit-file.ts';
 
-// hearsay-tools/cezarion#1446: the exit file is the one thing Cezar reads for a process wait. It
+// hearsay-tools/cezarion#1446: the exit file is the one thing Squawk reads for a process wait. It
 // must sit in the worktree or the run's temp directory, and only an integer leaves it.
 let root: string, worktree: string, tmpDir: string, outside: string;
 beforeEach(() => {

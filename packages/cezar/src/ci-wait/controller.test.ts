@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stat, access, rm, mkdtemp, mkdir } from 'node:fs/promises';
@@ -172,7 +173,7 @@ describe('private CI controller', () => {
       expect(done.isError).not.toBe(true);
       const [doneJson, doneHint] = (done.content as Array<{ text: string }>)[0]!.text.split('\n');
       expect(squawkDoneAnswerSchema.parse(JSON.parse(doneJson!))).toEqual(accepted);
-      expect(doneHint).toBe('Accepted. End your turn; Cezar finishes the task at its end.');
+      expect(doneHint).toBe(`Accepted. End your turn; ${productName('Cezar')} finishes the task at its end.`);
     } finally { await client.close(); }
   }, 15000);
 });
@@ -296,7 +297,7 @@ describe('private wait routes', () => {
     // A throw never forwards its text.
     ask.mockImplementationOnce(coded('capacity'));
     const failed = await raw(session.env, JSON.stringify(card), undefined, 'ask');
-    expect(JSON.parse(failed.body)).toEqual({ ok: false, code: 'unavailable', message: 'Cezar could not show your question now. Retry once; if it fails again, ask it in your final message.' });
+    expect(JSON.parse(failed.body)).toEqual({ ok: false, code: 'unavailable', message: `${productName('Cezar')} could not show your question now. Retry once; if it fails again, ask it in your final message.` });
     expect(failed.body).not.toContain('secret-sensitive');
     session.revoke();
     expect((await raw(session.env, JSON.stringify(card), undefined, 'ask')).status).toBe(401);

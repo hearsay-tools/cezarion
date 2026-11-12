@@ -40,7 +40,7 @@ const REPLIES: readonly Reply[] = ['pr', 'timer', 'process', 'ask', 'done', 'not
 /** computeWaitingOn's order among the waits this test opens. */
 const TOP: readonly Kind[] = ['pr', 'process', 'timer'];
 
-/** `question` names who asked: the agent, or Cezar after a turn with no wait or done. */
+/** `question` names who asked: the agent, or Squawk after a turn with no wait or done. */
 type Model = { state: RunState; open: Set<Kind>; question: false | 'agent' | 'cezar'; session: boolean };
 type Real = { id: string };
 
@@ -106,7 +106,7 @@ function endTurn(model: Model, reply: Reply): number {
   if (model.question) { model.state = target('running.ask', 'running'); return 1; }
   const top = TOP.find((kind) => model.open.has(kind));
   if (top) { model.state = target('running.park-monitoring', 'running', `waiting:${top}`); return 1; }
-  // No wait: one nudge, whose plain reply opens Cezar's no-wait question.
+  // No wait: one nudge, whose plain reply opens Squawk's no-wait question.
   expect(target('running.no-wait-nudge', 'running')).toBe('running');
   model.state = target('running.no-wait-human', 'running');
   model.question = 'cezar';
@@ -180,7 +180,7 @@ class ResolveWait implements Command {
 class IdleElapses implements Command {
   check = (m: Readonly<Model>) => m.session && RUN_TRIGGERS.find((candidate) => candidate.id === 'waiting.idle')!.states.includes(m.state);
   async run(m: Model, r: Real) {
-    // Cezar's own question ends with the session; the agent's stays open.
+    // Squawk's own question ends with the session; the agent's stays open.
     const squawkAsks = m.state === 'waiting:human' && m.question === 'cezar';
     m.state = target(squawkAsks ? 'human.idle-cezar-question' : 'waiting.idle', m.state);
     if (squawkAsks) m.question = false;

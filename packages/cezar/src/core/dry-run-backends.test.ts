@@ -32,7 +32,7 @@ it('uses bundled Cursor print for a fresh dry run', async () => {
     expect(events.find(event => event.type === 'session')?.sessionTransport).toBe('cursor-print');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-it('shows Cursor native questions as failed tools without a Cezar answer card', async () => {
+it('shows Cursor native questions as failed tools without a Squawk answer card', async () => {
   vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_CURSOR_BIN', undefined);
   vi.stubEnv('CEZ_MOCK_CURSOR_PRINT_MODE', 'native-question');

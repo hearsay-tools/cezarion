@@ -85,7 +85,7 @@ describe('ompProfileName', () => {
     expect(ompProfileName('/home/u/.omp-alt/profiles/a.b-c_d')).toBe('a.b-c_d');
   });
 
-  it('refuses every name omp itself refuses, so cezar never hands omp a profile it rejects', () => {
+  it('refuses every name omp itself refuses, so Squawk never hands omp a profile it rejects', () => {
     // omp 18.8.0 `packages/utils/src/dirs.ts`: `^[a-z0-9][a-z0-9._-]{0,63}$`, not ending in `.`,
     // not a Windows device name, and `default` meaning NO profile.
     for (const name of ['Work', '-work', '.work', 'work.', 'default', 'con', 'NUL.txt', 'com1', 'a'.repeat(65), 'wo rk', '']) {

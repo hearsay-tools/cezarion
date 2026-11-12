@@ -46,8 +46,8 @@ export const runnerHook = {
 };
 
 // Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer
-// Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn end with no wait
-// reaches Cezar's own wait, not a question the mock made up.
+// Squawk's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn end with no wait
+// reaches Squawk's own wait, not a question the mock made up.
 const fixtureAutoname = process.env.CEZ_AUTONAME;
 const fixtureNudgeReply = process.env.CEZ_MOCK_NUDGE_REPLY;
 beforeEach(() => { process.env.CEZ_AUTONAME = '0'; process.env.CEZ_MOCK_NUDGE_REPLY = 'plain'; });

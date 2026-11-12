@@ -153,7 +153,7 @@ describe('SIGTERM→SIGKILL escalation for an opencode server that survives SIGT
  * #4 (upstream #897) — the runner used to long-poll `POST /session/:id/message`
  * and synthesize v1 `turn-end` from that response's settlement, so undici's
  * default 300s headers timeout ended any longer turn with `prompt failed:
- * fetch failed` and cezar parked a healthy run. The turn now starts with
+ * fetch failed` and Squawk parked a healthy run. The turn now starts with
  * `POST /session/:id/prompt_async` and ends from the SSE `session.idle` —
  * the same signal the v2 mapper already uses.
  */
@@ -1927,7 +1927,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => mock.permissionReplies.length === 1);
       expect(mock.permissionReplies).toEqual([{
         path: '/permission/per_1/reply',
-        body: { reply: 'reject', message: 'no permission UI is attached to this cezar session' },
+        body: { reply: 'reject', message: 'no permission UI is attached to this session' },
       }]);
     });
   });
@@ -2311,7 +2311,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         await waitFor(() => mock.permissionReplies.length === 1);
         expect(mock.permissionReplies).toEqual([{
           path: '/permission/per_1/reply',
-          body: { reply: 'reject', message: 'no permission UI is attached to this cezar session' },
+          body: { reply: 'reject', message: 'no permission UI is attached to this session' },
         }]);
         await idleEnds(mock, events, session);
       });

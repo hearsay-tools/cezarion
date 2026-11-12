@@ -87,7 +87,7 @@ describe('importing runs.json', () => {
   it('reads only the database once the import is complete, whatever runs.json says later', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
     open().close();
-    // An older cezar writing runs.json after the upgrade: re-upgrading must not import it.
+    // An older Squawk writing runs.json after the upgrade: re-upgrading must not import it.
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a', { title: 'downgraded' }), record('zz')]));
     const store = open();
     expect(store.getRun('a')?.title).toBe('run a');
@@ -438,7 +438,7 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
     const github = record('gh', { automation: { automationId: 'auto-gh', automationRevision: 1, receiptId: 'r1', event: 'issue.opened', githubUrl: 'https://github.com/o/r/issues/1' } });
     const scheduled = record('sched', { automationTrigger: { automationId: 'auto-s', automationRevision: 1, receiptId: 'r2', trigger: 'manual', occurrenceAt: '2026-10-05T00:00:00.000Z' } });
     seedRuns(dataDir, [github, scheduled, record('control', { autonomous: true })]);
-    // What an older cezar wrote: the same record, its summary projected without the field.
+    // What an older Squawk wrote: the same record, its summary projected without the field.
     const db = RunDatabase.open(join(dataDir, RUNS_DB_FILE));
     try {
       db.transaction({

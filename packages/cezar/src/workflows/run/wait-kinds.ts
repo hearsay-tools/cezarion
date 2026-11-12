@@ -7,6 +7,7 @@ import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import type { TimerWaitEntry, PrWaitEntry, ProcessWaitEntry, PeerWaitEntry, WorkerWaitEntry, HumanWaitEntry, SquawkWaitRequestInput, WaitVia, SubagentWaitEntry, SubagentChild } from '@open-mercato/cezar-contract';
 import type { Wait, WaitPhase, SquawkWaitRequest } from '@open-mercato/cezar-contract';
 import type { FiredBy } from '../run-states.ts';
+import { productName } from '../../home/display.ts';
 
 /** Each wait kind: its deadline, whether it keeps a slot while it is the top wait, who resolves it. */
 export type WaitKindSpec = {
@@ -116,7 +117,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     ...waitSelectors('pr'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: () => [],
-    sessionlessPrompt: { priority: 0, text: 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.' },
+    sessionlessPrompt: { priority: 0, text: `Resume to receive the queued CI observation. End this opening turn so ${productName('Cezar')} can deliver it; do not poll CI.` },
     untilText: PR_UNTIL_TEXT,
     summary: wait => { const pr = wait as PrWaitEntry; return clip(`${WAIT_KINDS.pr.untilText[pr.until].summary} ${pr.repository}#${pr.prNumber}`); },
     resultText: wait => { const pr = wait as PrWaitEntry; return WAIT_KINDS.pr.untilText[pr.until].resultText(pr); },
@@ -143,7 +144,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     ...waitSelectors('timer'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: wait => [{ priority: WAIT_KINDS.timer.monitoring(wait) ? 0 : 1, text: WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer' }],
-    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
+    sessionlessPrompt: { priority: 3, text: `Resume to receive the queued timer result. End this opening turn so ${productName('Cezar')} can deliver it.` },
     monitoring: wait => wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup'),
     monitoringNudge: MONITORING_WAKE_NUDGE,
     summary: wait => { const timer = wait as TimerWaitEntry; return clip(timer.note === undefined ? 'timer' : `timer: ${timer.note}`); },
@@ -177,7 +178,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     ...waitSelectors('process'),
     capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
     deliveryLabel: () => [{ priority: 2, text: 'process' }],
-    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
+    sessionlessPrompt: { priority: 3, text: `Resume to receive the queued timer result. End this opening turn so ${productName('Cezar')} can deliver it.` },
     summary: wait => { const process = wait as ProcessWaitEntry; return clip(process.note === undefined ? `process ${process.pid}` : `process ${process.pid}: ${process.note}`); },
     resultText: wait => processWaitResultText(wait as ProcessWaitEntry),
     footerItem: wait => { const process = wait as ProcessWaitEntry; return `process wait ${process.id} on PID ${process.pid}${process.note === undefined ? '' : ` (${process.note})`}, deadline ${process.deadline}`; },
@@ -202,7 +203,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     ...waitSelectors('subagent'),
     capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
     deliveryLabel: () => [],
-    sessionlessPrompt: { priority: 2, text: 'Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so Cezar can deliver it.' },
+    sessionlessPrompt: { priority: 2, text: `Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so ${productName('Cezar')} can deliver it.` },
     summary: wait => clip(`subagent wait on ${subagentPhrase(wait as SubagentWaitEntry)}`),
     resultText: wait => subagentWaitResultText(wait as SubagentWaitEntry),
     footerItem: wait => { const subagent = wait as SubagentWaitEntry; return `subagent wait ${subagent.id} on ${subagentPhrase(subagent)}, deadline ${subagent.deadline}`; },
@@ -230,7 +231,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     ...waitSelectors('peer'),
     capNote: (wait, maxAutoContinues) => `automatic ${wait.kind} wake-up cap reached (${maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`,
     deliveryLabel: () => [{ priority: 3, text: 'peer' }],
-    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
+    sessionlessPrompt: { priority: 3, text: `Resume to receive the queued timer result. End this opening turn so ${productName('Cezar')} can deliver it.` },
     summary: wait => clip(`peer wait on ${peerTargetPhrase(wait as PeerWaitEntry)}`),
     resultText: wait => peerWaitResultText(wait as PeerWaitEntry),
     footerItem: wait => { const peer = wait as PeerWaitEntry; return `peer wait ${peer.id} on ${peerTargetPhrase(peer)}, deadline ${peer.deadline}`; },
@@ -258,10 +259,10 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     ...waitSelectors('worker'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: () => [],
-    sessionlessPrompt: { priority: 1, text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.' },
+    sessionlessPrompt: { priority: 1, text: `Resume to receive the queued worker wait result. End this opening turn so ${productName('Cezar')} can deliver it.` },
     summary: wait => { const worker = wait as WorkerWaitEntry; return clip(`${worker.requestIds ? 'request' : 'worker'} wait on ${workerTargetPhrase(worker)}`); },
     resultText: (wait, workerStatus) => workerWaitResultText(wait as WorkerWaitEntry, workerStatus),
-    // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
+    // Squawk's completion wait has no deadline (hearsay-tools/cezarion#1301).
     footerItem: wait => { const worker = wait as WorkerWaitEntry; return `${worker.requestIds ? 'request' : 'worker'} wait ${worker.id} on ${workerTargetPhrase(worker)}, ${worker.deadline === undefined ? 'no deadline' : `deadline ${worker.deadline}`}`; },
     footerKinds: [{ order: 1, text: 'worker' }, { order: 2, text: 'request' }],
     resolve: (latest, _result, observed, resolvedAt) => ({ ...observed ?? latest as WorkerWaitEntry, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }),
@@ -282,13 +283,13 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     chargesWake: false, refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
     deadline: 'agent-only', keepsSlot: false, cancels: [...ENDS_WAITS, 'the parent settles'], resolves: [
     { trigger: 'the workers report outcomes or the requests get replies, as its mode says', firedBy: 'worker' },
-    { trigger: 'the deadline of an agent wait; Cezar\'s completion wait has none', firedBy: 'timer' },
+    { trigger: `the deadline of an agent wait; ${productName('Cezar')}'s completion wait has none`, firedBy: 'timer' },
   ] },
   human: {
     ...waitSelectors('human'),
     capNote: (wait, maxAutoContinues) => `automatic ${WAIT_KINDS.timer.monitoring(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${maxAutoContinues}); timer ${wait.id} cancelled`,
     deliveryLabel: () => [],
-    sessionlessPrompt: { priority: 3, text: 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.' },
+    sessionlessPrompt: { priority: 3, text: `Resume to receive the queued timer result. End this opening turn so ${productName('Cezar')} can deliver it.` },
     summary: wait => { const first = (wait as HumanWaitEntry).questions?.[0]?.question; return first === undefined ? 'human question' : clip(`human: ${first}`); },
     // The user's own message is a human wait's result; this text is never its delivery.
     resultText: wait => `Human wait ${wait.id} ended.`,
@@ -312,7 +313,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     userAnswers: true, holdsConversationInput: false, runnerResumeCancels: [],
     chargesWake: false, refusesSpentBudget: false, holdsSession: false, cancellable: 'unshown', timersDisabled: false,
     deadline: 'none', keepsSlot: false, humanOnly: 'The question is the user\'s gate.',
-    cancels: ['the agent\'s own wait replaces Cezar\'s', 'a done in the same turn', 'Stop', 'Finish', 'an authored step timeoutMs'],
+    cancels: [`the agent's own wait replaces ${productName('Cezar')}'s`, 'a done in the same turn', 'Stop', 'Finish', 'an authored step timeoutMs'],
     resolves: [{ trigger: 'an answer; the parent\'s for a routed worker question', firedBy: 'human' }] },
 };
 
@@ -436,13 +437,13 @@ function monitoringTimerEntry(via: WaitVia, now: number, delay: number | undefin
 const SUMMARY_MAX = 256;
 const SUBAGENT_DEADLINE_MINUTES = SUBAGENT_WAIT_DEADLINE_SECONDS / 60;
 
-/** Monitoring timers: the timers Cezar opens for live workers (`monitoring-line`, also the via of
+/** Monitoring timers: the timers Squawk opens for live workers (`monitoring-line`, also the via of
  *  saved `CEZ:MONITORING` timers) and `ScheduleWakeup`. */
 export function isMonitoringTimer(wait: Wait): boolean {
   return WAIT_KINDS.timer.monitoring(wait);
 }
 
-/** Cezar's own human wait (`no-wait`, `budget`): it stands in for a wait the agent never registered
+/** Squawk's own human wait (`no-wait`, `budget`): it stands in for a wait the agent never registered
  *  and is replaced by the agent's own (hearsay-tools/cezarion#1234), so the agent is never told of
  *  it as one of its waits. */
 export function isSquawkHumanWait(wait: Wait): boolean {
@@ -489,7 +490,7 @@ export function processNotRunningAtRegistration(wait: Pick<ProcessWaitEntry, 'st
 }
 
 /** A process wait's result (hearsay-tools/cezarion#1446). Only the outcome and an integer exit code
- *  come from Cezar; the agent reads the command's own output with its tools. */
+ *  come from Squawk; the agent reads the command's own output with its tools. */
 function processWaitResultText(wait: ProcessWaitEntry): string {
   const head = `Process wait ${wait.id} for PID ${wait.pid}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   const read = "Read the command's output with your own tools.";
@@ -524,7 +525,7 @@ export function subagentWaitResultText(wait: SubagentWaitEntry): string {
   const reason = wait.result?.reason;
   if (reason === 'interrupted') {
     const n = wait.children.filter(child => child.status === 'running').length;
-    return `${head}: Cezar restarted, and the ${n} native ${n === 1 ? 'subagent' : 'subagents'} still running in your last session stopped with it. Check what each one finished before it stopped, and start again any work it did not finish.`;
+    return `${head}: ${productName('Cezar')} restarted, and the ${n} native ${n === 1 ? 'subagent' : 'subagents'} still running in your last session stopped with it. Check what each one finished before it stopped, and start again any work it did not finish.`;
   }
   if (reason === 'timeout') return `${head}: no subagent event for ${Math.round(SUBAGENT_DEADLINE_MINUTES)} minutes; ${subagentPhrase(wait)} still running${outcomes ? ` (ended: ${outcomes})` : ''}. Check them, then end your turn to keep waiting, or continue toward the task goal.`;
   return `${head}: every native subagent ended (${outcomes}). Read their results and continue toward the task goal.`;
@@ -567,7 +568,7 @@ export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
 export function sessionlessWakePrompt(resolved: ReturnType<typeof resolvedWaits>): string {
   const prompts = resolved.map(wait => WAIT_KINDS[wait.kind].sessionlessPrompt);
   return prompts.sort((a, b) => a.priority - b.priority)[0]?.text
-    ?? 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
+    ?? `Resume to receive queued messages. End this opening turn so ${productName('Cezar')} can deliver them.`;
 }
 
 /** The first budgeted wait label, with monitoring timers ahead of ordinary timers, processes and peers. */

@@ -177,7 +177,7 @@ const send = (event) => {
   write(event);
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that Squawk tool over
 // OPENCODE_CONFIG_CONTENT's MCP entry before its turn ends. Returns '' or a note for the text.
 const tools = () => import('./mock-ci-tool.mjs');
 async function lifecycle(call) {
@@ -302,7 +302,7 @@ function handleRequest(req, res) { wireRecorder?.recordHttpResponse(req, res);
       res.end(JSON.stringify({ permission: { bash: 'ask' } }));
     };
     if (!classifyPending) { answer(); return; }
-    // P7: hold the config read, settle the ask natively while cezar classifies it, then send a
+    // P7: hold the config read, settle the ask natively while Squawk classifies it, then send a
     // marker ask. Files beside CEZ_MOCK_RELEASE_FILE hand each step to the test and back.
     classifyPending = false;
     const release = process.env.CEZ_MOCK_RELEASE_FILE;
@@ -346,7 +346,7 @@ async function handleRequestBody(req, res, url, body) {
 }
 function prepareRequestBody(req, url, body) {
   if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
-  // The delivery control also reads the prompt Cezar sent, before a nudge's scripted answer replaces it.
+  // The delivery control also reads the prompt Squawk sent, before a nudge's scripted answer replaces it.
   if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = withoutSessionContextBody(body);
   const received = body;
   if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = answerNudgeBody(body);
@@ -508,7 +508,7 @@ async function replyWithFailedApprovalReply(body) {
   return;
 }
 async function replyWithMalformedPermission(body) {
-  // P6: `patterns` must be an array; cezar rejects the ask by its id.
+  // P6: `patterns` must be an array; Squawk rejects the ask by its id.
   send({ type: 'message.updated', properties: { info: info({}) } });
   pendingPermissionAsks.add('per_mock_bad');
   send({ type: 'permission.asked', properties: {
@@ -712,7 +712,7 @@ function recordSessionPrompt(body) {
 function deliveryPromptText(body, received) {
   // A configured control matches the prompt's text parts, never their JSON encoding.
   let deliveryText = body;
-  // Both the prompt Cezar sent and a nudge's scripted answer match (hearsay-tools/cezarion#1525).
+  // Both the prompt Squawk sent and a nudge's scripted answer match (hearsay-tools/cezarion#1525).
   const textOf = (raw) => JSON.parse(raw).parts.map(part => part.text ?? '').join('\n');
   if (delivery) try { deliveryText = received === body ? textOf(body) : `${textOf(received)}\n${textOf(body)}`; } catch { /* not a prompt body */ }
   return deliveryText;

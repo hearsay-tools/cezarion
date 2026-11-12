@@ -105,8 +105,8 @@ const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
   R127: { ...providerHold(), assert: obs => assertProviderHold(obs, 'model endpoint not found') },
   R128: { ...providerHold(), assert: obs => assertProviderHold(obs, 'credit balance') },
   R1: {
-    // Group 7 — a run whose agent DECLARED completion reaches cezar's review
-    // gate, which is a non-attention terminal state (cezar never auto-merges).
+    // Group 7 — a run whose agent DECLARED completion reaches Squawk's review
+    // gate, which is a non-attention terminal state (Squawk never auto-merges).
     // The scenario has to declare it: a markerless turn-end parks as `waiting`
     // on every backend, and that is correct behaviour, not a defect.
     settled: (record) => TERMINAL.includes(record?.status ?? ''),

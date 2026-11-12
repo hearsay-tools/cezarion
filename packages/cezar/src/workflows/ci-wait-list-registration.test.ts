@@ -127,7 +127,7 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'timers_disabled' });
     const answer = await manager.squawkToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'timers_disabled', open_waits: [] });
-    // A refused registration registers nothing, so Cezar's own wait stays.
+    // A refused registration registers nothing, so Squawk's own wait stays.
     expect(store.getRun(run.id)?.waits?.map(wait => wait.via)).toEqual(['no-wait']);
     // CI is an external event: Park until resumed does not refuse it.
     await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: WAIT_KIND.pr });

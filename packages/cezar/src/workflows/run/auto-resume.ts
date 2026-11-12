@@ -8,6 +8,7 @@ import { formatWakeInstant } from '../run-scheduling.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
 import { atContinue } from './launch-read-resolver.ts';
+import { productName } from '../../home/display.ts';
 
 interface AutoResumeHost {
   move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
@@ -45,15 +46,15 @@ const AUTO_RESUME_PROMPT =
   'The provider usage limit that interrupted this task has reset. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
 
 const PROVIDER_RETRY_PROMPT =
-  'A provider error interrupted this task, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
+  `A provider error interrupted this task, and ${productName('Cezar')} retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.`;
 
 /** A provider error before the step's first session: the retry starts one, so it carries the step's prompt. */
 const freshRetryPrompt = (prompt: string) =>
-  `A provider error stopped this step before its agent session started, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) for any context. Your instructions:\n\n${prompt}`;
+  `A provider error stopped this step before its agent session started, and ${productName('Cezar')} retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) for any context. Your instructions:\n\n${prompt}`;
 
 /**
  * What a resume says. A provider retry always carries the held step's own prompt: a native runner
- * that failed before it reported its session leaves only Cezar's launch id, and that retry opens a
+ * that failed before it reported its session leaves only Squawk's launch id, and that retry opens a
  * new session too (hearsay-tools/squawk#3337).
  */
 export function retryPrompt(run: RunRecord): string {
@@ -201,7 +202,7 @@ export class AutoResumeScheduler {
     if (!this.context.semaphore.autoResumeOnUsageLimit()) {
       // Sweep the RECORDS, not the timer map. A record promising a resume that no timer is
       // holding is the exact population this method exists for, and it is also the one the
-      // setting can be switched off in front of: cezar restarted while it was off, the config
+      // setting can be switched off in front of: Squawk restarted while it was off, the config
       // was hand-edited, or the project context was disposed mid-wait. Retiring only the armed
       // timers leaves such a record with a live `autoResumeAt`, which `accountHolds()` reads as
       // a deadline hold — so nothing new starts on that account, `rescueStalledQueue` treats the

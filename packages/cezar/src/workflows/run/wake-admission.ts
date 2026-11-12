@@ -298,7 +298,7 @@ export class WakeAdmission {
   }
 
   /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
-   *  them as steering, which charges nothing. A parked run waits on the user instead: Cezar's
+   *  them as steering, which charges nothing. A parked run waits on the user instead: Squawk's
    *  `budget` human wait opens and is shown, and a human message resets the budget. */
   holdPeerWakesAtCap(runId: string): void {
     const run = this.context.store.getRun(runId);

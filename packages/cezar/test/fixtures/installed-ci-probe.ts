@@ -51,7 +51,7 @@ export async function probe({ Client, StdioClientTransport, CiToolController, cr
   const client = new Client({ name:'installed-ci-smoke', version:'1' });
   try {
    await client.connect(new StdioClientTransport({ ...session.descriptor, env:session.env, stderr:'pipe' }));
-   assert.match(client.getInstructions() ?? '', /^The interface to Cezarion[^\n]*\n- cezar_wait: /);
+   assert.match(client.getInstructions() ?? '', /^The interface to (Cezarion|Squawk)[^\n]*\n- cezar_wait: /);
    // hearsay-tools/cezarion#1236: the deprecated CI alias is gone.
    assert.ok(!(client.getInstructions() ?? '').includes('cezar_wait_for_ci'));
    const tools = await client.listTools();
@@ -74,7 +74,7 @@ export async function probe({ Client, StdioClientTransport, CiToolController, cr
      await previewClient.connect(new StdioClientTransport({ ...session.descriptor, env:{ ...session.env, CEZ_PREVIEW:'1' }, stderr:'pipe' }));
      assert.deepEqual((await previewClient.listTools()).tools.map(tool => tool.name), [...defaultTools.slice(0, 4), 'cezar_preview_serve', 'cezar_preview_stop', ...defaultTools.slice(4)]);
      assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through\.$/m);
-     assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_stop: load when your Cezar-started preview server needs stopping or restarting\.$/m);
+     assert.match(previewClient.getInstructions() ?? '', /^- cezar_preview_stop: load when your (Cezar|Squawk)-started preview server needs stopping or restarting\.$/m);
    } finally { await previewClient.close(); }
    const opened = await client.callTool({ name:'cezar_wait', arguments:{ kind:scenario.kind, pr:wait.prUrl } });
    assert.notEqual(opened.isError, true);
