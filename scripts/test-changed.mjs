@@ -14,7 +14,8 @@ const argv = process.argv.slice(2);
 for (const [index, arg] of argv.entries()) {
   if (arg === '--' && options.ci) { options.forward = argv.slice(index + 1); break; }
   if (arg === '--help' || arg === '-h') {
-    await new Promise(resolve => process.stdout.write(`Usage: npm run test:changed -- [--base=<ref>] [--plan] [--help | -h]
+    const output = Promise.withResolvers();
+    process.stdout.write(`Usage: npm run test:changed -- [--base=<ref>] [--plan] [--ci [-- <Vitest args>]] [--help | -h]
 
 Selection rules:
   Compare against the merge-base with local origin/main (or main), including
@@ -45,7 +46,8 @@ This prints docs-only, infra-only or full-matrix.
 
 This command provides iteration feedback. Import graphs do not cover every
 runtime dependency. CI's gate is final.
-`, resolve));
+`, output.resolve);
+    await output.promise;
     process.exit(0);
   }
   else if (arg === '--plan') options.plan = true;

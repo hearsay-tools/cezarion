@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import {
-  changedLines, classify, latestMap, mapProblem, parseOptions, readMap, referenceGraph, resolveLiteral, selectSpecs, stringLiterals,
+  changedLines, classify, latestMap, main, mapProblem, parseOptions, readMap, referenceGraph, resolveLiteral, selectSpecs, stringLiterals,
 } from './e2e-affected.mjs';
 
 // hearsay-tools/cezarion#1816: npm run test:e2e:affected chooses browser specs from the spec map.
@@ -236,6 +236,22 @@ function repository(t) {
 }
 
 const affected = (cwd, ...args) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+
+test('CI planning uses mapped specs and falls back on empty selection or a missing map', t => {
+  const { dir, put, map } = repository(t);
+  const cwd = process.cwd();
+  const mapFlag = map();
+  process.chdir(dir);
+  try {
+    assert.equal(main(['--ci', '--plan', mapFlag]), 0);
+    assert.equal(main(['--ci', '--plan', '--map=missing.json']), 0);
+    put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
+    assert.equal(main(['--ci', '--plan', mapFlag]), 0);
+    assert.equal(main(['--plan', mapFlag]), 0);
+  } finally {
+    process.chdir(cwd);
+  }
+});
 
 test('--plan diffs the working tree against the map’s commit, untracked files included, and runs nothing', t => {
   const { dir, put, map } = repository(t);
