@@ -11,6 +11,8 @@ import { IDLE_TIMEOUT_MS } from './run/constants.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import type { AgentRunner } from '../core/agent-runner.ts';
+import * as runnerFactory from '../core/runner-factory.ts';
+import { useRunners } from '../core/runners-under-test.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
@@ -21,22 +23,16 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 const hoistedRunnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined, ui: undefined as ((event: UiEvent) => void) | undefined }));
 
-vi.mock('../core/runner-factory.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
-  const originalStarts = new WeakMap<AgentRunner, AgentRunner['startSession']>();
-  return {
-    ...actual,
-    createRunner: (...args: Parameters<typeof actual.createRunner>) => {
-      const runner = hoistedRunnerHook.runner ?? actual.createRunner(...args);
-      const start = originalStarts.get(runner) ?? runner.startSession.bind(runner);
-      originalStarts.set(runner, start);
-      runner.startSession = (spec, ...rest) => {
-        hoistedRunnerHook.ui = rest[1]?.onUiEvent;
-        return start(spec, ...rest);
-      };
-      return runner;
-    },
+const originalStarts = new WeakMap<AgentRunner, AgentRunner['startSession']>();
+useRunners((...args) => {
+  const runner = hoistedRunnerHook.runner ?? runnerFactory.createRunner(...args);
+  const start = originalStarts.get(runner) ?? runner.startSession.bind(runner);
+  originalStarts.set(runner, start);
+  runner.startSession = (spec, ...rest) => {
+    hoistedRunnerHook.ui = rest[1]?.onUiEvent;
+    return start(spec, ...rest);
   };
+  return runner;
 });
 
 export const runnerHook = {
