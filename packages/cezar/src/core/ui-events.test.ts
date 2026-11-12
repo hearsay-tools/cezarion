@@ -62,7 +62,6 @@ describe('UiEvent vocabulary (compile-time contract)', () => {
     assertType<
       Equal<StopReason, 'end_turn' | 'max_tokens' | 'refusal' | 'cancelled' | 'timeout' | 'error'>
     >();
-    expect(true).toBe(true);
   });
 
   it('every UiEvent type is covered by a rendering-relevance map (compile-time exhaustive)', () => {

@@ -24,6 +24,8 @@ const execFileAsync = promisify(execFile);
 const legacyIdentity = (records: string) => `tree:${createHash('sha256').update(records).digest('hex')}`;
 /** The same, for a file holding `text`. */
 const legacyFileIdentity = (text: string) => legacyIdentity(`F  ${text}\n`);
+/** The `tree2:` identity a manifest records today over `records`: length-prefixed D/F entries. */
+const tree2Identity = (records: string) => `tree2:${createHash('sha256').update(records).digest('hex')}`;
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 describe('worktree manifest', { timeout: 30_000 }, () => {
@@ -65,11 +67,11 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     expect(doc).toEqual({
       version: 1,
       entries: [
-        { path: 'conf/a.json', writer: 'seed', kind: 'file', source: 'catalog-id', identity: fileIdentity('{}') },
-        { path: 'skills/x', writer: 'seed', kind: 'generated', skill: 'x', identity: await identityOf(join(worktree, 'skills/x')) },
+        { path: 'conf/a.json', writer: 'seed', kind: 'file', source: 'catalog-id', identity: tree2Identity('F0:2:{}') },
+        { path: 'skills/x', writer: 'seed', kind: 'generated', skill: 'x', identity: tree2Identity('D0:F8:SKILL.md1:X') },
       ],
     });
-    expect(await identityOf(join(worktree, 'conf/a.json'))).toBe(fileIdentity('{}'));
+    expect(await identityOf(join(worktree, 'conf/a.json'))).toBe(tree2Identity('F0:2:{}'));
     expect(readdirSync(worktree).sort()).toEqual(['.git', 'a.txt', 'conf', 'skills']);
     // The pass's staging dirs go with it.
     expect(readdirSync(join(gitDir, 'cezar-staging'))).toEqual([]);

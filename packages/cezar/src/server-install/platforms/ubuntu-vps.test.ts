@@ -892,33 +892,34 @@ describe('ubuntu-vps identity step (end-to-end verify)', () => {
 });
 
 describe('ubuntu-vps review fixes (PR #423)', () => {
-  it('ufwIsActive reads the world-readable ufw.conf, never root-only `ufw status`', async () => {
-    const calls: string[][] = [];
+  it.each([true, false])('ufwIsActive reads the world-readable ufw.conf, never root-only `ufw status` (enabled: %s)', async (enabled) => {
     // reach the sub-step via the proxy step's run with everything else stubbed green
     const ui = {
       ...createAutoUi(),
       text: async () => 'ops',
       password: async () => 'longenough',
     } as Ui;
-    const interactive = vi.fn(async () => 0);
-    const captured: Array<{ args: string[]; input?: string | undefined }> = [];
+    const commands: Array<{ program: string; args: string[] }> = [];
     const ctx = {
       ...ctxWith({ ui }),
       runner: {
-        capture: async (_p: string, args: string[], o?: { input?: string }) => {
-          captured.push({ args, input: o?.input });
+        capture: async (program: string, args: string[]) => {
+          commands.push({ program, args });
           if (args.join(' ').includes('openssl') || args[0] === 'passwd') return { code: 0, stdout: '$apr1$abc$hash', stderr: '' };
-          if (args.join(' ').includes('ufw.conf')) return { code: 0, stdout: '', stderr: '' }; // ufw not enabled
+          if (program === 'sh' && args.join(' ').includes('/etc/ufw/ufw.conf')) return { code: 0, stdout: enabled ? 'ufw-enabled\n' : '', stderr: '' };
           return { code: 0, stdout: '', stderr: '' };
         },
-        interactive,
+        interactive: async (program: string, args: string[]) => { commands.push({ program, args }); return 0; },
       },
     } as InstallContext;
     await stepById('nginx-proxy').run(ctx);
-    // no capture or interactive call may contain a root-only bare `ufw status` probe
-    const probeCalls = captured.map((c) => c.args.join(' ')).filter((a) => a.includes('ufw'));
-    for (const probe of probeCalls) expect(probe).toContain('ufw.conf');
-    expect(calls.length).toBe(0); // unused first runner sanity
+    // The one unprivileged ufw probe reads ufw.conf; every `ufw status` runs under sudo.
+    const unprivileged = commands.filter((c) => c.program !== 'sudo' && c.args.join(' ').includes('ufw'));
+    expect(unprivileged.map((c) => [c.program, ...c.args].join(' '))).toEqual([
+      'sh -c grep -qi "^ENABLED=yes" /etc/ufw/ufw.conf 2>/dev/null && echo ufw-enabled || true',
+    ]);
+    // Its answer decides whether the firewall rule is added.
+    expect(commands.some((c) => c.program === 'sudo' && c.args.join(' ').includes("ufw allow 'Nginx Full'"))).toBe(enabled);
   });
 
   it('htpasswd credential line goes to sudo stdin, not argv (hash never ps-visible)', async () => {

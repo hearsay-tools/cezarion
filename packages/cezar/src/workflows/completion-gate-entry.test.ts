@@ -48,7 +48,7 @@ function unused<T extends object>(name: string, values: Partial<T> = {}): T {
 
 type State = ActiveRun;
 const workerId = randomUUID();
-const refusal = { code: 'workers_outstanding' as const, message: `Workers are still live: ${workerId}.`,
+const refusal = { code: 'workers_outstanding' as const, message: expect.stringContaining(`Workers are still live: ${workerId}.`),
   workers: [{ worker_id: workerId, reason: 'outstanding' as const }], liveWorkerIds: [workerId] };
 
 describe('the completion gate outside a turn end', () => {
@@ -104,13 +104,11 @@ describe('the completion gate outside a turn end', () => {
     state = fakeState();
     modules();
     active.set(id, state);
-    vi.spyOn(finish, 'completionGate').mockReturnValue(refusal);
   });
   afterEach(() => { clearIdleTimer(state); vi.restoreAllMocks(); active.clear(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
   describe('the real root gate', () => {
     beforeEach(() => {
-      vi.mocked(finish.completionGate).mockRestore();
       store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
     });
 
@@ -145,11 +143,16 @@ describe('the completion gate outside a turn end', () => {
     deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: WAIT_PHASE.open, turnId: 'turn', mode: 'all',
     workerIds: [workerId], revisions: [], outcomes: [] });
   const sent = () => vi.mocked(session.sendMessage).mock.calls.length + vi.mocked(session.sendAgentMessage).mock.calls.length;
+  /** A root whose live worker blocks its done: the real gate refuses it to the open session. */
+  const blockedRoot = () => {
+    store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
+    vi.mocked(gateHost.parentCompletionBlockers).mockReturnValue([{ workerId, reason: 'outstanding' }]);
+  };
 
   it.each([['queued input', queueInput], ['an open agent wait', openWorkerWait]])('mid-turn, %s leaves the refusal to the live turn end', (_name, setup) => {
+    blockedRoot();
     setup();
     expect(finish.deferParentCompletion(id)).toBe(true);
-    expect(finish.completionGate).toHaveBeenCalled();
     expect(store.getRun(id)?.status).toBe('running');
     expect(sent()).toBe(0);
     expect(settleBoundary).not.toHaveBeenCalled();
@@ -158,10 +161,12 @@ describe('the completion gate outside a turn end', () => {
   it.each([['queued input', queueInput], ['an open agent wait', openWorkerWait]])(
     'at the boundary, %s delegates the refusal to turn settlement', (_name, setup) => {
       transitionTurnBoundary(state, { kind: 'turn-end', phase: 'ui-completed', session: session });
+      blockedRoot();
       setup();
       expect(finish.deferParentCompletion(id)).toBe(true);
       expect(settleBoundary).toHaveBeenCalledExactlyOnceWith(id, state, 'gate',
         expect.objectContaining({ done: true }), refusal);
+      expect(nudges.queueCompletionRefusal).not.toHaveBeenCalled();
     });
 
   // The gate held the done itself (a stopped root, or a question that parked for the user): a turn
