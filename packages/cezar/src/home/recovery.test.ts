@@ -4,7 +4,8 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { HomeOutsideWriteError, HomeStore } from './store.ts';
-import { acceptHomeRecovery, getHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from './recovery.ts';
+import { acceptHomeRecovery, getHomeRecovery, restoreHomeRecovery } from './recovery.ts';
+import { subscribeHomeRecovery } from './recovery-watch.ts';
 import { homeChanged } from './changes.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 
