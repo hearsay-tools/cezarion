@@ -34,7 +34,7 @@ test('the classifier fetches one commit, and history only for the events whose b
 test('dispatched verification checks out the attributed SHA even after its branch moves', () => {
   const { runInNewContext } = require('node:vm');
   const ci = workflow();
-  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((s) => s.uses?.startsWith('actions/checkout@'));
     const expression = checkout.with.ref.slice(3, -2).trim().replace(/needs\.([\w-]+)/g, "needs['$1']");
     const ref = runInNewContext(expression, { github: {
@@ -50,7 +50,7 @@ function runShell(command, env = {}, cwd = repoRoot) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: 'main', REVIEW_RESULT: 'success', TYPECHECK_RESULT: 'success', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
+    env: { ...process.env, CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: 'main', REVIEW_RESULT: 'success', TYPECHECK_RESULT: 'success', UNIT_TESTS_RESULT: 'success', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
 }
 
@@ -154,7 +154,7 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
 
 test('PR jobs use reviewed merge inputs from the trusted target workflow', () => {
   const ci = workflow();
-  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
     if (['vitest', 'cockpit-browser'].includes(name)) {
       assert.match(checkout.with.ref, /needs\.pr-test-input\.outputs\.sha/);
@@ -255,7 +255,7 @@ test('a docs-only or infra-only merge group may skip the suites; a bump PR shape
   const ci = workflow();
   const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
   const queue = (env) => runShell(gate.run, { EVENT_NAME: 'merge_group', BASE_REF: '', REVIEW_RESULT: 'skipped',
-    BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'skipped', COCKPIT_BROWSER_RESULT: 'skipped', BUMP_PR: 'false', ...env });
+    UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'skipped', COCKPIT_BROWSER_RESULT: 'skipped', BUMP_PR: 'false', ...env });
   for (const surface of ['docs-only', 'infra-only']) {
     assert.equal(queue({ CHANGE_SURFACE: surface }).status, 0, surface);
     for (const name of ['vitest', 'cockpit-browser']) {
@@ -300,7 +300,7 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
     filename: '.ai/upstream/scans/2026-09-25.md', previous_filename: 'packages/cezar/src/index.ts',
   }] });
   assert.equal(renamed.output, 'surface=full-matrix\n');
-  assert.ok(ci.jobs['build-and-package'].steps.some(step => step.run === 'npm run test:unit'));
+  assert.ok(ci.jobs['unit-tests'].steps.some(step => step.run === 'npm run test:unit:${{ matrix.suite }}'));
   assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
 });
 
@@ -396,7 +396,7 @@ test('verify requires the classifier and permits skipped tests only for docs-onl
   ];
   for (const scenario of cases) {
     const result = runShell(gate.run, {
-      BUILD_AND_PACKAGE_RESULT: 'success',
+      UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success',
       CHANGE_SURFACE: scenario.surface,
       BUMP_PR: scenario.bump,
       VITEST_RESULT: scenario.vitest,
@@ -532,15 +532,16 @@ test('build and package verifies the engines minimum without a second full unit 
   const runs = Object.entries(ci.jobs).filter(([id]) => ci.jobs.verify.needs.includes(id))
     .flatMap(([id, job]) => (job.steps ?? []).map(step => ({ id, run: step.run })));
   assert.deepEqual(runs.filter(s => s.run === 'npm run typecheck').map(s => s.id), ['typecheck']);
-  for (const command of ['npm run test:unit', 'npm run build', 'npm run test:package']) {
-    assert.deepEqual(runs.filter(s => s.run === command).map(s => s.id), ['build-and-package'], command);
+  for (const command of ['npm run test:unit:${{ matrix.suite }}', 'npm run build', 'npm run test:package']) {
+    assert.deepEqual(runs.filter(s => s.run === command).map(s => s.id), [command === 'npm run test:unit:${{ matrix.suite }}' ? 'unit-tests' : 'build-and-package'], command);
   }
   assert.deepEqual(runs.filter(s => s.run?.startsWith('npm test --')).map(s => s.id), ['vitest']);
   assert.equal(ci.jobs['node-floor'], undefined, 'the duplicate full-suite matrix must stay removed');
   assert.ok(ci.jobs.verify.needs.includes('build-and-package'));
   const gate = ci.jobs.verify.steps.find(s => s.name === 'Require every verification job');
-  for (const surface of ['full-matrix', 'docs-only']) for (const result of ['failure', 'skipped']) {
-    const env = { BUILD_AND_PACKAGE_RESULT: result, VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: surface, BUMP_PR: 'false' };
+  for (const key of ['UNIT_TESTS_RESULT', 'BUILD_AND_PACKAGE_RESULT']) for (const result of ['failure', 'skipped']) {
+    const surface = 'docs-only';
+    const env = { UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success', [key]: result, VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: surface, BUMP_PR: 'false' };
     assert.notEqual(runShell(gate.run, env).status, 0, `${surface}: build/package ${result}`);
   }
 });
@@ -582,8 +583,8 @@ test('a stalled minimum Node setup times out and retries once inside the job bud
 test('genuine failure and cancellation never green the aggregate', () => {
   const gate = workflow().jobs.verify.steps.find(s => s.name === 'Require every verification job');
   for (const result of ['failure', 'cancelled', 'timed_out']) {
-    for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
-      const env = { BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', [key]: result };
+    for (const key of ['UNIT_TESTS_RESULT', 'BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
+      const env = { UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false', [key]: result };
       assert.notEqual(runShell(gate.run, env).status, 0, `${key}=${result}`);
     }
   }
@@ -631,7 +632,7 @@ test('PR dispatch and event share concurrency while native suites pin immutable 
   const group = ctx => config.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, ctx));
   assert.equal(group(context(42, '')), group(context(undefined, '42')));
   assert.notEqual(group(context(42, '')), group(context(undefined, '43')));
-  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const ref = config.jobs[name].steps.find(s => s.uses?.startsWith('actions/checkout@')).with.ref;
     assert.equal(evaluate(ref, context(undefined, '42')), 'refs/pull/42/merge');
     assert.equal(evaluate(ref, context(42, '')), ['vitest', 'cockpit-browser'].includes(name) ? 'pinned-merge-sha' : 'refs/pull/42/merge');
@@ -743,7 +744,7 @@ test('the complexity gate runs on pull requests, merge groups and bare dispatche
   const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
   assert.equal(gate.env.COMPLEXITY_GATE_RESULT, "${{ needs['complexity-gate'].result }}");
   const verify = (event, result) => runShell(gate.run, {
-    EVENT_NAME: event, COMPLEXITY_GATE_RESULT: result, BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
+    EVENT_NAME: event, COMPLEXITY_GATE_RESULT: result, UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
     COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false',
   }).status;
   assert.equal(verify('pull_request_target', 'success'), 0);
@@ -989,4 +990,21 @@ test('clone gate uses trusted tooling and is required for PRs and merge groups',
       assert.notEqual(runShell(verify.run, { EVENT_NAME: event, CLONE_GATE_RESULT: status }).status, 0);
     }
   }
+});
+
+// The two source suites and package build share prerequisites, never each other.
+test('unit groups and build/package run in parallel without changing suite membership', () => {
+  const ci = workflow();
+  const unit = ci.jobs['unit-tests'];
+  const build = ci.jobs['build-and-package'];
+  assert.deepEqual(unit.needs, ['queue-proof', 'pr-test-input']);
+  assert.deepEqual(unit.needs, build.needs);
+  assert.equal(unit.if, build.if);
+  assert.deepEqual(unit.strategy, { 'fail-fast': false, matrix: { suite: ['package', 'scripts'] } });
+  assert.ok(ci.jobs.verify.needs.includes('unit-tests'));
+  assert.equal(ci.jobs.verify.steps[0].env.UNIT_TESTS_RESULT, "${{ needs['unit-tests'].result }}");
+  const scripts = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'))).scripts;
+  assert.equal(scripts['test:unit'], 'npm run test:unit:package && npm run test:unit:scripts');
+  assert.equal(scripts['test:unit:package'], 'npm run test:unit -w @wjarka/cezarion');
+  assert.equal(scripts['test:unit:scripts'], 'node --import ./scripts/test-home-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs');
 });

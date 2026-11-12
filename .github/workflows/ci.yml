@@ -635,8 +635,78 @@ jobs:
 
   # Heavy verification waits only for its skip decisions and immutable PR inputs.
   # Typecheck and cheap-gate failures still fail verify after this work runs.
+  unit-tests:
+    name: Unit tests (${{ matrix.suite }})
+    needs: [queue-proof, pr-test-input]
+    if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [package, scripts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - *resolve-dispatch
+      # PR-aware dispatch verifies the same merge result as the PR event.
+      # Bare dispatch keeps the immutable SHA receiving the check.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          # CI intentionally executes the PR merge result under pull_request_target;
+          # opt out of checkout's fork protection for this reviewed, read-only gate.
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
+
+      # Select the installer from the checked-out merge result: this trusted-base
+      # workflow must support a PR that replaces the npm lockfile with pnpm.
+      # The build and packaged CLI tests verify the exact engines.node minimum.
+      # Vitest and browser shards follow current LTS without repeating the suites.
+      - name: Set up pnpm
+        if: hashFiles('pnpm-lock.yaml') != ''
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      - name: Set up Node.js
+        id: setup-node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      # Keep the bounded download retry from the former floor job
+      # (hearsay-tools/cezarion#1214). A second failure fails this job.
+      - name: Retry Node.js setup
+        if: steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Install dependencies
+        if: hashFiles('pnpm-lock.yaml') == ''
+        run: npm ci
+
+      - name: Install pnpm dependencies
+        if: hashFiles('pnpm-lock.yaml') != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests
+        run: npm run test:unit:${{ matrix.suite }}
+
   build-and-package:
-    name: Unit, build, and package
+    name: Build and package
     needs: [queue-proof, pr-test-input]
     if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success') }}
     runs-on: ubuntu-24.04
@@ -698,9 +768,6 @@ jobs:
         if: hashFiles('pnpm-lock.yaml') != ''
         run: pnpm install --frozen-lockfile
 
-      - name: Run unit tests
-        run: npm run test:unit
-
       - name: Build application
         run: npm run build
 
@@ -724,7 +791,7 @@ jobs:
     # Docs-only and infra-only changes, and verified manifest-only bot release
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
-    # Vitest covers, and their script tests run under build-and-package.
+    # Vitest covers, and their script tests run under unit-tests.
     needs: [ queue-proof, change-surface, classify-pr, pr-test-input ]
     if: >-
       !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
@@ -1593,7 +1660,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck, preflight, review-result, build-and-package, vitest, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck, preflight, review-result, unit-tests, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1615,6 +1682,7 @@ jobs:
           CLONE_GATE_RESULT: ${{ needs['clone-gate'].result }}
           COMPLEXITY_GATE_RESULT: ${{ needs['complexity-gate'].result }}
           TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          UNIT_TESTS_RESULT: ${{ needs['unit-tests'].result }}
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
@@ -1642,6 +1710,7 @@ jobs:
           fi
           if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
             test "$TYPECHECK_RESULT" = skipped
+            test "$UNIT_TESTS_RESULT" = skipped
             test "$BUILD_AND_PACKAGE_RESULT" = skipped
             test "$VITEST_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = skipped
@@ -1649,6 +1718,7 @@ jobs:
             exit 0
           fi
           test "$TYPECHECK_RESULT" = success
+          test "$UNIT_TESTS_RESULT" = success
           test "$BUILD_AND_PACKAGE_RESULT" = success
           # A merge group classifies its own diff, so it takes the docs/infra-only skip;
           # the bump-PR skip stays PR and dispatch only.

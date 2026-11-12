@@ -14,8 +14,14 @@ tag can consume its five-minute job budget before classification. Only the PR
 baseline and patch checks read history; § CI verification says what each gate fetches.
 For pull requests, the PR-shape check requires GitHub to return a patch for every file, except binary files and files with no content change, and rejects incomplete file lists.
 
-Main PRs start heavy verification (build/package, Vitest and browser shards)
+Main PRs start heavy verification (unit tests, build/package, Vitest and browser shards)
 as soon as their queue proof, change classification and immutable PR inputs are ready.
+**Unit tests (package)** and **Unit tests (scripts)** run the two groups of
+`npm run test:unit` in parallel. The root command still runs both in sequence.
+**Build and package** runs the build,
+packaged test typecheck, packaged CLI tests and release-package checks. All three jobs install
+dependencies and run in parallel, including on merge groups and dispatches. A main push
+with valid queue proof skips all three; otherwise all three must pass, even for docs-only changes.
 Heavy jobs run beside typecheck and cheap deterministic preflight; native review
 admission still waits for successful preflight. Review findings no longer hold heavy work back; they block merge
 through the aggregate. `verify` (**Unit, build, E2E, and package**) requires
