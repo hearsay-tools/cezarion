@@ -159,10 +159,14 @@ test('wrapper-owned globalSetup joins the live lease without bootstrapping a sec
   assert.equal(existsSync(join(result.fixture, 'registry-restored')), true);
 });
 
-for (const failure of [{ installed: false }, { bootExit: 9 }, { registryFailure: 'setup' }, { registryFailure: 'restore' }]) {
+for (const [failure, reason] of [
+  [{ installed: false }, /Chrome fixture unavailable/], [{ bootExit: 9 }, /bootstrap failed/],
+  [{ registryFailure: 'setup' }, /registry setup failed/], [{ registryFailure: 'restore' }, /registry restore failed/],
+]) {
   test(`globalSetup releases its committed lease after failure ${JSON.stringify(failure)}`, t => {
     const result = bootstrap(t, failure);
     assert.notEqual(result.status, 0, result.stderr);
+    assert.match(result.stderr, reason);
     const db = new DatabaseSync(join(result.fixture, '.ai/qa/test-env-lease.sqlite'), { readOnly: true });
     try { assert.equal(db.prepare('SELECT count(*) AS n FROM holders').get().n, 0); }
     finally { db.close(); }
