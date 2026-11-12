@@ -8,7 +8,7 @@
     "packages/cezar/src/runs/store.ts": 3434,
     "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1009,
     "packages/cezar/src/server/forge/github.ts": 3216,
-    "packages/cezar/src/server/server.ts": 5408,
+    "packages/cezar/src/server/server.ts": 5106,
     "packages/web/e2e/agent-browser.ts": 1233,
     "packages/web/src/api/client.ts": 2214,
     "packages/web/src/api/queries.ts": 2124,

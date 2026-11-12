@@ -23,7 +23,8 @@ const { ProjectContexts } = await import('./project-context.ts');
 const { createRunner } = await import('../core/runner-factory.ts');
 const { RunnerModelCatalog } = await import('../core/runner-model-catalog.ts');
 const { ProviderAuthService } = await import('../core/provider-auth.ts');
-const { startServer, WorkspaceEventBus } = await import('./server.ts');
+const { startServer } = await import('./start-server.ts');
+const { WorkspaceEventBus } = await import('./server.ts');
 
 const temporary: string[] = [];
 function directory(): string {
