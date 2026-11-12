@@ -30,6 +30,11 @@ describe('cssRules', () => {
     ])
   })
 
+  it('keeps an important declaration over a later normal one, and lets a later important one win', () => {
+    expect(cssRules('.a { border: none!important; border: 1px solid red }')[0]?.declarations).toEqual({ border: 'none !important' })
+    expect(cssRules('.a { border: 0; border: none !important }')[0]?.declarations).toEqual({ border: 'none !important' })
+  })
+
   it('carries no declaration for statements such as @apply', () => {
     expect(cssRules('.a { @apply hover:bg-muted; color: red }')[0]?.declarations).toEqual({ color: 'red' })
   })
@@ -58,6 +63,8 @@ describe('targets', () => {
     expect(targets("[data-slot = 'gh-issue-filters' ]", "[data-slot='gh-issue-filters']")).toBe(true)
     expect(targets('.editor-extra', '.editor')).toBe(false)
     expect(targets('.editor.x', '.editor')).toBe(true)
+    expect(targets('.editor:has(> textarea)', '.editor')).toBe(true)
+    expect(targets(".editor:is([data-x='a b'], .y) .z", '.editor')).toBe(false)
   })
 })
 
@@ -66,5 +73,6 @@ describe('paintsBefore', () => {
     expect(paintsBefore("[data-slot='model-pill']:hover::before", "pill']")).toBe(true)
     expect(paintsBefore("[data-slot=\"runner-pill\"]:before", "pill']")).toBe(true)
     expect(paintsBefore("[data-slot='model-pill'] span::before", "pill']")).toBe(false)
+    expect(paintsBefore("[data-slot='model-pill']:is(:hover, :focus)::before", "pill']")).toBe(true)
   })
 })

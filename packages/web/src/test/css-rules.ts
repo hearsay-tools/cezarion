@@ -57,7 +57,9 @@ export function cssRules(css: string): CssRule[] {
     const colon = text.indexOf(':')
     if (!into || colon < 0 || text.trim().startsWith('@')) return
     const prop = text.slice(0, colon).trim().toLowerCase()
-    if (prop) into[prop] = normalize(text.slice(colon + 1)).replace(/ ?! ?important$/i, ' !important')
+    const value = normalize(text.slice(colon + 1)).replace(/ ?! ?important$/i, ' !important')
+    // A later normal declaration does not beat an earlier important one.
+    if (prop && !(into[prop]?.endsWith(' !important') && !value.endsWith(' !important'))) into[prop] = value
   }
   const open = (selectors: readonly string[], at: readonly string[]) => {
     const own: Record<string, string> = {}
@@ -107,18 +109,34 @@ export function cssRules(css: string): CssRule[] {
 /** Escapes `text` for a RegExp source. */
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/** The last compound of `selector`, split at top-level combinators only: `:has(> b)` and `:is(a, b)` stay whole. */
+function subjectOf(selector: string): string {
+  const text = normalize(selector)
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === "'") {
+      const close = text.indexOf("'", i + 1)
+      i = close < 0 ? text.length : close
+    } else if (ch === '(' || ch === '[') depth++
+    else if (ch === ')' || ch === ']') depth--
+    else if (ch === ' ' && depth === 0) start = i + 1
+  }
+  if (depth !== 0) throw new Error(`unbalanced selector "${selector}"`)
+  return text.slice(start)
+}
+
 /**
- * True when `selector`'s subject (its last compound, ignoring trailing pseudo-classes and
- * pseudo-elements) contains `compound`. `.a .b` targets `.b`, not `.a`.
+ * True when `selector`'s subject (its last compound) contains `compound` as a whole token.
+ * `.a .b` targets `.b`, not `.a`; `.a:has(> b)` targets `.a`.
  */
 export function targets(selector: string, compound: string): boolean {
-  const parts = normalize(selector).split(/ [>+~] | (?![^[(]*[\])])/)
-  const subject = parts.at(-1) ?? ''
-  // A whole token: `.editor` is not `.editor-extra`.
-  return new RegExp(`${literal(normalize(compound))}(?![\\w-])`).test(subject)
+  return new RegExp(`${literal(normalize(compound))}(?![\\w-])`).test(subjectOf(selector))
 }
 
 /** True when `selector` puts a `::before` (or legacy `:before`) on a subject whose compound contains `compound`. */
 export function paintsBefore(selector: string, compound: string): boolean {
-  return new RegExp(`${literal(normalize(compound))}[^ >+~]*::?before(?![\\w-])`).test(normalize(selector))
+  const subject = subjectOf(selector)
+  return subject.includes(normalize(compound)) && /::?before$/.test(subject)
 }
