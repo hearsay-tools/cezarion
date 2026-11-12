@@ -129,16 +129,33 @@ function boardMoves(data, status) {
 
 // Board access is optional: without a project-capable token the sync reports
 // why and returns.
-async function syncBoard({ projectGithub, owner, repo, pullNumber, status, log }) {
+// The whole board sync shares one budget, apart from the rerun's 120-second
+// read deadline: a stalled project request costs the rerun at most this long.
+const BOARD_BUDGET_MS = 15000;
+// Ends when the request ends or the budget aborts it, even for a client that
+// ignores the signal. A late result after the abort is dropped.
+function bounded(request, signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new Error('board request budget exhausted'));
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
+async function syncBoard({ projectGithub, owner, repo, pullNumber, status, log,
+  signal = AbortSignal.timeout(BOARD_BUDGET_MS) }) {
   if (!projectGithub) {
     log(`Board sync skipped for #${pullNumber}: no project token (grant the release App Organization projects access).`);
     return { moved: 0, skipped: 'no-token' };
   }
+  const graphql = (query, variables) => bounded(Promise.resolve()
+    .then(() => projectGithub.graphql(query, { ...variables, request: { signal, retries: 0 } })), signal);
   try {
-    const data = await projectGithub.graphql(BOARD_QUERY, { owner, repo, number: pullNumber });
+    const data = await graphql(BOARD_QUERY, { owner, repo, number: pullNumber });
     const moves = boardMoves(data, status);
     for (const move of moves) {
-      await projectGithub.graphql(`mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+      await graphql(`mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
         updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) { projectV2Item { id } }
       }`, move);
     }
@@ -167,4 +184,5 @@ module.exports = {
   boardMoves,
   boardStatus,
   syncBoard,
+  BOARD_BUDGET_MS,
 };

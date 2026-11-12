@@ -661,3 +661,33 @@ for (const [label, accepted] of [['a rejected', false], ['an ambiguous but accep
     assert.deepEqual(cards(board), IN_PROGRESS);
   });
 }
+
+// The board sync has its own budget: a project request that never settles,
+// even one that ignores its abort signal, ends the sync when the budget aborts.
+test('a stalled board request ends at the board budget', async () => {
+  const budget = new AbortController(), logs = [], seen = [];
+  const stalled = { graphql: (query, variables) => { seen.push(variables.request); return new Promise(() => {}); } };
+  const sync = syncBoard({ projectGithub: stalled, owner, repo, pullNumber: 7, status: BOARD.progress,
+    log: message => logs.push(message), signal: budget.signal });
+  budget.abort();
+  assert.deepEqual(await sync, { moved: 0, skipped: 'error' });
+  assert.match(logs.join('\n'), /board request budget exhausted/);
+  assert.deepEqual(seen, [{ signal: budget.signal, retries: 0 }], 'the budget signal reaches the client, with no retries');
+});
+
+test('board requests carry an abort signal, and a failed board still lets the rerun proceed', async () => {
+  const github = fakeGithub();
+  github.state.checks[0].conclusion = 'failure';
+  const board = fakeBoard({ current: 'In review' }), signals = [];
+  const graphql = board.graphql;
+  board.graphql = async (query, variables) => {
+    signals.push(variables.request);
+    if (!query.includes('updateProjectV2ItemFieldValue')) throw new Error('board request budget exhausted');
+    return graphql(query, variables);
+  };
+  assert.equal(await reconcile({ ...eventArgs({ github, projectGithub: board }), pullNumber: 7 }), 'rerun-requested');
+  assert.deepEqual(github.state.writes, [30]);
+  assert.equal(signals.length, 1);
+  assert.ok(signals[0].signal instanceof AbortSignal);
+  assert.equal(signals[0].retries, 0);
+});
