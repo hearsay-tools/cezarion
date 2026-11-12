@@ -179,9 +179,8 @@ describe('iOS sweep — every primary view at 390×844', () => {
   })
 
   it('/github (forge-gated, like github.e2e.ts)', () => {
-    // Forge OFF is not reachable in this env — the gate itself is asserted live in
-    // github.e2e.ts and structurally in the unit suites (see the header comment).
-    if (!forgeAvailable) return
+    // The shared env runs under CEZ_DRY_RUN=1, whose forge driver always reports available.
+    expect(forgeAvailable).toBe(true)
     // Bare /github is the filter index at phone width (#622); the sweep wants the list.
     sweep('github', '/github?filter=all', '[data-slot="gh-header"]')
   })

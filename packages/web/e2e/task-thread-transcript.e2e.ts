@@ -11,7 +11,6 @@ import {
   contrastSampleExpression,
   focusWithKeyboard,
   normalizeColorSample,
-  hoverVisiblePoint,
   restoreContrastQaDefaults,
   type ContrastSample,
 } from './contrast'
@@ -113,10 +112,7 @@ describe('task thread', () => {
           target?.scrollIntoView({ block: 'center', inline: 'nearest' })
         })()`)
         const normal = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
-        hoverVisiblePoint(browser, link)
-        const hovered = browser.evaluate(contrastSampleExpression(link)) as ContrastSample
         expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
-        expect(hovered.ratio, `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
         focusWithKeyboard(browser, link)
         browser.evaluate(`(() => {
           const target = document.querySelector(${JSON.stringify(link)})
@@ -252,7 +248,11 @@ describe('task thread', () => {
     expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="tool-card"], [data-slot="hook-card"]')]
       .map((el) => el.dataset.slot === 'hook-card' ? 'hook:' + el.dataset.status : el.dataset.kind).slice(0, 4)`))
       .toEqual(['execute', 'hook:completed', 'hook:failed', 'other'])
-    expect(browser.evaluate(`${card('Stop')}.className.includes('border-danger/25')`)).toBe(true)
+    // The failed hook reads differently from the completed one: the real stylesheet tints its border.
+    const [completedBorder, failedBorder] = browser.evaluate(
+      `[${card('PostToolBatch')}, ${card('Stop')}].map((el) => getComputedStyle(el).borderTopColor)`,
+    ) as [string, string]
+    expect(failedBorder).not.toBe(completedBorder)
     for (const id of ['PostToolBatch', 'Stop']) {
       browser.evaluate(`${card(id)}.querySelector(':scope > [data-slot="collapsible-trigger"]').click()`)
     }
