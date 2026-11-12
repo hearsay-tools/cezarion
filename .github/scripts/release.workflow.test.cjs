@@ -37,6 +37,8 @@ test('one candidate commit goes plan, suite, stage, candidate tests, then promot
 test('the candidate stages under its own tag and the promotion publishes the same commit under the stable tag', async () => {
   const { jobs } = await parsed();
   const stage = jobs.stage.steps.find(step => step.id === 'release');
+  const stageSteps = jobs.stage.steps.map(step => step.name);
+  assert.equal(stageSteps.indexOf('Check the candidate tag'), stageSteps.indexOf('Publish the release candidate') - 1, 'the candidate tag is checked right before staging');
   assert.equal(stage.env.RELEASE_VERSION, '${{ needs.plan.outputs.candidate }}');
   assert.equal(stage.env.RELEASE_DIST_TAG, '${{ needs.plan.outputs.candidate_tag }}');
   const promote = jobs.release.steps.find(step => step.id === 'release');

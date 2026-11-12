@@ -226,3 +226,16 @@ test('a rerun of an older plan is refused when the registry moved since the plan
   // A retry of this promotion, already on latest, passes; release.mjs verifies its source.
   assert.deepEqual(check(at({ '1.2.0': '2026-11-10T00:00:00Z', '1.2.1': '2026-11-12T11:00:00Z' }, '1.2.1')), []);
 });
+
+test('no publish from a stale plan moves a dist-tag backwards', () => {
+  const registry = { versions: [], time: { '1.2.0': '2026-11-01T00:00:00Z', '1.1.6': '2026-11-02T00:00:00Z' },
+    distTags: { latest: '1.2.0', 'latest-1.1': '1.1.6', next: '1.3.0-rc.1' } };
+  // A rerun stage of an old 1.2.1-rc.1 plan after 1.3.0-rc.1 took next.
+  assert.throws(() => plan.checkCandidateTag({ packageName: 'p', version: '1.2.1-rc.1', tag: 'next', view: () => registry }), /next points to 1\.3\.0-rc\.1/);
+  plan.checkCandidateTag({ packageName: 'p', version: '1.3.0-rc.2', tag: 'next', view: () => registry });
+  plan.checkCandidateTag({ packageName: 'p', version: '1.3.0-rc.1', tag: 'next', view: () => registry });
+  // An old maintenance plan for 1.1.5 after 1.1.6 took latest-1.1.
+  const stale = plan.registryChanges({ registry, previous: '1.2.0', version: '1.1.5', stableTag: 'latest-1.1', rollback: false, now: NOW });
+  assert.match(stale.join('\n'), /latest-1\.1 points to 1\.1\.6/);
+  assert.deepEqual(plan.registryChanges({ registry, previous: '1.2.0', version: '1.1.7', stableTag: 'latest-1.1', rollback: false, now: NOW }), []);
+});

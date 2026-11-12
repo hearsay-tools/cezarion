@@ -170,6 +170,20 @@ jobs:
           pnpm install --frozen-lockfile
           npm run build
 
+      # A rerun of an older run reuses its plan; `next` may have moved on since.
+      - name: Check the candidate tag
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PACKAGE: ${{ needs.plan.outputs.package }}
+          VERSION: ${{ needs.plan.outputs.candidate }}
+          TAG: ${{ needs.plan.outputs.candidate_tag }}
+        with:
+          retries: 3
+          script: |
+            require('./.github/scripts/release-plan.cjs').checkCandidateTag({
+              packageName: process.env.PACKAGE, version: process.env.VERSION, tag: process.env.TAG,
+            });
+
       - name: Publish the release candidate
         id: release
         env:

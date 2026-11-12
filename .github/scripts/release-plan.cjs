@@ -242,10 +242,25 @@ async function planRelease({ github, context, inputs, packageName, now = Date.no
 // so the promotion refuses when `latest` moved, when its stable dist-tag no longer fits,
 // or when another stable version was published within 24 hours. A retry of this very
 // promotion (the version already on `latest`) passes; release.mjs verifies its source.
+// No publish moves a dist-tag backwards, whatever an older plan decided: a rerun of a
+// stale run meets a registry where a newer version already holds the tag.
+function tagRegression(registry, version, tag) {
+  const current = registry.distTags[tag];
+  return current && current !== version && compareVersions(version, current) < 0
+    ? `${tag} points to ${current}; publishing ${version} under it would move it backwards. Dispatch a new release.`
+    : null;
+}
+
+// Called right before the candidate is staged.
+function checkCandidateTag({ packageName, version, tag, view = npmView }) {
+  const reason = tagRegression(view(packageName), version, tag);
+  if (reason) throw new Error(`Staging refused: ${reason}`);
+}
+
 function registryChanges({ registry, previous, version, stableTag, rollback, now }) {
   const latest = registry.distTags.latest ?? '';
   if (latest === version) return [];
-  const reasons = [];
+  const reasons = [tagRegression(registry, version, stableTag)].filter(Boolean);
   if (latest !== previous) reasons.push(`latest moved from ${previous || 'nothing'} to ${latest} since the plan. Dispatch a new release.`);
   else if (stableDistTag(version, registry.distTags) !== stableTag) reasons.push(`${version} no longer fits dist-tag ${stableTag}.`);
   const others = Object.fromEntries(Object.entries(registry.time).filter(([entry]) => entry !== version));
@@ -266,5 +281,5 @@ async function recheckGates({ github, context, mode, previous, ignoreBlockers, p
 module.exports = {
   compareVersions, nextCandidateVersion, candidateDistTag, stableDistTag, lastStablePublish, rollbackVersion, rollbackTag,
   parseIssueNumbers, blockingIssues, rehearsalOutcome, rehearsalVerdict, newestVerifiedCommit, verifiedMainCommit, npmView,
-  planRelease, registryChanges, recheckGates, COOLDOWN_MS,
+  planRelease, tagRegression, checkCandidateTag, registryChanges, recheckGates, COOLDOWN_MS,
 };
