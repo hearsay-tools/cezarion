@@ -1,6 +1,6 @@
 import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
-import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
+import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace-record.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
 import { pathPresent, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
 import { forgetLegacyRunIds, LEGACY_RUNS_FILE, legacyItemOwner } from '../legacy-runs.ts';

@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, st
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { projectAdmissionRefusal } from '../server/cockpit-ownership.ts';
 import { migrateProject, resumeProjectMigration } from './engine.ts';

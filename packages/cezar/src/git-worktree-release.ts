@@ -1,5 +1,5 @@
 import type { WorkerDestroyResult, WorkerWorkspace } from '@open-mercato/cezar-contract';
-import { removeOwnedWorkspace, type RemovalReport } from './delegation/workspace.ts';
+import { removeOwnedWorkspace, type RemovalReport } from './delegation/workspace-removal.ts';
 import { removeWorktree, type RemoveWorktreeOptions } from './git-worktree.ts';
 import type { PreviewHostLike } from './preview/registration.ts';
 

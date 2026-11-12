@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 
 import { scheduledDestroyAttempts, workerCleanupInternals } from './service.testkit.ts';
-import { WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
+import { WORKTREE_LOCK_BUSY_ERROR } from './workspace-removal.ts';
 import { DelegationService } from './service.ts';
 
 import { f, linux, cadence, settled, destroyOf, listings, useDestroyBackoffFixture } from './service-destroy-backoff.testkit.ts';

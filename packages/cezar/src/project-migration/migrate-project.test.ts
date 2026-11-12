@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { WorkerWorkspace } from '@open-mercato/cezar-contract';
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runArtifactCommand } from '../artifacts/cli.ts';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { Home } from '../home/home.ts';
 import { holdCockpitLease } from '../home/leases.ts';

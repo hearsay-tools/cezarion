@@ -27,7 +27,8 @@ so an interruption preserves either the old or the new checkpoint. An incomplete
 temporary file cannot authorize cleanup. This store requires a local drive with Windows
 ACL support; unsupported or unreadable evidence retains resources.
 
-The ownership policy (`delegation/workspace.ts`) reaches these files only through the
+The ownership policy (`delegation/workspace-record.ts`, used by `workspace.ts` and
+`workspace-removal.ts`) reaches these files only through the
 `IdentityFileStore` port (`delegation/identity-file-store.ts`): directory, read, write and
 replace. The POSIX store (`posix-workspace-identity.ts`) is the default on a non-Windows host.
 On Windows the policy has no default and throws until a store is installed. Each process entry
@@ -42,7 +43,7 @@ so it does not itself prevent Windows deletion. An active lease, unverified app 
 or failed stop retains the worktree. Windows has no cwd scan, so that refusal must not
 depend on a later scan finding the app.
 
-Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts).
+Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts), [workspace-record.ts](../../packages/cezar/src/delegation/workspace-record.ts), [workspace-removal.ts](../../packages/cezar/src/delegation/workspace-removal.ts).
 
 Coverage: [session-process.test.ts](../../packages/cezar/src/core/session-process.test.ts), [process-liveness.test.ts](../../packages/cezar/src/delegation/process-liveness.test.ts), [workspace.test.ts](../../packages/cezar/src/delegation/workspace.test.ts), [workspace-destruction-identity.test.ts](../../packages/cezar/src/delegation/workspace-destruction-identity.test.ts), [workspace-destruction-refs.test.ts](../../packages/cezar/src/delegation/workspace-destruction-refs.test.ts) and [workspace-generic-cleanup.test.ts](../../packages/cezar/src/delegation/workspace-generic-cleanup.test.ts).
 

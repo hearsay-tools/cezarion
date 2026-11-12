@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { installIdentityFileStore, type IdentityFileStore } from './identity-file-store.ts';
-import { createOwnedWorkspace, ownedWorkspaceRecordFiles, removeOwnedWorkspace, verifyOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace, verifyOwnedWorkspace } from './workspace.ts';
+import { ownedWorkspaceRecordFiles } from './workspace-record.ts';
+import { removeOwnedWorkspace } from './workspace-removal.ts';
 
 // The ownership policy runs on Linux through a store that, like the Windows store, keeps no POSIX
 // mode bits: it writes world-readable files and replaces in place. The store alone decides which

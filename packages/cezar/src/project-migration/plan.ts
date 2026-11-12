@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import nodePath, { dirname, posix, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { shellQuote } from '../core/shell-env.ts';
-import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace.ts';
+import { ownedWorkspaceRecordFiles, readOwnedWorkspaceRecord } from '../delegation/workspace-record.ts';
 import { pathPresent, projectDestinationAvailable, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
 import { forgetLegacyRunIds, legacyItemOwner, legacyRunIds, LegacyRunsUnreadableError } from '../legacy-runs.ts';
 import { LEGACY_INDEX_FILE } from '../runs/legacy-index.ts';

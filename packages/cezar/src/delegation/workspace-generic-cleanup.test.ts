@@ -4,7 +4,8 @@ import { mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createWorktree, pruneOrphans, removeWorktree } from '../git-worktree.ts';
-import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace } from './workspace.ts';
+import { removeOwnedWorkspace } from './workspace-removal.ts';
 import { fixture, git, receiptPath, WORKSPACE_TEST_TIMEOUT_MS } from './workspace-fixture.testkit.ts';
 
 describe('owned resources bypass generic cleanup', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {

@@ -6,7 +6,7 @@ const order: string[] = [];
 /** Whether the fake removal declines (a dirty tree under `onlyClean`, a protected path). */
 let declines = false;
 
-vi.mock('./delegation/workspace.ts', () => ({
+vi.mock('./delegation/workspace-removal.ts', () => ({
   removeOwnedWorkspace: vi.fn(async (repoRoot: string, value: { ownerRunId: string; path: string }, _assert?: unknown, beforeRemove?: () => Promise<void>) => {
     if (declines) return { workerId: value.ownerRunId, state: 'incomplete', remaining: ['worktree', 'branch'] };
     await beforeRemove?.();
@@ -85,7 +85,7 @@ describe('removeWorktree call sites', () => {
   const SRC = import.meta.dirname;
   const ALLOWED = new Set(['git-worktree.ts', 'git-worktree-release.ts']);
   /** Where git removes a worktree itself: the two removals the helpers wrap. */
-  const RAW_REMOVAL = new Set(['git-worktree.ts', join('delegation', 'workspace.ts')]);
+  const RAW_REMOVAL = new Set(['git-worktree.ts', join('delegation', 'workspace-removal.ts')]);
 
   function sources(dir: string): string[] {
     return readdirSync(dir).flatMap(name => {

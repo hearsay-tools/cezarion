@@ -9,7 +9,7 @@ export const windowsIdentityFileStore: IdentityFileStore = {
   replace: async (path, content) => { windowsWriteIdentity(path, content, true); },
 };
 
-/** Called by each process entry that reaches `workspace.ts`; installs the Windows store on a Windows host only. */
+/** Called by each process entry that reaches `workspace-record.ts`; installs the Windows store on a Windows host only. */
 export function installWindowsIdentityStore(platform: NodeJS.Platform = process.platform): void {
   if (platform === 'win32') installIdentityFileStore(windowsIdentityFileStore);
 }

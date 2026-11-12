@@ -10,7 +10,8 @@ import { afterEach, expect, it } from 'vitest';
 import { processStartToken } from '../detached-process.ts';
 import { windowsStartToken } from './windows-test-app.ts';
 import { withIdleTestApp } from './idle-test-app.ts';
-import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
+import { createOwnedWorkspace } from './workspace.ts';
+import { removeOwnedWorkspace } from './workspace-removal.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
-import { removeOwnedWorkspace } from '../delegation/workspace.ts';
+import { removeOwnedWorkspace } from '../delegation/workspace-removal.ts';
 import { isReclaimable, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import * as config from '../config.ts';
