@@ -3,12 +3,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { homeRecoverySchema, type HomeRecovery } from '@open-mercato/cezar-contract/home-recovery';
 import { Home } from '../home/home.ts';
 import { cleanStoreRoots, storeRoot } from '../home/store.testkit.ts';
-import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from '../home/recovery.ts';
+import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, restoreHomeRecovery } from '../home/recovery.ts';
+import { subscribeHomeRecovery } from '../home/recovery-watch.ts';
 import { createHomeRecoveryPublisher, createHomeRecoveryRoutes, HOME_RECOVERY_TOPIC } from './home-recovery-routes.ts';
 import type { SocketHub } from './ws.ts';
 
 vi.mock('../home/recovery.ts', () => ({
-  getHomeRecovery: vi.fn(), restoreHomeRecovery: vi.fn(), acceptHomeRecovery: vi.fn(), importHomeRecovery: vi.fn(), subscribeHomeRecovery: vi.fn(),
+  getHomeRecovery: vi.fn(), restoreHomeRecovery: vi.fn(), acceptHomeRecovery: vi.fn(), importHomeRecovery: vi.fn(),
+}));
+vi.mock('../home/recovery-watch.ts', () => ({
+  subscribeHomeRecovery: vi.fn(),
 }));
 
 beforeEach(() => {

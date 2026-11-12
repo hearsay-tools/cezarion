@@ -21,7 +21,7 @@ vi.mock('../runs/raw-record.ts', async (importOriginal) => {
   } };
 });
 
-/** One family reconcile pass decodes each cold member at most once (hearsay-tools/cezarion#2378). */
+/** One family reconcile pass decodes each cold member once (hearsay-tools/cezarion#2378). */
 describe('family reconcile decodes each cold run once per pass', () => {
   let root: string;
   let store: RunStore;
@@ -55,17 +55,17 @@ describe('family reconcile decodes each cold run once per pass', () => {
 
   const memberDecodes = () => [family.parentId, family.workerId].map((id) => decodes.get(id) ?? 0);
 
-  it('a pass that projects the conversation decodes each member at most once', () => {
+  it('a pass that projects the conversation decodes each member once', () => {
     manager.reconcileWorkerWaits(family.parentId);
     expect(store.readEvents(family.workerId).filter((event) => event.type === 'conversation-message')).toHaveLength(61);
-    expect(Math.max(...memberDecodes())).toBeLessThanOrEqual(1);
+    expect(memberDecodes()).toEqual([1, 1]);
   });
 
-  it('a pass with nothing to repair decodes each member at most once', () => {
+  it('a pass with nothing to repair decodes each member once', () => {
     manager.reconcileWorkerWaits(family.parentId);
     store.flush(); // the written members leave memory: the next pass reads cold rows again
     decodes.clear();
     manager.reconcileWorkerWaits(family.parentId);
-    expect(Math.max(...memberDecodes())).toBeLessThanOrEqual(1);
+    expect(memberDecodes()).toEqual([1, 1]);
   });
 });

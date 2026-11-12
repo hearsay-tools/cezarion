@@ -22,6 +22,7 @@ import {
   WAIT_VIA,
 } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { timerWait, workerWait } from '@/test/wait-fixtures'
+import { isPainted, paintClasses } from '@/test/paint'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -1926,14 +1927,16 @@ describe('swipe to archive on touch (#780 §7)', () => {
   it('a long swipe switches to the "Release to archive" state and archives on release', () => {
     const onArchiveRun = vi.fn()
     renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
-    const fill = () => action('fin')!.className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
+    const paint = () => [paintClasses(action('fin')!, 'fill'), paintClasses(action('fin')!, 'ink')] as const
     swipe('fin', -50)
-    const parkedFill = fill()
+    const parked = paint()
     swipe('fin', -220, { release: false })
     expect(action('fin')!.getAttribute('data-past')).toBe('true')
-    // Past the commit point the action takes its own fill (--info; contrast in quick-list.e2e.ts).
-    expect(fill()).not.toEqual([])
-    expect(fill()).not.toEqual(parkedFill)
+    // Past the commit point the action takes its own painted fill and ink (--info; contrast in quick-list.e2e.ts).
+    const past = paint()
+    for (const classes of [...parked, ...past]) expect(isPainted(classes), classes.join(' ')).toBe(true)
+    expect(past[0]).not.toEqual(parked[0])
+    expect(past[1]).not.toEqual(parked[1])
     expect(action('fin')!.textContent).toBe('Release to archive')
     expect(onArchiveRun).not.toHaveBeenCalled()
     fireEvent.pointerUp(layer('fin'), { pointerId: 1, clientX: 80, clientY: 20 })

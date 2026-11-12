@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { configure } from '@testing-library/react'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 
-import { highlighterSettledForTests } from '@/lib/highlighter'
+import { highlighterSettledForTests } from '@/lib/highlighter-loads'
 
 import { createTestSandbox, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
 import { configureTestHome } from '../../scripts/test-home-setup.mjs'
