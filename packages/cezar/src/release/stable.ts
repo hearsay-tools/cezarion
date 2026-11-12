@@ -66,3 +66,39 @@ export function stampStableManifests(
 ): ReleaseManifestSet {
   return stampManifestSet(manifests, version, (v) => `^${v}`);
 }
+
+/** What one publication of the Release workflow writes: the version, its dist-tag, and how
+ *  the set pins its siblings. */
+export interface ReleaseTarget {
+  version: string;
+  distTag: string;
+  /** A release candidate pins its siblings exactly, so its tests run exactly that build. */
+  exactPins: boolean;
+}
+
+const STABLE_VERSION = /^\d+\.\d+\.\d+$/;
+const CANDIDATE_VERSION = /^\d+\.\d+\.\d+-rc\.[1-9]\d*$/;
+const STABLE_TAG = /^latest(?:-\d+\.\d+)?$/;
+const CANDIDATE_TAG = /^next(?:-\d+\.\d+)?$/;
+
+/** Resolve the release target, or explain why it is refused.
+ *
+ *  Without a requested version the bump decides, under `latest`, as before. A requested
+ *  version is either stable (`x.y.z`, under `latest` or a maintenance line's `latest-x.y`)
+ *  or a release candidate (`x.y.z-rc.n`, under `next` or `next-x.y`). A candidate can never
+ *  take `latest`, so an install of `@latest` never resolves to one. */
+export function resolveReleaseTarget(
+  bump: ReleaseBump,
+  base: string,
+  requested: { version?: string | undefined; distTag?: string | undefined } = {},
+): ReleaseTarget | { error: string } {
+  const version = requested.version || computeStableVersion(bump, base);
+  if (!version) return { error: `cannot ${bump}-bump base version "${base}" — a stable release must start from a plain x.y.z.` };
+  const candidate = CANDIDATE_VERSION.test(version);
+  if (!candidate && !STABLE_VERSION.test(version)) return { error: `"${version}" is neither x.y.z nor x.y.z-rc.n.` };
+  const distTag = requested.distTag || (candidate ? '' : 'latest');
+  if (!(candidate ? CANDIDATE_TAG : STABLE_TAG).test(distTag)) {
+    return { error: `dist-tag "${distTag}" does not fit ${candidate ? 'a release candidate (next or next-x.y)' : 'a stable version (latest or latest-x.y)'}.` };
+  }
+  return { version, distTag, exactPins: candidate };
+}

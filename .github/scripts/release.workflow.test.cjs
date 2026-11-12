@@ -11,61 +11,78 @@ function job(source, name) {
   return match[0];
 }
 
-function step(source, name) {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = source.match(
-    new RegExp(`- name: ${escaped}\\n[\\s\\S]*?(?=\\n      - name: |\\n      - id: |(?![\\s\\S]))`),
-  );
-  assert.ok(match, `expected step "${name}"`);
-  return match[0];
-}
+const parsed = async () => (await import('yaml')).parse(fs.readFileSync(workflowPath, 'utf8'));
 
-test('Verify runs in its own job so a publish failure cannot taint the Vitest report', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const verify = job(workflow, 'verify');
-  const release = job(workflow, 'release');
-
-  assert.match(verify, /npm test/,
-    'the Vitest suite must run on the verify job');
-  assert.doesNotMatch(verify, /node scripts\/release\.mjs/,
-    'verify must not publish — that is what mixed a green suite into a red job');
-  assert.match(release, /needs:\s*\[?verify\]?/,
-    'publish must wait on verify so re-run-failed-jobs skips the suite');
-  assert.doesNotMatch(release, /npm test/,
-    'the release job must not re-run Vitest and append a second summary');
-  assert.match(verify, /npm run typecheck/);
-  assert.match(verify, /npm run test:unit/);
-  assert.match(verify, /npm run build/,
-    'build stays on verify so a compile break fails the green job, not publish');
+test('one candidate commit goes plan, suite, stage, candidate tests, then promotion', async () => {
+  const { jobs } = await parsed();
+  assert.equal(jobs.suite.uses, './.github/workflows/full-suite.yml');
+  assert.equal(jobs.suite.if, "needs.plan.outputs.needs_suite == 'true'");
+  assert.deepEqual(jobs.stage.needs, ['plan', 'suite']);
+  assert.match(jobs.stage.if, /needs\.suite\.result == 'success' \|\| needs\.suite\.result == 'skipped'/);
+  assert.equal(jobs.candidate.uses, './.github/workflows/release-candidate-tests.yml');
+  assert.deepEqual(jobs.candidate.needs, ['plan', 'stage']);
+  assert.equal(jobs.candidate.with.version, '${{ needs.plan.outputs.candidate }}');
+  assert.equal(jobs.candidate.with.ref, '${{ needs.plan.outputs.source_sha }}');
+  assert.equal(jobs.candidate.with.previous, '${{ needs.plan.outputs.previous }}');
+  // No stable version is published before the tests of its published candidate pass.
+  assert.deepEqual(jobs.release.needs, ['plan', 'candidate']);
+  assert.match(jobs.release.if, /needs\.candidate\.result == 'success'/);
+  for (const name of ['stage', 'release']) {
+    const checkout = jobs[name].steps.find(step => step.name === 'Check out the candidate commit');
+    assert.equal(checkout.with.ref, '${{ needs.plan.outputs.source_sha }}', `${name} builds the candidate commit`);
+    assert.equal(checkout.with.path, 'source');
+  }
 });
 
-test('OIDC and the production environment stay on the publish job only', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  const verify = job(workflow, 'verify');
-  const release = job(workflow, 'release');
-
-  assert.doesNotMatch(verify, /environment:\s*production/,
-    'verify must not require the production environment gate');
-  assert.doesNotMatch(verify, /id-token:\s*write/,
-    'verify does not publish and must not request the OIDC token');
-  assert.match(release, /environment:\s*production/,
-    'the trusted publisher is still pinned to production on the publish job');
-  assert.match(release, /id-token:\s*write/,
-    'trusted publishing still needs the job OIDC token on release');
+test('the candidate stages under its own tag and the promotion publishes the same commit under the stable tag', async () => {
+  const { jobs } = await parsed();
+  const stage = jobs.stage.steps.find(step => step.id === 'release');
+  assert.equal(stage.env.RELEASE_VERSION, '${{ needs.plan.outputs.candidate }}');
+  assert.equal(stage.env.RELEASE_DIST_TAG, '${{ needs.plan.outputs.candidate_tag }}');
+  const promote = jobs.release.steps.find(step => step.id === 'release');
+  assert.equal(promote.name, 'Publish release');
+  assert.equal(promote.env.RELEASE_VERSION, '${{ needs.plan.outputs.version }}');
+  assert.equal(promote.env.RELEASE_DIST_TAG, '${{ needs.plan.outputs.stable_tag }}');
+  for (const step of [stage, promote]) assert.equal(step.env.HSQ_RELEASE_ROOT, '${{ github.workspace }}/source');
+  const steps = jobs.release.steps.map(step => step.name);
+  assert.ok(steps.indexOf('Check the gates again') < steps.indexOf('Publish release'), 'the gates are checked again right before promotion');
+  assert.ok(steps.indexOf('Publish release') < steps.indexOf('Install through the alias and boot'));
+  const smoke = jobs.release.steps.find(step => step.id === 'alias_smoke');
+  assert.equal(smoke.env.PACKAGE, '${{ steps.release.outputs.installName }}');
+  assert.equal(jobs.release.outputs.alias_smoke, '${{ steps.alias_smoke.outcome }}');
+  for (const name of ['Create GitHub Release', 'Open version-bump PR (patch/minor/major only)']) {
+    const step = jobs.release.steps.find(entry => entry.name === name);
+    assert.match(step.env.SOURCE_SHA, /needs\.plan\.outputs\.(source_sha|bump_sha)/, `${name} names the candidate, not the dispatch commit`);
+  }
 });
 
-test('the publish step has no npm credential and authenticates via OIDC', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /id-token: write/, 'trusted publishing needs the job OIDC token');
-  assert.match(workflow, /environment: production/, 'the trusted publisher is pinned to production');
+test('a failed candidate or promoted install files the release blocker', async () => {
+  const { jobs } = await parsed();
+  assert.deepEqual(jobs.blocker.needs, ['plan', 'candidate', 'release']);
+  assert.match(jobs.blocker.if, /needs\.candidate\.result == 'failure'/);
+  assert.match(jobs.blocker.if, /needs\.release\.outputs\.alias_smoke == 'failure'/);
+  assert.deepEqual(jobs.blocker.permissions, { contents: 'read', issues: 'write' });
+  for (const name of Object.keys(jobs).filter(name => name !== 'blocker')) {
+    assert.notEqual(jobs[name].permissions?.issues, 'write', `${name} must not write issues`);
+  }
+});
 
-  const publish = step(job(workflow, 'release'), 'Publish release');
-  assert.doesNotMatch(
-    publish,
-    /NODE_AUTH_TOKEN:/,
-    'a stable release must not set NODE_AUTH_TOKEN; npm authenticates with the job OIDC token',
-  );
-  assert.doesNotMatch(publish, /secrets\.NPM_TOKEN/);
+test('OIDC and the production environment stay on the publishing jobs only', async () => {
+  const { jobs } = await parsed();
+  for (const [name, job] of Object.entries(jobs)) {
+    const publishes = name === 'stage' || name === 'release';
+    assert.equal(job.environment === 'production', publishes, `${name} production environment`);
+    assert.equal(job.permissions?.['id-token'] === 'write', publishes, `${name} OIDC token`);
+  }
+});
+
+test('the publish steps have no npm credential and authenticate via OIDC', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  for (const name of ['stage', 'release']) {
+    const source = job(workflow, name);
+    assert.doesNotMatch(source, /NODE_AUTH_TOKEN:/, `${name} must not set NODE_AUTH_TOKEN; npm authenticates with the job OIDC token`);
+    assert.doesNotMatch(source, /secrets\.NPM_TOKEN/);
+  }
 });
 
 test('snapshots, nightlies, and dist-tag cleanup still pass NPM_TOKEN', () => {
@@ -97,7 +114,7 @@ test('release App setup is checked before publish and token only reaches PR crea
   assert.ok(steps.indexOf(app) < steps.findIndex(s => s.name === 'Publish release'));
   const validate = steps.find(s => s.id === 'validate_release_app');
   assert.ok(validate && steps.indexOf(validate) < steps.indexOf(app));
-  assert.match(validate.if, /inputs.bump != 'existing'/);
+  assert.match(validate.if, /needs.plan.outputs.record_bump == 'true'/);
   const consumers = steps.filter(s => JSON.stringify(s).includes('steps.release_app.outputs.token'));
   assert.equal(consumers.length, 1);
   assert.equal(consumers[0].id, 'bump_pr');

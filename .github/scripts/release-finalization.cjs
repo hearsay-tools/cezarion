@@ -18,6 +18,15 @@ const readOptional = async (read) => {
     throw error;
   }
 };
+// The published source is the release candidate, which can be older than the dispatch
+// commit (context.sha). The workflow passes it as SOURCE_SHA; the bump PR, the tag and
+// the changelog all name it.
+function withSource(context) {
+  const sha = process.env.SOURCE_SHA || context.sha;
+  if (!/^[a-f0-9]{40}$/.test(sha ?? '')) throw new Error('Missing or invalid published source commit.');
+  return { ...context, sha };
+}
+
 function failed(core, error) {
   const reason = message(error);
   core.setOutput('status', 'failed');
@@ -140,6 +149,7 @@ async function bumpPr({ github, prGithub, context, core, nativeCi = false, sleep
   const recovery = `${repoUrl(context)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}?expand=1`;
   core.setOutput('recovery', recovery);
   try {
+    context = withSource(context);
     if (!/^\d+\.\d+\.\d+$/.test(version ?? '') || !base) throw new Error('Missing or invalid release version/base branch.');
     if (git('rev-parse', 'HEAD') !== context.sha) throw new Error('Checkout does not match the published source commit.');
     const tree = collectBumpTree();
@@ -175,6 +185,7 @@ async function githubRelease({ github, context, core }) {
   const tag = `v${version}`;
   core.setOutput('tag_verified', 'false');
   try {
+    context = withSource(context);
     if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) throw new Error('Missing or invalid release version.');
     const runCommand = process.env.RUN_COMMAND;
     const published = (process.env.PUBLISHED_NAMES ?? '').split(',').filter(Boolean);

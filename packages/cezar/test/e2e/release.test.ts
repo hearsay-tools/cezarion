@@ -222,6 +222,56 @@ test('the existing bump publishes the committed version verbatim', { timeout: 12
   }
 });
 
+test('a release candidate publishes under its own dist-tag with exact pins', { timeout: 120_000 }, async () => {
+  const root = await makeFixture('0.1.5');
+  try {
+    await writeFile(join(root, 'github-output.txt'), '');
+    const { stub, log } = await writeNpmStub(root);
+    await runScript(root, ['patch'], {
+      NODE_AUTH_TOKEN: 'npm_fake_token', npm_execpath: stub, NPM_STUB_LOG: log,
+      RELEASE_VERSION: '0.1.6-rc.2', RELEASE_DIST_TAG: 'next',
+    });
+    const npmArgs = (await readFile(log, 'utf8')).trim().split('\n');
+    assert.ok(npmArgs.length > 0 && npmArgs.every((line) => line.startsWith('publish --tag next ')), npmArgs.join('\n'));
+    // The candidate's tests must run exactly this build, never a newer sibling.
+    assert.deepEqual((await readPkg(root, 'packages', 'cezar')).devDependencies, { '@scope/fake-client': '0.1.6-rc.2' });
+    const output = await readFile(join(root, 'github-output.txt'), 'utf8');
+    assert.match(output, /^version=0\.1\.6-rc\.2$/m);
+    assert.match(output, /^distTag=next$/m);
+    assert.match(output, /^installName=fake-alias$/m);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a release candidate can never take latest', { timeout: 120_000 }, async () => {
+  const root = await makeFixture('0.1.5');
+  try {
+    await assert.rejects(runScript(root, ['patch', '--dry-run'], { RELEASE_VERSION: '0.1.6-rc.1', RELEASE_DIST_TAG: 'latest' }),
+      /does not fit a release candidate/);
+    assert.equal((await readPkg(root, 'packages', 'cezar')).version, '0.1.5', 'a refused target stamps nothing');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('--stamp-only stamps the planned version and publishes nothing', { timeout: 120_000 }, async () => {
+  const root = await makeFixture('0.1.5');
+  try {
+    await writeFile(join(root, 'github-output.txt'), '');
+    const { stub, log } = await writeNpmStub(root);
+    await runScript(root, ['patch', '--stamp-only'], { npm_execpath: stub, NPM_STUB_LOG: log, RELEASE_VERSION: '0.1.9' });
+    assert.equal((await readPkg(root, 'packages', 'cezar')).version, '0.1.9');
+    assert.deepEqual((await readPkg(root, 'alias-cezarion')).dependencies, { '@scope/fake-root': '^0.1.9' });
+    await assert.rejects(readFile(log, 'utf8'), { code: 'ENOENT' });
+    const output = await readFile(join(root, 'github-output.txt'), 'utf8');
+    assert.match(output, /^published=false$/m);
+    assert.match(output, /^stamped=true$/m);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('a missing NPM token forces a dry run instead of publishing', { timeout: 120_000 }, async () => {
   const root = await makeFixture('0.1.5');
   try {

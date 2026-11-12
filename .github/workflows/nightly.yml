@@ -1,11 +1,15 @@
 name: Nightly
 
-# Publishes `main`'s tip to npm under the `nightly` dist-tag, every day.
+# The release rehearsal. Every night it takes the commit a release would take — the newest
+# `main` commit whose ci.yml push run passed — runs the full suite on it, publishes it
+# under the `nightly` dist-tag, and tests the published package as Release tests a
+# release candidate. A failure files a `release-blocker` issue, and the Release workflow
+# refuses a stable release until the last rehearsal passed
+# (spec .ai/specs/2026-11-11-one-full-run-delivery-pipeline.md § Release,
+# hearsay-tools/cezarion#3212; docs/publishing.md § Nightlies).
 #
-# A third channel alongside the two in docs/publishing.md: previews follow a PR or
-# `dev`, stable `latest` is owner-driven and manual — neither gives you "what is
-# on the trunk right now" without hunting for a run number. `npx cezarion@nightly`
-# does. Like every snapshot it publishes a PRERELEASE version under an explicit
+# `npx cezarion@nightly` gives "what is on the trunk right now" without hunting for a run
+# number. Like every snapshot it publishes a PRERELEASE version under an explicit
 # dist-tag, so it can never become the default install.
 on:
   schedule:
@@ -40,8 +44,13 @@ jobs:
     # A scheduled run always uses the default branch; this also pins the manual
     # dispatch to main, so a nightly can never be cut from a feature branch.
     if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      actions: read # ci.yml push runs name the verified candidate
     outputs:
       publish: ${{ steps.decide.outputs.publish }}
+      candidate: ${{ steps.candidate.outputs.sha }}
+      previous: ${{ steps.candidate.outputs.previous }}
 
     steps:
       - name: Check out repository
@@ -51,6 +60,11 @@ jobs:
           # so the "did main move?" check below would see an empty log every night.
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
 
       - name: Decide whether to publish
         id: decide
@@ -71,6 +85,25 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # The commit a release dispatched now would take, and the `latest` version the
+      # rehearsal upgrades from.
+      - name: Find the verified candidate
+        id: candidate
+        if: steps.decide.outputs.publish == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 3
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const { verifiedMainCommit, npmView } = require('./.github/scripts/release-plan.cjs');
+            const { releasePackages } = require('./.github/scripts/release-packages.cjs');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const sha = await verifiedMainCommit({ github, repo: context.repo, git, head: context.sha });
+            const previous = npmView(releasePackages().publication.cezar.name).distTags.latest ?? '';
+            core.setOutput('sha', sha);
+            core.setOutput('previous', previous);
+            await core.summary.addRaw(`Rehearsal candidate: ${sha}; upgrade from ${previous || 'nothing'}.\n`).write();
+
       - name: Write workflow summary
         if: steps.decide.outputs.publish != 'true'
         run: |
@@ -80,102 +113,37 @@ jobs:
             echo "\`main\` has not moved in the last 24 hours — the current \`nightly\` tag is already this build."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # A nightly is an installable build, not a preview of a proposal — it carries
-  # the same gate as a release. main is protected and every commit on it passed
-  # ci.yml already, but the trunk can still go red through the calendar alone (a
-  # dependency's new major, an expired fixture), and a broken `@nightly` is worse
-  # than a missing one.
-  #
-  # The gate is split the way ci.yml splits it, on ci.yml's runner and bounds: the
-  # whole suite in one 20-minute job outgrew that job on 2026-10-06, and every
-  # nightly after it was stopped at the time limit (hearsay-tools/cezarion#1272).
-  # nightly.workflow.test.cjs keeps the Vitest shards equal to ci.yml's.
-  # `lts/*` like every other workflow here: a nightly is built and verified on
-  # the Node release line users are actually on that day (see ci.yml).
-  checks:
-    name: Typecheck, unit, build, and package
+  # The trunk can go red through the calendar alone (a dependency's new major, an
+  # expired fixture), and a broken `@nightly` is worse than a missing one.
+  suite:
+    name: Full suite
     needs: decide
     if: needs.decide.outputs.publish == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: lts/*
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Run unit tests
-        run: npm run test:unit
-
-      - name: Build application
-        run: npm run build
-
-      - name: Run packaged CLI E2E tests
-        run: npm run test:package
-
-  vitest:
-    name: Vitest shard ${{ matrix.shard }}/4
-    needs: decide
-    if: needs.decide.outputs.publish == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: lts/*
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run server and cockpit unit suites
-        run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4
+    uses: ./.github/workflows/full-suite.yml
+    with:
+      ref: ${{ needs.decide.outputs.candidate }}
 
   # Publishing stays on a GitHub-hosted runner: `--provenance` is refused from
   # any other kind.
   nightly:
     name: Publish nightly to npm
-    needs: [checks, vitest]
+    needs: [decide, suite]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.suite.result == 'success'
     permissions:
       contents: read
       id-token: write # npm provenance attestation
+    outputs:
+      attempted: ${{ steps.nightly.outputs.attempted }}
+      dry_run: ${{ steps.nightly.outputs.dryRun }}
+      result: ${{ steps.nightly.outputs.result }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.decide.outputs.candidate }}
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -228,3 +196,41 @@ jobs:
           for (const line of r.installLines) console.log(line);
           console.log('```');
           EOF
+
+  # The published-package tests a release candidate gets, on the nightly version.
+  rehearsal:
+    name: Rehearse the release tests
+    needs: [decide, nightly]
+    if: needs.nightly.result == 'success' && needs.nightly.outputs.attempted == 'true' && needs.nightly.outputs.dry_run != 'true'
+    uses: ./.github/workflows/release-candidate-tests.yml
+    with:
+      package: ${{ fromJSON(needs.nightly.outputs.result).rootName }}
+      version: ${{ fromJSON(needs.nightly.outputs.result).version }}
+      previous: ${{ needs.decide.outputs.previous }}
+      ref: ${{ needs.decide.outputs.candidate }}
+
+  blocker:
+    name: File the rehearsal blocker
+    needs: [decide, suite, nightly, rehearsal]
+    if: ${{ always() && needs.decide.outputs.publish == 'true' && contains(join(needs.*.result, ' '), 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: File the rehearsal blocker
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RESULTS: ${{ format('candidate lookup {0}, full suite {1}, publish {2}, published-package tests {3}', needs.decide.result, needs.suite.result, needs.nightly.result, needs.rehearsal.result) }}
+        with:
+          script: |
+            const { fileReleaseBlocker } = require('./.github/scripts/release-blocker.cjs');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issue = await fileReleaseBlocker({ github, repo: context.repo, kind: 'rehearsal', stage: process.env.RESULTS, runUrl });
+            await core.summary.addRaw(`Release blocker: ${issue.url}\n`).write();
