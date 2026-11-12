@@ -11,6 +11,13 @@ describe('sessionAffinity', () => {
     expect(sessionAffinity(run, { retryRunner: 'claude' }, undefined, step, false)).toEqual({ originalRunner: 'claude', targetRunner: 'claude', resume: true });
   });
 
+  it('resumes on the held step\'s own account for a provider retry', () => {
+    const owned = makeStepState({ ...step, profileId: 'work-account' });
+    const pinned = { ...run, agentProfile: 'personal', steps: [owned] };
+    expect(sessionAffinity(pinned, { retryRunner: 'claude' }, undefined, owned, false)).toMatchObject({ targetRunner: 'claude', resume: true });
+    expect(sessionAffinity(pinned, {}, undefined, owned, false)).toMatchObject({ resume: false });
+  });
+
   it('keeps the run runner for any other Continue', () => {
     expect(sessionAffinity(run, {}, undefined, step, false)).toEqual({ originalRunner: 'codex', targetRunner: 'codex', resume: false });
   });

@@ -101,7 +101,8 @@ export function sessionAffinity(run: RunRecord, opts: ContinueRunOptions, identi
   // Legacy sessions without explicit affinity belong to the run's current runner/account.
   const sessionBackend = sessionStep?.backend ?? run.runner ?? 'claude';
   const sessionAccount = sessionStep?.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-  const accountSwitched = (opts.agentProfile ?? identity?.account.profileId ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
+  // A provider retry keeps the held step's account, as it keeps its runner (hearsay-tools/squawk#3337).
+  const accountSwitched = (opts.agentProfile ?? identity?.account.profileId ?? (opts.retryRunner ? undefined : run.agentProfile) ?? sessionAccount) !== sessionAccount;
   const resume = sessionBackend === targetRunner && !accountSwitched;
   return { originalRunner, targetRunner, resume };
 }
