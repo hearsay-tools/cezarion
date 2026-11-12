@@ -279,10 +279,15 @@ export const PROVIDER_HOLD_SCENARIOS = [
   ['provider-credit', 'credit'],
 ];
 
-function trailingScenario(prompt, context) {
+/** A provider failure in the wire's native shape: one error class per scenario (hearsay-tools/squawk#3337). */
+function providerScenario(prompt, context) {
   const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
   if (matches('provider-error') && !context.nativeFailureControl) return scenario('provider-error', [open(), end({ error: 'provider' })]);
   for (const [name, error] of PROVIDER_HOLD_SCENARIOS) if (matches(name)) return scenario(name, [open(), end({ error })]);
+}
+
+function trailingScenario(prompt, context) {
+  const matches = name => has(prompt, name) && !context.unsupported?.includes(name.replace(/:$/, ''));
   if (matches('hold-cezar-done')) return scenario('hold-cezar-done', held(done(context, 'parity hold-done: content after the pause')));
   if (matches('hold-cezar-ask')) return scenario('hold-cezar-ask', held(ask(context)));
   if (matches('cezar-done') || !context.unsupported?.includes('cezar-done') && context.session.resumeAfterAsk && prompt.trim() === 'Library: Vitest') {
@@ -302,7 +307,7 @@ function trailingScenario(prompt, context) {
 
 /** First match wins. A wire declares genuine gaps rather than implementing a partial script. */
 export function scenarioFor(prompt, context) {
-  for (const select of [earlyScenario, beforeFailureScenario, trailingScenario]) {
+  for (const select of [earlyScenario, beforeFailureScenario, providerScenario, trailingScenario]) {
     const selected = select(prompt, context);
     if (selected && !context.unsupported?.includes(selected.name)) return selected;
   }
