@@ -1,14 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { RunLine } from './run-line.ts';
 
 describe('RunLine', () => {
   it('keeps queue identity and only removes a queued entry with its wake marker', () => {
     const line = new RunLine();
-    const push = vi.spyOn(line.queue, 'push');
+    const queue = line.queue;
     line.enqueueWake('wake', 10);
     line.enqueueWake('wake', 20);
     line.markWake('sessionless', 30);
-    expect(push).toHaveBeenCalledTimes(1);
     expect(line.queue).toEqual(['wake']);
     line.removeWake('sessionless');
     expect(line.queue).toEqual(['wake']);
@@ -17,6 +16,7 @@ describe('RunLine', () => {
     line.markWake('wake', 40);
     line.forget('wake');
     expect(line.queue).toEqual([]);
+    expect(line.queue).toBe(queue);
   });
 
   it('retains the existing teardown exceptions and clears only the owned transient state', () => {
