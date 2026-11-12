@@ -32,8 +32,9 @@ function lintOf(status, lintExpected = false) {
   const l = status?.lint;
   if (!l) return { failing: 0, unfinished: 1 };
   if (l.off || l.failed || l.unreadable) return { failing: l.failing ?? 0, unfinished: 1, unavailable: String(l.off ?? l.failed ?? l.unreadable) };
+  // Squeal omits `linting` once lint is done; an object with total 0 is a run that has not started.
   const total = l.linting?.total ?? 0;
-  const notDone = Math.max(0, total - (l.linting?.done ?? 0)) + (lintExpected && total === 0 ? 1 : 0);
+  const notDone = l.linting ? Math.max(0, total - (l.linting.done ?? 0)) + (lintExpected && total === 0 ? 1 : 0) : 0;
   return { failing: l.failing ?? 0, unfinished: (l.pending ?? 0) + (l.stale ?? 0) + (l.unknown ?? 0) + notDone };
 }
 

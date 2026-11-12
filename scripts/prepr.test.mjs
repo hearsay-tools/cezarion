@@ -74,3 +74,8 @@ test('lint that has not started is incomplete when a linted file changed', () =>
   assert.equal(judgeSqueal(0, notStarted, () => false, true).state, 'incomplete');
   assert.equal(judgeSqueal(0, notStarted).state, 'pass');
 });
+
+test('finished lint omits the progress field and is clean', () => {
+  const done = { selection: { testFiles: [] }, lint: { files: 2000, failing: 0, pending: 0, stale: 0, unknown: 0 } };
+  assert.equal(judgeSqueal(0, done, () => false, true).state, 'pass');
+});
