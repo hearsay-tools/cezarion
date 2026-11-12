@@ -65,12 +65,17 @@ const KILL_GRACE_MS = 10_000;
 const LINTED = /^packages\/.*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const NO_SQUEAL = { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
 
+/** Git readers for one checkout: `git` returns text, `gitBytes` a Buffer. */
+export const gitIo = (cwd = undefined) => ({
+  git: (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' }).stdout,
+  gitBytes: (...a) => spawnSync('git', a, { cwd, maxBuffer: 256 << 20 }).stdout,
+});
+
 export const realIo = {
   run,
   sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   now: () => Date.now(),
-  git: (...a) => spawnSync('git', a, { encoding: 'utf8' }).stdout,
-  gitBytes: (...a) => spawnSync('git', a, { maxBuffer: 256 << 20 }).stdout,
+  ...gitIo(),
 };
 
 export async function squealChecks(paths, waitMs, io = realIo) {

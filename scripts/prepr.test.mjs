@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { daemonAlive, fallbackLines, focusedTests, judgeSqueal, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+import { daemonAlive, fallbackLines, focusedTests, gitIo, judgeSqueal, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
 
 const { GITHUB_PATCH_LIMITS } = createRequire(import.meta.url)('../.github/scripts/missing-patches.cjs');
 
@@ -211,10 +210,7 @@ test('squealChecks passes a process timeout to the wait', async () => {
 function fixtureRepo(t, write) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'prepr-patch-'));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
-  const io = {
-    git: (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' }).stdout,
-    gitBytes: (...a) => spawnSync('git', a, { cwd, maxBuffer: 64 << 20 }).stdout,
-  };
+  const io = gitIo(cwd);
   for (const a of [['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid'], ['commit', '--allow-empty', '-m', 'base'], ['switch', '-c', 'topic']]) io.git(...a);
   write(cwd);
   io.git('add', '--all');
