@@ -15,10 +15,10 @@ import {
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
 import { RunStore } from '../runs/store.ts';
-import type { RunManager } from '../workflows/run.ts';
+import { RunManager } from '../workflows/run.ts';
 import { allocateProjectSlug, clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -552,23 +552,39 @@ describe('workspace projects API', () => {
       // The boot warm-up builds every project in the background; a removal that lands mid-build
       // used to find no context, count no running tasks, dispose nothing, and leave the build to
       // register a removed project's store and manager afterwards.
-      // The build is held open until a beat after the removal arrives.
+      // A live run the build will load: only a removal that waits for the build can count it.
+      const seeded = RunStore.open(join(otherRoot, '.ai/cezar'));
+      seeded.createRun({ title: 'live', workflow: 'quick-task', task: 'x', steps: [] });
+      seeded.close();
+      // Recovery would launch it; the count only needs it loaded.
+      const recover = vi.spyOn(RunManager.prototype, 'recover').mockResolvedValue();
       let release!: () => void;
       const gate = new Promise<void>((resolve) => { release = resolve; });
       // Past the registry lookup, as a real build is when recovery is what takes the time.
       const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
       const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome()), ownership });
+      // The build stays gated until the removal reaches its wait for it.
+      const settle = contexts.settle.bind(contexts);
+      vi.spyOn(contexts, 'settle').mockImplementation((id) => { release(); return settle(id); });
       const other = await registerProject(otherRoot, undefined, testHome());
       const building = contexts.context(other.id);
-      setTimeout(release, 100);
+      try {
+        const refused = await del(other.id, { contexts });
 
-      const { status } = await del(other.id, { contexts });
+        expect(refused.status).toBe(409);
+        expect(refused.body.runningTasks).toBe(1);
+        expect((await getProjects()).projects.map((p) => p.id)).toContain(other.id);
+        expect(contexts.peek(other.id)).toBe(await building);
 
-      expect(status).toBe(200);
-      expect(contexts.peek(other.id)).toBeUndefined();
-      await building.catch(() => undefined);
-      expect(contexts.peek(other.id)).toBeUndefined();
-      contexts.disposeAll();
+        setRunStatus(contexts.peek(other.id)!.store, contexts.peek(other.id)!.store.listRuns()[0]!.id, RUN_STATUS.done);
+        expect((await del(other.id, { contexts })).status).toBe(200);
+        expect(contexts.peek(other.id)).toBeUndefined();
+      } finally {
+        release();
+        await building.catch(() => undefined);
+        recover.mockRestore();
+        contexts.disposeAll();
+      }
     });
 
     it('404s an unknown id and a malformed one, without touching the registry', async () => {

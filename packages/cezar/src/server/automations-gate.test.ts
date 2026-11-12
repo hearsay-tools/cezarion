@@ -236,6 +236,10 @@ describe('automations gate (#801)', () => {
             timeout: WARMUP_MS,
             interval: 10,
           });
+          // The gate runs in the same turn as the sweep. Past it, the chain to `start()` is
+          // microtasks and synchronous store opens once Git inspection answers at once, so one
+          // real event-loop turn would let an ungated chain reach `start()`.
+          await setImmediate();
         }
       } finally {
         server.close();
@@ -244,6 +248,7 @@ describe('automations gate (#801)', () => {
     };
 
     it('never starts polling while the flag is off', async () => {
+      vi.spyOn(git, 'getRepoInfo').mockResolvedValue(null);
       await boot();
     }, WARMUP_MS + 5_000);
 
