@@ -154,7 +154,7 @@ test('the design route opens with a recorded live probe per runner and sends bac
   const definitions = buildAutomations();
   const design = definitions.find(d => d.filters.changedLabels.includes('friction-design'));
   const probe = 'Start with a reproduction. Before you design, run a minimal live probe of the reported failure on each runner the issue names, or on the runner this task runs on when it names none. When the failure is not runtime behaviour, the probe is the smallest command that shows the current state. Record each probe command and its outcome, per runner, in the design.';
-  const sentBack = 'A design that records no probe is sent back at the design gate: do not ask for approval without one.';
+  const sentBack = 'A design that does not record a probe for each runner is sent back at the design gate: do not ask for approval without one.';
   const { prompt } = design.task;
   assert.ok(prompt.includes(probe), 'probe step');
   assert.ok(prompt.includes(sentBack), 'sent-back rule');
