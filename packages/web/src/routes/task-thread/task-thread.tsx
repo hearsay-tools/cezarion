@@ -243,7 +243,7 @@ export function ThreadView({
   // meanings. A rejection is already a danger toast from inside the hook — swallowed here so the
   // click handler does not also surface it as an unhandled rejection.
   const finishAction = useFinishRun(run.id)
-  // Cezar's own waits ask nothing, so they leave empty Continue available (review of #1437).
+  // Squawk's own waits ask nothing, so they leave empty Continue available (review of #1437).
   const needsAnswer = transcriptAsk || asksQuestion(run)
   const { hasContinuation, continuable } = threadContinuation(sessionOpen, queued, continueAction)
   // A closed session can never settle its in-flight items — nothing in the reducer rewrites a

@@ -40,7 +40,7 @@ the repo — `.ai/cezar/`, `~/.cezar/`, `CEZ_*` and the `cez` command are
 unchanged — and the private workspace packages keep their `@open-mercato/*`
 names because they never reach npm.
 
-How cezar reaches npm. Two paths, deliberately separate
+How Squawk reaches npm. Two paths, deliberately separate
 (spec: `.ai/specs/2026-07-18-npm-preview-publish.md`, issue #482), with
 two authentication methods (#33):
 
@@ -63,7 +63,7 @@ two authentication methods (#33):
   `NPM_TOKEN`. Its trusted publisher never builds or executes PR code; validated archive files are repacked
   before npm receives them with lifecycle scripts disabled. Forks never publish.
 - **Nightlies** are **clock-driven**: [`nightly.yml`](../.github/workflows/nightly.yml)
-  cuts `main`'s tip every night under the `nightly` dist-tag, so `npx cezarion@nightly`
+  cuts `main`'s tip every night under the `nightly` dist-tag, so `npx -p @hearsay-tools/squawk@nightly hsq`
   is always the trunk. Also runnable on demand from the Actions tab.
   Authenticated with `NPM_TOKEN`.
 
@@ -273,7 +273,7 @@ also reused. The `existing` input needs no bump PR.
 Stable patch/minor/major releases create the version-bump PR with a short-lived
 GitHub App installation token. This emits `pull_request_target`, so the real CI
 aggregate appears in the PR and satisfies the existing branch ruleset. This is
-maintainer infrastructure; Cezar users do not configure an App.
+maintainer infrastructure; Squawk users do not configure an App.
 
 An organization owner (or someone permitted to manage and install GitHub Apps)
 performs this setup once:
@@ -413,7 +413,7 @@ comments on it), and the Release workflow refuses a stable release until the new
 finished rehearsal passed.
 
 ```bash
-npx cezarion@nightly              # whatever is on main as of last night
+npx -p @hearsay-tools/squawk@nightly hsq              # whatever is on main as of last night
 npx cezarion@0.1.5-nightly.20260813.126   # that exact night, forever
 ```
 

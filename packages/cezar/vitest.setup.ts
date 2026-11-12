@@ -12,7 +12,7 @@ import { installOutboundGuard, throwOutboundRefusals } from './src/test-outbound
 
 import { createTestSandbox, hideHostCommands, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
 
-// Cezar task worktrees pin TMPDIR under the repo (`.ai/cezar/tmp/<runId>`). That
+// Squawk task worktrees pin TMPDIR under the repo (`.ai/cezar/tmp/<runId>`). That
 // makes `os.tmpdir()` land inside a git worktree, so suites that mkdtemp a
 // "non-repo" path still resolve `git rev-parse --show-toplevel` to the host
 // project. Pin temp to a real OS temp sandbox first, before anything else that
@@ -77,7 +77,7 @@ const pinSandboxHome = testHome.pinHome
 
 const pinSandboxUserHome = testHome.pinUserHome
 
-// Cezar tasks inherit host wrappers, deployment mode and feature flags. Suites
+// Squawk tasks inherit host wrappers, deployment mode and feature flags. Suites
 // assume default executables, local mode and opt-in features off — clear the
 // host values so a suite run inside a task worktree matches CI. Cases that set
 // an override themselves still win: this hook runs before theirs.
@@ -115,7 +115,7 @@ for (const key of HOST_FILE_MODE_KEYS) delete process.env[key]
 // A task session's own context (hearsay-tools/cezarion#953). Inherited, it pointed the
 // suite at the LIVE task: the mocks appended to its handoff file, and fixtures could reach
 // its delegation API and tool socket. Unlike the keys above, these are cleared once per
-// test file, not per test, so a suite that simulates a nested cezar in `beforeAll`
+// test file, not per test, so a suite that simulates a nested Squawk in `beforeAll`
 // (`system-prompt.test.ts` sets CEZ_TODOS_FILE) keeps its value.
 const HOST_TASK_KEYS = [
   'CEZ_ARTIFACTS_DIR',

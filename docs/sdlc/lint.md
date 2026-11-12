@@ -148,7 +148,7 @@ runner applies the same two scanners to tracked and unignored new test files out
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
 The guarded names are `homedir`, legacy `cezarHomeDir` and `resolveHome`.
 `home/resolve.ts` exports only `resolveHome` as an environment-to-Home resolver.
-The Cezar path helpers in `paths.ts` take an explicit `Home`; its agent-home
+The Squawk path helpers in `paths.ts` take an explicit `Home`; its agent-home
 and tilde APIs remain separate APIs.
 
 The rule checks syntax only. It reports these positions:

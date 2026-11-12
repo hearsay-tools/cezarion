@@ -1,7 +1,7 @@
 {
   "name": "@open-mercato/cezar-api-client",
   "version": "0.18.0",
-  "description": "Typed client and shared contract types for the cezar cockpit HTTP API.",
+  "description": "Typed client and shared contract types for the Squawk cockpit HTTP API.",
   "license": "MIT",
   "private": true,
   "type": "module",

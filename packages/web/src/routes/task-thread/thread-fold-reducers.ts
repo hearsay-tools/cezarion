@@ -500,7 +500,7 @@ function reduceWorkerQuestionFallback(fold: FoldState, event: RunEvent): void {
   if (ask) ask.routedToParent = false
 }
 
-// Cezar answers it for the parent: no human answers it from here on.
+// Squawk answers it for the parent: no human answers it from here on.
 function reduceWorkerQuestionUndelivered(fold: FoldState, event: RunEvent): void {
   const ask = openAskFor(fold, event)
   if (ask) closeAsk(fold, ask, 'undeliverable')
@@ -520,7 +520,7 @@ function closeAsk(fold: FoldState, ask: ThreadAsk, reason: AskClosedReason): voi
 }
 
 function reduceHumanInputDelivered(fold: FoldState, event: RunEvent): void {
-  // A human answer resolves on its `user-message`; only the parent's and Cezar's answers have none.
+  // A human answer resolves on its `user-message`; only the parent's and Squawk's answers have none.
   const ask = openAskFor(fold, event)
   if (!ask) return
   if (event.source === 'cezar') { closeAsk(fold, ask, 'undeliverable'); return }

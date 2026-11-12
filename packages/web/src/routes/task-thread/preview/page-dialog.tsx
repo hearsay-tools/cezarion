@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PreviewServerMessage } from '@open-mercato/cezar-api-client'
 import { Button } from '@/components/ui/button'
 
-/** 5.13: the page's own alert, confirm or prompt, drawn by cezar and labelled with the origin. */
+/** 5.13: the page's own alert, confirm or prompt, drawn by Squawk and labelled with the origin. */
 export function PageDialog({
   dialog,
   onResult,

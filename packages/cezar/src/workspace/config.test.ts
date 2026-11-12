@@ -168,7 +168,7 @@ describe('workspace config', () => {
   });
 
   it('every atomic write stages through its own tmp file (pid + random, never a shared name)', () => {
-    // Two cezar processes (a `serve` per repo, a settings PUT, `cezar run`)
+    // Two Squawk processes (a `serve` per repo, a settings PUT, `hsq run`)
     // share `~/.cezar/` — a fixed `${path}.tmp` would let one writer O_TRUNC
     // the other's staging file mid-write and rename corruption into place.
     const path = workspaceConfigPath(undefined, testHome());

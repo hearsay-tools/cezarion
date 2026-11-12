@@ -33,7 +33,7 @@ const descriptorPath = resolve(repoRoot, '.ai/qa/test-env.json')
 const fixtureGitConfig = resolve(repoRoot, '.ai/qa/gitconfig')
 
 /**
- * The built CLI a spec spawns when it needs its OWN cezar rather than the shared test env
+ * The built CLI a spec spawns when it needs its OWN Squawk rather than the shared test env
  * (a pinned `seedRuns` fixture, an empty repo, a second project).
  *
  * Exported from here rather than re-derived per spec because it is one fact about the build
@@ -379,7 +379,7 @@ export function fixtureServeEnv(
   const ambient = Object.entries(process.env).filter(([key]) => !/^(CEZ|HSQ)_/i.test(key))
   const env: NodeJS.ProcessEnv = { ...Object.fromEntries(ambient), ...extra }
   for (const key of Object.keys(env)) if (key.toUpperCase().startsWith('GIT_')) delete env[key]
-  // Cezar pins TMPDIR inside the ambient checkout. Without a ceiling, discovery
+  // Squawk pins TMPDIR inside the ambient checkout. Without a ceiling, discovery
   // climbs into that checkout and a non-Git fixture looks nested and unsafe.
   // Bound both discovery and the child at tmpdir so nested repos inside temp
   // still fail the safety check, while the host worktree cannot be inherited.

@@ -2,7 +2,7 @@
 # om-prepare-test-env: generated entrypoint (contract v2)
 # regenerate with: om-prepare-test-env --regenerate
 # history:
-#   2026-07-14 generated (cold ~40s, warm ~2s) — cezar has no backing services, so
+#   2026-07-14 generated (cold ~40s, warm ~2s) — Squawk has no backing services, so
 #             the service-provisioning step of the contract is deliberately absent.
 #   2026-07-21 detach the app with nohup so non-interactive bootstrap shells do not
 #             terminate the healthy server immediately after the script exits.
@@ -433,7 +433,7 @@ BROWSER_NAMESPACE=cez-e2e
 BROWSER_LAUNCH_ARGS_CSV=""
 BROWSER_RUNTIME_TMPDIR=""
 
-# Container Chrome needs `--no-sandbox`; Cezar worktree TMPDIR makes SingletonSocket
+# Container Chrome needs `--no-sandbox`; Squawk worktree TMPDIR makes SingletonSocket
 # exceed sockaddr_un. Resolve once, pass the same flags/env to doctor and the probe, and
 # record the flags for every later invocation. The TMPDIR in the descriptor is THIS boot's
 # answer only: a caller reusing the env decides its own (hearsay-tools/cezarion#1090).
@@ -629,7 +629,7 @@ start_app() {
   port_free "$PORT" || PORT=$(free_port)
   BASE_URL="http://127.0.0.1:$PORT"
 
-  log "starting cezar on $BASE_URL (CEZ_DRY_RUN=1${SERVER_ENV:+ $SERVER_ENV})"
+  log "starting Squawk on $BASE_URL (CEZ_DRY_RUN=1${SERVER_ENV:+ $SERVER_ENV})"
   # --no-open: a test boot must never hijack the operator's browser.
   # Detach through Node on every host: the cached app survives the caller and is
   # outside the command group retained by a crashed build's lifetime lease.

@@ -59,7 +59,7 @@ describe('scheduleTaskRequestSchema', () => {
     expect(scheduleTaskRequestSchema.safeParse(base).success).toBe(false);
   });
 
-  // Every Cezar tool time is UTC: a local wall time or a zone is refused, never read as local.
+  // Every Squawk tool time is UTC: a local wall time or a zone is refused, never read as local.
   it('takes at only as UTC and refuses a time zone', () => {
     expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00' }).success).toBe(false);
     expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00+01:00' }).success).toBe(false);

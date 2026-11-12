@@ -2,7 +2,7 @@
 
 `thread-run.ndjson` is a REAL transcript with one documented synthetic extension (see the
 last section): the base is the verbatim NDJSON a
-CEZ_DRY_RUN=1 cezar (this branch, R2 protocol emitters active) persisted for a quick-task run
+CEZ_DRY_RUN=1 Squawk (this branch, R2 protocol emitters active) persisted for a quick-task run
 that received one follow-up message and was then finished. It is the documented mixed-file
 state — v1 lines (`lifecycle`, `note`, `text`, `tool-call`, `user-message`, …) and protocol-v2
 events (`item.*`, `turn.*`, `session.*`) interleaved on one `seq` clock, including the v1
@@ -58,7 +58,7 @@ events with their v1 twins on one `seq` clock), repeated. The run record is
 ## Sub-agent fan-out transcript (#474 — Agents dock, drill-down sheet)
 
 `subagents-run.ndjson` is a REAL transcript with NO synthetic extension: the verbatim NDJSON a
-`CEZ_DRY_RUN=1` cezar persisted for a quick-task run whose task was `mock:subagents`. That
+`CEZ_DRY_RUN=1` Squawk persisted for a quick-task run whose task was `mock:subagents`. That
 trigger (`scripts/mock-claude.mjs`) replays a parallel fan-out — two `Task` spawns, then their
 children interleaved with `parent_tool_use_id`, then the tool_results — which is exactly the
 shape the Agents dock groups. The only edit is timestamp normalization (`ts` values rewritten

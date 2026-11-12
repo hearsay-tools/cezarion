@@ -222,7 +222,7 @@ const COMMANDS: Record<string, string> = { a: 'selectAll', c: 'copy', x: 'cut', 
 
 /**
  * `undefined` means "not the page's key": the caller must neither send nor `preventDefault`, so
- * the event keeps going. Ctrl/Cmd+V (the paste event sends the text) and Ctrl/Cmd+K (cezar's
+ * the event keeps going. Ctrl/Cmd+V (the paste event sends the text) and Ctrl/Cmd+K (Squawk's
  * command palette, registered for both) are such keys.
  */
 export function keyToMessage(e: KeyLike): PreviewClientMessage | undefined {

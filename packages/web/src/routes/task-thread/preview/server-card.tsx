@@ -12,7 +12,7 @@ import { serverScript, serverStatus, type PreviewOpenRequest } from './preview-s
 /**
  * The thread card for one registered dev server (#781, v1 design screen 05).
  *
- * The card makes no claim about a port cezar did not start: a server that answered when the agent
+ * The card makes no claim about a port Squawk did not start: a server that answered when the agent
  * registered it reads "was running when registered" with a neutral dot, never "up". Whenever the
  * next click may run the command, the card says so beside the button. Stop is never on the card.
  */

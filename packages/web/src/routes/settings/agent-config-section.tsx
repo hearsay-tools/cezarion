@@ -21,7 +21,7 @@ import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice, useSettingsAdminR
  * 2026-07-17-agent-config-by-agent): read and edit the coding agents' OWN config
  * files — raw, per scope, highlighted — grouped BY AGENT. An agent selector
  * first; the selected agent's pane holds its Settings, MCP and Memory files
- * together, driven by the per-agent descriptor table. cezar never re-serializes;
+ * together, driven by the per-agent descriptor table. Squawk never re-serializes;
  * it shows each scope's file and the vendor's own documented precedence, and
  * never claims a merge it does not perform. Writing needs settings
  * administration: a local cockpit, or a remote one whose host operator ran
@@ -210,7 +210,7 @@ function AgentPane({
 }
 
 /** Claude's user/local MCP scopes live in ~/.claude.json (Claude's own state
- *  file) — listed read-only; cezar never edits it. */
+ *  file) — listed read-only; Squawk never edits it. */
 function UserMcpBlock({ userMcp }: { userMcp: NonNullable<AgentConfigListing['userMcp']> }) {
   return (
     <div data-slot="agent-config-user-mcp" className="mt-3">

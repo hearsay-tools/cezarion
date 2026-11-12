@@ -182,7 +182,7 @@ describe('attentionOfRung', () => {
   });
 });
 
-/** A worker wait is a list entry (hearsay-tools/cezarion#1235), Cezar's completion wait included
+/** A worker wait is a list entry (hearsay-tools/cezarion#1235), Squawk's completion wait included
  *  (hearsay-tools/cezarion#1301): `delegation.wait` is never read. */
 const workerEntry = (over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry => ({
   kind: WAIT_KIND.worker, id: '88888888-8888-4888-8888-888888888880', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: '2026-10-19T10:00:00.000Z',

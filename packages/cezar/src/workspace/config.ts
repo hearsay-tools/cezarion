@@ -27,7 +27,7 @@ import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
  *
  * - every field optional/defaulted with `.catch`, so a bad value degrades
  *   per-key instead of discarding the file;
- * - `.passthrough()` at every object level, so keys a *newer* cezar wrote
+ * - `.passthrough()` at every object level, so keys a *newer* Squawk wrote
  *   survive a round-trip through an older one;
  * - `.max()` bounds on strings (this file is parsed on every boot);
  * - atomic tmp+rename writes with mode `0600` (dir `0700`);
@@ -41,7 +41,7 @@ import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
 export const PROJECT_ID_RE = PROJECT_ID_PATTERN;
 
 /** The states that send a delivery (hearsay-tools/cezarion#1356). Absent means the default; `[]`
- *  stays `[]`. An unknown value (a newer cezar's option) is dropped on its own and the rest of the
+ *  stays `[]`. An unknown value (a newer Squawk's option) is dropped on its own and the rest of the
  *  list kept, so one value never resets the selection. */
 const storedTriggersSchema = z
   .array(z.unknown())
@@ -106,11 +106,11 @@ const workspaceProjectSchema = z
     /** Per-project cap on concurrently running tasks. Absent = inherit the
      *  workspace `resources.maxParallel`. Bounded like the workspace cap; a bad
      *  value degrades to "inherit" (`.catch(undefined)`) rather than a hard
-     *  default, and `.passthrough()` preserves the key across cezar round-trips. */
+     *  default, and `.passthrough()` preserves the key across Squawk round-trips. */
     maxParallel: z.number().int().min(1).max(16).optional().catch(undefined),
     /** Free-form labels grouping connected repositories (`storefront`, `infra`), used by the
      *  global Tasks page to filter and group across projects. Absent = untagged; the writers
-     *  (`PATCH /api/projects/:id`, `cezar projects tag`) delete the key rather than storing `[]`,
+     *  (`PATCH /api/projects/:id`, `hsq projects tag`) delete the key rather than storing `[]`,
      *  so an untagged project costs nothing in the file. Bounds mirror the PATCH schema exactly,
      *  so a value that route accepts can never be degraded away by the next load's `.catch`. */
     tags: z
@@ -163,7 +163,7 @@ const resourcesSchema = z
      * Default-ON at 5 minutes (#810). It shipped as `null` and that made monitoring a
      * dead end: #661 removed the 15-minute idle timer that used to bound a parked
      * monitor, so with no wake timer a monitoring run had NO timer at all — and
-     * cezar has no other resume path (no process-exit callback, no CI webhook, no
+     * Squawk has no other resume path (no process-exit callback, no CI webhook, no
      * sub-agent-completion event). Tasks sat in `monitoring` for hours until a human
      * typed something. Same reasoning as `autoResumeOnUsageLimit` below: it spends
      * nothing while the downstream work is genuinely pending and it finishes the work
@@ -311,7 +311,7 @@ export function defaultWorkspaceConfig(): WorkspaceConfig {
 
 /**
  * Last successful registry snapshot, including empty writes. Reads may restore a non-empty
- * snapshot in memory. Delete the whole cezar home for a complete reset; older writers may leave
+ * snapshot in memory. Delete the whole Squawk home for a complete reset; older writers may leave
  * the snapshot behind.
  */
 export function workspaceConfigBackupPath(path: string): string {

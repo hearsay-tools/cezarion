@@ -17,7 +17,7 @@ const record = recordedRun(recordJson)
 
 /**
  * The grouped sub-agent display (spec `.ai/specs/2026-07-20-grouped-subagent-display.md`,
- * #474) in a real browser, against a real cezar serving a run whose transcript is a REAL
+ * #474) in a real browser, against a real Squawk serving a run whose transcript is a REAL
  * NDJSON file — `fixtures/subagents-run.ndjson`, the verbatim output of a `mock:subagents`
  * dry run (two parallel `Task` spawns whose children carry `parent_tool_use_id`).
  *

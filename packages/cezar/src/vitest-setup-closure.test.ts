@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { runtimeImports } from './lint/import-closure.testkit.ts';
 
 /**
- * Every cezar test file loads `vitest.setup.ts`, so Squeal reruns every test when a module the
+ * Every Squawk test file loads `vitest.setup.ts`, so Squeal reruns every test when a module the
  * setup loads at runtime changes (hearsay-tools/cezarion#3241). The setup's closure stays on
  * leaf modules: a new runtime import anywhere in it fails here, and widening the list is a
  * decision about every test's rerun set. TypeScript erases type-only imports, so they are not

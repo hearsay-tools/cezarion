@@ -44,7 +44,7 @@ it('starts no automatic maintenance after a web fixture commit', () => {
   expect(commit.stderr).not.toMatch(/\b(?:maintenance run|gc) --auto\b/)
 })
 
-// These exercise only the pre-spawn environment helper: no Cezar process is ever started.
+// These exercise only the pre-spawn environment helper: no Squawk process is ever started.
 it('rejects a non-Git fixture below an ambient Git repository before a server can start', () => {
   const parent = gitRoot(), child = join(parent, 'temporary-fixture')
   mkdirSync(child)

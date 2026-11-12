@@ -120,7 +120,7 @@ export const previewClientMessageSchema = z.discriminatedUnion('t', [
     /** Automatic reconnects may reclaim only this pane's last ownership. */
     viewerId: z.string().min(1).max(128).optional(),
     resume: z.boolean().optional(),
-    /** `agent`: the page an agent drives through cezar's CDP proxy, shown as it is, never navigated (hearsay-tools/cezarion#784). */
+    /** `agent`: the page an agent drives through Squawk's CDP proxy, shown as it is, never navigated (hearsay-tools/cezarion#784). */
     target: z.union([z.object({ port }), z.object({ url: z.string().min(1).max(2048) }), z.object({ agent: z.literal(true) })]),
     /** Absent from an older cockpit, which streams `normal`. */
     quality: previewQualitySchema.optional(),

@@ -16,7 +16,7 @@ import { COCKPIT_PORTS } from './task-cli/discovery.ts';
 /**
  * `cez remote-settings enable | status | disable` (hearsay-tools/cezarion#2428): the host operator's
  * grant for editing Agent config and worktree setup from one remote cockpit, named by its listen
- * port. It runs on the machine that runs Cezarion, as the same user (and the same `CEZ_HOME`) as the
+ * port. It runs on the machine that runs Squawk, as the same user (and the same `CEZ_HOME`) as the
  * cockpit service. One JSON object per invocation; exit 0 ok, 2 refused, 64 usage.
  */
 

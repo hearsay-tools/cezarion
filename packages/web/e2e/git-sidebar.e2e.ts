@@ -179,7 +179,7 @@ describe('the fixture', () => {
   it('has the git state this spec assumes', async () => {
     const repo = (await fetch(`${base}/api/v1/p/${project}/repo`).then((r) => r.json())) as { info: { branch: string }; status: Array<{ path: string }>; branches: string[] }
     expect(repo.info.branch).toBe('main')
-    // Booting may add files of its own (cezar's data gitignore); ours is the one this spec names.
+    // Booting may add files of its own (Squawk's data gitignore); ours is the one this spec names.
     expect(repo.status.map((entry) => entry.path)).toContain('dirty.txt')
     expect(repo.branches).toEqual(['feature', 'main'])
     const branches = (await fetch(`${base}/api/v1/p/${project}/repo/branches`).then((r) => r.json())) as { prStateKnown: boolean; branches: Array<{ name: string; class: string }> }

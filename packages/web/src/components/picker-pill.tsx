@@ -394,7 +394,7 @@ export interface RunnerAccountChoice {
   provider: Runner
   id: string
   label: string
-  /** The folder, as written. The labels are cezar's invention; the folder IS the account. */
+  /** The folder, as written. The labels are Squawk's invention; the folder IS the account. */
   configDir: string
 }
 
@@ -458,7 +458,7 @@ export function RunnerPill({
     return logins.map((login) => ({
       value: choiceValue(runner.id, login.id),
       label: `${runner.id} · ${login.label}`,
-      // The folder, because the label is cezar's invention and the folder is the account.
+      // The folder, because the label is Squawk's invention and the folder is the account.
       desc: login.configDir,
     }))
   })

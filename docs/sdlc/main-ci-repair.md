@@ -43,7 +43,7 @@ outside the managed block survive reporter retries.
 
 Replaying an attempt whose summary is closed leaves it closed and does not route
 it. A different attempt gets a separate summary, even when it reuses signature
-reports. The reporter never reopens a closed report. It changes no Cezar run state
+reports. The reporter never reopens a closed report. It changes no Squawk run state
 and adds no database or required configuration.
 
 ## Escalation after 60 minutes
@@ -66,7 +66,7 @@ request never gets one.
 
 ## Local automation and repair ownership
 
-The Cezar automation **Main CI — guarded repair** polls `issue.labeled` every five
+The Squawk automation **Main CI — guarded repair** polls `issue.labeled` every five
 minutes and requires the live `main-ci-failure` label. New installations are
 created paused and must be enabled explicitly in the cockpit. It uses one
 isolated task per match, allows human questions, and generates no follow-up tasks.
@@ -132,7 +132,7 @@ helper does not update a running cockpit's saved prompt. Apply and verify the
 prompt-only migration below for future tasks. Tasks already launched retain their
 original prompt and need an explicit continuation instruction for this cleanup.
 
-GitHub issues retain the diagnostic evidence and summary. Cezar retains matching
+GitHub issues retain the diagnostic evidence and summary. Squawk retains matching
 receipts and the task handoff. Each reported main CI attempt adds one summary
 issue. A paused automation spends no runner tokens. When enabled, each newly
 routed summary can start one repair task and consume tokens.
@@ -149,11 +149,11 @@ The checked-in prompt helper emits a partial update for the existing automation:
 
 ```sh
 node .github/scripts/main-ci-repair-automation.cjs > /tmp/main-ci-repair-prompt.json
-cez automation list
-cez automation show <existing-id>
-cez automation update <existing-id> --file /tmp/main-ci-repair-prompt.json
-cez automation show <existing-id>
-cez automation check <existing-id>
+hsq automation list
+hsq automation show <existing-id>
+hsq automation update <existing-id> --file /tmp/main-ci-repair-prompt.json
+hsq automation show <existing-id>
+hsq automation check <existing-id>
 ```
 
 Use the ID of **Main CI — guarded repair**, not a new automation. Review its current
@@ -176,7 +176,7 @@ These reports stay outside this repair path:
 - A report starts no task. A maintainer reads it and, when the flake is real, adds
   `flaky-test`. A queued PR can make the shard list any existing test file, so the
   label is the confirmation.
-- A separate Cezar automation starts one task for each issue that gets `flaky-test`:
+- A separate Squawk automation starts one task for each issue that gets `flaky-test`:
   a GitHub poll on `issue.labeled` with `changedLabels: ["flaky-test"]`,
   `allLabels: ["flake-report", "flaky-test"]` and `requireCurrentLabels: true`. Its task
   reproduces the flake from the report's files and either fixes the test or quarantines

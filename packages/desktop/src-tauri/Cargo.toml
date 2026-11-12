@@ -1,7 +1,7 @@
 [package]
 name = "cezar-desktop"
 version = "0.1.0"
-description = "Desktop shell for cezar (PoC)"
+description = "Desktop shell for Squawk (PoC)"
 edition = "2021"
 publish = false
 

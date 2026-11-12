@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { askRequestSchema } from './ask-schema.ts';
 
 /** Who may talk: a root and its owned worker (`family`), or two root tasks of one project (`peer`,
- *  spec 2026-10-27-task-communication-protocol § 2). Cezar writes it on peer messages only; an
+ *  spec 2026-10-27-task-communication-protocol § 2). Squawk writes it on peer messages only; an
  *  absent field reads as `family`, so family records stay as older versions wrote them. */
 export const conversationRelationshipSchema = z.enum(['family', 'peer']);
 export type ConversationRelationship = z.infer<typeof conversationRelationshipSchema>;

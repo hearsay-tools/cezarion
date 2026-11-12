@@ -73,8 +73,8 @@ export async function recoverServeProject(
 }
 
 export function warnServeBind(bindHost: string | undefined, port: number): void {
-  // SECURITY: cezar executes agents. A non-loopback bind exposes that box to
-  // whatever can reach the interface, and cezar itself has NO auth — it is only
+  // SECURITY: Squawk executes agents. A non-loopback bind exposes that box to
+  // whatever can reach the interface, and Squawk itself has NO auth — it is only
   // for a deliberate hosted setup where a reverse proxy in front provides TLS +
   // auth (see `server-install --external-proxy`). Say so, loudly, every start.
   if (bindHost && !['127.0.0.1', 'localhost', '::1'].includes(bindHost)) {

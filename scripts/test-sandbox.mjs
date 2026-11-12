@@ -14,7 +14,7 @@ import { delimiter, isAbsolute, join, sep } from 'node:path'
 /** Inside every sandbox: `{ pid, host }` of the process that owns it. */
 export const OWNER_FILE = '.cez-test-owner'
 
-/** The fixed OS temp root, not the inherited TMPDIR: a cezar task pins TMPDIR inside its
+/** The fixed OS temp root, not the inherited TMPDIR: a Squawk task pins TMPDIR inside its
  *  worktree, where Git resolves every "non-repo" fixture to the host checkout. */
 export function osTempRoot() {
   return process.platform === 'win32'

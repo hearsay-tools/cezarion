@@ -30,7 +30,7 @@ export interface SquawkClientOptions {
 }
 
 /**
- * Build a typed client for a cezar service.
+ * Build a typed client for a Squawk service.
  *
  * `T` is the service's `AppType`. It is left unconstrained so that a JS consumer, or a
  * consumer that does not want the server package installed, still gets a working (untyped)

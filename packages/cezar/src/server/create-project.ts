@@ -369,7 +369,7 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
     },
   };
   /** `gh repo create` failed — which does not prove GitHub did nothing. Check the name again and
-   *  say what the user finds there; never adopt (or delete) a repository cezar cannot prove it made. */
+   *  say what the user finds there; never adopt (or delete) a repository Squawk cannot prove it made. */
   const createFailed = async (error: string): Promise<CreateProjectFailure> => {
     const recheck = await exec('gh', ['api', `repos/${slug}`, '--jq', '.full_name'], false, process.cwd());
     if (recheck.ok) {

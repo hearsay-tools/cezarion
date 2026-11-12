@@ -12,7 +12,7 @@ import { clearProjectProbeCache, registerProject } from './projects.ts';
 import { runProjectsCommand, type ProjectsCommandIo } from './projects-cli.ts';
 
 /**
- * `cezar projects` (spec 2026-07-20-multi-project-workspace, step 5.2): the
+ * `hsq projects` (spec 2026-07-20-multi-project-workspace, step 5.2): the
  * offline registry CLI. Every test pins `CEZ_HOME` to a temp dir — these cases
  * register and remove projects for real, and must never touch the developer's
  * own `~/.cezar`.

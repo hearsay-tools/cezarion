@@ -339,7 +339,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
   // `AgentHomePaths.omp` (`$PI_CODING_AGENT_DIR` or `~/${PI_CONFIG_DIR || '.omp'}/agent`, the default
   // profile; a named profile relocates it and is not modelled). Project files always live in
   // `<repo>/.omp/`. Settings are YAML (`config.yml`); no `modelKey`, because OMP has no native-default
-  // strategy cezar reads (spec § Model selection). Precedence strings quote the docs in doc order;
+  // strategy Squawk reads (spec § Model selection). Precedence strings quote the docs in doc order;
   // a numbered doc list is joined with "; ", its wording untouched. Not listed, by the spec's
   // scope: `.omp/AGENTS.md` (OMP's native project context file; project memory is the shared root
   // `AGENTS.md` row) and the `.omp/.mcp.json` / user `.mcp.json` compatibility spellings.

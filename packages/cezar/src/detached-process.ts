@@ -84,7 +84,7 @@ export function processStartToken(pid: number, platform: NodeJS.Platform = proce
     return start && boot ? `${boot}:${start}` : start;
   }
   if (platform !== 'darwin') return undefined;
-  // `lstart` is locale- and zone-formatted; pin both so the token is stable across cezar processes.
+  // `lstart` is locale- and zone-formatted; pin both so the token is stable across Squawk processes.
   const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
   const token = ps.status === 0 ? ps.stdout.trim() : '';
   return token || undefined;
@@ -96,8 +96,8 @@ export function spawnDetached(file: string, args: readonly string[], options: Om
   return spawn(file, args, { ...options, detached: true });
 }
 
-/** Starts a process cezar never stops, such as an editor or a browser: detached, so it outlives
- *  cezar, with no stdio and nothing recorded. True when no spawn error arrives within `settleMs`.
+/** Starts a process Squawk never stops, such as an editor or a browser: detached, so it outlives
+ *  Squawk, with no stdio and nothing recorded. True when no spawn error arrives within `settleMs`.
  *  Neither the child nor the wait keeps the event loop alive, so a caller may drop the promise. */
 export function startAndForget(file: string, args: readonly string[], { settleMs = 250 }: { settleMs?: number } = {}): Promise<boolean> {
   return new Promise((resolve) => {

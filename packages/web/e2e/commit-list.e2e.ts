@@ -20,7 +20,7 @@ const record = recordedRun(recordJson)
  * WHY THIS ROUTE AND NOT THE REPO ONE. The repo Commits segment cannot reach the threshold —
  * `getLog` (src/server/git.ts) defaults to 20 and the server calls it without a count, so that
  * list is 20 rows by construction. The task tab's source, `collectRunCommits`, runs
- * `git log <merge-base>..HEAD` with NO cap, and cezar autosaves a commit per turn, so THIS is
+ * `git log <merge-base>..HEAD` with NO cap, and Squawk autosaves a commit per turn, so THIS is
  * the list that actually grows. Testing the capped one would prove nothing.
  *
  * HONESTY NOTE: as with the diff spec, "bounded DOM" is the proxy for smoothness; frame timing

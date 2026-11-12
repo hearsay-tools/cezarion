@@ -58,7 +58,7 @@ export function toolsBlocker(health: HealthResponse): string | null {
   return null
 }
 
-/** The trigger's hover tooltip: the cezar version, then the blocker if there is one — else
+/** The trigger's hover tooltip: the Squawk version, then the blocker if there is one — else
  *  the optional tools still worth knowing about. Exported for the tests. */
 export function toolsTooltip(health: HealthResponse): string {
   const base = `${productName('cezar')} v${health.version}`

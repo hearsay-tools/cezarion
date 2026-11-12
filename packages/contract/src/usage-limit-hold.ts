@@ -9,7 +9,7 @@ import type { RunRecord } from './runs.ts';
  * the time only, so a caller can still settle the hold to another status.
  *
  * This module has no runtime imports: `vitest.setup.ts` loads it through `run-exits.ts`, so every
- * cezar test loads it (hearsay-tools/cezarion#3241). `waits.ts` re-exports it.
+ * Squawk test loads it (hearsay-tools/cezarion#3241). `waits.ts` re-exports it.
  */
 export function isUsageLimitHold<T extends Partial<Pick<RunRecord, 'status' | 'autoResumeAt'>>>(
   run: T,

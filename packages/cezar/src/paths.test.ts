@@ -42,7 +42,7 @@ describe('paths', () => {
     expect(serverLockPath(DEFAULT_SERVER_INSTANCE, testHome())).toBe('/tmp/cez-home-test/server.install.lock');
   });
 
-  it('workspace config/ui-state live directly under the cezar home', () => {
+  it('workspace config/ui-state live directly under the Squawk home', () => {
     delete env.CEZ_HOME;
     expect(workspaceConfigPath(undefined, testHome())).toBe(join(homedir(), '.cezar', 'config.json')); // test-home-read: compare the workspace config path without writing
     expect(workspaceUiStatePath(testHome())).toBe(join(homedir(), '.cezar', 'ui-state.json')); // test-home-read: compare the workspace UI path without writing
@@ -131,7 +131,7 @@ describe('agentHomePaths', () => {
     // still hides PI_PROFILE, exactly as omp reads them.
     expect(omp({ OMP_PROFILE: 'default' })).toBe('/home/u/.omp/agent');
     expect(omp({ OMP_PROFILE: ' ', PI_PROFILE: 'other' })).toBe('/home/u/.omp/agent');
-    // A name omp would refuse selects nothing cezar can describe; fall through to the plain home.
+    // A name omp would refuse selects nothing Squawk can describe; fall through to the plain home.
     expect(omp({ OMP_PROFILE: 'Bad Name' })).toBe('/home/u/.omp/agent');
   });
 
@@ -185,10 +185,10 @@ describe('claudeStateFilePath', () => {
     expect(claudeStateFilePath('/home/u/.claude-klaudiusz', env)).toBe('/home/u/.claude-klaudiusz/.claude.json');
   });
 
-  it('reads an account\'s OWN state file when the cezar process carries an override', () => {
-    // Review case: cezar started with CLAUDE_CONFIG_DIR=/opt/work, and `~/.claude` added as a NAMED
+  it('reads an account\'s OWN state file when the Squawk process carries an override', () => {
+    // Review case: Squawk started with CLAUDE_CONFIG_DIR=/opt/work, and `~/.claude` added as a NAMED
     // account (legal — the discovered account is /opt/work, so it is not a duplicate). The answer is
-    // the file INSIDE it, because that is the one the CLI will read when cezar runs that account as
+    // the file INSIDE it, because that is the one the CLI will read when Squawk runs that account as
     // `CLAUDE_CONFIG_DIR=~/.claude claude`. The sibling would describe a login it never uses.
     const env = { HOME: '/home/u', CLAUDE_CONFIG_DIR: '/opt/work' } as NodeJS.ProcessEnv;
     expect(claudeStateFilePath('/home/u/.claude', env)).toBe('/home/u/.claude/.claude.json');

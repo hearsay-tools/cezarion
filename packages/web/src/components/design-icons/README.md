@@ -1,4 +1,4 @@
-# Approved Cezarion glyph geometry
+# Approved Squawk glyph geometry
 
 Extracted without coordinate changes from pen.dev 0.3.7 HTML export of all 193 frames of user-approved `cezarion.pen`, SHA256 `56a71a27c7795137cab1c0a40a5839edecbacab4014d2d39ddc90f89343275f8`.
 

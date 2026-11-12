@@ -429,7 +429,7 @@ describe('picker data flows', () => {
     expect(document.querySelector('[data-slot="base-pill"]')).toBeNull()
   })
 
-  // #791: health is bound to the boot folder, so a cezar booted outside a git repo answered
+  // #791: health is bound to the boot folder, so a Squawk booted outside a git repo answered
   // `repo: null` for EVERY project. Reading git state from the project-scoped `/repo` instead is
   // what keeps the worktree controls alive for a git project under a non-git boot root.
   it('offers worktrees for the project repo even when the boot folder has no git', async () => {
@@ -1071,7 +1071,7 @@ describe('the composer runner pill carries the account', () => {
       'claude · Default/home/u/.claude'.replace(/\s+/g, ' '),
       'claude · Klaudiusz~/.claude-klaudiusz'.replace(/\s+/g, ' '),
     ])
-    // Each row names its folder: the labels are cezar's invention, the folder is the account.
+    // Each row names its folder: the labels are Squawk's invention, the folder is the account.
     expect(options[1]?.textContent).toContain('~/.claude-klaudiusz')
   })
 

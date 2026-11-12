@@ -430,7 +430,7 @@ Tests of global or team discovery seed their own sandbox sources.
 
 ## A plain dry-run reply parks on a "Next step" card
 
-A dry-run task whose reply has no marker does not park with the composer alone. Cezar's no-wait
+A dry-run task whose reply has no marker does not park with the composer alone. Squawk's no-wait
 nudge (hearsay-tools/cezarion#1234) asks the mock again, and every native mock answers the nudge
 with a "Next step" question card. `packages/cezar/scripts/mock-nudge.mjs` is the source of that
 card. A spec that needs a task parked `waiting` with no question card sets
@@ -484,7 +484,7 @@ Linux and macOS only.
 ## Forcing a race with a delayed route
 
 To force a race that CI hits and your machine does not, delay the built route that the
-spec races. The shared env and specs that boot their own cezar (`squawkCli`) both run
+spec races. The shared env and specs that boot their own Squawk (`squawkCli`) both run
 `.ai/qa/build/cezar`, but the environment-variable delay below reaches only the shared
 server. For a spec that boots its own server, use
 [the file-read delay](#specs-that-boot-their-own-server). Use the shared env in this order,
@@ -551,11 +551,11 @@ Restart with `--force --server-env=CEZ_E2E_GATE_FILE=/tmp/cez-e2e-1276.ready`
 loading state, then `touch /tmp/cez-e2e-1276.ready` from another shell to release the
 response and mount the late UI piece. Choose a route other than health so bootstrap can
 finish before release. Remove the file afterwards and use step 4's rebuild to drop the
-patch. This variable is temporary instrumentation in the ignored build, not a cezar setting.
+patch. This variable is temporary instrumentation in the ignored build, not a Squawk setting.
 
 ### Specs that boot their own server
 
-The recipes above reach only the shared server. A spec that boots its own cezar with
+The recipes above reach only the shared server. A spec that boots its own Squawk with
 `spawnFixtureServer` and `fixtureServeEnv(...)`, such as `composer-defaults.e2e.ts`, gives
 that server no ambient `CEZ_*` variable: `fixtureServeEnv` removes them all and adds back
 only the values the spec passes in its `extra` argument. `--server-env` sets only the shared

@@ -15,14 +15,14 @@ import { requirePid } from './pid-file.testkit.ts';
 const HANG_GUARD_MS = 15_000;
 
 /**
- * cezar's own SIGINT and SIGTERM reach the agents (hearsay-tools/cezarion#890), through the real CLI.
+ * Squawk's own SIGINT and SIGTERM reach the agents (hearsay-tools/cezarion#890), through the real CLI.
  *
  * Agent sessions lead their own process groups, so the terminal's Ctrl-C no longer reaches them
- * through cezar's foreground group. `serve` forwards the signal as it exits, after its store has
+ * through Squawk's foreground group. `serve` forwards the signal as it exits, after its store has
  * closed, so the run stays `running` for restart recovery; `cez run` forwards it and still ends
- * by it. cezar is started in its own group, as a shell starts a foreground job.
+ * by it. Squawk is started in its own group, as a shell starts a foreground job.
  *
- * The agent outlives its stdin: the bundled mock exits when cezar's exit closes its stdin, which
+ * The agent outlives its stdin: the bundled mock exits when Squawk's exit closes its stdin, which
  * would pass these tests with no forwarding at all. Every probe (`--help`, auth) still goes to
  * the mock; only a session stalls.
  */
@@ -141,7 +141,7 @@ function onPty(args: string[]): { hangUp: () => void; ended: Promise<string> } {
   return { hangUp: () => writeFileSync(hangup, ''), ended };
 }
 
-describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM to agent sessions (hearsay-tools/cezarion#890)', () => {
+describe.skipIf(process.platform === 'win32')('Squawk forwards SIGINT and SIGTERM to agent sessions (hearsay-tools/cezarion#890)', () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-session-signal-'));
     execFileSync('git', ['init', '-q', '-b', 'main', root]);

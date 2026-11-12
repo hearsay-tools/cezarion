@@ -47,7 +47,7 @@ test('each lane carries current edits and has private state with shared build as
   mkdirSync(scratch);
   const baseline = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const lane1 = createLane({ repoRoot: repo, scratchRoot: scratch, index: 1, baseRef: baseline });
-  // Cezar may autosave this checkout between lane creation calls. Every lane must still
+  // Squawk may autosave this checkout between lane creation calls. Every lane must still
   // start from the same revision and overlay the current source files.
   execFileSync('git', ['-C', repo, 'add', '-A']);
   execFileSync('git', ['-C', repo, '-c', 'user.name=E2E Test', '-c', 'user.email=e2e@example.invalid', 'commit', '-qm', 'autosave']);

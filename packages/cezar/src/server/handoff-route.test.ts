@@ -13,7 +13,7 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp } from './server.ts';
 
 /**
- * `GET /runs/:id/handoff` (spec 007) shows the file with cezar's records from the run store
+ * `GET /runs/:id/handoff` (spec 007) shows the file with Squawk's records from the run store
  * (hearsay-tools/cezarion#1809): the agent may have rewritten the block or the whole file since
  * the last write.
  */

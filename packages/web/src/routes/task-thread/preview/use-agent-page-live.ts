@@ -6,7 +6,7 @@ import type { RunEvent } from '@open-mercato/cezar-api-client'
 
 /**
  * Whether the latest `preview.agent-browser` event in these events says `connected`: an agent
- * drives the task's browser through cezar's CDP link now (hearsay-tools/cezarion#784). No such
+ * drives the task's browser through Squawk's CDP link now (hearsay-tools/cezarion#784). No such
  * event reads as not connected.
  */
 export function agentPageLive(events: readonly RunEvent[]): boolean {

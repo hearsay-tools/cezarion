@@ -19,7 +19,7 @@ import { agentInputSchema, workerOutcomeSchema } from './delegation.ts';
  * Open by design: `type` is a plain string and unknown keys pass through, because the event
  * vocabulary is an APPEND-ONLY on-disk format (BACKWARD_COMPATIBILITY.md) that old NDJSON
  * recordings must keep replaying forever. Closing this schema would make a recording written by
- * a newer cezar unreadable by an older one — the opposite of what the format promises.
+ * a newer Squawk unreadable by an older one — the opposite of what the format promises.
  */
 export const runEventSchema = z.looseObject({
   seq: z.number(),
@@ -47,14 +47,14 @@ export const humanInputDeliveredEventSchema = runEventSchema.extend({
   type: z.literal('human-input-delivered'),
   askSeq: z.number().int().nonnegative(),
   /** Who answered: absent (records before #505) or `human` is a person; `parent` is the
-   * owning parent's reply to a routed worker question; `cezar` is Cezar's notice that the question
+   * owning parent's reply to a routed worker question; `cezar` is Squawk's notice that the question
    * could not reach a live parent (hearsay-tools/cezarion#2410). */
   source: z.enum(['human', 'parent', 'cezar']).optional(),
 });
 export type HumanInputDeliveredEvent = z.infer<typeof humanInputDeliveredEventSchema>;
 
 /** The question was retired unanswered: an accepted Finish ended the task (`finish`,
- * hearsay-tools/cezarion#1260), or new input went to a worker whose only question was Cezar's own
+ * hearsay-tools/cezarion#1260), or new input went to a worker whose only question was Squawk's own
  * fallback question (`superseded`, hearsay-tools/cezarion#1301). A worker's question has one
  * addressee, its parent (hearsay-tools/cezarion#2410): it also closes when the parent stopped
  * (`parent-stopped`), when the worker stopped (`worker-stopped`), or when a live parent could not
@@ -84,7 +84,7 @@ export const workerQuestionFallbackEventSchema = runEventSchema.extend({
 });
 export type WorkerQuestionFallbackEvent = z.infer<typeof workerQuestionFallbackEventSchema>;
 
-/** A worker's question could not reach its live parent (hearsay-tools/cezarion#2410): Cezar answers
+/** A worker's question could not reach its live parent (hearsay-tools/cezarion#2410): Squawk answers
  *  it with the reason, and no human does. */
 export const workerQuestionUndeliveredEventSchema = runEventSchema.extend({
   type: z.literal('worker-question-undelivered'),

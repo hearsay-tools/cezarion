@@ -60,11 +60,11 @@ export function readTestEnvDescriptor(root) {
   let descriptor;
   try { descriptor = JSON.parse(readFileSync(file, 'utf8')); }
   catch (cause) {
-    throw new Error(`cezar e2e: cannot read ${file}. Run \`npm run test:e2e\`, which boots the env first; ` +
+    throw new Error(`Squawk e2e: cannot read ${file}. Run \`npm run test:e2e\`, which boots the env first; ` +
       'if it did, the boot failed — see .ai/qa/test-env-app.log and .ai/qa/test-env-build.log.', { cause });
   }
   const mismatch = testEnvInputsMismatch(root, descriptor);
-  if (mismatch) throw new Error(`cezar e2e: ${mismatch}. Run .ai/scripts/test-env-up.sh again.`);
+  if (mismatch) throw new Error(`Squawk e2e: ${mismatch}. Run .ai/scripts/test-env-up.sh again.`);
   return descriptor;
 }
 

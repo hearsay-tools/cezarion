@@ -7,7 +7,7 @@ can carry several turns.
 
 ## Turn settlement
 
-Cezar's processing of a completed turn to account for input still owed,
+Squawk's processing of a completed turn to account for input still owed,
 questions, waits, completion requests and workflow progression. A transport
 acknowledgement can defer settlement until after the turn-end signal.
 
@@ -16,12 +16,12 @@ and proof that worker resources can be removed remain separate facts.
 
 ## Nudge
 
-One automatic turn that Cezar sends when a turn ends without an accepted done
+One automatic turn that Squawk sends when a turn ends without an accepted done
 and without a wait. It has a cause: no wait (the turn named neither a wait nor
 a done) or completion (the agent's done was refused). A nudge is charged to the
 automatic-wake budget, and a timer bounds its reply. A run that is not
 autonomous gets one nudge per cause; when the answered turn ends the same way,
-the run parks on Cezar's human wait (no wait) or on the completion wait or the
+the run parks on Squawk's human wait (no wait) or on the completion wait or the
 user (completion). An autonomous run is nudged again until the budget is spent.
 
 _Avoid_: reminder, poke
@@ -112,7 +112,7 @@ _Avoid_: wait registry (the part that validates requests), wait manager
 ## No-progress stall
 
 The native mock mode that a `mock:no-progress-*` prompt selects: the mock stops
-making progress, so tests can exercise Cezar's no-progress deadline and the
+making progress, so tests can exercise Squawk's no-progress deadline and the
 escalation that ends a session. Its variants close the input, ignore SIGTERM,
 hold the output pipe open in a child, or leave children behind. The mock writes
 `watchdog.pid` only after the variant is in place, so a test may signal it as

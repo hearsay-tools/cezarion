@@ -1,14 +1,14 @@
 import { scrubProbeSessionEnv } from '../../packages/cezar/scripts/probe-session-env.ts';
-// Manual real-harness probe for hearsay-tools/cezarion#1343: does cezar answer Codex's MCP tool
-// approvals as AGENT_PROTOCOL.md § MCP tool approvals says? cezar's own server must run with no
-// approval request, and another server's tool call must reach cezar as permission.requested and get
+// Manual real-harness probe for hearsay-tools/cezarion#1343: does Squawk answer Codex's MCP tool
+// approvals as AGENT_PROTOCOL.md § MCP tool approvals says? Squawk's own server must run with no
+// approval request, and another server's tool call must reach Squawk as permission.requested and get
 // the reply named on the command line (hearsay-tools/cezarion#1294).
 //
 // Spends ONE paid Codex turn. Never run by CI or `npm test`, and never packed (it lives outside
 // packages/). Usage, from the repo root:
 //   node_modules/.bin/tsx .ai/scripts/probe-approvals.ts [--answer allow|session|always|decline] [--model <id>]
 // --answer picks the option for each MCP tool approval (default allow, "Allow once"); every other
-// approval gets "Decline and continue". CEZ_CODEX_BIN picks the binary, as it does for cezar.
+// approval gets "Decline and continue". CEZ_CODEX_BIN picks the binary, as it does for Squawk.
 //
 // Isolation: one scratch root (printed first) holds codex-home/, project/ and the logs. The probe
 // drops the session's own CEZ_* and CLAUDE_CODE_* variables first. It keeps CEZ_ENV_PASSTHROUGH and
@@ -17,11 +17,11 @@ import { scrubProbeSessionEnv } from '../../packages/cezar/scripts/probe-session
 // the selected [model_providers.<name>] table from the user's $CODEX_HOME/config.toml (or
 // ~/.codex/config.toml), and adds the probe_marker server. It holds no approval_policy, so the
 // thread runs under Codex's default, and there is no auth.json: the provider's env_key must reach
-// Codex through cezar's env allowlist or CEZ_ENV_PASSTHROUGH.
+// Codex through Squawk's env allowlist or CEZ_ENV_PASSTHROUGH.
 //
-// The run uses cezar's own pieces: CodexAppServerRunner, CiToolController (its socket, token and
+// The run uses Squawk's own pieces: CodexAppServerRunner, CiToolController (its socket, token and
 // ci-wait/mcp.ts server, with stub handlers that record each call) and respondPermission. The
-// runner's bin is a tee shim that logs every JSON-RPC line between cezar and codex app-server. The
+// runner's bin is a tee shim that logs every JSON-RPC line between Squawk and codex app-server. The
 // prompt asks for one probe_marker call, then one cezar_wait timer.
 //
 // Output: one JSON line per record: scratch, scratch-config, permission, permission-resolved, text,
@@ -62,9 +62,9 @@ const HANG_GUARD_MS = 240_000; // bound: a turn that never ends still prints wha
 const END_GRACE_MS = 15_000; // bound: an ended session that never settles still exits
 const TEXT_LIMIT = 200;
 // The session's own wiring (CEZ_TOOL_SOCKET, CEZ_HANDOFF_FILE, CLAUDE_CODE_SESSION_ID, …) must not
-// reach the run. These host settings stay, as cezar would read them.
+// reach the run. These host settings stay, as Squawk would read them.
 
-// smol-toml is cezar's dependency. It is installed under packages/cezar, which the resolution of a
+// smol-toml is Squawk's dependency. It is installed under packages/cezar, which the resolution of a
 // file in .ai/scripts does not reach.
 const toml = createRequire(new URL('../../packages/cezar/package.json', import.meta.url))('smol-toml') as Toml;
 
@@ -140,7 +140,7 @@ const isInside = (dir: string, path: string) => {
   return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 };
 
-/** TMPDIR, or /tmp when TMPDIR lies under the real home: a cezar task's TMPDIR sits inside a checkout. */
+/** TMPDIR, or /tmp when TMPDIR lies under the real home: a Squawk task's TMPDIR sits inside a checkout. */
 const scratchBase = () => isInside(homedir(), tmpdir()) ? '/tmp' : tmpdir();
 
 /** The user's config.toml, parsed; `{}` when it is absent. Never prints the file, which a parse error would quote. */
@@ -184,7 +184,7 @@ function readWire(path: string): WireLine[] {
   });
 }
 
-/** Each request Codex sent cezar, with the exact reply cezar wrote back, or `none`. */
+/** Each request Codex sent Squawk, with the exact reply Squawk wrote back, or `none`. */
 function serverRequests(wire: WireLine[]): Frame[] {
   const replies = new Map(wire.filter(({ from, message }) => from === 'cezar' && message.method === undefined && message.id !== undefined)
     .map(({ message }) => [String(message.id), message]));
@@ -211,7 +211,7 @@ function threadApprovalPolicy(wire: WireLine[]): unknown {
   return (response?.message.result as Frame | undefined)?.approvalPolicy ?? 'not seen';
 }
 
-/** cezar's tool socket with stub handlers: each call is recorded, and a timer wait gets a receipt. */
+/** Squawk's tool socket with stub handlers: each call is recorded, and a timer wait gets a receipt. */
 function stubHandlers(calls: Frame[]): SquawkToolHandlers {
   const message = 'The approval probe answers cezar_wait timers only.';
   const registerWait: SquawkToolHandlers['registerWait'] = async (request, via) => {

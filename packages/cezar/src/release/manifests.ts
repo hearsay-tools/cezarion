@@ -85,7 +85,7 @@ export interface ReleaseManifests {
    * publish the day that script is deleted.
    */
   contract: ManifestLike;
-  /** The contract package a consumer installs to talk to a cezar service. */
+  /** The contract package a consumer installs to talk to a Squawk service. */
   apiClient: ManifestLike;
   /** The published service + CLI. */
   cezar: ManifestLike;

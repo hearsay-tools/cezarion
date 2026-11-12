@@ -106,7 +106,7 @@ export interface ProjectContextDeps {
   rebrand?: boolean | undefined;
 }
 
-/** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */
+/** Data dirs this process has swept: the sweep cleans up after a crashed Squawk, never this one. */
 const sweptPreviewDirs = new Set<string>();
 
 /** One data dir's crash leftovers, once per process; whatever the live host runs is spared. A
@@ -124,7 +124,7 @@ function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promi
 
 /**
  * A project's preview exits that the store drives (#781, spec 2026-10-02-live-preview-v1):
- * dev servers and browsers a crashed cezar left behind are swept once per data dir per process
+ * dev servers and browsers a crashed Squawk left behind are swept once per data dir per process
  * (always, so turning the flag off after a crash still cleans up; a project removed and re-added
  * is not swept again, and what the live host runs is spared either way), and a deleted run's
  * preview is released with its profile.

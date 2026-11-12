@@ -152,7 +152,7 @@ function owesWorkerWake(run: AttentionInput): boolean {
   return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved');
 }
 
-/** Worker waits in the list include Cezar's completion wait (hearsay-tools/cezarion#1301).
+/** Worker waits in the list include Squawk's completion wait (hearsay-tools/cezarion#1301).
  * A worker waits outside itself on its parent (ring); a root waits on its own workers (robot). */
 function workerAttention(run: Pick<AttentionInput, 'delegation'>, waitingOn: Extract<WaitingOn, { kind: 'workers' }>): Attention {
   const attention = attentionOfRung('waiting-on-workers');

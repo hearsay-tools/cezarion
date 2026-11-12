@@ -86,7 +86,7 @@ export function skillClosure(
 
 // ---- installing, ignoring and recording ---------------------------------------------------
 
-/** First line of the `.gitignore` cezar owns inside a worktree skills dir. */
+/** First line of the `.gitignore` Squawk owns inside a worktree skills dir. */
 export const PROVISION_IGNORE_MARK = '# cezar: skills installed for this task, not part of the repository';
 
 /** Matches `TEAM_SKILL_MARKER` in skills-remote.ts: it names the team source of a copy. */
@@ -97,7 +97,7 @@ export interface ProvisionResult {
   installed: string[];
   /** The first skill `MAX_SKILL_CLOSURE` left out, if any. */
   truncated?: string;
-  /** Absolute directories that hold cezar's current copy of a team directory skill, by skill name. */
+  /** Absolute directories that hold Squawk's current copy of a team directory skill, by skill name. */
   teamCopies: Record<string, string[]>;
 }
 
@@ -148,7 +148,7 @@ interface Pass {
 
 /**
  * Provision roots and companions only in an owned task worktree, through its manifest
- * (`worktree-manifest.ts`): replace or remove only cezar's unchanged entries, and reject escaping
+ * (`worktree-manifest.ts`): replace or remove only Squawk's unchanged entries, and reject escaping
  * destinations. Install ignore rules before entries. On failure retain the system-prompt
  * fallback; never throw.
  */
@@ -177,7 +177,7 @@ async function provisionPass(
     for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
       checkpoint();
       // Ignore first: an entry git could see must never exist, not even for a crash's length.
-      // Only names cezar may write: a recorded entry or a free path, never the user's own skill.
+      // Only names Squawk may write: a recorded entry or a free path, never the user's own skill.
       const planned: string[] = [];
       for (const skill of skills) {
         const rel = entryPath(agentDir, skill.name);
@@ -221,7 +221,7 @@ function ownedNames(files: WorktreeFiles, agentDir: string): string[] {
     .map((entry) => entry.skill ?? '').filter(Boolean);
 }
 
-/** Keep `names` out of git in `<agentDir>/skills`, through cezar's own `.gitignore` when it may. */
+/** Keep `names` out of git in `<agentDir>/skills`, through Squawk's own `.gitignore` when it may. */
 async function syncIgnore(files: WorktreeFiles, agentDir: string, names: readonly string[]): Promise<void> {
   const rel = `${agentDir}/skills/.gitignore`;
   const state = await files.inspect(rel);
@@ -237,7 +237,7 @@ async function syncIgnore(files: WorktreeFiles, agentDir: string, names: readonl
   }
   const text = [PROVISION_IGNORE_MARK, '/.gitignore', ...sorted.map((name) => `/${name}`)].join('\n') + '\n';
   if (state.owner === 'ours' && state.entry?.kind === 'ignore-file' && state.current === fileIdentity(text)) return;
-  // The agent wrote the ignore file while cezar staged it: it stays theirs, as above.
+  // The agent wrote the ignore file while Squawk staged it: it stays theirs, as above.
   if ((await files.put(rel, { type: 'file', text }, { kind: 'ignore-file' })) === null) await excludeEach(files, agentDir, names);
 }
 
@@ -248,7 +248,7 @@ async function excludeEach(files: WorktreeFiles, agentDir: string, names: readon
 /** The state of `rel` when this pass may write it; null when it must stay as it is. */
 async function claimPath(pass: Pass, rel: string): Promise<PathState | null> {
   const state = await pass.files.inspect(rel);
-  // Not cezar's (tracked, or the user's own), changed since, or out of the worktree: leave it.
+  // Not Squawk's (tracked, or the user's own), changed since, or out of the worktree: leave it.
   if (state.owner === 'outside' || state.owner === 'theirs') {
     pass.files.forget(rel);
     return null;
@@ -309,8 +309,8 @@ async function placeEntry(
 
 /**
  * A team directory skill: materialized in a staging dir, then placed in each agent dir whose
- * path is free or still holds cezar's unchanged copy. A copy the agent changed, or added files
- * to, stays as it is. Returns the worktree dirs that hold cezar's current copy.
+ * path is free or still holds Squawk's unchanged copy. A copy the agent changed, or added files
+ * to, stays as it is. Returns the worktree dirs that hold Squawk's current copy.
  */
 async function placeTeamCopies(pass: Pass, skill: Skill): Promise<string[]> {
   const { files } = pass;
@@ -339,11 +339,11 @@ async function placeTeamCopies(pass: Pass, skill: Skill): Promise<string[]> {
   return copies;
 }
 
-/** Owned entries the closure no longer wants go, while they are still what cezar left. */
+/** Owned entries the closure no longer wants go, while they are still what Squawk left. */
 async function removeUnwanted({ files, wanted }: Pass): Promise<void> {
   for (const entry of files.entries()) {
     if (entry.kind === 'ignore-file' || wanted.has(entry.path)) continue;
-    // Changed since an interrupted pass, or not this cezar's to judge: never deleted, still out of git.
+    // Changed since an interrupted pass, or not this Squawk's to judge: never deleted, still out of git.
     if ((await files.inspect(entry.path)).owner === 'kept') continue;
     if (!(await files.remove(entry.path))) files.forget(entry.path);
   }
@@ -351,7 +351,7 @@ async function removeUnwanted({ files, wanted }: Pass): Promise<void> {
 }
 
 /**
- * Remove every entry `provisionSkills` recorded in `worktree` that still is what cezar left, and
+ * Remove every entry `provisionSkills` recorded in `worktree` that still is what Squawk left, and
  * its owned ignore files, then drop its entries and roots from the manifest. A path the user
  * replaced stays. Never throws. A later skills design calls this before it installs its own view.
  */
@@ -359,7 +359,7 @@ export function removeProvisionedSkills(worktree: string): Promise<void> {
   return withWorktreeFiles(worktree, 'skills', {}, undefined, async (files) => {
     try {
       for (const entry of files.entries()) {
-        // Never deleted, and still kept out of git once cezar's ignore file is gone.
+        // Never deleted, and still kept out of git once Squawk's ignore file is gone.
         if ((await files.inspect(entry.path)).owner === 'kept') await excludeFromGit(files.worktree, `${entry.path}/`);
         else if (await files.remove(entry.path)) continue;
         files.forget(entry.path);

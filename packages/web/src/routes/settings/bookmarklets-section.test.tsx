@@ -12,7 +12,7 @@ import { BookmarkletPanel } from './bookmarklets-section'
 /**
  * #422: the bookmark's visible label (what a browser stamps as the bookmark's name when it is
  * dragged to the bookmarks bar) must include the current repo name so a person with several
- * cezar cockpits open can tell their bookmarks apart.
+ * Squawk cockpits open can tell their bookmarks apart.
  *
  * Multi-project spec, step 3.6: the same generator, mounted under `/p/<id>/settings`, must bake
  * THAT project's URL prefix and THAT project's launch key — the second describe below.

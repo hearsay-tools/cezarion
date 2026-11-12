@@ -9,7 +9,7 @@ import { askStatusFields, type AskContent } from '@open-mercato/cezar-contract/p
  *
  * Both default shapes carry `attention` + `attentionLabel` (#553/#609): the cockpit's own answer
  * to "does this run want a human", from the contract's `deriveAttention`, so a bot never has to
- * learn cezar's status vocabulary to decide whether to act. `waiting` is attention even when no
+ * learn Squawk's status vocabulary to decide whether to act. `waiting` is attention even when no
  * question is pending; `waiting` on an open CI or timer wait is neither settled nor attention.
  * `--full` prints the contract `ApiRun` untouched — the derived fields are not on it.
  */

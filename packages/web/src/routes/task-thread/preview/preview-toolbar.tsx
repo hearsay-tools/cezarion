@@ -84,7 +84,7 @@ export interface PreviewToolbarProps {
   agentLive?: boolean
   /** The pane shows the agent's page. */
   agentShown?: boolean
-  /** The page comes from a server cezar did not start (5.18). */
+  /** The page comes from a server Squawk did not start (5.18). */
   adopted: boolean
   viewport: PreviewViewport
   /** The stream's JPEG quality (hearsay-tools/cezarion#2066). */

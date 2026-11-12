@@ -84,7 +84,7 @@ describe('settings → appearance against the live dry-run server', () => {
 
   it('keeps the sole accent wired while omitting its one-choice control', async () => {
     // A legacy server value is still accepted. On boot the appearance mechanism normalizes it
-    // to the sole Cezarion family and mirrors that canonical value for the next pre-paint.
+    // to the sole Squawk family and mirrors that canonical value for the next pre-paint.
     await fetch(`${baseUrl}/api/v1/workspace/ui-state`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },

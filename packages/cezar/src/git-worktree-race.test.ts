@@ -151,7 +151,7 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     expect(JSON.parse(readFileSync(peer.result, 'utf8'))).toMatchObject({ ok: true });
   }, 25_000);
 
-  it('keeps Git protected after its calling Cezar process dies, then releases for restart adoption', async () => {
+  it('keeps Git protected after its calling Squawk process dies, then releases for restart adoption', async () => {
     const { root, linked, start } = await fixture();
     const victim = start(root, 'create', 'victim', 'victim000000');
     await until(() => existsSync(join(root, 'paused')), 'Git paused');

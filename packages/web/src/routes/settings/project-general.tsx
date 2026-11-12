@@ -114,7 +114,7 @@ export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilit
   )
 }
 
-/** The registry entry, read out: what cezar probed about this folder the last time it looked.
+/** The registry entry, read out: what Squawk probed about this folder the last time it looked.
  *  `canRemove` is whether the Remove field is rendered below — the missing-folder hint points at
  *  it, and must not point at a field single-project mode took away. */
 function ProjectFacts({ project, canRemove }: { project: ProjectListEntry; canRemove: boolean }) {
@@ -133,7 +133,7 @@ function ProjectFacts({ project, canRemove }: { project: ProjectListEntry; canRe
  * Deregister this project — the registry table's per-row Remove, offered where the user already
  * is. Same hook, same dialog, same words (remove-project.tsx).
  *
- * The boot project cannot be removed: cezar is serving it and re-registers it at every start, so
+ * The boot project cannot be removed: Squawk is serving it and re-registers it at every start, so
  * the server 409s. Disabling here means the explanation arrives before the click rather than as
  * an error toast after it.
  *

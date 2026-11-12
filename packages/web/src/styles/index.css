@@ -1,4 +1,4 @@
-/* cezar cockpit — Tailwind v4 entry point and the Mercato design-token definition site.
+/* Squawk cockpit — Tailwind v4 entry point and the Mercato design-token definition site.
  *
  * Palette preserved from the mockup token sheet (.ai/analysis/cockpit-ui-redesign/mercato-visuals.md §1).
  * Dark is the default theme; `.light` on <html> flips it.
@@ -75,7 +75,7 @@
   --page-gutter: clamp(1.125rem, 0.5rem + 2vw, 2.75rem);
   --nav-scrim: oklch(0.22 0.004 260 / 0.6);
 
-  /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */
+  /* Role-named family selected by appearance.accent. Squawk is the sole family today. */
   --action: oklch(0.84292398 0.15105370 88.300494);
   --action-foreground: oklch(0.16828084 0.01806226 263.904279);
   --accent-strong: oklch(0.74 0.105 182);
@@ -312,7 +312,7 @@
 }
 
 /* ---------- appearance: density + reading width ----------
- * The sole Cezarion accent is implicit. appearance.accent remains persisted and normalized so
+ * The sole Squawk accent is implicit. appearance.accent remains persisted and normalized so
  * a future second option only needs a token family plus an ACCENT_OPTIONS entry.
  */
 

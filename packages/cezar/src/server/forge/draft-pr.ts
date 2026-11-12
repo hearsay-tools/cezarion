@@ -1,3 +1,4 @@
+import { productName } from '../../home/display.ts';
 import { fallbackProjectWriteError } from '../../project-paths.ts';
 import { productEnv } from '../../core/product-env.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
@@ -91,14 +92,14 @@ export async function createDraftPr(input: DraftPrInput): Promise<DraftPrOutcome
 /**
  * PR body from the handoff journal: the "## Goal" section (task text as
  * fallback) + the first ~10 lines of "## Progress log" (newest first) +
- * the cezar footer.
+ * the Squawk footer.
  */
 export function buildPrBody(handoffText: string, task: string): string {
   const goal = section(handoffText, '## Goal') || task.trim();
   const progress = section(handoffText, '## Progress log').split('\n').filter((l) => l.trim()).slice(0, PROGRESS_LINES_MAX).join('\n');
   const parts = ['## Goal', '', goal];
   if (progress) parts.push('', '## Progress log', '', progress);
-  parts.push('', '---', '', '🤖 made with cezar');
+  parts.push('', '---', '', `🤖 made with ${productName('cezar')}`);
   return parts.join('\n');
 }
 

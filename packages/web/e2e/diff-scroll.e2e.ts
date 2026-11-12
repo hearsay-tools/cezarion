@@ -13,11 +13,11 @@ import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 /**
  * Diff virtualization in a real browser (`components/diff/diff-scroll.ts` §"THE PERFORMANCE
  * RULE"), over a changeset this spec BUILDS — a throwaway git repo with a deliberately large
- * uncommitted diff, served by its own cezar instance.
+ * uncommitted diff, served by its own Squawk instance.
  *
  * The fixture is generated rather than read from the checkout on purpose. An earlier version
  * of this spec measured whatever the working tree happened to hold, which made it silently
- * worthless the moment the tree was clean or small (cezar's autosave commits as a task runs,
+ * worthless the moment the tree was clean or small (Squawk's autosave commits as a task runs,
  * so "small" is the normal state). A regression test for a size threshold has to control the
  * size.
  *
@@ -67,7 +67,7 @@ let browser: AgentBrowser
 let server: ChildProcess
 let repo: string
 let baseUrl: string
-/** The server's own count. NOT `FIXTURE_FILES`: booting cezar against the fixture writes
+/** The server's own count. NOT `FIXTURE_FILES`: booting Squawk against the fixture writes
  *  `.ai/cezar/.gitignore` into it, which is itself an honest untracked change the view shows. */
 let changedFiles = 0
 
@@ -171,7 +171,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     //
     // The offset starts at 900 and steps 60 px down while no card straddles the fold. A fixed
     // offset depends on the height of every card above it, and the fixture's first cards are
-    // files cezar itself writes (`.ai/cezar/.gitignore`, `.cez-home/config.json`).
+    // files Squawk itself writes (`.ai/cezar/.gitignore`, `.cez-home/config.json`).
     // hearsay-tools/cezarion#1037 added one `.gitignore` line, and the fold then sat at the
     // boundary between those two cards: no card had more than 40 px below it. Every card is far taller than 60 + 40 px, so one step leaves
     // that band. The cap of 10 steps keeps a real sticky failure a failure.

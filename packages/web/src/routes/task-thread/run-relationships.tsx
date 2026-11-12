@@ -86,7 +86,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   const metadata = run.delegation
   const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
   const ids = workerIdsOf(metadata, query.data)
-  // A worker wait is a wait-list entry (hearsay-tools/cezarion#1235). Cezar's completion wait, which
+  // A worker wait is a wait-list entry (hearsay-tools/cezarion#1235). Squawk's completion wait, which
   // has no deadline, comes first, as it did from `delegation.wait` (hearsay-tools/cezarion#1301).
   const wait = completionWaitView(run) ?? workerWaitView(run)
   const dependencyLabel = wait ? workerDependencyLabel(run, wait) : undefined

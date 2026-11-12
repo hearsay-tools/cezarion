@@ -146,7 +146,7 @@ async function healthDetail(ctx: InstallContext, site: SitePlan | undefined): Pr
   return `health check: port ${port} answers, then ${url} (${tls}) asks for a login and accepts a probe login`;
 }
 
-/** Move only recorded cezar resources. Dry runs plan the same moves and change nothing. */
+/** Move only recorded Squawk resources. Dry runs plan the same moves and change nothing. */
 export async function migrateUbuntu(ctx: InstallContext, rebrand: boolean): Promise<PlatformMigrationReport> {
   const report = emptyReport();
   if (!rebrand) return report;
@@ -355,7 +355,7 @@ async function publicStatus(ctx: InstallContext, target: PublicTarget, login?: L
   return (await ctx.runner.capture('curl', args, input ? { input } : undefined)).stdout.trim() || '000';
 }
 
-/** Through the public URL: an anonymous request must be challenged, and the login must reach cezar. */
+/** Through the public URL: an anonymous request must be challenged, and the login must reach Squawk. */
 async function checkPublicSite(ctx: InstallContext, vhostAvailable: string, login?: Login): Promise<void> {
   const target = publicTarget(ctx, await readText(ctx, vhostAvailable));
   const anonymous = await publicStatus(ctx, target);

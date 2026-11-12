@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * The handoff journal (`.ai/cezar/runs/<runId>.handoff.md`, spec 007) as the server and the
- * cockpit both read it. The agent writes the file; cezar keeps its own records in the run store
+ * cockpit both read it. The agent writes the file; Squawk keeps its own records in the run store
  * and writes them into the file as one block that it rewrites whole (hearsay-tools/cezarion#1809).
  */
 
@@ -24,7 +24,7 @@ export const handoffAutosaveRecordSchema = z.object({
 });
 export type HandoffAutosaveRecord = z.infer<typeof handoffAutosaveRecordSchema>;
 
-/** `RunRecord.handoffRecords`: cezar's own records for the run's handoff file, newest first. */
+/** `RunRecord.handoffRecords`: Squawk's own records for the run's handoff file, newest first. */
 export const handoffRecordsSchema = z.object({ autosave: z.array(handoffAutosaveRecordSchema) });
 export type HandoffRecords = z.infer<typeof handoffRecordsSchema>;
 

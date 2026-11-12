@@ -1,4 +1,4 @@
-import { logPrefix } from './display.ts';
+import { logPrefix, productName } from './display.ts';
 import { lstatSync, realpathSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path';
@@ -14,7 +14,7 @@ export function protectedRootsFor(accountHome: string, env: { TMPDIR?: string | 
 }
 
 /**
- * The account's real cezar roots. HOME and a caller's env can name a sandbox, so the account home
+ * The account's real Squawk roots. HOME and a caller's env can name a sandbox, so the account home
  * comes from the OS. Throws when the OS gives no absolute home: relative roots would protect nothing.
  */
 export function accountProtectedRoots(): string[] {
@@ -75,7 +75,7 @@ export function assertOutsideAccountHome(path: string, refusal: () => Error): vo
 /** A test install marker belongs to a sandbox. Refuse an account root in every process, test runner or not. */
 export function assertTestHomeOutsideAccountHome(root: string): void {
   assertOutsideAccountHome(root, () => new Error(
-    `${logPrefix()} refusing to write a test install marker to ${root}: it is the account's real cezar home, ` +
+    `${logPrefix()} refusing to write a test install marker to ${root}: it is the account's real ${productName('cezar')} home, ` +
       'or the OS gives no account home to check it against. ' +
       'Use a sandbox directory for a test home.',
   ));

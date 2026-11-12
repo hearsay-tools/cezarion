@@ -958,7 +958,7 @@ describe('agent profiles API', () => {
         configDir: claudeDir('claude-klaudiusz'),
       });
       const warmed = spawns;
-      loggedIn = false; // …then log out behind cezar's back, as a terminal would.
+      loggedIn = false; // …then log out behind Squawk's back, as a terminal would.
 
       const res = await apiRequest(app, '/api/v1/providers/connect', {
         method: 'POST',

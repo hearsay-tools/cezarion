@@ -206,7 +206,7 @@ describe('sidebar wiring', () => {
     renderShell()
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    // The honest empty state: cezar cannot answer what repo it is on, so it says nothing.
+    // The honest empty state: Squawk cannot answer what repo it is on, so it says nothing.
     // It does not invent one, and it does not take the whole cockpit down with it.
     expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
     expect(versionChip()).toBeNull()
@@ -457,7 +457,7 @@ describe('sidebar wiring', () => {
     serve({ '/api/v1/health': { ...HEALTH, repo: null } })
     renderShell()
 
-    // Running cezar outside a repo is supported: no repo chip, but the rest of the chrome is
+    // Running Squawk outside a repo is supported: no repo chip, but the rest of the chrome is
     // real and must not vanish with it.
     await waitFor(() => expect(versionChip()).not.toBeNull())
     expect(versionChip()?.textContent).toBe('v0.1.3')
