@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
-import { controlledWire, manager, parent, register, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait-claude.testkit.ts';
+import { controlledWire, manager, parent, register, restart, root, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker } from './worker-wait-claude.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
@@ -96,5 +96,17 @@ it('parent cancellation retires its wait with a receipt while cancelling workers
     expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'cancelled' });
     await until(() => store.getRun(w.id)?.status === 'cancelled');
     expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
+  });
+it('parent failure leaves its live workers running (hearsay-tools/squawk#3337)', async () => {
+    const p = await parent(); const w = await worker(p.id, 'mock:slow'); manager.enqueueOwnedRun(w.id);
+    // The live-workers monitoring timer would park the failure; without it the parent fails.
+    await until(() => store.getRun(w.id)?.status === 'running' && !!store.getRun(p.id)?.waits?.length);
+    for (const wait of store.getRun(p.id)!.waits!) manager.cancelWait(p.id, wait.id, toolGenerationOf(p.id));
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:request-error' }]);
+    await until(() => store.getRun(p.id)?.status === 'failed');
+    manager.reconcileWorkerWaits();
+    expect(store.getRun(w.id)?.status).toBe('running');
+    expect(store.getRun(w.id)?.stopping).toBeFalsy();
+    manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15_000);
   });
 });

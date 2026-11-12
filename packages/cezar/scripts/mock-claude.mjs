@@ -563,6 +563,19 @@ async function replyWithAuthenticationFailure(userText, uuid) {
   return;
 }
 
+// `mock:request-error` → a request the provider rejects as invalid (HTTP 400): not a provider
+// outage, so the run fails instead of parking (hearsay-tools/squawk#3337).
+async function replyWithRequestError() {
+  emit({
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    result: 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages: text content blocks must be non-empty"}}',
+    usage: { input_tokens: 0, output_tokens: 0 },
+    total_cost_usd: 0,
+  });
+}
+
 // `mock:limit` → the envelope Claude Code emits when the subscription window is
 // exhausted: an `is_error` result whose text is the machine-readable
 // `Claude AI usage limit reached|<epoch seconds>` marker. Makes the auto-resume path
@@ -589,6 +602,7 @@ async function replyWithNativeFailure(userText) {
   if (nativeFailure === 'unread') process.exit(1);
   if (failureControl?.failure === 'provider' ? nativeFailure === 'provider' : userText.includes('mock:auth-error')) { await replyWithAuthenticationFailure(); return true; }
   if (failureControl?.failure === 'usage-limit' ? nativeFailure === 'usage-limit' : userText.includes('mock:limit')) { await replyWithUsageLimit(); return true; }
+  if (userText.includes('mock:request-error')) { await replyWithRequestError(); return true; }
   return false;
 }
 
