@@ -304,12 +304,12 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
 });
 
-test('classification is not a path filter and build-and-package follows preflight without surface skips', () => {
+test('classification is not a path filter and build-and-package follows queue proof and immutable inputs without surface skips', () => {
   const ci = workflow();
   assert.equal(ci.on.pull_request_target.paths, undefined);
   assert.equal(ci.on.push.paths, undefined);
   assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
-  assert.deepEqual(ci.jobs['build-and-package'].needs, ['queue-proof', 'preflight']);
+  assert.deepEqual(ci.jobs['build-and-package'].needs, ['queue-proof', 'pr-test-input']);
 });
 
 test('preflight typecheck lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
@@ -425,8 +425,8 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
   assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'pr-test-input']);
-  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'pr-test-input']);
+  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr', 'pr-test-input']);
+  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr', 'pr-test-input']);
   assert.match(ci.jobs.vitest.if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.match(ci.jobs['cockpit-browser'].if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
@@ -510,7 +510,7 @@ test('verification bindings keep the final gate in CI and reserve local full bro
 test('packaged tests stay typechecked after the application build', () => {
   const ci = workflow();
   const job = ci.jobs['build-and-package'];
-  assert.deepEqual(job.needs, ['queue-proof', 'preflight']);
+  assert.deepEqual(job.needs, ['queue-proof', 'pr-test-input']);
   assert.doesNotMatch(job.if, /change-surface|bump_pr/);
   const steps = job.steps;
   const build = steps.findIndex(step => step.run === 'npm run build');

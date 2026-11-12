@@ -14,9 +14,10 @@ tag can consume its five-minute job budget before classification. Only the PR
 baseline and patch checks read history; § CI verification says what each gate fetches.
 For pull requests, the PR-shape check requires GitHub to return a patch for every file, except binary files and files with no content change, and rejects incomplete file lists.
 
-Main PRs run cheap deterministic preflight first. After it passes, automated
-review and heavy verification (build/package, Vitest and browser shards) start
-together. Review findings no longer hold heavy work back; they block merge
+Main PRs start heavy verification (build/package, Vitest and browser shards)
+as soon as their queue proof, change classification and immutable PR inputs are ready.
+Heavy jobs run beside typecheck and cheap deterministic preflight; native review
+admission still waits for successful preflight. Review findings no longer hold heavy work back; they block merge
 through the aggregate. `verify` (**Unit, build, E2E, and package**) requires
 successful preflight, a successful **Automated Code Review** and every heavy
 job, so a blocked review fails it even when every suite passes. Both protected
@@ -26,8 +27,9 @@ once CodeRabbit and the hosted runners became free for this repository.
 
 CodeRabbit starts automatic draft and incremental reviews on PR changes without
 a label filter or custom round cap. Its external review can start before
-preflight finishes. Heavy verification waits for successful preflight only;
-the aggregate waits for current-head review admission. The owner accepted automatic review because
+preflight finishes. Heavy verification does not wait for typecheck or preflight;
+the aggregate requires both and current-head review admission. A type error or cheap-gate
+failure still fails the required aggregate even though heavy jobs run. The owner accepted automatic review because
 CodeRabbit is free for this open-source repository. Both required checks still
 gate merge.
 
@@ -208,8 +210,10 @@ failure and the fixed result, including lease and checkout isolation.
 
 Required verification has ten verification jobs, plus the complexity and clone
 gates. Typecheck, workflow lint, citations, classification and policy ratchets
-feed the `Review preflight` gate. On PRs into main, the other nine jobs start after
-preflight and run beside the protected review result; `verify` requires both. Other events keep their existing test inventory. The eight Vitest shards use the exact Node version in
+feed the `Review preflight` gate. Heavy jobs wait only for their skip inputs:
+build/package needs queue proof and immutable PR inputs; Vitest and browser shards
+also need change-surface and PR-shape classification. They run beside typecheck and
+preflight. Native review admission follows preflight; `verify` requires all of them. Other events keep their existing test inventory. The eight Vitest shards use the exact Node version in
 `.node-version`, the eight cockpit browser shards the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
@@ -374,7 +378,7 @@ numeric timeout option alone is ignored by github-script v9. The job has a
 Actions runner during the wait. Readiness, queue admission and reconciliation
 still use the immediate reader. See [the pending-review plan](../../.ai/specs/2026-11-03-coderabbit-pending-plan.md).
 
-Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy build/package, Vitest and browser jobs do not depend on this gate; they start after preflight and run beside it. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
+Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy build/package, Vitest and browser jobs do not depend on this gate; they start once their skip inputs are ready and run beside typecheck, preflight and review admission. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
 
 Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. Readiness never changes draft state (hearsay-tools/cezarion#3288): agents open PRs ready, and a human's draft stays a draft, so the readiness job holds only read repository permissions. Under the same lock it syncs the PR and closing-linked issue cards: In review when the PR is ready and its live head is verified, In progress otherwise, a draft included. Done cards remain protected. An unverified new head moves the cards to In progress; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation. On the next readiness trigger, a new pending same-head execution or reopened thread moves a same-repository PR's cards back to In progress. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if the board needs refreshing. Fork PRs get no board sync. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue suites always run on full-matrix entries. Exact-push reuse keeps its existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
 

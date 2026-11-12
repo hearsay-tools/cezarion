@@ -633,10 +633,12 @@ jobs:
         if: cancelled()
         run: exit 1
 
+  # Heavy verification waits only for its skip decisions and immutable PR inputs.
+  # Typecheck and cheap-gate failures still fail verify after this work runs.
   build-and-package:
     name: Unit, build, and package
-    needs: [queue-proof, preflight]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
+    needs: [queue-proof, pr-test-input]
+    if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -723,9 +725,9 @@ jobs:
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
     # Vitest covers, and their script tests run under build-and-package.
-    needs: [ queue-proof, change-surface, classify-pr, preflight, pr-test-input ]
+    needs: [ queue-proof, change-surface, classify-pr, pr-test-input ]
     if: >-
-      !cancelled() && needs.preflight.result == 'success' && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
+      !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
     strategy:
       fail-fast: false
       matrix:
@@ -1463,9 +1465,9 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/8
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
-    needs: [ queue-proof, change-surface, classify-pr, preflight, pr-test-input ]
+    needs: [ queue-proof, change-surface, classify-pr, pr-test-input ]
     if: >-
-      !cancelled() && needs.preflight.result == 'success' && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
+      !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
     strategy:
       fail-fast: false
       matrix:
