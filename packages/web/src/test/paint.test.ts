@@ -38,4 +38,19 @@ describe('isPainted', () => {
     expect(isPainted(['bg-danger/[0]'])).toBe(false)
     expect(isPainted(['bg-[url(/a/b.png)]'])).toBe(true)
   })
+
+  it('refuses a zero opacity in every spelling', () => {
+    for (const cls of ['bg-danger/[.0]', 'bg-danger/[0%]', 'bg-danger/[0.00]', 'bg-danger/.0']) expect(isPainted([cls]), cls).toBe(false)
+    for (const cls of ['bg-danger/[.5]', 'bg-danger/[50%]', 'bg-danger/5']) expect(isPainted([cls]), cls).toBe(true)
+  })
+
+  it('refuses an arbitrary colour with zero alpha', () => {
+    for (const cls of ['bg-[#0000]', 'bg-[#0000]/15', 'bg-[#11223300]', 'bg-[rgba(0,0,0,0)]', 'bg-[hsla(0,0%,0%,0)]',
+      'bg-[rgb(0_0_0_/_0)]', 'bg-[oklch(0.5_0.1_200/0)]', 'bg-[transparent]', 'border-[rgb(0_0_0/0%)]']) {
+      expect(isPainted([cls]), cls).toBe(false)
+    }
+    for (const cls of ['bg-[#000]', 'bg-[#0000ff]', 'bg-[#000f]', 'bg-[rgba(0,0,0,0.4)]', 'bg-[oklch(0.5_0.1_200/0.5)]', 'bg-[var(--card)]']) {
+      expect(isPainted([cls]), cls).toBe(true)
+    }
+  })
 })
