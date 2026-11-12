@@ -20,6 +20,7 @@ import * as profiles from '../workspace/agent-profiles.ts';
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { DelegationService } from '../delegation/service.ts';
 
 import { monitoringWakeOf } from './waits.testkit.ts';
@@ -40,7 +41,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete' });
     expect(JSON.stringify(reopened.getRun(w.id))).not.toMatch(/execution|generation/);
     expect(existsSync(workspace(w).path)).toBe(false);
-    const other = new RunManager(reopened, root, { createRunner, home: testHome() }); expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
+    const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() }); expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 
   it('requeues a stopped untouched owned worker under normal capacity and preserves parent guards', async () => {
@@ -82,7 +83,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const w = await worker(); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(true);
     manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+    const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     const service = new DelegationService(); const detach = service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
     try {
       // The flag stays in the checkpoint as a record of the queued completion; destroy no longer reads it.
@@ -133,7 +134,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.dispose(); store.close();
     // The schema refuses the flag outside `complete`, so this generation's termination is never proven.
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: randomUUID(), phase: 'starting', neverMaterialized: true }), { mode: 0o600 });
-    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+    const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     const service = new DelegationService({ terminationTimeoutMs: 50 }); const detach = service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
     try {
       expect(reopened.readWorkerExecution(w.id)).toBeUndefined();
@@ -258,7 +259,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     mkdirSync(scratchDir, { recursive: true });
     const scratch = join(scratchDir, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
     manager.dispose(); setRunStatus(store, w.id, status); store.flush();
-    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     try {
       await other.recover();
       await until(() => !other.isActive(w.id) && reopened.getRun(w.id)?.status !== 'queued');
@@ -341,7 +342,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('queued destruction recovery never launches and missing or stale private evidence remains incomplete', async () => {
     const w = await worker(); destroy(w);
-    manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+    manager.dispose(); store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     await other.recover(); expect(reopened.getRun(w.id)?.status).toBe('queued');
     expect(other.isActive(w.id)).toBe(false); expect(existsSync(workspace(w).path)).toBe(false);
     rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));

@@ -16,6 +16,7 @@ import * as worktrees from '../git-worktree.ts';
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -38,7 +39,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(store.commitWorkerExecutionComplete(w.id, first.generation)).toBe(false);
     await until(() => store.getRun(w.id)?.status === 'waiting'); manager.requestWorkerStop(w.id);
     expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
-    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+    store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     expect(await other.awaitRunTermination(w.id, 10)).toBe(true); other.dispose(); reopened.flush();
   });
 

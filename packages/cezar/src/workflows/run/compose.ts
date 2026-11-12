@@ -54,7 +54,7 @@ import * as launchContext from './launch-context.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer } from './input-timers.ts';
 import type { RunExitId, ExitCall } from '../../runs/run-exits.ts';
 import { type PreviewHostLike } from '../../preview/registration.ts';
-import { acquireCiResources } from '../../ci-wait/resources.ts';
+import type { CiResources } from '../../ci-wait/resource-pool.ts';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../../ci-wait/controller.ts';
 import { type WorkerAccountBinding } from '../../delegation/execution-identity.ts';
@@ -127,7 +127,7 @@ export interface FacadeHost {
   pendingHumanAskSeq(runId: string): number | undefined;
   waitingBeforeFinalWorkflowStep(run: RunRecord): boolean;
   parentCompletionBlockers(runId: string): ReturnType<typeof completionGateReads.parentCompletionBlockers>;
-  ciResources: ReturnType<typeof acquireCiResources>;
+  ciResources: CiResources;
   cezarToolHandlers(runId: string, generation: string): CezarToolHandlers;
   delegationProvisioner?: DelegationProvisioner | undefined;
   move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>, call?: ExitCall): RunRecord | undefined;

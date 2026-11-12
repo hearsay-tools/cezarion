@@ -38,7 +38,7 @@ import { type RunExitId, type RunPatch, type ExitCall } from '../runs/run-exits.
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
-import { acquireCiResources } from '../ci-wait/resources.ts';
+import type { CiResources } from '../ci-wait/resource-pool.ts';
 import type { CiProgressRegistry } from '../ci-wait/progress.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
@@ -116,7 +116,7 @@ export class RunManager {
     return workerExecutionStopped(this.#store, runId, id => this.#modules.workerExecutions.isStopped(id));
   }
 
-  readonly #ciResources: ReturnType<typeof acquireCiResources>;
+  readonly #ciResources: CiResources;
   /** The check progress of the workspace's CI waits, for the activity view. */
   get ciProgress(): CiProgressRegistry { return this.#ciResources.progress; }
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
@@ -164,7 +164,7 @@ export class RunManager {
   constructor(
     store: RunStore,
     repoRoot: string,
-    options: { home: Home; createRunner: RunnerFactory; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined },
+    options: { home: Home; createRunner: RunnerFactory; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined; acquireCiResources: (workspace: object) => CiResources },
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;
@@ -228,7 +228,7 @@ export class RunManager {
     });
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
     if (options.cockpit) this.setCockpitAddress(options.cockpit);
-    this.#ciResources = acquireCiResources(this.#semaphore);
+    this.#ciResources = options.acquireCiResources(this.#semaphore);
     this.#ciSupervisor = this.#ciResources.supervisor;
     this.#offSemaphore = this.#semaphore.register({
       busySlots: () => this.#modules.line.busySlots(),

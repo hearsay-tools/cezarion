@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { seedSettledFamily } from './delegation-reconcile.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
@@ -45,7 +46,7 @@ describe('family reconcile decodes each cold run once per pass', () => {
     seeding.close();
     // Reopened, nothing is held: every member of the settled family is a cold row.
     store = RunStore.open(join(root, '.ai/cezar'));
-    manager = new RunManager(store, root, { createRunner, home: testHome() });
+    manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     decodes.clear();
   });
   afterEach(() => {

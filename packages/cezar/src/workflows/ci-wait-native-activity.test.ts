@@ -1,5 +1,5 @@
 // Register the external CI mock before loading RunManager.
-import { ciWaitOf, github, register } from './ci-wait-fixture.testkit.ts';
+import { ciWaitOf, github, register, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
@@ -11,7 +11,7 @@ import { manager, semaphore, store, until, useWorkerWaitFixture, work } from './
 
 
 describe('CI wait native activity', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
   it.each(RUNNER_IDS)('%s resumes on native activity before CI admission', async runner => {
     github();

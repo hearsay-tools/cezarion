@@ -5,6 +5,7 @@ import type { RunStore } from '../runs/store.ts';
 import { runnersUnderTest } from '../core/runners-under-test.testkit.ts';
 import { RunManager } from './run.ts';
 import { TrackedWork } from './run/tracked-work.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 
 const managerWork = new WeakMap<RunManager, TrackedWork>();
 const disposedManagers = new WeakSet<RunManager>();
@@ -18,10 +19,12 @@ class FixtureManager extends RunManager {
 
 const fixtures = new Map<string, { work: TrackedWork; managers: Array<{ manager: RunManager; store: RunStore }> }>();
 
-/** What a fixture manager takes: every `RunManager` option, with `home` and `createRunner` optional. */
-export type FixtureManagerOptions = Omit<ConstructorParameters<typeof RunManager>[2], 'home' | 'createRunner'> & {
+/** What a fixture manager takes: every `RunManager` option, with `home`, `createRunner` and
+ *  `acquireCiResources` optional. Without `acquireCiResources`, the manager has no CI supervisor. */
+export type FixtureManagerOptions = Omit<ConstructorParameters<typeof RunManager>[2], 'home' | 'createRunner' | 'acquireCiResources'> & {
   home?: import('../home/home.ts').Home;
   createRunner?: RunnerFactory;
+  acquireCiResources?: ConstructorParameters<typeof RunManager>[2]['acquireCiResources'];
 };
 
 /** Share ownership across managers, including simulated restart and recovery. Without a
@@ -32,7 +35,7 @@ export function createFixtureManager(...args: [store: RunStore, root: string, op
   const [store, root, options] = args;
   const group = fixtures.get(root) ?? { work: options?.work ?? new TrackedWork(), managers: [] };
   const manager = new FixtureManager(store, root, {
-    home: testHome(), createRunner: (backend, runnerOptions) => runnersUnderTest()(backend, runnerOptions),
+    home: testHome(), createRunner: (backend, runnerOptions) => runnersUnderTest()(backend, runnerOptions), acquireCiResources: acquireInertCiResources,
     ...options, work: group.work,
   });
   managerWork.set(manager, group.work);

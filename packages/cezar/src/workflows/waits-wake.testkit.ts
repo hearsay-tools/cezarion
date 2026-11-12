@@ -7,6 +7,7 @@ import type { CezarWaitRequestInput, CiWait, CiWaitResult, Wait } from '@open-me
 import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { manager, root, semaphore, store, until, useWorkerWaitFixture, work, toolGenerationOf } from './worker-wait.testkit.ts';
 import { observationClock } from '../core/observation-clock.testkit.ts';
 import { fireCapturedTimer, timed, type TimedWait } from './waits.testkit.ts';
@@ -19,7 +20,7 @@ import { ciNativeMessages, toolCall } from './waits-parity.testkit.ts';
 
 /** The fixture every waits-wake file runs under: worker-wait's, with nudges answered by a card. */
 export function useWaitsWakeFixture(): void {
-  useWorkerWaitFixture({ nudgeReply: 'card' });
+  useWorkerWaitFixture({ nudgeReply: 'card', acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
 }
 

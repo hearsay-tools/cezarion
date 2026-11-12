@@ -12,6 +12,7 @@ import { ArchiveOnMergeCoordinator } from '../server/archive-on-merge.ts';
 import { CompletionActionCoordinator } from '../server/completion-actions.ts';
 import { seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { RunManager } from '../workflows/run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { ProjectRunConnection } from './project-run-connection.ts';
 import { reclaimWorktrees } from './retention.ts';
@@ -124,7 +125,7 @@ it('boot, recovery, reconcilers and background sweeps never copy or change a fal
   const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
   const store = RunStore.open(primary, { keepLive: true });
-  const manager = new RunManager(store, root, { createRunner, home: testHome(),
+  const manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(),
     semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
   vi.spyOn(manager, 'continueRun').mockReturnValue({ ok: false, error: 'fixture launches no agent' });
   const project = { id: 'p', root };

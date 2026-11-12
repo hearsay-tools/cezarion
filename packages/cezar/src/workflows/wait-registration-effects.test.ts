@@ -1,4 +1,4 @@
-import { github, pr } from './ci-wait-fixture.testkit.ts';
+import { github, pr, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +10,7 @@ import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factori
 import { manager, parent, store, until, toolGenerationOf, useWorkerWaitFixture, restart } from './worker-wait-claude.testkit.ts';
 
 describe('wait registration effects', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   it('reports duplicate registration and refuses deadline changes without cancelling the original', async () => {
     github(); const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
