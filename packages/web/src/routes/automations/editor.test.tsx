@@ -179,14 +179,17 @@ it('an out-of-range hour is marked invalid and blocks Save until it is fixed', a
   expect(screen.getByText('Hour must be 00–23.')).not.toBeNull()
   fireEvent.submit(hour.form!)
   fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
-  await new Promise((resolve) => setTimeout(resolve, 20))
   expect(calls).toEqual([])
   expect(onSaved).not.toHaveBeenCalled()
   fireEvent.change(hour, { target: { value: '23' } })
   expect(hour.getAttribute('aria-invalid')).not.toBe('true')
   fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
-  expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ schedule: { hour: 23 } })
+  // A save the invalid hour let through would have gone out first, on the same path.
+  const posts = calls.filter((call) => call.method === 'POST')
+  expect(posts).toHaveLength(1)
+  expect(posts[0]?.body).toMatchObject({ schedule: { hour: 23 } })
+  expect(onSaved).toHaveBeenCalledTimes(1)
 })
 
 it('offers Save and enable once the enable switch is on', async () => {

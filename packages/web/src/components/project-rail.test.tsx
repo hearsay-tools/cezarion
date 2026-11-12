@@ -15,6 +15,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   localStorage.clear()
   setViewport(1024)
@@ -614,11 +615,13 @@ describe('ProjectRail reorder', () => {
     await act(async () => { fireEvent.touchEnd(target, touch(80)) })
 
     // A long press lifts it, and the finger carries it one row down.
-    await act(async () => {
+    vi.useFakeTimers()
+    act(() => {
       fireEvent.pointerDown(target, finger)
       fireEvent.touchStart(target, touch(26))
-      await new Promise((resolve) => setTimeout(resolve, 300))
     })
+    act(() => vi.advanceTimersByTime(300))
+    vi.useRealTimers()
     expect(mark('alpha').hasAttribute('data-dragging')).toBe(true)
     await act(async () => { fireEvent.touchMove(target, touch(60)) })
     await act(async () => { fireEvent.touchMove(target, touch(80)) })
@@ -640,6 +643,7 @@ describe('ProjectRail reorder', () => {
     await act(async () => { fireEvent.pointerMove(target, { clientX: 30, clientY: 80 }) })
     // A browser dispatches the trailing click in the same task as the pointerup, so both go in
     // one synchronous block: no timer may run between them.
+    vi.useFakeTimers()
     const afterDrag = new MouseEvent('click', { bubbles: true, cancelable: true })
     act(() => {
       fireEvent.pointerUp(target, { clientX: 30, clientY: 80 })
@@ -649,7 +653,8 @@ describe('ProjectRail reorder', () => {
     expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
 
     // The guard is released one tick later: a click elsewhere is no longer cancelled.
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)) })
+    act(() => vi.runOnlyPendingTimers())
+    vi.useRealTimers()
     const later = new MouseEvent('click', { bubbles: true, cancelable: true })
     document.body.dispatchEvent(later)
     expect(later.defaultPrevented).toBe(false)
