@@ -17,8 +17,13 @@ test('the project skill dirs the cockpit hint names are the ones discovery scans
   const named = [...declared[1]!.matchAll(/'([^']+)'/g)].map((match) => match[1]);
   // The per-agent mirrors of `.agents/skills` fold into the hint's "agent mirrors like
   // .claude/skills/" aside instead of being listed.
-  const mirrors = SKILL_DIRS.filter((d) => d.source === 'agents' && d.dir !== '.agents/skills').map((d) => d.dir);
-  assert.deepEqual(named, SKILL_DIRS.map((d) => d.dir).filter((dir) => !mirrors.includes(dir)).map((dir) => `${dir}/`));
+  const mirrors: string[] = [];
+  const listed: string[] = [];
+  for (const { dir, source } of SKILL_DIRS) {
+    if (source === 'agents' && dir !== '.agents/skills') mirrors.push(dir);
+    else listed.push(`${dir}/`);
+  }
+  assert.deepEqual(named, listed);
   assert.ok(mirrors.includes('.claude/skills') && hint.includes('<Path>.claude/skills/</Path>'), 'the hint names a real agent mirror');
 });
 
