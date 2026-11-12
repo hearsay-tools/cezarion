@@ -1,8 +1,8 @@
 # Follow an auto-merge PR until it merges
 
 Use this file for a PR you opened with the `auto-merge` label, right after you open
-it, before each push to it, and after each push, CI result, review round and
-draft/ready change.
+it, before each push to it, and after each push, CI result, review round,
+draft/ready change and quality-report completion.
 
 ## Squash, always
 

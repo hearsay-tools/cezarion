@@ -1,6 +1,6 @@
 ---
 name: auto-merge
-description: Auto-merge for pull requests into `main`. Use when opening a pull request, before and after each push on it, and after each CI result, review round or draft/ready change on one you opened with the `auto-merge` label.
+description: Auto-merge for pull requests into `main`. Use when opening a pull request, before and after each push on it, and after each CI result, review round, draft/ready change or quality-report completion on one you opened with the `auto-merge` label.
 ---
 
 # Auto-merge
@@ -64,5 +64,6 @@ the PR when its required checks pass.
 ## Labeled PRs
 
 Before each push to a PR you opened with the `auto-merge` label, and after
-each push, CI result, review round and draft/ready change on it, read
+each push, CI result, review round, draft/ready change and quality-report
+completion on it, read
 [`.ai/skills/auto-merge/references/follow.md`](references/follow.md) and act on it.
