@@ -10,6 +10,23 @@
 
 On by default; only exact `HSQ_AUTOMATIONS=0` (`CEZ_AUTOMATIONS` fallback) opts out, and the gate middleware then answers `409`. Restart after changing the flag. New definitions remain paused; existing enabled definitions resume unless opted out. Two kinds: `github` polls, `schedule` fires on the clock and needs no remote. A schedule fire takes the hearsay-tools/cezarion#651 store lease, reserves one receipt per occurrence (`<id>:schedule:<iso>`), launches an ordinary task, and never advances `nextRunAt` on a lost lease. At most one catch-up inside 24 h, auto-pause after 3 consecutive launch failures. `setState` is a read-modify-write against a fresh disk read. No `task.dispatch`. Stage 2 (hearsay-tools/cezarion#774): `hsq automation` (`automations/automation-cli.ts`) reaches the cockpit through `HSQ_COCKPIT_URL` (`CEZ_COCKPIT_URL` fallback)/`HSQ_PROJECT_ID` (`CEZ_PROJECT_ID` fallback), which the boot manager receives at construction (`serve` binds its listener before it recovers, so recovered runs carry it) and every other project's manager receives from `startServer` via `RunManager.setCockpitAddress`; it never starts a server or probes ports on its own. The prompt part and the built-in `create-cezarion-automation` skill share ONE gate (the effective `HSQ_AUTOMATIONS` value, with `CEZ_AUTOMATIONS` fallback, is not `0` AND an address): add any new skill lookup through `RunManager.builtinSkills()` and any new session construction site through `automationsPart()`. Templates, calendars and stats are stage 3.
 
+## Repository name and failing polls
+
+A GitHub poll reads under the canonical `owner/name` that `gh repo view
+github.com/<origin owner>/<origin name>` reports (`automations/github-repository.ts`),
+not the `origin` URL text, because the issue search answers `422` for a renamed
+repository's old name. It names `origin` explicitly: an unqualified `gh repo view`
+picks gh's default repository, which is `upstream` in a fork. The name is memoized
+per project (`server/forge/github-repo-handle.ts`). A `404` or `422` forgets it,
+resolves again, and retries once, with a fresh acceptor, when the name changed.
+Receipts match without the repository name (issues by node ID, pull requests by
+the rest of the event ID), so a rename does not relaunch an old item.
+
+A failed check stores `lastError` and `lastErrorAt`; a success or a re-arm clears
+them, and a backed-off skip keeps the last real error. From
+`AUTOMATION_FAILURE_NOTICE_AFTER` (3) consecutive failures, `automationFailureNotice`
+gives the cockpit card's alert and the `failing` key of `hsq automation list`.
+
 ## Project directory log reads
 
 Both log sources and both receipt sources merge through `mergeAppendOnly`

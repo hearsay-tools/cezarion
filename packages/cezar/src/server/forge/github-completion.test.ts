@@ -34,6 +34,8 @@ beforeEach(() => {
     expect(opts.timeout).toBeLessThanOrEqual(15_000);
     onCall(args);
     if (failure && args.includes(failure)) return reply(new Error('GitHub refused'), { stdout: '', stderr: '' });
+    // Repository discovery answers through gh's jq projection (plain text).
+    if (args[0] === 'repo' && args[1] === 'view') return reply(null, { stdout: 'org/repo\n', stderr: '' });
     let output: unknown;
     if (args[0] === 'pr' && args[1] === 'view') output = pr;
     else if (args[0] === 'pr' && args[1] === 'ready') { pr.isDraft = false; output = {}; }
@@ -135,7 +137,7 @@ describe('ready-for-review through gh', () => {
     pr.isDraft = true;
     expect(await driver.readyPR!(42, readyInput)).toMatchObject({ available: true, mergeState: { isDraft: false, headSha: sha } });
     expect(mutations()).toEqual([['pr', 'ready', '42', '--repo', 'github.com/org/repo']]);
-    expect(calls[0]).toEqual(['pr', 'view', '42', '--json', 'number,url,state,isDraft,headRefName,headRefOid']);
+    expect(calls.find(args => args[0] === 'pr')).toEqual(['pr', 'view', '42', '--json', 'number,url,state,isDraft,headRefName,headRefOid']);
     expect(calls.filter(args => args[0] === 'pr' && args[1] === 'view')).toHaveLength(2);
   });
 
@@ -158,7 +160,7 @@ describe('ready-for-review through gh', () => {
   it('fails closed when marking ready fails', async () => {
     pr.isDraft = true; failure = 'ready';
     expect(await driver.readyPR!(42, readyInput)).toMatchObject({ available: false });
-    expect(calls.filter(args => args[1] === 'view')).toHaveLength(1);
+    expect(calls.filter(args => args[0] === 'pr' && args[1] === 'view')).toHaveLength(1);
   });
 
   it('detects a head change during ready before returning usable state', async () => {
@@ -170,7 +172,7 @@ describe('ready-for-review through gh', () => {
   it('cancels when intent changes during the ready preflight', async () => {
     pr.isDraft = true;
     let proceed = true;
-    onCall = args => { if (args[1] === 'view') proceed = false; };
+    onCall = args => { if (args[0] === 'pr' && args[1] === 'view') proceed = false; };
     expect(await driver.readyPR!(42, { ...readyInput, canProceed: () => proceed })).toMatchObject({ available: false, reason: expect.stringContaining('cancelled') });
     expect(mutations()).toEqual([]);
   });
@@ -180,7 +182,7 @@ describe('ready-for-review through gh', () => {
     let proceed = true;
     onCall = args => { if (args[1] === 'ready') proceed = false; };
     expect(await driver.readyPR!(42, { ...readyInput, canProceed: () => proceed })).toMatchObject({ available: false, reason: expect.stringContaining('cancelled') });
-    expect(calls.filter(args => args[1] === 'view')).toHaveLength(1);
+    expect(calls.filter(args => args[0] === 'pr' && args[1] === 'view')).toHaveLength(1);
     expect(mutations()).toHaveLength(1);
   });
 

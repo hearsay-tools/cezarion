@@ -70,6 +70,19 @@ it('shows a github row with Test filter and no Run now', () => {
   expect(screen.getByText('Scheduler running · GitHub unavailable · No GitHub remote configured. · Europe/Warsaw')).not.toBeNull()
 })
 
+it('shows the last error of a poll whose recent checks all failed, from the third failure on', () => {
+  routed(() => undefined)
+  const state = (consecutiveFailures: number) => ({ consecutiveFailures, lastError: 'gh: Validation Failed (HTTP 422)', lastErrorAt: '2026-07-16T02:17:00.000Z', backoffUntil: '2026-07-16T02:21:00.000Z' })
+  mount(response([
+    { ...github, state: state(3) },
+    { ...github, id: 'g2', name: 'Two failures', state: state(2) },
+    { ...github, id: 'g3', name: 'Paused poll', enabled: false, state: state(5) },
+  ]))
+  const notices = screen.getAllByRole('alert')
+  expect(notices.map((notice) => notice.textContent)).toEqual(['The last 3 checks failed: gh: Validation Failed (HTTP 422) · Next try Thu 04:21'])
+  expect(notices[0]!.closest('[data-slot="automation-card"]')?.textContent).toContain('Triage issues')
+})
+
 it('shows a paused schedule with no next run, offers Enable, and still allows Run now', () => {
   routed(() => undefined)
   mount(response([{ ...schedule, enabled: false, nextRunAt: undefined }], { scheduler: { state: 'idle' } }))

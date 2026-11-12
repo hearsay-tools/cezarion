@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { completionControlsShape, taskAccessShape } from './task-options.ts';
-import { automationKindSchema, automationHistoryScanSchema } from './automations.ts';
+import { automationKindSchema, automationHistoryScanSchema, automationLastErrorShape } from './automations.ts';
 import { automationScheduleSchema, type AutomationSchedule } from './automation-schedule.ts';
 import { runnerSchema } from './runner.ts';
 const RUNNER_IDS = runnerSchema.options;
@@ -169,6 +169,7 @@ export const storedAutomationRuntimeStateSchema = z
     etags: z.record(z.string(), z.string()).optional(),
     backoffUntil: z.string().datetime().optional(),
     consecutiveFailures: z.number().int().nonnegative().optional(),
+    ...automationLastErrorShape,
     /** once schedule: it stopped without a task — the launch failed, or it started past its cutoff. */
     onceOutcome: z.enum(['failed', 'missed']).optional(),
   })

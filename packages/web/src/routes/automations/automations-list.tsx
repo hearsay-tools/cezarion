@@ -2,6 +2,7 @@ import { productName } from '@/lib/product-name'
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { scheduleLabel } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import { automationFailureNotice } from '@open-mercato/cezar-api-client/contract/automations'
 import type { AutomationListEntry, AutomationsResponse, OnceStatus } from '@open-mercato/cezar-api-client'
 
 import { cancelAutomation, checkAutomation, getAutomationCheck, runAutomationNow, setAutomationEnabled } from '@/api/client'
@@ -205,6 +206,18 @@ function NextRunLine({ automation, timeZone }: {
   )
 }
 
+/** An enabled GitHub poll whose recent checks all failed: how many, the last error, the next try. */
+function FailureNotice({ automation, timeZone }: { automation: AutomationListEntry; timeZone: string }) {
+  const failure = automation.enabled ? automationFailureNotice(automation.state) : undefined
+  if (!failure) return null
+  return (
+    <p role="alert" data-slot="automation-failing" className="mt-3 text-sm break-words text-destructive">
+      {`The last ${failure.consecutiveFailures} checks failed: ${failure.lastError}`}
+      {failure.retryAt ? <span className="text-muted-foreground">{` · Next try ${dayTime(failure.retryAt, timeZone)}`}</span> : null}
+    </p>
+  )
+}
+
 /** The actions row of a live card: edit, log, toggle, run/preview, and the cancel entry. */
 function CardActions({ automation, busy, confirmingCancel, cancelRef, onToggle, onRun, onPreview, onOpenCancel }: {
   automation: AutomationListEntry
@@ -289,6 +302,7 @@ function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onP
       <AutomationCardHead automation={automation} badge={badgeFor(automation)} />
       {archive ? <ArchiveRecord automation={automation} archive={archive} /> : null}
       {archive ? null : <NextRunLine automation={automation} timeZone={timeZone} />}
+      {archive ? null : <FailureNotice automation={automation} timeZone={timeZone} />}
       {archive ? null : (
         <CardActions
           automation={automation}

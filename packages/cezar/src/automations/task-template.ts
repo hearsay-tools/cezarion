@@ -11,6 +11,8 @@ import { stopOnceSchedule, type ScheduleOccurrence } from './schedule-runner.ts'
 import type { AutomationStore } from './store.ts';
 import { githubBaselineState } from './github-baseline.ts';
 import { ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
+import { parseRemote } from '../server/forge/index.ts';
+import { getRepoInfo } from '../server/git.ts';
 import { isGithubAutomation, isOnceSchedule } from './types.ts';
 import type { AutomationDefinition, GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
@@ -148,13 +150,14 @@ export async function launchAutomationRun(options: {
   const { definition, candidate } = options;
   if ((definition.task.variants ?? 1) !== 1) throw new Error(PARALLEL_VARIANTS_REMOVED);
   const workflow = await resolveWorkflow(options.root, definition);
+  const issueRepositories = candidate.event.startsWith('issue.') ? await issueRepositoryNames(options.root, candidate.repo) : [];
   if (definition.filters.requireCurrentLabels && !await (options.poller ?? new GithubPoller()).matchesCurrentLabels(candidate, definition)) {
     throw new AutomationCandidateChangedError();
   }
   // Check after workflow loading: no async gap between the final check and run creation.
   // This shared launcher also covers manual execute checks and explicit receipt retries.
-  if (candidate.event.startsWith('issue.')) {
-    const existing = options.store.findNonArchivedRunByIssue(candidate.repo, candidate.number);
+  for (const repository of issueRepositories) {
+    const existing = options.store.findNonArchivedRunByIssue(repository, candidate.number);
     if (existing) return { runId: existing, existing: true };
   }
   const provenance = {
@@ -165,6 +168,14 @@ export async function launchAutomationRun(options: {
     githubUrl: candidate.url,
   };
   return startClaimedRun(options.store, options.receiptId, () => startRun(options.manager, workflow, definition, renderAutomationTask(definition, candidate), { automation: provenance }));
+}
+
+/** The names a task can use for the candidate's repository: its canonical name and, after a
+ *  rename, the old name `origin` still carries (hearsay-tools/cezarion#3326). */
+async function issueRepositoryNames(root: string, canonical: string): Promise<string[]> {
+  const remote = parseRemote((await getRepoInfo(root))?.remote ?? '');
+  const origin = remote ? `${remote.owner}/${remote.repo}` : undefined;
+  return origin && origin.toLowerCase() !== canonical.toLowerCase() ? [canonical, origin] : [canonical];
 }
 
 /**

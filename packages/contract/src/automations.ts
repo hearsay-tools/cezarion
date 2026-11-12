@@ -146,6 +146,13 @@ export const automationHistoryScanSchema = z.object({
   cursor: automationCursorSchema.optional(),
 });
 
+/** The longest `lastError` the scheduler stores. */
+export const AUTOMATION_LAST_ERROR_MAX = 1_000;
+/** `github` kind: the error of the last failed check and when it failed, until a check succeeds. */
+export const automationLastErrorShape = {
+  lastError: z.string().max(AUTOMATION_LAST_ERROR_MAX).optional(),
+  lastErrorAt: z.string().datetime().optional(),
+};
 export const automationRuntimeStateSchema = z.object({
   /** The definition revision this state belongs to; activation or history-policy changes re-arm. */
   revision: z.number().optional(),
@@ -166,10 +173,34 @@ export const automationRuntimeStateSchema = z.object({
   etags: z.record(z.string(), z.string()).optional(),
   backoffUntil: z.string().optional(),
   consecutiveFailures: z.number().optional(),
+  ...automationLastErrorShape,
   /** `once` schedules: why it stopped without a task — its launch failed, or it started past its cutoff. */
   onceOutcome: z.enum(['failed', 'missed']).optional(),
 });
 export type AutomationRuntimeState = z.infer<typeof automationRuntimeStateSchema>;
+
+/** Consecutive failed checks after which the cockpit and `hsq automation list` show the error. */
+export const AUTOMATION_FAILURE_NOTICE_AFTER = 3;
+
+export interface AutomationFailureNotice {
+  consecutiveFailures: number;
+  lastError: string;
+  lastErrorAt?: string;
+  /** When the scheduler tries again. */
+  retryAt?: string;
+}
+
+/** The failure a GitHub automation shows, or undefined while fewer checks than the threshold failed in a row. */
+export function automationFailureNotice(state: AutomationRuntimeState | undefined): AutomationFailureNotice | undefined {
+  const failures = state?.consecutiveFailures ?? 0;
+  if (failures < AUTOMATION_FAILURE_NOTICE_AFTER || !state?.lastError) return undefined;
+  return {
+    consecutiveFailures: failures,
+    lastError: state.lastError,
+    ...(state.lastErrorAt ? { lastErrorAt: state.lastErrorAt } : {}),
+    ...(state.backoffUntil ? { retryAt: state.backoffUntil } : {}),
+  };
+}
 
 /** What one poll decided about one candidate. `baseline` and `preview` are bookkeeping rows: no
  *  task was launched and none was meant to be. */

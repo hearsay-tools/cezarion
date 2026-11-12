@@ -1,5 +1,4 @@
 import { productEnv } from '../../core/product-env.ts';
-import type { RepoHandleDiscovery } from './repo-handle-discovery.ts';
 export type { RepoHandleDiscovery } from './repo-handle-discovery.ts';
 import { createDraftPr } from './draft-pr.ts';
 export { createDraftPr, buildPrBody } from './draft-pr.ts';
@@ -9,9 +8,11 @@ import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercat
 import { pullRequestKey } from '../../runs/pull-requests.ts';
 import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../merge-observations.ts';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { z } from 'zod';
+import { gh, githubContext, parseOwnerName, type GithubContext } from './github-cli.ts';
+import { canonicalRepoRef, discoverRepoHandle, forgetRepoHandle, forgettingNameOnMiss, resolveRepoHandle, sharedRepoHandle } from './github-repo-handle.ts';
+export { parseOwnerName } from './github-cli.ts';
+export { __clearRepoHandleCacheForTests, discoverRepoHandle, forgetRepoHandle, resolveRepoHandle } from './github-repo-handle.ts';
 import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract/github';
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements } from './github-merge-requirements.ts';
@@ -53,8 +54,6 @@ import type {
  * `/api/github`'s response shape is this driver's serialization and is
  * protected by BACKWARD_COMPATIBILITY.md — additive changes only.
  */
-
-const exec = promisify(execFile);
 
 export const GH_PR_DIFF_FILE_CAP = 300;
 export const GH_PR_PATCH_CAP = 512 * 1024;
@@ -242,25 +241,6 @@ export function rollupToChecks(rollup: z.infer<typeof ghStatusCheckRollup>): Git
   return 'passing';
 }
 
-// Keep account-directory and host selection attached to shared work. Never key by owner/name:
-// separate local roots (including different remotes/accounts) must not share results.
-function githubContext(repoRoot: string) {
-  const env = { GH_HOST: process.env.GH_HOST, GH_CONFIG_DIR: process.env.GH_CONFIG_DIR };
-  return { key: JSON.stringify([repoRoot, env.GH_HOST, env.GH_CONFIG_DIR]), env };
-}
-type GithubContext = ReturnType<typeof githubContext>;
-
-async function gh(repoRoot: string, args: string[], timeout = 15_000, signal?: AbortSignal, context?: GithubContext): Promise<string> {
-  const { stdout } = await exec('gh', args, {
-    cwd: repoRoot,
-    ...(context ? { env: { ...process.env, ...context.env } } : {}),
-    timeout,
-    maxBuffer: 50 * 1024 * 1024,
-    ...(signal ? { signal } : {}),
-  });
-  return stdout;
-}
-
 // ---- GraphQL plumbing ----------------------------------------------------
 
 /** Runs a GraphQL query — injected so pagination is unit-testable without shelling to `gh`.
@@ -277,12 +257,6 @@ export function ghGraphqlArgs(query: string, variables: Record<string, string | 
     args.push(typeof value === 'number' ? '-F' : '-f', `${key}=${value}`);
   }
   return args;
-}
-
-/** `owner/name` → `{ owner, name }`, or null when the handle isn't a clean two-part slug. */
-export function parseOwnerName(nameWithOwner: string): { owner: string; name: string } | null {
-  const [owner, name, ...rest] = nameWithOwner.trim().split('/');
-  return owner && name && rest.length === 0 ? { owner, name } : null;
 }
 
 // Paged open lists defer comment counts; hydrate them through the counts route after paint.
@@ -615,7 +589,7 @@ async function loadGithubPage(
   const ownerName = await resolveRepoHandleStrict(repoRoot, context);
   if (!ownerName) return { available: false, reason: 'Could not resolve this repository on GitHub.', issues: [], prs: [] };
   const runGraphql: GraphqlRunner = (query, variables) =>
-    gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context);
+    forgettingNameOnMiss(repoRoot, () => gh(repoRoot, ghGraphqlArgs(query, variables), timeout, undefined, context));
   const projectGraphql = githubProjectGraphql(repoRoot, context);
   const firstPage = isFirstGithubPage(page);
   const issueSide = fetchListConnection(runGraphql, ownerName.owner, ownerName.name, 'issues', capped, page.issuesCursor, page.issuesDone);
@@ -916,7 +890,7 @@ export async function searchGithubItems(
     if (!handle) {
       return { available: false, reason: 'no GitHub remote to search', items: [] };
     }
-    const out = await gh(repoRoot, [
+    const out = await forgettingNameOnMiss(repoRoot, () => gh(repoRoot, [
       'search',
       kind === 'pr' ? 'prs' : 'issues',
       '--repo',
@@ -931,7 +905,7 @@ export async function searchGithubItems(
       // on the cockpit's host. Behind `--` it is search text, which is all the box ever means.
       '--',
       trimmed,
-    ]);
+    ]));
     const hits = z.array(ghSearchHitSchema).parse(JSON.parse(out));
     // Older gh/GHES search treats repeated repo qualifiers as OR. Never hydrate a foreign
     // hit's number with this repository's memberships or expose it as a local detail row.
@@ -1205,117 +1179,6 @@ export async function fetchGithubItem(
         : firstLine(message),
     };
   }
-}
-
-// The repo handle for the per-commit checks query (#525 Phase 2). Memoized per repoRoot — stable
-// in practice, and keyed per root rather than globally for multi-project forward-compatibility.
-// `null` is a cached permanent negative for malformed identity. Local absence is not cached (#102).
-// Network, authentication and timeout failures are deliberately NOT cached: caching them would
-// disable glyphs until process restart on one transient failure.
-type RepoHandle = { owner: string; name: string } | null;
-const repoHandleCache = new Map<string, RepoHandle>();
-type RepoDiscoveryFlight = {
-  controller: AbortController;
-  promise: Promise<RepoHandle>;
-  owners: number;
-};
-const repoDiscoveryFlights = new Map<string, RepoDiscoveryFlight>();
-
-/** Each subscriber owns a lease, not the subprocess. Only the last cancellation aborts it.
- * Keep the rejecting promise intact so strict callers retain gh's diagnostic. */
-function sharedRepoHandle(repoRoot: string, signal?: AbortSignal, context = githubContext(repoRoot)): Promise<RepoHandle> {
-  if (signal?.aborted) return Promise.reject(signal.reason);
-  const memo = repoHandleCache.get(context.key);
-  if (memo !== undefined) return Promise.resolve(memo);
-  let flight = repoDiscoveryFlights.get(context.key);
-  if (!flight) {
-    const controller = new AbortController();
-    const created: RepoDiscoveryFlight = {
-      controller, owners: 0,
-      promise: gh(repoRoot, ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], 15_000, controller.signal, context)
-        .then(parseOwnerName),
-    };
-    created.promise = created.promise.then(handle => {
-      // A disposed owner may complete late; it must not overwrite a replacement discovery.
-      if (!controller.signal.aborted && repoDiscoveryFlights.get(context.key) === created) {
-        repoHandleCache.set(context.key, handle);
-      }
-      return handle;
-    }).finally(() => {
-      if (repoDiscoveryFlights.get(context.key) === created) repoDiscoveryFlights.delete(context.key);
-    });
-    flight = created;
-    repoDiscoveryFlights.set(context.key, flight);
-  }
-  const owned = flight;
-  owned.owners++;
-  return new Promise((resolve, reject) => {
-    let released = false;
-    const release = () => {
-      if (released) return false;
-      released = true;
-      signal?.removeEventListener('abort', cancel);
-      if (--owned.owners === 0 && repoDiscoveryFlights.get(context.key) === owned) {
-        repoDiscoveryFlights.delete(context.key);
-        owned.controller.abort();
-      }
-      return true;
-    };
-    const cancel = () => { if (release()) reject(signal?.reason); };
-    signal?.addEventListener('abort', cancel, { once: true });
-    owned.promise.then(
-      handle => { if (release()) resolve(handle); },
-      error => { if (release()) reject(error); },
-    );
-  });
-}
-
-/** Test-only: drop the memoized repo handles. */
-export function __clearRepoHandleCacheForTests(): void {
-  repoHandleCache.clear();
-  for (const flight of repoDiscoveryFlights.values()) flight.controller.abort();
-  repoDiscoveryFlights.clear();
-}
-
-/** Local absence cannot improve through network retries. Authentication, timeouts and remote
- * errors deliberately stay retryable, including 404s for temporarily inaccessible repositories. */
-function isPermanentRepoFailure(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if ('code' in error && error.code === 'ENOENT') return true;
-  const stderr = 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
-  return /not a git repository|no git remotes found|none of the git remotes configured for this repository point to a known GitHub host/i.test(`${error.message}\n${stderr}`);
-}
-
-/** Share the existing memo with ordinary discovery, but retain failure classification (#102).
- * An aborted owner must never publish its late result into this shared cache. */
-export async function discoverRepoHandle(repoRoot: string, signal?: AbortSignal): Promise<RepoHandleDiscovery> {
-  const context = githubContext(repoRoot);
-  if (signal?.aborted) return { status: 'cancelled' };
-  try {
-    const handle = await sharedRepoHandle(repoRoot, signal, context);
-    if (signal?.aborted) return { status: 'cancelled' };
-    return handle ? { status: 'resolved', handle } : { status: 'unknown' };
-  } catch (error) {
-    if (signal?.aborted) return { status: 'cancelled' };
-    if (isPermanentRepoFailure(error)) {
-      // Do not replace a successful discovery another caller completed while this one failed.
-      const recovered = repoHandleCache.get(context.key);
-      if (recovered) return { status: 'resolved', handle: recovered };
-      // The live arming loop stops on unknown. Do not memoize local failures here: later cold
-      // index/status requests must still discover an installed gh or a newly added remote.
-      return { status: 'unknown' };
-    }
-    return { status: 'retryable' };
-  }
-}
-
-/** Compatible fail-open lookup for existing API and cold-index callers. */
-export async function resolveRepoHandle(
-  repoRoot: string,
-  signal?: AbortSignal,
-): Promise<{ owner: string; name: string } | null> {
-  const result = await discoverRepoHandle(repoRoot, signal);
-  return result.status === 'resolved' ? result.handle : null;
 }
 
 /** SHAs per rollup query. Aliases resolve independently, so a chunk that fails costs only its own
@@ -2916,7 +2779,8 @@ async function fetchPrMergeState(
       'number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt',
     ]);
     const parsedPr = mergePrSchema.parse(JSON.parse(prOut));
-    if (!matchesGithubPullRequest({ ...repoRef, number }, parsedPr)) return { available: false, reason: 'GitHub returned a different pull request.' };
+    // A pull request under another name is a redirect after a rename: look the name up again.
+    if (!matchesGithubPullRequest({ ...repoRef, number }, parsedPr)) { forgetRepoHandle(repoRoot); return { available: false, reason: 'GitHub returned a different pull request.' }; }
     mergedPullRequestObservations.observe({ ...repoRef, number }, parsedPr);
     const [policyOut, requirements] = await Promise.all([
       gh(repoRoot, ['api', `repos/${repoRef.owner}/${repoRef.repo}`]),
@@ -3037,15 +2901,16 @@ async function mergePullRequest(
   mergeInflight.add(key);
   try {
     if (input.canProceed?.() === false) return mergeCancelledResult();
-    const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
+    const ref = await canonicalRepoRef(repoRoot, repoRef);
+    const fresh = await fetchPrMergeState(repoRoot, ref, number, true);
     if (input.canProceed?.() === false) return mergeCancelledResult();
     if (!fresh.available) return { merged: false, status: 502, error: fresh.reason };
     const current = fresh.mergeState;
     const preflight = mergePullRequestPreflight(current, input);
     if (preflight) return preflight;
-    const ciConflict = await mergeActiveCiConflict(repoRoot, repoRef, current, input);
+    const ciConflict = await mergeActiveCiConflict(repoRoot, ref, current, input);
     if (ciConflict) return ciConflict;
-    return await executeGithubMerge(repoRoot, repoRef, number, input, current);
+    return await executeGithubMerge(repoRoot, ref, number, input, current);
   } catch (error) {
     return mergePullRequestFailure(error);
   } finally {
@@ -3139,11 +3004,12 @@ async function readyPullRequest(
   mergeInflight.add(key);
   try {
     if (input.canProceed?.() === false) return readyCancelledResult();
+    const ref = await canonicalRepoRef(repoRoot, repoRef);
     if (productEnv('DRY_RUN') !== '1') {
-      const ownership = await readyPullRequestOwnership(repoRoot, repoRef, number, input);
+      const ownership = await readyPullRequestOwnership(repoRoot, ref, number, input);
       if (ownership) return ownership;
     }
-    return await refreshReadyPullRequestState(repoRoot, repoRef, number, input);
+    return await refreshReadyPullRequestState(repoRoot, ref, number, input);
   } catch {
     return { available: false, reason: 'GitHub could not mark the pull request ready for review.' };
   } finally {
@@ -3151,7 +3017,8 @@ async function readyPullRequest(
   }
 }
 
-/** owner/repo parsed out of the origin remote — feeds `viewUrl`. */
+/** owner/repo parsed out of the origin remote — feeds `viewUrl`. Reads that name the repository
+ *  use `canonicalRepoRef` instead, which follows a rename. */
 export interface GithubRepoRef {
   owner: string;
   repo: string;
@@ -3221,7 +3088,8 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
       try {
         const out = await gh(repoRoot, ['pr', 'view', branch, '--json', 'number,url,state,isDraft,statusCheckRollup,mergedAt']);
         const pr = ghPrViewSchema.parse(JSON.parse(out));
-        if (repoRef) mergedPullRequestObservations.observe({ ...repoRef, number: pr.number }, pr);
+        const ref = await canonicalRepoRef(repoRoot, repoRef);
+        if (ref) mergedPullRequestObservations.observe({ ...ref, number: pr.number }, pr);
         return {
           number: pr.number,
           url: pr.url,
@@ -3234,7 +3102,7 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
       }
     },
 
-    prMergeState: (number, opts) => fetchPrMergeState(repoRoot, repoRef, number, opts?.refresh),
+    prMergeState: async (number, opts) => fetchPrMergeState(repoRoot, await canonicalRepoRef(repoRoot, repoRef), number, opts?.refresh),
 
     readyPR: (number, input) => readyPullRequest(repoRoot, repoRef, number, input),
 
