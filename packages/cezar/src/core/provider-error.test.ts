@@ -6,6 +6,7 @@ describe('classifyProviderError', () => {
   it.each([
     ['claude 429', 'step "task" failed: API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}', 'rate-limit'],
     ['codex spend limit', 'step "task" failed: {"status":429,"error":{"type":"usage_limit_reached","message":"You have hit your spend limit"}}', 'rate-limit'],
+    ['an exhausted balance in a 400', 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"insufficient credits remaining on this account"}}', 'credit'],
     ['credit balance as a 400', 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}', 'credit'],
     ['claude overloaded', 'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}', 'overloaded'],
     ['omp overloaded', 'omp: anthropic/claude-sonnet request failed: Overloaded', 'overloaded'],
@@ -25,6 +26,7 @@ describe('classifyProviderError', () => {
   });
 
   it.each([
+    ['a 400 that only mentions billing', 'API Error: 400 invalid_request_error: billing metadata is invalid'],
     ['a bad request', 'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages: text content blocks must be non-empty"}}'],
     ['the no-progress kill alone', 'Agent made no progress for 30 minutes during an open turn and was terminated'],
     ['a CLI exit', 'claude CLI exited with code 1 — Error: ENOENT: no such file or directory'],

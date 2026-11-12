@@ -14,7 +14,7 @@
 export type ProviderErrorKind = 'rate-limit' | 'credit' | 'overloaded' | 'server' | 'proxy-not-found' | 'access';
 export type ProviderError = { kind: ProviderErrorKind; detail: string };
 
-const CREDIT_RE = /credit balance (?:is )?too low|insufficient[\s_-]?(?:credits?|balance|funds|quota)|out of credits|payment required|\bbilling\b|\b402\b/i;
+const CREDIT_RE = /credit balance (?:is )?too low|insufficient[\s_-]?(?:credits?|balance|funds|quota)|out of credits|payment required|\b402\b/i;
 const REQUEST_ERROR_RE = /\b400\b|invalid_request_error|bad request/i;
 const RATE_LIMIT_RE = /\b429\b|rate[\s_-]?limit|too many requests|(?:usage|spend(?:ing)?|session|weekly|hourly|monthly)[\s_-]?limit|quota (?:exceeded|reached)|resource[\s_-]?exhausted/i;
 const OVERLOADED_RE = /overloaded|\b529\b/i;
