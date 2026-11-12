@@ -239,7 +239,7 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, upper-quartile fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
 comparison, runner cost, failures and coverage investigation. Four workers per shard,
@@ -326,11 +326,29 @@ Job wall time is GitHub's `startedAt` to `completedAt`, excluding queue time. Th
 
 The balanced GitHub-hosted [run 34995104039](https://github.com/hearsay-tools/cezarion/actions/runs/34995104039) passed with browser job times of 3m51s, 3m45s, 4m00s and 3m45s. The subsequent [Blacksmith 4-vCPU run 35002322591](https://github.com/hearsay-tools/cezarion/actions/runs/35002322591) passed in 3m11s, 3m42s, 2m51s and 3m33s. The owner chose GitHub-hosted runners for browser shards because the 18-second reduction in the longest job did not justify the additional cost. These are single-run measurements with different Node versions and intervening test fixes, not a controlled hardware-only comparison. Duration balancing, current-LTS selection and the test fixes remain in place. Browser setup uses `check-latest: true` with `lts/*` so an older matching version in a runner image cannot silently replace the current LTS patch. The first Blacksmith attempt selected cached Node 24.13.0 instead of the GitHub run's 24.20.0 and failed on all four shards with socket errors; it is retained as a failed comparison, not timing evidence.
 
-Browser sharding now reuses the unit sequencer's longest-first allocator with a separate duration manifest. It assigns each next file to the lightest shard, resolves ties deterministically, and gives new specs the median known duration. The manifest never controls discovery, so removed specs are ignored and new specs remain included. The initial browser weights come from the successful run above and predict 203.48–204.95s of tests per shard, before setup; this is an allocation estimate, not a measured balanced CI result. The sequencer only overrides shard allocation, preserving Vitest's normal execution order for local full runs and within each shard.
+Browser sharding now reuses the unit sequencer's longest-first allocator with a separate duration manifest. It assigns each next file to the lightest shard, resolves ties deterministically, and gives new specs the upper-quartile known duration. The manifest never controls discovery, so removed specs are ignored and new specs remain included. The initial browser weights come from the successful run above and predict 203.48–204.95s of tests per shard, before setup; this is an allocation estimate, not a measured balanced CI result. The sequencer only overrides shard allocation, preserving Vitest's normal execution order for local full runs and within each shard.
 
-Refresh browser weights from successful per-file suite summary lines in CI logs (not individual test timings), using filenames relative to `packages/web/e2e`, and update the manifest's provenance with the source run and commit. Keep the unit manifest separate: browser durations and unit durations measure different suites.
+`refresh-test-durations.yml` refreshes both manifests daily at 04:25 UTC. It reads
+up to 100 recent successful `ci.yml` runs and takes the three newest measured
+full eight-shard runs for each suite, from `main` pushes or `main` merge groups,
+within 14 days. PR selections, skipped shards and exact-SHA proof reuse are not
+samples. It reads passed per-file suite summaries, including skipped-test
+annotations, and takes each current file's median available duration. Browser
+keys are relative to `packages/web/e2e`; unit keys are repository-relative.
+`_provenance.runs` records run IDs, commits and job IDs. A new file without a
+measurement gets the measured upper quartile and appears in `estimatedFiles`.
+Deleted files leave the manifest. Fewer than three measured runs leave that
+suite's manifest unchanged and appear in the run summary.
 
-The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the median known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
+The workflow opens one ready PR when the file inventory changes, or when any
+median changes by at least **25% and 5 seconds**. It leaves an existing refresh
+PR for normal CI and review instead of pushing over it. The existing release
+App creates the PR so native PR CI and CodeRabbit run. It does not merge the PR.
+A manual dispatch defaults to `dry_run: true`; branch dispatches and PR proofs
+cannot publish. Use `gh workflow run refresh-test-durations.yml --ref <branch>`
+for a read-only proof, and cite the run summary. Required checks never depend
+on this maintenance workflow.
+The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the upper-quartile known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
 
 When a PR adds or splits a Vitest unit test file taking longer than about one
 minute on CI, add or update its repository-relative path and measured duration
@@ -339,7 +357,7 @@ passed per-file Vitest suite-summary line in the CI log, not an individual test
 timing or total job duration; record the source run and commit in provenance.
 For split files, measure each resulting file separately. Keep browser E2E weights
 in their separate manifest. The paragraph above gives the
-sequencer's balancing-only role and median fallback for unlisted files.
+sequencer's balancing-only role and upper-quartile fallback for unlisted files.
 
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 

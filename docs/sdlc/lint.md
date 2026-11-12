@@ -351,7 +351,7 @@ regexes, applicability, allowed predicates and their reasons remain unchanged.
 The five content tests stay in `packages/web/src/design-guardian.test.ts`. They read only the files
 named in their assertions; no source walk runs at import. Their old duration weights were removed
 from both duration manifests because they measured the removed repository scan; the sequencers use
-the median fallback until successful CI suite summaries provide fresh measurements. Historical
+the upper-quartile fallback until successful CI suite summaries provide fresh measurements. Historical
 benchmark snapshots keep their original measurements.
 
 ### Mock lifecycle boundary

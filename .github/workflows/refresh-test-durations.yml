@@ -1,0 +1,128 @@
+name: Refresh test durations
+
+on:
+  schedule:
+    - cron: '25 4 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Measure without opening a pull request
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/refresh-test-durations.yml'
+      - '.github/scripts/refresh-test-durations*'
+
+permissions: {}
+
+concurrency:
+  group: refresh-test-durations-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      changed: ${{ steps.refresh.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Refresh measured weights
+        id: refresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/refresh-test-durations.mjs
+      - name: Upload refreshed manifests
+        if: steps.refresh.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: refreshed-test-durations
+          path: |
+            .github/cockpit-test-durations.json
+            .github/test-durations.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  propose:
+    needs: measure
+    # A branch dispatch and PR proof can measure, but cannot publish or mint an App token.
+    if: >-
+      needs.measure.outputs.changed == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && inputs.dry_run == false))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Find an existing refresh PR
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open --limit 1000 \
+            --json headRefName --jq '[.[] | select(.headRefName | startswith("ci/test-duration-refresh-"))] | length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Download refreshed manifests
+        if: steps.existing.outputs.count == '0'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: refreshed-test-durations
+          path: .github
+      - name: Push the refresh branch
+        if: steps.existing.outputs.count == '0'
+        env:
+          BRANCH: ci/test-duration-refresh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          git switch -c "$BRANCH"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/cockpit-test-durations.json .github/test-durations.json
+          git commit -m 'ci: refresh measured test durations'
+          git push origin "$BRANCH"
+      # The existing release App creates the PR so native PR CI and CodeRabbit run.
+      # A PR created with GITHUB_TOKEN would suppress those events.
+      - name: Create refresh PR token
+        id: app
+        if: steps.existing.outputs.count == '0'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+      - name: Open the refresh PR
+        if: steps.existing.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          EXPECTED_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          BRANCH: ci/test-duration-refresh-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          test "${APP_SLUG}[bot]" = "$EXPECTED_LOGIN"
+          cat > "$RUNNER_TEMP/refresh-pr.md" <<'BODY'
+          Refresh browser and Vitest shard weights from three recent successful eight-shard CI runs. Each manifest records its source runs and any estimates.
+
+          The refresh opens a PR when files are added or removed, or when a per-file median changes by at least 25% and 5 seconds. Required CI and review apply. This workflow does not enable auto-merge.
+
+          Refs hearsay-tools/cezarion#3356.
+          BODY
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title 'ci: refresh measured test durations' --body-file "$RUNNER_TEMP/refresh-pr.md"
