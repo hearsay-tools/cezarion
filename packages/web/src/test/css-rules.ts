@@ -1,0 +1,92 @@
+/**
+ * Reads a stylesheet as rules, so a test can ask what a rule declares instead of matching
+ * source text. Whitespace, quote style and selector-list order do not change the result, so a
+ * respaced rule cannot slip past an absence check. jsdom's CSSOM drops Tailwind at-rules
+ * (`@theme`, `@custom-variant`), which would make an absence check on `index.css` vacuous;
+ * this reader keeps every block it can balance and throws on one it cannot.
+ */
+export type CssRule = {
+  /** One selector of the rule's list, whitespace-normalized, with single quotes. */
+  readonly selector: string
+  /** The at-rule preludes around the rule, outermost first, e.g. `@media (max-width: 767px)`. */
+  readonly at: readonly string[]
+  readonly declarations: Readonly<Record<string, string>>
+}
+
+const normalize = (text: string) =>
+  text.replace(/"/g, "'").replace(/\s*([>+~,])(?!=)\s*/g, ' $1 ').replace(/\s+/g, ' ').replace(/ , /g, ', ').trim()
+
+/** Splits a selector list on its top-level commas, leaving `:is(a, b)` whole. */
+export function splitSelectorList(list: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < list.length; i++) {
+    const ch = list[i]
+    if (ch === '(' || ch === '[') depth++
+    else if (ch === ')' || ch === ']') depth--
+    else if (ch === ',' && depth === 0) {
+      out.push(list.slice(start, i).trim())
+      start = i + 1
+    }
+  }
+  out.push(list.slice(start).trim())
+  return out.filter(Boolean)
+}
+
+/** Drops comments, leaving strings such as `@source "dist/*.js"` intact. */
+const stripComments = (css: string) => css.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\/\*[\s\S]*?\*\//g, (_, string?: string) => string ?? '')
+
+export function cssRules(css: string): CssRule[] {
+  const src = stripComments(css)
+  const rules: CssRule[] = []
+  const declare = (into: Record<string, string> | null, text: string) => {
+    const colon = text.indexOf(':')
+    if (!into || colon < 0) return
+    const prop = text.slice(0, colon).trim().toLowerCase()
+    if (prop) into[prop] = normalize(text.slice(colon + 1))
+  }
+  // Reads one block body from `from`; returns the index of its closing brace (or src.length at top level).
+  const block = (from: number, at: readonly string[], declarations: Record<string, string> | null): number => {
+    let token = from
+    for (let i = from; i < src.length; i++) {
+      const ch = src[i]
+      if (ch === '"' || ch === "'") {
+        const close = src.indexOf(ch, i + 1)
+        if (close < 0) throw new Error(`unterminated string at offset ${i}`)
+        i = close
+      } else if (ch === ';' || ch === '}') {
+        declare(declarations, src.slice(token, i))
+        token = i + 1
+        if (ch === '}') {
+          if (at.length === 0 && declarations === null) throw new Error(`unbalanced "}" at offset ${i}`)
+          return i
+        }
+      } else if (ch === '{') {
+        const prelude = normalize(src.slice(token, i))
+        if (prelude.startsWith('@')) {
+          i = block(i + 1, [...at, prelude], null)
+        } else {
+          const own: Record<string, string> = {}
+          for (const selector of splitSelectorList(prelude)) rules.push({ selector, at, declarations: own })
+          i = block(i + 1, at, own)
+        }
+        if (i >= src.length) throw new Error(`unclosed block "${prelude}"`)
+        token = i + 1
+      }
+    }
+    return src.length
+  }
+  block(0, [], null)
+  return rules
+}
+
+/**
+ * True when `selector`'s subject (its last compound, ignoring trailing pseudo-classes and
+ * pseudo-elements) contains `compound`. `.a .b` targets `.b`, not `.a`.
+ */
+export function targets(selector: string, compound: string): boolean {
+  const parts = selector.split(/ [>+~] | (?![^[(]*[\])])/)
+  const subject = parts.at(-1) ?? ''
+  return subject.includes(normalize(compound))
+}

@@ -60,6 +60,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
+  focusManager.setFocused(undefined)
   resetLiveSession()
   fetchMock.mockReset()
   vi.unstubAllGlobals()
@@ -87,6 +89,17 @@ function wrapper() {
   return function Wrapper({ children }: { children: ReactNode }) {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>
   }
+}
+
+/** Advances fake timers inside act, settling the fetches and renders they start. */
+async function tickFake(ms = 1) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+}
+
+/** The user leaves the tab and comes back: TanStack's focus refetch runs on the return. */
+async function refocus() {
+  act(() => focusManager.setFocused(false))
+  await act(async () => { focusManager.setFocused(true); await vi.advanceTimersByTimeAsync(1) })
 }
 
 const HEALTH = {
@@ -250,38 +263,20 @@ describe('provider status workspace query', () => {
     expect(workspaceQueryKeys.providerStatus).toEqual(['workspace', 'providers', 'status'])
   })
 
-  it('loads once without interval polling and becomes focus-refreshable after five minutes', async () => {
-    fetchMock.mockResolvedValue(json(PROVIDERS))
-    const client = createQueryClient()
-    const { result } = renderHook(() => useProviderStatus(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
-    })
+  it('loads once, never polls, and refetches on focus only after five minutes', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(async () => json(PROVIDERS))
+    const { result } = renderHook(() => useProviderStatus(), { wrapper: wrapper() })
+    await tickFake()
+    expect(result.current.isSuccess).toBe(true)
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    await tickFake(5 * 60_000 - 1_000)
+    await refocus()
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const query = client.getQueryCache().find({ queryKey: workspaceQueryKeys.providerStatus })
-    expect(query?.observers[0]?.options.refetchInterval).toBe(false)
-    expect(query?.observers[0]?.options.staleTime).toBe(5 * 60_000)
-  })
 
-  it('refetches on window focus', async () => {
-    fetchMock.mockResolvedValue(json(PROVIDERS))
-    const client = createQueryClient()
-    const { result } = renderHook(() => useProviderStatus(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
-    })
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const query = client.getQueryCache().find({ queryKey: workspaceQueryKeys.providerStatus })
-    if (!query) throw new Error('provider status query was not created')
-    query.setState({ ...query.state, dataUpdatedAt: Date.now() - 5 * 60_000 - 1 })
-    window.dispatchEvent(new Event('visibilitychange'))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await tickFake(2_000)
+    await refocus()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('surfaces an ApiError instead of synthesizing disconnected providers', async () => {
@@ -1097,25 +1092,20 @@ describe('usePatchRun', () => {
 
 describe('useRunChanges', () => {
   it('opts out of the no-poll defaults so a finished run’s tab refetches on focus (#488)', async () => {
-    fetchMock.mockResolvedValue(json({ files: [], stat: { adds: 0, dels: 0, files: 0 } }))
-    const client = createQueryClient()
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(async () => json({ files: [], stat: { adds: 0, dels: 0, files: 0 } }))
     // live=false: the run is not active, so polling is off — exactly when the global defaults would
     // otherwise leave a stale, possibly-empty snapshot on screen until the 5-min staleTime lapses.
-    const { result } = renderHook(() => useRunChanges('run-1', false), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
-    })
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const { result } = renderHook(() => useRunChanges('run-1', false), { wrapper: wrapper() })
+    await tickFake()
+    expect(result.current.isSuccess).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    // Read the resolved options off the live observer: this query overrides the client-wide
-    // refetchOnWindowFocus:false / long staleTime (asserted in 'query defaults'), scoped to itself.
-    const options = client.getQueryCache().find({ queryKey: queryKeys.runs.changes('run-1') })?.observers[0]
-      ?.options
-    expect(options?.refetchOnWindowFocus).toBe(true)
-    expect(options?.staleTime).toBe(0)
+    await refocus()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     // …but an inactive run still must not poll.
-    expect(options?.refetchInterval).toBe(false)
+    await tickFake(10 * 60_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -1130,12 +1120,24 @@ describe('query defaults', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('does not poll — SSE drives freshness', () => {
-    const client = createQueryClient()
-    const defaults = client.getDefaultOptions().queries
-    expect(defaults?.refetchInterval).toBe(false)
-    expect(defaults?.refetchOnWindowFocus).toBe(false)
-    expect(defaults?.staleTime).toBeGreaterThanOrEqual(60_000)
+  it('does not poll, refetch on focus, or refetch a remount within a minute — SSE drives freshness', async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementation(async () => json({ id: 'run-1' }))
+    const wrap = wrapper()
+    const first = renderHook(() => useRun('run-1'), { wrapper: wrap })
+    await tickFake()
+    expect(first.result.current.isSuccess).toBe(true)
+    first.unmount()
+
+    await tickFake(59_000)
+    const second = renderHook(() => useRun('run-1'), { wrapper: wrap })
+    await tickFake()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await tickFake(10 * 60_000)
+    await refocus()
+    expect(second.result.current.data).toEqual({ id: 'run-1' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

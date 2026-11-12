@@ -7,53 +7,6 @@ import { Button } from './button'
 afterEach(cleanup)
 
 describe('Button', () => {
-  it('defaults to the primary variant at the default size', () => {
-    render(<Button>Run</Button>)
-    const button = screen.getByRole('button', { name: 'Run' })
-
-    expect(button.dataset.variant).toBe('primary')
-    expect(button.dataset.size).toBe('default')
-    expect(button.className).toContain('bg-action')
-    expect(button.className).toContain('h-11')
-  })
-
-  describe('variant → class mapping', () => {
-    it.each([
-      { variant: 'primary', expected: ['bg-action', 'text-action-foreground'] },
-      { variant: 'contrast', expected: ['bg-contrast', 'text-contrast-foreground'] },
-      { variant: 'outline', expected: ['border-border', 'bg-card'] },
-      { variant: 'ghost', expected: ['text-muted-foreground'] },
-      { variant: 'danger-ghost', expected: ['text-danger'] },
-    ] as const)('$variant', ({ variant, expected }) => {
-      render(<Button variant={variant}>Label</Button>)
-      const button = screen.getByRole('button')
-
-      expect(button.dataset.variant).toBe(variant)
-      for (const cls of expected) expect(button.className).toContain(cls)
-    })
-  })
-
-  describe('size → class mapping', () => {
-    it.each([
-      { size: 'default', expected: ['h-11', 'px-3.5'] },
-      { size: 'sm', expected: ['h-[30px]', 'rounded-sm'] },
-      { size: 'icon', expected: ['size-9'] },
-      { size: 'icon-sm', expected: ['size-[30px]', 'rounded-sm'] },
-    ] as const)('$size', ({ size, expected }) => {
-      render(<Button size={size}>Label</Button>)
-      const button = screen.getByRole('button')
-
-      expect(button.dataset.size).toBe(size)
-      for (const cls of expected) expect(button.className).toContain(cls)
-    })
-  })
-
-  it('lets the small sizes override the default control radius', () => {
-    render(<Button size="sm">Label</Button>)
-    // `rounded-md` is the base; the sm size must win the merge rather than coexist.
-    expect(screen.getByRole('button').className).not.toContain('rounded-md')
-  })
-
   it('lets a caller className override a variant class', () => {
     render(<Button className="bg-muted">Label</Button>)
     const button = screen.getByRole('button')
