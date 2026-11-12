@@ -24,6 +24,7 @@ import {
   RunManager,
 } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { AutoResumeScheduler } from './run/auto-resume.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -233,6 +234,17 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // A restart before the Continue starts must not take it for the automatic retry.
     expect(readPersistedRuns(join(repoRoot, '.ai/cezar')).find(run => run.id === record.id)?.autoResumeReason).toBeUndefined();
   }, 30_000);
+
+  it('plans no hold for a run a Stop already cancelled', () => {
+    const scheduler = new AutoResumeScheduler({ store, semaphore: new WorkspaceSemaphore({ home: testHome() }) } as unknown as ConstructorParameters<typeof AutoResumeScheduler>[0],
+      { move: () => undefined, continueRun: () => ({ ok: true }), pump: async () => undefined });
+    const run = store.createRun({ title: 'stopped', task: 'ship it', workflow: 'quick-task', steps: [] });
+    const error = 'step "work" failed: API Error: 429 rate_limit_error';
+    setRunStatus(store, run.id, RUN_STATUS.failed, { error });
+    expect(scheduler.holdFor(run.id, error)).toMatchObject({ autoResumeReason: 'provider-error' });
+    setRunStatus(store, run.id, RUN_STATUS.cancelled);
+    expect(scheduler.holdFor(run.id, error)).toBeUndefined();
+  });
 
   it('fails a run plainly on a request error, which is no provider error', async () => {
     manager = createFixtureManager(store, repoRoot);

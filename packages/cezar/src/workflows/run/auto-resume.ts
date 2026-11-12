@@ -90,7 +90,8 @@ export class AutoResumeScheduler {
    */
   holdFor(runId: string, error: string | undefined): HoldPlan | undefined {
     const run = this.context.store.getRun(runId);
-    if (!run || run.archived || !error || !this.context.semaphore.autoResumeOnUsageLimit()) return undefined;
+    // A Stop that recorded `cancelled` before the failure settled wins: the failure takes `fail-continue`.
+    if (!run || run.archived || run.status === 'cancelled' || !error || !this.context.semaphore.autoResumeOnUsageLimit()) return undefined;
     // A root that asked to Finish ends with its failure: the Finish intent retires with it.
     if (run.delegation?.role === 'root' && run.delegation.finishRequestedAt) return undefined;
     const limit = parseUsageLimit(error);
