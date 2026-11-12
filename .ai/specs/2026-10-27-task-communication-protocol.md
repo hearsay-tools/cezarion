@@ -255,7 +255,7 @@ Every field already exists unless the table says **new**.
 | `kind` | `request` (creates one reply obligation), `progress`, `follow-up`, `reply` | Request body |
 | `requestId` | The request a `follow-up` or `reply` names | Request body; required for those two kinds only |
 | `text` | At most 100,000 characters, secrets redacted before storage | Request body |
-| `createdAt`, `deadline` | Acceptance time; a request's deadline (1–1,800 s, default 600; up to 86,400 s for a worker resume) | Cezar |
+| `createdAt`, `deadline` | Acceptance time; a request's deadline (1–7,200 s, default 600; up to 86,400 s for a worker resume) | Cezar |
 | `requestHash` | SHA-256 of sender and payload, for retry deduplication | Cezar |
 | `state` | `accepted`, `continuation-required`, `destroyed`, `late` | Cezar |
 | `instruction` | Why a message was not delivered, and the next command | Cezar |
@@ -334,15 +334,16 @@ they must act. A request wait covers only "wake me on the reply to my request".
 
 The **`peer`** wait kind fills that gap.
 
-- **Register:** `cez message wait --peer <task-id> [--peer <task-id> …] [--timeout-seconds <1-1800>]`,
+- **Register:** `cez message wait --peer <task-id> [--peer <task-id> …] [--timeout-seconds <1-7200>]`,
   or `cezar_wait` with `{ "kind": "peer", "peer_ids": [...], "timeout_seconds": 600 }`. It names
   1–32 peers. Every named peer must pass the resolver as a `peer`; otherwise registration is
   refused with `denied_scope`. Workers cannot register it.
 - **No "any peer" form.** A wait "in case someone asks" has no exit but its deadline, so each
-  timeout would cost a turn to wait again: polling that spends the wake budget. A named peer
+  timeout would cost a turn to wait again even though an empty deadline wake spends no
+  automatic-wake budget. A named peer
   can settle, which gives the wait a real exit. A task that waits for coordination knows its
   coordinator, or finds it with `cez message tasks`. A task with nothing left to do ends.
-- **Deadline:** required, 1–1,800 s, default 600. It is the wait's liveness bound.
+- **Deadline:** required, 1–7,200 s, default 600. It is the wait's liveness bound.
 - **What closes it:**
   - a message of any kind from a named peer;
   - a named peer reaching `review`, `done`, `failed` or `cancelled`, or being deleted, so a
@@ -400,7 +401,7 @@ request to a live worker is already blocked by that worker, so nothing changes t
   (hearsay-tools/cezarion#1301). Like the worker completion wait, it has no deadline of its
   own. It still always ends: every request has a deadline, and each ledger's request-deadline
   timer (`requestDeadlineTimers`, `run.ts`) settles a request `timed-out` when its deadline
-  passes. A resume request's deadline can reach 86,400 s, which a Cezar wait's 1,800 s
+  passes. A resume request's deadline can reach 86,400 s, which a Cezar wait's 7,200 s
   `timeoutSeconds` could not hold; this is why the wait takes none.
 - When the requests settle, the run wakes and can call `cezar_done` again.
 - A human's Finish is not blocked by open requests: the human decides. The requests settle
@@ -415,7 +416,7 @@ request to a live worker is already blocked by that worker, so nothing changes t
 The rule above covers requests a task sent. The other side is a task that received a
 request and calls done without replying. Today its done passes, and the requester learns
 of it only from the outcome. When the recipient rests at `review`, which is common after it
-changed files, the request even stays pending until its deadline: up to 30 minutes for
+changed files, the request even stays pending until its deadline: up to two hours for
 nothing.
 
 - **The first `cezar_done`** of a root task with unanswered requests addressed to it is
@@ -450,12 +451,12 @@ root task. [F7](#14-follow-ups) and [F8](#14-follow-ups) declare these rows in
 | `running` | The turn ends with an open `peer` wait as the top wait | runner | `waiting:peer`; the slot is freed; the idle timer is armed |
 | `waiting:peer` | A named peer sends a message | peer | The wait resolves `message`; the wake joins the line; `running` |
 | `waiting:peer` | A named peer settles or is deleted | watcher | Resolves `settled`; wakes as above |
-| `waiting:peer` | The deadline passes | timer | Resolves `timeout`; wakes as above |
+| `waiting:peer` | The deadline passes | timer | Resolves `timeout`; delivers the empty observation without spending wake budget, including when it is spent |
 | `waiting:peer` | A human message | human | Wakes; the wait stays open; the turn end parks again |
 | `waiting:peer` | A message from its parent or a worker | parent / worker | Wakes; the wait stays open |
 | `waiting:peer` | Another wait resolves | watcher / timer | Wakes with that result; the `peer` wait stays open |
 | `waiting:peer` | 15 minutes idle | timer | The session closes; the run stays `waiting`; a wake reopens it through the scheduler |
-| `waiting:peer` | A resolution arrives with the wake budget spent | watcher / peer | Not admitted; Cezar's `budget` human wait opens; Needs you ([§ 8](#8-bounds)) |
+| `waiting:peer` | A substantive resolution arrives with the wake budget spent | watcher / peer | Not admitted; Cezar's `budget` human wait opens; Needs you ([§ 8](#8-bounds)) |
 | `waiting:peer` | Stop | human | `cancelled`; the wait is cancelled |
 | `waiting:peer` | Controller restart | recovery | The wait list is re-read; the deadline is re-armed; a message committed before the crash resolves it on reconcile |
 | `running` | The turn ends on a done that open requests block, the first time in the cycle | runner | A refusal nudge that names each request and both ways forward; stays `running` (as `running.completion-nudge`) |
@@ -481,10 +482,11 @@ A family has a parent that can stop a loop. Two peers do not: two coordinators t
 each other could run until their ledgers fill, up to 1,024 messages each, and every message
 can start a turn. So peer messages charge the existing automatic-wake budget:
 
-- A peer message, or a `peer` wait resolution, that **starts a new turn** on the recipient
-  charges one unit of its automatic-wake budget (`MAX_AUTO_CONTINUES`, 40, `run.ts:540`).
-  Today `chargesBudget` (`packages/cezar/src/workflows/waits.ts:40`) charges only timer and
-  process waits.
+- A peer message, or a substantive `peer` wait resolution, that **starts a new turn** on
+  the recipient charges one unit of its automatic-wake budget (`MAX_AUTO_CONTINUES`, 40).
+  Empty peer and process deadline observations spend no budget. Explicit timers and
+  native-subagent safety deadlines remain charged. `chargesBudget` in
+  `packages/cezar/src/workflows/waits.ts` reads the resolved wait-kind policy.
 - A message taken inside a running turn, as steering, charges nothing.
 - With the budget spent, peer messages stay `queued` and wake nothing. Cezar opens its
   `budget` human wait, as it does today, and the run reads Needs you. A human message
@@ -525,7 +527,7 @@ the relationship. No request field carries it.
 | Action | Command | Route |
 | --- | --- | --- |
 | Human input | Cockpit composer; `cez task send <id> '<text>'` outside any task | `POST /api/v1/p/:projectId/runs/:id/messages` |
-| Ask for a reply | `cez message request <task-id> '<text>' --id <UUID> [--timeout-seconds <1-1800>]` | `POST /api/v1/delegation/send`, `kind: request` |
+| Ask for a reply | `cez message request <task-id> '<text>' --id <UUID> [--timeout-seconds <1-7200>]` | `POST /api/v1/delegation/send`, `kind: request` |
 | Give an update | `cez message progress <task-id> '<text>' --id <UUID>` | `…/send`, `kind: progress` |
 | Clarify your request | `cez message follow-up <task-id> '<text>' --id <UUID> --request-id <UUID>` | `…/follow-up` |
 | Answer a request | `cez message reply <task-id> '<text>' --id <UUID> --request-id <UUID>` | `…/reply` |

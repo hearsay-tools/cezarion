@@ -46,16 +46,11 @@ export function resolvedWaits(run: Pick<RunRecord, 'waits'>): Wait[] {
   return (run.waits ?? []).filter((wait) => wait.phase === 'resolved').sort((a, b) => at(a) - at(b));
 }
 
-/**
- * Timer and process waits count against the automatic-wake budget, including a process used as a
- * delayed timer, and a subagent wait that reached its deadline. So does a peer wait: two root tasks have no parent to stop a loop between them
- * (spec 2026-10-27-task-communication-protocol § 8, hearsay-tools/cezarion#1995).
- */
+/** The kind row decides charging from the durable result. Empty dependency deadlines are
+ * free; explicit timers, safety deadlines and substantive outcomes keep their own policy. */
 export function chargesBudget(wait: Wait): boolean {
-  // A subagent wait spends a wake only at its safety deadline: its children ending is an external
-  // event, like CI (hearsay-tools/cezarion#2431).
   const charge = WAIT_KINDS[wait.kind].chargesWake;
-  return charge === 'timeout' ? 'result' in wait && !!wait.result && 'reason' in wait.result && wait.result.reason === 'timeout' : charge;
+  return typeof charge === 'function' ? charge(wait) : charge;
 }
 
 /**

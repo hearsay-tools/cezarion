@@ -102,6 +102,38 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     expect(notes(run.id, `automatic process wake-up (${spentBefore + 1}/40)`)).toHaveLength(1);
   });
 
+  it.each([7, 40])('three empty process deadlines leave a budget of %s unchanged', async budget => {
+    const external = processes();
+    const run = await waitingParent();
+    const pid = sleeper();
+    const waits = [];
+    for (const note of ['one', 'two', 'three', 'anchor']) waits.push(await register(run.id, { pid, note, exit_file: `${note}.exit` }));
+    store.updateRun(run.id, { automaticWakes: budget });
+    for (let index = 0; index < 3; index++) {
+      const wait = waits[index]!;
+      external.settle({ outcome: 'deadline' }, index);
+      await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      expect(store.getRun(run.id)?.automaticWakes).toBe(budget);
+      expect(waitById(run.id, waits[3]!.id)?.phase).toBe('open');
+    }
+    expect(notes(run.id, 'cap reached')).toEqual([]);
+  });
+
+  it('a batch with an empty deadline and a process exit still charges once', async () => {
+    const external = processes();
+    const run = await waitingParent();
+    const pid = sleeper();
+    const empty = await register(run.id, { pid, exit_file: 'empty.exit' });
+    const completed = await register(run.id, { pid, exit_file: 'completed.exit' });
+    await register(run.id, { pid, exit_file: 'anchor.exit' });
+    store.updateRun(run.id, { automaticWakes: 7 });
+    external.settle({ outcome: 'deadline' }, 0);
+    external.settle({ outcome: 'exited' }, 1);
+    await until(() => settledById(run.id, empty.id)?.phase === 'delivered' && settledById(run.id, completed.id)?.phase === 'delivered');
+    expect(store.getRun(run.id)?.automaticWakes).toBe(8);
+  });
+
   it('a resolution at the spent budget is cancelled with the cap note and the run waits on the user', async () => {
     const external = processes();
     const run = await waitingParent();

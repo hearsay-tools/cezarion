@@ -1011,7 +1011,7 @@ Calls made by the agent (owner to check):
   run.
 - **Agent-registered worker waits keep their deadline.** `workerWaitEntrySchema` makes
   `deadline` and `timeoutSeconds` optional for `source: 'cezar'` entries only; the agent's worker
-  waits still require both (1–1800 seconds), and the legacy `WorkerWait` shape keeps its deadline.
+  waits still require both (1–7200 seconds), and the legacy `WorkerWait` shape keeps its deadline.
 - **`via: 'completion'`** is a new `via` value; `openHumanAlias` treats it as `source: 'cezar'`,
   like `no-wait` and `budget`.
 
@@ -1352,8 +1352,8 @@ Calls made by the owner (2026-10-23):
   `watch(request, signal) → Promise<ProcessWaitResult>` sits beside `CiWatcherSupervisor`.
   `armWait`, `disarmWait`, `settleWait`, restart re-arming and the terminal paths reuse the CI
   watch path. Tests replace `watch` as the CI cells do (`vi.spyOn(….prototype, 'watch')`).
-- **Recommendations taken as written:** each process wake counts against the automatic-wake
-  budget; the kind is refused with `timers_disabled` when `monitoringWakeIntervalMinutes()` is
+- **Recommendations:** substantive process outcomes count against the automatic-wake
+  budget; empty process deadline observations do not (ADR 0061). The kind is refused with `timers_disabled` when `monitoringWakeIntervalMinutes()` is
   `null`; the `waitingOn` order is human > usage limit > workers > CI > process > timer; the poll
   interval is 5 s.
 
@@ -1431,9 +1431,10 @@ The wake text names the PID and note and tells the agent to read its own log.
 
 - **Slot:** a process park keeps its slot like CI and timer (`keepsSlot`), arms no idle timer, and
   so keeps the session (and any runner-tracked background job) open while it waits.
-- **Budget:** a resolution at the spent budget is cancelled with the cap note, as a timer's is
-  (`cancelTimersAtCap` generalised), and a `budget` human wait opens when nothing else is open.
-  A delivered process wake is charged as a timer wake is.
+- **Budget:** a substantive process resolution at the spent budget is cancelled with the cap
+  note, as a timer's is, and a `budget` human wait opens when nothing else is open. A delivered
+  process outcome is charged as a timer wake is. An empty process deadline observation is
+  delivered without spending budget, including when the budget is spent (see ADR 0061).
 - **Cancel, Stop, Finish, delete:** the wait is cancelled and its watch aborted. The process is not
   signalled (hearsay-tools/cezarion#1311 owns ending escaped jobs).
 - **Restart:** recovery re-arms from the stored `pid`, `startToken` and `exitFile`; an overdue
@@ -1585,7 +1586,8 @@ Shipped defaults: `maxParallel` 2, `maxMonitoringSessions` 2, wake budget 40,
 | | Claude's native background-task notification | The runner (unsolicited turn) | `resumeParkedRun`; the process wait stays open; the turn end decides again |
 | | `cezar_cancel_wait` | The agent, in a later turn | Cancelled; nothing delivered |
 | | Stop, Finish, cancel, deletion | The user | Cancelled without a wake; the process is not signalled |
-| | Resolution at the spent wake budget | `resolveWait` | Cancelled with the cap note; a `budget` human wait opens if nothing else is open |
+| | Substantive resolution at the spent wake budget | `resolveWait` | Cancelled with the cap note; a `budget` human wait opens if nothing else is open |
+| | Empty process deadline observation | Deadline watcher | Delivered without spending wake budget, including at the cap |
 | | Provider failure or clean session close | The runner | The run stays `waiting`; the supervisor keeps watching; the resolution reopens the run through the scheduler continuation |
 | | Cezar restarts | Recovery | Re-armed from the stored PID, token and exit file; overdue deadline resolves at once; wake through the continuation |
 | `waiting`, process wait open, no live process between turns (Cursor print, after a restart) | Any trigger above | As above | Same outcomes; every wake goes through the continuation |

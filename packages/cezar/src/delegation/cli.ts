@@ -121,7 +121,7 @@ const WORKER_FLAG_HELP: Record<string, string> = {
   '--context-file': '<path>            UTF-8 context file; mutually exclusive with --context.',
   '--attach': '<path>                  Copy a git-ignored file from your worktree into the worker worktree at the same path; repeatable.',
   '--mode': '<one|any|all>             Wait mode (default any); one requires one target.',
-  '--timeout-seconds': '<1-1800>       Wait or request deadline (default 600 seconds); --resume requests accept 1-86400.',
+  '--timeout-seconds': '<1-7200>       Wait or request deadline (default 600 seconds); --resume requests accept 1-86400.',
   '--request': '<UUID>                 Request to wait for; repeat for multiple requests.',
   '--id': '<UUID>                      Message ID; reuse only for an exact retry.',
   '--kind': '<request|progress>        Whether the message requires an explicit reply.',
@@ -193,6 +193,7 @@ function formatWorkerCliError(error: unknown, argv: string[]): string {
     const missing = error.issues.filter(issue => issue.code === 'invalid_type' && issue.message.includes('undefined'));
     if (missing.length) return `${operation} is missing ${missing.map(issue => cliName(issue.path, argv)).join(' and ')}`;
     const first = error.issues[0];
+    if (first?.path[0] === 'timeoutSeconds') return `${operation} --timeout-seconds must be an integer between 1 and ${argv.includes('--resume') ? 86400 : 7200}`;
     return first ? `${operation} has invalid ${cliName(first.path, argv)}` : 'Invalid worker command arguments';
   }
   if (error instanceof Error && 'code' in error && error.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
@@ -331,12 +332,12 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
   return runDelegationCommand(argv, env);
 }
 const MESSAGE_HELP: Record<string, string> = {
-  request: '<task-id> "<text>" --id <UUID> [--timeout-seconds <1-1800>]',
+  request: '<task-id> "<text>" --id <UUID> [--timeout-seconds <1-7200>]',
   progress: '<task-id> "<text>" --id <UUID>',
   'follow-up': '<task-id> "<text>" --id <UUID> --request-id <UUID>',
   reply: '<task-id> "<text>" --id <UUID> --request-id <UUID>',
   conversation: '<task-id> [--before <cursor>]', inbox: '', 'cancel-request': '<UUID>',
-  wait: '--request <UUID> [--request <UUID>...] [--mode one|any|all] [--timeout-seconds <1-1800>] | --peer <task-id> [--peer <task-id>...] [--timeout-seconds <1-1800>]',
+  wait: '--request <UUID> [--request <UUID>...] [--mode one|any|all] [--timeout-seconds <1-7200>] | --peer <task-id> [--peer <task-id>...] [--timeout-seconds <1-7200>]',
   'cancel-wait': '<wait-id>', tasks: '[--all] [--offset <n>]',
 };
 function messageHelp(operation?: string): string {
@@ -435,7 +436,9 @@ const COMMAND_OPTIONS: Record<string, NonNullable<Parameters<typeof parseArgs>[0
 };
 function cliInteger(operation: string, flag: string, value: CliValues[string]): number | undefined {
   if (value === undefined) return;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new WorkerCliError(`${operation} has invalid --${flag}`);
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new WorkerCliError(flag === 'timeout-seconds'
+    ? `${operation} --${flag} must be an integer between 1 and 7200 (resume requests: 1 to 86400)`
+    : `${operation} has invalid --${flag}`);
   return Number(value);
 }
 function messagePayload(operation: string, values: CliValues, positionals: string[]) {

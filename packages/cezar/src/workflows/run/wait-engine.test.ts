@@ -228,3 +228,16 @@ it.each([
   expect(f.watchSignals).toEqual([]);
   expect(f.host.queueWaitWake).toHaveBeenCalledWith(f.run.id);
 });
+
+// Recovery can resolve a deadline with no active session and a spent budget.
+it.each(['peer', 'process', 'worker'] as const)('%s: recovery of an empty deadline at the cap still queues its result', kind => {
+  const f = current = fixture();
+  f.wakes.count = 10;
+  const wait = KINDS[kind].entry(f);
+  f.store.commitWait(f.run.id, wait);
+  if (wait.kind === 'worker') f.engine.resolveWorkerWait(f.run.id, wait, { ...wait, result: { reason: 'timeout' } });
+  else f.engine.resolveWait(f.run.id, wait.id);
+  expect(stored(f, wait.id)?.phase).toBe(WAIT_PHASE.resolved);
+  expect(f.host.queueWaitWake).toHaveBeenCalledWith(f.run.id);
+  expect(f.host.wakeCapReached).not.toHaveBeenCalled();
+});

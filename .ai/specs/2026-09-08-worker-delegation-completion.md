@@ -31,7 +31,7 @@ isolation. Those remain outside hearsay-tools/cezarion#116.
 
 Preserve the delegation gate (since hearsay-tools/cezarion#2784 the per-task settings of ADR 0058, on by default). Add no required
 configuration, dependency, daemon, or new environment knob. Existing limits of
-32 accepted workers per parent and 1–1800 second waits (default 600) remain.
+32 accepted workers per parent and 1–7200 second waits (default 600) remain.
 Existing commands retain their behavior unless this spec explicitly refines it.
 
 ## Inputs and accepted execution identity

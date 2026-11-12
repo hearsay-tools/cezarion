@@ -264,7 +264,7 @@ export type WorkerSteerRequest = z.infer<typeof workerSteerRequestSchema>;
 
 export const workerWaitRequestSchema = z.object({
   workerIds: workerIdsSchema,
-  timeoutSeconds: z.number().int().min(1).max(1800).default(600),
+  timeoutSeconds: z.number().int().min(1).max(7200).default(600),
   mode: workerWaitModeSchema.optional(),
 }).strict().refine(request => request.mode !== 'one' || request.workerIds.length === 1, { message: 'one mode requires exactly one worker' });
 export type WorkerWaitRequest = z.infer<typeof workerWaitRequestSchema>;
@@ -422,12 +422,12 @@ export type WorkerCancelWaitResult = z.infer<typeof workerCancelWaitResultSchema
 
 /**
  * `cez message wait --peer` (hearsay-tools/cezarion#1995): a root task waits on 1–32 named peer
- * root tasks, with a deadline of 1–1,800 s (default 600). The wait answers as its list entry does:
+ * root tasks, with a deadline of 1–7,200 s (default 600). The wait answers as its list entry does:
  * its phase, and once it resolved, why and from which peer.
  */
 export const peerWaitRequestSchema = z.object({
   peerIds: workerIdsSchema,
-  timeoutSeconds: z.number().int().min(1).max(1800).default(600),
+  timeoutSeconds: z.number().int().min(1).max(7200).default(600),
 }).strict();
 export type PeerWaitRequest = z.infer<typeof peerWaitRequestSchema>;
 /**

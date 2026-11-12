@@ -16,7 +16,7 @@
 - No recursive delegation, peer messaging, shared workspaces, dirty snapshots, automatic merge, or automatic review acceptance.
 - This is cooperative local-agent supervision, not process isolation.
 - All routes use `/api/v1`; inventory the new surface in `BACKWARD_COMPATIBILITY.md`.
-- Default timeout is 600 seconds; accepted values are 1–1800 seconds.
+- Default timeout is 600 seconds; accepted values are 1–7200 seconds.
 - At most 32 accepted worker creations per parent, including destroyed workers.
 - Wait up to 30 seconds for proven termination during destruction.
 - No authored configuration, no daemon, no new dependencies; every new CEZ variable is documented in `.env.example` in the same commit.

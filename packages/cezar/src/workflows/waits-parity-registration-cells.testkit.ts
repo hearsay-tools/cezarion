@@ -1,5 +1,7 @@
-import { waitPartDescribers, nativeWire, retryAtOnce, toolResources, prompted, sessionOf, fireTimer, settled, inputsFor, timerText, github, pr, parkedOn, waitOfKind, agentWaits, turnEnds, flushMicrotasks, expectPoolCapacity, timerWaits, humanOpen } from './waits-parity-fixture.testkit.ts';
+import { waitPartDescribers, parentWithWorker, parentTurn, nativeWire, retryAtOnce, toolResources, prompted, sessionOf, fireTimer, settled, inputsFor, timerText, github, pr, parkedOn, waitOfKind, agentWaits, turnEnds, flushMicrotasks, expectPoolCapacity, timerWaits, humanOpen } from './waits-parity-fixture.testkit.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
+import { randomUUID } from 'node:crypto';
+import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { it as registerTest, vi, expect } from 'vitest';
@@ -19,6 +21,28 @@ export const { describeWaitParity } = waitPartDescribers('registration', registr
 
 export function registrationCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
+    for (const [kind, row] of [['worker', 'U28w'], ['request', 'U28r'], ['peer', 'U28p']] as const) {
+      it(`${runner} ${row} ${kind} accepts a two-hour wait on the native wire and names the range above it`, async () => {
+        const { p, w } = await parentWithWorker(runner);
+        const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
+        setRunStatus(store, peer.id, RUN_STATUS.running, { delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer', 'inspect'], receipts: [] } });
+        const requestId = randomUUID();
+        store.commitConversation(p.id, { messages: [{ id: requestId, senderRunId: p.id, recipientRunId: w.id,
+          kind: 'request', text: 'Review the result', createdAt: new Date().toISOString(),
+          deadline: new Date(Date.now() + 7_200_000).toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [] });
+        const target = kind === 'worker' ? { worker_ids: [w.id] } : kind === 'request' ? { request_ids: [requestId] } : { peer_ids: [peer.id] };
+        const bad = toolCall('cezar_wait', { kind, ...target, timeout_seconds: 7201 });
+        const good = toolCall('cezar_wait', { kind, ...target, timeout_seconds: 7200 });
+        await parentTurn(p.id, `${bad} ${good}`, () => agentWaits(p.id).length === 1);
+        const [wait] = agentWaits(p.id);
+        expect(wait).toMatchObject({ timeoutSeconds: 7200, phase: WAIT_PHASE.open, via: WAIT_VIA.cezar_wait });
+        expect(Date.parse(('deadline' in wait! ? wait.deadline : undefined)!) - Date.parse(wait!.registeredAt)).toBe(7_200_000);
+        // The native mock emits the tool's actual refusal as its response text.
+        expect(JSON.stringify(store.readEvents(p.id))).toContain('must be an integer between 1 and 7200');
+        expect(JSON.stringify(store.readEvents(p.id))).toContain('invalid_request');
+      });
+    }
+
     it(`${runner} U26 a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools`, async () => {
       nativeWire(runner);
       retryAtOnce();

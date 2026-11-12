@@ -38,7 +38,7 @@ export const PROCESS_TIMEOUT_MAX_SECONDS = 7200;
 export const PROCESS_EXIT_FILE_MAX = 4096;
 /** A peer wait's deadline, and a request or worker wait's (hearsay-tools/cezarion#1995). */
 export const PEER_WAIT_DEFAULT_SECONDS = 600;
-export const PEER_WAIT_MAX_SECONDS = 1800;
+export const PEER_WAIT_MAX_SECONDS = 7200;
 /** A subagent wait (hearsay-tools/cezarion#2431): its safety deadline after the last child event,
  *  the grace after the last child ends before Cezar wakes the parent, and its child bound. */
 export const SUBAGENT_WAIT_DEADLINE_SECONDS = 1800;
@@ -160,7 +160,7 @@ export const workerWaitEntrySchema = z.object({
   kind: z.literal('worker'),
   // Cezar's completion wait has neither: it ends when its workers settle (hearsay-tools/cezarion#1301).
   deadline: z.iso.datetime().optional(),
-  timeoutSeconds: z.number().int().min(1).max(1800).optional(),
+  timeoutSeconds: z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS).optional(),
   mode: workerWaitModeSchema.optional(),
   workerIds: workerIdsSchema.optional(),
   revisions: z.array(z.object({ workerId: z.uuid(), revision: z.number().int().nonnegative() }).strict()).max(32).optional(),
