@@ -43,8 +43,8 @@ export function runWire(control) {
     // `done` calls cezar_done over the session's own wire before the turn ends, and publishes the
     // tool's answer beside the turn's input (hearsay-tools/cezarion#2397).
     if (result.done) {
-      const { probeCezarTool } = await import(new URL('../../../scripts/mock-ci-tool.mjs', import.meta.url).href);
-      const answer = await probeCezarTool(codex ? 'codex' : 'claude', toolWire, 'cezar_done', {}, false);
+      const { probeSquawkTool } = await import(new URL('../../../scripts/mock-ci-tool.mjs', import.meta.url).href);
+      const answer = await probeSquawkTool(codex ? 'codex' : 'claude', toolWire, 'cezar_done', {}, false);
       publishJson(join(control, `${id}.${number}.done.json`), JSON.parse(answer.response.content[0].text.split('\n')[0]));
     }
     const reply = result.text ?? 'Independent work paused';

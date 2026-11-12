@@ -63,8 +63,8 @@ const ROSTER = declaredRunnerIds().map(id => `'${id}'`).join(', ');
 
 const VIOLATIONS: Record<string, [string, string]> = {
   'product-env-read': ['packages/cezar/src/env-reader.ts', 'const flag = process.env.CEZ_DRY_RUN;\n'],
-  'test-home-write': ['packages/web/src/ambient-home.test.ts', "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}');\n"],
-  'home-boundary': ['packages/cezar/src/ambient-home.ts', 'cezarHomeDir();\n'],
+  'test-home-write': ['packages/web/src/ambient-home.test.ts', "writeFileSync(join(squawkHomeDir(), 'config.json'), '{}');\n"],
+  'home-boundary': ['packages/cezar/src/ambient-home.ts', 'squawkHomeDir();\n'],
   'unit-wait-discipline': ['packages/web/src/wait-violation.test.tsx', 'await sleep(5);\n'],
   'test-wait-discipline': ['packages/cezar/src/wait-violation.test.ts', 'await sleep(5);\n'],
   'card-2-contrast': ['packages/web/src/unsafe.tsx', '<p className="bg-card-2 text-danger text-xs">bad</p>'],
@@ -260,7 +260,7 @@ describe('the cez rules under oxlint', () => {
     'os["home" + "dir"]()',
     'homes[`resolveHome`]()',
     'homes["resolve" + "Home"]()',
-    'paths[`cezarHomeDir`]()',
+    'paths[`squawkHomeDir`]()',
     'paths["cezar" + "HomeDir"]()',
   ].map(source => ['packages/cezar/src/ambient.ts', source])))('oxlint rejects static callee keys in %s: %s', file => {
     expect(findingsFor(file)).toEqual([expect.stringContaining('cez(home-boundary)')]);

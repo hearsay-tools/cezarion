@@ -11,7 +11,7 @@ import { RUNNER_FACTS } from './runner-facts.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
 import { cursorPrintToolGrantArgs } from './runner-tool-grants.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { squawkToolEnvNames } from '../ci-wait/tools.ts';
+import { squawkToolEnvNames } from '../ci-wait/tool-catalog.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 import { cursorArgs } from './cursor-cli-flags.ts';
 import { sanitizeCursorProviderError } from './cursor-provider-error.ts';

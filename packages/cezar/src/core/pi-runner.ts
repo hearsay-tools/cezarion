@@ -31,7 +31,7 @@ import { RUNNER_FACTS } from './runner-facts.js';
 import { unknownToolGrant } from './agent-runner.js';
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
-import { squawkToolNames } from '../ci-wait/tools.js';
+import { squawkToolNames } from '../ci-wait/tool-catalog.js';
 import { readNdjson } from './ndjson.js';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';

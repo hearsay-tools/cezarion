@@ -470,11 +470,6 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     expect(loaded).not.toHaveProperty('monitoringWakeAt');
   });
 
-  it('still loads an old record that predates activity (#490)', () => {
-    seedRuns(dataDir, [LEGACY_RUN]);
-    RunStore.open(dataDir);
-  });
-
   it('never lets an unknown activity value through the schema boundary (#490)', () => {
     seedRuns(dataDir, [{ ...LEGACY_RUN, id: 'bad-activity', status: RUN_STATUS.running, activity: 'bogus' }]);
     // A corrupt/unknown activity must not smuggle a run in with an invalid value. Store schema 4
@@ -482,8 +477,12 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     // run loads without it instead of being dropped whole.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = RunStore.open(dataDir);
-    expect(store.getRun('bad-activity')).toBeDefined();
+    const run = store.getRun('bad-activity');
+    expect(run).toMatchObject({ id: 'bad-activity', title: LEGACY_RUN.title });
+    expect(run).not.toHaveProperty('activity');
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('could not be read'));
+    store.close();
+    expect(readPersistedRuns(dataDir).find((row) => row.id === 'bad-activity')).not.toHaveProperty('activity');
   });
 
   it('round-trips an effort pin while omission stays compatible (#45)', () => {

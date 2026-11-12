@@ -33,7 +33,7 @@ export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './agent-runner.ts';
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { squawkToolEnvNames, squawkToolNames } from '../ci-wait/tools.ts';
+import { squawkToolEnvNames, squawkToolNames } from '../ci-wait/tool-catalog.ts';
 import { costWeightedTokens } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
 import { InputSubmissions } from './input-submissions.ts';

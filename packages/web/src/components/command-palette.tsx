@@ -21,6 +21,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command'
 import { deriveAttention } from '@/lib/attention'
+import { OPEN_COMMAND_PALETTE_EVENT } from '@/lib/command-palette-events'
 import { shortAge } from '@/lib/format'
 import { orderProjects as orderRegistry } from '@/lib/project-order'
 import { isUnread } from '@/lib/read-state'
@@ -41,14 +42,8 @@ import { CONFIRM_PLACEHOLDER, VoiceConfirm, VoiceRows } from '@/components/voice
  * anything close it.
  */
 
-/** The programmatic-open seam: a window event rather than a context, so chrome that must stay
- *  presentational (the sidebar hint today, an onboarding nudge tomorrow) can open the palette
- *  without threading a setter through the tree. */
-export const OPEN_COMMAND_PALETTE_EVENT = 'cezar:open-command-palette'
-
-export function openCommandPalette(): void {
-  window.dispatchEvent(new Event(OPEN_COMMAND_PALETTE_EVENT))
-}
+// The programmatic-open seam lives in `lib/command-palette-events`; kept importable from here.
+export { OPEN_COMMAND_PALETTE_EVENT, openCommandPalette } from '@/lib/command-palette-events'
 
 /** Newest first — the palette's unfiltered Tasks group should lead with what you touched last,
  *  exactly like the sidebar. Stable for equal timestamps (variant groups started together). */

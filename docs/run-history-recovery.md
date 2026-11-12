@@ -37,7 +37,7 @@ DIR=.ai/squawk   # or .ai/cezar before the move
    node --input-type=module -e "import { DatabaseSync } from 'node:sqlite'; import { writeFileSync } from 'node:fs'; const db = new DatabaseSync('$DIR/runs.db', { readOnly: true }); const rows = db.prepare('SELECT data FROM runs ORDER BY created_at, id').all(); writeFileSync('runs.export.json', '[' + rows.map((row) => row.data).join(',') + ']'); console.log(rows.length + ' runs')"
    ```
 
-   `runs.export.json` is the same array of `RunRecord` that `runs.json` always was. To downgrade to a pre-SQLite Cezarion release with the new history, move the current `.ai/cezar/runs.json` aside and put the export in its place as `.ai/cezar/runs.json`, then start that release: it reads only `.ai/cezar/`. Leave `runs.db` where it is: pre-SQLite releases do not read it. SQLite-backed Squawk and Squawk releases still read `runs.db`; replacing `runs.json` does not downgrade their database.
+   `runs.export.json` is the same array of `RunRecord` that `runs.json` always was. To downgrade to a pre-SQLite Cezarion release with the new history, move the current `.ai/cezar/runs.json` aside and put the export in its place as `.ai/cezar/runs.json`, then start that release: it reads only `.ai/cezar/`. Leave `runs.db` where it is: pre-SQLite releases do not read it. SQLite-backed Cezarion and Squawk releases still read `runs.db`; replacing `runs.json` does not downgrade their database.
 5. **Re-upgrade after a downgrade, keeping both histories.** Export as in step 4, then merge by run id. This example keeps the `runs.db` copy when both files hold the same id, so choose the order for your case:
 
    ```bash

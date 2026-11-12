@@ -1,6 +1,6 @@
 import { useLocation, useSearchParams } from 'react-router'
 
-import { useSidebarNavigate } from '@/components/app-shell'
+import { useSidebarNavigate } from '@/components/shell-contexts'
 import { SIDEBAR_LIST_BODY_CLASS } from '@/components/nav-row-styles'
 import { stripProjectPrefix } from '@/lib/project-router'
 

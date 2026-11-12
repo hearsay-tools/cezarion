@@ -3,7 +3,7 @@ import type { Node } from '@babel/types';
 import { TEST_FILE } from './home-boundary.ts';
 import { lineAt, type SourceRule } from './source-rule.ts';
 
-const SOURCES = new Set(['homedir', 'cezarHomeDir', 'resolveHome']);
+const SOURCES = new Set(['homedir', 'squawkHomeDir', 'resolveHome']);
 const EXPRESSIONS = new Set(['TSAsExpression', 'TSTypeAssertion', 'TSNonNullExpression', 'TSSatisfiesExpression', 'TSInstantiationExpression']);
 const TYPE_ONLY = new Set([
   'TSTypeAnnotation', 'TSTypeParameterDeclaration', 'TSTypeParameterInstantiation', 'TSTypeParameter',

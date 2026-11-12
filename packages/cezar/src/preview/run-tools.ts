@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { previewStopRequestSchema, previewServeRequestSchema, type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import type { RunStore } from '../runs/store.ts';
-import { previewToolEnabled } from '../ci-wait/tools.ts';
+import { previewToolEnabled } from '../ci-wait/tool-catalog.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from './registration.ts';
 
 export async function stopPreviewServer(store: RunStore, preview: PreviewHostLike | undefined, squawkPort: (() => number | undefined) | undefined, disposed: () => boolean, runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {

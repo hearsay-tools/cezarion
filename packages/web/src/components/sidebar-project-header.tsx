@@ -8,7 +8,7 @@ import type * as React from 'react'
 import { openProjectIn } from '@/api/client'
 import { useHealth, useMarkRunSeen, useOpenTargets, useProjects, useProjectRuns } from '@/api/queries'
 import type { RunSummary } from '@open-mercato/cezar-api-client'
-import { useSidebarNavigate } from '@/components/app-shell'
+import { useSidebarNavigate } from '@/components/shell-contexts'
 import { cliTargetRunner, openInIcon } from '@/components/open-in-menu'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal,
