@@ -18,5 +18,6 @@ Disclosed: <raised timeouts, added retries or skip conditions, removed assertion
 ```
 
 **Done when** the PR is open with the label and the section. Then read
-[`.ai/skills/auto-merge/references/follow.md`](follow.md) and act on it now: its
-table enables auto-merge.
+[`.ai/skills/auto-merge/references/follow.md`](follow.md) and act on it: its
+table arms auto-merge only after the reviewer round and the changed-function
+quality report for the head are done.

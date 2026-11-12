@@ -1,6 +1,6 @@
 ---
 name: auto-merge
-description: Auto-merge for pull requests into `main`. Use when opening a pull request, and after each push, CI result, review round or draft/ready change on one you opened with the `auto-merge` label.
+description: Auto-merge for pull requests into `main`. Use when opening a pull request, before and after each push on it, and after each CI result, review round, draft/ready change or quality-report completion on one you opened with the `auto-merge` label.
 ---
 
 # Auto-merge
@@ -40,8 +40,30 @@ confirm the rules the script cannot see:
 as it says. A rule you are unsure of does not hold. On any other outcome, open the
 PR the usual way, without the label; this skill is then finished.
 
+## Arm it only after the review and the report
+
+A qualifying PR does not merge on checks alone. Arm
+`gh pr merge --auto --squash` only when both preconditions hold for the PR's
+current head:
+
+- The reviewer round for that head has no blocking finding: no finding scored
+  5 or more. Findings scored 4 or lower do not block; list them in the PR body.
+- The changed-function quality report for that head is complete with no
+  blocker, as [Before a PR](../check-code-quality/references/pre-pr.md)
+  defines it. An incomplete report is a blocker, whatever its exit code: it
+  blocks this path as it blocks that one.
+
+Before any later push to a PR with auto-merge armed, turn it off
+(`gh pr merge --disable-auto`). An armed request never carries across a push:
+arm it again only when both preconditions hold for the new head.
+
+Like the review round, this arming rule is an agent rule: queue admission
+checks native CI and CodeRabbit only, never the local report. GitHub enqueues
+the PR when its required checks pass.
+
 ## Labeled PRs
 
-After each push, CI result, review round and draft/ready change on a PR you opened
-with the `auto-merge` label, read
+Before each push to a PR you opened with the `auto-merge` label, and after
+each push, CI result, review round, draft/ready change and quality-report
+completion on it, read
 [`.ai/skills/auto-merge/references/follow.md`](references/follow.md) and act on it.
