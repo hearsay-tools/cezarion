@@ -1,5 +1,7 @@
 import { Button } from '@/components/ui/button'
-import { PENDING_ASK_SECTION_ID } from './session-transcript'
+
+/** The section holding the pending ask's answerable copy; its row key is `pending-ask:<askId>`. */
+export const PENDING_ASK_SECTION_ID = 'pending-ask'
 
 /**
  * Navigation between the pending question's two places (hearsay-tools/cezarion#1495): the

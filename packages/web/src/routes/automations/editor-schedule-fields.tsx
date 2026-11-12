@@ -1,11 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react'
 import { SCHEDULE_HOURS_OPTIONS, WEEKDAY_NAMES, cronOf, type AutomationSchedule, type NormalizedSchedule, type ScheduleEvery, type ScheduleType } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChipButton } from './chip-button'
 import { OnceFields, defaultOnceAt } from './once-fields'
+import { TimeField } from './time-field'
 
 const SHAPES: readonly { type: ScheduleType; label: string }[] = [
   { type: 'daily', label: 'Every day' },
@@ -15,40 +14,8 @@ const SHAPES: readonly { type: ScheduleType; label: string }[] = [
   { type: 'once', label: 'Once' },
 ]
 
-const pad = (n: number) => String(n).padStart(2, '0')
-
-/** A two-digit clock field. It holds its own text while typing — "7" is not yet "07" — and
- *  commits to the schedule only a value in range; blur settles it back to the committed value.
- *  Text that is not the committed value ("24", "7x") is invalid until fixed or blurred: the field
- *  says so and its custom validity blocks the form, so Enter cannot save a time nobody typed. */
-export function TimeField({ label, value, max, onCommit }: { label: string; value: number; max: number; onCommit: (next: number) => void }) {
-  const [text, setText] = useState(pad(value))
-  const ref = useRef<HTMLInputElement>(null)
-  const invalid = !(/^\d{1,2}$/.test(text) && Number(text) === value)
-  const message = `${label} must be 00–${pad(max)}.`
-  const messageId = useId()
-  useEffect(() => { ref.current?.setCustomValidity(invalid ? message : '') }, [invalid, message])
-  return (
-    <>
-      <Input
-        ref={ref}
-        aria-label={label}
-        aria-invalid={invalid || undefined}
-        aria-describedby={invalid ? messageId : undefined}
-        inputMode="numeric"
-        maxLength={2}
-        className="w-20 text-center tabular-nums"
-        value={text}
-        onChange={(event) => {
-          setText(event.target.value)
-          if (/^\d{1,2}$/.test(event.target.value) && Number(event.target.value) <= max) onCommit(Number(event.target.value))
-        }}
-        onBlur={() => setText(pad(value))}
-      />
-      {invalid ? <p id={messageId} className="order-last basis-full text-xs text-destructive">{message}</p> : null}
-    </>
-  )
-}
+// Moved to `time-field`; kept importable from here.
+export { TimeField }
 
 /** `stored` is the saved schedule when editing: a one-time due time left as saved is not re-judged as past. */
 export function ScheduleFields({ value, stored, onChange, timeZone }: { value: NormalizedSchedule; stored?: AutomationSchedule | undefined; onChange: (next: NormalizedSchedule) => void; timeZone: string }) {
