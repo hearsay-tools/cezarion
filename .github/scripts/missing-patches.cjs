@@ -5,9 +5,11 @@ const { execFileSync } = require('node:child_process');
 // this repository's PRs; docs/sdlc/ci.md § GitHub patch limits names it, and scripts/prepr.mjs reads it.
 const GITHUB_PATCH_LIMITS = Object.freeze({ fileBytes: 102_400 });
 
-// The `git diff` options that give GitHub's patch shape, whatever the user's diff settings.
-const PATCH_SHAPE = Object.freeze(['--no-ext-diff', '--no-textconv', '--no-color', '--unified=3',
-  '--diff-algorithm=myers', '--src-prefix=a/', '--dst-prefix=b/']);
+// The `git` arguments that give GitHub's patch shape, whatever the user's settings: every
+// option a diff.* or color.* setting can change that changes the patch's bytes.
+const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', 'diff', '--no-ext-diff',
+  '--no-textconv', '--no-color', '--no-relative', '--unified=3', '--inter-hunk-context=0',
+  '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/', '--dst-prefix=b/']);
 
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 << 20, stdio: 'pipe' });
@@ -26,7 +28,7 @@ function patchFacts(patch) {
 function localPatch(cwd, from, to, file) {
   const paths = file.previous_filename ? [file.previous_filename, file.filename] : [file.filename];
   const renames = file.previous_filename ? '--find-renames' : '--no-renames';
-  return gitBytes(cwd, 'diff', ...PATCH_SHAPE, renames, from, to, '--', ...paths);
+  return gitBytes(cwd, ...PATCH_DIFF, renames, from, to, '--', ...paths);
 }
 
 /** Why GitHub returned no patch for a file, from its local patch facts. */
@@ -113,4 +115,4 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   return report(core, missingPatches(files, stats, pr.changed_files, local));
 }
 
-module.exports = { GITHUB_PATCH_LIMITS, PATCH_SHAPE, diffStats, patchFacts, patchCause, missingPatches, checkPullRequest };
+module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, diffStats, patchFacts, patchCause, missingPatches, checkPullRequest };

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { isDocsPath } = require('../.github/scripts/change-surface.cjs');
-const { GITHUB_PATCH_LIMITS, PATCH_SHAPE, patchFacts } = require('../.github/scripts/missing-patches.cjs');
+const { GITHUB_PATCH_LIMITS, PATCH_DIFF, patchFacts } = require('../.github/scripts/missing-patches.cjs');
 
 export const SQUEAL_WAIT_MS = 120_000;
 
@@ -144,7 +144,7 @@ function mergeBaseOf(base, io) {
   return mergeBase;
 }
 
-const DIFF = ['diff', ...PATCH_SHAPE, '--find-renames'];
+const DIFF = [...PATCH_DIFF, '--find-renames'];
 
 /** Rows of `git diff --numstat -z` with renames on: a rename row names its old and new path. */
 export function numstatRows(numstat) {

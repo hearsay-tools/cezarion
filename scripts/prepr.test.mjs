@@ -282,8 +282,13 @@ test('numstat rows keep tabs in a path and read a rename row as two paths', () =
 
 test('patch limits measure GitHub\'s patch shape, whatever the user\'s diff settings', async t => {
   const io = fixtureRepo(t, (cwd, git) => {
-    for (const [key, value] of [['diff.context', '10000'], ['diff.noprefix', 'true'], ['color.diff', 'always'], ['diff.algorithm', 'patience']]) git.git('config', key, value);
-    fs.appendFileSync(path.join(cwd, 'big.md'), 'one more line\n');
+    const settings = [['diff.context', '0'], ['diff.interHunkContext', '100000'], ['diff.noprefix', 'true'],
+      ['color.diff', 'always'], ['diff.algorithm', 'patience'], ['diff.relative', 'true'], ['diff.suppressBlankEmpty', 'true']];
+    for (const [key, value] of settings) git.git('config', key, value);
+    const lines = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10).split('\n');
+    lines[0] = 'first edited';
+    lines[lines.length - 2] = 'last edited';
+    fs.writeFileSync(path.join(cwd, 'big.md'), lines.join('\n'));
   }, cwd => fs.writeFileSync(path.join(cwd, 'big.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10)));
   const [line] = patchLimitLines('main', io);
   assert.equal(line.ok, true, line.text);
