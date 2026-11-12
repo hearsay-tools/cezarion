@@ -881,7 +881,7 @@ jobs:
         continue-on-error: true
         env:
           SHARD: ${{ matrix.shard }}
-          COLLECT: ${{ steps.collect.outcome }}
+          COLLECT: ${{ github.event_name == 'pull_request_target' && steps.collect_pr.outcome || steps.collect.outcome }}
           UPLOAD: ${{ steps.upload.outcome }}
         run: |
           if [ "$COLLECT" != success ]; then

@@ -223,3 +223,21 @@ test('a shard that produced no report warns with its number and says where the v
   const upload = runStep(directory, step, { SHARD: '3', COLLECT: 'success', UPLOAD: 'failure' });
   assert.match(upload.stdout, /shard 3: the upload ended as failure/);
 });
+
+test('shard warnings use the selected PR or full dispatch collection outcome', t => {
+  const step = named(ci().jobs.vitest, 'Report a missing shard coverage report');
+  const directory = sandbox(t);
+  for (const event of ['pull_request_target', 'workflow_dispatch']) {
+    for (const outcome of ['success', 'failure']) {
+      const ctx = { ...context(event), steps: {
+        collect: { outcome: event === 'pull_request_target' ? 'skipped' : outcome },
+        collect_pr: { outcome: event === 'pull_request_target' ? outcome : 'skipped' },
+      } };
+      const collect = expression(step.env.COLLECT, ctx);
+      assert.equal(collect, outcome, `${event}: collection result`);
+      const result = runStep(directory, step, { SHARD: '1', COLLECT: collect, UPLOAD: 'failure' });
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, outcome === 'success' ? /the upload ended as failure/ : /the test run ended as failure/);
+    }
+  }
+});
