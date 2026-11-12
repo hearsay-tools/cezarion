@@ -68,3 +68,9 @@ test('lint that is off or failed is incomplete, not clean', () => {
     assert.equal(judgeSqueal(0, { selection: { testFiles: [] }, lint }).state, 'incomplete');
   }
 });
+
+test('lint that has not started is incomplete when a linted file changed', () => {
+  const notStarted = { selection: { testFiles: [] }, lint: { failing: 0, linting: { done: 0, total: 0 } } };
+  assert.equal(judgeSqueal(0, notStarted, () => false, true).state, 'incomplete');
+  assert.equal(judgeSqueal(0, notStarted).state, 'pass');
+});

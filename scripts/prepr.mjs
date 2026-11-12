@@ -11,7 +11,7 @@ const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change
 export const SQUEAL_WAIT_MS = 120_000;
 
 /** Judge one `squeal status --wait <ms> <paths> --json` result (exit code and parsed stdout). */
-export function judgeSqueal(exitCode, status, ignorePath = () => false) {
+export function judgeSqueal(exitCode, status, ignorePath = () => false, lintExpected = false) {
   const selection = status?.selection ?? {};
   // Browser specs are CI's: Squeal runs them only on request.
   const files = (selection.testFiles ?? []).filter(f => !f.path.endsWith('.e2e.ts'));
@@ -19,19 +19,21 @@ export function judgeSqueal(exitCode, status, ignorePath = () => false) {
   const failed = files.filter(f => f.state === 'current' && !['pass', 'skip'].includes(f.verdict)).map(f => f.path);
   const failures = selection.verdict?.failures ?? {};
   if (exitCode === 1 || failed.length || failures.tests || failures.testFiles || failures.setups) {
-    return { state: 'fail', failed, missing: [], lint: lintOf(status) };
+    return { state: 'fail', failed, missing: [], lint: lintOf(status, lintExpected) };
   }
   const missing = [...files.filter(f => f.state !== 'current').map(f => f.path), ...unmatched.map(p => `${p} (selects no test file)`)];
-  const lint = lintOf(status);
+  const lint = lintOf(status, lintExpected);
   if (lint.failing) return { state: 'fail', failed: [], missing, lint };
   return { state: missing.length || lint.unfinished ? 'incomplete' : 'pass', failed: [], missing, lint, count: files.length };
 }
 
-function lintOf(status) {
+// lintExpected: a changed file is one Squeal lints, so a lint run that has not started is not a clean one.
+function lintOf(status, lintExpected = false) {
   const l = status?.lint;
   if (!l) return { failing: 0, unfinished: 1 };
   if (l.off || l.failed || l.unreadable) return { failing: l.failing ?? 0, unfinished: 1, unavailable: String(l.off ?? l.failed ?? l.unreadable) };
-  const notDone = Math.max(0, (l.linting?.total ?? 0) - (l.linting?.done ?? 0));
+  const total = l.linting?.total ?? 0;
+  const notDone = Math.max(0, total - (l.linting?.done ?? 0)) + (lintExpected && total === 0 ? 1 : 0);
   return { failing: l.failing ?? 0, unfinished: (l.pending ?? 0) + (l.stale ?? 0) + (l.unknown ?? 0) + notDone };
 }
 
@@ -63,12 +65,25 @@ function changedFiles(base) {
   return [...new Set(`${tracked}\n${untracked}`.split('\n').filter(Boolean))];
 }
 
+const LINTED = /^packages\/.*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function squealChecks(paths, waitMs) {
+  const deadline = Date.now() + waitMs;
+  const lintExpected = paths.some(p => LINTED.test(p));
+  const ignore = p => p.endsWith('.e2e.ts') || isDocsPath(p);
   const wait = await run('squeal', ['status', '--wait', String(waitMs), '--json', ...paths]);
   let status;
   try { status = JSON.parse(wait.out); } catch { status = undefined; }
   if (wait.code === 127 || !daemonAlive(status)) return { daemon: false };
-  return { daemon: true, ...judgeSqueal(wait.code, status, p => p.endsWith('.e2e.ts') || isDocsPath(p)) };
+  let result = judgeSqueal(wait.code, status, ignore, lintExpected);
+  // The named-file wait settles on tests alone: give lint the rest of the bound.
+  while (result.state === 'incomplete' && !result.missing.length && Date.now() < deadline) {
+    await sleep(Math.min(3000, Math.max(0, deadline - Date.now())));
+    const poll = await run('squeal', ['status', '--json']);
+    try { result = judgeSqueal(wait.code, { ...status, lint: JSON.parse(poll.out).lint }, ignore, lintExpected); } catch { break; }
+  }
+  return { daemon: true, ...result };
 }
 
 // Without a daemon: the focused tests only when the selection is not the full suite.
