@@ -2,6 +2,8 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { SearchXIcon } from 'lucide-react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { isPainted, paintClasses } from '@/test/paint'
+
 import { CenteredState, TwinkleBackdrop } from './centered-state'
 
 // Explicit rather than relying on RTL's auto-cleanup, which only runs when vitest `globals` is on.
@@ -18,14 +20,13 @@ describe('CenteredState', () => {
     const tiles = (['primary', 'neutral', 'danger'] as const).map((tone) => {
       const { container } = render(<CenteredState icon={<SearchXIcon />} tone={tone} title="T" />)
       expect(container.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe(tone)
-      // Each tone paints its own tile fill; borders and ink alone would not set the tiles apart.
-      const fill = tileOf(container).className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
-      expect(fill.length, tone).toBeGreaterThan(0)
-      expect(fill, tone).not.toContain('bg-transparent')
+      // Every painted property of the tile is present, not see-through, and its own per tone.
+      const paint = (['fill', 'stroke', 'ink'] as const).map((property) => paintClasses(tileOf(container), property))
+      for (const classes of paint) expect(isPainted(classes), `${tone}: ${classes.join(' ')}`).toBe(true)
       cleanup()
-      return fill.join(' ')
+      return paint
     })
-    expect(new Set(tiles).size).toBe(3)
+    for (const property of [0, 1, 2]) expect(new Set(tiles.map((paint) => paint[property]!.join(' '))).size).toBe(3)
   })
 
   it('defaults to the neutral tone', () => {

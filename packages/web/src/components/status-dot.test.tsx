@@ -1,6 +1,8 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { isPainted, paintClasses, type PaintedProperty } from '@/test/paint'
+
 import { StatusDot, type StatusDotTone } from './status-dot'
 
 // Explicit rather than relying on RTL's auto-cleanup, which only runs when vitest `globals` is on.
@@ -15,21 +17,25 @@ function renderDot(ui: React.ReactElement) {
 
 describe('StatusDot', () => {
   const TONES = ['success', 'pending', 'danger', 'accent', 'info', 'running', 'neutral'] as const satisfies readonly StatusDotTone[]
-  const fillOf = (dot: Element) => dot.className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
-  // A painted fill: some bg- class, none of them transparent.
-  const painted = (fill: readonly string[]) => fill.length > 0 && !fill.includes('bg-transparent')
+  const fillOf = (dot: Element) => paintClasses(dot, 'fill')
+  // One rendered dot per tone, for a property that must be painted and set the tones apart.
+  const perTone = (shape: 'filled' | 'ring' | 'workers', property: PaintedProperty) => TONES.map((tone) => {
+    const paint = paintClasses(renderDot(<StatusDot tone={tone} shape={shape} />), property)
+    cleanup()
+    return { tone, paint }
+  })
+  const expectPaintedApart = (rows: readonly { tone: string; paint: string[] }[]) => {
+    for (const { tone, paint } of rows) expect(isPainted(paint), `${tone}: ${paint.join(' ')}`).toBe(true)
+    expect(new Set(rows.map(({ paint }) => paint.join(' '))).size).toBe(rows.length)
+  }
 
   it('gives every tone its own fill and names it in data-tone', () => {
-    // The resolved colours (the sidebar-safe violet for running, #617) are sampled in quick-list.e2e.ts.
-    const fills = TONES.map((tone) => {
-      const dot = renderDot(<StatusDot tone={tone} />)
-      expect(dot.getAttribute('data-tone')).toBe(tone)
-      const fill = fillOf(dot)
-      expect(painted(fill), tone).toBe(true)
+    // The resolved colours (the sidebar-safe violet for running) are sampled in quick-list.e2e.ts.
+    for (const tone of TONES) {
+      expect(renderDot(<StatusDot tone={tone} />).getAttribute('data-tone')).toBe(tone)
       cleanup()
-      return fill.join(' ')
-    })
-    expect(new Set(fills).size).toBe(TONES.length)
+    }
+    expectPaintedApart(perTone('filled', 'fill'))
   })
 
   it('defaults to the neutral tone', () => {
@@ -70,6 +76,14 @@ describe('StatusDot', () => {
       expect(fillOf(ring).filter((cls) => cls !== 'bg-transparent')).toEqual([])
       // A stroke wider than zero: plain `border`, `border-N` or `border-[Npx]` with N > 0.
       expect(classes.some((cls) => /^border(?:-[1-9]\d*|-\[(?:0?\.\d*[1-9]|[1-9][\d.]*)px\])?$/.test(cls))).toBe(true)
+    })
+
+    it('strokes each ring tone in its own painted colour', () => {
+      expectPaintedApart(perTone('ring', 'stroke'))
+    })
+
+    it('inks each workers glyph tone in its own painted colour', () => {
+      expectPaintedApart(perTone('workers', 'ink'))
     })
 
     it('renders the workers shape as a bot glyph with the same accessible name', () => {
