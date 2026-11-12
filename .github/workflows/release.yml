@@ -4,6 +4,19 @@ name: Release
 # (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482). Pushes to `main`
 # publish the `dev` preview via ci.yml's `publish-snapshot`; same-repo PRs use
 # publish-pr-snapshot.yml. Only this workflow moves the `latest` dist-tag.
+#
+# One dispatch takes one candidate commit through every stage
+# (spec .ai/specs/2026-11-11-one-full-run-delivery-pipeline.md § Release,
+# hearsay-tools/cezarion#3212; docs/publishing.md § Stable releases):
+#   plan     → the candidate commit, the versions, and the gates (24 hours, blockers, rehearsal)
+#   suite    → the full suite, for a release/** head no merge queue verified
+#   stage    → `<version>-rc.<n>` of the candidate under `next`
+#   candidate→ tests of the published candidate (release-candidate-tests.yml)
+#   release  → the gates again, then `<version>` of the same commit under `latest`,
+#              an install through the alias, the bump PR, the tag and the GitHub Release
+#   blocker  → a `release-blocker` issue when the candidate or the promoted install fails
+# Tooling runs from the dispatch commit; the package is built from the candidate commit
+# in `source/`, so a rollback to an older commit still runs the current release scripts.
 on:
   workflow_dispatch:
     inputs:
@@ -17,84 +30,130 @@ on:
           - minor
           - major
           - existing
+      rollback:
+        description: 'Roll back: release the last good stable commit again as the next patch version (ignores bump and the 24-hour limit)'
+        required: false
+        default: false
+        type: boolean
+      rollback_to:
+        description: 'Rollback only: the stable tag to release again (default: the newest stable tag below latest)'
+        required: false
+        type: string
+      ignore_blockers:
+        description: 'Rollback only: release-blocker issue numbers that do not affect the rollback commit (comma separated)'
+        required: false
+        type: string
 
-# Default-read at the workflow level; the publish job elevates what it needs.
-# Verify stays read-only so a suite run never holds the release OIDC token.
+# Default-read at the workflow level; the publish jobs elevate what they need.
+# The suite and the candidate tests stay read-only, so no test run holds the OIDC token.
 permissions:
   contents: read
 
+# One release at a time across branches: the 24-hour rule, the rc numbers and the
+# dist-tags are shared by every line.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  # Vitest's github-actions reporter appends `## Vitest Test Report` to
-  # $GITHUB_STEP_SUMMARY. Keeping Verify in the same job as Publish meant a
-  # registry blip after a green suite failed the whole job and, on re-run,
-  # left a second / false-failing report next to the passing one (#62).
-  # Split like ci.yml: the suite owns one green job; publish is a dependent.
-  verify:
-    name: Verify before release
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 20
-    # Releases from `main` (the stable trunk) or a `release/*` maintenance branch —
-    # the latter is how a patch line (e.g. `release/0.9.x`) ships fixes without the
-    # newer features already merged to `main`. Dispatch from the BRANCH, never a tag:
-    # workflow_dispatch reads this file from the ref it runs on, and a tag's copy is
-    # frozen, so a tag would still evaluate the old gate.
+  plan:
+    name: Plan the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Dispatch from the BRANCH, never a tag: workflow_dispatch reads this file from the ref
+    # it runs on, and a tag's copy is frozen.
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
-
+    permissions:
+      contents: read
+      actions: read # ci.yml push runs and the last Nightly rehearsal
+      issues: read # open release-blocker issues
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      package: ${{ steps.plan.outputs.package }}
+      alias: ${{ steps.plan.outputs.alias }}
+      source_sha: ${{ steps.plan.outputs.source_sha }}
+      dispatch_sha: ${{ steps.plan.outputs.dispatch_sha }}
+      version: ${{ steps.plan.outputs.version }}
+      stable_tag: ${{ steps.plan.outputs.stable_tag }}
+      candidate: ${{ steps.plan.outputs.candidate }}
+      candidate_tag: ${{ steps.plan.outputs.candidate_tag }}
+      previous: ${{ steps.plan.outputs.previous }}
+      upgrade_from: ${{ steps.plan.outputs.upgrade_from }}
+      names: ${{ steps.plan.outputs.names }}
+      needs_suite: ${{ steps.plan.outputs.needs_suite }}
+      ignore_blockers: ${{ steps.plan.outputs.ignore_blockers }}
+      record_bump: ${{ steps.plan.outputs.record_bump }}
+      bump_sha: ${{ steps.plan.outputs.bump_sha }}
+      bump_dir: ${{ steps.plan.outputs.bump_dir }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Plan the release
+        id: plan
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          BUMP: ${{ inputs.bump }}
+          ROLLBACK: ${{ inputs.rollback }}
+          ROLLBACK_TO: ${{ inputs.rollback_to }}
+          IGNORE_BLOCKERS: ${{ inputs.ignore_blockers }}
+        with:
+          retries: 3
+          script: |
+            const { execFileSync } = require('node:child_process');
+            const { planRelease } = require('./.github/scripts/release-plan.cjs');
+            const { releasePackages, installAlias, publishedNames } = require('./.github/scripts/release-packages.cjs');
+            const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+            const plan = await planRelease({
+              github, context, git, packageName: releasePackages().publication.cezar.name, aliasName: installAlias(), names: publishedNames(),
+              inputs: { bump: process.env.BUMP, rollback: process.env.ROLLBACK, rollbackTo: process.env.ROLLBACK_TO, ignoreBlockers: process.env.IGNORE_BLOCKERS },
+            });
+            for (const [key, value] of Object.entries(plan)) core.setOutput(key, value);
+            await core.summary.addHeading(`Release plan: ${plan.package}@${plan.version}`)
+              .addCodeBlock(JSON.stringify(plan, null, 2), 'json').write();
 
-      - name: Typecheck
-        run: npm run typecheck
+  suite:
+    name: Full suite on the release branch head
+    needs: plan
+    if: needs.plan.outputs.needs_suite == 'true'
+    uses: ./.github/workflows/full-suite.yml
+    with:
+      ref: ${{ needs.plan.outputs.source_sha }}
 
-      - name: Run unit tests
-        run: npm run test:unit
-
-      - name: Run server and cockpit unit suites
-        run: npm test
-
-      - name: Build application
-        run: npm run build
-
-  release:
-    name: Release ${{ inputs.bump }} to npm (latest)
-    needs: verify
+  stage:
+    name: Stage ${{ needs.plan.outputs.candidate }} under ${{ needs.plan.outputs.candidate_tag }}
+    needs: [plan, suite]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.suite.result == 'success' || needs.suite.result == 'skipped') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
-    # Gate the publish behind a required-reviewer approval. If the environment
-    # isn't configured yet, GitHub creates it on first use without reviewers
-    # (non-blocking); add reviewers at Settings → Environments → production.
+    timeout-minutes: 25
+    # The trusted publisher on npmjs.com is pinned to this workflow and this environment.
     environment: production
     permissions:
-      contents: write # create the release tag + GitHub Release via the API
+      contents: read
       id-token: write # npm trusted publishing (OIDC) + provenance
-      pull-requests: read # inspect/reuse bump PRs; the App token creates them
-      actions: read # observe native PR CI; never dispatch over it
-
     steps:
-      - name: Check out repository
+      - name: Check out release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # No token while dependencies install and the builds run.
+          persist-credentials: false
+
+      - name: Check out the candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -106,17 +165,76 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Build release tooling
+        run: |
+          pnpm install --frozen-lockfile
+          npm run build:server
 
-      - name: Build application
-        run: npm run build
+      - name: Build the candidate
+        working-directory: source
+        run: |
+          pnpm install --frozen-lockfile
+          npm run build
 
+      # A rerun of an older run reuses its plan; `next` may have moved on since.
+      - name: Check the candidate tag
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          NAMES: ${{ needs.plan.outputs.names }}
+          VERSION: ${{ needs.plan.outputs.candidate }}
+          TAG: ${{ needs.plan.outputs.candidate_tag }}
+        with:
+          retries: 3
+          script: |
+            const { publishedNames } = require('./.github/scripts/release-packages.cjs');
+            require('./.github/scripts/release-plan.cjs').checkCandidateTag({
+              names: process.env.NAMES, sourceNames: publishedNames(`${process.env.GITHUB_WORKSPACE}/source`).join(','),
+              version: process.env.VERSION, tag: process.env.TAG,
+            });
+
+      - name: Publish the release candidate
+        id: release
+        env:
+          HSQ_RELEASE_ROOT: ${{ github.workspace }}/source
+          RELEASE_VERSION: ${{ needs.plan.outputs.candidate }}
+          RELEASE_DIST_TAG: ${{ needs.plan.outputs.candidate_tag }}
+        run: node scripts/release.mjs "${{ inputs.bump }}"
+
+  candidate:
+    name: Test the published candidate
+    needs: [plan, stage]
+    if: ${{ !cancelled() && needs.stage.result == 'success' }}
+    uses: ./.github/workflows/release-candidate-tests.yml
+    with:
+      package: ${{ needs.plan.outputs.package }}
+      alias: ${{ needs.plan.outputs.alias }}
+      version: ${{ needs.plan.outputs.candidate }}
+      previous: ${{ needs.plan.outputs.upgrade_from }}
+      ref: ${{ needs.plan.outputs.source_sha }}
+
+  release:
+    name: Promote ${{ needs.plan.outputs.version }} to npm (${{ needs.plan.outputs.stable_tag }})
+    needs: [plan, candidate]
+    if: ${{ !cancelled() && needs.candidate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    permissions:
+      contents: write # create the release tag + GitHub Release via the API
+      id-token: write # npm trusted publishing (OIDC) + provenance
+      pull-requests: read # inspect/reuse bump PRs; the App token creates them
+      actions: read # observe native PR CI and the last Nightly rehearsal
+      issues: read # re-check open release-blocker issues
+    outputs:
+      publish: ${{ steps.release.outcome }}
+      alias_smoke: ${{ steps.alias_smoke.outcome }}
+      dist_tags: ${{ steps.dist_tags.outcome }}
+    steps:
       # Validate and mint before npm publication; missing credentials must not
       # leave a published version without an App-authored bump PR.
       - name: Validate release App settings
         id: validate_release_app
-        if: inputs.bump != 'existing'
+        if: needs.plan.outputs.record_bump == 'true'
         env:
           RELEASE_APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
           RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
@@ -131,7 +249,7 @@ jobs:
 
       - name: Create release PR token
         id: release_app
-        if: inputs.bump != 'existing'
+        if: needs.plan.outputs.record_bump == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
@@ -140,7 +258,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Check release App identity
-        if: inputs.bump != 'existing'
+        if: needs.plan.outputs.record_bump == 'true'
         env:
           APP_SLUG: ${{ steps.release_app.outputs.app-slug }}
           EXPECTED_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
@@ -150,6 +268,65 @@ jobs:
             exit 1
           fi
 
+      - name: Check out release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # No token while dependencies install and the builds run.
+          persist-credentials: false
+
+      - name: Check out the candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+
+      - name: Build release tooling
+        run: |
+          pnpm install --frozen-lockfile
+          npm run build:server
+
+      - name: Build the candidate
+        working-directory: source
+        run: |
+          pnpm install --frozen-lockfile
+          npm run build
+
+      # Right before publication: a blocker opened during the candidate tests or the
+      # builds, a failed rehearsal, or a registry that changed since the plan (a rerun of
+      # an older run reuses its plan) stops the promotion.
+      - name: Check the gates again
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          PREVIOUS: ${{ needs.plan.outputs.previous }}
+          IGNORE_BLOCKERS: ${{ needs.plan.outputs.ignore_blockers }}
+          PACKAGE: ${{ needs.plan.outputs.package }}
+          NAMES: ${{ needs.plan.outputs.names }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          STABLE_TAG: ${{ needs.plan.outputs.stable_tag }}
+        with:
+          retries: 3
+          script: |
+            const { publishedNames } = require('./.github/scripts/release-packages.cjs');
+            await require('./.github/scripts/release-plan.cjs').recheckGates({
+              sourceNames: publishedNames(`${process.env.GITHUB_WORKSPACE}/source`).join(','),
+              github, context, mode: process.env.MODE, previous: process.env.PREVIOUS, ignoreBlockers: process.env.IGNORE_BLOCKERS,
+              packageName: process.env.PACKAGE, names: process.env.NAMES, version: process.env.VERSION, stableTag: process.env.STABLE_TAG,
+            });
+
       - name: Publish release
         id: release
         # No npm credential in this job. npm authenticates via OIDC trusted
@@ -157,29 +334,88 @@ jobs:
         # production). Snapshots and nightlies keep the token — one publisher
         # per package, and dist-tag cleanup is not an OIDC command. See
         # docs/publishing.md.
+        env:
+          HSQ_RELEASE_ROOT: ${{ github.workspace }}/source
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_DIST_TAG: ${{ needs.plan.outputs.stable_tag }}
         run: node scripts/release.mjs "${{ inputs.bump }}"
+
+      # A retry skips names already on the registry, so check that each stable dist-tag
+      # really points to this version before the promotion counts as done.
+      - name: Check the dist-tags
+        id: dist_tags
+        if: steps.release.outputs.published == 'true'
+        env:
+          NAMES: ${{ steps.release.outputs.publishedNames }}
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ needs.plan.outputs.stable_tag }}
+        run: |
+          for name in ${NAMES//,/ }; do
+            current=$(npm view "$name" "dist-tags.$TAG")
+            if [ "$current" != "$VERSION" ]; then
+              echo "::error::$name@$TAG is ${current:-unset}, expected $VERSION. Move it with npm dist-tag add $name@$VERSION $TAG, then rerun this job."
+              exit 1
+            fi
+          done
+
+      - name: Install through the alias and boot
+        id: alias_smoke
+        if: steps.release.outputs.published == 'true'
+        env:
+          PACKAGE: ${{ steps.release.outputs.installName }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: node scripts/release-smoke.mjs --package "$PACKAGE" --version "$VERSION"
+
+      # Finalization (the rollback stamp, the bump PR, the GitHub Release) runs only after
+      # every post-publication check passed: the dist-tag check and the alias boot, which
+      # runs only after it. A failed check files a blocker; a rerun finishes the release.
+      # A rollback records its version on the dispatched branch's head: the old
+      # commit's tree is history, and a bump from it would revert newer work.
+      - name: Stamp the dispatch commit for the rollback bump
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' && needs.plan.outputs.mode == 'rollback' }}
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_DIST_TAG: ${{ needs.plan.outputs.stable_tag }}
+        run: node scripts/release.mjs "${{ inputs.bump }}" --stamp-only
+
+      # The checkouts keep no token, so no install or build step could read one. Only the
+      # bump push gets it, with hooks off so no file a build wrote runs during the push.
+      - name: Give the bump push its credential
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
+        working-directory: ${{ needs.plan.outputs.bump_dir }}
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git config core.hooksPath /dev/null
+          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
 
       # Keep protected branches PR-only. Retries verify and reuse prior work;
       # a failed bump PR must not prevent the published version's Release.
       - name: Open version-bump PR (patch/minor/major only)
         id: bump_pr
-        if: steps.release.outputs.published == 'true' && inputs.bump != 'existing'
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}
           BASE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ needs.plan.outputs.bump_sha }}
+          BUMP_DIR: ${{ needs.plan.outputs.bump_dir }}
           RELEASE_PR_TOKEN: ${{ steps.release_app.outputs.token }}
         with:
           script: |
+            const path = require('node:path');
+            const finalization = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/release-finalization.cjs'));
+            process.chdir(path.resolve(process.env.GITHUB_WORKSPACE, process.env.BUMP_DIR));
             const prGithub = getOctokit(process.env.RELEASE_PR_TOKEN);
-            await require('./.github/scripts/release-finalization.cjs').bumpPr({ github, prGithub, context, core, nativeCi: true });
+            await finalization.bumpPr({ github, prGithub, context, core, nativeCi: true });
 
       - name: Create GitHub Release
         id: github_release
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.alias_smoke.outcome == 'success' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}
+          SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
           PUBLISHED_NAMES: ${{ steps.release.outputs.publishedNames }}
           RUN_COMMAND: ${{ steps.release.outputs.runCommand }}
           ROOT_NAME: ${{ steps.release.outputs.rootName }}
@@ -195,7 +431,7 @@ jobs:
           PUBLISHED: ${{ steps.release.outputs.published }}
           RUN_COMMAND: ${{ steps.release.outputs.runCommand }}
           ROOT_NAME: ${{ steps.release.outputs.rootName }}
-          BUMP: ${{ inputs.bump }}
+          BUMP: ${{ needs.plan.outputs.record_bump == 'true' && inputs.bump || 'existing' }}
           PR_STATUS: ${{ steps.bump_pr.outputs.status }}
           PR_URL: ${{ steps.bump_pr.outputs.url }}
           PR_REASON: ${{ steps.bump_pr.outputs.reason }}
@@ -209,3 +445,40 @@ jobs:
         with:
           script: |
             require('./.github/scripts/release-finalization.cjs').summary();
+
+  blocker:
+    name: File the release blocker
+    needs: [plan, candidate, release]
+    # A failed candidate publishes no stable version and leaves `latest` as it was; a
+    # failed install of the promoted version needs a rollback. Both block the next release.
+    # A stable publish that failed partway is filed only when some name already carries
+    # the version; the step below reads the registry before it files.
+    if: ${{ always() && needs.plan.result == 'success' && (needs.candidate.result == 'failure' || needs.release.outputs.publish == 'failure' || needs.release.outputs.dist_tags == 'failure' || needs.release.outputs.alias_smoke == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: File the release blocker
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          STAGE: ${{ needs.candidate.result == 'failure' && format('tests of release candidate {0}', needs.plan.outputs.candidate) || needs.release.outputs.publish == 'failure' && format('publication of {0}, stopped partway', needs.plan.outputs.version) || needs.release.outputs.dist_tags == 'failure' && format('dist-tags of {0} after promotion', needs.plan.outputs.version) || format('install of {0} through the alias after promotion', needs.plan.outputs.version) }}
+          PARTIAL: ${{ needs.candidate.result != 'failure' && needs.release.outputs.publish == 'failure' }}
+          NAMES: ${{ needs.plan.outputs.names }}
+        with:
+          script: |
+            const { fileReleaseBlocker, publishedSome } = require('./.github/scripts/release-blocker.cjs');
+            if (process.env.PARTIAL === 'true' && !publishedSome({ names: process.env.NAMES, version: process.env.VERSION })) {
+              core.info(`The publish of ${process.env.VERSION} failed before any name reached the registry; a rerun retries it, so no blocker.`);
+              return;
+            }
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issue = await fileReleaseBlocker({ github, repo: context.repo, kind: 'release', version: process.env.VERSION, stage: process.env.STAGE, runUrl });
+            await core.summary.addRaw(`Release blocker: ${issue.url}\n`).write();

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeStableVersion,
   isReleaseBump,
+  resolveReleaseTarget,
   stampStableManifests,
   type ReleaseManifests,
 } from './stable.ts';
@@ -133,5 +134,37 @@ describe('stampStableManifests', () => {
     stampStableManifests(manifests, '0.1.6');
     expect(manifests.cezar.version).toBe('0.1.5');
     expect(manifests.alias!.dependencies).toEqual({ '@scope/impl': '^0.1.5' });
+  });
+});
+
+describe('resolveReleaseTarget', () => {
+  it('keeps the bump under latest when the workflow names no target', () => {
+    expect(resolveReleaseTarget('patch', '0.1.5')).toEqual({ version: '0.1.6', distTag: 'latest', exactPins: false });
+  });
+
+  it('stages a release candidate under next with exact pins', () => {
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6-rc.2', distTag: 'next' }))
+      .toEqual({ version: '0.1.6-rc.2', distTag: 'next', exactPins: true });
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6-rc.1', distTag: 'next-0.1' }))
+      .toEqual({ version: '0.1.6-rc.1', distTag: 'next-0.1', exactPins: true });
+  });
+
+  it('never lets a release candidate take latest, or a stable version take next', () => {
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6-rc.1', distTag: 'latest' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6-rc.1' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6', distTag: 'next' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6', distTag: 'latest-0.1' }))
+      .toEqual({ version: '0.1.6', distTag: 'latest-0.1', exactPins: false });
+  });
+
+  it('refuses a maintenance tag of another version line', () => {
+    expect(resolveReleaseTarget('patch', '0.18.0', { version: '0.18.1', distTag: 'latest-0.17' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.18.0', { version: '0.18.1-rc.1', distTag: 'next-0.17' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', '0.18.0', { version: '1.18.1', distTag: 'latest-0.18' })).toHaveProperty('error');
+  });
+
+  it('refuses a version that is neither stable nor a release candidate', () => {
+    expect(resolveReleaseTarget('patch', '0.1.5', { version: '0.1.6-nightly.1' })).toHaveProperty('error');
+    expect(resolveReleaseTarget('patch', 'garbage')).toHaveProperty('error');
   });
 });

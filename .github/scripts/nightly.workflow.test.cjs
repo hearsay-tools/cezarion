@@ -5,40 +5,41 @@ const path = require('node:path');
 const yaml = require('yaml');
 
 const read = file => yaml.parse(fs.readFileSync(path.join(__dirname, '..', 'workflows', file), 'utf8'));
-const commands = job => (job.steps || []).map(step => step.run || '').join('\n');
-const suite = job => (job.steps || []).find(step => /\bnpm test\b/.test(step.run || ''))?.run;
 
-// The unsharded suite outgrew the nightly's single 20-minute job on 2026-10-06,
-// and 14 nights timed out before anyone noticed (hearsay-tools/cezarion#1272).
-// ci.yml's shard count, runner and bound are measured on every push, so the
-// nightly reuses them rather than keeping its own estimate.
-test('nightly shards the suite exactly as ci.yml does', () => {
-  const nightly = read('nightly.yml'), ci = read('ci.yml');
-  const shards = nightly.jobs.vitest;
-  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3, 4, 5, 6, 7, 8]);
-  assert.equal(shards.name, 'Vitest shard ${{ matrix.shard }}/8');
-  assert.equal(shards.strategy['fail-fast'], false);
-  assert.equal(suite(shards), 'npm test -- --shard=${{ matrix.shard }}/8 --maxWorkers=4');
-  assert.deepEqual(shards.strategy.matrix.shard, ci.jobs.vitest.strategy.matrix.shard);
-  assert.equal(shards['runs-on'], ci.jobs.vitest['runs-on']);
-  // Nightly keeps the non-coverage path: same shards, command and 15-minute bound.
-  assert.equal(shards['timeout-minutes'], 15);
-  assert.equal(suite(shards), suite(ci.jobs.vitest).replace(/ \$\{\{.*?\}\}/g, ''));
-  for (const [name, job] of Object.entries(nightly.jobs)) {
-    if (name !== 'vitest') assert.equal(suite(job), undefined, `${name} must not run the whole suite in one job`);
-  }
+// The rehearsal takes the commit a release would take, verifies it with the release's
+// own full suite, publishes it, and runs the release-candidate tests on the published
+// package (hearsay-tools/cezarion#3212).
+test('nightly rehearses the release on the newest verified commit', () => {
+  const { jobs } = read('nightly.yml');
+  const candidate = jobs.decide.steps.find(step => step.id === 'candidate');
+  assert.match(candidate.with.script, /verifiedMainCommit/);
+  assert.match(candidate.with.script, /npmView\(.*\{ optional: true \}\)\?\.distTags\.latest/, 'a package not on the registry yet leaves no upgrade baseline');
+  assert.equal(jobs.decide.outputs.candidate, '${{ steps.candidate.outputs.sha }}');
+  assert.equal(jobs.suite.uses, './.github/workflows/full-suite.yml');
+  assert.equal(jobs.suite.with.ref, '${{ needs.decide.outputs.candidate }}');
+  assert.deepEqual(jobs.nightly.needs, ['decide', 'suite']);
+  assert.match(jobs.nightly.if, /needs\.suite\.result == 'success'/);
+  assert.equal(jobs.nightly.steps[0].with.ref, '${{ needs.decide.outputs.candidate }}');
+  assert.equal(jobs.rehearsal.uses, './.github/workflows/release-candidate-tests.yml');
+  assert.equal(jobs.rehearsal.with.ref, '${{ needs.decide.outputs.candidate }}');
+  assert.match(jobs.rehearsal.if, /dry_run != 'true'/);
 });
 
-test('nightly publishes after the full gate, from a GitHub-hosted runner on main only', () => {
-  const {jobs} = read('nightly.yml');
+test('a failed rehearsal files a release-blocker issue from a job that runs no candidate code', () => {
+  const { jobs } = read('nightly.yml');
+  assert.deepEqual(jobs.blocker.needs, ['decide', 'suite', 'nightly', 'rehearsal']);
+  assert.match(jobs.blocker.if, /always\(\)/);
+  assert.match(jobs.blocker.if, /needs\.decide\.result == 'failure'/, 'a decide job that found no verified candidate files a blocker too');
+  assert.match(jobs.blocker.if, /contains\(join\(needs\.\*\.result, ' '\), 'failure'\)/);
+  assert.match(jobs.blocker.steps.at(-1).with.script, /kind: 'rehearsal'/);
+  assert.deepEqual(jobs.blocker.permissions, { contents: 'read', issues: 'write' });
+  assert.equal(jobs.blocker.steps[0].with.ref, undefined, 'the blocker job checks out the trusted dispatch commit');
+});
+
+test('nightly publishes from a GitHub-hosted runner on main only, and only that job holds a credential', () => {
+  const { jobs } = read('nightly.yml');
   const publish = jobs.nightly;
-  const verification = Object.keys(jobs).filter(name => name !== 'decide' && name !== 'nightly');
-  assert.deepEqual([...publish.needs].sort(), verification.sort());
-  const gate = verification.map(name => commands(jobs[name])).join('\n');
-  for (const command of ['npm run typecheck', 'npm run test:unit', 'npm run build', 'npm run test:package']) {
-    assert.ok(gate.includes(command), `the nightly gate must run ${command}`);
-  }
-  // npm provenance needs a GitHub-hosted runner, and only the publish job holds a publishing credential.
+  // npm provenance needs a GitHub-hosted runner.
   assert.equal(publish['runs-on'], 'ubuntu-latest');
   assert.equal(publish.permissions['id-token'], 'write');
   for (const name of Object.keys(jobs).filter(name => name !== 'nightly')) {

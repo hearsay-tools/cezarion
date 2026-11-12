@@ -115,7 +115,8 @@ its own trusted-publisher row plus a token grant — see the admin setup below.
 
 ## Stable releases
 
-Run **Actions → Release → Run workflow** from `main` and choose a bump:
+Run **Actions → Release → Run workflow** from `main` (or a `release/*` maintenance
+branch) and choose a bump:
 
 | Bump | Effect (base `0.1.5`) |
 |---|---|
@@ -124,18 +125,100 @@ Run **Actions → Release → Run workflow** from `main` and choose a bump:
 | `major` | `1.0.0` |
 | `existing` | publishes the version already committed to `packages/cezar/package.json` |
 
-The workflow verifies, builds, then `scripts/release.mjs` stamps every manifest
-(intra-release dependencies keep a **caret** range — stable follows compatible
-releases, unlike the exact-pinned snapshots), publishes them in dependency order
-with `--tag latest` (no `--provenance` — trusted publishing attaches it), opens
-a version-bump PR, and cuts a GitHub Release tagged `v<version>` at the published
-source commit. The bump PR targets the dispatched branch (`main` or a
-`release/*` maintenance branch); the workflow never pushes to that branch. It's
-gated behind the `production` environment, so a release can require reviewer
-approval — and the
-trusted publisher on npmjs.com is pinned to that same environment name. Outside
-Actions, with neither `NODE_AUTH_TOKEN` nor the OIDC request env, the script
-degrades to a loud dry run.
+One dispatch takes one **candidate commit** through every stage
+([`release.yml`](../.github/workflows/release.yml), spec
+[`2026-11-11-one-full-run-delivery-pipeline.md`](../.ai/specs/2026-11-11-one-full-run-delivery-pipeline.md)
+§ Release):
+
+1. **Plan.** The candidate on `main` is the newest commit whose `ci.yml` push run
+   passed. Every `main` commit passed the full suite in the merge queue, so the
+   candidate can be older than the dispatch commit. On a `release/*` branch no queue
+   verified the head, so the release runs the full suite
+   ([`full-suite.yml`](../.github/workflows/full-suite.yml), the merge-group jobs of
+   `ci.yml`) on it first. The version comes from that commit's manifest. The plan
+   then checks the [gates](#release-gates).
+2. **Stage.** The workflow publishes `<version>-rc.<n>` of the candidate under the
+   `next` dist-tag, with exact pins between the packages. The stable version is not
+   staged: an alias that depends on its runtime with a caret range would match any
+   stable version, whatever its dist-tag; a caret range does not match a prerelease.
+3. **Test the published candidate**
+   ([`release-candidate-tests.yml`](../.github/workflows/release-candidate-tests.yml)).
+   [`scripts/release-smoke.mjs`](../scripts/release-smoke.mjs) installs the candidate,
+   and its alias when one is published, from the registry into an empty prefix, boots it and loads the cockpit, then boots
+   the version its stable dist-tag holds now (`latest`, or `latest-x.y` on a maintenance
+   line) on a fresh home and project and upgrades it to the candidate.
+   It runs on Linux, macOS and Windows, on the `engines.node` floor and the current
+   LTS. The browser specs run shuffled on the candidate's source commit: the published
+   bundle has no e2e mode.
+4. **Promote.** The gates are checked again, so a blocker opened during the
+   candidate tests stops the release. Then `scripts/release.mjs` publishes the stable
+   version of the same commit under the planned stable tag (`latest`, or `latest-x.y` for
+   a maintenance release below `latest`; intra-release dependencies keep a
+   **caret** range, unlike the exact-pinned snapshots and candidates), checks that
+   every published name's stable dist-tag points to it, installs it through the alias
+   and boots it, opens a version-bump PR and cuts a GitHub Release
+   tagged `v<version>` at the candidate commit. The bump PR targets the dispatched
+   branch; the workflow never pushes to that branch.
+
+The release scripts run from the dispatch commit; the package is built from the
+candidate commit in `source/`. Neither checkout keeps a token while dependencies install and the builds
+run; only the version-bump push gets one, with Git hooks off. Both publishing jobs are gated behind the `production`
+environment, so a release can require reviewer approval — and the trusted publisher
+on npmjs.com is pinned to that same environment name. Outside Actions, with neither
+`NODE_AUTH_TOKEN` nor the OIDC request env, the script degrades to a loud dry run.
+
+`next` and `latest` never move backwards, on any published name. A maintenance-line candidate below the
+current `next` stages under `next-<major>.<minor>`, and a maintenance release below
+the current `latest` publishes under `latest-<major>.<minor>`. A release from `main`
+must be above `latest`: merge the pending version-bump PR first.
+
+### Release gates
+
+| Gate | Release | Rollback |
+|---|---|---|
+| The last stable version was published 24 hours ago or more (npm `time`) | refused within 24 hours | not checked |
+| No open issue carries `release-blocker` | refused | refused, except the blocker the Release workflow filed for the `latest` version it replaces, and blockers named in `ignore_blockers` |
+| The newest finished Nightly run that tested a published package passed (its `Release candidate result` job) | refused | not checked: a failed rehearsal files a blocker, and the blocker rule decides |
+
+The plan checks every gate; the promotion checks the blocker and rehearsal gates
+again. A retry after a failed candidate is not a second stable release, so the
+24-hour rule does not refuse it. It takes the same stable version with the next
+`rc` number, once its blocker is closed.
+
+A failed candidate publishes no stable version and leaves `latest` unchanged. The
+`blocker` job files a `release-blocker` issue (marker
+`<!-- cez-release-blocker:v1:release:<version> -->`); a repeat failure of the same
+version comments on it. A failed install through the alias after promotion files
+the same issue: that version is on `latest`, so [roll back](#rolling-back).
+So does a failed dist-tag check after promotion, which also stops the bump PR and the
+GitHub Release until a rerun passes, and a stable publish that stopped after some names
+already carry the version. A publish that failed before any name reached the registry
+files nothing: a rerun retries it. Before each publish, the workflow also checks that the
+candidate commit publishes the names the plan checked.
+
+### Rolling back
+
+Dispatch **Release** from `main` with `rollback` checked (a rollback replaces the global
+`latest`, so a maintenance branch refuses it). It releases the last good stable commit
+again as the next patch version: the commit of the newest stable tag below `latest`
+(or the tag in `rollback_to`), published as the next patch version above `latest`
+(`1.2.2` after a broken `1.2.1`) through the same
+stage, candidate tests and promotion. A rollback ignores the bump input and the
+24-hour rule. The blocker that the failed release filed does not stop it; every
+other open `release-blocker` does, unless the dispatch names it in `ignore_blockers`
+as not affecting the rollback commit. Its version-bump PR records the new version
+on the dispatched branch's head, not on the old commit.
+
+Moving the `latest` dist-tag back to the old version is not a rollback:
+
+- an installed newer version stays: update checks and `npm install -g` compare
+  versions, and the old version is lower;
+- an alias or a dependent that names its runtime with a caret range resolves the
+  highest matching stable version, the broken one, whatever `latest` says;
+- the next release computes its version from the manifests and the registry, so a
+  moved tag hides the broken version without retiring it.
+
+A new, higher patch version from the good commit reaches every one of those paths.
 
 ### Release changelog
 
@@ -321,9 +404,13 @@ described above.
 ## Nightlies
 
 Every night at **03:17 UTC**, [`nightly.yml`](../.github/workflows/nightly.yml)
-verifies `main` (typecheck, unit suites, build, packaged-CLI e2e — the same gate
-a release runs, split into the same jobs and Vitest shards as `ci.yml`) and
-publishes it under the `nightly` dist-tag:
+rehearses the release. It takes the commit a release would take (the newest `main`
+commit whose `ci.yml` push run passed), runs the full suite on it
+([`full-suite.yml`](../.github/workflows/full-suite.yml)), publishes it under the
+`nightly` dist-tag, and runs the release-candidate tests on the published package.
+A failure of any of these files a `release-blocker` issue (one open issue; a repeat
+comments on it), and the Release workflow refuses a stable release until the newest
+finished rehearsal passed.
 
 ```bash
 npx cezarion@nightly              # whatever is on main as of last night
@@ -383,12 +470,17 @@ prereleases are inert).
 |---|---|
 | `packages/cezar/src/release/snapshot.ts` | pure decisions: channel/version/dist-tag, install lines (unit-tested) |
 | `packages/cezar/src/release/manifests.ts` | the shared stamper: which manifests exist, and how each pins the next (unit-tested) |
-| `scripts/release.mjs` | stable orchestrator: stamps manifests, `npm publish --tag latest` via OIDC, no `--provenance` (e2e-tested) |
+| `scripts/release.mjs` | stable orchestrator: stamps manifests, `npm publish` of a planned candidate (`next`) or stable version (`latest`) via OIDC, no `--provenance`; `--stamp-only` for a rollback's bump PR (e2e-tested) |
+| `.github/scripts/release-plan.cjs` | the candidate commit, the versions and dist-tags, and the release gates (unit-tested) |
+| `.github/scripts/release-blocker.cjs` | the `release-blocker` issue of a failed candidate, promotion or rehearsal |
+| `scripts/release-smoke.mjs` | install a published version from the registry, boot it, load the cockpit, upgrade from `latest` |
+| `full-suite.yml` | the merge-group verification of `ci.yml` as a reusable workflow, for a `release/*` head and the rehearsal |
+| `release-candidate-tests.yml` | the tests of a published candidate or nightly |
 | `scripts/release-snapshot.mjs` | snapshot orchestrator: stamps manifests, `npm publish --tag <channel> --provenance` with `NPM_TOKEN`, emits result JSON (`--dry-run` supported; e2e-tested) |
 | `ci.yml` → `publish-snapshot` | `main` push gate (`needs: verify`) and provenance permissions |
 | `ci.yml` → `prepare-pr-snapshot` | same-repo PR archives after verification, without publishing credentials |
 | `publish-pr-snapshot.yml` + `.github/scripts/pr-snapshot.cjs` | trusted artifact validation and publishing, current-head/attempt checks, sticky PR comment and summary |
-| `nightly.yml` | the 03:17 UTC cron + manual dispatch: main-only guard, "did main move?" check, full verify, then the same orchestrator with `CEZ_RELEASE_CHANNEL=nightly` |
+| `nightly.yml` | the 03:17 UTC rehearsal: main-only guard, "did main move?" check, the verified candidate, the full suite, the same orchestrator with `CEZ_RELEASE_CHANNEL=nightly`, the published-package tests, a `release-blocker` on failure |
 | `npm-preview-cleanup.yml` | dist-tag removal on PR close |
 
 Guards: the job runs only for pushes and same-repo PRs (fork PRs get no

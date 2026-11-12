@@ -1,0 +1,146 @@
+name: Release candidate tests
+
+# Tests a version already on the registry, installed as a user installs it: clean install,
+# boot and cockpit smoke, upgrade from the current `latest` with existing state, on three
+# operating systems at the Node floor and the current LTS. The browser specs run shuffled on
+# the candidate's source commit: the published bundle has no e2e mode. Release calls it for
+# each release candidate; Nightly calls it as the rehearsal (docs/publishing.md).
+# The test tooling comes from the calling workflow's commit, so a rollback to an older
+# commit is tested by the current smoke script.
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: Published package name to install
+        required: true
+        type: string
+      alias:
+        description: Published alias package that users install through; empty when there is none
+        required: false
+        type: string
+        default: ''
+      version:
+        description: Exact published version to test
+        required: true
+        type: string
+      previous:
+        description: Version to upgrade from (the current latest); empty skips the upgrade check
+        required: false
+        type: string
+        default: ''
+      ref:
+        description: Full source commit SHA of the candidate, for the browser specs
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install and boot (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+        # The engines.node floor and the release line users are on.
+        node: ['24.21.0', 'lts/*']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Check out test tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release-smoke.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          check-latest: true
+
+      # Every published install path: the package, and the alias when one exists.
+      - name: Clean install, boot and cockpit
+        shell: bash
+        env:
+          PACKAGES: ${{ inputs.package }} ${{ inputs.alias }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          for package in $PACKAGES; do
+            node scripts/release-smoke.mjs --package "$package" --version "$VERSION"
+          done
+
+      - name: Upgrade from latest with existing state
+        if: inputs.previous != ''
+        shell: bash
+        env:
+          PACKAGES: ${{ inputs.package }} ${{ inputs.alias }}
+          VERSION: ${{ inputs.version }}
+          PREVIOUS: ${{ inputs.previous }}
+        run: |
+          for package in $PACKAGES; do
+            node scripts/release-smoke.mjs --package "$package" --version "$VERSION" --upgrade-from "$PREVIOUS"
+          done
+
+  browser:
+    name: Shuffled browser specs shard ${{ matrix.shard }}/4
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SHUFFLE_SEED: ${{ github.run_id }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - name: Check out the candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          check-latest: true
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Run shuffled browser specs
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "Replay: npm run test:e2e -- --sequence.shuffle --sequence.seed=$SHUFFLE_SEED --shard=$SHARD/4" >> "$GITHUB_STEP_SUMMARY"
+          npm run test:e2e -- --sequence.shuffle --sequence.seed="$SHUFFLE_SEED" --shard="$SHARD/4" 2>&1 | tee e2e.log
+          node .github/scripts/require-e2e-passed.cjs < e2e.log
+
+      - name: Upload failure bundles
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: candidate-browser-failures-shard-${{ matrix.shard }}
+          path: .ai/qa/failures/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  result:
+    name: Release candidate result
+    needs: [install, browser]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every candidate test
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do test "$result" = success; done
