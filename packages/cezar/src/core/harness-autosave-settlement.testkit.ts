@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as realSetTimeout } from 'node:timers';
 import { describe, expect, it, vi } from 'vitest';
-import * as worktrees from '../git-worktree.ts';
+import * as worktrees from '../autosave-commit.ts';
 import { RunStore } from '../runs/store.ts';
 import { IDLE_TIMEOUT_MS, RunManager } from '../workflows/run.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';

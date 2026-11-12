@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 
-import * as worktrees from '../git-worktree.ts';
+import * as worktrees from '../autosave-commit.ts';
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
