@@ -314,13 +314,17 @@ it('retains known IDs during loading, request error and offline pause, then retr
   browser.evaluate(`window.__relationshipMode = 'success'`)
   // Pause a retry on an already loaded run: a completely uncached run cannot
   // mount its relationships while its own detail request is offline.
+  // Network emulation outlives the page reset before each case: restore it even on failure.
   browser.setOffline(true)
-  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
-  browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Offline')`)
-  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
-  browser.screenshot(join(artifacts, 'workers-offline.png'), { viewport: true })
-  browser.evaluate(`window.fetch = window.__relationshipFetch; true`)
-  browser.setOffline(false)
+  try {
+    browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
+    browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Offline')`)
+    expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
+    browser.screenshot(join(artifacts, 'workers-offline.png'), { viewport: true })
+    browser.evaluate(`window.fetch = window.__relationshipFetch; true`)
+  } finally {
+    browser.setOffline(false)
+  }
   browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Record unavailable')`)
   observations.push({ loading: 'known ID retained', error: 'known ID retained; real retry succeeds', offline: 'paused; reconnect fetch succeeds' })
 })
