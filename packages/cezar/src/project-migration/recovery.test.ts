@@ -27,6 +27,7 @@ import { writeSettledJournal } from './project-migration.testkit.ts';
 import { ProjectMigrationRecoveryError, recoverProjectMigration } from './recovery.ts';
 import { prepareBeforeTicks, prepareProjects } from './auto.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
+import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /**
  * Early recovery of an unfinished project migration (hearsay-tools/cezarion#3089): every entry
@@ -76,7 +77,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;

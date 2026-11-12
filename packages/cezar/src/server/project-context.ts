@@ -21,7 +21,7 @@ import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './repo-branch-sweep.
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from '../workflows/run.ts';
+import type { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
@@ -72,6 +72,9 @@ export function projectWarmupEnabled(env: NodeJS.ProcessEnv = process.env): bool
   return productEnv('PROJECT_WARMUP', env) !== '0';
 }
 
+/** Builds one project's RunManager: the entry point's choice, so the project registry does not load the engine. */
+export type RunManagerFactory = (...args: ConstructorParameters<typeof RunManager>) => RunManager;
+
 export interface ProjectContextDeps {
   forgeFactory?: ForgeFactory | undefined;
   /** CLI process ownership, acquired before opening any secondary store. */
@@ -102,6 +105,8 @@ export interface ProjectContextDeps {
   toolActivity?: ToolActivityTracker | undefined;
   /** Builds each manager's runners: the entry point's choice (hearsay-tools/cezarion#2939). */
   createRunner: RunnerFactory;
+  /** Builds each project's manager. A caller that omits it cannot build a context (hearsay-tools/cezarion#3373). */
+  createManager?: RunManagerFactory | undefined;
   /** Test seam for the release switch of the automatic project move; production uses `REBRAND_SWITCH`. */
   rebrand?: boolean | undefined;
 }
@@ -503,6 +508,8 @@ export class ProjectContexts {
   }
 
   private async open(project: ProjectContextSource, dataDir: string, stale: () => boolean): Promise<ProjectContext> {
+    const createManager = this.deps.createManager;
+    if (!createManager) throw new Error('ProjectContexts needs a createManager factory to build a project context');
     const projectId = project.id;
     await this.deps.ownership?.acquire(dataDir);
     if (stale()) throw new ProjectContextsClosedError();
@@ -519,7 +526,7 @@ export class ProjectContexts {
     reconcileAutomationReceipts(automationStore, store);
     this.notifyStoreCreated(store);
     armPreview(store, dataDir, this.deps.preview);
-    const manager: RunManager = new RunManager(store, project.root, {
+    const manager: RunManager = createManager(store, project.root, {
       home: this.deps.home,
       createRunner: this.deps.createRunner,
       semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort, toolActivity: this.deps.toolActivity,

@@ -11,6 +11,7 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts, sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { startServer } from './server.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 // The post-listen chain reads the registry, then sweeps preview leftovers, then decides on the
 // warm-up: the sweep call is the test's signal that the chain reached that decision.
@@ -57,7 +58,7 @@ describe('startServer project warm-up', () => {
     const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
     const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,
@@ -123,7 +124,7 @@ describe('startServer project warm-up', () => {
     const bootId = (await registerProject(bootRoot, undefined, testHome())).id;
     const otherId = (await registerProject(otherRoot, undefined, testHome())).id;
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
     const server = startServer({ home: testHome(),
       repoRoot: bootRoot,
       bootProjectId: bootId,

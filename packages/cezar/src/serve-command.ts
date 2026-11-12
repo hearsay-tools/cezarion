@@ -134,6 +134,7 @@ export async function serveCommand(
   deps.warnServeBind(bindHost, port);
   const server = deps.startServer({
     home,
+    createManager: (...args) => new deps.RunManager(...args),
     ownership,
     delegation,
     repoRoot,

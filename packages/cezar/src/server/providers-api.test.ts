@@ -19,6 +19,7 @@ import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { WorkspaceEventBus, createApp } from './server.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -446,7 +447,7 @@ describe('workspace provider API', () => {
     lazyStore.close();
     lazyStore.removeAllListeners();
 
-    const contexts = new ProjectContexts({ createRunner, home: testHome(),
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(),
       listProjects: async () => [{ id: 'lazy', root: lazyRoot, status: 'not-git' }],
       prepareManager: ({ store: recoveringStore, manager }) => {
         const recover = vi.spyOn(manager, 'recover').mockImplementationOnce(async () => {
