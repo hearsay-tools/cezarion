@@ -31,7 +31,7 @@ Act on the first row that matches:
 | No `auto-merge` label | The owner took the PR back. Follow it as an ordinary PR. |
 | New head or title since your last decision | Run the decision in [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) again. On `DOES NOT QUALIFY`, leave auto-merge. |
 | `isInMergeQueue` is true | The merge is pending. Keep following it with `until: "merge_or_blocked"`; a null `autoMergeRequest` does not mean it needs another merge command. |
-| `autoMergeRequest` is null | Run `gh pr merge <n> --auto --squash`. When GitHub refuses because the PR is a draft, a human holds it as a draft: leave it and wait for the next event. When GitHub answers that the PR is in clean status, merge it now: `gh pr merge <n> --squash --match-head-commit <headRefOid>`. |
+| `autoMergeRequest` is null | Run `gh pr merge <n> --auto --squash`. When GitHub refuses because the PR is a draft, leave it as a draft and tell the owner it needs promotion: no workflow promotes a draft, including one a saved automation opened. When GitHub answers that the PR is in clean status, merge it now: `gh pr merge <n> --squash --match-head-commit <headRefOid>`. |
 | `autoMergeRequest` is set | Wait for the next event. |
 
 After requesting a merge, keep responsibility for the PR and register:
