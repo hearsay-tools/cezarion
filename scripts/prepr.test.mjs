@@ -214,7 +214,7 @@ function fixtureRepo(t, write, seed = () => {}) {
   for (const a of [['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid']]) io.git(...a);
   seed(cwd);
   for (const a of [['add', '--all'], ['commit', '--allow-empty', '-m', 'base'], ['switch', '-c', 'topic']]) io.git(...a);
-  write(cwd);
+  write(cwd, io);
   io.git('add', '--all');
   io.git('commit', '-m', 'head');
   return io;
@@ -278,4 +278,13 @@ test('numstat rows keep tabs in a path and read a rename row as two paths', () =
     { added: '3', deleted: '1', paths: ['old\tname.md', 'new name.md'] },
     { added: '-', deleted: '-', paths: ['bin'] },
   ]);
+});
+
+test('patch limits measure GitHub\'s patch shape, whatever the user\'s diff settings', async t => {
+  const io = fixtureRepo(t, (cwd, git) => {
+    for (const [key, value] of [['diff.context', '10000'], ['diff.noprefix', 'true'], ['color.diff', 'always'], ['diff.algorithm', 'patience']]) git.git('config', key, value);
+    fs.appendFileSync(path.join(cwd, 'big.md'), 'one more line\n');
+  }, cwd => fs.writeFileSync(path.join(cwd, 'big.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10)));
+  const [line] = patchLimitLines('main', io);
+  assert.equal(line.ok, true, line.text);
 });
