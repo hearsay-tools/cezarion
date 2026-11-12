@@ -146,6 +146,32 @@ without launching tasks. Do not pass `--execute`, enable a paused automation or
 create a duplicate. This implementation prepares the update; it does not change
 a live automation. After the prompt update is verified, deploy the reporter.
 
+## Flake reports from the merge queue
+
+A merge-queue shard that fails its first test run and passes its whole-shard rerun
+lets the entry merge. `report-queue-flakes.yml` files a `flake-report` issue for it
+([CI § Flake reports from the merge queue](ci.md#flake-reports-from-the-merge-queue)).
+These reports stay outside this repair path:
+
+- A report never gets `main-ci-failure`, so **Main CI — guarded repair** does not take
+  it. That automation accepts only a failed `main` push run.
+- A report starts no task. A maintainer reads it and, when the flake is real, adds
+  `flaky-test`. A queued PR can make the shard list any existing test file, so the
+  label is the confirmation.
+- A separate Cezar automation starts one task for each issue that gets `flaky-test`:
+  a GitHub poll on `issue.labeled` with `changedLabels: ["flaky-test"]`,
+  `allLabels: ["flake-report", "flaky-test"]` and `requireCurrentLabels: true`. Its task
+  reproduces the flake from the report's files and either fixes the test or quarantines
+  it, in a PR that links the report. Create it paused, check it with
+  `hsq automation check <id>`, and enable it deliberately, as for the repair automation.
+- Enable that automation before anyone adds `flaky-test`. By default an automation
+  ignores events from before it was enabled, so a label added earlier starts no task.
+  To recover one, remove the label and add it again, or turn on the automation's
+  **Include existing items** with a lookback that covers the label event.
+
+The labels `flake-report` and `flaky-test` must exist before a flake needs a report:
+without either, the reporter fails visibly and writes nothing.
+
 ## Verification
 
 Reporter tests cover trusted event eligibility, cancelled-run failures,
