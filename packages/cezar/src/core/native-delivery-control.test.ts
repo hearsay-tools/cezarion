@@ -214,8 +214,10 @@ describe.each(RUNNER_IDS)('%s native delivery control', runner => {
     await seam(runner, holdAck.path, async (session, wire) => {
       const input = send(session, 'mock:agent-echo delay-owned-ack');
       await waitFor(holdAck.held);
-      // bound: proves an absence; a settled acknowledgement would arrive within a few ms.
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // The turn's content and its end follow on the wire while the ACK is held, so the runner
+      // has read past the point where it could settle the input. Cursor print sends nothing
+      // while held: its acknowledgement is its first model work.
+      if (runner !== 'cursor') await waitFor(() => echoed(wire, 'delay-owned-ack') && turnEnds(wire) === 2);
       expect(input.state.settled).toBe(false);
       holdAck.release();
       await input.done;
