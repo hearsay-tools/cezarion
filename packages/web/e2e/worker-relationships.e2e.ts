@@ -315,8 +315,8 @@ it('retains known IDs during loading, request error and offline pause, then retr
   // Pause a retry on an already loaded run: a completely uncached run cannot
   // mount its relationships while its own detail request is offline.
   // Network emulation outlives the page reset before each case: restore it even on failure.
-  browser.setOffline(true)
   try {
+    browser.setOffline(true)
     browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
     browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Offline')`)
     expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
