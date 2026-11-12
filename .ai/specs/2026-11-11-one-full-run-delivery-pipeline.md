@@ -3,6 +3,8 @@
 Status: **draft**. The owner chose this direction on 2026-11-11, in place of the
 post-merge verification design of hearsay-tools/cezarion#3217 (epic
 hearsay-tools/cezarion#3208). Implementation follows in separate issues (§ Phases).
+Amended 2026-11-13 with the result of Squeal's coverage proof, squeal row 020-26c
+(§ Coverage, § Before the PR item 4, § Phases phase 2), as the owner chose on 2026-11-12.
 
 ## Goal
 
@@ -66,8 +68,24 @@ Two facts decide the shape:
 3. Local `test:parity`, local browser specs and any coverage run outside the quality check
    leave the list of duties. CI runs them.
 4. The changed-function quality check (`.ai/skills/check-code-quality/`) runs beside the
-   push, like the reviewer. It reuses the daemon's results at the branch's own content:
-   one report on 2026-11-11 took 136 s with 681 of 755 files from the store, and 661 s with
+   push, like the reviewer. It reads the PR's own CI parts for the files CI already ran
+   (`squeal code --base --parts`, squeal spec 020 D13.2) and runs only the rest locally.
+   The parts are the `squeal-parts-shard-N` artifacts of the PR head's run (§ Coverage);
+   they exist when the PR's Vitest shards end, so the check with parts starts then.
+   Checked on 2026-11-13: a part made on CI's `ubuntu-24.04` runner is accepted from a
+   local worktree on this host. D13.2 compares the Node version (`.node-version`, one exact
+   version on both sides), platform, Vitest version, Squeal's adapter version and record
+   format, the allow-listed variables and the resolved config less the fields CI may
+   change; the local Squeal (0.1.460) read parts the pinned release (0.1.443) wrote. With
+   the merge-group parts of `main` commit 5c84b0158 and the gate run at that commit against
+   its parent, 1,513 of 1,661 selected Vitest files came from the parts. The gate ran the
+   other 148 itself, although the parts hold their results and records, and named no
+   reason per file (friction report hearsay-tools/squeal#205). Two limits: a PR run
+   records only the tests
+   `scripts/test-changed.mjs` selected, so files the gate selects beyond them run locally;
+   and CI records no node:test parts, so the gate's node:test files (154 in that run) run
+   locally. For the rest it reuses the daemon's results at the branch's own content: one
+   report on 2026-11-11 took 136 s with 681 of 755 files from the store, and 661 s with
    none. Coverage imported from `main` cannot shorten it, because every file it selects
    loads changed code, so no key equals a `main` key (Squeal research on
    hearsay-tools/squeal#190, closed). An incomplete report blocks, as the skill's pre-PR
@@ -189,15 +207,36 @@ nightly as the rehearsal. Two changes, because this plan has no `main-verify.yml
 
 ### Coverage
 
-A Vitest run takes one coverage provider. Today the PR shards collect V8 coverage, and
-the queue shards collect Squeal's per-file records. This plan keeps that split: PR runs
-keep `--coverage.enabled` over the selected tests.
+A Vitest run takes one coverage provider. Until 2026-11-12 the PR shards collected V8
+coverage and the queue shards collected Squeal's per-file records, because Squeal's
+`ci record` yielded to a project's own provider. Squeal 0.1.443 ends that: `ci record`
+wraps the project's V8 provider, calls it first, and reads the same payloads for its
+records (hearsay-tools/squeal#189, squeal spec 020 D19). The project keeps its report,
+reporters, thresholds and exit code.
 
-Squeal is studying whether `ci record` can wrap the project's own provider and read
-per-file records from it, keeping the project's report and thresholds (hearsay-tools/squeal#189,
-squeal spec 020 row 020-26). If it can, a later change records the PR runs too. The quality
-check can then read the PR's own parts (`squeal code --parts`, squeal spec 020 D13.2) for
-the files CI already ran. That change is not part of this plan.
+So this plan ends the split. Every CI Vitest run, the PR's selected tests and the queue's
+full suite, runs under `squeal ci record` with `--coverage.enabled`. One run gives the
+project's V8 report (the `vitest-coverage-<sha>` artifact stays) and Squeal's per-file
+records in the shard's parts, uploaded as `squeal-parts-shard-N`. Export and publication
+stay merge-group only (§ Queue item 3); a PR run's parts serve the quality check (§ Before the
+PR item 4).
+
+Measured by Squeal's proof, row 020-26c (hearsay-tools/cezarion#3336, run 43188105135,
+2026-11-12): Vitest shard 1/8 ran three times on one commit on `ubuntu-24.04`, once under
+`squeal ci record` with `--coverage.enabled`, once with V8 alone, and once more with V8
+alone as the run-to-run control. Squeal 0.1.443, Vitest 4.1.10.
+
+| Measure | Result |
+| --- | --- |
+| Records | 211 of 211 test files got a record from the project's V8 collector |
+| Report | 1,426 files and 114,272 statements in all three runs |
+| Tolerance | The two V8-only runs differ in 21 covered statements (0.02%, 8 files). The Squeal run differs from the V8-only run in 46 (0.04%, 16 files). All are process, server and timer code. The control's difference is the tolerance: a difference of its order is run-to-run variation, and 46 is of that order, not a confirmed change at one run |
+| Cost | Not readable from this run: the Squeal job ran on an older CPU model (1,507 s CPU on an EPYC 7763, against 1,016 s and 975 s on an EPYC 9V74). Squeal's own hook time was 6.3% of test time, as on the 020-08c shards (5.4% to 6.3%). On the research shard (422 files, Vitest 4.1.10) the wrap cost nothing above one run's noise |
+
+Limits: Squeal records from the project's provider only on the Vitest minors it has
+tested, 4.1 and 5.0 (this repository runs 4.1.10). It writes no record for an
+`isolate: false` project, a child-process payload or browser-mode V8 coverage. Those
+files keep the project's report, and the quality check runs them itself.
 
 ### Records that a later run reads
 
@@ -225,7 +264,7 @@ Each row becomes one issue.
 | Phase | Content | Size | Needs |
 | --- | --- | --- | --- |
 | 1 | Local gate (`npm run prepr`, 2-minute bound, shorter duties; scope of hearsay-tools/cezarion#3216 without the lane); PR stays ready; auto-merge armed after the review and turned off before a later push; queue rerun of a failed shard, with its Squeal parts; the trusted flake reporter | days | Owner actions 1, 2 |
-| 2 | Selected tests on the PR; 8 + 8 shards for the queue and the full fallback; no queue reuse of PR suites; Squeal shard pattern and test; the 60-minute mention; the Squeal ref warning | about 1 week | |
+| 2 | Selected tests on the PR; 8 + 8 shards for the queue and the full fallback; no queue reuse of PR suites; Squeal shard pattern and test; the 60-minute mention; the Squeal ref warning; Squeal records with V8 coverage on every CI Vitest run and the quality check reading the PR's parts (§ Coverage, § Before the PR item 4). This builds on the `ci.yml` change of hearsay-tools/cezarion#3336 (Squeal's pinned action, the `squeal_coverage_proof` dispatch) and does not repeat it | about 1 week | |
 | 3 | Release: hearsay-tools/cezarion#3212 with the candidate rules of § Release, and the reusable full-suite workflow for `release/**` | as specified there, plus that workflow | Owner actions of that issue |
 | 4 | Optional: verification after the merge (hearsay-tools/cezarion#3209 to hearsay-tools/cezarion#3211), only if phase 2 data shows the queue is still the slowest step | | A change to this spec |
 
