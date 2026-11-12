@@ -258,13 +258,16 @@ recovery may redeliver the same identified context if the process died between
 backend delivery and receipt persistence; never promise transactional exactly-once
 model execution. Never silently lose an undelivered outcome.
 
-Parent cancellation, failure, or terminal success revokes its session credential,
-clears its wait, and requests cancellation of all unfinished workers. Preserve
-artifacts. A controller shutdown/restart is not parent terminal success and must
-not cascade-cancel recoverable work. A worker's question has one addressee, its
-parent (hearsay-tools/cezarion#2410): when the parent is cancelled or fails, its
-workers are cancelled and their open questions close with them; none moves to a
-human. Continue on a worker whose parent has settled is refused, naming the parent.
+Parent cancellation, failure, or terminal success revokes its session credential
+and clears its wait. Cancellation and terminal success request cancellation of all
+unfinished workers; a failed parent leaves them running (hearsay-tools/squawk#3337,
+`2026-11-12-provider-error-hold.md`), and a provider error holds the parent instead
+of failing it. Preserve artifacts. A controller shutdown/restart is not parent
+terminal success and must not cascade-cancel recoverable work. A worker's question
+has one addressee, its parent (hearsay-tools/cezarion#2410): when the parent is
+cancelled or fails, the open questions close; a cancelled parent's workers are
+cancelled with them; none moves to a human. Continue on a worker whose parent has
+settled is refused, naming the parent.
 
 Task 5 review ruling: ordinary parked delegated roots remain `waiting` across
 restart even after their children finish. Inactive roots retain explicit human
