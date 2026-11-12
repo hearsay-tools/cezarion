@@ -58,83 +58,102 @@ function run(cmd, args, options = {}) {
 
 const tail = (text, n = 15) => text.trim().split('\n').slice(-n).join('\n');
 
-function changedFiles(base) {
-  const git = (...a) => spawnSync('git', a, { encoding: 'utf8' });
-  const mergeBase = git('merge-base', base, 'HEAD').stdout.trim() || base;
-  const tracked = git('diff', '--name-only', '--no-renames', mergeBase).stdout;
-  const untracked = git('ls-files', '--others', '--exclude-standard').stdout;
-  return [...new Set(`${tracked}\n${untracked}`.split('\n').filter(Boolean))];
-}
-
 const LINTED = /^packages\/.*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const NO_SQUEAL = { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
 
-async function squealChecks(paths, waitMs) {
-  const deadline = Date.now() + waitMs;
+export const realIo = {
+  run,
+  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  now: () => Date.now(),
+  git: (...a) => spawnSync('git', a, { encoding: 'utf8' }).stdout,
+};
+
+export async function squealChecks(paths, waitMs, io = realIo) {
+  const deadline = io.now() + waitMs;
   const lintExpected = paths.some(p => LINTED.test(p));
   const ignore = p => p.endsWith('.e2e.ts') || isDocsPath(p);
-  const wait = await run('squeal', ['status', '--wait', String(waitMs), '--json', ...paths]);
+  const wait = await io.run('squeal', ['status', '--wait', String(waitMs), '--json', ...paths]);
   let status;
   try { status = JSON.parse(wait.out); } catch { status = undefined; }
   if (wait.code === 127 || !daemonAlive(status)) return { daemon: false };
   let result = judgeSqueal(wait.code, status, ignore, lintExpected);
   // The named-file wait settles on tests alone: give lint the rest of the bound.
-  while (result.state === 'incomplete' && !result.missing.length && Date.now() < deadline) {
-    await sleep(Math.min(3000, Math.max(0, deadline - Date.now())));
-    const poll = await run('squeal', ['status', '--json']);
+  while (result.state === 'incomplete' && !result.missing.length && io.now() < deadline) {
+    await io.sleep(Math.min(3000, Math.max(0, deadline - io.now())));
+    const poll = await io.run('squeal', ['status', '--json']);
     try { result = judgeSqueal(wait.code, { ...status, lint: JSON.parse(poll.out).lint }, ignore, lintExpected); } catch { break; }
   }
   return { daemon: true, ...result };
 }
 
 // Without a daemon: the focused tests only when the selection is not the full suite.
-async function focusedTests(base) {
+export async function focusedTests(base, io = realIo) {
   const baseArg = `--base=${base}`;
-  const plan = await run('node', ['scripts/test-changed.mjs', baseArg, '--plan']);
+  const plan = await io.run('node', ['scripts/test-changed.mjs', baseArg, '--plan']);
   let mode;
   try { mode = JSON.parse(plan.out).mode; } catch { mode = 'unknown'; }
   if (mode === 'full' || mode === 'unknown') return { skipped: `the selection is the full suite (mode ${mode}); CI runs it` };
   if (mode === 'skip') return { skipped: 'no tests selected' };
-  return run('node', ['scripts/test-changed.mjs', baseArg]);
+  return io.run('node', ['scripts/test-changed.mjs', baseArg]);
 }
 
-export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS } = {}) {
-  const files = changedFiles(base);
+const detail = r => (r.code ? `\n${tail(r.out + r.err)}` : '');
+const entry = (ok, text) => ({ ok, text: `- ${ok ? 'pass' : 'FAIL'}: ${text}` });
+
+/** Report lines for a Squeal result: an array of { ok, text }. */
+export function squealLines(squeal, waitMs) {
+  if (squeal.state === 'fail') {
+    const what = squeal.failed.length ? `failing test files: ${squeal.failed.join(', ')}`
+      : squeal.lint.failing ? `${squeal.lint.failing} lint finding(s)` : 'known test failures';
+    return [entry(false, `Squeal: ${what} (\`squeal failures\`, \`squeal status\`)`)];
+  }
+  if (squeal.state === 'incomplete') {
+    const more = squeal.missing.length > 10 ? [`and ${squeal.missing.length - 10} more`] : [];
+    const lint = squeal.lint.unfinished ? [`lint (${squeal.lint.unfinished} file(s) not done)`] : [];
+    const names = [...squeal.missing.slice(0, 10), ...more, ...lint];
+    return [{ ok: true, text: `- pass, incomplete: Squeal had no result within ${Math.round(waitMs / 1000)} s for: ${names.join(', ')}. No failure was seen. CI runs these.` }];
+  }
+  return [entry(true, `Squeal: ${squeal.count} affected test file(s) current and passing; lint clean`)];
+}
+
+/** Report lines when no Squeal daemon runs: the focused tests and lint. */
+export async function fallbackLines(base, io = realIo) {
+  const [tests, lint] = await Promise.all([focusedTests(base, io), io.run('npm', ['run', '--silent', 'lint'])]);
+  return [
+    { ok: true, text: '- No Squeal daemon for this worktree: ran the focused checks (`npm run test:changed`, `npm run lint`).' },
+    tests.skipped ? { ok: true, text: `- skipped: focused tests: ${tests.skipped}` }
+      : entry(tests.code === 0, `focused tests (\`npm run test:changed\`)${detail(tests)}`),
+    entry(lint.code === 0, `lint (\`npm run lint\`)${detail(lint)}`),
+  ];
+}
+
+function changedFiles(base, io) {
+  const mergeBase = io.git('merge-base', base, 'HEAD').trim() || base;
+  const tracked = io.git('diff', '--name-only', '--no-renames', mergeBase);
+  const untracked = io.git('ls-files', '--others', '--exclude-standard');
+  return [...new Set(`${tracked}\n${untracked}`.split('\n').filter(Boolean))];
+}
+
+export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS, io = realIo } = {}) {
+  const files = changedFiles(base, io);
   const docsOnly = files.every(isDocsPath);
-  const lines = [];
-  let failed = false;
   const direct = [
     ...(docsOnly ? [] : [['typecheck', 'npm', ['run', '--silent', 'typecheck']]]),
     ['citations', 'node', ['.github/scripts/check-citations.cjs', '--base', base]],
     ['clones', 'node', ['.github/scripts/check-clones.cjs', '--base', base, '--head', 'HEAD']],
   ];
-  const directRuns = direct.map(([, cmd, args]) => run(cmd, args));
-  const squeal = files.length ? await squealChecks(files, waitMs) : { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
-  const note = (ok, text) => { lines.push(`- ${ok ? 'pass' : 'FAIL'}: ${text}`); if (!ok) failed = true; };
-
-  if (!squeal.daemon) {
-    lines.push('- No Squeal daemon for this worktree: ran the focused checks (`npm run test:changed`, `npm run lint`).');
-    const [tests, lint] = await Promise.all([focusedTests(base), run('npm', ['run', '--silent', 'lint'])]);
-    if (tests.skipped) lines.push(`- skipped: focused tests: ${tests.skipped}`);
-    else note(tests.code === 0, `focused tests (\`npm run test:changed\`)${tests.code ? `\n${tail(tests.out + tests.err)}` : ''}`);
-    note(lint.code === 0, `lint (\`npm run lint\`)${lint.code ? `\n${tail(lint.out + lint.err)}` : ''}`);
-  } else if (squeal.state === 'fail') {
-    note(false, `Squeal: ${squeal.failed.length ? `failing test files: ${squeal.failed.join(', ')}` : squeal.lint.failing ? `${squeal.lint.failing} lint finding(s)` : 'known test failures'} (\`squeal failures\`, \`squeal status\`)`);
-  } else if (squeal.state === 'incomplete') {
-    const names = [...squeal.missing.slice(0, 10), ...(squeal.missing.length > 10 ? [`and ${squeal.missing.length - 10} more`] : []), ...(squeal.lint.unfinished ? [`lint (${squeal.lint.unfinished} file(s) not done)`] : [])];
-    lines.push(`- pass, incomplete: Squeal had no result within ${Math.round(waitMs / 1000)} s for: ${names.join(', ')}. No failure was seen. CI runs these.`);
-  } else {
-    note(true, `Squeal: ${squeal.count} affected test file(s) current and passing; lint clean`);
-  }
-
+  const directRuns = direct.map(([, cmd, args]) => io.run(cmd, args));
+  const squeal = files.length ? await squealChecks(files, waitMs, io) : NO_SQUEAL;
+  const entries = squeal.daemon ? squealLines(squeal, waitMs) : await fallbackLines(base, io);
   for (const [i, [name]] of direct.entries()) {
     const r = await directRuns[i];
-    note(r.code === 0, `${name}${r.code ? `\n${tail(r.out + r.err)}` : ''}`);
+    entries.push(entry(r.code === 0, `${name}${detail(r)}`));
   }
-  if (docsOnly) lines.push('- skipped: typecheck (docs-only change)');
-  const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-  const dirty = spawnSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).stdout.trim() !== '';
-  const report = [`prepr: ${failed ? 'FAIL' : 'PASS'}`, '', '### Local gate (`npm run prepr`)', '', `Head ${head}${dirty ? ' (uncommitted changes present)' : ''}, base ${base}, ${files.length} changed file(s).`, '', ...lines].join('\n');
+  if (docsOnly) entries.push({ ok: true, text: '- skipped: typecheck (docs-only change)' });
+  const failed = entries.some(e => !e.ok);
+  const head = io.git('rev-parse', '--short', 'HEAD').trim();
+  const dirty = io.git('status', '--porcelain').trim() !== '';
+  const report = [`prepr: ${failed ? 'FAIL' : 'PASS'}`, '', '### Local gate (`npm run prepr`)', '', `Head ${head}${dirty ? ' (uncommitted changes present)' : ''}, base ${base}, ${files.length} changed file(s).`, '', ...entries.map(e => e.text)].join('\n');
   return { failed, report };
 }
 
