@@ -509,9 +509,9 @@ describe('worker wait entry', () => {
 
 describe('cezar_wait worker request', () => {
   it.each([
-    { kind: 'worker', worker_ids: [W1] },
+    { kind: WAIT_KIND.worker, worker_ids: [W1] },
     { kind: 'request', request_ids: [R1] },
-    { kind: 'peer', peer_ids: [W1] },
+    { kind: WAIT_KIND.peer, peer_ids: [W1] },
   ])('accepts a two-hour $kind wait and refuses the next second', request => {
     expect(cezarWaitRequestSchema.parse({ ...request, timeout_seconds: 7200 })).toMatchObject({ timeout_seconds: 7200 });
     expect(cezarWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 }).success).toBe(false);

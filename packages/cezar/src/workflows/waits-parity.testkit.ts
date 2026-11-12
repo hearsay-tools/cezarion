@@ -8,6 +8,9 @@ import { readMockRecords } from '../mock-records.testkit.ts';
 // hearsay-tools/cezarion#1233: the wait list's RUNNER_IDS cells. U0 (tool admission) lives in
 // `core/ci-tools-wait-cancel.test.ts` and `core/ci-tools-ask-done.test.ts`.
 export const WAIT_CRITERIA = [
+  { id: 'U29p', scenario: 'baseline', name: 'empty process deadlines cost no budget, even at the cap without a session' },
+  { id: 'U29q', scenario: 'baseline', name: 'empty peer deadlines cost no budget, even at the cap without a session' },
+  { id: 'U29m', scenario: 'baseline', name: 'a mixed empty-deadline and process-exit batch charges once' },
   { id: 'U28w', scenario: 'baseline', name: 'worker accepts a two-hour wait and names the range above it' },
   { id: 'U28r', scenario: 'baseline', name: 'request accepts a two-hour wait and names the range above it' },
   { id: 'U28p', scenario: 'baseline', name: 'peer accepts a two-hour wait and names the range above it' },

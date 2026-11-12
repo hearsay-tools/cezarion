@@ -299,9 +299,9 @@ describe('wait result guidance', () => {
 });
 
 it.each([
-  { kind: 'worker', worker_ids: ['11111111-1111-4111-8111-111111111111'] },
+  { kind: WAIT_KIND.worker, worker_ids: ['11111111-1111-4111-8111-111111111111'] },
   { kind: 'request', request_ids: ['11111111-1111-4111-8111-111111111111'] },
-  { kind: 'peer', peer_ids: ['11111111-1111-4111-8111-111111111111'] },
+  { kind: WAIT_KIND.peer, peer_ids: ['11111111-1111-4111-8111-111111111111'] },
 ])('names the accepted timeout range above the $kind bound', request => {
   const result = cezarWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 });
   expect(result.success).toBe(false);
