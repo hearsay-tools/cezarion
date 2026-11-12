@@ -261,7 +261,8 @@ describe('task quick-list', () => {
         ).toBeGreaterThanOrEqual(4.5)
 
         browser.moveTo(0, 0)
-        const rest = browser.evaluate(contrastSampleExpression(age(hoveredRow))) as ContrastSample
+        // Held, so a hover wash left by the previous pointer position has cleared before it is the baseline.
+        const rest = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(age(hoveredRow)))
         browser.hover(hoveredRow)
         // The row's hover wash is the state under test: wait until it replaced the rest surface.
         const hovered = browser.waitForValue<ContrastSample>(
@@ -560,7 +561,8 @@ describe('tasks table overview', () => {
         ? `${row} [data-slot="mobile-task-meta"] > span:last-child`
         : `${row} [data-column-id="started"]`
       browser.moveTo(0, 0)
-      const normal = browser.waitForValue(contrastSampleExpression(metadata)) as ContrastSample
+      // Held, so a hover wash left by the previous pointer position has cleared before it is the baseline.
+      const normal = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(metadata))
       expect(normal.ratio, `${variant.id} normal: ${normal.foreground} on ${normal.background}`).toBeGreaterThanOrEqual(4.5)
       // The phone card has no hover style; the desktop row's hover wash is the state under test.
       if (!mobile) {
@@ -1592,7 +1594,8 @@ describe('archive from the sidebar (#780)', () => {
         for (const scope of ['unpinned']) {
           const group = `[data-action="archive-group"][data-scope="${scope}"]`
           browser.moveTo(0, 0)
-          const rest = browser.evaluate(contrastSampleExpression(group, 'color', 'parent')) as ContrastSample
+          // Held, so a hover wash left by the previous pointer position has cleared before it is the baseline.
+          const rest = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(group, 'color', 'parent'))
           expect(rest.ratio, `${variant.id} ${scope} rest: ${rest.foreground} on ${rest.background}`).toBeGreaterThanOrEqual(4.5)
           browser.hover(group)
           const hovered = browser.waitForValue<ContrastSample>(

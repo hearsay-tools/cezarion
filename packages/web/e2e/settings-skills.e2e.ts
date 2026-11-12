@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { pollFor, pollJson } from './poll'
+import { waitForSettledSample } from './visual-ready'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -133,7 +134,8 @@ describe('settings → skills against the live dry-run server', () => {
         browser.evaluate(`document.querySelector(${JSON.stringify(row(BETA))}).scrollIntoView({ block: 'center' })`)
         const hoveredSelector = `${row(BETA)} > span:last-child`
         browser.moveTo(0, 0)
-        const rest = browser.evaluate(contrastSampleExpression(hoveredSelector)) as ContrastSample
+        // Held, so a hover wash left by the previous pointer position has cleared before it is the baseline.
+        const rest = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(hoveredSelector))
         browser.hover(row(BETA))
         // The row's hover wash is the state under test: wait until it replaced the rest surface.
         const hovered = browser.waitForValue<ContrastSample>(
