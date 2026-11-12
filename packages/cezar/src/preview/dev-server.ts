@@ -1,7 +1,7 @@
 import { productName } from '../home/display.ts';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
@@ -9,6 +9,7 @@ import { buildCommandEnv } from '../core/agent-env.ts';
 import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
 import { spawnDetached, stopGroup, type GroupLeader } from '../detached-process.ts';
 import { CHROMIUM_PID_FILE } from './chromium.ts';
+import { legacyRunsBeside, runDataDir } from '../legacy-runs.ts';
 
 /**
  * Supervisor for one cezar-owned dev server (#781, spec 2026-10-02-live-preview-v1): spawn the
@@ -250,6 +251,27 @@ export class DevServer extends EventEmitter {
   }
 }
 
+/** Each run's preview directory under `dataDir`, and those of the tasks a project move left in
+ *  `.ai/cezar/` (`legacy-runs.ts`): their servers and browsers keep their records there. */
+function previewRunDirectories(dataDir: string): Array<{ runId: string; directory: string }> {
+  const root = join(dataDir, 'preview');
+  const runs = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).filter(run => run.isDirectory()).map(run => ({ runId: run.name, directory: join(root, run.name) }))
+    : [];
+  let kept: string[] = [];
+  // An unreadable kept-task list: sweep only this directory, never a guessed one.
+  try { kept = legacyRunsBeside(dataDir); } catch { /* none of the kept tasks' records are touched */ }
+  for (const runId of kept) {
+    const legacy = runDataDir(dataDir, runId);
+    const directory = join(legacy, 'preview', runId);
+    // Only the run's own real directory: a link at preview/ or preview/<id> could name another run's records.
+    try {
+      if (lstatSync(directory).isDirectory() && realpathSync(directory) === join(realpathSync(legacy), 'preview', runId)) runs.push({ runId, directory });
+    } catch { /* absent or unreadable: nothing of this run's to sweep */ }
+  }
+  return runs;
+}
+
 /**
  * Boot sweep: a crashed cezar leaves pid records behind, `<port>.pid.json` for each dev server and
  * `chromium.pid.json` for the task's browser. Kill only when the recorded pid is still the process
@@ -260,16 +282,13 @@ export class DevServer extends EventEmitter {
  * Returns how many processes were killed.
  */
 export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: ((runId: string, what: number | 'browser') => boolean) | undefined } = {}): Promise<number> {
-  const root = join(dataDir, 'preview');
-  if (!existsSync(root)) return 0;
   const kills: Promise<void>[] = [];
-  for (const run of readdirSync(root, { withFileTypes: true })) {
-    if (!run.isDirectory()) continue;
-    for (const file of readdirSync(join(root, run.name))) {
+  for (const { runId, directory } of previewRunDirectories(dataDir)) {
+    for (const file of readdirSync(directory)) {
       if (!file.endsWith('.pid.json')) continue;
       const what = file === CHROMIUM_PID_FILE ? 'browser' : Number(file.slice(0, -'.pid.json'.length));
-      if (opts.keep?.(run.name, what)) continue;
-      const path = join(root, run.name, file);
+      if (opts.keep?.(runId, what)) continue;
+      const path = join(directory, file);
       let record: unknown;
       try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { /* unreadable: nothing to kill */ }
       rmSync(path, { force: true });

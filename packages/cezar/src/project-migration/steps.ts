@@ -1,8 +1,9 @@
-import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { readOwnedWorkspaceRecord, replaceOwnedWorkspaceRecord } from '../delegation/workspace.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
-import { pathPresent, projectMovedMarker, projectMoveMarked } from '../project-paths.ts';
+import { pathPresent, projectMovedMarker, projectMoveMarked, realDirectory } from '../project-paths.ts';
+import { forgetLegacyRunIds, LEGACY_RUNS_FILE, legacyItemOwner } from '../legacy-runs.ts';
 import { RUNS_DB_FILE, RunDatabase, type RunRowInput } from '../runs/run-database.ts';
 import { notRegularFile, outsideOf, receiptDirectory, runStoreFiles } from './containment.ts';
 import { replaceAtomically, settle } from './durable.ts';
@@ -257,7 +258,9 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
     rewrite.kind !== 'run-row' && rewrite.kind !== 'receipt' && rewrite.kind !== 'cleanup-checkpoint');
   let index = 0;
   for (const [file, fields] of byFile(rewrites)) {
-    contained('run-files', join(journal.destination, 'runs'), file);
+    // A kept task's own file stays in the old directory and is rewritten there.
+    const kept = file.startsWith(join(journal.source, 'runs') + sep);
+    contained('run-files', join(kept ? journal.source : journal.destination, 'runs'), file);
     regularFile('run-files', file);
     const text = readFileSync(file, 'utf8');
     let next = text;
@@ -272,6 +275,46 @@ function runFilesStep(journal: ProjectMigrationJournal, fault: MigrationFault): 
     settle(dirname(journal.destination), file, { data: true });
     fault(`run-files:item:${index++}`);
   }
+}
+
+/**
+ * Remove the directories under `directory` (at `parts` below the old directory) that the move left
+ * empty, deepest first: never a kept task's item, never a directory that still holds anything,
+ * never through a symlink. A directory something else fills in the meantime stays.
+ */
+function pruneEmptied(directory: string, parts: readonly string[], keep: ReadonlySet<string>, top: boolean): void {
+  for (const name of readdirSync(directory)) {
+    if (top && name.startsWith('cockpit.lock')) continue;
+    const path = join(directory, name);
+    if (!realDirectory(path) || legacyItemOwner([...parts, name], keep)) continue;
+    pruneEmptied(path, [...parts, name], keep, false);
+    try { rmdirSync(path); } catch { /* not empty: it stays */ }
+  }
+}
+
+/**
+ * Name the kept tasks (live or not archived) whose own items stay in the old directory (`legacy-runs.ts`), in the new
+ * one, then remove the old directories the move emptied; no task left removes the file. Written
+ * before the mark, so the project is never marked moved while a task's items resolve elsewhere.
+ */
+function leftoversStep(journal: ProjectMigrationJournal): void {
+  const keep = new Set(journal.leftovers ?? []);
+  const file = join(journal.destination, LEGACY_RUNS_FILE);
+  contained('leftovers', journal.destination, file);
+  regularFile('leftovers', file);
+  if (keep.size > 0) {
+    createDirectories(journal.destination, journal.source, journal.destination);
+    replaceAtomically(file, `${JSON.stringify({ version: 1, runs: [...keep].sort() }, null, 2)}\n`, 0o600);
+  } else rmSync(file, { force: true });
+  forgetLegacyRunIds(journal.destination);
+  // With nothing moved and no task kept, the new directory may not exist: nothing was written there.
+  if (pathPresent(journal.destination)) settle(dirname(journal.destination), file, { data: keep.size > 0 });
+  if (realDirectory(journal.source)) {
+    pruneEmptied(journal.source, [], keep, true);
+    // Nothing left at all, not even an ownership claim: the old directory itself goes.
+    try { rmdirSync(journal.source); } catch { /* not empty: it stays */ }
+  }
+  settle(dirname(journal.destination), journal.source);
 }
 
 /**
@@ -302,5 +345,6 @@ export const MIGRATION_STEP_RUNNERS: Record<ProjectMigrationStep, (journal: Proj
   receipts: receiptStep,
   'run-store': runStoreStep,
   'run-files': runFilesStep,
+  leftovers: leftoversStep,
   'mark-moved': markMovedStep,
 };

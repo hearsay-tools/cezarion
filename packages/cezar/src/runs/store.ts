@@ -1,5 +1,5 @@
 import { legacyIndexRows } from './legacy-run-rows.ts';
-import { dataReadDirs } from '../project-paths.ts';
+import { dataReadDirs, runDataDir } from '../project-paths.ts';
 import { addRunSource, copyFallbackFamily, fallbackRunSource, bindWorkerResultPath, fallbackRunDeleteError, workerResultsDirectory } from './project-run-sources.ts';
 import { productName, logPrefix } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
@@ -709,7 +709,7 @@ export class RunStore extends EventEmitter {
   get unavailable(): RunStoreOpenError | undefined { return this.openFailure; }
 
   /** Every sidecar for a run follows the winning record, never file-by-file fallback. */
-  sourceDataDir(id: string): string { return this.isFallbackRun(id) ? dataReadDirs(this.dataDir)[1]! : this.dataDir; }
+  sourceDataDir(id: string): string { return this.isFallbackRun(id) ? dataReadDirs(this.dataDir)[1]! : runDataDir(this.dataDir, id); }
   isFallbackRun(id: string): boolean { return this.db?.isFallback(id) ?? false; }
   hasFallbackRun(id: string): boolean { return this.db?.hasFallback(id) ?? false; }
   fallbackDeleteError(id: string, kind: 'record' | 'worktree' = 'record'): string | undefined { return fallbackRunDeleteError(this.dataDir, kind === 'record' ? this.hasFallbackRun(id) : this.isFallbackRun(id), this.peek(id)?.worktreePath); }
@@ -882,7 +882,7 @@ export class RunStore extends EventEmitter {
   }
   private fallbackRefusal(id: string): RunWriteRefusedError { return new RunWriteRefusedError(id, 'fallback', fallbackRunDeleteError(this.dataDir, true)); }
   /** Run files are written only for a family this store may write, never a fallback family. */
-  private writeDir(id: string): string { if (this.runOwnership(id) === 'fallback') throw this.fallbackRefusal(id); return this.dataDir; }
+  private writeDir(id: string): string { if (this.runOwnership(id) === 'fallback') throw this.fallbackRefusal(id); return runDataDir(this.dataDir, id); }
 
   /** Every run whose family another process owns (`foreignClaimedRunIds`). */
   listForeignClaimedRunIds(): string[] { return foreignClaimedRunIds(this.db, this.owner); }
@@ -1880,7 +1880,7 @@ export class RunStore extends EventEmitter {
   private workerResultsDir(parentId: string, write = false): string { return workerResultsDirectory(write ? this.writeDir(parentId) : this.sourceDataDir(parentId), parentId, write); }
 
   workerResultSnapshotPath(parentId: string, workerId: string, snapshotId: string): string {
-    return join(this.dataDir, 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
+    return join(runDataDir(this.dataDir, parentId), 'runs', `${z.uuid().parse(parentId)}-worker-results`, `${z.uuid().parse(workerId)}.${z.uuid().parse(snapshotId)}.json`);
   }
 
   private readWorkerResultFile(parentId: string, workerId: string): z.infer<typeof workerResultFileSchema> | undefined {
@@ -3030,7 +3030,7 @@ export class RunStore extends EventEmitter {
       } else if (run.delegation?.role === 'root') {
         this.commitDelegation([{ id, delegation: { ...run.delegation, historyDeletion: 'pending' } }]);
         this.removeRunHistoryBytes(id);
-        rmSync(join(this.dataDir, 'runs', `${id}-worker-results`), { recursive: true, force: true });
+        rmSync(join(runDataDir(this.dataDir, id), 'runs', `${id}-worker-results`), { recursive: true, force: true });
         this.commitIndex(new Map([[id, null]]));
       } else return false;
       removeAgentTmpDir(this.dataDir, id);
@@ -3042,7 +3042,7 @@ export class RunStore extends EventEmitter {
   private removeRunHistoryBytes(id: string): void {
     // Fixed owned paths only: never follow context descriptors supplied in persisted metadata.
     z.uuid().parse(id);
-    const dir = join(this.dataDir, 'runs');
+    const dir = join(runDataDir(this.dataDir, id), 'runs');
     if (realpathSync(dir) !== resolve(dir)) throw new Error('History storage redirected');
     this.facts.forget(id);
     removeHistory(this.dataDir, id);

@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { fallbackProjectWriteError } from '../project-paths.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -55,7 +56,8 @@ async function readCanonicalFile(
   return read.bytes;
 }
 async function inputDirectory(dataDir: string, workerId: string): Promise<string> {
-  const root = await realpath(dataDir);
+  // A worker the project move left in `.ai/cezar/` keeps its inputs there (`legacy-runs.ts`).
+  const root = await realpath(runDataDir(dataDir, workerId));
   const runs = join(root, 'runs');
   if (await realpath(runs) !== runs) throw invalid();
   return join(runs, `${workerId}-images`);
@@ -79,7 +81,7 @@ async function writeCopy(path: string, bytes: Buffer): Promise<void> {
 }
 async function attachmentBytes(dataDir: string, parentId: string, id: string, limit: number) {
   const source = resolveAttachmentPath(dataDir, parentId, id);
-  const expected = join(await realpath(dataDir), 'runs', `${parentId}-images`, id);
+  const expected = join(await realpath(runDataDir(dataDir, parentId)), 'runs', `${parentId}-images`, id);
   if (!source || source !== expected) throw invalid();
   await canonicalFile(source);
   return readCanonicalFile(source, limit, () => canonicalFile(source));

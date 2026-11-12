@@ -15,8 +15,9 @@ import type { MigrationFault } from './steps.ts';
 
 const HELP = commandText(`Usage: cez migrate-project [--dry-run] [--repo <dir>]
 Move this project's runtime state from .ai/cezar/ to .ai/squawk/, offline. Stop every
-cockpit that serves the project and finish or cancel every task first; the command
-names what it finds still running. It cannot see a cockpit of another home that
+cockpit that serves the project first; the command names what it finds still running.
+A task that is not archived keeps its own files (worktree, handoff, scratch) in
+.ai/cezar/ until it is archived; run the command again, or start a cockpit, to move them then. It cannot see a cockpit of another home that
 lists the project but never opened it: stop it yourself, and keep older binaries off
 the project. Tracked files are never moved: the command prints the
 git mv commands to run and commit.

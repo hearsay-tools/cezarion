@@ -1,0 +1,113 @@
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { removeHistory } from './runs/history-file.ts';
+import { forgetLegacyRunIds, LEGACY_RUNS_FILE, legacyItemOwner, legacyRunIds, legacyRunItem, LegacyRunsUnreadableError, runDataDir } from './legacy-runs.ts';
+import { workerEvidenceRunIds } from './runs/worker-execution.ts';
+
+/** Live tasks that keep their own items in `.ai/cezar/` after a project move (owner decision A). */
+
+const LIVE = '20000000-0000-4000-8000-000000000002';
+const OTHER = '30000000-0000-4000-8000-000000000003';
+
+describe('the items of a task the project move left in .ai/cezar/', () => {
+  let root: string;
+  let moved: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-legacy-runs-'));
+    moved = join(root, '.ai', 'squawk');
+    mkdirSync(moved, { recursive: true });
+  });
+  afterEach(() => {
+    forgetLegacyRunIds(moved);
+    rmSync(root, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const list = (runs: string[]) => {
+    writeFileSync(join(moved, LEGACY_RUNS_FILE), JSON.stringify({ version: 1, runs }));
+    forgetLegacyRunIds(moved);
+  };
+
+  it('names the owner of a worktree, a scratch directory, a preview profile and every runs/<id> entry', () => {
+    const ids = new Set([LIVE]);
+    for (const parts of [['worktrees', LIVE], ['worktrees', LIVE, 'src', 'a.ts'], ['tmp', LIVE], ['preview', LIVE, 'agent-connected'],
+      ['t', LIVE.slice(0, 8)], ['t', LIVE.slice(0, 8), 'exit'], ['runs', `${LIVE}.handoff.md`], ['runs', `${LIVE}.ndjson`],
+      ['runs', `${LIVE}-artifacts`, 'x', 'content'], ['runs', `${LIVE}-worker-results`], ['runs', `${LIVE}-images`, 'pasted-1.png']]) {
+      expect(legacyItemOwner(parts, ids), parts.join('/')).toBe(LIVE);
+    }
+    for (const parts of [['worktrees', OTHER], ['runs', `${OTHER}.handoff.md`], ['runs.db'], ['runs'], ['workflows', 'flow.yaml'],
+      ['runs', `${LIVE}x`], ['t', LIVE.slice(0, 7)], ['worktrees', LIVE, '..', OTHER], ['config.json']]) {
+      expect(legacyItemOwner(parts, ids), parts.join('/')).toBeUndefined();
+    }
+  });
+
+  it('resolves a listed task\'s data directory to .ai/cezar/ and every other task\'s to the moved one', () => {
+    expect(runDataDir(moved, LIVE)).toBe(moved);
+    list([LIVE]);
+    expect(runDataDir(moved, LIVE)).toBe(join(root, '.ai', 'cezar'));
+    expect(runDataDir(moved, OTHER)).toBe(moved);
+    // Never for a directory that is not a moved project directory: the legacy one, or a fixture's.
+    expect(runDataDir(join(root, '.ai', 'cezar'), LIVE)).toBe(join(root, '.ai', 'cezar'));
+    expect(runDataDir(join(root, 'data'), LIVE)).toBe(join(root, 'data'));
+    expect(legacyRunItem(root, join(root, '.ai', 'cezar', 'worktrees', LIVE, 'file'))).toBe(true);
+    expect(legacyRunItem(root, join(root, '.ai', 'cezar', 'runs.db'))).toBe(false);
+    expect(legacyRunItem(root, join(root, '.ai', 'squawk', 'worktrees', LIVE))).toBe(false);
+  });
+
+  it('fails closed on a present list it cannot read or validate, and reads a repaired one again', () => {
+    const file = join(moved, LEGACY_RUNS_FILE);
+    const legacyHandoff = join(root, '.ai', 'cezar', 'runs', `${LIVE}.handoff.md`);
+    for (const write of [
+      () => writeFileSync(file, '{"version":1,"runs":["../escape"]}'), // invalid
+      () => writeFileSync(file, '{"version":1,'), // malformed
+      () => mkdirSync(file), // present, unreadable as a file
+    ]) {
+      rmSync(file, { recursive: true, force: true });
+      write();
+      forgetLegacyRunIds(moved);
+      expect(() => legacyRunIds(moved)).toThrow(LegacyRunsUnreadableError);
+      // Never a guessed `.ai/squawk/` path for a task that may have kept its files.
+      expect(() => runDataDir(moved, LIVE)).toThrow(LegacyRunsUnreadableError);
+      // The write guard treats nothing in `.ai/cezar/` as a kept task's.
+      expect(legacyRunItem(root, legacyHandoff)).toBe(false);
+    }
+    // The failure is not cached: a repaired list is read on the next call.
+    rmSync(file, { recursive: true, force: true });
+    writeFileSync(file, JSON.stringify({ version: 1, runs: [LIVE] }));
+    expect(runDataDir(moved, LIVE)).toBe(join(root, '.ai', 'cezar'));
+    // Only a missing list means no kept task.
+    rmSync(file);
+    forgetLegacyRunIds(moved);
+    expect(legacyRunIds(moved).size).toBe(0);
+    expect(runDataDir(moved, LIVE)).toBe(moved);
+  });
+
+  it('reserves a kept task as a worker only by its own evidence in .ai/cezar/runs', () => {
+    list([LIVE, OTHER]);
+    const legacyRuns = join(root, '.ai', 'cezar', 'runs');
+    mkdirSync(legacyRuns, { recursive: true });
+    mkdirSync(join(moved, 'runs'), { recursive: true });
+    writeFileSync(join(legacyRuns, `${LIVE}.execution.json`), '{}');
+    writeFileSync(join(legacyRuns, `${OTHER}.handoff.md`), '# Handoff');
+    expect(workerEvidenceRunIds(moved)).toEqual([LIVE]);
+    // An unreadable list leaves the reservation unknown: callers retain every scratch.
+    writeFileSync(join(moved, LEGACY_RUNS_FILE), '{');
+    forgetLegacyRunIds(moved);
+    expect(workerEvidenceRunIds(moved)).toBeUndefined();
+  });
+
+  it('removes a listed task\'s history bytes from .ai/cezar/, and only its own', () => {
+    list([LIVE]);
+    const legacyRuns = join(root, '.ai', 'cezar', 'runs');
+    mkdirSync(legacyRuns, { recursive: true });
+    mkdirSync(join(moved, 'runs'), { recursive: true });
+    const own = [`${LIVE}.ndjson`, `${LIVE}.ndjson.br`, `${LIVE}.ndjson.br.orphaned`, `${LIVE}.facts.json`].map(name => join(legacyRuns, name));
+    const others = [join(legacyRuns, `${OTHER}.ndjson`), join(legacyRuns, `${LIVE}.handoff.md`), join(moved, 'runs', `${OTHER}.ndjson`)];
+    for (const path of [...own, ...others]) writeFileSync(path, 'x');
+    removeHistory(moved, LIVE);
+    for (const path of own) expect(existsSync(path), path).toBe(false);
+    for (const path of others) expect(existsSync(path), path).toBe(true);
+  });
+});

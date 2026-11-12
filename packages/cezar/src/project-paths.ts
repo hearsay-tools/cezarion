@@ -3,6 +3,8 @@ import { REBRAND_SWITCH } from './home/switch.ts';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, isAbsolute, relative, resolve } from 'node:path';
+import { legacyRunItem } from './legacy-runs.ts';
+export { runDataDir } from './legacy-runs.ts';
 
 /**
  * Where a completed project migration marks the project moved (hearsay-tools/cezarion#3150):
@@ -113,10 +115,12 @@ export function readProjectPath(repoRoot: string, ...parts: string[]): string {
 /** Recognize either managed worktree name without changing Git-based repo discovery. */
 export const MANAGED_WORKTREE = /(?:^|\/)\.ai\/(?:cezar|squawk)\/worktrees\//;
 
-/** Guard every destructive path, including rows already copied to the write root's database. */
+/** Guard every destructive path, including rows already copied to the write root's database. An
+ *  item a task kept in `.ai/cezar/` at the project move (`legacy-runs.ts`) is not guarded. */
 export function isFallbackProjectPath(repoRoot: string, path: string): boolean {
   const inside = relative(resolve(projectPaths(repoRoot).reads[1]!), resolve(path));
-  return inside === '' || (inside !== '..' && !inside.startsWith('../') && !inside.startsWith('..\\')) && !isAbsolute(inside);
+  const fallback = inside === '' || (inside !== '..' && !inside.startsWith('../') && !inside.startsWith('..\\')) && !isAbsolute(inside);
+  return fallback && !legacyRunItem(repoRoot, path);
 }
 
 /**
@@ -129,6 +133,8 @@ export function fallbackProjectWriteError(path: string): string | undefined {
     const root = path.slice(0, match.index) || '.';
     if (REBRAND_SWITCH && !pathPresent(root)) continue;
     if (basename(projectPaths(root).reads[1]!) !== match[1]) continue;
+    // A kept task's own items stay in `.ai/cezar/` after the move, and stay writable.
+    if (match[1] === 'cezar' && legacyRunItem(root, path)) continue;
     return `Cannot write read-only project data in ${path}. Use the binary that migrated the project.`;
   }
   return undefined;

@@ -21,7 +21,8 @@ import { PROJECT_MIGRATION_STEPS, writeProjectMigrationJournal } from './journal
  * or a linked one), tracked workflows, skills and `context.yaml`, a task worktree, two owned worker
  * workspaces with receipts (one with a cleanup checkpoint), a run store, and every kind of
  * file-backed evidence. Built once at a fixed path and restored byte for byte (`cp -a`) for each
- * case, so absolute paths, ids, commits and reflogs are the same in every copy.
+ * case, so absolute paths, ids, commits and reflogs are the same in every copy. Every task is
+ * archived, so a move carries all of it; a case that keeps a task's items unarchives it.
  */
 
 export const PARENT = '10000000-0000-4000-8000-000000000001';
@@ -56,7 +57,7 @@ export interface MigrationProject {
 }
 
 function workerRecord(workspace: WorkerWorkspace, extra: Record<string, unknown> = {}) {
-  return makeRunRecord({ id: workspace.ownerRunId, status: RUN_STATUS.done, worktreePath: workspace.path, branch: workspace.branch,
+  return makeRunRecord({ id: workspace.ownerRunId, status: RUN_STATUS.done, archived: true, worktreePath: workspace.path, branch: workspace.branch,
     delegation: { role: 'worker', parentRunId: PARENT, permissions: [], workspace }, ...extra } as never);
 }
 
@@ -96,8 +97,8 @@ export async function buildMigrationProject(options: { linked: boolean; checkpoi
   const runs = join(dataDir, 'runs');
   const artifact = await publishArtifact(artifactDirectory(dataDir, TASK), TASK, join(task.path, 'report.html'));
   seedRuns(dataDir, [
-    makeRunRecord({ id: PARENT, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } } as never),
-    makeRunRecord({ id: TASK, status: RUN_STATUS.review, worktreePath: task.path, branch: task.branch,
+    makeRunRecord({ id: PARENT, archived: true, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } } as never),
+    makeRunRecord({ id: TASK, status: RUN_STATUS.review, archived: true, worktreePath: task.path, branch: task.branch,
       task: `Work in ${task.path} and keep this prose`,
       workflowDef: { name: 'local', path: join(dataDir, 'workflows/local.yaml'), steps: [] },
       lastWaits: [{ ...makeProcessWait({ exitFile: join(dataDir, 't', TASK.slice(0, 8), 'exit') }), unknownWaitField: 1 }],

@@ -14,8 +14,10 @@ import { readQuiescentRunDatabase } from './plan.ts';
 
 /**
  * Whether anything is live for a project (hearsay-tools/cezarion#3089). A project migration runs
- * offline: it refuses while a cockpit serves the project or a task of it is live, and names what to
- * stop. Shared by every caller that starts a migration.
+ * offline: it refuses while a cockpit serves the project or another live process claims a task of
+ * it, and names what to stop. A task live otherwise (parked, waiting, a worker whose destroy is
+ * unfinished) does not refuse it: its own items stay in `.ai/cezar/` (`projectLiveRunIds`).
+ * Shared by every caller that starts a migration.
  *
  * Seen: the cockpit that owns the project's `cockpit.lock` (any home), every live cockpit of the
  * given homes whose registry lists the project (their presence leases, `home/leases.ts`), and live
@@ -83,15 +85,23 @@ function record(value: unknown): RunRecord | undefined {
  * JSON. The legacy directory wins an id both hold. Live: rows not terminal, and the runs of
  * families a live process claims. Throws when a live id's record cannot be read.
  */
-export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'> {
+export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'> & {
+  allRuns: () => RunRecord[];
+  /** Ids of rows not archived whose record does not parse: whether they can resume is unknown. */
+  unreadableUnarchived: () => string[];
+} {
   const runs = new Map<string, RunRecord>();
-  const live = new Set<string>(), foreign = new Set<string>();
+  const live = new Set<string>(), foreign = new Set<string>(), unparsed = new Set<string>();
   const add = (run: RunRecord | undefined) => { if (run && !runs.has(run.id)) runs.set(run.id, run); };
   for (const directory of projectPaths(root).reads) {
     const database = join(directory, RUNS_DB_FILE);
     if (pathPresent(database)) {
       readQuiescentRunDatabase(database, (db) => {
-        for (const row of db.listAll()) add(record(JSON.parse(row.data)));
+        for (const row of db.listAll()) {
+          const run = record(parseJson(row.data));
+          add(run);
+          if (!run && !row.archived) unparsed.add(row.id);
+        }
         for (const row of db.listLive()) live.add(row.id);
         for (const claim of db.listClaims(true)) {
           if (!claimOwnerLive(claim)) continue;
@@ -107,6 +117,8 @@ export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'per
       const run = record(entry);
       add(run);
       if (run && isLiveRecord(run)) live.add(run.id);
+      const raw = entry as { id?: unknown; archived?: unknown } | null;
+      if (!run && typeof raw?.id === 'string' && raw.archived !== true) unparsed.add(raw.id);
     }
   }
   // A live task whose record cannot be read is still live: the check refuses what it cannot prove safe.
@@ -115,7 +127,12 @@ export function readLiveTaskView(root: string): Pick<RunStore, 'listRuns' | 'per
     throw new Error(`Cannot migrate ${root}: these tasks are marked live but their records cannot be read: ${unreadable.join(', ')}. `
       + 'Open the project with the binary that wrote them, finish or cancel each one, then retry');
   }
-  return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id) };
+  return { listRuns: () => [], persistedLiveRunIds: () => ({ live: [...live], foreign: [...foreign] }), getRun: (id) => runs.get(id),
+    allRuns: () => [...runs.values()], unreadableUnarchived: () => [...unparsed].filter(id => !runs.has(id)).sort() };
+}
+
+function parseJson(text: string): unknown {
+  try { return JSON.parse(text); } catch { return undefined; }
 }
 
 /** Refuse when a cockpit serves the project; include live tasks in that first refusal. The fence checks them again. */
@@ -130,7 +147,33 @@ export async function assertNoProjectCockpit(root: string, homes: readonly Home[
   throw new ProjectInUseError(root, cockpits, tasks);
 }
 
-/** The project's live tasks, read without writing anything: the fence's live-task check. */
+/** The project's live tasks, read without writing anything. */
 export function projectLiveTasksOffline(root: string): LiveProjectTask[] {
   return projectLiveTasks(readLiveTaskView(root));
+}
+
+/** The tasks of families another live process claims, read without writing anything: the fence's check. */
+export function projectForeignTasksOffline(root: string): LiveProjectTask[] {
+  const view = readLiveTaskView(root);
+  const { foreign } = view.persistedLiveRunIds();
+  return projectLiveTasks({ ...view, persistedLiveRunIds: () => ({ live: [], foreign }) });
+}
+
+/**
+ * The ids of every task of the project that can still resume: each live task, and each task not
+ * archived, since a human can Continue a done, review, failed or cancelled task from its stored
+ * worktree. A migration leaves their own items in place. A deleted task has no record, so its
+ * items move.
+ */
+export function projectKeptRunIds(root: string): ReadonlySet<string> {
+  const view = readLiveTaskView(root);
+  // A task not archived may still be continued; with its record unreadable, its files cannot be proven safe to move.
+  const unreadable = view.unreadableUnarchived();
+  if (unreadable.length > 0) {
+    throw new Error(`Cannot migrate ${root}: these tasks are not archived but their records cannot be read: ${unreadable.join(', ')}. `
+      + 'Open the project with the binary that wrote them and archive or delete each one, then retry');
+  }
+  const kept = new Set(projectLiveTasks(view).map(task => task.id));
+  for (const run of view.allRuns()) if (!run.archived) kept.add(run.id);
+  return kept;
 }

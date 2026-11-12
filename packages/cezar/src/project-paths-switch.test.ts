@@ -74,19 +74,32 @@ it('prepares a fresh cockpit project once before its first ownership claim', asy
   } finally { rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
 });
 
-it('prints one switch-aware notice when a live task blocks the automatic move', async () => {
+it('prints one switch-aware notice when the automatic move must wait', async () => {
   release.enabled = true;
   const repo = mkdtempSync(join(tmpdir(), 'busy-project-switch-'));
   const warnings: string[] = [];
   const warn = vi.spyOn(console, 'warn').mockImplementation(line => { warnings.push(String(line)); });
   try {
     execFileSync('git', ['init', '-q', repo]);
-    seedRuns(join(repo, '.ai/cezar'), [makeRunRecord({ status: RUN_STATUS.running, title: 'busy task' })]);
+    mkdirSync(join(repo, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repo, '.ai/cezar/runs.json'), JSON.stringify([makeRunRecord({ status: RUN_STATUS.running, title: 'busy task' })]));
     expect((await moveProjectWhenIdle(repo, { homes: [] })).status).toBe('blocked');
     noticeLegacyProject(repo);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/^\[hsq\] Project /);
-    expect(warnings[0]).toContain('busy task');
+    expect(warnings[0]).toContain('has not been imported into a run store');
+  } finally { warn.mockRestore(); rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
+});
+
+it('moves past a live task: a running task alone never blocks the automatic move', async () => {
+  release.enabled = true;
+  const repo = mkdtempSync(join(tmpdir(), 'live-task-switch-'));
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    execFileSync('git', ['init', '-q', repo]);
+    seedRuns(join(repo, '.ai/cezar'), [makeRunRecord({ status: RUN_STATUS.running, title: 'busy task' })]);
+    expect((await moveProjectWhenIdle(repo, { homes: [] })).status).toBe('moved');
+    expect(projectPaths(repo).write).toBe(join(repo, '.ai/squawk'));
   } finally { warn.mockRestore(); rmSync(repo, { recursive: true, force: true }); release.enabled = false; }
 });
 

@@ -120,11 +120,21 @@ Project state moves separately; see [project folders](#project-folders).
 
 Each project keeps its state in `.ai/squawk/` (runs, logs, worktrees, artifacts).
 A project that has no `.ai/cezar` path starts there. For a project that has one,
-the cockpit moves the state at start when nothing else uses the project: no other
-cockpit, live task, headless run or automation lease. When something is live, the
-project stays in place, the cockpit serves it from both folders, logs what blocks
-the move and tries again at the next start. A finished move logs the `git mv`
-commands for tracked files.
+the cockpit moves the state at start, before any task resumes, when no other
+writer uses the project: no other cockpit, headless run or automation lease.
+When one is live, the project stays in place, the cockpit serves it from both
+folders, logs what blocks the move and tries again at the next start.
+
+A task that is not archived does not stop the move, live or not: running,
+parked on you, waiting on a pull request, a timer or a worker, a worker whose
+cleanup did not finish, or done, in review, failed or cancelled (you can still
+Continue it). The run store and everything else move; the task's own files stay
+in `.ai/cezar/` at the paths its agent knows: its worktree, its handoff file and
+other `runs/<id>…` files, and its scratch directories. New tasks write only to
+`.ai/squawk/`. A later start moves the files of each such task after you archive
+or delete it, and removes the folders under `.ai/cezar/` that this leaves empty.
+A finished move logs the `git mv` commands for tracked files and says "N task(s)
+keep their files in .ai/cezar/ until they are archived: <ids>".
 
 To move a project yourself, stop its cockpit and run:
 
@@ -133,8 +143,10 @@ hsq migrate-project --dry-run
 hsq migrate-project
 ```
 
-The command refuses while a cockpit or a task of the project is live, and names
-what to stop. It never moves tracked files under `.ai/cezar/` (workflows, skills,
+The command refuses while a cockpit serves the project or another process (a
+headless run) holds one of its tasks, and names what to stop. A task that is not
+archived keeps its own files in `.ai/cezar/`, as at a cockpit start; run the command
+again after you archive the task to move them. It never moves tracked files under `.ai/cezar/` (workflows, skills,
 `context.yaml`): it prints the `git mv` commands, and you commit them. Until you
 do, the project reads those files from `.ai/cezar/`. Do not rename the directory
 by hand, and keep older binaries off a project while it moves. An older binary

@@ -17,7 +17,7 @@ import type { PathRewrite, ProjectMigrationJournal } from './journal.ts';
  *   `<root>/.ai` is a real directory.
  * - A move goes from inside `source` to the same place inside `destination`; so does a worktree.
  * - A receipt or cleanup checkpoint lies in `<git common dir>/cezar-owned-workspaces/`; every other
- *   rewritten file lies in `<destination>/runs/`.
+ *   rewritten file lies in `<destination>/runs/`, or in `<source>/runs/` for a file a kept task keeps.
  * - A rewritten value moves a path from a form of the project root's `.ai/cezar` to the same place
  *   under `.ai/squawk`; a tracked file is a relative `.ai/cezar/...` path printed as a `git mv`.
  * - No existing directory on the way to a checked path resolves elsewhere (a symlink out), and a
@@ -134,7 +134,9 @@ async function rewritesRefusal(journal: ProjectMigrationJournal): Promise<string
   const stores = journal.rewrites.some(rewrite => rewrite.kind === 'run-row') ? [...runStoreFiles(journal.source), ...runStoreFiles(journal.destination)] : [];
   const fileRefusal = (rewrite: PathRewrite): string | undefined => {
     if (!('file' in rewrite)) return undefined;
-    return outsideOf(isReceipt(rewrite) ? receipts! : runs, rewrite.file) ?? notRegularFile(rewrite.file);
+    // A kept task's own run file stays in the old directory and is rewritten there.
+    const directory = isReceipt(rewrite) ? receipts! : rewrite.file.startsWith(join(journal.source, 'runs') + sep) ? join(journal.source, 'runs') : runs;
+    return outsideOf(directory, rewrite.file) ?? notRegularFile(rewrite.file);
   };
   return firstRefusal(journal.rewrites, (rewrite) => { return fileRefusal(rewrite) ?? valueMoved(journal.repoRoot, real, rewrite); })
     ?? firstRefusal(stores, notRegularFile);

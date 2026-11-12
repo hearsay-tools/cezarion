@@ -1,3 +1,4 @@
+import { runDataDir } from '../../legacy-runs.ts';
 import { atTaskHead, atContinue, atLiveInput } from './launch-read-resolver.ts';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -179,7 +180,7 @@ export class QueuedInput {
       // Defend the join against a crafted URL: only a bare file name may be deleted.
       if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) continue;
       try {
-        rmSync(join(this.context.dataDir, 'runs', `${runId}-images`, name), { force: true });
+        rmSync(join(runDataDir(this.context.dataDir, runId), 'runs', `${runId}-images`, name), { force: true });
       } catch {
         /* best effort */
       }

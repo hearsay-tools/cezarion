@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -252,21 +252,30 @@ describe('the offline migrate-project', { timeout: TIMEOUT }, () => {
     } finally { release(); }
   });
 
-  it('refuses while a task is live, lists it with the next step, and migrates once the task ends', async () => {
-    const live = (status: 'waiting' | 'review') => {
-      const store = RunStore.open(project.dataDir, { keepLive: true });
-      try { setRunStatus(store, TASK, status); store.flush(); } finally { store.close(); }
-    };
-    live('waiting');
-    const refused = await cli([]);
-    expect(refused.code).toBe(1);
-    expect(refused.err).toMatch(new RegExp(`^Cannot migrate ${project.root}: 1 task is live\\. Finish or cancel each one, then retry:\\n- ${TASK} `));
-    expect(existsSync(project.newDir)).toBe(false);
+  it('migrates while a task is live, keeps the task\'s own files in place and lists it, and moves them once the task is archived', async () => {
+    const store = RunStore.open(project.dataDir, { keepLive: true });
+    try { setRunStatus(store, TASK, 'waiting', { archived: false }); store.flush(); } finally { store.close(); }
+    const first = await cli([]);
+    expect(first.code).toBe(0);
+    expect(first.out).toContain(`Kept in .ai/cezar/ for tasks until they are archived:\n  ${TASK}`);
+    expect(first.out).toContain('The tasks listed above keep their files in .ai/cezar/; a later migration moves them once they are archived.');
+    expect(existsSync(join(project.newDir, 'runs.db'))).toBe(true);
+    expect(migratedTask()?.worktreePath).toBe(project.taskPath);
+    expect(existsSync(project.taskPath)).toBe(true);
     expectReleased();
-    live('review');
+    // In review, a human can still Continue it: its files stay.
+    const reviewed = RunStore.open(project.newDir, { keepLive: true });
+    try { setRunStatus(reviewed, TASK, 'review'); reviewed.flush(); } finally { reviewed.close(); }
+    const second = await cli([]);
+    expect(second.code).toBe(0);
+    expect(migratedTask()?.worktreePath).toBe(project.taskPath);
+    expect(existsSync(project.taskPath)).toBe(true);
+    const archived = RunStore.open(project.newDir, { keepLive: true });
+    try { archived.setArchived(TASK, true); archived.flush(); } finally { archived.close(); }
     const migrated = await cli([]);
     expect(migrated.code).toBe(0);
     expect(migratedTask()?.worktreePath).toBe(moved(project, project.taskPath));
+    expect(existsSync(project.taskPath)).toBe(false);
   });
 });
 
@@ -281,14 +290,15 @@ describe('the live-task check of an offline migration', () => {
     return out;
   }
 
-  it('refuses a live task of a runs.json no store imported yet, and writes nothing', async () => {
+  it('refuses a project with a runs.json no store imported yet, live task and all, and writes nothing', async () => {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-migrate-legacy-'));
     try {
+      execFileSync('git', ['init', '-q', root]);
       mkdirSync(join(root, '.ai/cezar'), { recursive: true });
       writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([makeRunRecord({ id: 'legacy-run', title: 'legacy live', status: RUN_STATUS.running })]));
       const before = snapshot(root);
       await expect(migrateProjectOffline(root, { homes: [], dryRun: false })).rejects.toThrow(
-        `Cannot migrate ${root}: 1 task is live. Finish or cancel each one, then retry:\n- legacy-run legacy live (running)`);
+        `Cannot migrate ${root}:\n- ${join(root, '.ai/cezar/runs.json')} has not been imported into a run store; open the project with this build first`);
       expect(snapshot(root)).toEqual(before);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });

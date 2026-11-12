@@ -18,7 +18,7 @@ exists in fallback; no tombstone is written.
 
 ## Rules
 
-A per-task journal at `<project data>/runs/<runId>.handoff.md`, where `<project data>` is the project's write root (`.ai/squawk/`, or `.ai/cezar/` before the project moves) (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `HSQ_HANDOFF_FILE` (`CEZ_HANDOFF_FILE` fallback) and the `handoffInstructions` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`.
+A per-task journal at `<project data>/runs/<runId>.handoff.md`, where `<project data>` is the project's write root (`.ai/squawk/`, or `.ai/cezar/` before the project moves; a task not archived at the move keeps its handoff in `.ai/cezar/` until it is archived, `legacy-runs.ts`) (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `HSQ_HANDOFF_FILE` (`CEZ_HANDOFF_FILE` fallback) and the `handoffInstructions` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`.
 
 **The file belongs to the agent; Squawk writes no line of its own into it.** `buildPrBody` (`server/forge/github.ts`) and the Tasks-row preview (`packages/web/src/lib/task-preview.ts`) read the first lines of `## Progress log` as the agent's own summary. Squawk touches the file in three places only, and two ast-grep rules (`.ai/ast-grep/rules/handoff-write-outside-writers.yml`, `handoff-written-outside-handoff-module.yml`) refuse a fourth:
 

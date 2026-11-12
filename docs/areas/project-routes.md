@@ -42,8 +42,9 @@ plus start-token liveness and token-checked release.
   first owns `cockpit.lock` (taken in whichever project directory exists, so a resume after
   the move never recreates the old name), so no cockpit boots on or builds the project, then
   claims the fence, so no other process that checks admission is admitted. A competing CLI meets the held fence and
-  fails at once. Right after the claim, `liveTasks` runs as the holder; any live task
-  releases the fence and throws `ProjectMigrationBusyError` with each task's id, title and
+  fails at once. Right after the claim, `liveTasks` runs as the holder; every caller passes
+  the tasks of families another live process claims (`projectForeignTasksOffline`). Any such
+  task releases the fence and throws `ProjectMigrationBusyError` with each task's id, title and
   state and the next step (finish or cancel each one).
 - **Anything live.** Before it claims, `migrateProjectOffline` refuses with
   `ProjectInUseError` while a cockpit serves the project (`project-migration/live.ts`): the
@@ -59,7 +60,9 @@ plus start-token liveness and token-checked release.
   waiting on a human, a usage-limit auto-resume, a timer, a PR or a worker) persisted as live
   in either directory, plus the runs of families another live store claims in `run_claims` (a
   headless `cez run`, another binary), read from both physical claim tables so a stale legacy
-  claim never hides a live fallback one. An agent process belongs to a live task. Not seen: a
+  claim never hides a live fallback one. An agent process belongs to a live task. Only the
+  claimed families and a cockpit refuse a move; every other task that is not archived keeps its
+  own items in place (**Leftover tasks** below). Not seen: a
   cockpit of another home that lists the project but never opened it. The user stops it; during
   the move, admission and the write backstop refuse its project entries and its store and
   listed state writes.
@@ -221,12 +224,15 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   for the write root only after the prepare step. When `.ai/cezar/` holds
   state to move and the plan has no blocker or conflict, the same live check as the command
   runs, without counting the cockpit's own process (its `cockpit.lock` claim and its presence
-  lease): with nothing live, the offline move runs under the cockpit's own claim
-  (`moveUnderFence`). With anything live (another cockpit, a task from before the restart, a
-  headless run), nothing moves: the project is served from both folders as before, a log
+  lease): with no other writer, the offline move runs under the cockpit's own claim
+  (`moveUnderFence`). A task from before the restart is no other writer: its own items stay
+  (**Leftover tasks**). With another writer live (another cockpit, a family another process
+  claims), nothing moves: the project is served from both folders as before, a log
   notice names what blocks the move, and the next start tries again (one attempt per project
   per cockpit run; a caller that comes while it runs waits for it). The notice of a finished
-  move lists the `git mv` commands for tracked files. Any failure before the journal exists
+  move lists the `git mv` commands for tracked files and the tasks that keep their files
+  in `.ai/cezar/` until they are archived. A marked project whose `.ai/cezar/` holds more than `cockpit.lock*` plans
+  again at each start and moves what no kept task owns now. Any failure before the journal exists
   only delays the move; a failure after it leaves the journal, so admission refuses the
   project until recovery finishes it. Every cockpit
   path that touches a project before or without its context runs the same prepare step
@@ -240,11 +246,38 @@ P4b3 (hearsay-tools/cezarion#3089) connects the fence and the engine, offline.
   CLI entries recover journals but never start a move. The switch must not turn on before the
   per-project write root follows moved state (hearsay-tools/cezarion#3150): until then moved
   runs are fallback runs.
+- **Leftover tasks** (owner decision A, hearsay-tools/cezarion#2778). The plan takes the ids
+  of the tasks that can still resume at planning (`keep`, read under the fence by
+  `projectKeptRunIds`): every live task and every task not archived, since a human can Continue
+  a done, review, failed or cancelled task from its stored worktree. Live-ness alone does not
+  select items; an archived task's items move, and a deleted task's items move or are gone. A
+  row that is not archived but whose record cannot be read refuses the move. Their own items stay in
+  `.ai/cezar/`: `worktrees/<id>`, `tmp/<id>`, `preview/<id>`, `t/<first 8 of id>` and every
+  `runs/<id>…` entry (`legacyItemOwner` in `legacy-runs.ts`). The directory around such an item
+  merges item by item; no stored path into one is rewritten, so a session resumes at its old
+  cwd; a kept task's `workflowDef` and `delegation.context` fields are never rewritten, because
+  the worker identity file binds them by hash (`identityBoundField` in `plan.ts`); a stored path into a moved item is rewritten, in a kept file too (in place, under
+  `<source>/runs/`). The `leftovers` step writes the ids to `.ai/squawk/legacy-runs.json`
+  before the mark, then removes the directories the move emptied and `.ai/cezar/` itself when
+  nothing is left in it. `runDataDir(dataDir, id)` resolves a listed task's data directory to
+  `.ai/cezar/`; every path helper of a run's own items (handoff, history, artifacts,
+  attachments, worker results, scratch and control directories, preview profile, autosave
+  cleanup, history removal, `RunStore.sourceDataDir`, the reports index and the agent's granted
+  `runs/` directory) calls it, the boot preview sweep also scans the listed tasks' real
+  `preview/<id>` (never through a link), and `fallbackProjectWriteError` and
+  `isFallbackProjectPath` exempt such items, so the task and its cleanup (a worker's destroy
+  retry) work at the stored paths. A later move carries a task's items once it is archived or
+  deleted and drops it from the list; no task left removes the file. The checks fail closed:
+  only an absent `legacy-runs.json` means no kept task; a present one that cannot be read throws
+  `LegacyRunsUnreadableError` from `runDataDir`, the write guards treat no item as kept, and the
+  next move rewrites the file from the run store. A top-level directory the plan cannot list
+  blocks the plan, since it may hold a kept item. Only a kept task's own
+  `identity`/`execution`/`processes` files reserve it as a worker (`workerEvidenceRunIds`).
 - **Early recovery.** `recoverProjectMigration(root, { ownership, keep })`
   (`project-migration/recovery.ts`) finishes an unfinished journal under the exclusive fence
   before the entry that finds it reads the project, in both switch states. Without a journal it costs one
   `lstat`. It takes the fence without a live-task check: the journal has refused every admission
-  since it was written, and a migration starts only with no live task it can see. It leaves the journal
+  since it was written, and a migration starts only with no other writer it can see. It leaves the journal
   to a live cockpit that owns the project or a process that holds its fence; admission
   refuses meanwhile. It uses the caller's claim when the caller owns the project or is about
   to (`keep`), otherwise a temporary claim it releases. Concurrent calls in one process share

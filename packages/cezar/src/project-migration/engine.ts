@@ -10,11 +10,14 @@ import { gitMvCommands, LEGACY_PROJECT_DIR, planProjectMigration, type ProjectMi
 import { GIT_MIGRATION_STEPS, MIGRATION_STEP_RUNNERS, type MigrationFault } from './steps.ts';
 import { withWorktreeMutation, type WorktreeGit } from '../git-worktree-lock.ts';
 import { assertJournalContained, assertJournalFile } from './containment.ts';
+import { projectKeptRunIds } from './live.ts';
 
 /**
  * The project state migration engine (P4b2, hearsay-tools/cezarion#3088): it moves a project's
  * runtime state from `.ai/cezar/` to `.ai/squawk/` under the exclusive project fence. A migration
- * runs offline (hearsay-tools/cezarion#3089): no cockpit serves the project and no task is live.
+ * runs offline (hearsay-tools/cezarion#3089): no cockpit serves the project and no other process
+ * claims a task of it. A task that can still resume (live or not archived) keeps its own items in
+ * `.ai/cezar/` (`legacy-runs.ts`); a later migration carries them once it is archived or deleted.
  *
  * Order: the caller takes the fence (`fenceProject`); the engine checks that this process holds
  * it, runs as its holder (`asFenceHolder`), closes the store the caller opened (`closeProject`),
@@ -105,21 +108,39 @@ async function resumeHeld(options: ProjectMigrationOptions): Promise<ProjectMigr
 }
 
 /**
+ * The tasks that can still resume: live or not archived. When their records cannot be read, a plan that is refused anyway reports its
+ * own conflicts and blockers rather than the read failure.
+ */
+async function resolveKeptRunIds(options: { repoRoot: string; keptRunIds?: () => ReadonlySet<string> }): Promise<ReadonlySet<string>> {
+  try { return (options.keptRunIds ?? (() => projectKeptRunIds(options.repoRoot)))(); }
+  catch (error) {
+    const plan = await planProjectMigration(options.repoRoot);
+    if (plan.blockers.length > 0 || plan.conflicts.length > 0) throw new ProjectMigrationRefusedError(plan);
+    throw error;
+  }
+}
+
+/**
  * Migrate the project, or finish its unfinished journal first. `closeProject` runs before the
  * plan: the CLI closes the store it opened for its live-task check. A refused plan writes nothing.
  */
-export async function migrateProject(options: ProjectMigrationOptions & { closeProject?: () => void | Promise<void> }): Promise<ProjectMigrationResult> {
+export async function migrateProject(options: ProjectMigrationOptions & {
+  closeProject?: () => void | Promise<void>;
+  /** The tasks that keep their items (live or not archived), read after `closeProject`; by default read from the project's run stores. */
+  keptRunIds?: () => ReadonlySet<string>;
+}): Promise<ProjectMigrationResult> {
   const dataDir = legacyDataDir(options.repoRoot);
   assertHeldFence(dataDir, options.fence);
   return asFenceHolder(options.fence, async () => {
     await options.closeProject?.();
     const unfinished = await resumeHeld(options);
     if (unfinished) return unfinished;
-    const plan = await planProjectMigration(options.repoRoot);
+    const plan = await planProjectMigration(options.repoRoot, { keep: await resolveKeptRunIds(options) });
     if (plan.blockers.length > 0 || plan.conflicts.length > 0) throw new ProjectMigrationRefusedError(plan);
     const journal: ProjectMigrationJournal = {
       version: 1, id: randomUUID(), createdAt: new Date().toISOString(), repoRoot: plan.repoRoot, source: plan.source,
       destination: plan.destination, done: [], moves: plan.moves, tracked: plan.tracked, worktrees: plan.worktrees, rewrites: plan.rewrites,
+      leftovers: plan.leftovers,
     };
     // The same rule as a resume, before the journal exists, so a refused plan leaves nothing behind.
     await assertJournalContained(plan.journal, journal);

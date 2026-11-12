@@ -138,11 +138,14 @@ test('busy cockpit port from a different cwd refuses before recovery or startup 
     const homeConfig = await readFile(Home.sandbox(join(f.root, 'home')).workspaceConfig, 'utf8');
 
     refused(await f.start(secondRepo, ['serve', '--port', String(port)]).outcome(), port);
-    assert.equal(await storeSnapshot(dataDir), index, 'rejected boot must not recover runs');
-    assert.deepEqual(await readdir(join(dataDir, 'runs')), [], 'no recovery event or agent resources');
-    assert.equal(await readFile(join(orphan, 'sentinel'), 'utf8'), 'preserve', 'no startup pruning');
+    // The boot moves a legacy project to .ai/squawk/ before it takes the port (owner decision A):
+    // read the store where the project keeps it now. A move carries the bytes; recovery would change them.
+    const served = projectPaths(secondRepo).write;
+    assert.equal(await storeSnapshot(served), index, 'rejected boot must not recover runs');
+    assert.deepEqual(await readdir(join(served, 'runs')), [], 'no recovery event or agent resources');
+    assert.equal(await readFile(join(served, 'worktrees', 'orphan-sentinel', 'sentinel'), 'utf8'), 'preserve', 'no startup pruning');
     assert.equal(await readFile(Home.sandbox(join(f.root, 'home')).workspaceConfig, 'utf8'), homeConfig, 'no registry mutation');
-    assert.equal(existsSync(join(dataDir, 'cockpit.lock')), false, 'rejection must release ownership');
+    assert.equal(existsSync(join(served, 'cockpit.lock')), false, 'rejection must release ownership');
     assert.equal((await localGet(`${first.url}/api/v1/health`)).status, 200, 'existing cockpit remains healthy');
 
     const deliberateRepo = await f.repo('deliberate');
@@ -218,9 +221,11 @@ test('different cwd contenders acquire the exact port once before either can rec
     const loser = outcomes.findIndex((outcome) => outcome.code === 1);
     assert.ok(loser >= 0, JSON.stringify(outcomes));
     refused(outcomes[loser]!, free.port);
-    assert.equal(await storeSnapshot(join(repos[loser]!, '.ai/cezar')), indexes[loser]);
-    assert.deepEqual(await readdir(join(repos[loser]!, '.ai/cezar/runs')), []);
-    assert.equal(existsSync(join(repos[loser]!, '.ai/cezar/cockpit.lock')), false);
+    // As above: the loser's boot may have moved its project before the race for the port.
+    const served = projectPaths(repos[loser]!).write;
+    assert.equal(await storeSnapshot(served), indexes[loser]);
+    assert.deepEqual(await readdir(join(served, 'runs')), []);
+    assert.equal(existsSync(join(served, 'cockpit.lock')), false);
     const winner = outcomes.find((outcome) => outcome.url)!;
     assert.equal(Number(new URL(winner.url!).port), free.port);
     assert.equal((await localGet(`${winner.url}/api/v1/health`)).status, 200);

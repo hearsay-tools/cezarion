@@ -1,3 +1,4 @@
+import { runDataDir } from '../legacy-runs.ts';
 import { closeSync, openSync, realpathSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
@@ -10,7 +11,7 @@ export function isAttachmentFileName(name: string): boolean {
 export function attachmentDirectory(dataDir: string, runId: string): string | null {
   if (!isAttachmentFileName(runId)) return null;
   try {
-    const expected = join(realpathSync(dataDir), 'runs', `${runId}-images`);
+    const expected = join(realpathSync(runDataDir(dataDir, runId)), 'runs', `${runId}-images`);
     const actual = realpathSync(expected);
     return actual === expected && statSync(actual).isDirectory() ? actual : null;
   } catch {
