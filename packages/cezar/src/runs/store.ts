@@ -558,7 +558,9 @@ export class RunStore extends EventEmitter {
   /** `null` once the store is closed, and in a `RunStore.unavailable` store (nothing is written,
    *  nothing is evicted). */
   private db: RunDatabase | null = null;
-  get reports(): ReportsIndex { return reportsIndex(this.db, this, this.dataDir, this.openFailure); }
+  get reports(): ReportsIndex { return reportsIndex(this); }
+  /** Persistence source for consumers that build the reports index. No index is created here. */
+  reportSource() { return { db: this.db, dataDir: this.dataDir, openFailure: this.openFailure }; }
   /** Why `open` failed, in a `RunStore.unavailable` store. */
   private openFailure: RunStoreOpenError | undefined;
   private persistence: RunStorePersistence | undefined;
