@@ -266,8 +266,9 @@ of failing it. Preserve artifacts. A controller shutdown/restart is not parent
 terminal success and must not cascade-cancel recoverable work. A worker's question
 has one addressee, its parent (hearsay-tools/cezarion#2410): when the parent is
 cancelled or fails, the open questions close; a cancelled parent's workers are
-cancelled with them; none moves to a human. Continue on a worker whose parent has
-settled is refused, naming the parent.
+cancelled with them; none moves to a human. Continue on a worker whose parent is
+done, in review or cancelled is refused, naming the parent; a failed parent's
+workers continue.
 
 Task 5 review ruling: ordinary parked delegated roots remain `waiting` across
 restart even after their children finish. Inactive roots retain explicit human

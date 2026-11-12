@@ -369,7 +369,10 @@ export class DelegationService {
   /** A cancelled or session-less worker restarts from its worktree and branch (hearsay-tools/squawk#3337),
    *  so --resume proves both still exist before anything is accepted. */
   private async assertResumableWorkspace(caller: Caller, request: ConversationSendRequest): Promise<void> {
-    const { project, recipient } = this.conversationPair(caller, request.recipientRunId, true);
+    const pair = this.conversationPair(caller, request.recipientRunId, true);
+    const { project, recipient } = pair;
+    // An exact retry returns its stored receipt, whatever became of the workspace since.
+    if (this.currentConversation(project, this.ledgerFor(pair, request)).messages.some(message => message.id === request.id)) return;
     if (recipient.delegation?.role !== 'worker' || recipient.delegation.destroy || !freshWorkerSession(recipient) && recipient.status !== 'cancelled') return;
     if (['queued', 'running', 'waiting'].includes(recipient.status)) return;
     try { await verifyOwnedWorkspace(project.root, recipient); }

@@ -13,6 +13,8 @@ describe('classifyProviderError', () => {
     ['opencode 503', 'opencode: provider anthropic/claude request failed: upstream unavailable (HTTP 503)', 'server'],
     ['codex stream gone', 'Codex stream made no progress for 60s: stream disconnected before completion', 'server'],
     ['codex unreachable', 'Codex stream made no progress for 60s: Reconnecting... waiting for network — Connection failed: error sending request', 'server'],
+    ['omp bare 500', 'omp: anthropic/claude-mock request failed: 500 {"type":"error","error":{"type":"api_error","message":"Internal error"}}', 'server'],
+    ['pi bare 503', 'pi: openai/gpt-test request failed: 503 upstream unavailable', 'server'],
     ['proxy 404 on /v1/responses', 'unexpected status 404 Not Found: {"detail":"Not Found"} url: http://127.0.0.1:4000/v1/responses', 'proxy-not-found'],
     ['pi not found', 'pi: openai/gpt-5 request failed: Not Found', 'proxy-not-found'],
     ['claude 401', 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.', 'access'],

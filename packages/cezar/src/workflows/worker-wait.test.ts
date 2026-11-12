@@ -40,7 +40,21 @@ for (const mode of ['fresh', 'continuation'] as const) {
       expect(semaphore.busy()).toBe(0);
     });
   }
-it.each(['review', 'done', 'failed'] as const)('readiness worker Continue requires continuing a %s parent first', async status => {
+// hearsay-tools/squawk#3337: a failed parent leaves its workers running, so their Continue (a human's,
+// a provider-error retry's, recovery's) is admitted beside it.
+it('a worker of a failed parent continues', async () => {
+    const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
+    setRunStatus(store, w.id, RUN_STATUS.done);
+    store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: randomUUID(), backend: 'claude' });
+    const generation = store.commitWorkerExecutionStart(w.id); store.commitWorkerExecutionComplete(w.id, generation);
+    setRunStatus(store, p.id, RUN_STATUS.failed);
+    expect(manager.continueRun(w.id, { text: 'mock:agent-echo more' }, true)).toEqual({ ok: true });
+    expect(store.getRun(w.id)?.status).toBe(RUN_STATUS.queued);
+    setRunStatus(store, p.id, RUN_STATUS.waiting);
+    manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15_000);
+  });
+it.each(['review', 'done'] as const)('readiness worker Continue requires continuing a %s parent first', async status => {
     const p = await parent(); const w = await worker(p.id);
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     setRunStatus(store, w.id, RUN_STATUS.done);

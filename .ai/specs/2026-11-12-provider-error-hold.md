@@ -78,7 +78,11 @@ carries the task. A usage-limit hold with no session is still withdrawn at fire 
 
 `endStoppedParent` returns before the child loop when the parent is `failed`. Its worker waits
 and routed questions close as before, so a worker message reads "Not delivered: parent is
-failed". The parent sees its workers after a Continue (`worker list`, `collect`).
+failed". The parent sees its workers after a Continue (`worker list`, `collect`). Restart
+recovery does the same (`recoveryLeavesWorkerToRoot`), and a worker's Continue is admitted
+beside a failed root, so a held worker's retry still runs.
+
+An exact retry of an accepted `--resume` returns its stored receipt before the workspace check.
 
 `--resume` of a `cancelled` worker is accepted (`assertSendResume`, `parentMessageRefusal`).
 `DelegationService.assertResumableWorkspace` proves the worktree and branch with
@@ -124,6 +128,8 @@ Rows live in `RUN_TRIGGERS` (`workflows/run-states.ts`); this table is the desig
 | waiting:usage-limit | One of its waits resolves | watcher | Stays held; the retry delivers it (hold.wait-resolves) |
 | waiting:usage-limit | Restart, no session in memory | recovery | Re-armed from `autoResumeAt` and `autoResumeReason`; an older row without the reason reads as `usage-limit` (hold.restart) |
 | failed (root) | Its live worker runs on and settles | worker | No cancel. The worker's result waits for `collect` after the parent's Continue |
+| failed (root) | Restart | recovery | Its workers' routed questions close; its workers recover and run on (`recoveryLeavesWorkerToRoot`) |
+| any worker state | A Continue (human, retry, recovery) while the root is failed | human, timer, recovery | Admitted: a failed root is not a settled parent for `settledParentRefusalError`. A `done`, `review` or `cancelled` root still refuses |
 | cancelled (worker) | `worker resume` by its parent | parent | queued; same session if one is recorded, else a fresh one. Refused when destroyed, being destroyed, or its worktree or branch is gone |
 
 Recovery with no session: a hold carries no session and no slot, so restart rebuilds it from the

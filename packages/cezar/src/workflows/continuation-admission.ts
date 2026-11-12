@@ -46,9 +46,10 @@ export function parentMessageRefusal(run: RunRecord, defer: boolean, conversatio
   }
 }
 
-/** The refusal of a Continue on a worker whose parent is settled (hearsay-tools/cezarion#2410). */
+/** The refusal of a Continue on a worker whose parent is settled (hearsay-tools/cezarion#2410). A
+ *  failed parent leaves its workers running, so they continue and retry (hearsay-tools/squawk#3337). */
 export function settledParentRefusalError(parentId: string, status: RunRecord['status']): string | undefined {
-  return ['done', 'review', 'failed', 'cancelled'].includes(status) ? `Parent task ${parentId} is ${status}; continue the parent before its worker.` : undefined;
+  return ['done', 'review', 'cancelled'].includes(status) ? `Parent task ${parentId} is ${status}; continue the parent before its worker.` : undefined;
 }
 
 export function stoppingRefusal(run: RunRecord): ContinuationRefusal | undefined {

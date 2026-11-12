@@ -18,7 +18,7 @@ const CREDIT_RE = /credit balance (?:is )?too low|insufficient[\s_-]?(?:credits?
 const REQUEST_ERROR_RE = /\b400\b|invalid_request_error|bad request/i;
 const RATE_LIMIT_RE = /\b429\b|rate[\s_-]?limit|too many requests|(?:usage|spend(?:ing)?|session|weekly|hourly|monthly)[\s_-]?limit|quota (?:exceeded|reached)|resource[\s_-]?exhausted/i;
 const OVERLOADED_RE = /overloaded|\b529\b/i;
-const SERVER_RE = /(?:HTTP|status|API Error:?|error|code)\W{0,3}5\d\d\b|internal server error|bad gateway|service unavailable|gateway timeout|upstream connect error|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|fetch failed|stream disconnected|Connection failed: error sending request/i;
+const SERVER_RE = /(?:HTTP|status|API Error:?|error|code|request failed:)\W{0,3}5\d\d\b|internal server error|bad gateway|service unavailable|gateway timeout|upstream connect error|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|fetch failed|stream disconnected|Connection failed: error sending request/i;
 const NOT_FOUND_RE = /\b404\b|request failed: Not Found|\bNot Found\b/;
 const ACCESS_RE = /\b40[13]\b|unauthori[sz]ed|forbidden|failed to authenticate|authentication (?:failed|error)|ProviderAuthError|invalid (?:x-)?api[\s_-]?key|access token has been revoked|model_not_found|model (?:\S+ )?(?:is )?(?:not available|not found|does not exist|may not exist)|(?:no|not have) access to (?:the )?model/i;
 
