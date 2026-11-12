@@ -43,3 +43,12 @@ test('browser specs without a result do not count as missing', () => {
   const r = judgeSqueal(3, status([file('packages/web/e2e/a.e2e.ts', 'pending'), file('a.test.ts', 'current', 'pass')]));
   assert.equal(r.state, 'pass');
 });
+
+test('a skipped current file is not a failure', () => {
+  assert.equal(judgeSqueal(0, status([file('a.test.ts', 'current', 'skip')])).state, 'pass');
+});
+
+test('an input that selects no test is named as missing', () => {
+  const r = judgeSqueal(3, { ...status([]), selection: { testFiles: [], unmatched: ['src/x.ts'] } });
+  assert.deepEqual([r.state, r.missing], ['incomplete', ['src/x.ts (selects no test file)']]);
+});

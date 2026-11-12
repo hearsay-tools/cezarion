@@ -11,16 +11,17 @@ const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change
 export const SQUEAL_WAIT_MS = 120_000;
 
 /** Judge one `squeal status --wait <ms> <paths> --json` result (exit code and parsed stdout). */
-export function judgeSqueal(exitCode, status) {
+export function judgeSqueal(exitCode, status, ignorePath = () => false) {
   const selection = status?.selection ?? {};
   // Browser specs are CI's: Squeal runs them only on request.
   const files = (selection.testFiles ?? []).filter(f => !f.path.endsWith('.e2e.ts'));
-  const failed = files.filter(f => f.state === 'current' && f.verdict !== 'pass').map(f => f.path);
+  const unmatched = (selection.unmatched ?? []).map(u => u?.path ?? String(u)).filter(p => !ignorePath(p));
+  const failed = files.filter(f => f.state === 'current' && !['pass', 'skip'].includes(f.verdict)).map(f => f.path);
   const failures = selection.verdict?.failures ?? {};
   if (exitCode === 1 || failed.length || failures.tests || failures.testFiles) {
     return { state: 'fail', failed, missing: [], lint: lintOf(status) };
   }
-  const missing = files.filter(f => f.state !== 'current').map(f => f.path);
+  const missing = [...files.filter(f => f.state !== 'current').map(f => f.path), ...unmatched.map(p => `${p} (selects no test file)`)];
   const lint = lintOf(status);
   if (lint.failing) return { state: 'fail', failed: [], missing, lint };
   return { state: missing.length || lint.unfinished ? 'incomplete' : 'pass', failed: [], missing, lint, count: files.length };
@@ -63,17 +64,18 @@ async function squealChecks(paths, waitMs) {
   let status;
   try { status = JSON.parse(wait.out); } catch { status = undefined; }
   if (wait.code === 127 || !daemonAlive(status)) return { daemon: false };
-  return { daemon: true, ...judgeSqueal(wait.code, status) };
+  return { daemon: true, ...judgeSqueal(wait.code, status, p => p.endsWith('.e2e.ts') || isDocsPath(p)) };
 }
 
 // Without a daemon: the focused tests only when the selection is not the full suite.
-async function focusedTests() {
-  const plan = await run('node', ['scripts/test-changed.mjs', '--plan']);
+async function focusedTests(base) {
+  const baseArg = `--base=${base}`;
+  const plan = await run('node', ['scripts/test-changed.mjs', baseArg, '--plan']);
   let mode;
   try { mode = JSON.parse(plan.out).mode; } catch { mode = 'unknown'; }
   if (mode === 'full' || mode === 'unknown') return { skipped: `the selection is the full suite (mode ${mode}); CI runs it` };
   if (mode === 'skip') return { skipped: 'no tests selected' };
-  return run('node', ['scripts/test-changed.mjs']);
+  return run('node', ['scripts/test-changed.mjs', baseArg]);
 }
 
 export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS } = {}) {
@@ -87,13 +89,12 @@ export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS } = 
     ['clones', 'node', ['.github/scripts/check-clones.cjs', '--base', base, '--head', 'HEAD']],
   ];
   const directRuns = direct.map(([, cmd, args]) => run(cmd, args));
-  const sourcePaths = files.filter(f => !isDocsPath(f));
-  const squeal = sourcePaths.length ? await squealChecks(sourcePaths, waitMs) : { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
+  const squeal = files.length ? await squealChecks(files, waitMs) : { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
   const note = (ok, text) => { lines.push(`- ${ok ? 'pass' : 'FAIL'}: ${text}`); if (!ok) failed = true; };
 
   if (!squeal.daemon) {
     lines.push('- No Squeal daemon for this worktree: ran the focused checks (`npm run test:changed`, `npm run lint`).');
-    const [tests, lint] = await Promise.all([focusedTests(), run('npm', ['run', '--silent', 'lint'])]);
+    const [tests, lint] = await Promise.all([focusedTests(base), run('npm', ['run', '--silent', 'lint'])]);
     if (tests.skipped) lines.push(`- skipped: focused tests: ${tests.skipped}`);
     else note(tests.code === 0, `focused tests (\`npm run test:changed\`)${tests.code ? `\n${tail(tests.out + tests.err)}` : ''}`);
     note(lint.code === 0, `lint (\`npm run lint\`)${lint.code ? `\n${tail(lint.out + lint.err)}` : ''}`);

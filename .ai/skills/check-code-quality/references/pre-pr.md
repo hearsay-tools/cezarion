@@ -125,5 +125,5 @@ versions, base/head identity and each finding with its action in the PR body.
 
 State that the **Squeal one-shot gate** supplied the local quality evidence.
 Do not call it a bundled-check pass or a daemon measurement. Only complete
-passing evidence permits the PR to open. CI and independent review remain
+passing evidence permits the PR to merge (auto-merge waits for it); it no longer gates opening it. CI and independent review remain
 separate gates. Keep hearsay-tools/cezarion#3096 open for the remaining migration.
