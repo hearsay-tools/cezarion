@@ -45,7 +45,7 @@ function runStep(directory, run, env) {
 test('only a squeal_gate_trial dispatch without pr_number runs the trial, after the shards pass or fail', () => {
   const job = trialJob();
   assert.deepEqual(job.needs, ['vitest']);
-  // jobs further up (pr-test-input, pr-test-proof) are skipped in a dispatch; GitHub's implied success() would skip this one.
+  // jobs further up (pr-test-input) are skipped in a dispatch; GitHub's implied success() would skip this one.
   assert.match(String(job.if), /^\$\{\{ !cancelled\(\) && /);
   const at = (event, options) => expression(job.if, context(event, options));
   assert.equal(at('workflow_dispatch', { trial: true }), true);

@@ -330,6 +330,13 @@ under the new values. The watcher logs why it stopped a server to `.ai/qa/test-e
 
 ## Choosing specs for a change
 
+PR CI uses `scripts/e2e-affected.mjs --ci` with `--shard=N/8`. It resolves the
+complete selection before sharding. A missing map, selector error or empty
+selection runs every spec. A nonempty selection permits empty shard partitions.
+All eight jobs still require a passed browser marker. Merge-group jobs always
+run the full suite and retain their whole-shard rerun and flake reports. See
+[Selected PR tests](../../../docs/sdlc/ci.md#selected-pr-tests).
+
 `npm run test:e2e:affected` runs only the specs that a change reaches
 (hearsay-tools/cezarion#1816). `--plan` prints the choice and runs nothing. Other arguments go
 to `npm run test:e2e`.
@@ -362,7 +369,8 @@ commit. Without a download it uses the newest cached map. Without a usable map i
 
 An edit outside recorded function ranges selects every spec. Insertions at function boundaries
 include both neighbouring lines. Cockpit coverage stays per file. A selected pass is iteration
-feedback. CI's required checks still run every spec.
+feedback. PR CI uses the same map rules with full fallback for unsafe or empty
+selection. Merge-group jobs run every spec.
 
 ## The project the shared env serves
 

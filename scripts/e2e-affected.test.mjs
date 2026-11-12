@@ -1,18 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import {
-  changedLines, classify, latestMap, mapProblem, parseOptions, readMap, referenceGraph, resolveLiteral, selectSpecs, stringLiterals,
+  changedLines, classify, latestMap, main, mapProblem, parseOptions, readMap, referenceGraph, resolveLiteral, selectSpecs, stringLiterals,
 } from './e2e-affected.mjs';
 
 // hearsay-tools/cezarion#1816: npm run test:e2e:affected chooses browser specs from the spec map.
 
 const script = fileURLToPath(new URL('./e2e-affected.mjs', import.meta.url));
+const yaml = createRequire(import.meta.url)('yaml');
 const COMMIT = 'a'.repeat(40);
 const spec = name => `packages/web/e2e/${name}.e2e.ts`;
 
@@ -237,6 +239,22 @@ function repository(t) {
 
 const affected = (cwd, ...args) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
 
+test('CI planning uses mapped specs and falls back on empty selection or a missing map', t => {
+  const { dir, put, map } = repository(t);
+  const cwd = process.cwd();
+  const mapFlag = map();
+  process.chdir(dir);
+  try {
+    assert.equal(main(['--ci', '--plan', mapFlag]), 0);
+    assert.equal(main(['--ci', '--plan', '--map=missing.json']), 0);
+    put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
+    assert.equal(main(['--ci', '--plan', mapFlag]), 0);
+    assert.equal(main(['--plan', mapFlag]), 0);
+  } finally {
+    process.chdir(cwd);
+  }
+});
+
 test('--plan diffs the working tree against the map’s commit, untracked files included, and runs nothing', t => {
   const { dir, put, map } = repository(t);
   put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
@@ -273,6 +291,61 @@ test('a --map file that cannot be read is an error, not a full run', t => {
   const result = affected(dir, '--plan', '--map=missing.json');
   assert.equal(result.status, 2);
   assert.match(result.stderr, /cannot read the spec map at .*missing\.json/);
+});
+
+test('CI runs selected specs with shard flags and uses full fallback for empty or failed selection', t => {
+  const { dir, put, map } = repository(t);
+  put('.ai/scripts/e2e.sh', 'printf "arg=%s\\n" "$@"; exit 19\n');
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  git('add', '.'); git('commit', '-qm', 'browser command');
+  const mapFlag = map();
+  put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
+  const selected = affected(dir, '--ci', '--shard=2/8', mapFlag);
+  assert.equal(selected.status, 19, selected.stdout + selected.stderr);
+  assert.match(selected.stdout, /arg=--shard=2\/8/);
+  assert.match(selected.stdout, /arg=packages\/web\/e2e\/artifact-project-links.e2e.ts/);
+  assert.match(selected.stdout, /arg=packages\/web\/e2e\/chat-code-fence.e2e.ts/);
+  assert.doesNotMatch(selected.stdout, /arg=.*smoke.e2e.ts/);
+  assert.match(selected.stdout, /arg=--passWithNoTests=true/);
+  git('restore', 'packages/web/src/routes/task-thread/markdown.tsx');
+  for (const flag of [mapFlag, '--map=missing.json']) {
+    const fallback = affected(dir, '--ci', '--shard=2/8', flag);
+    assert.equal(fallback.status, 19, fallback.stdout + fallback.stderr);
+    assert.match(fallback.stdout, /Selected 3 of 3 specs/);
+    assert.match(fallback.stdout, /arg=--shard=2\/8/);
+    assert.doesNotMatch(fallback.stdout, /arg=.*e2e.ts|passWithNoTests/);
+  }
+});
+
+test('PR browser workflow logs leave the mapped selection intact', t => {
+  const { dir, put, map } = repository(t);
+  put('.ai/scripts/e2e.sh', 'printf "arg=%s\\n" "$@"; echo TEST_E2E_STATUS=passed\n');
+  execFileSync('git', ['add', '.'], { cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'browser command'], { cwd: dir });
+  const mapFile = map().slice('--map='.length);
+  put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
+  const temp = tempDir(t);
+  // Keep the workflow command intact. Only map download and the costly browser are fixture seams.
+  temp.put('node', `#!/bin/sh
+if [ "$1" = scripts/e2e-affected.mjs ]; then
+  shift
+  exec "$REAL_NODE" "$SELECTOR_SCRIPT" "$@" "--map=$MAP_FILE"
+fi
+exec "$REAL_NODE" "$MARKER_SCRIPT" "$@"
+`);
+  chmodSync(join(temp.dir, 'node'), 0o755);
+  const workflow = yaml.parse(readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8'));
+  const run = workflow.jobs['cockpit-browser'].steps.find(step => step.id === 'e2e-pr').run;
+  const result = spawnSync('bash', ['-eu', '-c', run.replace('${{ matrix.shard }}', '1')], {
+    cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${temp.dir}:${process.env.PATH}`,
+      RUNNER_TEMP: temp.dir, REAL_NODE: process.execPath, SELECTOR_SCRIPT: script, MAP_FILE: mapFile,
+      MARKER_SCRIPT: fileURLToPath(new URL('../.github/scripts/require-e2e-passed.cjs', import.meta.url)) },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Selected 2 of 3 specs/);
+  assert.match(result.stdout, /arg=packages\/web\/e2e\/artifact-project-links.e2e.ts/);
+  assert.match(result.stdout, /arg=packages\/web\/e2e\/chat-code-fence.e2e.ts/);
+  assert.doesNotMatch(result.stdout, /arg=.*smoke.e2e.ts/);
 });
 
 test('mock function edits select only specs that executed that function, plus incomplete specs', () => {

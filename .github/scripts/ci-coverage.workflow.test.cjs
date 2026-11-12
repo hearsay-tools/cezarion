@@ -29,7 +29,7 @@ function context(event, { surface = 'full-matrix', bump = 'false', verified = 'f
     needs: {
       'queue-proof': { result: 'success', outputs: { verified } },
       'pr-test-input': { result: 'success', outputs: { sha: '' } },
-      'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } },
+
       'change-surface': { result: 'success', outputs: { surface } },
       'classify-pr': { result: 'success', outputs: { bump_pr: bump } },
       vitest: { result: shards },
@@ -58,7 +58,7 @@ test('coverage publication follows eligible shards, including failures, but neve
   const merge = jobs['vitest-coverage-merge'].if;
   const upload = named(jobs.vitest, 'Upload shard coverage').if;
   const missing = named(jobs.vitest, 'Report a missing shard coverage report').if;
-  const shardContext = (event, options) => ({ ...context(event, options), steps: { collect: { outcome: 'skipped' }, upload: { outcome: 'skipped' } }, always: () => true });
+  const shardContext = (event, options) => ({ ...context(event, options), steps: { collect: { outcome: 'skipped' }, 'collect_pr': { outcome: 'skipped' }, upload: { outcome: 'skipped' } }, always: () => true });
   for (const event of ['pull_request_target', 'workflow_dispatch']) {
     assert.equal(expression(upload, context(event)), true);
     assert.equal(expression(merge, context(event)), true);
@@ -222,4 +222,22 @@ test('a shard that produced no report warns with its number and says where the v
   assert.match(timedOut.summary, /Vitest coverage shard 2\/8: no report/);
   const upload = runStep(directory, step, { SHARD: '3', COLLECT: 'success', UPLOAD: 'failure' });
   assert.match(upload.stdout, /shard 3: the upload ended as failure/);
+});
+
+test('shard warnings use the selected PR or full dispatch collection outcome', t => {
+  const step = named(ci().jobs.vitest, 'Report a missing shard coverage report');
+  const directory = sandbox(t);
+  for (const event of ['pull_request_target', 'workflow_dispatch']) {
+    for (const outcome of ['success', 'failure']) {
+      const ctx = { ...context(event), steps: {
+        collect: { outcome: event === 'pull_request_target' ? 'skipped' : outcome },
+        collect_pr: { outcome: event === 'pull_request_target' ? outcome : 'skipped' },
+      } };
+      const collect = expression(step.env.COLLECT, ctx);
+      assert.equal(collect, outcome, `${event}: collection result`);
+      const result = runStep(directory, step, { SHARD: '1', COLLECT: collect, UPLOAD: 'failure' });
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, outcome === 'success' ? /the upload ended as failure/ : /the test run ended as failure/);
+    }
+  }
 });

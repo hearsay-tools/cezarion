@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs the cockpit browser specs that this checkout's changes reach (hearsay-tools/cezarion#1816).
-// Iteration feedback only: CI still runs every spec.
+// PR CI uses --ci; the merge queue runs every spec.
 //
 // The spec map, built on each push to main by .github/workflows/e2e-spec-map.yml, links each
 // cockpit source file and covered Node functions to the specs that ran them. The selector diffs the working
@@ -12,6 +12,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { browserFiles } from './ci-test-selection.mjs';
 
 const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change-surface.cjs');
 
@@ -30,6 +31,7 @@ export function parseOptions(argv) {
     if (arg === '--plan') options.plan = true;
     else if (arg.startsWith('--map=') && arg.length > 6) options.map = arg.slice(6);
     else if (arg.startsWith('--map')) throw new Error(`--map takes a file: --map=<file>. ${usage}`);
+    else if (arg === '--ci') options.ci = true;
     else options.forward.push(arg);
   }
   return options;
@@ -328,7 +330,7 @@ function report(root, loaded, selection, specFiles) {
   if (!selection.all) for (const spec of selection.specs) console.log(`  → ${spec}`);
   const time = selection.specs.length > 0 ? minutes(root, selection.specs) : '';
   console.log(`${LOG} Selected ${selection.specs.length} of ${specFiles.length} specs${time}.`);
-  console.log(`${LOG} Iteration feedback only: CI still runs every spec.`);
+  console.log(`${LOG} The merge queue runs every spec.`);
 }
 
 function chooseSpecs(root, run, loaded, specFiles) {
@@ -352,16 +354,23 @@ export function main(argv) {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
   const run = runCommand(root);
   const specFiles = listSpecs(root);
-  const loaded = options.map ? readMap(resolve(options.map)) : latestMap(root, run);
-  if (options.map && loaded.error) throw new Error(loaded.error);
-  const chosen = chooseSpecs(root, run, loaded, specFiles);
-  report(root, loaded, chosen, specFiles);
+  let loaded;
+  const select = () => {
+    loaded = options.map ? readMap(resolve(options.map)) : latestMap(root, run);
+    if (options.map && loaded.error) throw new Error(loaded.error);
+    return chooseSpecs(root, run, loaded, specFiles);
+  };
+  const files = options.ci ? browserFiles(select) : undefined;
+  const chosen = options.ci
+    ? { all: files === null, specs: files ?? specFiles }
+    : select();
+  report(root, loaded ?? {}, chosen, specFiles);
   if (options.plan) return 0;
   if (chosen.specs.length === 0) {
     console.log(`${LOG} No browser spec reaches these changes, so none runs.`);
     return 0;
   }
-  const args = ['.ai/scripts/e2e.sh', ...options.forward, ...(chosen.all ? [] : chosen.specs)];
+  const args = ['.ai/scripts/e2e.sh', ...options.forward, ...(chosen.all ? [] : chosen.specs), ...(options.ci && !chosen.all ? ['--passWithNoTests=true'] : [])];
   const result = spawnSync('sh', args, { cwd: root, stdio: 'inherit' });
   if (result.error) console.error(result.error.message);
   return result.status ?? 1;

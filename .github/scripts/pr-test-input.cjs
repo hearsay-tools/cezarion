@@ -1,8 +1,6 @@
 'use strict';
 const { reader, validSha } = require('./queue-ci-proof.cjs');
 
-// The name binds official job metadata to the trusted workflow and tested head.
-const attestationName = (base, head) => `Attest PR test inputs / ${base} / ${head}`;
 function requireMergeInput(merge, sha, head) {
   if (merge?.sha !== sha || !validSha(merge.tree?.sha) || merge.parents?.length !== 2
     || !validSha(merge.parents[0]?.sha) || merge.parents[1]?.sha !== head) throw new Error('PR merge input moved');
@@ -30,4 +28,4 @@ async function resolvePrTestInput({ github, owner, repo, pullNumber, head, workf
     return fallback;
   }
 }
-module.exports = { resolvePrTestInput, attestationName };
+module.exports = { resolvePrTestInput };

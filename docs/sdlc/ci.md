@@ -170,6 +170,36 @@ CPU time by about 16% but more than doubled wall time here; CI's per-VM four-wor
 limit should not be assumed to improve local latency. Use `--maxWorkers=4` when
 intentionally trading single-run latency for lower concurrency on a shared host.
 
+### Selected PR tests
+
+On `pull_request_target`, all eight jobs remain present, with the same required
+check names and coverage artifacts. Each job resolves the complete selection
+before Vitest assigns files to its shard. A small selection can leave some shards
+empty; `--passWithNoTests=true` permits those empty partitions only after a
+nonempty global selection. An empty global selection runs the full suite.
+
+The unit jobs call `scripts/test-changed.mjs --ci --base=<PR base SHA>` and keep
+`--coverage.enabled`. The CI mode uses the existing source classifier, then
+Vitest's unsharded `list --changed` inventory to resolve the files. Shared inputs,
+configuration, unknown paths, missing history, failed inventory and no matched
+file all run full Vitest on eight shards. A failing selected test fails its job;
+it never triggers a full-suite retry. The base fetch is bounded to 100 commits.
+A missing merge-base costs a full run instead of silently skipping tests.
+
+Browser jobs call `scripts/e2e-affected.mjs --ci`. The selector reads the newest
+successful `e2e-spec-map.yml` map on `main`, compares against the map's own commit,
+and keeps its existing conservative selection rules. A missing map, failed
+selector or empty selection runs every spec on eight shards. Selected browser
+runs still require `TEST_E2E_STATUS=passed`; missing browsers fail verification.
+The token used to download the map has read-only Actions and repository scopes.
+
+Docs-only, infra-only and verified release-stamp skips remain as before. Merge
+groups and manual dispatches run full suites. Main pushes reuse eligible exact-SHA
+queue proof or run full CI as a fallback. Merge groups retain the whole-shard
+rerun, trusted flake reports and Squeal recording. The local selectors
+without `--ci` retain their iteration behavior, including an error on unmatched
+unit changes and a skip when no browser spec reaches a change.
+
 ### CI verification
 
 The path-filtered `Windows test environment lease` workflow also runs the worker test-app
@@ -198,13 +228,13 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-The full Vitest suite runs once across the eight LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
 comparison, runner cost, failures and coverage investigation. Four workers per shard,
 coverage settings, duration weights and all required gates remain unchanged. Manual
 review context still recognizes exact skipped three-shard names from older native
-base workflows. Queue reuse requires the complete current eight-shard roster; old
+base workflows. Exact-SHA queue-to-main proof requires the complete current eight-shard roster; old
 three- and four-shard proof falls back to full verification.
 
 Since hearsay-tools/cezarion#3292 the Vitest and browser suites run on eight shards each,
@@ -346,7 +376,7 @@ still use the immediate reader. See [the pending-review plan](../../.ai/specs/20
 
 Settled blocked admission or an expired provider wait logs a notice and exits unsuccessfully. Existing reconciliation can retry after a late review finishes. Broken API/schema evidence is an error. Findings must not become error annotations because the CI sweep groups identical errors across PRs. Heavy build/package, Vitest and browser jobs do not depend on this gate; they start after preflight and run beside it. A blocked gate fails `verify`, which reads the gate and every heavy result. Docs-only and infra-only retain their suite skips but still require review admission. Cancellation never releases heavy work. Both protected checks remain required; branch protections are unchanged.
 
-Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. Readiness never changes draft state (hearsay-tools/cezarion#3288): agents open PRs ready, and a human's draft stays a draft, so the readiness job holds only read repository permissions. Under the same lock it syncs the PR and closing-linked issue cards: In review when the PR is ready and its live head is verified, In progress otherwise, a draft included. Done cards remain protected. An unverified new head moves the cards to In progress; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation. On the next readiness trigger, a new pending same-head execution or reopened thread moves a same-repository PR's cards back to In progress. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if the board needs refreshing. Fork PRs get no board sync. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue-suite reuse and exact-push reuse keep their existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
+Readiness additionally proves the latest native `ci.yml` run/attempt and successful protected jobs, and reads fresh CodeRabbit admission. Trusted discovery emits PR numbers before scheduling. Every readiness trigger uses the same per-PR job lock, and every surviving job reads the live head and proof after acquiring it. Automatic CI/provider/signal discovery selects only the event's bounded PR targets, with independent jobs and budgets. Readiness never changes draft state (hearsay-tools/cezarion#3288): agents open PRs ready, and a human's draft stays a draft, so the readiness job holds only read repository permissions. Under the same lock it syncs the PR and closing-linked issue cards: In review when the PR is ready and its live head is verified, In progress otherwise, a draft included. Done cards remain protected. An unverified new head moves the cards to In progress; a late synchronize event cannot override current green proof. Human ready/draft events request the same reevaluation. On the next readiness trigger, a new pending same-head execution or reopened thread moves a same-repository PR's cards back to In progress. GitHub Actions has no review-thread event for manual reopening or resolution; dispatch **Reconcile CodeRabbit admission** with `pr_number` after either change, then **PR Readiness** if the board needs refreshing. Fork PRs get no board sync. Native proof requires an official matching main-target PR association; an empty association fails closed. If it appears, inspect the native run and start fresh native CI rather than substituting a dispatch or unrelated same-head run. Queue admission reads the same fresh provider/thread evidence in addition to its existing native proof, rules and membership checks. Queue suites always run on full-matrix entries. Exact-push reuse keeps its existing proof and snapshot publication rules. `fetch-ci-results.cjs` remains for snapshot consumers.
 
 Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]` or the exact bot configured in `RELEASE_APP_BOT_LOGIN`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `pnpm-lock.yaml`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head manifests differ only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets), and the pnpm lockfile stays byte-identical except matching local workspace specifiers (including its pnpm package-manager document).
 
@@ -885,8 +915,8 @@ target workflow before opening PRs against it.
 CI accepts `merge_group: checks_requested` for `main`. It verifies the immutable
 combined commit before merge. Typecheck, citations, complexity, clones, build,
 Node tests and packaged CLI tests always run on that commit. The eight Vitest
-and eight browser jobs can reuse native PR suites for an unchanged queue entry
-built directly on `main`.
+and eight browser jobs execute the full suites on every full-matrix queue entry.
+A selected PR run never serves as full-suite proof for the queue.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
 
 Before enqueueing, and again in queue admission, use the newest trusted
@@ -1034,30 +1064,14 @@ empty diff, a classifier failure or an unknown verdict classifies the entry
 
 Native PR test matrices resolve their input once to an immutable merge commit.
 For a same-repository PR that contains the trusted workflow's base and whose
-head and merge trees match, they test the immutable head instead. Only both
-successful full matrices can produce `Attest PR test inputs / <workflow SHA> /
-<PR head SHA>`, a read-only job whose official name records those identities.
-A missing or moved merge input fails input resolution. An unavailable optional
-ancestry check keeps the immutable merge checkout without attestation.
+head and merge trees match, they test the immutable head instead. A missing or
+moved merge input fails input resolution. An unavailable optional ancestry check
+keeps the immutable merge checkout.
 
-For the entry this build tests, a read-only probe uses admission's entry lookup.
-Entries queued behind it do not block reuse. It requires a group base equal to
-`main`, so only an entry built directly on `main` can reuse; entry 2 of two
-speculative builds always runs both full queue suites. It also requires
-current native CI/review admission, all eight successful suite jobs, an attestation
-for the queue base and PR head, identical head/combined trees, and identical
-`ci.yml` blobs at the attested base and queue commit. A changed workflow always
-runs the queue suites, since native PR CI used the older definition. It re-reads
-membership, main, head and the newest source run/attempt. Missing, partial, old,
-failed, fork, stale-group or changing evidence runs both full queue suites.
-The probe is bounded to 60 seconds, with individual requests capped at 10 seconds.
-It may read a still-running native workflow only when its required aggregate,
-review, attestation and all suites have passed; optional publication can finish
-later. Final queue admission still requires the native workflow to finish
-successfully. A successful probe leaves each queue matrix job running only a
-short reuse receipt, so every required job still has a successful verdict.
-This proves content equivalence for these suites; checks that depend on commit
-identity, parents or the event still execute on the queue commit.
+PR matrices use the selectors described in § Selected PR tests. The queue always
+runs both applicable full suites. There is no PR-suite attestation, reuse probe or
+reuse receipt. This preserves full-suite proof on the combined commit when a PR
+selection misses a runtime dependency.
 
 The required `Automated Code Review` check verifies existing PR-head review
 admission. It does not call a model to review combined code. The helper comes
@@ -1075,8 +1089,8 @@ fails closed. GitHub owns queue persistence; no cockpit session is required.
 A main push probes official Actions metadata for at most 60 seconds (each request
 at most 10 seconds; at most seven pending reads; complete lists limited to 200
 records). It reuses only the newest same-repository queue run's latest successful
-attempt for the **exact pushed SHA**, after every classifier, verification leaf (including a verified native-suite
-reuse receipt), aggregate and review admission job succeeds. A final reread checks for races.
+attempt for the **exact pushed SHA**, after every classifier, verification leaf,
+aggregate and review admission job succeeds. A final reread checks for races.
 A queue run of a docs-only entry lists each skipped suite once, under its unexpanded
 name (`Vitest shard ${{ matrix.shard }}/8`). The probe accepts those two skipped jobs in
 place of the sixteen shards only when the pushed commit is docs-only or infra-only by
@@ -1131,8 +1145,7 @@ backlog or jump the queue. Confirm external merge tools distinguish enqueueing
 from actual merging before adoption; documentation here does not update them.
 
 Normal eligible merges replace main's full matrix with queue verification
-before merge plus a metadata probe. An eligible entry built on `main` reuses the
-native PR's unit/browser suites, even with entries queued behind it, and runs the remaining checks fresh. This is a
+before merge plus a metadata probe. Every full-matrix entry runs the full unit/browser suites and the remaining checks fresh. This is a
 cost goal, not a guarantee. Rebuilds,
 failed groups, retries and fallback add work. Measure queue
 wait, verification job-seconds, source attempts, reuse hits and fallback reasons.
@@ -1189,16 +1202,16 @@ its head SHA and fails closed.
 | 9 | Entry 2's PR head changes, or a human removes it | Push or removal | Author or human | Entry 2 removed; entry 1 unaffected | Not building yet: removed from the queue |
 | 10 | Queue reordered or an entry jumps ahead | Human action | Authorized human | GitHub builds again with new groups. A stale group's admission finds no matching entry and fails closed | As today |
 | 11 | Entry 2 conflicts with entry 1 | Group commit cannot be built | GitHub | Entry 2 removed with `merge_conflict`; PR stays open | Conflict found when it reaches the head |
-| 12 | Entry 1 changes `ci.yml` | PR content | Author | Entry 2's run uses its group head's workflow, which holds entry 1's change. Entry 2 cannot reuse native suites anyway (base is not `main`) | As today: the next entry runs the merged workflow |
+| 12 | Entry 1 changes `ci.yml` | PR content | Author | Entry 2's run uses its group head's workflow, which holds entry 1's change. Entry 2 runs full suites, as every full-matrix entry does | As today: the next entry runs the merged workflow |
 | 13 | Entry 1 changes the admission or proof helpers | PR content | Author | Entry 2 runs entry 1's helpers from its base (G3). If entry 1 fails, entry 2 is built again on `main`'s helpers | Entry 2 runs them after entry 1 merges |
-| 14 | Entry 2 changes `ci.yml` | PR content | Author | Its own run uses the group head's workflow; helpers come from its base; no reuse. Same as today | As today |
+| 14 | Entry 2 changes `ci.yml` | PR content | Author | Its own run uses the group head's workflow; helpers come from its base; full suites run. Same as today | As today |
 | 15 | Ruleset set back to 1 with two entries in flight | Owner edits ruleset 22473654 | Owner | Admission accepts 1 or 2 at every read, so in-flight builds stay valid. If GitHub invalidates entry 2, it is built again later | — |
 | 16 | Ruleset set to 3 or more, or batching enabled, without a spec change | Owner edits ruleset | Owner | Admission rejects every entry. The queue fails every build until the owner reverts the setting or this spec and the allowlist change | Same |
 | 17 | `main` moves outside the queue | Push with bypass | Nobody: the ruleset has no bypass actors | Cannot happen. If it did, GitHub rebuilds every group on the new `main` | Same |
 | 18 | Admission API error, deadline or changing evidence | GitHub API | Actions | Entry fails closed and is removed, so it counts as a queue failure. The PR stays open | As today |
 | 19 | Docs-only entry at position 2 | PR content | Classifier | The group diff `base..head` is that PR's own diff, so the skip is valid. Main proof: first parent = ref base | As today |
-| 20 | Entry at position 2, native suites passed | — | `pr-test-proof` | Base is not `main`, so full suites run | Cannot happen |
-| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Reuse allowed (before hearsay-tools/cezarion#2624: blocked by the entries behind) | Reuse allowed |
+| 20 | Entry at position 2, native suites passed | — | CI | Full suites run; PR selections are never queue proof | Cannot happen |
+| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | CI | Full suites run; PR selections are never queue proof | Full suites run |
 | 22 | An invalidated run finishes green later | Old run completes | Actions | Its group never merges, and its SHA never reaches `main`. It is counted as waste in the pilot metric | Cannot happen |
 | 23 | Manual re-run of a failed queue run | Human | Human | The entry was already removed; the run proves nothing for a new group. Requeue the PR | As today |
 | 24 | GitHub reports entry 2's `baseCommit` as `main`, not entry 1's head (S5 false) | GitHub data model | GitHub | Entry 2's admission fails closed on every build. The pre-activation exercise catches this before the pilot. Then the lookup changes to: base = the position-1 head, checked through the ref name | — |
