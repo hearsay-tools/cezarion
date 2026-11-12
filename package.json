@@ -33,6 +33,7 @@
     "test:changed": "node scripts/test-changed.mjs",
     "mock:wire": "node packages/cezar/scripts/record-mock-wires.mjs",
     "test:parity": "node scripts/test-parity.mjs",
+    "prepr": "node scripts/prepr.mjs",
     "metrics": "node scripts/metrics.mjs",
     "test:unit": "npm run test:unit -w @wjarka/cezarion && node --import ./scripts/test-home-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs",
     "test:package": "node scripts/test-package.mjs",
