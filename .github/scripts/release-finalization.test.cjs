@@ -193,7 +193,7 @@ process.exit(out.status ?? 1);
           return name.endsWith('/release-finalization.cjs') ? { ...loaded,
             bumpPr: (args) => loaded.bumpPr({ ...args, sleep: async () => {} }) } : loaded;
         };
-        await new AsyncFunction('github', 'context', 'core', 'require', 'getOctokit', step.with.script)(github, { repo, sha: outputs.dispatchSha ?? sha, serverUrl: 'https://github.com' }, core, testRequire, getOctokit);
+        await new AsyncFunction('github', 'context', 'core', 'require', 'getOctokit', step.with.script)(github, actionsContext({ repo, sha: outputs.dispatchSha ?? sha, serverUrl: 'https://github.com' }), core, testRequire, getOctokit);
       }
     } finally {
       if (step.id) outputs[step.id] = current;
@@ -205,6 +205,11 @@ process.exit(out.status ?? 1);
   };
   const reset = () => { git('checkout', '--detach', '-f', sha); if (git('branch', '--list', 'release/v0.12.1')) git('branch', '-D', 'release/v0.12.1'); stamp(); outputs.date = '2026-09-09T20:00:00Z'; };
   return { run, reset, git, write, pnpm, cwd, sha, state, outputs, errors, summary, workflow, remote };
+}
+// Shaped like @actions/github's Context: `repo` is a prototype getter, not an own property.
+function actionsContext({ repo, ...own }) {
+  class Context { get repo() { return repo; } }
+  return Object.assign(new Context(), own);
 }
 const bumpStep = 'Open version-bump PR (patch/minor/major only)';
 const releaseStep = 'Create GitHub Release';

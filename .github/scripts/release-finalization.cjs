@@ -24,7 +24,8 @@ const readOptional = async (read) => {
 function withSource(context) {
   const sha = process.env.SOURCE_SHA || context.sha;
   if (!/^[a-f0-9]{40}$/.test(sha ?? '')) throw new Error('Missing or invalid published source commit.');
-  return { ...context, sha };
+  // @actions/github defines `repo` as a prototype getter, which a spread drops.
+  return { ...context, repo: context.repo, sha };
 }
 
 function failed(core, error) {
