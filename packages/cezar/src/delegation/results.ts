@@ -29,7 +29,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   // One async read (#880): an archived transcript decodes with the async brotli API.
   const allEvents = await store.readEventsAsync(run.id);
   const events = allEvents.filter(event => event.seq > (delegation.executionStartSeq ?? -1));
-  const summary = latestAssistantSummary(events);
+  const summary = run.status === 'failed' && run.error?.trim() ? failureSummary(run.error, events) : latestAssistantSummary(events);
   const destroyed = delegation.destroy?.phase === 'complete';
   const workspaceRemoved = !!delegation.destroy && !delegation.destroy.remaining.includes('worktree');
   const { lastExecutionOutcome, settled } = executionOutcome(store, run);
@@ -55,6 +55,13 @@ function latestAssistantSummary(events: RunEvent[]): WorkerCollectedResult['summ
     if (text?.trim()) summary = { state: 'available', text: text.slice(0, 4000), source: 'assistant', seq: event.seq, truncated: text.length > 4000 };
   }
   return summary;
+}
+
+/** A failed worker's summary names the runner's failure reason, so its parent can act on it without
+ *  reading the transcript (hearsay-tools/squawk#3337). It takes precedence over the last assistant text. */
+function failureSummary(error: string, events: RunEvent[]): WorkerCollectedResult['summary'] {
+  const text = `Runner failure: ${error.trim()}`;
+  return { state: 'available', text: text.slice(0, 4000), source: 'failure', seq: events.at(-1)?.seq ?? 0, truncated: text.length > 4000 };
 }
 
 /** The public status as an execution outcome; settled only once the private execution record is complete. */

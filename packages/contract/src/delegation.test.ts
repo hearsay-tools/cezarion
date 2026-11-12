@@ -387,7 +387,7 @@ describe('collected worker results', () => {
 
   it('accepts every evidence state for the summary, head, diff and artifacts', () => {
     const missing = ['no-assistant-output', 'missing', 'unreadable', 'unverified'].map(reason => ({ ...unavailable, reason }));
-    acceptsEach(workerCollectedResultSchema, result, 'summary', [...missing, deleted, { ...result.summary, text: 's'.repeat(4000) }]);
+    acceptsEach(workerCollectedResultSchema, result, 'summary', [...missing, deleted, { ...result.summary, text: 's'.repeat(4000) }, { ...result.summary, source: 'failure' }]);
     acceptsEach(workerCollectedResultSchema, result, 'head', [{ state: 'available', sha: SHA40 }, { ...unavailable, sha: SHA40 }, { ...deleted, sha: SHA64 }, deleted]);
     acceptsEach(workerCollectedResultSchema, result, 'diff', [unavailable, deleted, { ...result.diff, path: 'p'.repeat(8192) }]);
     acceptsEach(workerCollectedResultSchema, result, 'artifacts', [unavailable, deleted, { ...result.artifacts, items: [] }]);
