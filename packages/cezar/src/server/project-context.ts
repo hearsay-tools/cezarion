@@ -18,17 +18,17 @@ import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './repo-branch-sweep.ts';
-import { RunStore, type RunRecord } from '../runs/store.ts';
+import { RunStore } from '../runs/store.ts';
 import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from '../workflows/run.ts';
 import type { ToolActivityTracker } from '../activity/tool-activity.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { getRepoInfo } from './git.ts';
-import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, withProjectAdmission, CockpitOwnership, type LiveProjectTask } from './cockpit-ownership.ts';
-import { isLiveRecord } from '../runs/run-row.ts';
-import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
+import { assertProjectAdmitted, ownedByAnotherCockpit, projectAdmissionRefusal, withProjectAdmission, CockpitOwnership } from './cockpit-ownership.ts';
 import { prepareProject } from '../project-migration/auto.ts';
+
+export { projectLiveTasks } from '../runs/live-tasks.ts';
 
 /**
  * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
@@ -161,35 +161,6 @@ export async function sweepRegisteredPreviewLeftovers(
     killed += await sweepPreviewOnce(dataDir, host);
   }
   return killed;
-}
-
-/** The state a live-task list shows: the status, and what an idle-looking task still waits for. */
-function liveState(run: RunRecord): string {
-  if (isUsageLimitHold(run)) return `${run.status}, usage-limit auto-resume`;
-  const waits = run.waits?.filter((wait) => wait.phase === 'open' || wait.phase === 'resolved').map((wait) => wait.kind) ?? [];
-  return waits.length ? `${run.status}, waiting on ${[...new Set(waits)].join(', ')}` : run.status;
-}
-
-/**
- * Every task of a project that is not terminal (`isLiveRecord`): queued, running, waiting on a
- * human, a usage-limit auto-resume, a timer, a PR or a worker, held by this store or persisted
- * in either project directory. Plus the runs of every family another live process (a headless
- * `cez run`, another binary) claims in the same database.
- * The migration fence's live-task check uses this one notion of live.
- */
-export function projectLiveTasks(store: Pick<RunStore, 'listRuns' | 'persistedLiveRunIds' | 'getRun'>): LiveProjectTask[] {
-  const tasks = new Map(store.listRuns().filter(isLiveRecord).map((run) => [run.id, run]));
-  // Rows another process left live, whose owner may since have gone, are in the database only.
-  const { live, foreign } = store.persistedLiveRunIds();
-  for (const id of live) {
-    const run = tasks.has(id) ? undefined : store.getRun(id);
-    if (run && isLiveRecord(run)) tasks.set(id, run);
-  }
-  for (const id of foreign) {
-    const run = tasks.has(id) ? undefined : store.getRun(id);
-    if (run) tasks.set(id, run);
-  }
-  return [...tasks.values()].map((run) => ({ id: run.id, title: run.title, state: liveState(run) }));
 }
 
 /** A build that finished after `disposeAll`: its context was torn down, never registered. */
