@@ -576,6 +576,19 @@ async function replyWithRequestError() {
   });
 }
 
+// `mock:rate-limit` → an API 429 with no reset time: a provider error the run holds on and
+// retries with back-off (hearsay-tools/squawk#3337).
+async function replyWithRateLimit() {
+  emit({
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    result: 'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}',
+    usage: { input_tokens: 0, output_tokens: 0 },
+    total_cost_usd: 0,
+  });
+}
+
 // `mock:limit` → the envelope Claude Code emits when the subscription window is
 // exhausted: an `is_error` result whose text is the machine-readable
 // `Claude AI usage limit reached|<epoch seconds>` marker. Makes the auto-resume path
@@ -603,6 +616,7 @@ async function replyWithNativeFailure(userText) {
   if (failureControl?.failure === 'provider' ? nativeFailure === 'provider' : userText.includes('mock:auth-error')) { await replyWithAuthenticationFailure(); return true; }
   if (failureControl?.failure === 'usage-limit' ? nativeFailure === 'usage-limit' : userText.includes('mock:limit')) { await replyWithUsageLimit(); return true; }
   if (userText.includes('mock:request-error')) { await replyWithRequestError(); return true; }
+  if (userText.includes('mock:rate-limit')) { await replyWithRateLimit(); return true; }
   return false;
 }
 

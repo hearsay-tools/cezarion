@@ -25,6 +25,9 @@ export type ContinueRunOptions = {
   agentProfile?: string | undefined;
   /** The parent reply this continuation delivers as the answer to a routed question. */
   answerInputId?: string;
+  /** A provider-error retry of a run that never recorded a session starts a fresh one
+   *  (hearsay-tools/squawk#3337). */
+  freshSession?: true;
 };
 
 export type ContinuationRefusal = { ok: false; error: string };
@@ -319,7 +322,7 @@ export class ContinuationChecks {
     const sessionStep = [...run.steps].reverse().find(s => s.sessionId);
     // Command/check steps may have changed the repo; only an untouched workflow can restart.
     const untouched = this.reads.untouched(run);
-    const absent = sessionRefusal(sessionStep, untouched, run.delegation?.role === 'worker' && !!this.conversation);
+    const absent = sessionRefusal(sessionStep, untouched, (run.delegation?.role === 'worker' && !!this.conversation) || this.opts.freshSession === true);
     if (absent) return absent;
     const affinity = sessionAffinity(run, this.opts, identity, sessionStep, untouched);
     const resumeSessionId = affinity.resume ? this.reads.sessionId(sessionStep) : undefined;

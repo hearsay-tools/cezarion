@@ -140,6 +140,7 @@ export const runRecordSchema = contractRunRecordSchema.extend({
   hasPendingPermission: contractRunRecordSchema.shape.hasPendingPermission.catch(undefined),
   autoResumeAt: z.string().datetime().optional().catch(undefined),
   autoResumeAttempts: z.number().int().min(0).optional().catch(undefined),
+  autoResumeReason: contractRunRecordSchema.shape.autoResumeReason.catch(undefined),
   pullRequests: z.preprocess((value) => Array.isArray(value)
     ? value.flatMap((entry) => {
         const parsed = runPullRequestSchema.safeParse(entry);
@@ -1772,7 +1773,7 @@ export class RunStore extends EventEmitter {
     const run = this.peek(id);
     if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
     if (isUsageLimitHold(run)) this.move(id, 'withdraw-hold');
-    else this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }]]));
+    else this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined, autoResumeReason: undefined }]]));
   }
 
   /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, and

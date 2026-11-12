@@ -34,6 +34,9 @@ import { toast } from '@/components/ui/toaster'
  * feature is off, the provider named no reset, the safety cap is spent, or the run failed for any
  * other reason — so this component never has to reason about any of those cases.
  */
+/** `MAX_AUTO_RESUMES` on the server: the retries a provider-error hold gets before the run fails. */
+const PROVIDER_RETRY_CAP = 12
+
 export function AutoResumeHint({ run }: { run: ApiRun }) {
   const queryClient = useQueryClient()
   const cancel = useMutation({
@@ -62,12 +65,24 @@ export function AutoResumeHint({ run }: { run: ApiRun }) {
           neutral ring — parked on a clock, the same answer `deriveAttention` gives this run
           everywhere else. */}
       <StatusDot tone="neutral" shape="ring" />
-      <span>
-        Usage limit reached — this task resumes automatically at{' '}
-        <time dateTime={run.autoResumeAt} className="font-medium text-foreground">
-          {label}
-        </time>
-      </span>
+      {run.autoResumeReason === 'provider-error' ? (
+        // A provider error retries with back-off (hearsay-tools/squawk#3337): the reason is the
+        // error the run kept, and the attempt counts against the cap of 12.
+        <span title={run.error}>
+          Provider error — this task retries automatically at{' '}
+          <time dateTime={run.autoResumeAt} className="font-medium text-foreground">
+            {label}
+          </time>{' '}
+          (attempt {(run.autoResumeAttempts ?? 0) + 1} of {PROVIDER_RETRY_CAP})
+        </span>
+      ) : (
+        <span>
+          Usage limit reached — this task resumes automatically at{' '}
+          <time dateTime={run.autoResumeAt} className="font-medium text-foreground">
+            {label}
+          </time>
+        </span>
+      )}
       <button
         type="button"
         data-action="auto-resume-cancel"

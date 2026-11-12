@@ -80,6 +80,10 @@ describe('metaStateWord (#617: the states the dot alone cannot say)', () => {
     ])('with %s', (_name, autoResumeAt, word) => {
       expect(metaStateWord(labelled('usage limit'), null, run({ autoResumeAt }), NOW)).toBe(word)
     })
+    it('names a provider-error hold (hearsay-tools/squawk#3337)', () => {
+      expect(metaStateWord(labelled('usage limit'), null, run({ autoResumeAt: ahead(12 * 60_000), autoResumeReason: 'provider-error' }), NOW))
+        .toBe('provider error, resumes in 12m')
+    })
   })
 
   describe('monitoring', () => {

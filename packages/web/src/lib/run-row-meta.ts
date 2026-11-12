@@ -48,7 +48,9 @@ export function metaStateWord(attention: Attention, queuePosition: number | null
     case 'resume': {
       // When, not just that (hearsay-tools/cezarion#617 01b): `usage limit, resumes in 12m`, or `usage limit` once due.
       const resume = resumeLabel(run.autoResumeAt, now)
-      return resume === 'scheduled' ? label : `${label}, ${resume}`
+      // The same hold, for a provider error retried with back-off (hearsay-tools/squawk#3337).
+      const reason = run.autoResumeReason === 'provider-error' ? 'provider error' : label
+      return resume === 'scheduled' ? reason : `${reason}, ${resume}`
     }
     case 'next-check': {
       // The same detail for a timer: `monitoring, next check 15:05` (phase 4b, hearsay-tools/cezarion#1236).

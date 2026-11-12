@@ -18,6 +18,12 @@ export const ORPHAN_BACKOFF: Backoff = { fastMs: 15_000, fastCount: 60, capMs: 3
  * clears within seconds; minutes would only delay a delivery that is likely to succeed.
  */
 export const WAKE_RETRY_BACKOFF: Backoff = { fastMs: 15_000, fastCount: 1, capMs: 60_000 };
+/**
+ * The wait before each automatic retry of a run held on a provider error (hearsay-tools/squawk#3337):
+ * 1 minute, doubling to 30 minutes, with no jitter, so the cockpit's retry time is exact. Twelve
+ * retries (`MAX_AUTO_RESUMES`) span about four hours, longer than the outages seen so far.
+ */
+export const PROVIDER_RETRY_BACKOFF: Backoff = { fastMs: 60_000, fastCount: 1, capMs: 1_800_000 };
 /** For the batched reprobes: ids that probe together keep probing together, so they share a scan. */
 export const noJitter = () => 0;
 /** Scheduled destroy attempts after which the cockpit says the cleanup needs attention: the first capped delay. */

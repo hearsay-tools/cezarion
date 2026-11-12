@@ -267,6 +267,23 @@ describe('ThreadView', () => {
     expect(textarea.placeholder).toBe('Reply — / for skills, @ for files…')
   })
 
+  it('held by a provider error → the dock names it, the retry time and the attempt (hearsay-tools/squawk#3337)', () => {
+    renderView(
+      <ThreadView
+        run={run('waiting', {
+          error: 'step "work" failed: API Error: 429 rate_limit_error',
+          autoResumeAt: '2026-08-03T17:00:30.000Z', autoResumeReason: 'provider-error', autoResumeAttempts: 2,
+          steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent, status: STEP_STATUS.failed, iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' }],
+        })}
+        thread={reduceThread(EVENTS)}
+      />,
+    )
+    const hint = document.querySelector('[data-slot="thread-dock"] [data-slot="auto-resume-hint"]')
+    expect(hint?.textContent).toContain('Provider error — this task retries automatically at')
+    expect(hint?.textContent).toContain('(attempt 3 of 12)')
+    expect(hint?.querySelector('[title]')?.getAttribute('title')).toContain('API Error: 429')
+  })
+
   it('held by a usage limit → the dock says when it resumes itself, and links the setting', async () => {
     renderView(
       <ThreadView

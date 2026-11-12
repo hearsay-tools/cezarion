@@ -353,6 +353,7 @@ function withdrawHold(run: RunRecord): void {
   if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold'));
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
+  run.autoResumeReason = undefined;
 }
 
 /**

@@ -36,10 +36,10 @@ export interface AttentionFields {
 /** The two derived fields, from the same function the cockpit's Needs You reads. A usage-limit
  *  hold also names its resume instant (hearsay-tools/cezarion#1236): the cockpit shows it beside
  *  the label, and a CLI reader has only the label. */
-export function attentionFields(run: Parameters<typeof deriveAttention>[0]): AttentionFields {
+export function attentionFields(run: Parameters<typeof deriveAttention>[0] & { autoResumeReason?: 'usage-limit' | 'provider-error' | undefined }): AttentionFields {
   const attention = deriveAttention(run);
   const label = attention.rung === 'usage-limit' && run.autoResumeAt
-    ? `usage limit, resumes ${run.autoResumeAt}`
+    ? `${run.autoResumeReason === 'provider-error' ? 'provider error' : 'usage limit'}, resumes ${run.autoResumeAt}`
     : attention.label;
   return { attention: attention.bucket, attentionLabel: label };
 }
