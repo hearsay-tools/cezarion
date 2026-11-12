@@ -225,6 +225,8 @@ it('keeps a queued provider retry on the held step\'s runner across a restart', 
   // The held step's account too, not the run's.
   const ownedStep = { ...step, profileId: 'work-account' };
   expect(atTaskHead.queuedResumeSession(context, host, { ...retry, agentProfile: 'personal', steps: [ownedStep] }, ownedStep)).toMatchObject({ backend: 'claude', sameAccount: true, recoveredSessionId: 'claude-session' });
+  // A step with no recorded account ran on the default one; the run's own profile does not move it.
+  expect(atTaskHead.queuedResumeSession(context, host, { ...retry, agentProfile: 'personal' }, step)).toMatchObject({ backend: 'claude', sameAccount: true, recoveredSessionId: 'claude-session' });
   // Any other queued Continue keeps the run's runner, as before.
   expect(atTaskHead.queuedResumeSession(context, host, { ...retry, autoResumeReason: undefined }, step)).toMatchObject({ backend: 'codex', recoveredSessionId: undefined });
 });

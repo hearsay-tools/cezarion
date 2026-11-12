@@ -591,7 +591,8 @@ function queuedResumeSession(context: RunModuleContext, host: QueuedRevivalHost,
   const backend = resumeIdentity?.account.provider ?? retryInFlightRunner(run) ?? run.runner ?? 'claude';
   const sessionBackend = sessionStep.backend ?? backend;
   const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-  const agentProfile = resumeIdentity?.account.profileId ?? (retryInFlightRunner(run) ? sessionStep.profileId : undefined) ?? run.agentProfile;
+  // A provider retry keeps the held step's account, resolved as `sessionAccount` is (hearsay-tools/squawk#3337).
+  const agentProfile = resumeIdentity?.account.profileId ?? (retryInFlightRunner(run) ? sessionAccount : run.agentProfile);
   const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
   const recoveredSessionId = sessionBackend === backend && sameAccount
     ? host.resumableSessionId(run.id, sessionStep) : undefined;
