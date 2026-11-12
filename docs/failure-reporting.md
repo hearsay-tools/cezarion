@@ -176,7 +176,7 @@ Leave both inputs empty for the normal window, or supply both UTC endpoints. The
 CLI equivalent for this repository is:
 
 ```bash
-gh workflow run sweep-ci-failures.yml --repo hearsay-tools/cezarion --ref main \
+gh workflow run sweep-ci-failures.yml --repo hearsay-tools/squawk --ref main \
   -f start=2026-09-01T00:00:00Z -f end=2026-09-08T00:00:00Z
 ```
 

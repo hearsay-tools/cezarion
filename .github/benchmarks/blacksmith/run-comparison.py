@@ -1,6 +1,6 @@
 import json, subprocess, time, sys
 from pathlib import Path
-REPO='hearsay-tools/cezarion'
+REPO='hearsay-tools/squawk'
 phase=sys.argv[1]
 refs=dict(github=f'bench/ci-github-{phase}',blacksmith=f'bench/ci-blacksmith-{phase}')
 output_root=Path(sys.argv[2]) if len(sys.argv)>2 else Path('/tmp/cez-provider-results')
