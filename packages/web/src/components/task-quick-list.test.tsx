@@ -1311,7 +1311,7 @@ describe('the calmer row (#617)', () => {
   })
 
   it('keeps the selected fill under the pointer; other rows take the hover fill', () => {
-    // The resolved fills and inks, per theme, are pinned by selection-states.e2e.ts (#617); that
+    // The resolved fills and inks, per theme, are pinned by selection-states.e2e.ts; that
     // spec hovers an unselected row only, so the selected row's hover rule is checked here.
     renderList({ runs: [run({ id: 'open', pullRequestUrl: 'https://github.com/o/r/pull/7' }), run({ id: 'other' })], currentRunId: 'open', onTogglePin: vi.fn() })
     expect(row('open')?.className).toContain('hover:bg-sidebar-row-selected')
