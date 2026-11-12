@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setImmediate as afterRejectionCheck } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -127,8 +128,9 @@ describe('armPreview', () => {
       const host = { release: () => Promise.reject(new Error('boom')), ownsServer: () => false, ownsBrowser: () => false } as unknown as PreviewHost;
       armPreview(store as unknown as RunStore, a.dataDir, host);
       store.emit('deleted', 'run-x');
-      // bound: negative window. An unhandled rejection from the deleted handler surfaces within a few event-loop turns; 20 ms covers them.
-      await new Promise(resolve => setTimeout(resolve, 20));
+      // Node reports an unhandled rejection once the microtasks after its creation drain, before
+      // the next check phase runs.
+      await afterRejectionCheck();
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }

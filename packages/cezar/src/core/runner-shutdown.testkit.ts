@@ -2,7 +2,7 @@ import * as childProcess from 'node:child_process';
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import type { IncomingMessage } from 'node:http';
 import * as fs from 'node:fs';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -376,11 +376,12 @@ process.on = function(event, listener) {
 `);
       vi.stubEnv('NODE_OPTIONS', `${process.env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(preload).href}`.trim());
       try {
-        await withChild(backend, async (_session, child) => {
+        await withChild(backend, async (_session, child, _events, _settled, cwd) => {
           child.kill('SIGTERM');
-          // bound: proves an exit did NOT happen; the default action kills within
-          // milliseconds, so this window can only miss a death, never invent one.
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // The mode's handler publishes a receipt and returns; the default action, or a
+          // handler that exits, ends the child without one.
+          // bound: the signal is already sent, so only its delivery remains.
+          await vi.waitFor(() => expect(existsSync(join(cwd, 'sigterm-ignored.pid'))).toBe(true), { timeout: 10_000 });
           expect(child.signalCode).toBeNull();
           expect(alive(child.pid!)).toBe(true);
         }, 'no-progress-ignore-term');
