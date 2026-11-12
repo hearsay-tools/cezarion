@@ -129,7 +129,7 @@ export class CodexAppServerRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const session = new CodexSession(this.bin, this.timeoutMs, spec, onEvent, opts);
+    const session = new CodexSession(this.bin, this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs, spec, onEvent, opts);
     this.lastSession = session;
     return session;
   }
@@ -221,7 +221,7 @@ class CodexSession implements AgentSession {
 
   constructor(
     private readonly bin: string,
-    timeoutMs: number | undefined,
+    timeoutMs: number,
     private readonly spec: AgentRunSpec,
     private readonly onEvent: ((event: AgentEvent) => void) | undefined,
     private readonly opts: SessionOptions,
@@ -268,7 +268,7 @@ class CodexSession implements AgentSession {
     this.child.stderr.on('data', (chunk: string) => stderrChunks.push(chunk));
 
     // Whole-session timeouts remain optional; startup is always bounded.
-    const limitMs = spec.timeoutMs ?? timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
+    const limitMs = spec.timeoutMs ?? timeoutMs;
     let deadline: NodeJS.Timeout | undefined;
     if (limitMs > 0) {
       deadline = setTimeout(() => {

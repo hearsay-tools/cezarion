@@ -12,10 +12,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>() }));
 vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>() }));
 
-vi.mock('./runner-runtime.ts', async (original) => ({
-  ...await original<typeof import('./runner-runtime.ts')>(),
-  KILL_GRACE_MS: 100,
-}));
 
 import { leaderState, probeLeaderState, psLeaderState, forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
 import { requirePid } from '../pid-file.testkit.ts';
@@ -207,7 +203,7 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
   async function start(script: string): Promise<{ leader: ChildProcessWithoutNullStreams; member: number; cwd: string }> {
     const cwd = mkdtempSync(join(tmpdir(), 'cez-session-group-'));
     dirs.push(cwd);
-    const leader = spawnSessionLeader(process.execPath, ['-e', script], { cwd, env: process.env });
+    const leader = spawnSessionLeader(process.execPath, ['-e', script], { cwd, env: process.env, timings: { killGraceMs: 100 } });
     pids.push(leader.pid!);
     // bound: wait for this process signal or PID publication on a loaded host.
     const member = await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 10_000 });
@@ -277,7 +273,7 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
 const g = spawn(process.execPath, ['-e', ${JSON.stringify(IGNORES_TERM)}], { stdio: 'ignore' });
 const s = spawn(process.execPath, ['-e', ${JSON.stringify(IGNORES_TERM)}], { stdio: 'ignore', detached: true });
 fs.writeFileSync('pids.tmp', g.pid + ' ' + s.pid); fs.renameSync('pids.tmp', 'pids');
-g.unref(); s.unref(); process.exit(0);`], { cwd, env: process.env });
+g.unref(); s.unref(); process.exit(0);`], { cwd, env: process.env, timings: { killGraceMs: 100 } });
     pids.push(leader.pid!);
     // bound: three node processes starting on a loaded host.
     const [group, setsid] = await vi.waitFor(() => {
@@ -304,7 +300,7 @@ process.stdin.resume(); setTimeout(() => {}, 20000);`;
     const leader = spawnSessionLeader(process.execPath, ['-e', `const { spawn } = require('child_process');
 const m = spawn(process.execPath, ['-e', ${JSON.stringify(member)}], { stdio: ['pipe', 'ignore', 'ignore'] });
 require('fs').writeFileSync('member.pid.tmp', String(m.pid)); require('fs').renameSync('member.pid.tmp', 'member.pid');
-setTimeout(() => process.exit(0), 50);`], { cwd, env: process.env });
+setTimeout(() => process.exit(0), 50);`], { cwd, env: process.env, timings: { killGraceMs: 100 } });
     pids.push(leader.pid!);
     // bound: two node processes starting on a loaded host.
     pids.push(await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 5000 }));

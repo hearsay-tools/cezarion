@@ -10,11 +10,6 @@ import { NO_PROGRESS_CRITERIA, driveSeam, exemptionFor, waitFor } from './harnes
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
-vi.mock('./runner-runtime.ts', async importOriginal => ({
-  ...await importOriginal<typeof import('./runner-runtime.ts')>(),
-  DEFAULT_NO_PROGRESS_TIMEOUT_MS: 800,
-  KILL_GRACE_MS: 150,
-}));
 
 // Keep native startup, IPC, polling and process exit on real time. Only the
 // inactivity deadline (and N5's kill escalation) uses the controlled clock.
@@ -30,7 +25,7 @@ function controlDeadlines(killEscalation: boolean, onDeadlineArmed?: () => void)
   vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...params: Parameters<typeof setTimeout>) => {
     const [callback, ms, ...args] = params;
     // Cursor and OpenCode keep their own 4 s kill grace; the other runners
-    // use runner-runtime's shortened 150 ms grace below.
+    // use the injected 150 ms grace below.
     if (ms !== 800 && !(killEscalation && (ms === 150 || ms === 4_000))) {
       return realSetTimeout(callback, ms, ...args);
     }
@@ -114,7 +109,7 @@ describe('managed open-turn inactivity — #470', () => {
       const exemption = exemptionFor(row.id, backend);
       if (exemption) {
         it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
-          const observed = await driveSeam(backend, 'no-progress', { timeoutMs: 2_500 });
+          const observed = await driveSeam(backend, 'no-progress', { timeoutMs: 2_500, spec: { timings: { noProgressTimeoutMs: 800, killGraceMs: 150 } } });
           expect(observed.v2.some(event => event.type === 'turn.started')).toBe(true);
           expect(observed.v1.some(event => event.type === 'error' && /no progress/i.test(event.message))).toBe(true);
         });
@@ -217,7 +212,7 @@ describe('managed open-turn inactivity — #470', () => {
             expect(run.error).toContain('no progress');
             expect(store.readEvents(runId).some(e => e.type === 'check-output')).toBe(false);
           }
-        }, { workflowDef });
+        }, { workflowDef, timings: { noProgressTimeoutMs: 800, killGraceMs: 150 } });
       }, 30_000);
     }
   }

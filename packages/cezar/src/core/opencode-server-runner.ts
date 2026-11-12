@@ -161,7 +161,6 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
 };
 /** How long an idle session may sit on steered input before it counts as a lost wake. */
 export const OPENCODE_LOST_WAKE_GRACE_MS = 2_000;
-
 export class OpencodeServerRunner implements AgentRunner {
   readonly backend = 'opencode' as const;
   readonly specSupport = OPENCODE_SPEC_SUPPORT;
@@ -194,7 +193,7 @@ export class OpencodeServerRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
   ): AgentSession {
-    const session = new OpencodeSession(this.bin, this.timeoutMs, this.serverStartTimeoutMs, spec, onEvent, opts);
+    const session = new OpencodeSession(this.bin, this.timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs, this.serverStartTimeoutMs, spec, onEvent, opts);
     this.lastSession = session;
     return session;
   }
@@ -304,7 +303,7 @@ class OpencodeSession implements AgentSession {
 
   constructor(
     private readonly bin: string,
-    timeoutMs: number | undefined,
+    timeoutMs: number,
     private readonly serverStartTimeoutMs: number,
     private readonly spec: AgentRunSpec,
     private readonly onEvent: ((event: AgentEvent) => void) | undefined,
@@ -315,7 +314,7 @@ class OpencodeSession implements AgentSession {
     // The server prints its URL on stdout once listening.
     const urlReady = this.startServer();
 
-    const limitMs = spec.timeoutMs ?? timeoutMs ?? spec.timings?.runTimeoutMs ?? DEFAULT_RUNNER_TIMINGS.runTimeoutMs;
+    const limitMs = spec.timeoutMs ?? timeoutMs;
     let deadline: NodeJS.Timeout | undefined;
     if (limitMs > 0) {
       deadline = setTimeout(() => {
@@ -608,8 +607,7 @@ class OpencodeSession implements AgentSession {
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawnSessionLeader(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-        cwd: this.spec.cwd,
-        timings: this.spec.timings,
+        cwd: this.spec.cwd, timings: this.spec.timings,
         env: buildChildEnv({ backend: 'opencode', extraEnv: opencodeTaskScopeEnv(ciOpenCodeEnv(this.spec), this.spec.restrictCrossSessionMessaging) }),
       });
     } catch (err) {

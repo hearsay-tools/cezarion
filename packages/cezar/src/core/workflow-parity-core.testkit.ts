@@ -395,6 +395,8 @@ export async function withOwnedInputRun(
   options: {
     /** A persisted catalog definition the worker runs instead of quick-task (#451). */
     workflowDef?: WorkflowDef | undefined;
+    /** Internal runner deadlines for this fixture, including restarts. */
+    timings?: Partial<import('./runner-runtime.ts').RunnerTimings>;
     /** The private identity evidence to write instead of the internal marker (#452); its run-level
      *  account must match `runner`/`agentProfile` on the record, as acceptance guarantees. */
     identity?: WorkerExecutionIdentity;
