@@ -1,6 +1,6 @@
 import type { CezarAskAnswer, CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
 import type { ScheduleTaskAnswer, ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { previewToolEnabled, automationsToolEnabled, waitToolDefinition, askToolDefinition, cancelWaitToolDefinition, doneToolDefinition, previewToolDefinition, previewStopToolDefinition, scheduleTaskToolDefinition, scheduledTasksToolDefinition } from './tool-catalog.ts';
+import { cezarToolDefinitions, waitToolDefinition, askToolDefinition, cancelWaitToolDefinition, doneToolDefinition, previewToolDefinition, previewStopToolDefinition, scheduleTaskToolDefinition, scheduledTasksToolDefinition } from './tool-catalog.ts';
 export { previewToolEnabled, automationsToolEnabled, waitToolDefinition, askToolDefinition, cancelWaitToolDefinition, doneToolDefinition, previewToolDefinition, previewStopToolDefinition, scheduleTaskToolDefinition, scheduledTasksToolDefinition, cezarToolNames, cezarToolEnvNames } from './tool-catalog.ts';
 import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop, callScheduleTask, callScheduledTasks } from './client.ts';
 
@@ -91,12 +91,13 @@ const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trig
 const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
+const TOOLS_BY_NAME = new Map([
+  WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL,
+  PREVIEW_TOOL, PREVIEW_STOP_TOOL, SCHEDULE_TASK_TOOL, SCHEDULED_TASKS_TOOL,
+].map(tool => [tool.definition.name, tool]));
+
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  return [
-    WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL,
-    ...(previewToolEnabled(env) ? [PREVIEW_TOOL, PREVIEW_STOP_TOOL] : []),
-    ...(automationsToolEnabled(env) ? [SCHEDULE_TASK_TOOL, SCHEDULED_TASKS_TOOL] : []),
-  ];
+  return cezarToolDefinitions(env).map(definition => TOOLS_BY_NAME.get(definition.name)!);
 }
 
 export function cezarServerInstructions(env: NodeJS.ProcessEnv = process.env): string {
