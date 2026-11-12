@@ -435,7 +435,7 @@ describe('sweepPreviewLeftovers', () => {
   });
 
   describe("a task's Chromium (chromium.pid.json)", () => {
-    // Chromium is not detached: it shares cezar's process group, so only its pid may be signalled.
+    // Chromium is not detached: it shares Squawk's process group, so only its pid may be signalled.
     function strayBrowser(): ChildProcess {
       const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000', ...guard.args], { stdio: 'ignore' });
       strays.push(child);

@@ -63,7 +63,7 @@ jobs:
           squeal() { node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" "$@"; }
           # Vitest derives allowOnly, updateSnapshot and browser settings from CI detection;
           # removing the variables keeps the resolved config equal to a developer's.
-          # A cezar test mocks node:path with path.win32, and Squeal 0.1.417's coverage provider
+          # A Squawk test mocks node:path with path.win32, and Squeal 0.1.417's coverage provider
           # then writes a file named '\tmp\squeal-...' into the checkout root. Ignore such names,
           # or the dirty tree moves the checkpoint's revision and the run has no verdict.
           printf '%s\n' '/\\*' >> .git/info/exclude
@@ -71,7 +71,7 @@ jobs:
           # Let the daemon list the test files before asking for a group.
           squeal status --wait 120000 > /dev/null || true
           status=0
-          # The default `tests` group is every test file outside cezar's `browser` group (at: manual),
+          # The default `tests` group is every test file outside Squawk's `browser` group (at: manual),
           # which needs a browser this job does not set up. In Squeal 0.1.417 `run --fast` counts the
           # browser files in its verdict without running them, so it cannot end with a verdict here.
           env -u CI -u GITHUB_ACTIONS node "$RUNNER_TEMP/squeal/plugins/claude-code/dist/cli/squeal.mjs" run tests --wait 5400000 > "$RUNNER_TEMP/squeal-run.log" 2>&1 || status=$?

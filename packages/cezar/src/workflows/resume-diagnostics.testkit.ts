@@ -9,6 +9,7 @@ import { setRunStatus, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { productName } from '../home/display.ts';
 
 // hearsay-tools/cezarion#1380: losing the saved cause before Continue, or preferring a
 // saved message over the restart explanation, must fail on every native input wire.
@@ -96,7 +97,7 @@ function humanText(runner: RunnerId, it: typeof registerTest = registerTest): vo
     it(`${runner} R91 preserves human text that equals the legacy restart fallback`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'cezar-done');
-      const text = 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
+      const text = `The ${productName('Cezar')} process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.`;
       const before = messages().length;
       expect(manager.continueRun(id, { text })).toEqual({ ok: true });
       await until(() => messages().length > before);

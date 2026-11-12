@@ -127,7 +127,7 @@ export function restoreOriginatingIssue(run: RunRecord): void {
  * does not corroborate it (#945). Returns whether anything changed.
  *
  * One-directional by construction: it only ever clears fields, so a record written by an older
- * cezar — or read by one after this ran — is never worse off, and a downgrade sees a record whose
+ * Squawk — or read by one after this ran — is never worse off, and a downgrade sees a record whose
  * format is untouched and whose cleared fields were already optional.
  */
 export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean {

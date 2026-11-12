@@ -81,7 +81,7 @@ async function readRepoResourceKeys(
  *    overwritten — presence is checked against the RAW global file (before
  *    defaults are applied), which is exactly what makes a crash-interrupted
  *    re-run safe: the first pass writes the keys, the re-run sees them set.
- * 3. Every per-repo file is left untouched in place, so an older cezar run in
+ * 3. Every per-repo file is left untouched in place, so an older hsq run in
  *    the same repo keeps working off its local copies.
  *
  * Registering the boot repo is NOT part of the migration — the normal boot

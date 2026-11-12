@@ -28,7 +28,7 @@ import { pageTitleContext, type PageTitleContext } from '@/routes'
  * Derive the sidebar's repo chip from `/api/health`.
  *
  * Null — the chip renders nothing — whenever there is nothing true to say: health hasn't
- * answered yet, or cezar is running outside a git repository (`repo: null`), which is a
+ * answered yet, or Squawk is running outside a git repository (`repo: null`), which is a
  * supported way to run it. An empty chip is honest; "loading…" or a guessed folder name is not.
  *
  * The name is the repo root's basename: `/home/me/Projects/cezar` → `cezar`. Both separators,

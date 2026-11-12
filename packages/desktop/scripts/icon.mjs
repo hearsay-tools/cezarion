@@ -8,7 +8,7 @@
 // The SVG is wrapped full-bleed: the tile's own fill covers the whole 1024px canvas, because
 // macOS masks the squircle itself and a transparent corner or margin gets a white plate behind
 // it in the Dock. The fill is `--bg` when given, the mark's gradient when it has one, else the
-// Cezarion sidebar's navy surface. It is then rendered to PNG and fed to `tauri icon`, which writes the
+// Squawk sidebar's navy surface. It is then rendered to PNG and fed to `tauri icon`, which writes the
 // .icns/.ico/.png set under src-tauri/icons. The splash logo (ui/icon.svg) is refreshed from
 // the same source.
 // Rendering uses rsvg-convert when present, else macOS's qlmanage.

@@ -73,7 +73,7 @@ describe('ubuntu-vps ssl step', () => {
     const ids = ubuntuVps.steps(ctxWith({})).map((s) => s.id);
     expect(ids).toEqual(['deps', 'nginx-proxy', 'ssl', 'autostart', 'identity']);
     expect(stepById('ssl').optional).toBe(true);
-    // The service step is required now — after install cezar must actually run.
+    // The service step is required now — after install Squawk must actually run.
     expect(stepById('autostart').optional).toBeFalsy();
     expect(stepById('identity').optional).toBeFalsy();
   });
@@ -536,7 +536,7 @@ describe('isNpxExecStart (#696)', () => {
     expect(isNpxExecStart('/usr/bin/node /usr/bin/cezarion serve --no-open --port 4321')).toBe(false);
   });
 
-  // #23: this clone publishes as `cezarion`, so a unit installed by UPSTREAM cezar as
+  // #23: this clone publishes as `Squawk`, so a unit installed by UPSTREAM cezar as
   // `npx --yes cezar-cli` stops matching. It must not be adopted (clearing upstream's npx
   // cache would move the box onto upstream's latest), but it must not pass silently either —
   // `server-deploy` would report a green restart having changed nothing.
@@ -1081,5 +1081,5 @@ describe('ubuntu-vps preflight', () => {
   });
 });
 
-// These installer fixtures describe the existing cezar systemd units.
+// These installer fixtures describe the existing Squawk systemd units.
 vi.mock('../../home/switch.ts', () => ({ REBRAND_SWITCH: false }));

@@ -21,7 +21,7 @@ coverage to a separate issue. Where the fix lives decides where its row runs
 - **A fix inside a runner class** extends the seam contract suite
   (`core/seam-contract.testkit.ts`) or that runner's own rows. These run on every
   runner. Give a genuine wire gap a named executable exemption.
-- **A fix above the seam**, in Cezar's shared code, extends a shared row. A
+- **A fix above the seam**, in Squawk's shared code, extends a shared row. A
   shared row runs on the derived runner set: the smallest set that shows every
   declared value of each turn-path fact (`inputDelivery.mode`, `.consumption`,
   `.acknowledgement`, `.humanInputAtTurnEnd` and `systemPromptOnResume`).
@@ -127,7 +127,7 @@ and head and explain every difference.
 recorder import runs. Records name stdout, stderr, SSE or the HTTP response
 (status and body). Normalization replaces process-local identities, timestamps,
 temporary paths, pids and allocated ports. It keeps frame and write order.
-The evidence endpoint uses the real cezar tool definitions with stable
+The evidence endpoint uses the real Squawk tool definitions with stable
 unavailable receipts; it creates no waits and makes no GitHub requests. Parity
 tests continue to verify tool effects through the real workflow controller.
 

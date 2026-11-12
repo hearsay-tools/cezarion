@@ -604,7 +604,7 @@ describe('upgrade-on-read of agent worker waits', () => {
     }
   });
 
-  it('upgrades a parked completion wait into a cezar worker entry and drops completion', () => {
+  it('upgrades a parked completion wait into a Squawk worker entry and drops completion', () => {
     const wait = legacyWait({ mode: 'all', deadline: iso(600_000), workerIds: [WORKER, REQUEST], revisions: undefined });
     const row = rootRow({ wait, completion: { phase: 'waiting', waitId: WAIT_ID } });
     const run = parseOne(row);

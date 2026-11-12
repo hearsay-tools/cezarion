@@ -3,6 +3,7 @@ import { type AgentBackend, type RunnerId, type ToolGrant } from '../core/agent-
 
 import { workflowStepDefSchema as workflowStepSchema, workflowDefSchema } from '@open-mercato/cezar-contract/workflows';
 import { workflowFileSchema } from '@open-mercato/cezar-contract/workflow-file';
+import { productName } from '../home/display.ts';
 export { workflowStepSchema, workflowDefSchema, workflowFileSchema };
 export type WorkflowStepDef = z.infer<typeof workflowStepSchema>;
 export type WorkflowDoc = z.infer<typeof workflowFileSchema>;
@@ -84,7 +85,7 @@ export function chainStepNote(steps: WorkflowStepDef[], index: number): string |
     `Call cezar_done only once step ${position}'s own goal is achieved, not just the run's overall task.`,
   );
   // hearsay-tools/cezarion#1620: the step completes only on that signal.
-  if (position < total) sentences.push(`Cezar starts step ${position + 1} only after that signal; a turn that ends without it keeps step ${position} open.`);
+  if (position < total) sentences.push(`${productName('Cezar')} starts step ${position + 1} only after that signal; a turn that ends without it keeps step ${position} open.`);
   return sentences.join(' ');
 }
 

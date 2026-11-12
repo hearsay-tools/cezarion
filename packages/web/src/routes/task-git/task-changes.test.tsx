@@ -320,7 +320,7 @@ describe('the Changes tab route', () => {
     )
   })
 
-  // #791: `/api/v1/health` reports the boot folder, so a cezar booted outside a git repo answered
+  // #791: `/api/v1/health` reports the boot folder, so a Squawk booted outside a git repo answered
   // `repo: null` and Push went dark for every project. The remote must come from the
   // project-scoped `/repo` instead.
   it('offers Push from the project remote even when the boot folder has no git repo', async () => {

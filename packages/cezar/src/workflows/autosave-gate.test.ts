@@ -134,7 +134,7 @@ describe('periodic autosave gate (#471)', () => {
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
     expect(await autosaveCommit(worktreePath, 'turn end')).toBe('committed');
     const { stdout } = await run('git', ['log', '-1', '--format=%s'], { cwd: worktreePath });
-    // Keeps the `cezar autosave` prefix so existing log greps still match, and
+    // Keeps the `Squawk autosave` prefix so existing log greps still match, and
     // names the reason so an opted-out user can tell this flush apart from the
     // periodic timer they disabled (#471 follow-up).
     expect(stdout.trim()).toBe('cezar autosave (turn end)');

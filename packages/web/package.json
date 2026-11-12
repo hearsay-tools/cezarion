@@ -1,7 +1,7 @@
 {
   "name": "@open-mercato/cezar-web",
   "version": "0.18.0",
-  "description": "The cezar cockpit SPA — one client of the cezar API service.",
+  "description": "The Squawk cockpit SPA — one client of the Squawk API service.",
   "license": "MIT",
   "private": true,
   "type": "module",

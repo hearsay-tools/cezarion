@@ -365,7 +365,7 @@ function withdrawHold(run: RunRecord): void {
  * finished" sweep never goes through a route, and it has to obey the rule too.
  *
  * Deleted, not set to `false`: absent is what every reader treats as unpinned, and it is the
- * shape a cezar that has never heard of pins already writes.
+ * shape a Squawk that has never heard of pins already writes.
  */
 export function clearPin(run: RunRecord): void {
   delete run.pinned;

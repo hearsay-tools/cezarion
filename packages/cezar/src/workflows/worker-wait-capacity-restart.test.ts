@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { manager, parent, queuedWake, restart, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { useWorkerCapacityFixture } from './worker-wait-capacity.testkit.ts';
+import { productName } from '../home/display.ts';
 
 describe("worker waits through RunManager", { timeout: 30_000 }, () => {
   useWorkerCapacityFixture();
@@ -17,7 +18,7 @@ describe("worker waits through RunManager", { timeout: 30_000 }, () => {
     }] });
     manager.enqueueMessage(p.id, [{ type: 'text', text: 'queued human answer mock:hold' }]);
     expect(store.getRun(p.id)?.continuationMessage).toMatchObject({ origin: 'human',
-      text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.' });
+      text: `Resume to receive the queued worker wait result. End this opening turn so ${productName('Cezar')} can deliver it.` });
     await restart();
     await until(() => store.readEvents(p.id).some(event => event.type === 'human-input-delivered'));
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);

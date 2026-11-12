@@ -6,7 +6,7 @@ export const completionControlsShape = {
   autoMergePr: z.boolean().optional(),
 };
 
-/** Task access (hearsay-tools/cezarion#2784): may the task's agents start and resume Cezar workers,
+/** Task access (hearsay-tools/cezarion#2784): may the task's agents start and resume Squawk workers,
  *  and message peer tasks. New runs store an explicit value; a missing value is on. */
 export const taskAccessShape = {
   allowWorkers: z.boolean().optional(),

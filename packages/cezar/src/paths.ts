@@ -1,4 +1,4 @@
-import { logPrefix } from './home/display.ts';
+import { logPrefix, productName } from './home/display.ts';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { AgentHomePaths } from './agent-config/catalog.ts';
@@ -8,7 +8,7 @@ import { assertOutsideAccountHome } from './home/protected-roots.ts';
 import type { Home } from './home/home.ts';
 
 /**
- * Test writers must never reach the account's real cezar home. HOME can be a
+ * Test writers must never reach the account's real Squawk home. HOME can be a
  * sandbox, so read the account home from the OS. Runner detection belongs to
  * the process: a caller's custom env must not disable this guard.
  */
@@ -18,7 +18,7 @@ export function assertSquawkHomeWriteIsSandboxed(path: string, _env: NodeJS.Proc
   if (!testing) return;
   assertOutsideAccountHome(path, () => new Error(
     `${logPrefix()} refusing to write ${path} from a test run — CEZ_HOME is not pinned to a sandbox. ` +
-      'Pin it to a test sandbox so the suite never touches the real cezar home.',
+      `Pin it to a test sandbox so the suite never touches the real ${productName('cezar')} home.`,
   ));
 }
 
@@ -66,7 +66,7 @@ export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE, home
 
 /**
  * Per-user workspace config (spec 2026-07-20-multi-project-workspace): schema
- * version, global defaults, and the project registry — every repo cezar has
+ * version, global defaults, and the project registry — every repo Squawk has
  * been booted in. The legacy layout keeps it under `Home.root`, so the `CEZ_HOME`
  * override applies (tests/containers never touch a real home dir).
  */
@@ -183,20 +183,20 @@ export function ompProfilesDir(env: NodeJS.ProcessEnv = process.env): string {
  * profile, i.e. the wrong account's file.
  *
  * The condition below reads like two heuristics OR-ed together; it is one exact rule. The file sits
- * inside precisely when the CLI will SEE `CLAUDE_CONFIG_DIR` for this dir, and cezar knows when
+ * inside precisely when the CLI will SEE `CLAUDE_CONFIG_DIR` for this dir, and Squawk knows when
  * that is:
  *
  *   - a stored account is always spawned with it (`profileEnv`), and its dir is by construction not
  *     `~/.claude` — the route refuses a dir that is already the discovered account's;
  *   - the DISCOVERED account is spawned with nothing added, so it sees the variable only when the
- *     cezar process itself carries one — and it does reach the child, because `CLAUDE_` is in
+ *     Squawk process itself carries one — and it does reach the child, because `CLAUDE_` is in
  *     `BACKEND_ALLOW_PREFIXES`.
  *
- * One case is worth naming because it looks like a bug and is not. Start cezar with
+ * One case is worth naming because it looks like a bug and is not. Start Squawk with
  * `CLAUDE_CONFIG_DIR=/opt/work` and add `~/.claude` as a NAMED account (legal — the discovered
  * account is `/opt/work`, so `~/.claude` is not a duplicate). This answers `~/.claude/.claude.json`,
  * not the sibling `~/.claude.json`, and "Show details" can therefore say "not signed in" for a
- * folder a bare `claude` would treat as signed in. That is correct rather than unfortunate: cezar
+ * folder a bare `claude` would treat as signed in. That is correct rather than unfortunate: Squawk
  * will run that account as `CLAUDE_CONFIG_DIR=~/.claude claude`, and under that invocation the
  * state file the CLI reads and writes IS the one inside. Reporting the sibling would describe a
  * login this account will never use.

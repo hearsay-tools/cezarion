@@ -388,7 +388,7 @@ test('materializeSkillDir overlays an unmarked existing dir without deleting or 
   assert.equal(readFileSync(join(own, 'mine.md'), 'utf8'), 'the user wrote this\n');
   assert.equal(readFileSync(join(own, 'SKILL.md'), 'utf8'), 'say hi v1\n');
   assert.equal(existsSync(join(own, TEAM_SKILL_MARKER)), false, 'an unmarked dir must never become ours');
-  // The destinations cezar created itself are still marked.
+  // The destinations Squawk created itself are still marked.
   assert.equal(existsSync(join(repoRoot, '.agents', 'skills', 'greeter', TEAM_SKILL_MARKER)), true);
 });
 

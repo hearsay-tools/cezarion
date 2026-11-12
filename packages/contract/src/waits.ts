@@ -23,7 +23,7 @@ export { isUsageLimitHold };
  * entry with no deadline, so the list is all `computeWaitingOn` reads.
  * hearsay-tools/cezarion#1995 adds `peer` (spec `2026-10-27-task-communication-protocol` § 7): a root
  * task waits for named peer root tasks to write or to settle, with a deadline.
- * hearsay-tools/cezarion#2431 adds `subagent`: Cezar's own wait on the native subagents a turn left
+ * hearsay-tools/cezarion#2431 adds `subagent`: Squawk's own wait on the native subagents a turn left
  * running, with a safety deadline.
  */
 
@@ -40,7 +40,7 @@ export const PROCESS_EXIT_FILE_MAX = 4096;
 export const PEER_WAIT_DEFAULT_SECONDS = 600;
 export const PEER_WAIT_MAX_SECONDS = 7200;
 /** A subagent wait (hearsay-tools/cezarion#2431): its safety deadline after the last child event,
- *  the grace after the last child ends before Cezar wakes the parent, and its child bound. */
+ *  the grace after the last child ends before Squawk wakes the parent, and its child bound. */
 export const SUBAGENT_WAIT_DEADLINE_SECONDS = 1800;
 export const SUBAGENT_WAIT_GRACE_SECONDS = 15;
 export const SUBAGENT_WAIT_CHILD_LIMIT = 32;
@@ -50,13 +50,13 @@ const pidSchema = z.number().int().min(2);
 export const waitPhaseSchema = z.enum(['open', 'resolved', 'delivered', 'cancelled']);
 export type WaitPhase = z.infer<typeof waitPhaseSchema>;
 /** What opened the wait: the tool itself, or one of the aliases that map into the same list.
- *  `no-wait` is the human wait cezar opens when a nudged turn still ends without one; `budget`
+ *  `no-wait` is the human wait Squawk opens when a nudged turn still ends without one; `budget`
  *  is the one it opens when the automatic-wake budget is spent; `cez-worker-wait` is
  *  `cez worker wait`, the alias that opens a `worker` wait; `completion` is the worker wait
- *  cezar opens for a root whose done is refused twice (hearsay-tools/cezarion#1301).
+ *  Squawk opens for a root whose done is refused twice (hearsay-tools/cezarion#1301).
  *  `cez-message-wait` is `cez message wait --peer` (hearsay-tools/cezarion#1995); a request wait
  *  from `cez message wait --request` keeps `cez-worker-wait`. `native-subagents` is the subagent
- *  wait Cezar opens when a turn ends with native subagents still running (hearsay-tools/cezarion#2431). */
+ *  wait Squawk opens when a turn ends with native subagents still running (hearsay-tools/cezarion#2431). */
 export const waitViaSchema = z.enum([
   // `cezar_wait_for_ci` is kept for stored rows only: the tool was removed (hearsay-tools/cezarion#1236).
   'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
@@ -134,8 +134,8 @@ export const processWaitEntrySchema = z.object({
 export type ProcessWaitEntry = z.infer<typeof processWaitEntrySchema>;
 
 /** The user. `questions` is the card the agent asked with, absent for a plain "your turn";
- *  `askSeq` is the event cezar showed it as, once the turn ended: its `ask.requested`, the human
- *  gate a wait without a card raises, or the note that shows Cezar's own wait. */
+ *  `askSeq` is the event Squawk showed it as, once the turn ended: its `ask.requested`, the human
+ *  gate a wait without a card raises, or the note that shows Squawk's own wait. */
 export const humanWaitEntrySchema = z.object({
   ...waitBaseShape,
   kind: z.literal('human'),
@@ -158,7 +158,7 @@ export type HumanWaitEntry = z.infer<typeof humanWaitEntrySchema>;
 export const workerWaitEntrySchema = z.object({
   ...waitBaseShape,
   kind: z.literal('worker'),
-  // Cezar's completion wait has neither: it ends when its workers settle (hearsay-tools/cezarion#1301).
+  // Squawk's completion wait has neither: it ends when its workers settle (hearsay-tools/cezarion#1301).
   deadline: z.iso.datetime().optional(),
   timeoutSeconds: z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS).optional(),
   mode: workerWaitModeSchema.optional(),
@@ -197,7 +197,7 @@ export const workerWaitEntrySchema = z.object({
   }
 });
 export type WorkerWaitEntry = z.infer<typeof workerWaitEntrySchema>;
-/** An entry the legacy `WorkerWait` shape can render: its deadline is required there. Cezar's
+/** An entry the legacy `WorkerWait` shape can render: its deadline is required there. Squawk's
  *  deadline-less completion wait is not one (hearsay-tools/cezarion#1301). */
 export type DeadlinedWorkerWaitEntry = WorkerWaitEntry & { deadline: string };
 export const hasWorkerDeadline = (entry: WorkerWaitEntry): entry is DeadlinedWorkerWaitEntry => entry.deadline !== undefined;
@@ -241,7 +241,7 @@ export const subagentWaitResultSchema = z.object({ reason: z.enum(['settled', 't
 export type SubagentWaitResult = z.infer<typeof subagentWaitResultSchema>;
 
 /**
- * The native subagents a turn left running (hearsay-tools/cezarion#2431). Cezar opens it at the
+ * The native subagents a turn left running (hearsay-tools/cezarion#2431). Squawk opens it at the
  * turn end instead of a monitoring timer: the park keeps its session, which holds the children, and
  * a monitoring-pool slot. It resolves when every child ended and the runner did not resume the
  * parent within a grace, or at its deadline, which each child event moves.
@@ -592,8 +592,8 @@ export function asksHuman(run: Pick<WaitingOnInput, 'waits'>): boolean {
   return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open');
 }
 
-/** Whether a question waits on the user: an open human wait the agent opened, or one of Cezar's
- *  that carries a card (a worker's fallback question to its parent). Cezar's other waits
+/** Whether a question waits on the user: an open human wait the agent opened, or one of Squawk's
+ *  that carries a card (a worker's fallback question to its parent). Squawk's other waits
  *  (`no-wait`, `budget`, `completion`) wait for the user without a question. */
 export function asksQuestion(run: Pick<WaitingOnInput, 'waits'>): boolean {
   return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'human' && wait.phase === 'open' && (wait.source === 'agent' || !!wait.questions?.length));
@@ -614,7 +614,7 @@ export function resolveWaitingOn(run: { waitingOn?: WaitingOn | undefined } & Wa
 
 /**
  * A run's worker wait in the old `WorkerWait` shape, for views that still show one: the newest
- * open or owed `worker` entry the agent registered (hearsay-tools/cezarion#1235). Cezar's
+ * open or owed `worker` entry the agent registered (hearsay-tools/cezarion#1235). Squawk's
  * completion wait has no deadline, which that shape requires, so it is not one
  * (hearsay-tools/cezarion#1301). An open entry reads `parked` once the run waits on it, unless a
  * pending question holds the run.
@@ -635,7 +635,7 @@ export function completionWaitEntry(waits: readonly Wait[] | undefined, workerId
 }
 
 /**
- * Cezar's completion wait as inspection and the relationships view show it, read from the list
+ * Squawk's completion wait as inspection and the relationships view show it, read from the list
  * like `workerWaitView` (hearsay-tools/cezarion#1301): its phases map as the legacy shape's do.
  */
 export function workerCompletionWaitProjection(entry: WorkerWaitEntry, run: Partial<Pick<RunRecord, 'status' | 'waits'>>): WorkerCompletionWait {

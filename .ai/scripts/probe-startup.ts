@@ -1,32 +1,32 @@
 // Manual real-harness probe for hearsay-tools/cezarion#1307: what does pi or omp load at startup
-// when cezar starts it? Prints the skills and commands the runner lists, the system prompt of its
+// when Squawk starts it? Prints the skills and commands the runner lists, the system prompt of its
 // first model request, the marker files the fixture's extensions and MCP servers wrote, and the
 // trust.json state.
 //
 // Spends NO paid session: a spy model provider on 127.0.0.1 answers every request. Never run by CI
 // or `npm test`, and never packed (it lives outside packages/). Usage, from the repo root:
 //   node_modules/.bin/tsx .ai/scripts/probe-startup.ts <pi|omp> [fixture-dir] [-- extra args]
-// Extra args go after cezar's argv, e.g. `-- --approve` for pi in a folder trusted for this run.
-// CEZ_PI_BIN and CEZ_OMP_BIN pick the binary, as they do for cezar.
+// Extra args go after Squawk's argv, e.g. `-- --approve` for pi in a folder trusted for this run.
+// CEZ_PI_BIN and CEZ_OMP_BIN pick the binary, as they do for Squawk.
 //
 // Isolation: everything lives in one scratch root (printed first), with home/, the agent dir
 // home/.pi/agent or home/.omp/agent, and project/. The child env holds only PATH, LANG, TERM,
 // TMPDIR, the scratch HOME, PI_CODING_AGENT_DIR and PI_OFFLINE=1: no provider keys, no XDG_* and no
-// OMP_PROFILE, PI_PROFILE or PI_CONFIG_DIR. The probe refuses to start when cezar's own
+// OMP_PROFILE, PI_PROFILE or PI_CONFIG_DIR. The probe refuses to start when Squawk's own
 // agentHomePaths() resolves the agent dir outside the scratch root. pi and omp also search every
 // ancestor of project/ (pi for context files such as AGENTS.md, omp for .omp/agents,
 // .claude/agents and more), so the scratch root never sits under the real home: when TMPDIR does,
 // the probe uses /tmp. A run therefore reads and writes nothing under the real ~/.pi or ~/.omp.
 // The ancestor-context record lists every context file pi still finds above project/.
 //
-// The argv is cezar's: buildPiArgs or buildOmpArgs on a spec with the shipped default tools
+// The argv is Squawk's: buildPiArgs or buildOmpArgs on a spec with the shipped default tools
 // (allowedToolsForStep), model spy/spy-model and PROBE_SYSTEM_PROMPT. pi also gets --offline.
 //
 // Fixture: a project directory, copied into project/ (git init runs there when it has no .git),
 // so the fixture itself never changes. Without fixture-dir the probe writes the built-in fixture
 // below, which holds one of each:
 //   .agents/skills/<name>/SKILL.md   shared skills (pi offers an untrusted folder's through
-//                                    cezar's pi-project-skills extension)
+//                                    Squawk's pi-project-skills extension)
 //   .pi/skills/<name>/SKILL.md       pi skills
 //   .omp/skills/<name>/SKILL.md      omp skills
 //   .pi/extensions/*.ts              pi extensions (trust-gated in pi)
@@ -239,7 +239,7 @@ prepareProject(project, fixture);
 const env = probeEnv(home, agentDir);
 const resolvedAgentDir = agentHomePaths(env)[name];
 if (!isInside(scratch, resolvedAgentDir)) {
-  console.error(`refusing to start: cezar resolves the ${name} agent dir to ${resolvedAgentDir}, outside ${scratch}`);
+  console.error(`refusing to start: Squawk resolves the ${name} agent dir to ${resolvedAgentDir}, outside ${scratch}`);
   process.exit(1);
 }
 const spy = await startSpy();

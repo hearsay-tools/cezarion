@@ -44,7 +44,7 @@ export type StepCreated = z.infer<typeof stepCreatedSchema>;
 
 /**
  * Persisted per-step outcome — the `steps` map in `server.json`. A status this
- * version doesn't know (written by a newer cezar) degrades to `failed`, which
+ * version doesn't know (written by a newer Squawk) degrades to `failed`, which
  * keeps the record AND keeps it on uninstall's undo path — never to a parse
  * failure that would discard the whole ledger.
  */
@@ -56,14 +56,14 @@ export type StepOutcome = z.infer<typeof stepOutcomeSchema>;
 
 /**
  * `~/.cezar/server.json` — host-level, install-once. Additive-safe: every new
- * field is optional / defaulted so an older cezar still parses a newer file
+ * field is optional / defaulted so an older Squawk still parses a newer file
  * (BACKWARD_COMPATIBILITY cross-version-state rule). No secrets live here.
  */
 export const serverStateSchema = z
   .object({
     schema: z.literal(1).catch(1),
     /**
-     * Free string, not an enum: a `server.json` written by a newer cezar with a
+     * Free string, not an enum: a `server.json` written by a newer Squawk with a
      * platform this version doesn't ship must still parse — the registry lookup
      * is where "unknown platform" is decided, with the ledger intact.
      */
@@ -81,7 +81,7 @@ export const serverStateSchema = z
     /**
      * External-reverse-proxy mode (`--external-proxy`): the box already has a
      * front (Dokploy/Traefik, Coolify, Caddy, an existing nginx) that owns
-     * :80/:443 and provides TLS + auth. cezar then installs NO nginx and NO
+     * :80/:443 and provides TLS + auth. Squawk then installs NO nginx and NO
      * cert of its own — just the service — and that proxy routes to `bindHost`.
      */
     externalProxy: z.boolean().optional().catch(undefined),
@@ -111,7 +111,7 @@ export const serverStateSchema = z
       .default({})
       .catch({}),
   })
-  // Unknown top-level fields written by a newer cezar survive a load+save
+  // Unknown top-level fields written by a newer Squawk survive a load+save
   // round-trip — the file's own additive-safe contract.
   .passthrough();
 export type ServerState = z.infer<typeof serverStateSchema>;
@@ -226,7 +226,7 @@ export interface InstallContext {
   assumeYes: boolean;
   /** Step ids the user asked to force-rerun via `--reconfigure`. */
   reconfigure: ReadonlySet<string>;
-  /** Repo root the autostart service should run `cezar serve` in. */
+  /** Repo root the autostart service should run `hsq serve` in. */
   repoRoot: string;
   /** ISO timestamp for this run (passed in — Date.now guard). */
   now: string;
@@ -278,7 +278,7 @@ export interface PlatformStrategy {
   /** Ordered steps for this platform. */
   steps(ctx: InstallContext): InstallStep[];
   /**
-   * Reload the running cockpit to pick up a new cezar version (a fresh local
+   * Reload the running cockpit to pick up a new Squawk version (a fresh local
    * build or a newly published `cezarion`) — the standardized `server-deploy`
    * entry point. Typically: restart the service + re-verify. Throw `StepAborted`
    * to report a failed deploy.

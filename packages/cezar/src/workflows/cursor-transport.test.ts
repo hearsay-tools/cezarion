@@ -57,7 +57,7 @@ describe('Cursor print workflow transport', () => {
     const first = store.getRun(run.id)!.steps[0]!;
     expect(first.sessionId).toMatch(/^[0-9a-f-]{36}$/);
     await expect.poll(() => store.getRun(run.id)?.status, { timeout: 15_000 }).toBe('waiting');
-    // Every turn here ends with no wait, so Cezar's no-wait nudge is a second print call on the
+    // Every turn here ends with no wait, so Squawk's no-wait nudge is a second print call on the
     // same session (hearsay-tools/cezarion#1234): two log lines per turn.
     const calls = () => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { resumeId?: string });
     expect(calls()).toHaveLength(2);

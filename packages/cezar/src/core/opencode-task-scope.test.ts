@@ -22,7 +22,7 @@ async function hook(sessions: Sessions, fail?: string) {
 
 const call = (sessionID: string, args: unknown, tool = 'task') => [{ tool, sessionID, callID: 'c1' }, { args }] as const;
 
-// Two cezar tasks: root A with child A1 and grandchild A2, and root B with child B1.
+// Two Squawk tasks: root A with child A1 and grandchild A2, and root B with child B1.
 const SESSIONS: Sessions = { A: null, A1: 'A', A2: 'A1', B: null, B1: 'B' };
 
 describe('opencode-task-scope plugin (hearsay-tools/cezarion#2279)', () => {
@@ -43,7 +43,7 @@ describe('opencode-task-scope plugin (hearsay-tools/cezarion#2279)', () => {
     });
   });
 
-  describe('a native call into another cezar task is refused', () => {
+  describe('a native call into another Squawk task is refused', () => {
     it.each([
       ['another task\'s root session', 'A', 'B'],
       ['another task\'s subagent', 'A1', 'B1'],

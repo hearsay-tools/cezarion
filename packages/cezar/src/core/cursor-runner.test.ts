@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentRunSpec, AgentRunner, AgentSession } from './agent-runner.ts';
 import { CursorRunner } from './cursor-runner.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { productName } from '../home/display.ts';
 
 const spec: AgentRunSpec = { cwd: '/tmp', userPrompt: 'start', toolGrant: UNSET_TOOL_GRANT };
 function fakeRunner(transport: 'cursor-print', starts: string[], specs: AgentRunSpec[]): AgentRunner {
@@ -33,10 +34,10 @@ describe('Cursor transport facade', () => {
     return { starts, specs, inspect, runner };
   }
 
-  const ACP_REFUSED = 'This Cursor session was started on the ACP transport, which Cezarion no longer supports, '
+  const ACP_REFUSED = `This Cursor session was started on the ACP transport, which ${productName('Cezarion')} no longer supports, `
     + 'so it cannot resume. Start a new task to continue this work.';
   const unsupported = (reason: string) => `Cursor CLI cannot run this task: ${reason}. Run "agent update" to install a `
-    + 'supported Cursor CLI, or update Cezarion if your build is newer than this version supports.';
+    + `supported Cursor CLI, or update ${productName('Cezarion')} if your build is newer than this version supports.`;
 
   it('refuses an ACP-tagged resume without a print probe or a session (hearsay-tools/cezarion#1267)', async () => {
     const { starts, inspect, runner } = setup({ sessionTransport: 'cursor-acp' });

@@ -132,7 +132,7 @@ export function sharedCwdScan(scan: () => CwdSnapshot = scanProcessCwds): CwdSou
 }
 
 /** PIDs (never this process) whose readable working directory is one of `dirs` or beneath it,
- * from `cwds` when the caller shares a snapshot, else from a fresh scan. cezar's own short-lived
+ * from `cwds` when the caller shares a snapshot, else from a fresh scan. Squawk's own short-lived
  * git children in a worktree make this read "alive" briefly: conservative, and a retry self-heals. */
 export function processesWithCwdUnder(dirs: string | readonly string[], platform: NodeJS.Platform = process.platform, proc: ProcReader = realProc,
   darwin: DarwinReader = realDarwin, cwds?: CwdSnapshot): number[] | 'unknown' {

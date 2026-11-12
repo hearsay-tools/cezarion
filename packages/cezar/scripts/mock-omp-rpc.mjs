@@ -55,7 +55,7 @@ if (unknownFlags.length > 0) {
 let tools = flags.has('--no-tools') ? [] : DEFAULT_TOOLS;
 if (typeof flags.get('--tools') === 'string') {
   tools = flags.get('--tools').split(',');
-  // The CI extension registers cezar's tools (the preview tools only under CEZ_PREVIEW=1, the schedule tools unless CEZ_AUTOMATIONS=0); an MCP name needs a configured server, which the mock
+  // The CI extension registers Squawk's tools (the preview tools only under CEZ_PREVIEW=1, the schedule tools unless CEZ_AUTOMATIONS=0); an MCP name needs a configured server, which the mock
   // takes from CEZ_MOCK_OMP_MCP_TOOLS (none by default, like a home without .omp/mcp.json).
   const mcpTools = (process.env.CEZ_MOCK_OMP_MCP_TOOLS ?? '').split(',').filter(Boolean);
   // Tools a user setting disabled (`todo.enabled: false`, `lsp.enabled: false`, ...) are built-ins
@@ -316,7 +316,7 @@ async function handle(command) {
       return;
     case 'prompt':
       record({ userText: rawMessage(command), imageCount: (command.images ?? []).length });
-      // The delivery control reads both the prompt Cezar sent and a nudge's scripted answer.
+      // The delivery control reads both the prompt Squawk sent and a nudge's scripted answer.
       { const answered = answerNudge(command.message);
         return prompt({ ...command, message: answered }, answered === command.message ? answered : `${command.message}\n${answered}`); }
     default:

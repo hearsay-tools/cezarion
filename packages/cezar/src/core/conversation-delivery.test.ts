@@ -102,7 +102,7 @@ for (const backend of RUNNER_IDS) {
         inputs.some(input => input.id === (event.message as ConversationMessage).id));
       // The worker's own ask is routed to its parent (hearsay-tools/cezarion#505); a routed
       // question projects here too, so only the parent's two messages are counted. The echo turns
-      // end with no wait or done, so after their nudge Cezar asks the parent too: every other
+      // end with no wait or done, so after their nudge Squawk asks the parent too: every other
       // routed question is that fallback (hearsay-tools/cezarion#1301, § A worker's no-wait fallback).
       const routing = store.readEvents(runId).filter(event => event.type === 'worker-question-routed');
       const fallbackAsks = new Set(store.readEvents(runId).filter(event => event.type === 'ask.requested' &&
@@ -114,7 +114,7 @@ for (const backend of RUNNER_IDS) {
       expect(projections.filter(event => event.delivery !== 'consumed')).toHaveLength(4);
       expect(projections.filter(event => event.delivery === 'consumed').length).toBeLessThanOrEqual(2);
       expect(new Set(projections.map(event => event.projectionId)).size).toBe(projections.length);
-      // The parent's 'Vitest' answers the worker's own question; the barrier supersedes Cezar's
+      // The parent's 'Vitest' answers the worker's own question; the barrier supersedes Squawk's
       // fallback one, which no human answers (hearsay-tools/cezarion#2410).
       expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered' && event.askSeq === ask.seq)).toEqual([expect.objectContaining({ source: 'parent' })]);
       expect(store.readEvents(runId).filter(event => event.type === 'user-message').map(event => event.text))

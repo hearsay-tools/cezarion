@@ -128,7 +128,7 @@ export const KILL_GRACE_MS = 4_000;
  * falls back to one fresh session with the full system prompt.
  *
  * Auth = the host's opencode config/logins. OpenCode's own permission config
- * governs tools: cezar answers OpenCode's built-in default asks once and routes
+ * governs tools: Squawk answers OpenCode's built-in default asks once and routes
  * asks the user configured to the cockpit (hearsay-tools/cezarion#1266); this
  * adapter does not map `spec.toolGrant`. Governed delegation adds only a
  * supported session-level task deny rule.
@@ -147,7 +147,7 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'prompt_async text part' },
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
   cwd: { honored: true, via: 'opencode serve spawn cwd; the session is bound to it' },
-  toolGrant: { honored: false, reason: 'OpenCode permission config governs tool access and bash; cezar answers its built-in default asks and routes configured asks to the cockpit, but maps no per-tool allowlist, so no command-prefix restriction either' },
+  toolGrant: { honored: false, reason: 'OpenCode permission config governs tool access and bash; this runner answers its built-in default asks and routes configured asks to the cockpit, but maps no per-tool allowlist, so no command-prefix restriction either' },
   restrictCrossSessionMessaging: { honored: true, via: 'the opencode-task-scope.mjs plugin appended to the OPENCODE_CONFIG_CONTENT plugin list; its tool.execute.before hook refuses a task call whose task_id names a session outside the caller\'s session tree, and keeps subagents (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: false, reason: 'the server works from cwd; no extra-root mapping' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
@@ -753,7 +753,7 @@ class OpencodeSession implements AgentSession {
           message: `OpenCode session ${requested} no longer exists; the continuation runs in a fresh session without the earlier conversation.`,
         });
       } else {
-        // A `task` deny an older cezar added stays on the session: OpenCode appends permission
+        // A `task` deny an older Squawk added stays on the session: OpenCode appends permission
         // rules and has no remove (hearsay-tools/cezarion#2279).
         this.attachSession(stringField(existing, 'id') ?? requested);
         resumed = true;
@@ -935,7 +935,7 @@ class OpencodeSession implements AgentSession {
     this.emit({ type: 'turn-end' });
     // Steered input the server holds is read by a follow-on run, or stranded by the
     // upstream lost wake (anomalyco/opencode#46842). Only a quiet grace window tells
-    // them apart; then report it so cezar submits it as a new prompt.
+    // them apart; then report it so Squawk submits it as a new prompt.
     if (this.submissions.pending > 0) {
       this.clearLostWakeTimer();
       this.followOn = new Promise((resolve) => { this.followOnResolve = resolve; });
@@ -1363,7 +1363,7 @@ class OpencodeSession implements AgentSession {
     this.agentInputReady = false;
     this.cancelAutoEnd();
     if (!parsed.success) {
-      this.emit({ type: 'note', message: 'opencode: rejected an OpenCode permission request cezar could not read' });
+      this.emit({ type: 'note', message: 'opencode: rejected an OpenCode permission request that could not be read' });
       void this.rejectPermission(pending, 'cezar could not read this permission request');
       return;
     }
@@ -1420,7 +1420,7 @@ class OpencodeSession implements AgentSession {
 
   private bridgePermission(pending: PendingOpencodePermission): void {
     if (!this.opts.onUiEvent) {
-      const message = 'no permission UI is attached to this cezar session';
+      const message = 'no permission UI is attached to this session';
       this.emit({ type: 'note', message: `opencode: rejected the OpenCode ${pending.ask!.permission} permission prompt: ${message}` });
       void this.rejectPermission(pending, message);
       return;

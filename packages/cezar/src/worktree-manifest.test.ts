@@ -20,7 +20,7 @@ import {
 import { readManifest } from './worktree-manifest.testkit.ts';
 
 const execFileAsync = promisify(execFile);
-/** The `tree:` identity a cezar before hearsay-tools/cezarion#1814 recorded over `records`. */
+/** The `tree:` identity a Squawk before hearsay-tools/cezarion#1814 recorded over `records`. */
 const legacyIdentity = (records: string) => `tree:${createHash('sha256').update(records).digest('hex')}`;
 /** The same, for a file holding `text`. */
 const legacyFileIdentity = (text: string) => legacyIdentity(`F  ${text}\n`);
@@ -152,7 +152,7 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     expect((await readManifest(worktree))?.entries.map((entry) => entry.path)).toEqual(['free.txt']);
   });
 
-  it('writes nothing, and leaves the file, when a newer cezar wrote it', async () => {
+  it('writes nothing, and leaves the file, when a newer Squawk wrote it', async () => {
     const newer = JSON.stringify({ version: 2, entries: [{ path: 'x', anything: true }] });
     writeManifest(newer);
     let ran = false;
@@ -320,7 +320,7 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     ['placed', { kind: 'pending', onDisk: 'v2', owner: 'ours' }],
   ];
 
-  // The agent writes at the path while cezar stages its next entry there.
+  // The agent writes at the path while Squawk stages its next entry there.
   const editRows: Array<[string, { path: string; first: EntryContent; next: EntryContent; edit: string; at: WriteBoundary }]> = [
     ['a dir, edited before the pending entry is saved', { path: 'skills/x', first: v1, next: v2, edit: 'skills/x/SKILL.md', at: 'staged' }],
     ['a file, edited after the pending entry is saved', {
@@ -328,7 +328,7 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     }],
   ];
 
-  it.each(editRows)('never replaces an edit the agent makes while cezar stages an entry: %s', async (_name, row) => {
+  it.each(editRows)('never replaces an edit the agent makes while Squawk stages an entry: %s', async (_name, row) => {
     await pass('skills', (files) => files.put(row.path, row.first, meta));
     const edited = join(worktree, row.edit);
     const faults = (at: WriteBoundary) => {
@@ -339,7 +339,7 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     expect((await readManifest(worktree))?.entries ?? []).toEqual([]);
   });
 
-  it('writes an entry whose path the agent deleted while cezar staged it', async () => {
+  it('writes an entry whose path the agent deleted while Squawk staged it', async () => {
     await pass('skills', (files) => files.put('skills/x', v1, meta));
     const faults = (at: WriteBoundary) => {
       if (at === 'pending') rmSync(join(worktree, 'skills', 'x'), { recursive: true });

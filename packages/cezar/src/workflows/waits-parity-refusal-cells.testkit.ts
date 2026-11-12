@@ -71,7 +71,7 @@ export function refusalCells(runners: RunnerId[], it: typeof registerTest = regi
     }
 
     // hearsay-tools/cezarion#1301: a human message starts a fresh cycle (U20h). A refusal nudge the
-    // harness acknowledges on its native wire and never answers parks on Cezar's human wait; the next
+    // harness acknowledges on its native wire and never answers parks on Squawk's human wait; the next
     // message then ends on a blocked done again, and that done gets a fresh nudge rather than the
     // second step. Each turn-end handler: the opening session's and a continuation's.
     for (const path of ['opening session', 'continuation'] as const) {

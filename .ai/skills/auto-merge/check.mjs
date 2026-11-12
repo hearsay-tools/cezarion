@@ -82,7 +82,7 @@ const NEVER = [
 
 const TEST_FILE = /\.(test|spec|e2e|testkit)\.[cm]?[jt]sx?$/
 const isSource = (path) => /^packages\/[^/]+\/src\//.test(path) && !TEST_FILE.test(path) && !path.includes('__fixtures__')
-// Mock-only variables (CEZ_MOCK_*) configure offline test runners, not cezar.
+// Mock-only variables (CEZ_MOCK_*) configure offline test runners, not Squawk.
 const ENV_NAME = /CEZ_(?!MOCK_)[A-Z0-9_]+/g
 const MARKER = /CEZ:[A-Z_]+/g
 

@@ -228,9 +228,9 @@ describe('the state table', () => {
     ['needs-you with a question', { status: RUN_STATUS.waiting, waits: [makeHumanWait({ registeredAt: iso(-3_000), questions: [{ id: 'q', header: 'Branch', question: 'Which branch?', options: [] }] as never })] },
       { kind: WAIT_KIND.human, since: iso(-3_000), detail: { question: 'Which branch?', reason: 'question' } }],
     ['needs-you, a plain turn end', { status: RUN_STATUS.waiting }, undefined],
-    ['needs-you, Cezar’s no-wait wait', { status: RUN_STATUS.waiting, waits: [makeHumanWait({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'], askSeq: 4 })] },
+    ['needs-you, Squawk’s no-wait wait', { status: RUN_STATUS.waiting, waits: [makeHumanWait({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'], askSeq: 4 })] },
       { kind: WAIT_KIND.human, since: '2026-10-26T00:00:00.000Z', detail: { reason: 'turn-end' } }],
-    ['needs-you, Cezar’s budget wait', {
+    ['needs-you, Squawk’s budget wait', {
       status: RUN_STATUS.waiting, waits: [makeHumanWait({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.budget, askSeq: 4 })],
       agentInputs: [0, 1, 2].map((n) => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text: `m${n}`, createdAt: iso(-1_000), ...(n === 2 ? { deliveredAt: iso(0) } : {}) })) as never,
     }, { kind: WAIT_KIND.human, since: '2026-10-26T00:00:00.000Z', detail: { reason: 'budget', queuedMessages: 2 } }],

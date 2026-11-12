@@ -3,7 +3,7 @@ import type { RunRowInput } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
 
 /** `runs.json`'s records as rows, and how many of its entries were left out. Each row's `data` is
- *  the record's own JSON as `runs.json` held it, so nothing this cezar's schema does not know is lost
+ *  the record's own JSON as `runs.json` held it, so nothing this Squawk's schema does not know is lost
  *  (raw-record.ts); its summary and columns come from the parsed record, which is what decoding that
  *  JSON gives back. An entry that does not parse is skipped and costs that entry only, as an
  *  unreadable row does once it is in the database. Undefined when the file is not a JSON array. */

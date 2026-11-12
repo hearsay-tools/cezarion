@@ -13,6 +13,7 @@ import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-ru
 import type { UiEvent } from './ui-events.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 import { TOOL_GRANT_CASES } from './tool-grant-parity-cells.testkit.ts';
+import { productName } from '../home/display.ts';
 
 /** Only the escalation tests below swap the child out; every other test in this
  *  file keeps spawning its real stub binary through the untouched `spawn`. */
@@ -214,7 +215,7 @@ describe('buildClaudeArgs permission mode', () => {
 });
 
 /**
- * #703 — a session cezar tore down itself must not settle as an agent
+ * #703 — a session Squawk tore down itself must not settle as an agent
  * failure. Every agent CLI installs its own stop-signal handler and exits
  * `128 + signal`, so the runner sees a NON-ZERO code for a teardown it
  * asked for (goal achieved → `end()`, or a user cancel → `interrupt()`).
@@ -233,7 +234,7 @@ describe('isSignalTerminationExit', () => {
   });
 });
 
-describe('a teardown cezar initiated', () => {
+describe('a teardown Squawk initiated', () => {
   const stubBin = fileURLToPath(
     new URL('./__fixtures__/claude/stub-ignores-eof-exits-143.mjs', import.meta.url),
   );
@@ -272,7 +273,7 @@ describe('a teardown cezar initiated', () => {
     });
     expect(events.at(-1)).toEqual({ type: 'done' });
     expect(
-      events.some((e) => e.type === 'note' && e.message.includes('terminated by cezar (code 143)')),
+      events.some((e) => e.type === 'note' && e.message.includes(`terminated by ${productName('Cezar')} (code 143)`)),
     ).toBe(true);
   }, 15_000);
 });

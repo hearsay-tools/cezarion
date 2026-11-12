@@ -158,7 +158,7 @@ function withMachineDefaults(raw: unknown, machine: WorkspaceConfig['agentDefaul
  * Read `.ai/cezar/config.json` on demand — never cached, never throws.
  *
  * Also reads the machine-wide defaults, which is one more small JSON read and deliberately not
- * cached for the same reason this one is not: `~/.cezar/` is shared by every cezar process on the
+ * cached for the same reason this one is not: `~/.cezar/` is shared by every Squawk process on the
  * machine, so a snapshot is a staleness bug.
  */
 export async function loadConfig(repoRoot: string, home: Home): Promise<CezConfig> {

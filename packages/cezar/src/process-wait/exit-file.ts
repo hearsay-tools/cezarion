@@ -1,10 +1,11 @@
+import { productName } from '../home/display.ts';
 import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 /**
  * A process wait's exit file (hearsay-tools/cezarion#1446, spec 2026-10-17-unified-waits § Process
- * wait decisions). The agent's own shell writes the command's exit code to it, since Cezar cannot
- * read a non-child's status. It must sit in the run's worktree or its Cezar temp directory, no
+ * wait decisions). The agent's own shell writes the command's exit code to it, since Squawk cannot
+ * read a non-child's status. It must sit in the run's worktree or its Squawk temp directory, no
  * symlink may lead out of them, and only an integer first line ever leaves it.
  */
 export type ExitFileRoots = { worktree: string; tmpDir?: string };
@@ -42,7 +43,7 @@ export function confineExitFile(path: string, roots: ExitFileRoots): { ok: true;
  */
 export function readExitCode(path: string, roots: ExitFileRoots): { present: false } | { present: true; exitCode?: number } {
   if (!existsSync(path)) return { present: false };
-  if (!confineExitFile(path, roots).ok) throw new Error('the exit file now resolves outside the worktree and the Cezar temp directory');
+  if (!confineExitFile(path, roots).ok) throw new Error(`the exit file now resolves outside the worktree and the ${productName('Cezar')} temp directory`);
   // Non-blocking: a FIFO with no writer would block a plain open, and this runs on the server's
   // event loop. The opened descriptor, not a path stat, decides, so a file swapped in between
   // the two cannot slip past.

@@ -90,7 +90,7 @@ async function readClaudeIdentity(configDir: string): Promise<AccountIdentity> {
  * `refresh_token`, none of which this function so much as names.
  *
  * The signature is NOT verified, and that is correct here: this is a local file the user's own CLI
- * wrote, read to display who they are — not a token cezar is accepting as proof of anything.
+ * wrote, read to display who they are — not a token Squawk is accepting as proof of anything.
  */
 async function readCodexIdentity(configDir: string): Promise<AccountIdentity> {
   const auth = await readJsonCapped(join(configDir, 'auth.json'));

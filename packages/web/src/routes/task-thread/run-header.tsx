@@ -650,7 +650,7 @@ function ActionsKebab({
   )
 }
 
-/** Per-task Cezar access (hearsay-tools/cezarion#2784). Owned workers never show it: their
+/** Per-task Squawk access (hearsay-tools/cezarion#2784). Owned workers never show it: their
  *  parent's settings decide what the family may do. */
 function TaskAccessItems({ run, patch }: { run: ApiRun; patch: ReturnType<typeof usePatchRun> }) {
   const workersHelpId = useId()

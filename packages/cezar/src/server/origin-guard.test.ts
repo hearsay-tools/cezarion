@@ -289,7 +289,7 @@ describe('request-origin guard (#426)', () => {
 });
 
 /**
- * Hosted mode (CEZ_REMOTE=1 — spec §"Deployment modes"): cezar binds loopback
+ * Hosted mode (CEZ_REMOTE=1 — spec §"Deployment modes"): Squawk binds loopback
  * behind a reverse proxy that forwards the real public Host, so the loopback
  * allowlist must stand down there. CSRF protection stays on — Origin still has
  * to match the served Host.

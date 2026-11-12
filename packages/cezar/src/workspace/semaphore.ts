@@ -46,7 +46,7 @@ function normalizeRootSync(root: string): string {
   }
 }
 
-/** A cockpit booted from one of cezar's own task worktrees still belongs to
+/** A cockpit booted from one of Squawk's own task worktrees still belongs to
  *  the registry project that owns `.ai/cezar/worktrees/`. Auto-registration
  *  intentionally suppresses those worktrees, so the owner root is the only
  *  registry key their manager can inherit a project ceiling from. */

@@ -1,6 +1,6 @@
-// hearsay-tools/cezarion#1305: pi reads --tools as an allowlist, so a session given cezar's default
+// hearsay-tools/cezarion#1305: pi reads --tools as an allowlist, so a session given Squawk's default
 // tool list could not call an MCP server's tools (direct, codemode or deferred) or any tool another
-// pi extension registers. For the default list cezar sends --no-builtin-tools instead, which keeps
+// pi extension registers. For the default list Squawk sends --no-builtin-tools instead, which keeps
 // every tool registered, activates extension tools on registration and leaves the built-ins
 // inactive, and names the built-ins in --cezar-builtin-tools for this extension to activate.
 //
@@ -11,7 +11,7 @@
 const FLAG = 'cezar-builtin-tools';
 
 export default function registerPiDefaultTools(pi) {
-  pi.registerFlag(FLAG, { type: 'string', description: 'Built-in tools cezar activates (default tool list)' });
+  pi.registerFlag(FLAG, { type: 'string', description: 'Built-in tools Squawk activates (default tool list)' });
   pi.on('session_start', () => {
     const value = pi.getFlag(FLAG);
     if (typeof value !== 'string') return;

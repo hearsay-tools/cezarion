@@ -110,11 +110,11 @@ export const LAUNCH_SCRIPT_TTL_MS = 60_000;
  * open — and schedules its own removal (#785).
  *
  * Every "open in terminal" used to leave its `cez-term-*` directory behind forever. On a
- * host whose `/tmp` is a tmpfs that never reboots, cezar's own litter is part of what
+ * host whose `/tmp` is a tmpfs that never reboots, Squawk's own litter is part of what
  * exhausts the directory the agents' output capture depends on, so the opener cleans up
  * after itself. Deleting the script mid-run is safe: the emulator has already `exec`'d
  * bash on it, and POSIX keeps an unlinked file's inode alive for every open descriptor.
- * The timer is `unref`'d — a pending cleanup must never be the reason `cezar serve`
+ * The timer is `unref`'d — a pending cleanup must never be the reason `hsq serve`
  * refuses to exit.
  *
  * Exported for the regression test, which must prove the directory does not survive
@@ -164,7 +164,7 @@ export function refuseSpawnUnderTest(bin: string, args: readonly string[]): void
   );
 }
 
-/** Starts a launcher cezar never stops; success = no spawn error within a short settle window.
+/** Starts a launcher Squawk never stops; success = no spawn error within a short settle window.
  *  Exported so `open-in-app.ts` launches through the same guard. */
 export async function runDetached(bin: string, args: string[]): Promise<boolean> {
   refuseSpawnUnderTest(bin, args);

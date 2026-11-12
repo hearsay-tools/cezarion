@@ -116,7 +116,7 @@ function spawnFailure(error: unknown): Error {
  * v18.4.11 prints an object, `{ "models": [...] }`; a bare array is accepted too. Each entry
  * carries `provider`, `kind`, `id`, `selector`, `name` and `thinking` (null, or the levels the
  * model accepts). Entries with another `kind` than `chat` (absent counts as chat) are not
- * runnable tasks and are skipped. `thinking` is intersected with cezar's `EffortLevel`s: OMP's
+ * runnable tasks and are skipped. `thinking` is intersected with Squawk's `EffortLevel`s: OMP's
  * own extras (`minimal`) are dropped, never remapped, so a pinned effort always means what the
  * picker said it means.
  *

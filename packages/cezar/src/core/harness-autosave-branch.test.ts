@@ -7,6 +7,7 @@ import { AUTOSAVE_INTERVAL_MS } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { waitFor } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
+import { productName } from '../home/display.ts';
 
 const FOREIGN = 'fix/1004-x';
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -18,12 +19,12 @@ const section = (text: string, header: string) => {
   const next = rest.indexOf('\n## ');
   return next >= 0 ? rest.slice(0, next) : rest;
 };
-/** The autosave lines of cezar's records block, newest first (hearsay-tools/cezarion#1809). */
+/** The autosave lines of Squawk's records block, newest first (hearsay-tools/cezarion#1809). */
 const autosaveLines = (text: string) => section(text, '### Autosave').split('\n').filter(line => line.startsWith('- ')).join('\n');
 
 // hearsay-tools/cezarion#1004, on every HARNESS_ADAPTERS native wire: an agent
 // that checks another branch out in its task worktree must not find
-// `cezar autosave` on it when the session settles. Registered as R78 (initial
+// `Squawk autosave` on it when the session settles. Registered as R78 (initial
 // run, `run finalize`) and R79 (Continue, `turn end`; its first settle also
 // pins the positive cell, a commit on the task branch, and its periodic case
 // a timer commit that leaves the turn-end flush nothing to save) in the parity
@@ -37,7 +38,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
           await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
             const dataDir = join(repoRoot, '.ai/cezar');
             const notes = () => store.readEvents(runId).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
-            // The report is in cezar's records block; the Progress log stays the agent's summary.
+            // The report is in Squawk's records block; the Progress log stays the agent's summary.
             const autosave = () => autosaveLines(readHandoff(dataDir, runId));
             const progress = () => section(readHandoff(dataDir, runId), '## Progress log');
             manager.enqueueOwnedRun(runId);
@@ -51,7 +52,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
               await waitFor(() => !manager.isActive(runId));
               expect(git(['log', '-1', '--format=%s', taskBranch!])).toBe('cezar autosave (run finalize)');
               const sha = git(['rev-parse', '--short', taskBranch!]);
-              const committed = `run finalize: cezar autosave committed ${sha} on ${taskBranch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
+              const committed = `run finalize: ${productName('Cezar')} autosave committed ${sha} on ${taskBranch}; to fold it into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
               expect(autosave()).toContain(committed);
               expect(progress()).not.toContain(committed);
               expect(notes()).toContain(committed);
@@ -69,7 +70,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
             expect(git(['status', '--porcelain']).split('\n')).toContain('?? progress.txt');
             const reason = continuation ? 'turn end' : 'run finalize';
             const skipped = new RegExp(`${escape(reason)}: \\d+ changed path\\(s\\) left uncommitted on ${escape(FOREIGN)}; ` +
-              `cezar does not autosave on a branch other than the task branch ${escape(taskBranch!)}`);
+              `${productName('Cezar')} does not autosave on a branch other than the task branch ${escape(taskBranch!)}`);
             expect(autosave()).toMatch(skipped);
             expect(progress()).not.toMatch(skipped);
             expect(notes().some(message => skipped.test(message))).toBe(true);
@@ -114,7 +115,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
 
           // The turn-end flush had nothing to save, so the periodic line is still the newest.
           expect(git(['rev-parse', '--short', taskBranch!])).toBe(sha);
-          const periodic = `periodic: 1 cezar autosave commit(s) on ${taskBranch}, first ${sha}, latest ${sha}; ` +
+          const periodic = `periodic: 1 ${productName('Cezar')} autosave commit(s) on ${taskBranch}, first ${sha}, latest ${sha}; ` +
             `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
           expect(autosave().split('\n').filter(Boolean)[0]).toMatch(new RegExp(`^- \\S+ — ${escape(periodic)}$`));
           expect(store.getRun(runId)?.handoffRecords?.autosave[0]).toMatchObject({ note: periodic, periodic: { count: 1, first: sha, latest: sha } });

@@ -66,7 +66,7 @@ export const agentProfileSchema = z.object({
   /** Whether the dir carries this agent's own marker files. ADVISORY: an unrecognised dir is
    *  still accepted, because "add profile → Connect → the CLI creates it" is the real flow. */
   looksValid: z.boolean(),
-  /** True for the profile cezar discovers from the environment. Never stored, never deletable. */
+  /** True for the profile Squawk discovers from the environment. Never stored, never deletable. */
   isDefault: z.boolean(),
   /** This account's own authentication state — two Claude logins answer independently.
    *
@@ -117,7 +117,7 @@ export const agentProfilesResponseSchema = z.object({
    *
    *  Served here rather than on `GET /api/v1/projects` because it is stored beside the accounts it
    *  names (`~/.cezar/agent-accounts.json`) — one file, so deleting an account and scrubbing every
-   *  reference to it is one atomic write, and neither can be dropped by a cezar version that never
+   *  reference to it is one atomic write, and neither can be dropped by a Squawk version that never
    *  heard of accounts. Empty in hosted mode, where the whole family is withheld. */
   selections: z.record(z.string(), agentAccountSelectionSchema),
   /** The machine-wide fallback account per provider, used by any repo that has chosen none. */

@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { productIdentity } from '../home/identity.ts';
 import { TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, type AskErrorCode, type DoneErrorCode, type WaitErrorCode, type Wait } from '@open-mercato/cezar-contract/waits';
 import { MESSAGING_OFF } from '../delegation/policy.ts';
@@ -47,7 +48,7 @@ export function ciErrorMessage(code: CiWaitErrorCode): string {
 export function toolsUnavailableMessage(detail: string, directory: string | undefined): string {
   const where = directory ? `a private socket directory in ${directory}` : 'a private named pipe';
   const fix = directory ? `Free space in ${directory} or fix its permissions` : 'Fix the cause';
-  return `Cezar tools could not start: ${detail}. Every agent session needs ${where}. ${fix}, then Continue the task.`;
+  return `${productName('Cezar')} tools could not start: ${detail}. Every agent session needs ${where}. ${fix}, then Continue the task.`;
 }
 
 // hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
@@ -57,13 +58,13 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   outcome_unknown: 'Registration outcome is unknown. Retry the same operation_id and arguments to recover its receipt; do not assume nothing was created or add a fallback wait.',
   timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',
   wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_ask if you need the user, or end your turn.',
-  capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
+  capacity: `${productName('Cezar')} cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.`,
   messaging_off: MESSAGING_OFF,
   denied_scope: 'This run cannot wait on those workers or requests: wait only on workers you own (a parent with the wait permission), or on requests you sent that are still accepted.',
   // hearsay-tools/cezarion#1446: process waits.
-  exit_file_outside: 'exit_file must be inside the task worktree or the Cezar temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree. For a command that writes its own status file somewhere else, leave exit_file out: wait on pid alone, and read that file after the wake.',
-  process_not_allowed: 'Cezar cannot wait on that PID: it is Cezar itself or an agent session, which ends only with the session. Pass the `pid` that the job start command printed for the background command.',
-  process_not_owned: 'That PID belongs to another user, so Cezar cannot tell whether it is the process you started. Pass the PID of a command you started yourself.',
+  exit_file_outside: `exit_file must be inside the task worktree or the ${productName('Cezar')} temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree. For a command that writes its own status file somewhere else, leave exit_file out: wait on pid alone, and read that file after the wake.`,
+  process_not_allowed: `${productName('Cezar')} cannot wait on that PID: it is ${productName('Cezar')} itself or an agent session, which ends only with the session. Pass the \`pid\` that the job start command printed for the background command.`,
+  process_not_owned: `That PID belongs to another user, so ${productName('Cezar')} cannot tell whether it is the process you started. Pass the PID of a command you started yourself.`,
 };
 
 export function waitErrorMessage(code: WaitErrorCode): string {
@@ -74,13 +75,13 @@ export function waitErrorMessage(code: WaitErrorCode): string {
 // borrows the CI wording.
 const askMessages: Record<AskErrorCode, string> = {
   autonomous_run: 'This is an autonomous run: do not wait for the user. Make a reasonable assumption and continue; the user can steer you at any time.',
-  capacity: 'Cezar cannot open another wait now: this run has the maximum open waits. Cancel a wait you no longer need with cezar_cancel_wait, then ask again.',
+  capacity: `${productName('Cezar')} cannot open another wait now: this run has the maximum open waits. Cancel a wait you no longer need with cezar_cancel_wait, then ask again.`,
   invalid_request: 'Invalid cezar_ask arguments.',
   persistence: 'Your question could not be saved; retry once, and if it fails again ask it in your final message.',
-  unavailable: 'Cezar could not show your question now. Retry once; if it fails again, ask it in your final message.',
-  unauthorized: 'This session\'s cezar tools are missing or revoked. Use the current session tool.',
+  unavailable: `${productName('Cezar')} could not show your question now. Retry once; if it fails again, ask it in your final message.`,
+  unauthorized: `This session's ${productName('cezar')} tools are missing or revoked. Use the current session tool.`,
   manager_disposed: 'The run manager was disposed. Ask your question in your final message.',
-  capability_revoked: 'This session\'s cezar tools were revoked. Use the current session tool.',
+  capability_revoked: `This session's ${productName('cezar')} tools were revoked. Use the current session tool.`,
   run_missing: 'The run no longer exists.',
   run_not_running: 'The run is not running or waiting. Resume it before asking.',
   run_stopping: 'The run is stopping. End your turn; it stops without your question.',
@@ -148,7 +149,7 @@ const doneMessages: Record<Exclude<DoneErrorCode, 'workers_outstanding' | 'worke
   not_final_step: 'This workflow step is not the last one. Call cezar_done again once this step\'s work is complete.',
   root_finish_pending: 'The parent is finishing. End your turn; the parent completes that transition.',
   manager_disposed: 'The run manager was disposed. Resume the task in a running cockpit before finishing.',
-  capability_revoked: 'This session\'s cezar tools were revoked. Use the current session tool.',
+  capability_revoked: `This session's ${productName('cezar')} tools were revoked. Use the current session tool.`,
   run_missing: 'The run no longer exists.',
   run_not_running: 'The run is not running or waiting. Resume it before finishing.',
   run_stopping: 'The run is stopping. End your turn; it stops without cezar_done.',
@@ -158,7 +159,7 @@ const doneMessages: Record<Exclude<DoneErrorCode, 'workers_outstanding' | 'worke
   finish_requested: 'Finish was already requested for this run. End your turn.',
   generation_mismatch: 'This tool belongs to an earlier session. Use the current session tool.',
   invalid_request: 'Invalid cezar_done arguments.',
-  unavailable: 'Cezar could not accept cezar_done now. Retry once; if it fails again, end your turn and say the task is complete.',
+  unavailable: `${productName('Cezar')} could not accept cezar_done now. Retry once; if it fails again, end your turn and say the task is complete.`,
 };
 
 export function doneErrorMessage(code: keyof typeof doneMessages): string {
@@ -179,12 +180,12 @@ export function doneInvalidInput(error?: z.ZodError): string {
 // secret, an environment value or another task's path.
 const EXAMPLE_CALL = '{ "command": "npm run dev -- --port 5173 --strictPort", "port": 5173 }';
 
-/** The refusals cezar's tool server answers itself; registration codes come from its owner. */
+/** The refusals Squawk's tool server answers itself; registration codes come from its owner. */
 export function previewRefusal(code: Extract<PreviewResultCode, 'preview_disabled' | 'headless' | 'unavailable'>): PreviewServeResult {
   switch (code) {
     case 'preview_disabled': return { ok: false, code, message: 'Live preview is not enabled in this cockpit.', hint: 'Do not retry. Tell the user the server command and port so they can open it themselves.' };
     case 'headless': return { ok: false, code, message: `No cockpit is attached to this run (\`${productIdentity().command} run\`).`, hint: 'Do not retry. Report the command and port in your final message.' };
-    case 'unavailable': return { ok: false, code, message: 'Cezar\'s tool server did not answer.', hint: 'Retry once. If it fails again, continue without preview and report the command and port in your message.' };
+    case 'unavailable': return { ok: false, code, message: `${productName('Cezar')}'s tool server did not answer.`, hint: 'Retry once. If it fails again, continue without preview and report the command and port in your message.' };
   }
 }
 
@@ -247,8 +248,8 @@ export function waitInvalidInput(error?: z.ZodError): string {
 
 // hearsay-tools/cezarion#1465: `cezar_schedule_task` and `cezar_scheduled_tasks` refusals.
 const scheduleMessages: Record<Extract<ScheduledTaskRefusalCode, 'automations_off' | 'unavailable'>, string> = {
-  automations_off: 'Automations are off in this cockpit (CEZ_AUTOMATIONS=0), so Cezar cannot schedule a task. Tell the user.',
-  unavailable: 'Cezar could not reach its scheduler for this session. Tell the user; scheduling needs a running cockpit.',
+  automations_off: `Automations are off in this cockpit (CEZ_AUTOMATIONS=0), so ${productName('Cezar')} cannot schedule a task. Tell the user.`,
+  unavailable: `${productName('Cezar')} could not reach its scheduler for this session. Tell the user; scheduling needs a running cockpit.`,
 };
 export function scheduleRefusal(code: ScheduledTaskRefusalCode, message?: string): { ok: false; code: ScheduledTaskRefusalCode; message: string } {
   return { ok: false, code, message: message ?? scheduleMessages[code as keyof typeof scheduleMessages] ?? 'Invalid arguments.' };

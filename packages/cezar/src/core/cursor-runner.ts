@@ -10,6 +10,7 @@ import { CursorPrintRunner, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-run
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import type { CursorPrintCapabilityResult } from './cursor-print-capabilities.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
+import { productName } from '../home/display.ts';
 
 export interface CursorRunnerOptions {
   sessionTransport?: SessionTransport;
@@ -23,13 +24,13 @@ interface CursorSelection {
 }
 
 /** A Continue of a session that ran on the removed ACP transport (hearsay-tools/cezarion#1267). */
-export const CURSOR_ACP_RESUME_REFUSED = 'This Cursor session was started on the ACP transport, which Cezarion no longer '
+export const CURSOR_ACP_RESUME_REFUSED = `This Cursor session was started on the ACP transport, which ${productName('Cezarion')} no longer `
   + 'supports, so it cannot resume. Start a new task to continue this work.';
 
 /** The step error for a Cursor build that fails print qualification (hearsay-tools/cezarion#1267). */
 export function cursorPrintUnsupportedMessage(reason: string): string {
   return `Cursor CLI cannot run this task: ${reason}. Run "agent update" to install a supported Cursor CLI, `
-    + 'or update Cezarion if your build is newer than this version supports.';
+    + `or update ${productName('Cezarion')} if your build is newer than this version supports.`;
 }
 
 /**

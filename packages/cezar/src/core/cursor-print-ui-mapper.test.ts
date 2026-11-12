@@ -61,7 +61,7 @@ describe('Cursor print mapper', () => {
     );
   });
 
-  it('treats an auto-rejected native question as one failed tool, without a Cezar ASK', () => {
+  it('treats an auto-rejected native question as one failed tool, without a Squawk ASK', () => {
     const events = replay('print-native-question.ndjson');
     const question = events.filter(event => event.type === 'item.completed' && event.item.kind === 'tool');
     expect(question).toHaveLength(1);

@@ -15,7 +15,7 @@ import { NO_WAIT_NUDGE_NOTE } from './turn-end.ts';
 import { controlledWire, manager, parent, restart, root, store, semaphore, work, toolGenerationOf, worker, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
 /**
- * Cezar's wait on native subagents (hearsay-tools/cezarion#2431): one test per `waiting:subagents`
+ * Squawk's wait on native subagents (hearsay-tools/cezarion#2431): one test per `waiting:subagents`
  * row of its Transitions out table, on the controlled Claude wire. The runner's own mapping of a
  * backgrounded child is the parity cells' (`waits-subagents-parity-cells.testkit.ts` U30–U37); here the
  * child's UI events reach the engine through the same handler the runners feed.
@@ -320,7 +320,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
       timerId = registered.wait.id;
     });
     const turns = turnEnds(id);
-    // Claude starts the turn inside Cezar's own write: that turn is the human's, not the runner's.
+    // Claude starts the turn inside Squawk's own write: that turn is the human's, not the runner's.
     expect(manager.sendMessage(id, [{ type: 'text', text: 'how is it going?' }])).toBe(true);
     await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting);
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });

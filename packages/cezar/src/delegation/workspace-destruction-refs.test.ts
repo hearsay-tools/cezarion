@@ -10,7 +10,7 @@ import { fixture, git, receiptPath, WORKSPACE_TEST_TIMEOUT_MS } from './workspac
 
 describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
   // hearsay-tools/cezarion#905: the worktree, its admin directory and its registration went away
-  // outside cezar, so no cleanup checkpoint exists, but the branch stayed behind.
+  // outside Squawk, so no cleanup checkpoint exists, but the branch stayed behind.
   async function strand(root: string, workspace: WorkerWorkspace, shape: 'externally removed' | 'deleted and pruned' | 'moved and pruned') {
     if (shape === 'externally removed') git(root, 'worktree', 'remove', workspace.path);
     else {

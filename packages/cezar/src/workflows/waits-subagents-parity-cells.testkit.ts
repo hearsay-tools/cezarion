@@ -17,7 +17,7 @@ import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture }
 import { SUBAGENT_CRITERIA, SUBAGENT_EXEMPTIONS, type SubagentCriterion } from './waits-subagents-rows.testkit.ts';
 
 /**
- * Cezar's wait on native subagents (hearsay-tools/cezarion#2431) on each runner's own native mock
+ * Squawk's wait on native subagents (hearsay-tools/cezarion#2431) on each runner's own native mock
  * wire: the runner maps a backgrounded child, and the engine parks, wakes and supersedes on what it
  * maps. A runner whose wire cannot carry a row has a named exemption with its reason; the guard
  * below pins each one to the runner having no scenario for it, so the day a mock carries it the

@@ -18,7 +18,7 @@ import { openSessionActivityRow } from './session-activity'
  *
  * The fixture repo carries a github.com `origin`, so the project's repo resolves, and
  * `CEZ_DRY_RUN=1` answers every forge read from the built-in mock — whose PR #128 and issue #142
- * are the numbers the seeded run references. The run is seeded through `runs.json` (cezar's
+ * are the numbers the seeded run references. The run is seeded through `runs.json` (Squawk's
  * documented state contract): no agent has to run, and nothing here depends on a live GitHub.
  */
 

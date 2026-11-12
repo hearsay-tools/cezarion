@@ -61,7 +61,7 @@ export async function runIndexWorkload(options: {
   sustainedMs?: number | undefined
   /** How long the `update` phase waits for the title on the page, at least 3 s (the default). */
   updateWindowMs?: number | undefined
-  /** The cezar package to serve, relative to `buildRoot`: the production build by default. */
+  /** The Squawk package to serve, relative to `buildRoot`: the production build by default. */
   serverPackage?: string | undefined
   /** Diagnostics: a renderer CPU profile of the sustained phase. */
   profileOut?: string | undefined

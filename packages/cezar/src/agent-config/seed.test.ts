@@ -119,7 +119,7 @@ describe('seedAgentConfigLocalLayer', () => {
     }
   });
 
-  // hearsay-tools/cezarion#1814: the seed writes only where nothing is, or cezar's unchanged copy.
+  // hearsay-tools/cezarion#1814: the seed writes only where nothing is, or Squawk's unchanged copy.
   const settings = (root: string) => join(root, '.claude', 'settings.local.json');
   const seedSettings = (text: string) => {
     mkdirSync(join(repo, '.claude'), { recursive: true });
@@ -162,7 +162,7 @@ describe('seedAgentConfigLocalLayer', () => {
     }
   });
 
-  it('keeps a file already in the worktree that cezar has no record of', async () => {
+  it('keeps a file already in the worktree that Squawk has no record of', async () => {
     seedSettings('{"main":true}');
     const wt = makeWorktree();
     try {

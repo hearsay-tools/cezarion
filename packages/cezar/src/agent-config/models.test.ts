@@ -123,7 +123,7 @@ describe('readAgentModelDefaults', () => {
     ).resolves.toEqual({ pi: 'openai/gpt-5-mini' });
   });
 
-  // cezar runs Pi in `--mode rpc`, which never prompts for project trust: without a saved
+  // Squawk runs Pi in `--mode rpc`, which never prompts for project trust: without a saved
   // decision Pi falls back to the global `defaultProjectTrust`, and `ask` (the default) or
   // `never` ignore `.pi/settings.json` outright. Reading a model from a file Pi would ignore, then
   // passing it as `--model`, would force a model Pi itself would not choose.

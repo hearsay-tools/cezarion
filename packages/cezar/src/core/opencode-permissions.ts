@@ -5,7 +5,7 @@ import type { PermissionOption, UiPermissionRequestedEvent } from './ui-events.t
 /**
  * The permissions behind OpenCode's own built-in asks (hearsay-tools/cezarion#1266). The 1.18.35
  * `build` agent ruleset asks for `doom_loop *`, `external_directory *`, `read *.env` and
- * `read *.env.*`; nobody configured those, so cezar answers them once. Every other ask came
+ * `read *.env.*`; nobody configured those, so Squawk answers them once. Every other ask came
  * from a rule the user wrote and goes to the cockpit.
  */
 export const OPENCODE_DEFAULT_ASK_PERMISSIONS: ReadonlySet<string> = new Set(['external_directory', 'doom_loop', 'read']);
@@ -67,7 +67,7 @@ export function opencodeWildcardMatch(value: string, pattern: string): boolean {
 }
 
 /**
- * An ask cezar may answer itself: a built-in permission no user rule names. A rule on the
+ * An ask Squawk may answer itself: a built-in permission no user rule names. A rule on the
  * permission key defers the ask whatever its pattern, which is stricter than OpenCode's own
  * pattern match. Unknown provenance (`rules` undefined) is never a default.
  */
@@ -85,7 +85,7 @@ export interface OpencodePermissionBridge {
   replies: Map<string, OpencodeReply>;
 }
 
-/** The cockpit request for an ask cezar does not answer itself, with opaque request and option ids. */
+/** The cockpit request for an ask Squawk does not answer itself, with opaque request and option ids. */
 export function opencodePermissionBridge(ask: OpencodePermissionAsk): OpencodePermissionBridge {
   const options: PermissionOption[] = [];
   const replies = new Map<string, OpencodeReply>();

@@ -29,7 +29,7 @@ export function doneCells(runners: RunnerId[], it: typeof registerTest = registe
       const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
       await until(() => store.getRun(p.id)?.status === 'waiting');
       const w = await worker(p.id);
-      /** One turn through the native wire; the answer of its last cezar tool call. */
+      /** One turn through the native wire; the answer of its last Squawk tool call. */
       const turn = async (text: string) => {
         const turns = turnEnds(p.id);
         rmSync(answers, { force: true });

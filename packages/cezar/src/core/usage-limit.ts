@@ -9,7 +9,7 @@
  * The evidence differs per backend, so the shapes are recognized in order of how exact they are:
  *
  *  1. Claude Code's machine-readable envelope, `Claude AI usage limit reached|<epoch>` — the CLI
- *     puts it in an `is_error` result frame, which reaches cezar verbatim as the run's `error`.
+ *     puts it in an `is_error` result frame, which reaches Squawk verbatim as the run's `error`.
  *     Exact, no locale, no parsing of prose. This is the one that matters in practice.
  *  2. An explicit reset instant in the prose (`try again at 2026-08-03T18:00:00Z`) — how Codex and
  *     OpenCode phrase the same thing when they carry a timestamp at all.

@@ -17,7 +17,7 @@ export const { describeWaitParity } = waitPartDescribers('completion-replies', c
 
 export function completionRepliesCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
-    it(`${runner} U21h an ignored refusal with only uncollected results parks on Cezar's human wait`, async () => {
+    it(`${runner} U21h an ignored refusal with only uncollected results parks on Squawk's human wait`, async () => {
       const reply = repliesDoneAgain();
       const p = await workerParent(runner);
       const { second: w } = await ignoreRefusal(runner, p.id, reply, () => gated(p.id), { uncollected: true });
@@ -94,9 +94,9 @@ export function completionRepliesCells(runners: RunnerId[], it: typeof registerT
     });
 
     // hearsay-tools/cezarion#1301: a reopened session that acknowledges the refusal and never answers
-    // it is bounded as the live nudge is: at the reply bound the run parks on Cezar's human wait and
+    // it is bounded as the live nudge is: at the reply bound the run parks on Squawk's human wait and
     // gives up its slot, whether or not its harness reports the input read.
-    it(`${runner} U22s a refusal reopened into a session that acknowledges it and never answers parks on Cezar's human wait at the nudge's reply bound`, async () => {
+    it(`${runner} U22s a refusal reopened into a session that acknowledges it and never answers parks on Squawk's human wait at the nudge's reply bound`, async () => {
       if (exemptionFor('U22s', runner)) {
         expect(exemptionFor('U22s', runner)?.kind).toBe('capability-absent');
         return;
@@ -117,7 +117,7 @@ export function completionRepliesCells(runners: RunnerId[], it: typeof registerT
     });
 
     // hearsay-tools/cezarion#1301: a queued refusal is owed input, and a reopened session that closes
-    // before Cezar submits it is a failed delivery, as U14's: one copy, the delivery bound, and the
+    // before Squawk submits it is a failed delivery, as U14's: one copy, the delivery bound, and the
     // run fails keeping it. A legacy accepted Finish takes the same path.
   }
 }

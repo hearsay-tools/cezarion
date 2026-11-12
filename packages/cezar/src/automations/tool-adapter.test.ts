@@ -45,8 +45,8 @@ describe('createAutomationToolService', () => {
     expect(project.automationStore.get(answer.ok ? answer.task.id : '')?.schedule).toMatchObject({ at: '2026-10-29T14:00', timeZone: 'Europe/Warsaw' });
   });
 
-  // An agent read UTC from Cezar's waits and local time from `date`, and mixed them. `at` is UTC
-  // like every other Cezar time; the cockpit still shows the schedule in its own zone.
+  // An agent read UTC from Squawk's waits and local time from `date`, and mixed them. `at` is UTC
+  // like every other Squawk time; the cockpit still shows the schedule in its own zone.
   it('takes at in UTC, answers it unchanged and stores the wall time in the cockpit zone', async () => {
     const { project, tools } = fixture();
     const answer = await tools.scheduleTask({ name: 'Check', prompt: 'Check it', at: '2026-10-29T08:00Z' });

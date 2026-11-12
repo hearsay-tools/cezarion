@@ -57,7 +57,7 @@ export interface ProviderCommandOptions {
 
 /**
  * The explicit environment lock delegates model and credential configuration
- * to each native coding agent. In that mode Cezar must not second-guess the
+ * to each native coding agent. In that mode Squawk must not second-guess the
  * agent's own credentials through the provider checks introduced by #652.
  *
  * Config-file model locks intentionally do not disable the checks: this bypass

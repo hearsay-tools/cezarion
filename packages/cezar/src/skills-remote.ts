@@ -296,7 +296,7 @@ async function listRemoteSource(src: SkillsRepoRef, home: Home): Promise<{ skill
 
 /**
  * Dropped into every copy `materializeSkillDir` creates, recording where it came
- * from. Its presence is what makes a directory cezar's to replace: a skill dir
+ * from. Its presence is what makes a directory Squawk's to replace: a skill dir
  * without it may be the user's own, and is only ever overlaid.
  */
 const TEAM_SKILL_MARKER = '.cezar-team-skill.json';

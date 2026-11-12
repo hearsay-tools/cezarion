@@ -74,7 +74,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
     } finally { session.interrupt(); await session.result; }
   });
 
-  it('asks before cezar\'s own tool when Codex still does, without saving a rule for its per-run server', async () => {
+  it('asks before Squawk\'s own tool when Codex still does, without saving a rule for its per-run server', async () => {
     const ui: UiEvent[] = [];
     const session = mcpSession('mock:mcp-approval-own', ui);
     try {

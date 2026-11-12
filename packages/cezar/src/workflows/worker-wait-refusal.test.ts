@@ -23,7 +23,7 @@ it('readiness repeated done with live workers: one nudge, then a park on the re-
     const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
     expect(timer).toBeDefined();
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-    // Deliver Cezar's own lifecycle input through the public route, without a human budget reset.
+    // Deliver Squawk's own lifecycle input through the public route, without a human budget reset.
     const input = { id: randomUUID(), source: 'lifecycle' as const, parentRunId: p.id,
       text: toolCall('cezar_done', {}), createdAt: new Date().toISOString() };
     store.updateRun(p.id, { agentInputs: [...store.getRun(p.id)?.agentInputs ?? [], input] });

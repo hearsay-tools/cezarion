@@ -2,7 +2,7 @@ const invoke = (command, args) =>
   window.__TAURI_INTERNALS__.invoke(command, args);
 const launcher = document.body.dataset.launcher === "true";
 document.getElementById("connection-shell").innerHTML = `
-  <aside><div class="brand"><img src="icon.svg" alt=""><span>Cezarion<small>Your coding workspace</small></span></div>
+  <aside><div class="brand"><img src="icon.svg" alt=""><span>Squawk<small>Your coding workspace</small></span></div>
     <div class="section-label">CONNECTIONS</div><nav id="saved" aria-label="Saved connections"></nav>
     <button id="new-connection" class="nav-button"><span aria-hidden="true">＋</span> Add connection</button>
     <div class="sidebar-bottom">${launcher ? '<button id="local-start" class="nav-button"><span aria-hidden="true">⌘</span> Local cockpit <span class="arrow">↗</span></button><p>Run agents on this computer</p>' : "<p>Connections stay on this computer.</p>"}</div>

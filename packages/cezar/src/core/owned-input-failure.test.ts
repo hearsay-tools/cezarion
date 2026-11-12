@@ -21,7 +21,7 @@ async function openSession(fixture: Fixture, mode: 'fresh' | 'continuation'): Pr
     expect(manager.continueRun(runId, { text: 'continue baseline' }).ok).toBe(true);
     await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
   }
-  // The idle worker parks on Cezar's fallback question, routed to its parent
+  // The idle worker parks on Squawk's fallback question, routed to its parent
   // (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410).
   await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
 }

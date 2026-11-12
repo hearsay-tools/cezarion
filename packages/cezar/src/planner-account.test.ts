@@ -16,9 +16,9 @@ function runners(): AgentRunner {
 
 /**
  * The planner bills the project's agent account like any task (spec 2026-07-29-agent-profiles), so
- * an account cezar refuses to spawn must not fail the plan route or fall back to the default login.
+ * an account Squawk refuses to spawn must not fail the plan route or fall back to the default login.
  */
-describe('planChain under an account cezar refuses to spawn (#1283)', () => {
+describe('planChain under an account Squawk refuses to spawn (#1283)', () => {
   let home: string;
   let repoRoot: string;
 

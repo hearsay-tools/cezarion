@@ -21,8 +21,8 @@ export class ConversationIdInUseError extends Error {
 export function assertConversationIdFree(root: RunRecord, subject: ConversationIdentity | AgentInput | undefined, peek: (id: string) => RunRecord | undefined,
   hasProjection: (runId: string, projectionId: string) => boolean): void {
   // Every new message is checked: a delivered input names its own message (hearsay-tools/cezarion#1990 review).
-  // Such a write is Cezar's own (a routed question, a park notice), retried under its deterministic ID
-  // after a crash that kept its projections but lost the ledger write. So only a projection no Cezar
+  // Such a write is Squawk's own (a routed question, a park notice), retried under its deterministic ID
+  // after a crash that kept its projections but lost the ledger write. So only a projection no Squawk
   // writer makes counts for it: `not-delivered`. A peer message that reached the recipient has an input.
   const replay = !!subject && 'source' in subject;
   const message = subject && 'source' in subject ? subject.conversation && { id: subject.id, ...subject.conversation } : subject;

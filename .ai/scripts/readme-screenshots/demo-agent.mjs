@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { withoutSessionContext } from '../../../packages/cezar/scripts/mock-session-context.mjs';
 import { FOLLOW_UP_REPLY, editedText, pickScenario, testText, turnScript } from './scenarios.mjs';
 
-/** `--help` names the options cezar detects before it passes them (#505). */
+/** `--help` names the options Squawk detects before it passes them (#505). */
 export const HELP_TEXT = 'Usage: claude [options]\n  --input-format <format>\n  --replay-user-messages  Re-emit user messages from stdin back on stdout\n';
 /** What `claude --version` prints, for a cockpit that probes the binary. */
 export const VERSION_TEXT = '2.1.0 (Claude Code)\n';

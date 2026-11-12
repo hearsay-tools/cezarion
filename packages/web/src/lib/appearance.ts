@@ -43,7 +43,7 @@ export interface Appearance {
 /** Coerce anything (missing key, a future value, garbage) into an Accent. */
 export function normalizeAccent(raw: unknown): Accent {
   // `lime` and `violet` are legacy color-named values. Every stored value converges on the
-  // role-based Cezarion family without requiring an eager server-side migration.
+  // role-based Squawk family without requiring an eager server-side migration.
   void raw
   return DEFAULT_ACCENT
 }

@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PreviewStopRequest, PreviewStopResult, PreviewResultCode, PreviewServeRequest, PreviewServeResult, PreviewServer } from '@open-mercato/cezar-contract';
 import { previewRefusal } from '../ci-wait/errors.ts';
@@ -89,7 +90,7 @@ export function previewHint(code: PreviewResultCode, ctx: PreviewHintContext): s
   switch (code) {
     case 'registered':
     case 'replaced':
-      return `Continue your work. Cezar runs \`${ctx.command}\` in the worktree when the user approves it from the preview; a copy you already run on \`:${ctx.port}\` is reused while it answers, and it stops when your session ends. Call again only if the command or port changes. Do not wait for the user to open it.`;
+      return `Continue your work. ${productName('Cezar')} runs \`${ctx.command}\` in the worktree when the user approves it from the preview; a copy you already run on \`:${ctx.port}\` is reused while it answers, and it stops when your session ends. Call again only if the command or port changes. Do not wait for the user to open it.`;
     case 'invalid_input': return `A valid call: ${EXAMPLE_CALL}. Fix the field and call again.`;
     case 'cwd_outside_worktree': return 'Pass a path relative to the worktree root, e.g. `"apps/web"`, or omit `cwd`.';
     case 'cezar_port': return 'Register your app\'s dev server port, not the cockpit\'s.';
@@ -112,7 +113,7 @@ function previewMessage(code: PreviewResultCode, ctx: PreviewHintContext): strin
     case 'replaced': return `Replaced the registration for \`:${ctx.port}\`.`;
     case 'invalid_input': return 'The arguments are invalid.';
     case 'cwd_outside_worktree': return '`cwd` resolves outside the worktree.';
-    case 'cezar_port': return `\`:${ctx.port}\` is cezar's own port.`;
+    case 'cezar_port': return `\`:${ctx.port}\` is ${productName('cezar')}'s own port.`;
     case 'port_held': return `\`:${ctx.port}\` is held by the dev server of task "${ctx.ownerTitle ?? 'another task'}".`;
     case 'too_many': return `This task already has ${PREVIEW_MAX_SERVERS} registered servers.`;
     case 'worktree_missing': return ctx.withoutWorktree ? 'This task runs without its own worktree, so live preview is not available.' : 'This task\'s worktree no longer exists.';
@@ -134,10 +135,10 @@ export function previewStopResult(code: PreviewStopResult['code']): PreviewStopR
     stopped: ['The preview server is stopped.', 'Continue your work. Set restart to true to reuse the approved command.'],
     restarted: ['The approved preview server is starting again.', 'Continue your work. Check the preview for readiness or startup errors.'],
     approval_required: ['This registration has no current owner approval.', 'Ask the owner to press Run and open in the preview to approve this registration.'],
-    adopted: ['Cezar did not start this server and cannot stop it.', 'Use the terminal or process owner that started it, or register a free port.'],
+    adopted: [`${productName('Cezar')} did not start this server and cannot stop it.`, 'Use the terminal or process owner that started it, or register a free port.'],
     not_registered: ['This port is not registered for your run.', 'Call cezar_preview_serve for your own server first.'],
     port_held: ['Another task owns this preview server.', "Do not stop the other task's server. Register your server on a free port."],
-    port_in_use: ['The port still answers after this server stopped.', 'Stop the process from the terminal that owns it, or register a free port; Cezar will not replace it.'],
+    port_in_use: ['The port still answers after this server stopped.', `Stop the process from the terminal that owns it, or register a free port; ${productName('Cezar')} will not replace it.`],
     invalid_input: ['Invalid preview stop arguments.', 'Call with { "port": 5173, "restart": true }; port must be an integer from 1 to 65535 and restart must be a boolean.'],
     preview_disabled: ['Live preview is not enabled.', 'Do not retry. Report the command and port in your final message.'],
     headless: ['No cockpit is attached to this run.', 'Do not retry. Report the command and port in your final message.'],

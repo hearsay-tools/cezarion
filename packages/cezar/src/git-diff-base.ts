@@ -14,7 +14,7 @@ export interface GitRunResult {
 /** A caller-supplied `git` invocation, already bound to a working directory (and env). */
 export type GitRunner = (args: string[]) => Promise<GitRunResult>;
 
-/** The task branch cezar created vs. the branch HEAD actually sits on. */
+/** The task branch Squawk created vs. the branch HEAD actually sits on. */
 export interface RepointedHead {
   headBranch: string;
   taskBranch: string;

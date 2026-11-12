@@ -1,3 +1,4 @@
+import { productName } from '../../home/display.ts';
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
 
@@ -16,7 +17,7 @@ export const NO_WAIT_NUDGE_REPLY_MS = 5 * 60_000;
 /** A root's done blocked at a turn end is answered with the refusal `cezar_done` gives, as one
  *  automatic turn (hearsay-tools/cezarion#1301). The nudge adds this sentence when live workers block
  *  it; the mid-turn answer never does. */
-export const COMPLETION_WILL_WAIT = 'If you end your turn with done again while these workers are live, Cezar will wait on them for you and wake you when they have all settled.';
+export const COMPLETION_WILL_WAIT = `If you end your turn with done again while these workers are live, ${productName('Cezar')} will wait on them for you and wake you when they have all settled.`;
 
 /** Bound one unattended session; an explicit Continue starts a new budget. */
 export const MAX_AUTO_CONTINUES = 40;
@@ -56,4 +57,4 @@ export const QUEUE_WATCHDOG_MS = 60_000;
 export const REPO_REDISCOVERY_MS = 30_000;
 
 export const RESTART_CONTINUATION_PROMPT =
-  'The cezar process restarted while you were working on this task. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
+  `The ${productName('Cezar')} process restarted while you were working on this task. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.`;

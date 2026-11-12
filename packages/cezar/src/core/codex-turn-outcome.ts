@@ -20,7 +20,7 @@ export function codexTurnOutcome(
   // Preserve the legacy turn/failed interrupt spelling. A provider error that
   // mentions an interrupted stream is still an error on turn/completed.
   if (turn.status === CODEX_TURN_STATUS.interrupted || (method === 'turn/failed' && /interrupt/i.test(message ?? ''))) {
-    // Legacy turn/failed still emits a v1 error unless cezar initiated teardown;
+    // Legacy turn/failed still emits a v1 error unless Squawk initiated teardown;
     // only its v2 stop reason is cancelled. Keep that existing lifecycle bound.
     return {
       stopReason: 'cancelled',

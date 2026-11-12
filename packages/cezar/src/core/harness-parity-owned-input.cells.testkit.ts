@@ -76,7 +76,7 @@ export const OWNED_INPUT_GROUPS = {
             // The parent's reply answers it through the answer seam; no human message is shown.
             expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
             expect(store.getRun(runId)?.agentInputs?.map(input => input.id)).toEqual([first.id, second.id, reply]);
-            // The answer retired this ask; the answered turn's end may raise Cezar's fallback question
+            // The answer retired this ask; the answered turn's end may raise Squawk's fallback question
             // on the idle worker (hearsay-tools/cezarion#1301), which is a new one.
             expect(store.transcriptFacts(runId).pendingAsk?.seq).not.toBe(askSeq);
             expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([expect.objectContaining({ askSeq, source: 'parent' })]);
@@ -148,7 +148,7 @@ export const OWNED_INPUT_GROUPS = {
             // ended; the answer's durable checkpoint is still that turn's end.
             await waitFor(() => recovered.store.readEvents(runId).some(e => e.type === 'human-input-delivered'));
             expect(recovered.store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([expect.objectContaining({ askSeq, source: 'parent' })]);
-            // The answer retired this ask; the answered turn's end may raise Cezar's fallback question
+            // The answer retired this ask; the answered turn's end may raise Squawk's fallback question
             // on the idle worker (hearsay-tools/cezarion#1301), which is a new one.
             expect(recovered.store.transcriptFacts(runId).pendingAsk?.seq).not.toBe(askSeq);
           });
@@ -184,7 +184,7 @@ export const OWNED_INPUT_GROUPS = {
         it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {
           await withOwnedInputRun(backend, 'baseline', async ({ store, manager, repoRoot, runId, parentRunId }) => {
             manager.enqueueOwnedRun(runId);
-            // The idle worker parks on Cezar's fallback question, routed to its parent
+            // The idle worker parks on Squawk's fallback question, routed to its parent
             // (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410).
             await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
             store.flush();
@@ -219,7 +219,7 @@ export const OWNED_INPUT_GROUPS = {
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             manager.finish(runId);
             await waitFor(() => !manager.isActive(runId));
-            // The idle worker's park may already be Cezar's fallback question (hearsay-tools/cezarion#1301):
+            // The idle worker's park may already be Squawk's fallback question (hearsay-tools/cezarion#1301):
             // wait for the continuation's own ask.
             const asked = store.readEvents(runId).filter(e => e.type === 'ask.requested').length;
             expect(manager.continueRun(runId, { text: promptFor(backend, 'ask-reply-late') }).ok).toBe(true);

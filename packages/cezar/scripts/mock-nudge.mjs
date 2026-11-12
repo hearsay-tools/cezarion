@@ -1,8 +1,8 @@
-// Cezar's no-wait nudge (hearsay-tools/cezarion#1234). Every native mock answers it the way an agent
+// Squawk's no-wait nudge (hearsay-tools/cezarion#1234). Every native mock answers it the way an agent
 // should, by rewriting it into the mocks' own scenario prompts after the prompt is recorded: it
 // calls cezar_ask with a card (`mock:cezar-tool`). CEZ_MOCK_NUDGE_REPLY=plain answers in plain text instead, so a
 // test can reach the no-wait fallback. CEZ_MOCK_COMPLETION_REPLY, when set, is the mock prompt that
-// answers Cezar's completion refusal nudge (hearsay-tools/cezarion#1301), so a test can choose the
+// answers Squawk's completion refusal nudge (hearsay-tools/cezarion#1301), so a test can choose the
 // reply turn; unset, the refusal gets the mocks' ordinary reply. `mock:ack-only` is a reply every
 // native mock understands: the harness acknowledges the prompt on its own wire (and reports it read
 // where that wire can) and opens no turn until more input arrives.

@@ -94,8 +94,8 @@ export function track() {
 }
 
 /**
- * `nudgeReply` is how the native mocks answer Cezar's no-wait nudge (hearsay-tools/cezarion#1234).
- * By default they ignore it in plain text: a run then reaches Cezar's no-wait human wait (the gate
+ * `nudgeReply` is how the native mocks answer Squawk's no-wait nudge (hearsay-tools/cezarion#1234).
+ * By default they ignore it in plain text: a run then reaches Squawk's no-wait human wait (the gate
  * a markerless question raised before) and a worker its plain park, so a suite about delegation or
  * CI decides what it tests. `card` keeps the mocks' own answer, a `cezar_ask` card.
  * `mockNotes` keeps the Claude mock's `notes.md` trace. Without it, task worktrees stay clean, so
@@ -183,7 +183,7 @@ if (options.replay && message.uuid) emit({ type: 'user', isReplay: true, uuid: m
 if (first) { first = false; fs.writeFileSync(${JSON.stringify(initial)}, 'received'); await wait(options.firstResultGate); }
 const humanAnswer = text.includes('human answer mock:hold');
 if (humanAnswer && options.humanAnswerGate) { fs.appendFileSync(received, JSON.stringify({ text }) + '\n'); await wait(options.humanAnswerGate); }
-// hearsay-tools/cezarion#2397: the lifecycle scenarios call the cezar tool through the session's
+// hearsay-tools/cezarion#2397: the lifecycle scenarios call the Squawk tool through the session's
 // MCP config with the native mocks' own client, then end the turn.
 const lifecycle = async (name, toolArgs) => (await import(${JSON.stringify(MOCK_CI_TOOL)})).lifecycleCall('claude', args, name, toolArgs);
 const ask = !humanAnswer && text.includes('mock:cezar-ask');

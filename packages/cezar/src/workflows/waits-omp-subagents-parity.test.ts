@@ -4,5 +4,5 @@ import { onlyRunner, useRunners } from '../core/runners-under-test.testkit.ts';
 
 useRunners(onlyRunner('omp', () => new OmpRunner()));
 
-// Cezar's wait on native subagents on the omp wire (hearsay-tools/cezarion#2431).
+// Squawk's wait on native subagents on the omp wire (hearsay-tools/cezarion#2431).
 subagentCells(['omp']);

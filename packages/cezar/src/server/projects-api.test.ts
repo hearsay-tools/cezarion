@@ -488,7 +488,7 @@ describe('workspace projects API', () => {
     };
 
     it('deregisters the project, emits project-removed, and leaves every file on disk untouched', async () => {
-      // A realistic project: source, git metadata, and its own cezar state — the three things a
+      // A realistic project: source, git metadata, and its own Squawk state — the three things a
       // user would be devastated to lose behind a button labelled "Remove".
       mkdirSync(join(otherRoot, '.git'), { recursive: true });
       mkdirSync(join(otherRoot, '.ai/cezar/runs'), { recursive: true });

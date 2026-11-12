@@ -105,7 +105,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         expect(contextLines(run.id)).toEqual([expect.stringMatching(/^session context: handoff applied \(\d+ B, .+\); vision applied \(\d+ B, docs\/vision\.md\); recipient applied \(\d+ B\)$/)]);
 
         writeFileSync(join(root, 'docs/vision.md'), 'VISION-V2\n');
-        // The agent's own line since the first launch; cezar writes none at a turn end (hearsay-tools/cezarion#1809).
+        // The agent's own line since the first launch; Squawk writes none at a turn end (hearsay-tools/cezarion#1809).
         const handoff = handoffPath(join(root, '.ai/cezar'), run.id);
         writeFileSync(handoff, readFileSync(handoff, 'utf8').replace('## Progress log\n\n', '## Progress log\n\n- 10:00 — R120 progress\n'));
         // A record the store committed before a crash, which never reached the file: the launch shows it.

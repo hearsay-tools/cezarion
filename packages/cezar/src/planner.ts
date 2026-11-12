@@ -69,7 +69,7 @@ export async function planChain(repoRoot: string, task: string, builtin: readonl
   const plannerModel = config.defaultRunner === 'claude' ? config.plannerModel : undefined;
   // Plan under the SAME agent account this project's tasks run on (spec
   // 2026-07-29-agent-profiles). Without this the planner would quietly bill the personal
-  // subscription for a project the user pointed at their work account. An account cezar refuses
+  // subscription for a project the user pointed at their work account. An account Squawk refuses
   // to spawn (`AgentAccountUnavailableError`) plans nothing and takes the fallback below, for the
   // same reason.
   const account = await resolveProfileEnvForRoot(repoRoot, config.defaultRunner, undefined, process.env, home).catch(() => null);

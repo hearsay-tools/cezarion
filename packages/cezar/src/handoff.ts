@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { runDataDir } from './legacy-runs.ts';
 import { commandText } from './home/command.ts';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,10 +12,10 @@ import type { RunStore } from './runs/store.ts';
  * next to the run's NDJSON events and outside the task worktree — it survives
  * worktree removal. Cez seeds the skeleton; the agent (told via
  * CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the "Progress log"
- * and "Resume notes" sections up to date. cezar's own records, the autosave
+ * and "Resume notes" sections up to date. Squawk's own records, the autosave
  * reports, live in the run store (`RunRecord.handoffRecords`) and reach the file
- * as ONE block that cezar rewrites whole (hearsay-tools/cezarion#1809), so cezar
- * never edits a line the agent writes. cezar writes no lifecycle line: the run
+ * as ONE block that Squawk rewrites whole (hearsay-tools/cezarion#1809), so Squawk
+ * never edits a line the agent writes. Squawk writes no lifecycle line: the run
  * event log and the run status hold those facts. Everything here is best-effort:
  * the handoff is a journal, never a reason to fail a run.
  */
@@ -63,7 +64,7 @@ function recordsBlock(records: HandoffRecords | undefined): string {
   const autosave = records?.autosave ?? [];
   if (autosave.length === 0) return '';
   const lines = autosave.map((record) => `- ${record.at} — ${record.note}`);
-  return [RECORDS_BEGIN, '## Cezar records', '', '### Autosave', '', ...lines, RECORDS_END, ''].join('\n');
+  return [RECORDS_BEGIN, `## ${productName('Cezar')} records`, '', '### Autosave', '', ...lines, RECORDS_END, ''].join('\n');
 }
 
 /**
@@ -146,7 +147,7 @@ export function recordHandoffAutosave(store: HandoffStore, dataDir: string, runI
 const SHA_UNAVAILABLE = '(sha unavailable)';
 
 function periodicAutosaveNote({ count, branch, first, latest }: NonNullable<HandoffAutosaveRecord['periodic']>): string {
-  return `periodic: ${count} cezar autosave commit(s) on ${branch ?? 'detached HEAD'}, first ${first ?? SHA_UNAVAILABLE}, latest ${latest ?? SHA_UNAVAILABLE}; ` +
+  return `periodic: ${count} ${productName('cezar')} autosave commit(s) on ${branch ?? 'detached HEAD'}, first ${first ?? SHA_UNAVAILABLE}, latest ${latest ?? SHA_UNAVAILABLE}; ` +
     `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${latest ?? 'HEAD'}~1\``;
 }
 
@@ -193,34 +194,34 @@ export function deleteHandoff(dataDir: string, runId: string): void {
   }
 }
 
-const HANDOFF_AUTOSAVE_NOTE = `The "Cezar records" block near the top, when present, is cezar's record of autosave commits on your branch (with the command that folds one back) or of work it left uncommitted; cezar rewrites the whole block, so never edit it.`;
+const HANDOFF_AUTOSAVE_NOTE = `The "${productName('Cezar')} records" block near the top, when present, is ${productName('cezar')}'s record of autosave commits on your branch (with the command that folds one back) or of work it left uncommitted; ${productName('cezar')} rewrites the whole block, so never edit it.`;
 const HANDOFF_READ_STEP = `1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;
 /** Step 1 when the launch's opening message already carries the file (hearsay-tools/cezarion#1584). */
-const HANDOFF_INJECTED_STEP = `1. Its contents as of this launch open your first message for this session, in the cezar context block with id "handoff"; read the file again only when you need a later version. "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;
+const HANDOFF_INJECTED_STEP = `1. Its contents as of this launch open your first message for this session, in the ${productName('cezar')} context block with id "handoff"; read the file again only when you need a later version. "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;
 
-const handoffJournal = (injected: boolean) => `## Handoff (cezar)
+const handoffJournal = (injected: boolean) => `## Handoff (${productName('cezar')})
 
 HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback) (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
 ${injected ? HANDOFF_INJECTED_STEP : HANDOFF_READ_STEP}
 2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
 3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.`;
 
-/** hearsay-tools/cezarion#2431: a runner that reports its native subagents. Cezar waits on them, so
+/** hearsay-tools/cezarion#2431: a runner that reports its native subagents. Squawk waits on them, so
  *  the agent just ends its turn; other background work keeps the timer guidance. */
-const NATIVE_SUBAGENTS_TOOLS = `Native subagents: when you end a turn while subagents you started in the background inside this session still run, just end the turn, with no cezar_wait timer for them. Cezar waits for them itself: it spends no automatic wake and wakes you once when they have all ended. Use cezar_wait for other background work.`;
+const NATIVE_SUBAGENTS_TOOLS = `Native subagents: when you end a turn while subagents you started in the background inside this session still run, just end the turn, with no cezar_wait timer for them. ${productName('Cezar')} waits for them itself: it spends no automatic wake and wakes you once when they have all ended. Use cezar_wait for other background work.`;
 
 /** hearsay-tools/cezarion#1234: the lifecycle as tool calls. Every session has the tools
  *  (hearsay-tools/cezarion#2397). */
-const LIFECYCLE_TOOLS = `Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn. When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user. When you are waiting on something else, call cezar_wait with kind "pr" for a pull request's checks or its merge, or kind "timer" to re-check later, then end your turn. A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait. Never call cezar_done while anything is unfinished or unverified.`;
+const LIFECYCLE_TOOLS = `Lifecycle tools (${productName('cezar')}): End every turn with a ${productName('cezar')} tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn. When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. ${productName('Cezar')} shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user. When you are waiting on something else, call cezar_wait with kind "pr" for a pull request's checks or its merge, or kind "timer" to re-check later, then end your turn. A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait. Never call cezar_done while anything is unfinished or unverified.`;
 
-/** Agents read UTC from Cezar's tools and local time from \`date\`, and told users UTC times
- *  as if they were local. Every Cezar tool speaks UTC; this names the user's zone. */
-const timeZoneNote = (zone: string) => `Times: Cezar tools take and answer times in UTC, ending in Z, such as a wait's \`deadline\` or a scheduled task's \`due_at\`. The user's time zone is ${zone}. Before you tell the user a time, convert it to ${zone} and name the zone. \`date -u\` prints the current time in UTC, and \`TZ=${zone} date\` prints it in the user's zone.`;
+/** Agents read UTC from Squawk's tools and local time from \`date\`, and told users UTC times
+ *  as if they were local. Every Squawk tool speaks UTC; this names the user's zone. */
+const timeZoneNote = (zone: string) => `Times: ${productName('Cezar')} tools take and answer times in UTC, ending in Z, such as a wait's \`deadline\` or a scheduled task's \`due_at\`. The user's time zone is ${zone}. Before you tell the user a time, convert it to ${zone} and name the zone. \`date -u\` prints the current time in UTC, and \`TZ=${zone} date\` prints it in the user's zone.`;
 
 const REFERENCES_AND_ATTACHMENTS = `Task reference markers: as soon as you know which GitHub pull request or issue this task is ABOUT (it was named in the task, or you just opened it), declare it by emitting, on its own line in your message text: CEZ:PR=<number> and/or CEZ:ISSUE=<number>. Declare each PR this task opens, even when it opens several. Earlier declarations remain associated with the task; the last declaration selects the current subject. For issues, an issue directly identified as the task subject in its prompt remains the primary attribution; later issue declarations and discovered links do not replace it. Re-emit with the new number if the subject changes (e.g. you open a PR later in the task). Declare only the task's own subject — never a PR/issue you merely mention, list, or compare against. You may also emit CEZ:TITLE=<terse gerund phrase, max 40 chars, e.g. "implementing comment threads"> once the work has a clearer shape than its current title; cez uses these instead of guessing from the transcript. Put markers in plain message text, never inside a code fence.
 
 ## Messaging other tasks
-Cezar tasks talk to each other only through \`${commandText('cez')} message\`, which needs task messaging on; with it, your delegation instructions give the full command and its verbs (\`tasks\`, \`request\`, \`progress\`, \`reply\`). Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions. Cezar does not record those messages: they carry no sender, receipt or deadline. When task messaging is off, no agent channel to another task exists: tell the user instead. \`${commandText('cez')} task send\` is human input and refuses to run inside a task. Native subagents inside your own session are not tasks: you may start them and message them with your runner's tools.
+${productName('Cezar')} tasks talk to each other only through \`${commandText('cez')} message\`, which needs task messaging on; with it, your delegation instructions give the full command and its verbs (\`tasks\`, \`request\`, \`progress\`, \`reply\`). Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions. ${productName('Cezar')} does not record those messages: they carry no sender, receipt or deadline. When task messaging is off, no agent channel to another task exists: tell the user instead. \`${commandText('cez')} task send\` is human input and refuses to run inside a task. Native subagents inside your own session are not tasks: you may start them and message them with your runner's tools.
 
 ## Pasted attachments
 User-attached screenshots and files (PDF, TXT, MD) are saved as real files; their absolute paths are listed in the message that carries them. Read a file from its path when you need its contents, and use the path when a task needs the file itself (saving, uploading, attaching to issues/PRs). An image also rides along inline, but that copy is for viewing only; a non-image attachment exists ONLY as the file at that path.`;
@@ -229,7 +230,7 @@ User-attached screenshots and files (PDF, TXT, MD) are saved as real files; thei
  * The handoff contract for one agent session: the journal, the lifecycle tools, then task
  * references and attachments. It names the user's time zone (the host's, as \`localTimeZone\` reads it,
  * unless \`timeZone\` is given): the cockpit's zone, the one one-time schedules default to. With `nativeSubagents` (a runner that reports them,
- * hearsay-tools/cezarion#2431) it adds that Cezar waits for native subagents. With
+ * hearsay-tools/cezarion#2431) it adds that Squawk waits for native subagents. With
  * `handoffInjected` the launch's opening message already carries the file
  * (hearsay-tools/cezarion#1584), so step 1 points there instead of asking for a read; the
  * writing duties never change.

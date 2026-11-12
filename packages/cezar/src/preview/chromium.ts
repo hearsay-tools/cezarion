@@ -123,7 +123,7 @@ export function resolveChromium(
   return cachedChromium(fs, env, platform, home, paths);
 }
 
-/** Third-party caches follow the OS user; cezar's downloaded copy follows the injected Home. */
+/** Third-party caches follow the OS user; Squawk's downloaded copy follows the injected Home. */
 function cachedChromium(fs: ChromiumFs, env: NodeJS.ProcessEnv, platform: string, home: string, paths: Home): string | undefined {
   if (platform === 'darwin') {
     for (const root of ['/Applications', join(home, 'Applications')]) {
@@ -170,7 +170,7 @@ export function downloadTarget(platform: string, arch: string): { platformKey: P
   return undefined;
 }
 
-/** The command that installs Chromium on this OS, or '' when cezar does not know one. `osRelease` is /etc/os-release. */
+/** The command that installs Chromium on this OS, or '' when Squawk does not know one. `osRelease` is /etc/os-release. */
 export function installCommand(platform: string, osRelease: string): string {
   if (platform === 'darwin') return 'brew install --cask chromium';
   if (platform !== 'linux') return '';
@@ -235,7 +235,7 @@ class PermanentDownloadError extends Error {}
 
 /**
  * Downloads the Stable `chrome-headless-shell` build into `<cache>/chromium` and returns its binary.
- * Each download stages in its own `.partial-*` directory (two cezar processes in different repos
+ * Each download stages in its own `.partial-*` directory (two Squawk processes in different repos
  * share the cache) and is renamed into place only once unpacked, so an abort or a crash never
  * leaves a half-installed Chromium for `resolveChromium` to find. A copy another process already
  * published wins; ours is discarded. Only the network
@@ -382,8 +382,8 @@ const KILLED_EXIT_WAIT_MS = 5_000;
  *  Keep its driver blocklist and software fallback; never pin a vendor or graphics backend.
  *  `--proxy-server=direct://` so Linux Chrome does not inherit HTTP(S)_PROXY: it will not send
  *  proxy auth the way curl does, and a render-blocking third-party stylesheet then never paints.
- *  `--remote-debugging-pipe` opens no port: only cezar reaches the browser, and an agent drives it
- *  through cezar's CDP proxy alone (hearsay-tools/cezarion#784). */
+ *  `--remote-debugging-pipe` opens no port: only Squawk reaches the browser, and an agent drives it
+ *  through Squawk's CDP proxy alone (hearsay-tools/cezarion#784). */
 export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string[] {
   const args = ['--headless=new', '--enable-gpu', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
   return productEnv('PREVIEW_NO_SANDBOX', env) === '1' ? ['--no-sandbox', ...args] : args;
@@ -391,7 +391,7 @@ export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string
 
 /**
  * The task's Chromium pid record, `<runDir>/chromium.pid.json` beside its profile: `{ pid, startToken }`.
- * A crashed cezar leaves the browser running; the boot sweep kills it by this record (#781).
+ * A crashed Squawk leaves the browser running; the boot sweep kills it by this record (#781).
  */
 export const CHROMIUM_PID_FILE = 'chromium.pid.json';
 

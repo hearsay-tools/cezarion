@@ -163,7 +163,7 @@ describe('readAccountIdentity', () => {
 
   it('names the agent it cannot read for pi, omp and Cursor, never OpenCode\'s reason', async () => {
     // pi and omp keep their login INSIDE the account folder (that is why they can carry
-    // accounts); cezar just does not read who it belongs to.
+    // accounts); Squawk just does not read who it belongs to.
     for (const [provider, name] of [['pi', 'pi'], ['omp', 'omp'], ['cursor', 'Cursor']] as const) {
       const identity = await readAccountIdentity(provider, home);
       expect(identity.available, provider).toBe(false);

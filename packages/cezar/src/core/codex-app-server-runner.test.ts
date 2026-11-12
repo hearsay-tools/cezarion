@@ -7,6 +7,7 @@ import type { AgentEvent } from './agent-runner.js';
 import { KILL_GRACE_MS } from './runner-runtime.js';
 import { CodexAppServerRunner, codexTurnStartExtras } from './codex-app-server-runner.js';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { productName } from '../home/display.ts';
 
 /** Only the escalation tests below swap the child out; every other test in this
  *  file keeps spawning the real mock app-server through the untouched `spawn`. */
@@ -27,7 +28,7 @@ vi.mock('node:child_process', async (importOriginal) => {
  * runners classify a cezar-initiated 128+signal exit as a teardown note rather
  * than an agent failure, so the Codex branch needs its own regression.
  */
-describe('a teardown cezar initiated (codex app-server)', () => {
+describe('a teardown Squawk initiated (codex app-server)', () => {
   const mockBin = fileURLToPath(
     new URL('./__fixtures__/codex/mock-codex-app-server.mjs', import.meta.url),
   );
@@ -58,7 +59,7 @@ describe('a teardown cezar initiated (codex app-server)', () => {
     expect(events.some((e) => e.type === 'error')).toBe(false);
     expect(events.at(-1)).toEqual({ type: 'done' });
     expect(
-      events.some((e) => e.type === 'note' && e.message.includes('terminated by cezar (code 143)')),
+      events.some((e) => e.type === 'note' && e.message.includes(`terminated by ${productName('Cezar')} (code 143)`)),
     ).toBe(true);
   }, 15_000);
 

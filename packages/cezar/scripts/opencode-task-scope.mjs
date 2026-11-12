@@ -1,14 +1,14 @@
-// OpenCode plugin that cezar loads into governed sessions (every session the delegation listener provisions) through
+// OpenCode plugin that Squawk loads into governed sessions (every session the delegation listener provisions) through
 // OPENCODE_CONFIG_CONTENT (hearsay-tools/cezarion#2279). OpenCode's `task` tool starts the
 // session's own subagents, and with `task_id` it resumes any session by ID without a parent
-// check, which can reach another cezar task's session. This hook keeps `task` for the
-// session's own tree and refuses a `task_id` outside it: cezar tasks talk only through
+// check, which can reach another Squawk task's session. This hook keeps `task` for the
+// session's own tree and refuses a `task_id` outside it: Squawk tasks talk only through
 // `cez message`. The same-user shell stays outside this control (AGENT_PROTOCOL.md D1).
 
 /** Parent links walked before giving up; a real session tree is a few levels deep. */
 const MAX_DEPTH = 64;
 
-const REFUSAL = 'This task_id names a session outside this task. Cezar tasks talk to each other only through `cez message`; start a new subagent with task and no task_id instead.';
+const REFUSAL = 'This task_id names a session outside this task. Squawk tasks talk to each other only through `hsq message`; start a new subagent with task and no task_id instead.';
 
 /**
  * The session's parent ID, null for a root session, or undefined when no such session exists.

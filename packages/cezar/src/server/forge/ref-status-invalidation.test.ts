@@ -24,7 +24,7 @@ vi.mock('node:child_process', async original => {
 import { createApp } from '../server.ts';
 
 /**
- * The two places cezar changes a pull request itself — and therefore the two places it must stop
+ * The two places Squawk changes a pull request itself — and therefore the two places it must stop
  * trusting what it cached about one.
  *
  * Everything else about a reference has to be polled: GitHub cannot push to a cockpit with no
@@ -37,7 +37,7 @@ import { createApp } from '../server.ts';
  * the cache effect after success and retention after refusal, through the real driver.
  */
 
-describe('a reference cezar changes itself is forgotten, not waited out', () => {
+describe('a reference Squawk changes itself is forgotten, not waited out', () => {
   let repoRoot: string;
   const seed = (...numbers: number[]) => __seedRefStatusCacheForTests(repoRoot, numbers.map(number => [number, {
     // ast-grep-ignore: test-enum-literal — forge reference kind, not a durable wait kind.

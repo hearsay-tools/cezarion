@@ -26,6 +26,7 @@ import type {
   ToolGrant,
 } from './agent-runner.ts';
 import { RUNNER_FACTS } from './runner-facts.ts';
+import { productName } from '../home/display.ts';
 
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
@@ -471,7 +472,7 @@ export class ClaudeCliRunner implements AgentRunner {
       // differs. Other errors outside a retry still use their native message.
       const originalRefusal = msg.type === 'result' && msg.is_error && refusalRetry?.message;
       // Claude reports `error_during_execution` while reacting to our
-      // teardown signal. Once cezar has signalled the child, that frame
+      // teardown signal. Once Squawk has signalled the child, that frame
       // describes the intentional stop rather than an agent failure.
       // Normalize only this precise wire shape so genuine result errors
       // (authentication, limits, malformed sessions) stay authoritative.
@@ -585,7 +586,7 @@ export class ClaudeCliRunner implements AgentRunner {
       if (eofKillTimer) clearTimeout(eofKillTimer);
     };
 
-    /** An exit cezar did not cause: an outside signal or a non-zero code fails the run. */
+    /** An exit Squawk did not cause: an outside signal or a non-zero code fails the run. */
     const failAbnormalExit = (exitCode: number | null): void => {
       if (exitCode === null && child.signalCode !== null) {
         const message = `claude CLI was killed by signal ${child.signalCode}`;
@@ -614,13 +615,13 @@ export class ClaudeCliRunner implements AgentRunner {
         return { text, toolCalls, tokensUsed, sessionId: spec.sessionId };
       }
 
-      // A session cezar itself tore down (EOF watchdog after `end()`, or a
+      // A session Squawk itself tore down (EOF watchdog after `end()`, or a
       // cancel) exits 143/137 — that is our own signal coming back, not an
       // agent failure, so it settles on the normal path with a note (#703).
       if (terminatedBySquawk && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
         onEvent?.({
           type: 'note',
-          message: `claude CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
+          message: `claude CLI did not exit on its own after close; terminated by ${productName('Cezar')} (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
         });
         onEvent?.({ type: 'done' });
         return { text, toolCalls, tokensUsed, sessionId: spec.sessionId };
@@ -715,7 +716,7 @@ export class ClaudeCliRunner implements AgentRunner {
  * keeps today's path: `CEZ_APPROVAL_GATE=1` opts into `acceptEdits` (#435).
  * `CEZ_CLAUDE_SETTING_SOURCES` optionally adds `--setting-sources`.
  */
-/** Optional CLI flags cezar feature-detects, because an older CLI rejects unknown options
+/** Optional CLI flags Squawk feature-detects, because an older CLI rejects unknown options
  * at startup. `--replay-user-messages` is the read signal (#505); without it, result
  * coverage (`user_message_uuids`) still reports reads. `--include-hook-events` streams every
  * hook's lifecycle (#961); without it the CLI still reports SessionStart/Setup hooks. */

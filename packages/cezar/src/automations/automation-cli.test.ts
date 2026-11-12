@@ -6,7 +6,7 @@ import { EXIT } from '../task-cli/cli.ts';
 import { fetchJson, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
 import { automationPageUrl, bodyFromAddFlags, parseEvery, runAutomationCommand, type AutomationIo } from './automation-cli.ts';
 import { AUTOMATION_SCHEMA_REFERENCE } from './prompts.ts';
-import { resolveDelay } from '@open-mercato/cezar-contract/scheduled-tasks';
+import { SCHEDULED_TASK_NOTE, resolveDelay } from '@open-mercato/cezar-contract/scheduled-tasks';
 
 /**
  * `cez automation` (#774, port of upstream #985) against a real cockpit app on a real loopback
@@ -441,7 +441,7 @@ describe('cez automation', () => {
     it('add --at --tz builds a once body', async () => {
       expect(await run(['add', '--name', 'Check', '--at', later, '--tz', 'Europe/Warsaw', '--latest-start', '6h', '--prompt', 'Check it']), out.join('\n')).toBe(EXIT.ok);
       expect(posted.at(-1)?.body).toEqual({ name: 'Check', kind: 'schedule', schedule: { type: 'once', at: later, timeZone: 'Europe/Warsaw', latestStartMinutes: 360 }, task: { prompt: 'Check it', worktree: true, autonomous: true } });
-      expect(last()).toMatchObject({ enabled: false, onceStatus: 'paused', timeZone: 'Europe/Warsaw', note: 'Cezarion must be running at the due time, or start again before the latest start, for this task to launch.' });
+      expect(last()).toMatchObject({ enabled: false, onceStatus: 'paused', timeZone: 'Europe/Warsaw', note: SCHEDULED_TASK_NOTE });
       expect(String(last().dueAt)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/);
     });
 

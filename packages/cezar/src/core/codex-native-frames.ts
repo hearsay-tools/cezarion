@@ -1,5 +1,6 @@
 import { isSignalTerminationExit } from './agent-runner.ts';
 import type { CodexAppServerMessage } from './codex-app-server-transport.ts';
+import { productName } from '../home/display.ts';
 
 /** Pure reads of native Codex app-server frames, for the session's stdout reader. */
 
@@ -49,7 +50,7 @@ export function turnIdOf(obj: Record<string, unknown>): string | undefined {
   return typeof turn?.id === 'string' ? turn.id : stringField(obj, 'turnId');
 }
 
-/** A non-zero exit that is not cezar's own signal teardown still carries stderr. */
+/** A non-zero exit that is not Squawk's own signal teardown still carries stderr. */
 export function sessionStderrIsUnexpected(exitCode: number | null, timedOut: boolean, terminatedBySquawk: boolean): boolean {
   return !timedOut && exitCode !== 0 && exitCode !== null && !(terminatedBySquawk && isSignalTerminationExit(exitCode));
 }
@@ -64,7 +65,7 @@ export function startupCrashOwnsFailure(
     && !(session.terminatedBySquawk && isSignalTerminationExit(exitCode));
 }
 
-/** 143/137, or a signal with no code, is the teardown cezar asked for. */
+/** 143/137, or a signal with no code, is the teardown Squawk asked for. */
 export function squawkAskedForExit(exitCode: number | null, signalCode: NodeJS.Signals | null): boolean {
   return isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null);
 }
@@ -85,10 +86,10 @@ export function sessionExitEvent(exit: SessionExit): { event: 'error' | 'note'; 
     return { event: 'error', message: `codex app-server timed out after ${mins}m and was killed` };
   }
   // Our own EOF watchdog / cancel signal coming back as 143/137 — the
-  // teardown cezar asked for, not a codex failure (#703).
+  // teardown Squawk asked for, not a codex failure (#703).
   if (exit.terminatedBySquawk && squawkAskedForExit(exit.exitCode, exit.signalCode)) {
     const how = exit.exitCode === null ? exit.signalCode : `code ${exit.exitCode}`;
-    return { event: 'note', message: `codex app-server did not exit on its own after close; terminated by cezar (${how})` };
+    return { event: 'note', message: `codex app-server did not exit on its own after close; terminated by ${productName('Cezar')} (${how})` };
   }
   if (exit.exitCode === null && exit.signalCode !== null) return { failure: `codex app-server was killed by signal ${exit.signalCode}` };
   if (exit.exitCode !== 0 && exit.exitCode !== null) {

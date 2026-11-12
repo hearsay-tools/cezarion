@@ -1196,7 +1196,7 @@ hearsay-tools/cezarion#3291).
   report and either label is missing, the job fails before any write and names the
   label.
 - **What a report starts.** Nothing. A maintainer who confirms the flake adds
-  `flaky-test`, and a Cezar automation starts a task to fix or quarantine the test
+  `flaky-test`, and a Squawk automation starts a task to fix or quarantine the test
   ([main CI repair](main-ci-repair.md#flake-reports-from-the-merge-queue)). A report never
   gets `main-ci-failure`, so the main CI repair automation does not take it.
 - **Activation order.** Enable the flake automation before anyone adds `flaky-test`. A

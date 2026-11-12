@@ -341,7 +341,7 @@ function curateEnv(
   // and a per-run `TEMP` are the same variable spelled two ways — leaving both
   // in the child env hands the backend the host value under one of them. That
   // is exactly the temp-directory bug #785 fixes, so the override has to be
-  // total. `extra` is cezar's own, never a host secret, and always wins.
+  // total. `extra` is Squawk's own, never a host secret, and always wins.
   const overridden = upperSet([
     ...Object.keys(extra).flatMap(name => {
       const key = name.toUpperCase();
@@ -403,14 +403,14 @@ function curateEnv(
     if (overridden.has(name.toUpperCase())) continue; // the per-run value replaces it, whatever the spelling
     if (allow(name)) out[name] = value;
   }
-  // Per-run env last — it is cezar's own, never a host secret, and must win.
+  // Per-run env last — it is Squawk's own, never a host secret, and must win.
   for (const [name, value] of Object.entries(extra)) out[name] = value;
   return withoutHomeEnv(out);
 
   /** `name` is matched normalized; the caller keeps the original spelling. */
   function allow(name: string): boolean {
     const key = name.toUpperCase();
-    // cezar's own namespace (CEZ_DRY_RUN plumbing, mock hooks, run wiring).
+    // Squawk's own namespace (CEZ_DRY_RUN plumbing, mock hooks, run wiring).
     // A secret-shaped one (`CEZ_PRIVATE_TOKEN`) reaches a host command only through passthrough.
     if ((key.startsWith('CEZ_') || key.startsWith('HSQ_')) && (grants.secretCez || !looksSecret(key))) return true;
     // Backend auth + gh handoff + the cloud creds an active Bedrock/Vertex

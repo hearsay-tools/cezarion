@@ -14,14 +14,14 @@ export interface RunnerFacts {
   /** How the runner carries `spec.systemPrompt` onto a resumed session (hearsay-tools/cezarion#790). */
   readonly systemPromptOnResume: SystemPromptOnResume;
   /**
-   * The harness's own question tool. `answerable`: the wire reports the question and Cezar routes
+   * The harness's own question tool. `answerable`: the wire reports the question and Squawk routes
    * the human answer back to it. `auto-skipped`: the harness has the tool but answers it itself
    * before a human can (Cursor print skips it in headless mode). `none`: the wire has no native
    * question; the agent asks through `cezar_ask`.
    */
   readonly nativeAsk: 'answerable' | 'auto-skipped' | 'none';
   /**
-   * Backgrounded native subagents. `reported`: the wire reports a child's start and end, so Cezar
+   * Backgrounded native subagents. `reported`: the wire reports a child's start and end, so Squawk
    * waits on the child. `unreported`: the wire sends no child signal. `turn-held`: the parent turn
    * stays open until every child returns, so no turn end parks on running children.
    */
@@ -33,9 +33,9 @@ export interface RunnerFacts {
    *  `per-turn`: each report is new cost since the previous report. */
   readonly costReport: 'cumulative' | 'per-turn';
   /**
-   * Who names the session. `launch`: the runner opens its session under the id Cezar saves on the
+   * Who names the session. `launch`: the runner opens its session under the id Squawk saves on the
    * step before launch, so that id resumes at once. `native`: the runner mints its own id and
-   * reports it in a `session` event; until then the step holds only Cezar's launch id, which the
+   * reports it in a `session` event; until then the step holds only Squawk's launch id, which the
    * runner never knew. The `sessionId` row of each runner's `specSupport` names the wire.
    */
   readonly sessionIdSource: 'launch' | 'native';

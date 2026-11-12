@@ -36,7 +36,7 @@ export class WaitGroup {
 
 Object.freeze(WaitGroup.prototype);
 type RegisteredWait = PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry;
-/** An agent or CLI registration: withdraw Cezar's human waits, commit with its receipt, park at a boundary. */
+/** An agent or CLI registration: withdraw Squawk's human waits, commit with its receipt, park at a boundary. */
 const OPEN_REGISTERED = (receipt: RegistrationIdentity | undefined) => ({ withdraw: true, receipt, onCommitFailure: 'persistence' as const, park: true });
 Object.freeze(WaitGroup);
 export function createWaitGroup(): WaitGroup { return new WaitGroup(); }
@@ -99,7 +99,7 @@ export class WaitRegistry {
     return this.host.waitEngine.open(runId, state, entry, { withdraw: true, receipt: registration, onCommitFailure: { capacity: waitCapacityPolicyError }, park: true }).wait!;
   }
 
-  /** Cezar waits on live workers or open requests without adding a deadline of its own. */
+  /** Squawk waits on live workers or open requests without adding a deadline of its own. */
   registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry | undefined {
     if (!this.host.waitEngine.hasRoom(this.context.store.getRun(runId) ?? {})) return;
     const state = this.host.active(runId)!;
@@ -298,7 +298,7 @@ export class WaitRegistry {
   }
 
   /**
-   * A process wait (hearsay-tools/cezarion#1446, spec § Process wait decisions). Cezar refuses only
+   * A process wait (hearsay-tools/cezarion#1446, spec § Process wait decisions). Squawk refuses only
    * what it cannot watch to an end: another user's PID, its own, and an agent session's leader;
    * the agent's shell can already observe any process of its own, so there is no ownership proof.
    * A PID already gone is no error: the command was fast, and the wait resolves at once from its

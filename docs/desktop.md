@@ -193,7 +193,7 @@ installer would end the process), and it does not relaunch itself after the inst
 ## Desktop identity and bridge validation
 
 The release identity is Squawk, `tools.hearsay.squawk`. It has separate feeds
-and artifacts from the old Cezarion app. See the [migration guide](migration.md#desktop-and-mobile).
+and artifacts from the old Squawk app. See the [migration guide](migration.md#desktop-and-mobile).
 Development builds with the release switch off keep the old identity. Native environment readers accept `HSQ_*` first and
 `CEZ_*` as fallback now. Presence wins, including empty values. The shell pins
 both aliases for every generated sidecar control, even in an old-ID build.

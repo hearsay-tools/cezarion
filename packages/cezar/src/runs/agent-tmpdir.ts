@@ -196,7 +196,7 @@ function platformTempRoot(): string | undefined {
 }
 
 /** Every root a fallback directory can hang off, most preferred first: the
- *  env-honouring OS temp root, then the platform default (#440). A cezar task
+ *  env-honouring OS temp root, then the platform default (#440). A Squawk task
  *  session exports a `TMPDIR` as deep as the checkout it belongs to (#785),
  *  so the first root's candidate can itself cross the socket cap while the
  *  platform default still fits. Resolution picks the first root whose

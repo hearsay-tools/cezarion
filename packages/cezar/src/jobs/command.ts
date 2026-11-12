@@ -9,8 +9,8 @@ export function ownCommand(): string[] {
 }
 
 /**
- * The launch prompt's part that names the `job start` command in full. Cezar composes it in its own
- * process, where `process.execPath` is the Node that runs Cezar. The tool list also loads inside
+ * The launch prompt's part that names the `job start` command in full. Squawk composes it in its own
+ * process, where `process.execPath` is the Node that runs Squawk. The tool list also loads inside
  * other programs (omp is a standalone binary), so the `cezar_wait` description names the command
  * only as `hsq job start` and points here.
  */

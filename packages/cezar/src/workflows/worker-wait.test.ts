@@ -126,7 +126,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
             expect(acknowledgement).toBeInstanceOf(Promise);
             await acknowledgement;
           }
-          // The runner ACK precedes Cezar's chained delivery bookkeeping. Drain its
+          // The runner ACK precedes Squawk's chained delivery bookkeeping. Drain its
           // promise reactions before reading the row; this does not wait for a park.
           await setImmediate();
           checkpoint('parent parked after nudge');

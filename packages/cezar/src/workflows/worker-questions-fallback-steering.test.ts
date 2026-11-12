@@ -13,7 +13,7 @@ import { conversationOf, eventsOf, squawkAnswered, noHumanCard, idleWorker, stee
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
-// hearsay-tools/cezarion#1301: Cezar's fallback question does not hold what the plain park let
+// hearsay-tools/cezarion#1301: Squawk's fallback question does not hold what the plain park let
   // through. A parent's steer supersedes it and is charged as its reply would be.
   it("a parent's steer supersedes the worker's fallback question and resolves its routed request", async () => {
     const f = await idleWorker();
@@ -58,7 +58,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     expect({ wakes: disk.automaticWakes, delivered: delivered(disk) }).toEqual({ wakes: wakes + 1, delivered: true });
   });
 
-// hearsay-tools/cezarion#2410: the stop closes Cezar's fallback question with the worker, so the
+// hearsay-tools/cezarion#2410: the stop closes Squawk's fallback question with the worker, so the
   // Continue that follows finds nothing to supersede and proceeds.
   it('a Continue on a stopped worker proceeds after the stop closed its fallback question', async () => {
     const f = await idleWorker();

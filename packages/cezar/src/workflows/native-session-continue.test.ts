@@ -17,7 +17,7 @@ import type { WorkflowDef } from './types.ts';
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
-/** The UUID Cezar writes on a step before the runner reports its own session id. */
+/** The UUID Squawk writes on a step before the runner reports its own session id. */
 const LAUNCH_SESSION_ID = '0b6f1f8e-6c2a-4f55-9d0e-3c7c1a2b9e41';
 
 /** Two agent steps at different efforts, so the wire shows which step a Continue runs as. */
@@ -111,7 +111,7 @@ const WIRES: Record<RunnerId, {
 };
 
 /**
- * Cezar saves a launch UUID on the step before the runner's `session` event. A runner that opens
+ * Squawk saves a launch UUID on the step before the runner's `session` event. A runner that opens
  * its session under that id (`sessionIdSource: 'launch'`) resumes it after a crash in that
  * window. A runner that mints its own id (`native`) never knew it, so the Continue opens a fresh
  * session. Either way the Continue runs as the step it continues. The real native mocks show the

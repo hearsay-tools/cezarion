@@ -3,14 +3,14 @@ import { spawn } from 'node:child_process';
 /**
  * macOS privacy prompts name the RESPONSIBLE process, and every process the desktop app starts
  * inherits the app as its responsible process. Left alone, an agent that lists `~/Documents`
- * raises "Cezar would like to access files in your Documents folder" — and an Allow there hands
+ * raises "Squawk would like to access files in your Documents folder" — and an Allow there hands
  * every agent, forever, what one of them asked for.
  *
  * The desktop shell exports `CEZ_DISCLAIM_EXEC`: its own executable, which, run as
  * `<exe> --cez-disclaim-exec <program> <args…>`, replaces itself (same pid, same stdio) with
  * `program` as its own responsible process. Agent backends are started through it, so the prompt
  * names the agent (`claude`, `codex`, …) and a grant covers that agent only. The cockpit server
- * itself stays the app's — the folder picker's prompts are still Cezar's, which they should be.
+ * itself stays the app's — the folder picker's prompts are still Squawk's, which they should be.
  *
  * Anywhere else — no desktop shell, not macOS, a program that does not resolve — the command is
  * returned untouched, so a missing binary still fails the spawn with the usual ENOENT and hint.

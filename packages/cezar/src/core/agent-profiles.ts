@@ -8,7 +8,7 @@ import type { ProviderId } from './provider-auth.ts';
  */
 
 /**
- * Account relocation variables used by cezar. null means named accounts are unsupported. omp
+ * Account relocation variables used by Squawk. null means named accounts are unsupported. omp
  * takes a profile name; other supported mappings take a folder. Host values define the default;
  * named overrides apply last. Refuse a named omp folder outside the current profile root.
  */
@@ -55,7 +55,7 @@ const OMP_RESERVED_NAME_RE = /^(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\..*)?$/i
  * The omp profile a folder names, or `null` when it names none.
  *
  * A folder names a profile when its parent is called `profiles` and its own name passes every rule
- * omp applies, so cezar never hands omp a profile it would refuse at startup. `default` is refused
+ * omp applies, so Squawk never hands omp a profile it would refuse at startup. `default` is refused
  * too: omp reads it as "no profile", so a named account under that name would be the default.
  *
  * Shape only — whether `profiles/` is the one under omp's CURRENT root needs the environment, and

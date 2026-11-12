@@ -24,7 +24,7 @@ import { FolderBrowser, useBrowseTarget } from '@/components/folder-browser'
  * navigates to the new project's scope. The browsing itself — and the three API shapes it is
  * faithful to — lives in `components/folder-browser.tsx`, shared with "Add agent account".
  *
- * A non-git folder is selectable: `isRepo` only earns a badge, because cezar degrades in a
+ * A non-git folder is selectable: `isRepo` only earns a badge, because Squawk degrades in a
  * non-git folder exactly as `cezar serve` does today, so gating selection on it would invent a
  * restriction the server does not have.
  *

@@ -55,7 +55,7 @@ export function insideRoot(destination, root, platform) {
 
 /** Refuse a root that is, or is below, an account root, through symlink aliases; fail closed when unverifiable. */
 function assertOutsideAccountHome(root) {
-  const refusal = () => new Error(`[cez] refusing to write a test install marker to ${root}: it is the account's real cezar home, or the OS gives no account home to check it against. Use a sandbox directory for a test home.`);
+  const refusal = () => new Error(`[cez] refusing to write a test install marker to ${root}: it is the account's real Squawk home, or the OS gives no account home to check it against. Use a sandbox directory for a test home.`);
   const canonicalTarget = (target, rejectDangling = true) => {
     let ancestor = resolve(target);
     const remaining = [];

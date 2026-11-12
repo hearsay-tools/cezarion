@@ -413,7 +413,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           if (await worktreeGone() && !await branchExists()) remaining = [];
           return undefined;
         }
-        // hearsay-tools/cezarion#905: the worktree went away outside cezar and left its branch behind.
+        // hearsay-tools/cezarion#905: the worktree went away outside Squawk and left its branch behind.
         // While the branch matches the receipt, is checked out nowhere, and it and every reflog entry
         // sit at the baseline, it holds no work: delete it through the checkpointed compare-and-swap
         // below. A branch reset back to its baseline keeps the worker's commits only in the reflog

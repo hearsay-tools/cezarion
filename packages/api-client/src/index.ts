@@ -1,5 +1,5 @@
 /**
- * `@open-mercato/cezar-api-client` — the one boundary between the cezar service and anything
+ * `@open-mercato/cezar-api-client` — the one boundary between the Squawk service and anything
  * that talks to it.
  *
  * Everything reachable from this barrel is Node-free by construction: no `node:*` import, no

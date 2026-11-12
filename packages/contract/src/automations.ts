@@ -1,5 +1,5 @@
 import { z } from 'zod';
-// An automation launches an ORDINARY cezar task, so the task it carries is the composer's own
+// An automation launches an ORDINARY Squawk task, so the task it carries is the composer's own
 // run-creation input minus the keys an automation supplies itself. Consumed rather than
 // redeclared — the same one-way direction `./runs.ts` takes towards `./workflows.ts`.
 import { createRunInputBaseSchema, singleRunVariantsSchema } from './runs.ts';
@@ -217,7 +217,7 @@ export const automationLogResultSchema = z.enum([
   'manual',
   'catch-up',
   'failed',
-  // once schedule: Cezarion started after its latest start, so nothing launched.
+  // once schedule: Squawk started after its latest start, so nothing launched.
   'missed',
 ]);
 export type AutomationLogResult = z.infer<typeof automationLogResultSchema>;

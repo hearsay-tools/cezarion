@@ -1,3 +1,4 @@
+import { productName } from './home/display.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,13 +19,13 @@ import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from './run
 
 const BEGIN = '<!-- cezar:records — cezar rewrites this block whole from its run store; edits here are replaced -->';
 const END = '<!-- /cezar:records -->';
-const block = (...lines: string[]) => `${BEGIN}\n## Cezar records\n\n### Autosave\n\n${lines.map((line) => `${line}\n`).join('')}${END}\n`;
+const block = (...lines: string[]) => `${BEGIN}\n## ${productName('Cezar')} records\n\n### Autosave\n\n${lines.map((line) => `${line}\n`).join('')}${END}\n`;
 const records = (...notes: string[]): HandoffRecords => ({ autosave: notes.map((note) => ({ at: '2026-10-16T10:00:00.000Z', note })) });
 const SEEDED = '# Handoff — t\n\n**Task id:** run-1\n**Workflow:** quick-task\n\n## Goal\n\ndo it\n\n## Progress log\n\n## Resume notes\n';
 
 /**
- * hearsay-tools/cezarion#1809: cezar's records live in the run store and reach the file as one
- * block that cezar rewrites whole. Nothing outside the block is read or changed.
+ * hearsay-tools/cezarion#1809: Squawk's records live in the run store and reach the file as one
+ * block that Squawk rewrites whole. Nothing outside the block is read or changed.
  */
 describe('renderHandoffRecords', () => {
   it('inserts the block right before the seeded Goal and leaves every other byte', () => {
@@ -109,7 +110,7 @@ describe('the store-backed autosave records', () => {
     return text.slice(start, text.indexOf(`\n${END}\n`, start)).split('\n').filter((line) => line.startsWith('- '));
   };
   const periodic = (count: number, first: string, latest: string, branch = BRANCH, fold = `${latest}~1`) =>
-    `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
+    `periodic: ${count} ${productName('cezar')} autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
     `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${fold}\``;
   const at = (iso: string) => vi.setSystemTime(new Date(iso));
   const recordPeriodic = (sha: string | null, branch: string | null = BRANCH) =>
@@ -289,8 +290,8 @@ describe('the store-backed autosave records', () => {
 describe('handoffInstructions', () => {
   it('the tool variant teaches cezar_done, cezar_ask and cezar_wait and no lifecycle marker', () => {
     const text = handoffInstructions();
-    expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
-    expect(text).toContain('When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.');
+    expect(text).toContain(`Lifecycle tools (${productName('cezar')}): End every turn with a ${productName('cezar')} tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.`);
+    expect(text).toContain(`When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. ${productName('Cezar')} shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.`);
     expect(text).toContain('call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later');
     expect(text).not.toContain('kind "human"');
     // A reply settles the question; only CI waits and timers wait for a result or a cancel.
@@ -299,7 +300,7 @@ describe('handoffInstructions', () => {
     for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
     expect(text).toContain('CEZ:PR=');
     expect(text).toContain('## Pasted attachments');
-    expect(text).toMatch(/"Cezar records" block[^\n]*never edit it/);
+    expect(text).toMatch(new RegExp(String.raw`"${productName('Cezar')} records" block[^\n]*never edit it`));
     expect(text).not.toContain('Autosave (cezar)');
     expect(text).not.toContain('CEZ_TODOS_FILE');
   });
@@ -309,14 +310,14 @@ describe('handoffInstructions', () => {
   it('steers agents off native cross-session messaging', () => {
     const text = handoffInstructions();
     expect(text).toContain('## Messaging other tasks');
-    expect(text).toContain('Cezar tasks talk to each other only through `hsq message`, which needs task messaging on; with it, your delegation instructions give the full command and its verbs (`tasks`, `request`, `progress`, `reply`).');
+    expect(text).toContain(`${productName('Cezar')} tasks talk to each other only through \`hsq message\`, which needs task messaging on; with it, your delegation instructions give the full command and its verbs (\`tasks\`, \`request\`, \`progress\`, \`reply\`).`);
     expect(text).toContain("Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions.");
     expect(text).toContain('When task messaging is off, no agent channel to another task exists: tell the user instead.');
     expect(text).toContain('`hsq task send` is human input and refuses to run inside a task.');
     expect(text).toContain("Native subagents inside your own session are not tasks: you may start them and message them with your runner's tools.");
   });
 
-  // hearsay-tools/cezarion#2431: a runner that reports its native subagents is told Cezar waits for
+  // hearsay-tools/cezarion#2431: a runner that reports its native subagents is told Squawk waits for
   // them; every other runner keeps the timer guidance alone.
   it('adds the native subagent paragraph only for a runner that reports them', () => {
     const plain = handoffInstructions({});
@@ -328,11 +329,11 @@ describe('handoffInstructions', () => {
     expect(native.replace(/\n\nNative subagents: [^\n]*/, '')).toBe(plain);
   });
 
-  // Agents read UTC from Cezar's tools and local time from `date`, and told users UTC times as
-  // local ones. Every session learns that Cezar's times are UTC and which zone the user is in.
+  // Agents read UTC from Squawk's tools and local time from `date`, and told users UTC times as
+  // local ones. Every session learns that Squawk's times are UTC and which zone the user is in.
   it('names the user\'s time zone and that Cezar tool times are UTC', () => {
     const text = handoffInstructions({ timeZone: 'Europe/Warsaw' });
-    expect(text).toContain('Times: Cezar tools take and answer times in UTC, ending in Z, such as a wait\'s `deadline` or a scheduled task\'s `due_at`. The user\'s time zone is Europe/Warsaw.');
+    expect(text).toContain(`Times: ${productName('Cezar')} tools take and answer times in UTC, ending in Z, such as a wait's \`deadline\` or a scheduled task's \`due_at\`. The user's time zone is Europe/Warsaw.`);
     expect(text).toContain('Before you tell the user a time, convert it to Europe/Warsaw and name the zone.');
     expect(text).toContain('`TZ=Europe/Warsaw date`');
     expect(handoffInstructions()).toContain(`The user's time zone is ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}.`);

@@ -60,7 +60,7 @@ export function wallTimeAtOrAfter(targetMs: number, timeZone: string): string {
 
 /**
  * The agent's form of a time: UTC to the minute, `YYYY-MM-DDTHH:MMZ`, like every other time a
- * Cezar tool takes or answers. The stored schedule keeps a wall time in its zone for the cockpit.
+ * Squawk tool takes or answers. The stored schedule keeps a wall time in its zone for the cockpit.
  */
 export const UTC_MINUTE_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})Z$/;
 export const utcMinute = (instantMs: number): string => `${new Date(instantMs).toISOString().slice(0, 16)}Z`;
@@ -129,8 +129,8 @@ export const scheduledTaskRefusalCodeSchema = z.enum(['invalid_request', 'unavai
 export type ScheduledTaskRefusalCode = z.infer<typeof scheduledTaskRefusalCodeSchema>;
 const refusal = z.object({ ok: z.literal(false), code: scheduledTaskRefusalCodeSchema, message: z.string() });
 
-/** The note every create answer carries: Cezarion has no daemon, so it must be running. */
-export const SCHEDULED_TASK_NOTE = 'Cezarion must be running at the due time, or start again before the latest start, for this task to launch.';
+/** The note every create answer carries: Squawk has no daemon, so it must be running. */
+export const SCHEDULED_TASK_NOTE = 'The cockpit must be running at the due time, or start again before the latest start, for this task to launch.';
 
 export const scheduleTaskAnswerSchema = z.union([
   z.object({ ok: z.literal(true), task: scheduledTaskSchema, note: z.string() }),

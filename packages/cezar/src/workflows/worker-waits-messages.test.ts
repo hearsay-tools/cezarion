@@ -11,6 +11,7 @@ import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 import { delegatingParent, manager, restart, root, store, until, useWorkerWaitFixture, waitOf, worker, work } from './worker-wait.testkit.ts';
 
 import { entryOf, inputOf } from './worker-waits-shared.testkit.ts';
+import { productName } from '../home/display.ts';
 
 describe('messages wake without being waits', { timeout: 45_000 }, () => {
   useWorkerWaitFixture();
@@ -165,7 +166,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
       input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'Still working mock:hold', createdAt: now, conversation: { senderRunId: idle.id, recipientRunId: f.p.id, kind: 'progress' } } });
     manager.deliverConversationInput(f.p.id);
     await until(() => delivered(f.p.id, id));
-    expect(resumed).toHaveBeenCalledWith(f.p.id, { text: 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.', waitWake: true }, true);
+    expect(resumed).toHaveBeenCalledWith(f.p.id, { text: `Resume to receive queued messages. End this opening turn so ${productName('Cezar')} can deliver them.`, waitWake: true }, true);
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
     expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, workerIds: [idle.id] });
     expect(written()).toEqual([]);

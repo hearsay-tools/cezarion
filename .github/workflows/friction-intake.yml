@@ -16,8 +16,8 @@ on:
 
 permissions: {}
 
-# Classification creates no cezar task. Handling-label events are consumed by
-# cezar's three polls; this preserves its one-task-per-issue deduplication.
+# Classification creates no Squawk task. Handling-label events are consumed by
+# Squawk's three polls; this preserves its one-task-per-issue deduplication.
 concurrency:
   group: friction-intake-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false

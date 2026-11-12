@@ -14,6 +14,7 @@ import { manager, until, store, semaphore, toolGenerationOf, restart, root, term
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import { toolCall } from './waits-parity.testkit.ts';
+import { productName } from '../home/display.ts';
 
 // The registration part of the wait parity cells (`WAIT_PARITY_PARTS` in `waits-parity-catalog.testkit.ts`).
 // A wait parity file imports this module first, so it loads no other part's cells (hearsay-tools/cezarion#3242).
@@ -43,12 +44,12 @@ export function registrationCells(runners: RunnerId[], it: typeof registerTest =
       });
     }
 
-    it(`${runner} U26 a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools`, async () => {
+    it(`${runner} U26 a launch whose Squawk tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools`, async () => {
       nativeWire(runner);
       retryAtOnce();
       const resources = toolResources.current!;
       const broken = () => vi.spyOn(resources, 'controller').mockRejectedValueOnce(new ToolsUnavailableError("ENOSPC: no space left on device, mkdtemp '/tmp/cez-ci-XXXXXX'", '/tmp'));
-      const cause = /Cezar tools could not start: ENOSPC: no space left on device, mkdtemp '\/tmp\/cez-ci-XXXXXX'\. .*Free space in \/tmp or fix its permissions, then Continue the task\./;
+      const cause = new RegExp(String.raw`${productName('Cezar')} tools could not start: ENOSPC: no space left on device, mkdtemp '\/tmp\/cez-ci-XXXXXX'\. .*Free space in \/tmp or fix its permissions, then Continue the task\.`);
       // A fresh start: nothing spawns, the step and the run fail with the cause.
       broken();
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${HARNESS_ADAPTERS[runner].scenarios.baseline!} u26-opening` });
@@ -193,7 +194,7 @@ export function registrationCells(runners: RunnerId[], it: typeof registerTest =
       expect(prompted(runner, `Timer ${last.id} fired`)).toEqual([]);
       expect(turnEnds(run.id)).toBe(turns);
       expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === `automatic timer wake-up cap reached (40); timer ${last.id} cancelled`)).toBe(true);
-      // hearsay-tools/cezarion#1234: the spent budget leaves a cezar human wait, so the run waits on the user.
+      // hearsay-tools/cezarion#1234: the spent budget leaves a Squawk human wait, so the run waits on the user.
       expect(store.getRun(run.id)?.waits ?? []).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
       await expectPoolCapacity(runner, run.id, false);

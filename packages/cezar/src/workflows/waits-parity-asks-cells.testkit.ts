@@ -50,7 +50,7 @@ export function asksCells(runners: RunnerId[], it: typeof registerTest = registe
       expect(wait.questions?.[1]).not.toHaveProperty('options');
     });
 
-    // hearsay-tools/cezarion#1458: on Claude, prose between tool calls can reach Cezar only as a
+    // hearsay-tools/cezarion#1458: on Claude, prose between tool calls can reach Squawk only as a
     // summary, so the content rides in the call. Every runner's wire must deliver it whole.
     it(`${runner} U7k cezar_ask delivers its context to the human wait and the card`, async () => {
       nativeWire(runner);
@@ -159,7 +159,7 @@ export function asksCells(runners: RunnerId[], it: typeof registerTest = registe
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
-    // Finish answers Cezar's own human wait; it keeps the agent's question (the #151 guard).
+    // Finish answers Squawk's own human wait; it keeps the agent's question (the #151 guard).
     it(`${runner} U5c a root parked on its no-wait human wait is finished by the user, and an agent question still blocks a root with workers`, async () => {
       nativeWire(runner);
       // Only a root with workers keeps its question through Finish (hearsay-tools/cezarion#2784).
@@ -185,7 +185,7 @@ export function asksCells(runners: RunnerId[], it: typeof registerTest = registe
       await until(() => !manager.isActive(asked.id));
     });
 
-    // Cezar's own wait is no question (hearsay-tools/cezarion#1234): it raises no human gate, so the
+    // Squawk's own wait is no question (hearsay-tools/cezarion#1234): it raises no human gate, so the
     // run takes what a plain park took before it, and a wait the agent registers replaces it.
     it(`${runner} U5d the no-wait human wait raises no question, and the agent's own wait replaces it`, async () => {
       nativeWire(runner);

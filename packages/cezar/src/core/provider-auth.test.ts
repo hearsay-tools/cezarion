@@ -698,7 +698,7 @@ describe('ProviderAuthService', () => {
     });
 
     it('re-checks a NOT-connected answer sooner, so a terminal login is noticed on its own', async () => {
-      // cezar cannot see `claude auth login` happen, so a card that says disconnected has to find
+      // Squawk cannot see `claude auth login` happen, so a card that says disconnected has to find
       // out for itself. A minute, not seconds: every expiry costs a background probe now that
       // reading revalidates behind the answer, and a polling cockpit would turn a five-second
       // window into a spawn every five seconds forever.

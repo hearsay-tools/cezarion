@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -72,7 +73,7 @@ describe('park notices (hearsay-tools/cezarion#1327)', () => {
 
   it('names what the worker waits on, what it last said, and how to reach it', () => {
     const text = formatParkNoticeText({ workerRunId: worker, waitId: wait, waits: [timer], lastText: 'Squeal times out harness-parity.test.ts.\nCEZ:MONITORING' });
-    expect(text).toContain(`Cezar notice: your worker ${worker} parked before finishing. Your wait ${wait} stays open`);
+    expect(text).toContain(`${productName('Cezar')} notice: your worker ${worker} parked before finishing. Your wait ${wait} stays open`);
     expect(text).toContain(`It waits on: timer ${timer.id} at ${timer.deadline} (Opened by CEZ:MONITORING.).`);
     expect(text).toContain('Its last message:\nSqueal times out harness-parity.test.ts.');
     expect(text).not.toContain('\nCEZ:MONITORING');

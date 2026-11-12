@@ -19,6 +19,7 @@ import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { startCursorPrintProcess, type CursorPrintProcess, type CursorPrintProcessOptions } from './cursor-print-process.ts';
 import { createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_NO_PROGRESS_TIMEOUT_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
+import { productName } from '../home/display.ts';
 
 /** Cursor print fields with live-qualified invocation mechanisms. */
 export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
@@ -27,7 +28,7 @@ export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'print stdin' },
   images: { honored: true, via: 'private temporary image files passed with --image' },
   cwd: { honored: true, via: 'spawn cwd' },
-  toolGrant: { honored: false, reason: 'No general Cezar tool-name to native Cursor tool-name mapping exists, and Cursor print has no per-command prefix allowlist' },
+  toolGrant: { honored: false, reason: `No general ${productName('Cezar')} tool-name to native Cursor tool-name mapping exists, and Cursor print has no per-command prefix allowlist` },
   restrictCrossSessionMessaging: { honored: false, reason: 'Cursor 2026.10.22-27dcf5f print reaches no other session: send_message (cloud agents) has no CLI handler, and the native agent tools reach the session\'s own subagents (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: true, via: '--add-dir per workspace root on every turn' },
   env: { honored: true, via: 'buildChildEnv with per-run env' },

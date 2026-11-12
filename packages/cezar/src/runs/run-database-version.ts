@@ -1,4 +1,4 @@
-/** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
+/** `PRAGMA user_version` of a database this build created. A higher number means a newer Squawk
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
 export const RUN_DATABASE_SCHEMA_VERSION = 11;

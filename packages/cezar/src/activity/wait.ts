@@ -65,7 +65,7 @@ export function activityWait(run: RunRecord, ledger: ConversationState | undefin
   }
 }
 
-/** A question, or one of Cezar's own waits for the user: a plain turn end, a spent wake budget or
+/** A question, or one of Squawk's own waits for the user: a plain turn end, a spent wake budget or
  *  the completion gate. */
 function humanWait(run: RunRecord): ActivityWait {
   const entries = openOf(run, 'human');

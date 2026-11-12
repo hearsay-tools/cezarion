@@ -129,7 +129,7 @@ describe('the config API', () => {
     expect((await getBody()).modelsLocked).toBe(false);
   });
 
-  it('locks native defaults and rejects Cezar model overrides', async () => {
+  it('locks native defaults and rejects Squawk model overrides', async () => {
     process.env.CEZ_AGENT_MODELS_LOCKED = '1';
     mkdirSync(join(homeRoot, '.codex'), { recursive: true });
     writeFileSync(join(homeRoot, '.codex', 'config.toml'), 'model = "gpt-5-codex"\n');

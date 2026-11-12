@@ -6,7 +6,7 @@
 
 /**
  * Non-image attachment types the composer may send (#950). Deliberately an allowlist and
- * deliberately short: cezar serves these files back from the cockpit's own origin, so every entry
+ * deliberately short: Squawk serves these files back from the cockpit's own origin, so every entry
  * here is one more thing that must be safe to hand a browser. `image/*` stays a regex — narrowing
  * what the route has always accepted would be the breaking half of this change.
  *
@@ -35,7 +35,7 @@ export function isAttachmentMediaType(mediaType: string): boolean {
 /**
  * The on-disk extension for an attachment, derived from its media type ALONE — the user's own
  * filename never reaches the wire, and therefore never reaches a path. `img` is the pre-existing
- * catch-all for an image type cezar does not name (an SVG, a BMP), kept so those files land where
+ * catch-all for an image type Squawk does not name (an SVG, a BMP), kept so those files land where
  * they always did.
  */
 export function attachmentExtension(mediaType: string): string {

@@ -6,7 +6,7 @@ import type { RunContext } from './host.ts';
 /**
  * A run's `preview.agent-browser` state across a crash (hearsay-tools/cezarion#784): the marker
  * `<dataDir>/preview/<runId>/agent-connected` exists from just before `connected` is appended until
- * just after `disconnected` is. A cezar killed with an agent connected leaves the marker, and the
+ * just after `disconnected` is. A Squawk killed with an agent connected leaves the marker, and the
  * next boot appends the missing `disconnected`, so the cockpit never lists a page no agent drives.
  */
 

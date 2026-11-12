@@ -670,7 +670,7 @@ describe('the agents form', () => {
       })
       // claude was ALREADY the default runner, so nothing needed saying to the repo config…
       expect(puts()).toHaveLength(0)
-      // …nor to the project registry, whose schema a downgraded cezar would rewrite.
+      // …nor to the project registry, whose schema a downgraded Squawk would rewrite.
       expect(requests.some((r) => r.url.startsWith('/api/v1/projects/'))).toBe(false)
     })
 

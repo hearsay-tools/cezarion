@@ -13,7 +13,7 @@ import { waitForStatus, pollFor, pollJson } from './poll'
 
 /**
  * Stacking, editing and removing a queued run's prompt (#472), end-to-end against a LIVE
- * dry-run cezar — the one state the cockpit used to forbid editing in.
+ * dry-run Squawk — the one state the cockpit used to forbid editing in.
  *
  * The queue is forced with `{"resources":{"maxParallel":1}}` in the throwaway
  * workspace's `CEZ_HOME/config.json`, and the slot is held by a `mock:slow` run

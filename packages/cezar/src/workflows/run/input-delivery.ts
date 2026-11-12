@@ -111,7 +111,7 @@ export class InputGroup {
   /** Only the older ask answered by this continuation's opening turn. */
   get openingAnswerAskSeq(): number | undefined { return this.#openingAnswerAskSeq; }
   get openingAgentInputId(): string | undefined { return this.#openingAgentInputId; }
-  /** A turn started synchronously inside Cezar's write belongs to that write. */
+  /** A turn started synchronously inside Squawk's write belongs to that write. */
   get writingInput(): boolean | undefined { return this.#writingInput; }
 
   recordInputError(message: string): void { this.#agentInputError = message; }
@@ -369,7 +369,7 @@ export class InputDelivery {
     // input finished before the input's acknowledgement. Its done, the waits still owed (a wake
     // acknowledged after its turn ended) or the turn end it kept (`parkAfterAck`) settle now, with
     // queued and accepted input still taking priority above (hearsay-tools/cezarion#1234, #1525).
-    // Cezar's own human wait is not owed: the rule decides, and the agent's wait replaces it.
+    // Squawk's own human wait is not owed: the rule decides, and the agent's wait replaces it.
     const done = state.boundary.doneAtBoundary === session;
     if (!done && (this.host.line.isParked(runId) ||
       (state.boundary.parkAfterAck?.session !== session && (proseGate || !this.host.humanWaits.holdsAgentWaits(runId))))) return;
@@ -543,7 +543,7 @@ export class InputDelivery {
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
-    // A wake beside a pending question (`admitsAgentInput`) is not its answer: the question stays Cezar's and its card stays answerable, because only a human delivery settles it. The provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
+    // A wake beside a pending question (`admitsAgentInput`) is not its answer: the question stays Squawk's and its card stays answerable, because only a human delivery settles it. The provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
     try { acknowledgement = writeInput(state, () => session.sendAgentMessage(content, inputIds)); }
     catch (error) { refund(); fail(error, false); state.inputState.clearFlight(); return false; }
     if (!acknowledgement) { refund(); state.inputState.clearFlight(); return false; }
@@ -618,7 +618,7 @@ export class InputDelivery {
   }
 
   private supersedeFallbackBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
-    // A parent's input to a worker supersedes Cezar's fallback question, charged as its reply would
+    // A parent's input to a worker supersedes Squawk's fallback question, charged as its reply would
     // be (hearsay-tools/cezarion#1301); the parent's reply to it goes through the answer seam.
     const answer = this.host.routedAnswer(runId)?.id;
     if (run.agentInputs?.some(input => !input.deliveredAt && input.source === 'agent' && input.id !== answer && input.id !== state.inputState.openingAgentInputId) &&
@@ -678,7 +678,7 @@ export class InputDelivery {
     return this.host.submitAgentInput(runId, state, [{ type: 'text', text }], batch.inputs.map(input => input.id), beforeHumanReset);
   }
 
-  /** Restore active lifecycle/accounting when either Cezar or the backend
+  /** Restore active lifecycle/accounting when either Squawk or the backend
    * resumes work in a parked session. */
   resumeParkedRun(runId: string, state: ActiveRun, beforeHumanReset?: HumanAnswerBudget): void {
     clearHeldHumanInputTimer(state);
@@ -705,7 +705,7 @@ export class InputDelivery {
     const run = this.context.store.getRun(runId);
     if (!canProceedWithRun(run, () => this.host.workerExecutionStopped(runId), run => this.host.executionBlockedByRootFinish(run))) return false;
 
-    // Cezar's fallback question on a worker never holds what the plain park it replaced let
+    // Squawk's fallback question on a worker never holds what the plain park it replaced let
     // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301),
     // and so does a human message, as a Continue does (hearsay-tools/cezarion#2410). A question the
     // worker asked itself belongs to its parent, and a human message is refused.

@@ -51,7 +51,7 @@ export async function probe({ Client, StdioClientTransport, CiToolController, cr
   const client = new Client({ name:'installed-ci-smoke', version:'1' });
   try {
    await client.connect(new StdioClientTransport({ ...session.descriptor, env:session.env, stderr:'pipe' }));
-   assert.match(client.getInstructions() ?? '', /^The interface to Cezarion[^\n]*\n- cezar_wait: /);
+   assert.match(client.getInstructions() ?? '', /^The interface to (Cezarion|Squawk)[^\n]*\n- cezar_wait: /);
    // hearsay-tools/cezarion#1236: the deprecated CI alias is gone.
    assert.ok(!(client.getInstructions() ?? '').includes('cezar_wait_for_ci'));
    const tools = await client.listTools();

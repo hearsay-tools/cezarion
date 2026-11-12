@@ -6,7 +6,7 @@ import { BACKEND_MODEL_MAP, parseModelIdentity } from './model-identity.ts';
  * rather than an export of `model-identity.ts` (#548/#831): nothing else may gate on it, because
  * `resolveModelIdentity` lets an unknown provider through on purpose. It is a heuristic for
  * {@link namesAnotherKnownProvider} alone, and being short is a feature — every entry costs a
- * false refusal if cezar is ever wrong about who serves it.
+ * false refusal if Squawk is ever wrong about who serves it.
  */
 const KNOWN_PROVIDERS = ['anthropic', 'openai', 'google', 'openrouter'] as const;
 
@@ -40,7 +40,7 @@ export const KNOWN_PRESETS_BY_RUNNER: Record<RunnerId, readonly string[]> = {
 };
 
 /**
- * True when the `provider/` prefix on `model` names a provider cezar knows that this
+ * True when the `provider/` prefix on `model` names a provider Squawk knows that this
  * single-provider runner does not serve — `anthropic/…` handed to codex.
  *
  * Deliberately narrower than the run-time gate in `model-identity.ts`: this check is

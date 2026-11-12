@@ -90,7 +90,7 @@ prints one JSON object to stdout and exits 0; a refusal or usage error prints
 `<name>.<run>.exit` and `<name>.job.db` files are scratch state in `$TMPDIR` or `--dir`:
 deleting them after the job ended loses only the record of that job. Do not delete them
 while the job runs: without `<name>.job.db` the name is free, so a later start runs a second
-copy beside the first, and without the directory the log and the exit code are lost. Cezar
+copy beside the first, and without the directory the log and the exit code are lost. Squawk
 removes `$TMPDIR` when the task ends, so a job that must outlive its task takes `--dir`. The `cezar_wait` description now names
 this command in place of the `sh -c '( … ) & echo $!'` recipe, and the launch prompt gains a
 "Long commands" part after the artifact part. A process wait on a PID

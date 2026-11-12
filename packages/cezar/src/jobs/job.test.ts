@@ -100,7 +100,7 @@ it('the supervisor records itself, writes the output and the exit code, and leav
   expect(jobStatus(dir, 'inline')).toMatchObject({ state: 'exited', exitCode: 4 });
   expect(await superviseJob(dir, 'killed', node("process.kill(process.pid,'SIGKILL')"))).toBe(137);
   expect(await superviseJob(dir, 'absent', [join(dir, 'no-such-binary')])).toBe(127);
-  // Cezar removes a task's temp directory when the task ends: the supervisor still ends with the code.
+  // Squawk removes a task's temp directory when the task ends: the supervisor still ends with the code.
   const gone = join(dir, 'gone');
   mkdirSync(gone);
   expect(await superviseJob(gone, 'late', node(`require('fs').rmSync(${JSON.stringify(gone)},{recursive:true});process.exit(2)`))).toBe(2);

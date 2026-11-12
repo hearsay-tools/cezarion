@@ -168,7 +168,7 @@ export function defaultAgentAccountStore(): AgentAccountStore {
 /**
  * Read the store on demand — never cached, never throws.
  *
- * Not cached because `~/.cezar/` is shared by every cezar process on the machine, so a snapshot is
+ * Not cached because `~/.cezar/` is shared by every Squawk process on the machine, so a snapshot is
  * a staleness bug; one small JSON read is free next to spawning a CLI.
  *
  * A missing file is the zero-config default (silent). A corrupt one degrades to the default with a
@@ -226,7 +226,7 @@ export async function mergeWriteAgentAccounts(
  *
  * Reads the RAW object rather than going through the workspace schema, because that schema no
  * longer names these keys — they only survive there as passthrough. Nothing is deleted from
- * `config.json`: an older cezar sharing this home keeps reading what it has always read, and this
+ * `config.json`: an older Squawk sharing this home keeps reading what it has always read, and this
  * import is idempotent because it only runs while `agent-accounts.json` is absent.
  */
 function importLegacyAccounts(home: Home): AgentAccountStore {
@@ -299,7 +299,7 @@ function readLegacyAccounts(home: Home, persist: boolean): AgentAccountStore {
   const imported = storeSchema.safeParse(input);
   if (!imported.success) return defaultAgentAccountStore();
   // Only worth persisting when there was something to carry over; an empty import must not create
-  // a file, or the zero-config promise ("delete any of them and cezar rebuilds") gains a file that
+  // a file, or the zero-config promise ("delete any of them and Squawk rebuilds") gains a file that
   // exists for no reason.
   if (!persist || imported.data.accounts.length === 0) return imported.data;
   try {

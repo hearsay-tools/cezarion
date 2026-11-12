@@ -322,7 +322,7 @@ function mapIdentifiedItem(
 // entry the agent is executing.
 //
 // `todoList` is NOT an app-server item type — the v2 `ThreadItem` union has no
-// todo variant, so this arm is dead on the transport cezar spawns. It is kept
+// todo variant, so this arm is dead on the transport Squawk spawns. It is kept
 // as cheap tolerance: these types are marked EXPERIMENTAL upstream, codex's
 // exec transport does emit a `todo_list` item, and a stray snapshot is better
 // rendered than dropped. The real plan channel is `turn/plan/updated`.

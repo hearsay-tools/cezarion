@@ -155,7 +155,7 @@ it.each([root, child])('shows request waiting for either participant ($id)', run
   expect(screen.getByText(run.delegation.role === 'worker' ? /Waiting on parent reply/ : /Waiting on worker replies/)).toBeTruthy();
 });
 
-// Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301): the parent still reads as
+// Squawk's completion wait has no deadline (hearsay-tools/cezarion#1301): the parent still reads as
 // waiting on its workers, and the note says nothing ends the wait but their settlement.
 it('shows a parent parked on Cezar\'s completion wait, which has no deadline', () => {
   setup({ ...root, status: RUN_STATUS.waiting, waits: [{

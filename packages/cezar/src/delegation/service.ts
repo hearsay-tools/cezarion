@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { commandText } from '../home/command.ts';
 import { WAIT_KINDS } from '../workflows/run/wait-kinds.ts';
 import { projectPaths } from '../project-paths.ts';
@@ -493,7 +494,7 @@ export class DelegationService {
       inputs.some(input => input.id === message.id && !input.deliveredAt));
     return { messages, outcomes,
       ...(merged.length > messages.length ? { nextBefore: encodeConversationCursor(messages[0]!) } : {}),
-      ...(unread ? { hint: commandText('This history includes unread messages. Run cez message inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.') } : {}) };
+      ...(unread ? { hint: commandText(`This history includes unread messages. Run cez message inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, ${productName('Cezar')} will not queue them again for normal end-of-turn delivery.`) } : {}) };
   }
   /** The ledgers a history read covers: the family's one, or each peer root's own while it exists.
    *  A peer whose history is being deleted, or is deleted, stays readable to a participant (spec § 2). */
@@ -611,7 +612,7 @@ export class DelegationService {
     for (const id of request.requestIds) this.ownRequest(caller, id);
     const project = this.context(caller);
     const wait = project.manager.registerRequestWait(caller.runId, request);
-    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'every selected request settles' : 'a selected request settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
+    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. ${productName('Cezar')} resumes you when ${wait.mode === 'all' ? 'every selected request settles' : 'a selected request settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   /** `cez message wait --peer` (hearsay-tools/cezarion#1995): the manager checks each peer through
    *  the relationship resolver, so a worker or a non-peer is `denied_scope`. */
@@ -619,7 +620,7 @@ export class DelegationService {
     const request = peerWaitRequestSchema.parse(value);
     const project = this.context(caller);
     const wait = project.manager.registerPeerWait(caller.runId, request, 'cez-message-wait');
-    return { wait: peerWaitView(wait), instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when a selected task messages you or settles, or at the deadline. Human and worker messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
+    return { wait: peerWaitView(wait), instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. ${productName('Cezar')} resumes you when a selected task messages you or settles, or at the deadline. Human and worker messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   async spawn(caller: Caller, value: WorkerSpawnRequest) {
     const request = workerSpawnRequestSchema.parse(value);
@@ -691,7 +692,7 @@ export class DelegationService {
       ...(wait ? { wait } : {}), ...(completionWait ? { completionWait } : {}), ...(worker.delegation.destroy ? { destroy: workerDestroyView(worker) } : {}), ...(outcome ? { outcome } : {}) };
   }
   /** The wait an inspection shows: the newest open or owed list wait naming the worker, in the
-   *  legacy `WorkerWait` shape (hearsay-tools/cezarion#1235). Cezar's completion wait carries no
+   *  legacy `WorkerWait` shape (hearsay-tools/cezarion#1235). Squawk's completion wait carries no
    *  deadline, which that shape requires, so inspection shows it as `completionWait`
    *  (hearsay-tools/cezarion#1301). */
   private inspectedWait(parent: RunRecord, workerId: string): WorkerWait | undefined {
@@ -750,7 +751,7 @@ export class DelegationService {
     for (const workerId of request.workerIds) this.target(caller, { workerId }, 'wait');
     const project = this.context(caller);
     const wait = project.manager.registerWorkerWait(caller.runId, request);
-    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
+    return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. ${productName('Cezar')} resumes you when ${wait.mode === 'all' ? 'all selected workers settle' : 'a selected worker settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
   async cancelWait(caller: Caller, value: WorkerCancelWaitRequest) {
     const { waitId } = workerCancelWaitRequestSchema.parse(value);

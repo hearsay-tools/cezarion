@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
 import { squawkAskRequestSchema, squawkCancelWaitRequestSchema, squawkDoneRequestSchema, squawkWaitRequestSchema, type SquawkAskAnswer, type SquawkWaitAnswer } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
@@ -7,7 +8,7 @@ import { z } from 'zod';
 import { callSquawkAsk, callSquawkCancelWait, callSquawkDone, callSquawkWait, callPreviewServe, callPreviewStop, callScheduleTask, callScheduledTasks } from './client.ts';
 
 /**
- * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
+ * The one list of Squawk tools (#781). The MCP adapter lists it, Pi's extension registers it, and
  * every allow-list or admission site reads its names, so adding a tool is one edit here.
  */
 type ToolResult = { content: Array<{ type: 'text'; text: string }>; isError?: boolean; details: unknown };
@@ -68,14 +69,14 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: a GitHub pull request\'s checks or its merge (kind "pr"), workers you own (kind "worker"), the replies to requests you sent (kind "request"), named peer tasks that may message you or settle (kind "peer"), a timer (kind "timer"), or a background command (kind "process"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait; only a message from a peer that a peer wait names closes that wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A checks observation is not merge approval; only a merge wait\'s "merged" outcome means the PR merged. Times in the answers, such as `deadline`, are UTC. ' +
+  description: `Open a wait on something outside this turn: a GitHub pull request's checks or its merge (kind "pr"), workers you own (kind "worker"), the replies to requests you sent (kind "request"), named peer tasks that may message you or settle (kind "peer"), a timer (kind "timer"), or a background command (kind "process"). End your turn after it answers; ${productName('Cezar')} wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait; only a message from a peer that a peer wait names closes that wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A checks observation is not merge approval; only a merge wait's "merged" outcome means the PR merged. Times in the answers, such as \`deadline\`, are UTC. ` +
     // hearsay-tools/cezarion#3097: Codex ends a command's process group when the command returns,
     // so a plain `&` job dies there, and `setsid … & echo $!` prints a dead PID under Claude.
     'kind "process" wakes you when a background command ends. To start one yourself, run ' +
     '`hsq job start <name> -- <command> [args...]` (your instructions give the full command for this session under "Long commands") ' +
     'and pass the `pid` and `exitFile` it prints as `pid` and `exit_file`, so the wake reports the exit code. ' +
-    'It writes the command\'s output to the `log` file it prints, refuses a name that still runs, and the job outlives this session; Cezar does not stop it. ' +
-    'Its files are in $TMPDIR, which Cezar removes when the task ends: for a job that must outlive the task, add `--dir <a git-ignored directory in the worktree>` before `--`. ' +
+    `It writes the command's output to the \`log\` file it prints, refuses a name that still runs, and the job outlives this session; ${productName('Cezar')} does not stop it. ` +
+    `Its files are in $TMPDIR, which ${productName('Cezar')} removes when the task ends: for a job that must outlive the task, add \`--dir <a git-ignored directory in the worktree>\` before \`--\`. ` +
     'Do not start a long command with `&`, `nohup`, `setsid` or your own background-task tool: it can end with the shell call or the session, or leave you a PID that is not the command\'s. ' +
     // A batch that writes its exit file outside $TMPDIR made agents start a watcher to copy it in.
     'For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out. ' +
@@ -92,7 +93,7 @@ export const waitToolDefinition = {
  */
 export const askToolDefinition = {
   name: 'cezar_ask',
-  description: `Ask the user for a decision or missing input. Put the full draft, findings, evidence and option meanings needed for the decision in context. Cezar renders context as Markdown above the question card. The user cannot see your reasoning or rejected tool calls. The question is a short choice, not the place for supporting detail. Each question takes a header of at most ${ASK_LIMITS.header} characters, a short question of at most ${ASK_LIMITS.question} characters, and ${ASK_LIMITS.minOptions}–${ASK_LIMITS.maxOptions} options shown as choices; leave the options out to let the user type the answer. The user can always type a reply of their own. Other open waits keep running while you wait. Then end your turn; the user's answer wakes you.`,
+  description: `Ask the user for a decision or missing input. Put the full draft, findings, evidence and option meanings needed for the decision in context. ${productName('Cezar')} renders context as Markdown above the question card. The user cannot see your reasoning or rejected tool calls. The question is a short choice, not the place for supporting detail. Each question takes a header of at most ${ASK_LIMITS.header} characters, a short question of at most ${ASK_LIMITS.question} characters, and ${ASK_LIMITS.minOptions}–${ASK_LIMITS.maxOptions} options shown as choices; leave the options out to let the user type the answer. The user can always type a reply of their own. Other open waits keep running while you wait. Then end your turn; the user's answer wakes you.`,
   inputSchema: { ...z.toJSONSchema(squawkAskRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 /**
@@ -100,7 +101,7 @@ export const askToolDefinition = {
  * they cut from a rejected card as sent. Both hints say where that context belongs: `context`.
  */
 export function askAnswerHint(answer: SquawkAskAnswer): string {
-  if (answer.ok) return 'Asked. Cezar shows the context and question card to the user. End your turn; the user\'s answer wakes you.';
+  if (answer.ok) return `Asked. ${productName('Cezar')} shows the context and question card to the user. End your turn; the user's answer wakes you.`;
   if (answer.code === 'invalid_request') return 'Not asked. The user never sees a rejected call. Fix the call from the message: put the detail in context and keep each question short.';
   return 'Not asked. Fix the call from the message, or continue without asking.';
 }
@@ -140,25 +141,25 @@ export async function invokeCancelWaitTool(input: unknown) {
  *  hearsay-tools/cezarion#2397 it is the only way to. */
 export const doneToolDefinition = {
   name: 'cezar_done',
-  description: 'Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait; after a step, Cezar starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
+  description: `Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. ${productName('Cezar')} closes the session at the end of this turn and cancels every open wait; after a step, ${productName('Cezar')} starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.`,
   inputSchema: { ...z.toJSONSchema(squawkDoneRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 export async function invokeDoneTool(input: unknown) {
   const answer = await callSquawkDone(input);
   const hint = !answer.ok ? 'Not finished. Do what the message says, then call cezar_done again.'
-    : answer.completes === 'step' ? `Accepted. End your turn; Cezar completes this step at its end and starts "${answer.next_step}".`
-    : 'Accepted. End your turn; Cezar finishes the task at its end.';
+    : answer.completes === 'step' ? `Accepted. End your turn; ${productName('Cezar')} completes this step at its end and starts "${answer.next_step}".`
+    : `Accepted. End your turn; ${productName('Cezar')} finishes the task at its end.`;
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
 }
 
 export const previewToolDefinition = {
   name: 'cezar_preview_serve',
-  description: 'Register a web dev server of this task so the user can click through it in the cockpit\'s live preview. Always pin the port (`vite --strictPort`, `next dev -p`) so the server comes up on the port you register. Cezar starts the command itself when the user opens the preview; do not wait for the user. ' +
+  description: `Register a web dev server of this task so the user can click through it in the cockpit's live preview. Always pin the port (\`vite --strictPort\`, \`next dev -p\`) so the server comes up on the port you register. ${productName('Cezar')} starts the command itself when the user opens the preview; do not wait for the user. ` +
     'To drive the browser the user sees, connect to `$CEZ_PREVIEW_CDP_URL` when it is set, e.g. `agent-browser --cdp "$CEZ_PREVIEW_CDP_URL" --pin-tab open http://localhost:5173`; the user watches your page live. `agent-browser record` needs ffmpeg on PATH.',
   inputSchema: { ...z.toJSONSchema(previewServeRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
-/** JSON first, then the hint as a plain sentence: the shape every cezar tool answers in. */
+/** JSON first, then the hint as a plain sentence: the shape every Squawk tool answers in. */
 export async function invokePreviewTool(input: unknown) {
   const result = await callPreviewServe(input);
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(result)}\n${result.hint}` }], isError: !result.ok, details: result };
@@ -166,7 +167,7 @@ export async function invokePreviewTool(input: unknown) {
 
 export const previewStopToolDefinition = {
   name: 'cezar_preview_stop',
-  description: 'Stop a preview server Cezar started for your own task. Set restart to true to reuse the unchanged command the owner approved, including after a crash. Adopted servers cannot be stopped; changed registrations need the owner to press Run and open again.',
+  description: `Stop a preview server ${productName('Cezar')} started for your own task. Set restart to true to reuse the unchanged command the owner approved, including after a crash. Adopted servers cannot be stopped; changed registrations need the owner to press Run and open again.`,
   inputSchema: { ...z.toJSONSchema(previewStopRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 export async function invokePreviewStopTool(input: unknown) {
@@ -182,7 +183,7 @@ const PREVIEW_STOP_TOOL: SquawkTool = { definition: previewStopToolDefinition, t
  */
 export const scheduleTaskToolDefinition = {
   name: 'cezar_schedule_task',
-  description: 'Schedule a new task to start once, later, in this project: give a name, the full prompt the task starts from, and either `at` (a UTC time YYYY-MM-DDTHH:MMZ, like every time in Cezar tools) or `delay` (30m, 6h, 7d of elapsed time from now). For a relative time ("in 2 hours"), use `delay`. For a clock time that the user names, convert it from the user\'s time zone to UTC. `latest_start` (10m to 30d) bounds how late it may still start after Cezarion was down; past it the schedule is marked missed. Pass enable: true only when the user\'s request asks for the work to run later; otherwise it is created paused for the user to enable. The new task does not see this conversation, so put every detail it needs in the prompt. The answer gives `due_at` in UTC. The cockpit shows the schedule in local time.',
+  description: `Schedule a new task to start once, later, in this project: give a name, the full prompt the task starts from, and either \`at\` (a UTC time YYYY-MM-DDTHH:MMZ, like every time in ${productName('Cezar')} tools) or \`delay\` (30m, 6h, 7d of elapsed time from now). For a relative time ("in 2 hours"), use \`delay\`. For a clock time that the user names, convert it from the user's time zone to UTC. \`latest_start\` (10m to 30d) bounds how late it may still start after ${productName('Cezarion')} was down; past it the schedule is marked missed. Pass enable: true only when the user's request asks for the work to run later; otherwise it is created paused for the user to enable. The new task does not see this conversation, so put every detail it needs in the prompt. The answer gives \`due_at\` in UTC. The cockpit shows the schedule in local time.`,
   inputSchema: { ...z.toJSONSchema(scheduleTaskRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
@@ -249,7 +250,7 @@ export function squawkToolEnvNames(env: NodeJS.ProcessEnv = process.env): string
 
 export function squawkServerInstructions(env: NodeJS.ProcessEnv = process.env): string {
   return [
-    'The interface to Cezarion, the orchestrator running this session. Load a tool below when its situation comes up.',
+    `The interface to ${productName('Cezarion')}, the orchestrator running this session. Load a tool below when its situation comes up.`,
     ...squawkTools(env).map(tool => `- ${tool.definition.name}: ${tool.trigger}`),
   ].join('\n');
 }

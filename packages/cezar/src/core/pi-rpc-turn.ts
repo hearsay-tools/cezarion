@@ -7,6 +7,7 @@ import { AUTO_END_DELAY_MS } from './runner-runtime.js';
 import { signalSession } from './session-process.js';
 import type { UiEvent } from './ui-events.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
+import { productName } from '../home/display.ts';
 
 /**
  * Turn and input bookkeeping that the Pi-family RPC runners share: pi (`pi-runner.ts`) and its
@@ -294,7 +295,7 @@ export interface PiEndWatchdog {
 
 /**
  * After `end()` closes stdin the CLI should exit on its own. When `child()` is still alive after
- * `graceMs`, `onTerminate` records that cezar ends it and SIGTERM follows; SIGKILL follows another
+ * `graceMs`, `onTerminate` records that Squawk ends it and SIGTERM follows; SIGKILL follows another
  * `graceMs` later. Closing input makes `interrupt()` a no-op, so this watchdog owns escalation even
  * when the CLI ignores both EOF and SIGTERM, and `result` cannot stay open forever.
  */
@@ -415,7 +416,7 @@ export function settlePiFamilyExit(exit: PiFamilyExit): AgentRunResult {
 }
 
 /**
- * A signal cezar sent is teardown, not a second agent failure (#73). A signal from outside (the
+ * A signal Squawk sent is teardown, not a second agent failure (#73). A signal from outside (the
  * OOM killer, a stray kill) is a truncated run, never a success; so is a non-zero exit.
  */
 function reportPiFamilyExit(exit: PiFamilyExit): void {
@@ -423,7 +424,7 @@ function reportPiFamilyExit(exit: PiFamilyExit): void {
   if (exit.terminatedBySquawk && (isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null))) {
     onEvent?.({
       type: 'note',
-      message: `${cli} CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? signalCode : `code ${exitCode}`})`,
+      message: `${cli} CLI did not exit on its own after close; terminated by ${productName('Cezar')} (${exitCode === null ? signalCode : `code ${exitCode}`})`,
     });
   } else if (exitCode === null && signalCode !== null) {
     const message = `${cli} CLI was killed by signal ${signalCode}`;

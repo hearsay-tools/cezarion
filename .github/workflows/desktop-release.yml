@@ -2,8 +2,8 @@ name: Desktop release
 
 # Builds, signs and publishes the desktop shell (packages/desktop) — spec
 # docs/desktop.md. The shell ships on ITS OWN version and cadence:
-# it contains no cezar code (the cockpit + server come from `~/.cezar/versions`, updated from
-# inside the cockpit), so a cezar release never touches it and a shell release is rare.
+# it contains no Squawk code (the cockpit + server come from `~/.cezar/versions`, updated from
+# inside the cockpit), so a Squawk release never touches it and a shell release is rare.
 #
 # Trigger: push a `desktop-v<version>` tag whose version matches packages/desktop/src-tauri/
 # tauri.conf.json, or run the workflow by hand — it then releases the version that file names,
@@ -87,7 +87,7 @@ jobs:
             echo "release $TAG already exists — assets will be replaced"
           else
             gh release create "$TAG" --draft --title "$DISPLAY_NAME desktop v$VERSION" --target "$GITHUB_SHA" \
-              --notes "Desktop shell v$VERSION. Installers below; the shell installs and updates cezar itself from the cockpit."
+              --notes "Desktop shell v$VERSION. Installers below; the shell installs and updates Squawk itself from the cockpit."
           fi
 
   build:
@@ -454,7 +454,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           # tauri-action uploads `latest.json`; the shells poll `$FEED.json` so the name
-          # can never collide with a future cezar (CLI) manifest on the same release page.
+          # can never collide with a future Squawk (CLI) manifest on the same release page.
           if gh release download "$TAG" --repo "$REPO" --pattern latest.json --output "$FEED.json" 2>/dev/null; then
             gh release upload "$TAG" "$FEED.json" --clobber --repo "$REPO"
             gh release delete-asset "$TAG" latest.json --yes --repo "$REPO" || true
@@ -467,7 +467,7 @@ jobs:
           fi
           gh release edit "$TAG" --draft=false --latest=false --repo "$REPO"
 
-      # `releases/latest/download/…` follows the repo's "latest" release, and that is cezar's own
+      # `releases/latest/download/…` follows the repo's "latest" release, and that is Squawk's own
       # `v*` release — which carries no installers. The permanent URLs therefore hang off a
       # ROLLING release, `$FEED`, whose assets are replaced on every shell release.
       - name: Refresh the rolling $FEED release

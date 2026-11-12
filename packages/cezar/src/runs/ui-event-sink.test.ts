@@ -22,6 +22,7 @@ import { DELTA_FLUSH_MS, UiEventSink, isV2WireEventType } from './ui-event-sink.
 import { z } from 'zod';
 import { STATUS_MAP as CODEX_TOOL_STATUS_MAP } from '../core/codex-ui-mapper.ts';
 import { STATUS_MAP as OPENCODE_TOOL_STATUS_MAP } from '../core/opencode-ui-mapper.ts';
+import { productName } from '../home/display.ts';
 
 const TOOL_STATUS = z.enum([
   ...Object.values(CODEX_TOOL_STATUS_MAP),
@@ -345,7 +346,7 @@ describe('live-vs-disk equivalence', () => {
     // The streamed path really carried the content: the merged live delta
     // equals the fixture's raw-delta concatenation AND the final snapshot.
     const merged = wire.find((e) => e.type === 'item.delta' && e.itemId === 'item_cmd_1');
-    expect(merged?.delta).toBe('> cezar@0.1.0 test\n> vitest run\nTest Files  4 passed (4)\n');
+    expect(merged?.delta).toBe(`> ${productName('Cezar')}@0.1.0 test\n> vitest run\nTest Files  4 passed (4)\n`);
     const final = fromDisk.get('item_cmd_1') as UiToolItem;
     expect(final.output).toBe(merged?.delta);
     expect(final.status).toBe('completed');

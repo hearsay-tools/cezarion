@@ -25,7 +25,7 @@ const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 // turn. Steers accepted by a scripted turn are read just before it settles: a user
 // message_start/end, then an echo, unless the turn is `late` (never read).
 let activeTurn = null;
-// Pi 0.87 defaults steeringMode to one-at-a-time (#551). Cezar's runner must
+// Pi 0.87 defaults steeringMode to one-at-a-time (#551). Squawk's runner must
 // send set_steering_mode all for a burst to reach the same next step.
 let steeringMode = 'one-at-a-time';
 // The prompt a queued handler is running; pi records it as the turn's user message.

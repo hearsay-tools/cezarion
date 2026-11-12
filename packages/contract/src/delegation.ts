@@ -56,7 +56,7 @@ export const workerWaitSchema = z.object({
 }).strict();
 export type WorkerWait = z.infer<typeof workerWaitSchema>;
 
-/** Cezar's completion wait as inspection and the relationships view show it: the `WorkerWait`
+/** Squawk's completion wait as inspection and the relationships view show it: the `WorkerWait`
  *  projection without a deadline, which that wait does not have, and the `via` that names it.
  *  `WorkerWait` keeps requiring a deadline (hearsay-tools/cezarion#1301). */
 export const workerCompletionWaitSchema = workerWaitSchema.omit({ deadline: true, requestIds: true, requestOutcomes: true })
@@ -67,7 +67,7 @@ export type WorkerCompletionWait = z.infer<typeof workerCompletionWaitSchema>;
  * attempts ran since the last explicit request, when the next one is due, and whether they
  * reached the hourly cap with nothing changing, which the cockpit shows as needing attention.
  * Absent until the first automatic attempt; a manual destroy clears it. Stored on the run record
- * (`destroyRetry`), never inside the strict worker delegation, so an older cezar strips it instead
+ * (`destroyRetry`), never inside the strict worker delegation, so an older Squawk strips it instead
  * of quarantining the worker; the API shows it as the worker's `destroy.retry`. */
 export const workerDestroyRetrySchema = z.object({
   attempts: z.number().int().positive(),
@@ -292,9 +292,9 @@ export const agentInputSchema = z.object({
    * such input; records written before #505 never carry it, so nothing historical replays. */
   awaitingRead: z.literal(true).optional(),
   inboxClaim: inboxClaimSchema.optional(),
-  /** A completion refusal Cezar queued for a closed session (hearsay-tools/cezarion#1301): its
+  /** A completion refusal Squawk queued for a closed session (hearsay-tools/cezarion#1301): its
    * delivery is the nudge's turn, bounded by the nudge's reply bound, and a session that closes
-   * before it is a failed delivery. `undelivered-question` is Cezar's answer to a worker question
+   * before it is a failed delivery. `undelivered-question` is Squawk's answer to a worker question
    * that could not reach its live parent (hearsay-tools/cezarion#2410). Absent on every other input
    * and on records written before. */
   purpose: z.enum(['completion-refusal', 'undelivered-question']).optional(),

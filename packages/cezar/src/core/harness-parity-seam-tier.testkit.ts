@@ -139,7 +139,7 @@ const SEAM_CELLS: Cells<typeof SEAM_ROWS, SeamCriterion> = {
   S2: {
     // Group 2 / #4 — the OpenCode five-minute cut. The runner used to end the
     // turn from its transport's own response, so undici's 300s headers timeout
-    // killed a healthy long turn and cezar parked the run. `hold` acknowledges
+    // killed a healthy long turn and Squawk parked the run. `hold` acknowledges
     // the prompt, THEN waits before emitting content and its terminal signal:
     // a runner that still derives turn-end from the ack reports it before the
     // content it is supposed to close over.
@@ -186,7 +186,7 @@ const SEAM_CELLS: Cells<typeof SEAM_ROWS, SeamCriterion> = {
     // Group 4 / #5, #600 — a spawned sub-agent runs in its own child session
     // that emits a full lifecycle over the shared connection. Its terminal
     // signal used to end the PARENT turn, so the parent's remaining work was
-    // attributed to a turn cezar had already closed.
+    // attributed to a turn Squawk had already closed.
     assert: ({ backend, v1, v2, result }) => {
       // #149: child text stays nested on v2 and never contaminates parent text,
       // including AgentRunResult's fallback buffer and unfinished child deltas.
@@ -221,7 +221,7 @@ const SEAM_CELLS: Cells<typeof SEAM_ROWS, SeamCriterion> = {
     // Group 7 — `resumeCommand()` and "open in CLI" need a session id after
     // every run. The two wires differ and both are legitimate: codex, opencode
     // cursor and pi mint their own and echo a v1 `session` event, while claude pins
-    // the id cezar supplied (`--session-id`, claude-cli-runner.ts:385) and
+    // the id Squawk supplied (`--session-id`, claude-cli-runner.ts:385) and
     // returns it on the result. What must never happen is neither — that is a
     // run nobody can resume.
     assert: ({ v1, result }) => {

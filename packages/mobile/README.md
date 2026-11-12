@@ -1,4 +1,4 @@
-# Cezarion mobile companion
+# Squawk mobile companion
 
 Native iOS (Swift/UIKit/WKWebView) and Android (Java/WebView) shells around the
 existing HTTPS cockpit. The launcher is native; the product UI stays on the server.
@@ -10,7 +10,7 @@ This directory is outside the pnpm workspaces (`pnpm-workspace.yaml`). It does n
 server, or browser behavior. `ios/Cezarion.xcodeproj` and the Android Gradle wrapper
 are checked in so a new checkout builds with the standard platform SDKs.
 
-The app icons reuse the Cezarion parrot artwork from
+The app icons reuse the Squawk parrot artwork from
 [hearsay-tools/cezarion#847](https://github.com/hearsay-tools/cezarion/pull/847).
 
 ## Build identity and final old-app release

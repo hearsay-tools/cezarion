@@ -19,6 +19,7 @@ import { familyOf, rootFinishRequested } from './run-guards.ts';
 import type { FamilyReconciler } from './family-reconciler.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
 import type { AutoResumeScheduler } from './auto-resume.ts';
+import { productName } from '../../home/display.ts';
 
 interface RunRecoveryHost {
   waitEngine: WaitEngine;
@@ -132,7 +133,7 @@ export class RunRecovery {
     // even after one adopted family: anything the recovery window held back goes out now.
     this.rearmRecoveredWakes();
     // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
-    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
+    // routinely longer than a Squawk session, so the deadline is durable and the timer is rebuilt
     // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
     // one — see `reconcileAutoResumes`.
     this.autoResumeScheduler.reconcileAutoResumes();
@@ -258,7 +259,7 @@ export class RunRecovery {
 
   /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
    *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript.
-   *  Cezar's own wait not shown as that ask is replaced, as the live ask does: a crash between
+   *  Squawk's own wait not shown as that ask is replaced, as the live ask does: a crash between
    *  saving the ask and replacing it leaves that wait open (review of #1437). */
   private adoptTranscriptAsk(runId: string): boolean {
     const askSeq = pendingHumanAskSeq(this.context.store, runId);
@@ -291,11 +292,11 @@ export class RunRecovery {
   /** The run as recovery reads it after it reconciles the run's question state. */
   private reconcileRecoveredAsk(found: RunRecord): RunRecord {
     let run = found;
-    // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
+    // A worker no process survived for is a closed session: Squawk's fallback question goes as at an
     // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
     if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.workerQuestions.supersedeWorkerFallback(run.id)) run = this.context.store.getRun(run.id)!;
     // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
-    // an older cezar left without one gets one now, attached to that ask.
+    // an older Squawk left without one gets one now, attached to that ask.
     if (this.adoptTranscriptAsk(run.id)) run = this.context.store.getRun(run.id)!;
     // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
     // the row's save did not. The wait read from it is answered (review of #1437).
@@ -362,7 +363,7 @@ export class RunRecovery {
       const resumed = this.host.continueRun(run.id, { text: this.restartContinuationPrompt }, true);
       this.context.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
         ? 'cezar restarted — resuming the worker CI recovery from its last session'
-        : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
+        : `${productName('Cezar')} restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
       return undefined;
     }
     const finishedAt = new Date().toISOString();
@@ -403,7 +404,7 @@ export class RunRecovery {
       type: 'lifecycle',
       message: resumed.ok
         ? 'cezar restarted — resuming the interrupted task from its last session'
-        : `cezar restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
+        : `${productName('Cezar')} restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
     });
   }
 

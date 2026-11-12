@@ -40,7 +40,7 @@ const EXTENSION_MEDIA_TYPES: Record<string, string> = {
 }
 
 /**
- * What cezar will call this file on the wire, or `null` when it will not take it at all.
+ * What Squawk will call this file on the wire, or `null` when it will not take it at all.
  *
  * The browser's `type` wins when it is one the contract knows. When it is empty — a `.md` on
  * Windows, a file dragged out of some archive tools — the extension decides instead, because

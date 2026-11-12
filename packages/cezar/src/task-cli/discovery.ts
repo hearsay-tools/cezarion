@@ -53,7 +53,7 @@ export async function checkoutRoot(dir: string, signal?: AbortSignal): Promise<s
 
 interface Candidate { origin: string; projects: Array<{ id: string; root: string; hasWebhook: boolean }>; bootProject: string }
 
-/** Health first (cheap, and it proves this is a cezar), then the registry with its roots. */
+/** Health first (cheap, and it proves this is a Squawk), then the registry with its roots. */
 async function probe(origin: string, timeoutMs: number, signal?: AbortSignal): Promise<Candidate | undefined> {
   try {
     const health = await fetchJson(`${origin}/api/v1/health`, { timeoutMs, ...(signal ? { signal } : {}) });

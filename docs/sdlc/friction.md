@@ -87,7 +87,7 @@ The digest writes three things:
 | Output | What it holds |
 | --- | --- |
 | A comment on the newest issue it reviewed | The full record. Every group with its verdict, evidence links, fix and destination in full, the recommended groups marked, the carried-forward Act groups and the whole watch list. It stands alone: it never says "unchanged" or points to an earlier digest instead of the content |
-| An HTML report, published with `cez artifact publish` | One card per recommended group, in rank order: title, cost chips (runs, time lost), what happens, the fix, the destination, and the evidence links folded. Everything else is folded at the bottom. The report uses no scripts and no external resources |
+| An HTML report, published with `hsq artifact publish` | One card per recommended group, in rank order: title, cost chips (runs, time lost), what happens, the fix, the destination, and the evidence links folded. Everything else is folded at the bottom. The report uses no scripts and no external resources |
 | A comment on each tracked issue that its evidence is new to | The new evidence links. The digest posts these without asking |
 
 Then it asks the owner through `cezar_ask`. The card lists the recommended
@@ -309,9 +309,9 @@ implementation, verification and ready implementation PR. The approved design
 stays in the session, with the handoff maintained for resumption. Recheck
 eligibility on Continue while recognizing the same task's own assignment and
 claim; competing work still blocks it. Relabeling is not a new-stage handoff:
-cezar's existing issue deduplication can block a second task for that issue.
+Squawk's existing issue deduplication can block a second task for that issue.
 
-The Jev action itself creates no cezar task, leaving issue deduplication available
+The Jev action itself creates no Squawk task, leaving issue deduplication available
 for its selected handler. Edits or reclassifications do not launch replacement
 work for an issue that already has a task.
 
@@ -369,8 +369,8 @@ The paused state is intentional; no existing backlog is launched by this change.
 
 `.github/scripts/friction-policy.cjs` owns labels, routing rules and the three
 prompts. Running `node .github/scripts/friction-policy.cjs` emits the definitions
-for review. Create each with `cez automation create --file <definition.json>`
-without `--enable`, then use `cez automation check <id>` without `--execute`.
+for review. Create each with `hsq automation create --file <definition.json>`
+without `--enable`, then use `hsq automation check <id>` without `--execute`.
 Compare existing definitions before updating them; do not create duplicate polls.
 When updating an existing design poll, remove its `task.workflow` key (the CLI
 accepts `null` to remove a task key), set its `task.steps` to the `dev-flow` agent

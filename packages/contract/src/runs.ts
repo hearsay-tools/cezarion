@@ -278,7 +278,7 @@ export const runRecordSchema = z.object({
    *
    * `event` is a plain string rather than `automationEventSchema`: it is the event NAME the
    * launching definition matched, recorded on the run for the audit trail, and `src/runs/store.ts`
-   * persists it as free text so an older cezar can still read a record written by a newer one.
+   * persists it as free text so an older Squawk can still read a record written by a newer one.
    */
   automation: z
     .object({
@@ -291,7 +291,7 @@ export const runRecordSchema = z.object({
     .optional(),
   /**
    * Provenance for a task a SCHEDULED automation launched. A separate optional key rather than a
-   * loosened `automation`: `runs.json` is parsed as one array, so a downgraded cezar meeting a
+   * loosened `automation`: `runs.json` is parsed as one array, so a downgraded Squawk meeting a
    * record without `githubUrl` would drop every run, whereas an unknown key it simply strips.
    */
   automationTrigger: z
@@ -305,7 +305,7 @@ export const runRecordSchema = z.object({
     })
     .optional(),
   /** A pending worker destroy's automatic retry state (hearsay-tools/cezarion#879). Here, not in
-   *  the strict worker `delegation`, so an older cezar strips it instead of quarantining the worker,
+   *  the strict worker `delegation`, so an older Squawk strips it instead of quarantining the worker,
    *  and keeps it across its own writes. The API shows it as the worker's `destroy.retry`. */
   destroyRetry: workerDestroyRetrySchema.optional(),
   /** Task webhook opt-in (#589): the project's webhook receives this run's status changes.
@@ -415,7 +415,7 @@ export const runRecordSchema = z.object({
    * like every other key.
    */
   workflowDef: workflowDefSchema.optional(),
-  /** cezar's autosave records for the handoff file (hearsay-tools/cezarion#1809). */
+  /** Squawk's autosave records for the handoff file (hearsay-tools/cezarion#1809). */
   handoffRecords: handoffRecordsSchema.optional(),
 });
 export type RunRecord = z.infer<typeof runRecordSchema>;
@@ -526,7 +526,7 @@ export const runSummarySchema = z.object({
    * The live CPU/RSS sample of this run's process tree, attached on the way out exactly as
    * `GET /runs` attaches it (`withUsage`) — never persisted.
    *
-   * It can ride a WORKSPACE-level answer because the sampler is process-wide: one cezar process
+   * It can ride a WORKSPACE-level answer because the sampler is process-wide: one Squawk process
    * runs every project's agents, so `currentUsage(runId)` knows about a run whatever project it
    * belongs to. That is what lets a cross-project table show live usage without opening one
    * event stream per project (it could not — the run stream is project-scoped).

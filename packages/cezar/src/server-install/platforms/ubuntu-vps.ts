@@ -17,8 +17,8 @@ import { migrateUbuntu, rollbackUbuntuMigration, startUbuntuService, stopUbuntuS
 import { REBRAND_SWITCH } from '../../home/switch.ts';
 export { isForeignNpxExecStart, isNpxExecStart, refreshNpxCacheForRedeploy };
 /**
- * The `ubuntu-vps` strategy: stand up an authenticated, proxied cezar on a bare
- * Ubuntu/Debian VPS. cezar itself stays loopback-bound; nginx is the single
+ * The `ubuntu-vps` strategy: stand up an authenticated, proxied Squawk on a bare
+ * Ubuntu/Debian VPS. Squawk itself stays loopback-bound; nginx is the single
  * public surface (TLS + htpasswd identity) forwarding to 127.0.0.1:<port>.
  *
  * Phase 1 ships deps → nginx+htpasswd → identity-verify (and their `undo`s).
@@ -73,13 +73,13 @@ export function upstreamHost(ctx: InstallContext): string {
   return ctx.state.bindHost?.trim() || '127.0.0.1';
 }
 
-/** True once cezar answers on <host>:<port> (any HTTP status = the process is up). */
+/** True once Squawk answers on <host>:<port> (any HTTP status = the process is up). */
 async function isSquawkUp(ctx: InstallContext, port: number): Promise<boolean> {
   const code = await curlCode(ctx, [`http://${upstreamHost(ctx)}:${port}/`]);
   return code !== '000';
 }
 
-/** Poll the upstream until cezar responds or the attempts run out. */
+/** Poll the upstream until Squawk responds or the attempts run out. */
 async function waitForSquawk(ctx: InstallContext, port: number, attempts = 15): Promise<boolean> {
   for (let i = 0; i < attempts; i++) {
     if (await isSquawkUp(ctx, port)) return true;
@@ -90,7 +90,7 @@ async function waitForSquawk(ctx: InstallContext, port: number, attempts = 15): 
 }
 
 /**
- * After a service is enabled, wait for cezar to actually answer on the loopback
+ * After a service is enabled, wait for Squawk to actually answer on the loopback
  * port. A running unit that crash-loops (bad WorkingDirectory, missing build)
  * would otherwise leave nginx proxying to nothing (502) while the installer
  * claims success. On failure, point the operator at the service logs.
@@ -265,7 +265,7 @@ const nginxProxyStep = (rebrand: boolean): InstallStep => ({
       throw new StepAborted('a cockpit password (≥6 chars) is required — run server-install without --yes to set one');
     }
     // Keep the credentials in memory (never persisted) so the final verify step
-    // can prove an authenticated request actually reaches cezar over the proxy.
+    // can prove an authenticated request actually reaches Squawk over the proxy.
     ctx.prefs.cockpit = { user, password };
 
     // 3) htpasswd file. The hash (not the plaintext) is embedded in the write
@@ -548,7 +548,7 @@ const sslStep = (rebrand: boolean): InstallStep => ({
 });
 
 /**
- * systemd unit that runs cezar loopback-bound with CEZ_REMOTE=1.
+ * systemd unit that runs Squawk loopback-bound with CEZ_REMOTE=1.
  *
  * `execStart` must be an ABSOLUTE command — systemd resolves the ExecStart
  * executable against its OWN compiled-in PATH (/usr/local/bin:/usr/bin:…), NOT
@@ -568,7 +568,7 @@ export function systemdUnit(
   const userLine = scope === 'system' ? `User=${userInfo().username}\n` : '';
   const installTarget = scope === 'system' ? 'multi-user.target' : 'default.target';
   // Give the service the operator's own PATH (node dir + the login PATH the CLI
-  // merged in, e.g. ~/.local/bin and nvm) so cezar can spawn claude / gh / codex
+  // merged in, e.g. ~/.local/bin and nvm) so Squawk can spawn claude / gh / codex
   // at runtime — systemd's default PATH has none of those.
   const pathDirs = [dirname(process.execPath), ...(process.env.PATH ?? '').split(':'), '/usr/local/bin', '/usr/bin', '/bin']
     .filter((d, i, a) => d && d !== '.' && a.indexOf(d) === i);
@@ -600,7 +600,7 @@ WantedBy=${installTarget}
 }
 /**
  * Decide the absolute ExecStart command for the service, mirroring how the
- * installer itself was launched so the box keeps running the same cezar:
+ * installer itself was launched so the box keeps running the same Squawk:
  *
  *  - Launched via npx (the CLI package lives in npm's ephemeral `_npx` cache,
  *    which gets cleaned): the service can't point there, so it reinstalls-and-runs
@@ -630,7 +630,7 @@ async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<
   const identity = productIdentity(rebrand);
   const node = process.execPath; // absolute node running this installer
   // The CLI's OWN package root (…/dist/server-install/platforms/ → up 3), NOT the
-  // repo being operated on — `--repo` / cwd can differ from where cezar lives.
+  // repo being operated on — `--repo` / cwd can differ from where Squawk lives.
   const pkgRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
   const entry = join(pkgRoot, 'dist', 'index.js');
   let npxPath = join(dirname(node), 'npx');
@@ -658,7 +658,7 @@ async function resolveExecStart(ctx: InstallContext, rebrand: boolean): Promise<
 
 const autostartStep = (rebrand: boolean): InstallStep => ({
   id: 'autostart',
-  // Required: after install the cockpit must actually be serving, so cezar runs
+  // Required: after install the cockpit must actually be serving, so Squawk runs
   // as a systemd service — started now AND enabled on boot. (id kept as
   // `autostart` for state compatibility.)
   title: `Run ${productName('cezar', rebrand)} as a service (systemd — starts now + on boot)`,
@@ -760,7 +760,7 @@ const autostartStep = (rebrand: boolean): InstallStep => ({
 /**
  * `--external-proxy` verification: confirm the cockpit is listening on the
  * interface the operator's proxy will dial, then hand them the routing snippet.
- * cezar ships no auth of its own, so this is also where we say — unmissably —
+ * Squawk ships no auth of its own, so this is also where we say — unmissably —
  * that the front they own has to enforce it.
  */
 async function verifyBehindExternalProxy(ctx: InstallContext, unit: string): Promise<{ artifacts: StepArtifact[] }> {
@@ -829,7 +829,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
     return false; // always re-verify; it creates nothing
   },
   async run(ctx): Promise<{ artifacts: StepArtifact[] }> {
-    // External proxy: cezar installed no nginx, so there is no auth challenge of
+    // External proxy: Squawk installed no nginx, so there is no auth challenge of
     // ours to probe. All we can (and should) verify is that the cockpit is
     // actually listening where the operator's proxy will look for it.
     if (ctx.state.externalProxy) return verifyBehindExternalProxy(ctx, recordedUnit(ctx, rebrand).name);
@@ -846,7 +846,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
     // probe verifies THIS cockpit's vhost, not a sibling's.
     const host = ctx.state.domain ? ['-H', `Host: ${ctx.state.domain}`] : [];
 
-    // 1) Is cezar actually listening on the loopback upstream? nginx challenges
+    // 1) Is Squawk actually listening on the loopback upstream? nginx challenges
     //    auth *before* proxying, so an anonymous 401 alone does NOT prove the
     //    backend is up — check the upstream directly.
     const upstreamUp = await isSquawkUp(ctx, port);
@@ -855,7 +855,7 @@ const identityStep = (rebrand: boolean): InstallStep => ({
     const anonCode = await curlCode(ctx, [...tls, ...host, base]);
     const authEnforced = anonCode === '401';
 
-    // 3) The real proof: an AUTHENTICATED request reaches cezar (2xx/3xx — not
+    // 3) The real proof: an AUTHENTICATED request reaches Squawk (2xx/3xx — not
     //    401/403 = bad creds, not 502/504 = upstream down). Credentials are read
     //    from stdin (curl -K -) so they never land in argv. `null` = not testable
     //    (a resume where the plaintext password is no longer in memory).
@@ -960,7 +960,7 @@ export function createUbuntuVps({ rebrand = REBRAND_SWITCH } = {}): PlatformStra
     },
     async redeploy(ctx: InstallContext) {
       const UNIT_NAME = recordedUnit(ctx, rebrand).name;
-      // Restart the systemd service so it picks up the new cezar (a fresh local
+      // Restart the systemd service so it picks up the new Squawk (a fresh local
       // build the unit runs from, or a newly published cezarion via npx), then
       // re-run the same end-to-end verify install uses.
       const userUnitPath = join(homedir(), '.config', 'systemd', 'user', UNIT_NAME);

@@ -1,10 +1,10 @@
 //! Stopping the owned cockpit and deciding what a supervisor does next. Std-only, so its tests
 //! run without a window system.
 //!
-//! The shell starts cezar with a piped stdin and `CEZ_SUPERVISOR_STDIN=1`. Closing that pipe is
-//! the stop request: cezar runs its own shutdown (store flush, preview host and delegation
+//! The shell starts Squawk with a piped stdin and `CEZ_SUPERVISOR_STDIN=1`. Closing that pipe is
+//! the stop request: Squawk runs its own shutdown (store flush, preview host and delegation
 //! cleanup) and exits. A pipe closes the same way on every platform, which a signal does not.
-//! A cezar older than that request ignores it, so every stop ends in a bounded force-kill.
+//! A Squawk older than that request ignores it, so every stop ends in a bounded force-kill.
 
 use std::process::Child;
 use std::time::{Duration, Instant};
@@ -137,7 +137,7 @@ mod tests {
             .expect("sh starts")
     }
 
-    // A cezar that watches its stdin exits on the request, well inside the grace period.
+    // A Squawk that watches its stdin exits on the request, well inside the grace period.
     #[cfg(unix)]
     #[test]
     fn a_cockpit_that_honours_the_request_exits_without_a_kill() {
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(child.wait().unwrap().code(), Some(0));
     }
 
-    // An older cezar ignores its stdin: the stop still ends, by force, at the deadline.
+    // An older Squawk ignores its stdin: the stop still ends, by force, at the deadline.
     #[cfg(unix)]
     #[test]
     fn a_cockpit_that_ignores_the_request_is_killed_at_the_deadline() {

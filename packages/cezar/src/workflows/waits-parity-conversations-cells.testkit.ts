@@ -89,7 +89,7 @@ export function conversationsCells(runners: RunnerId[], it: typeof registerTest 
       await until(() => delivered(f.p.id, first) && peerWakeNotes(f.p.id).length === 1);
       expect(peerWakeNotes(f.p.id)).toEqual([expect.objectContaining({ message: `automatic peer message wake-up (${MAX_AUTO_CONTINUES}/${MAX_AUTO_CONTINUES})` })]);
       await until(() => turnEnds(f.p.id) > turns && store.getRun(f.p.id)?.status === 'waiting');
-      // Past the budget the next peer message wakes nothing: it stays queued and Cezar's human wait opens.
+      // Past the budget the next peer message wakes nothing: it stays queued and Squawk's human wait opens.
       fixtureUpdateRun(f.p.id, { automaticWakes: MAX_AUTO_CONTINUES });
       const held = await peer.progress('Peer progress u19q held');
       expect(delivered(f.p.id, held)).toBe(false);
@@ -123,6 +123,6 @@ export function conversationsCells(runners: RunnerId[], it: typeof registerTest 
     });
 
     // hearsay-tools/cezarion#1301: a blocked done at the turn end is answered with the refusal
-    // `cezar_done` gives mid-turn, as one automatic turn, and Cezar opens no wait.
+    // `cezar_done` gives mid-turn, as one automatic turn, and Squawk opens no wait.
   }
 }

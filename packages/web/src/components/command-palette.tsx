@@ -246,7 +246,7 @@ const taskKey = (task: Pick<PaletteTask, 'projectId' | 'id'>): string =>
  * The section holds finished tasks you have not opened since they finished — `isUnread` from
  * `lib/read-state`, the SAME decider behind the Tasks nav badge and the sidebar rows, not a
  * re-derivation. It is headed "Recently finished" rather than "Unread" because that is what it
- * reads as: cezar only stamps a read receipt when you open a thread in the cockpit, so a task you
+ * reads as: Squawk only stamps a read receipt when you open a thread in the cockpit, so a task you
  * followed in the terminal, or simply never clicked, stays technically unread for as long as it
  * exists. Sorted by when they FINISHED (not created) — the question is "what landed while I was
  * away", and that is the order to work through them in.

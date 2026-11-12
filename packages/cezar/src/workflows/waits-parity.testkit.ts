@@ -72,14 +72,14 @@ export const WAIT_CRITERIA = [
   { id: 'U20', scenario: 'baseline', name: 'a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait' },
   { id: 'U20u', scenario: 'baseline', name: 'a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' },
   { id: 'U20h', scenario: 'baseline', name: 'a human message, in the opening session or a continuation, after an unanswered refusal nudge starts a fresh cycle' },
-  { id: 'U21', scenario: 'baseline', name: 'an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes' },
+  { id: 'U21', scenario: 'baseline', name: 'an ignored refusal with live workers parks on a Squawk worker wait that settlement wakes' },
   { id: 'U21r', scenario: 'baseline', name: 'after a restart, a deadline-less completion wait resolves on the worker\'s settlement and wakes the parent once' },
   { id: 'U21m', scenario: 'baseline', name: 'a worker message wakes a parent parked on the completion wait and the wait stays open' },
   { id: 'U21t', scenario: 'baseline', name: 'an agent timer registered beside a completion-wait park keeps its deadline and wakes beside it' },
-  { id: 'U21h', scenario: 'baseline', name: 'an ignored refusal with only uncollected results parks on Cezar\'s human wait' },
+  { id: 'U21h', scenario: 'baseline', name: 'an ignored refusal with only uncollected results parks on Squawk\'s human wait' },
   { id: 'U21a', scenario: 'autonomous-cap', name: 'an autonomous parent\'s ignored refusal is nudged again until the budget' },
   { id: 'U22', scenario: 'baseline', name: 'a done blocked after the session closed reopens it and delivers the refusal' },
-  { id: 'U22s', scenario: 'baseline', name: 'a refusal reopened into a session that acknowledges it and never answers parks on Cezar\'s human wait at the nudge\'s reply bound' },
+  { id: 'U22s', scenario: 'baseline', name: 'a refusal reopened into a session that acknowledges it and never answers parks on Squawk\'s human wait at the nudge\'s reply bound' },
   { id: 'U22c', scenario: 'baseline', name: 'a refusal whose reopened sessions keep closing cleanly is queued once, stops at the delivery bound, and Continue delivers it once' },
   { id: 'U22f', scenario: 'baseline', name: 'a refusal whose reopened session closes once counts the failure, and its delivery clears it' },
   { id: 'U22k', scenario: 'baseline', name: 'after a refusal failed at the delivery bound, Continue delivers it within the nudge\'s reply bound and the closing sessions\' delivery retry' },
@@ -87,7 +87,7 @@ export const WAIT_CRITERIA = [
   { id: 'U22x', scenario: 'baseline', name: 'Stop retires a refusal a closed session still owes, and a Continue after it does not deliver it' },
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
   { id: 'U24r', scenario: 'baseline', name: 'a parent\'s reply to a worker question whose session closed opens a continuation that answers it in one commit' },
-  { id: 'U26', scenario: 'baseline', name: 'a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools' },
+  { id: 'U26', scenario: 'baseline', name: 'a launch whose Squawk tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
   // hearsay-tools/cezarion#1446: process waits.
   { id: 'U1p', scenario: 'baseline', name: 'a process wait registers through cezar_wait on the native wire, parks keeping its slot, and wakes with its exit code' },
@@ -102,7 +102,7 @@ export const WAIT_CRITERIA = [
   { id: 'R17', scenario: 'baseline', name: 'incoming requests refuse once then complete without reply' },
 ] as const;
 
-/** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
+/** The native mocks' `mock:cezar-tool` prompt: one Squawk tool call through the runner's own wire.
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
 export function toolCall(name: 'cezar_wait' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;

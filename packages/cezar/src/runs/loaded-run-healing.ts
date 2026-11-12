@@ -11,7 +11,7 @@ export function restoreLostReferencedPullRequest(
   // could match the created number. The evidence is all still on the record — only the
   // conclusion drawn from it was wrong — so re-resolve without that declaration instead of
   // asking for a migration. Deliberately one-directional: it only runs on a record that HAS no
-  // referenced PR, so it can never take one away from a record written by an older cezar whose
+  // referenced PR, so it can never take one away from a record written by an older Squawk whose
   // candidate list no longer explains it. `prNumber` is not recoverable this way (the
   // declaration overwrote it) and is left alone — the restored URL is what paints the chip.
   if (

@@ -12,7 +12,7 @@ describe('progressPreview', () => {
       .toEqual(['10:03 — tests pass', '10:02 — fix written', '10:01 — cause found'])
   })
 
-  // Older runs kept cezar's lifecycle lines in the Progress log; since hearsay-tools/cezarion#1809
+  // Older runs kept Squawk's lifecycle lines in the Progress log; since hearsay-tools/cezarion#1809
   // the preview shows only the agent's own lines, and nothing when the agent wrote none.
   it.each([
     '- 2026-10-24T10:05:00Z — turn complete — status=waiting',

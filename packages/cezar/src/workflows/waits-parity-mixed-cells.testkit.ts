@@ -7,6 +7,7 @@ import { fixtureUpdateRun, until, store, manager, worker, timeline, spendWorkerB
 import type { TimedWait } from './waits.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { toolCall, thenSay, ciNativeMessages, ciNativeSteers } from './waits-parity.testkit.ts';
+import { productName } from '../home/display.ts';
 
 // The mixed part of the wait parity cells (`WAIT_PARITY_PARTS` in `waits-parity-catalog.testkit.ts`).
 // A wait parity file imports this module first, so it loads no other part's cells (hearsay-tools/cezarion#3242).
@@ -116,8 +117,8 @@ export function mixedCells(runners: RunnerId[], it: typeof registerTest = regist
       expect(notice!.text).toContain(`It waits on: timer ${timer!.id} at ${timer!.deadline}`);
       expect(notice!.text).toContain('Squeal is still pending u3n.');
       // The notice reaches the parent on its own wire, and the parent's wait stays open.
-      await until(() => delivered(p.id, notice!.id) && prompted(runner, `Cezar notice: your worker ${w.id}`).length > 0);
-      expect(prompted(runner, `Cezar notice: your worker ${w.id}`).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
+      await until(() => delivered(p.id, notice!.id) && prompted(runner, `${productName('Cezar')} notice: your worker ${w.id}`).length > 0);
+      expect(prompted(runner, `${productName('Cezar')} notice: your worker ${w.id}`).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
       await until(() => parkedOn(p.id, workerWaits(p.id)[0]));
       expect(workerWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: WAIT_PHASE.open, deadline: workers.deadline })]);
       expect(inputsFor(p.id, workers.id)).toEqual([]);
@@ -148,7 +149,7 @@ export function mixedCells(runners: RunnerId[], it: typeof registerTest = regist
       // takes it as a steer, every other wire as a prompt.
       const [notice, ...more] = parkNotices(p.id, w.id);
       const reached = (text: string) => [...ciNativeMessages(runner, root), ...ciNativeSteers(runner, root)].some(input => input.includes(text));
-      await until(() => !!notice && delivered(p.id, notice.id) && reached(`Cezar notice: your worker ${w.id}`) && parkedOn(p.id, workerWaits(p.id)[0]), () => timeline(p.id));
+      await until(() => !!notice && delivered(p.id, notice.id) && reached(`${productName('Cezar')} notice: your worker ${w.id}`) && parkedOn(p.id, workerWaits(p.id)[0]), () => timeline(p.id));
       expect(more).toEqual([]);
       expect(notice).toMatchObject({ id: parkNoticeId(w.id, workers.id), senderRunId: w.id, recipientRunId: p.id });
       expect(notice!.text).toContain('It has no open wait: it waits for a message from you.');
@@ -167,7 +168,7 @@ export function mixedCells(runners: RunnerId[], it: typeof registerTest = regist
       expect(terminal).toContain(store.getRun(w.id)?.status);
       expect(store.readEvents(w.id).some(event => event.type === 'turn-end')).toBe(true);
       expect(conversationOf(p.id).filter(message => message.senderRunId === w.id)).toEqual([]);
-      expect(prompted(runner, 'Cezar notice:')).toEqual([]);
+      expect(prompted(runner, `${productName('Cezar')} notice:`)).toEqual([]);
     });
 
     it(`${runner} U7w cez worker wait and cezar_wait kind worker land in the same wait list`, async () => {

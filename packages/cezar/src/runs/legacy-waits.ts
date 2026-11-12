@@ -43,7 +43,7 @@ function rootCompletion(row: Record<string, unknown>): { waitId?: unknown } | un
 /** The worker waits a record still holds in `delegation` (store schemas 6 and 7,
  *  hearsay-tools/cezarion#1235, #1301), in the order they settled: `lastWait`, then `wait`. The
  *  completion gate's wait, the one `delegation.completion.waitId` names, is flagged `completion`: it
- *  was Cezar's own, not the agent's. A value that does not parse is left where it is, for the
+ *  was Squawk's own, not the agent's. A value that does not parse is left where it is, for the
  *  delegation schema to quarantine as it always has. */
 function agentWorkerWaits(row: Record<string, unknown>): AgentWaitFound[] {
   const delegation = row.delegation;
@@ -197,7 +197,7 @@ function settleLegacyAgentWait(row: Record<string, unknown>, found: AgentWaitFou
   if (key === 'lastWait' && currentId === wait.id) return;
   const input = inputs.find((candidate) => candidate.id === (wait.wakeId ?? wait.id));
   const entry = workerWaitEntry(wait, now);
-  // Cezar's completion gate wait is its own: no agent registered it (hearsay-tools/cezarion#1301).
+  // Squawk's completion gate wait is its own: no agent registered it (hearsay-tools/cezarion#1301).
   // It keeps the deadline it always carried, with the 600 s default registration.
   if (entry && completion) Object.assign(entry, { source: 'cezar', via: 'completion', mode: 'all' });
   // The `message` stand-in becomes no entry, but its delivered message may be that crash too.

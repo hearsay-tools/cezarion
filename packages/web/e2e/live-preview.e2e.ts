@@ -84,7 +84,7 @@ let runId: string
 let taskUrl: string
 
 /** The browser's cold launch can take most of a 25 s wait on a loaded CI runner (PR #792); give
- *  this spec's waits room past cezar's 30 s launch deadline, so a launch that fails shows its
+ *  this spec's waits room past Squawk's 30 s launch deadline, so a launch that fails shows its
  *  5.5 reason in the failure bundle instead of a spinner. Restored in afterAll. */
 const priorWaitBudget = process.env.AGENT_BROWSER_DEFAULT_TIMEOUT
 
@@ -102,7 +102,7 @@ beforeAll(async () => {
 
   appPort = await freePort()
   // The cockpit's own browser is launched with --no-sandbox exactly where this machine needs it.
-  // Whether the Chromium cezar resolves can use its sandbox depends on the host: GitHub's Ubuntu
+  // Whether the Chromium Squawk resolves can use its sandbox depends on the host: GitHub's Ubuntu
   // runners and this repo's dev boxes restrict unprivileged user namespaces (AppArmor), and the
   // pane then shows 5.4. That state has its own unit coverage; this spec is about streaming, so it always opts
   // out the documented way.

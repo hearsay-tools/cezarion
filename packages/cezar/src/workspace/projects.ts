@@ -88,7 +88,7 @@ async function normalizeRoot(root: string): Promise<string> {
   }
 }
 
-/** True when `path` sits inside a cezar task worktree (`…/.ai/cezar/worktrees/…`). */
+/** True when `path` sits inside a Squawk task worktree (`…/.ai/cezar/worktrees/…`). */
 function isInsideTaskWorktree(path: string): boolean {
   return MANAGED_WORKTREE.test(`${path.replaceAll('\\', '/')}/`);
 }

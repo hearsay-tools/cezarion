@@ -3,7 +3,7 @@ language: typescript
 severity: warning
 message: >-
   Write into a task worktree through withWorktreeFiles (packages/cezar/src/worktree-manifest.ts),
-  which records each path cezar wrote and never replaces or removes one the agent changed
+  which records each path Squawk wrote and never replaces or removes one the agent changed
   (hearsay-tools/cezarion#1814). A module that writes there imports no file-changing node:fs function.
 # The modules that write into a task worktree. A new one goes here, and through the manifest.
 files:

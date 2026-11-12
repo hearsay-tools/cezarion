@@ -248,7 +248,7 @@ async function fileReport({ github, base, run, key, flakes, left }) {
     'A merge-queue shard failed its first test run and passed its whole-shard rerun, so the queue entry passed. A test that passes only on a rerun is flaky. See `docs/sdlc/ci.md` § Flake reports from the merge queue.', '',
     ...details(base, run, flakes, left), '',
     '### What to do', '',
-    `This report starts no task. If the flake is real, add the \`${CONFIRM_LABEL}\` label: a Cezar automation then starts a task to fix or quarantine the test. A later merge group that flakes on a file this report names adds a comment here. Close the issue when the test is fixed or quarantined.`,
+    `This report starts no task. If the flake is real, add the \`${CONFIRM_LABEL}\` label: a Squawk automation then starts a task to fix or quarantine the test. A later merge group that flakes on a file this report names adds a comment here. Close the issue when the test is fixed or quarantined.`,
   ].join('\n');
   await github.request('POST /repos/{owner}/{repo}/issues', { ...base, title, body, labels: [LABEL] });
   return 1;

@@ -330,7 +330,7 @@ export const SESSION_GROUPS = {
           45_000,
         );
 
-        // Group 7 / #703 — a teardown cezar asked for is never an agent failure.
+        // Group 7 / #703 — a teardown Squawk asked for is never an agent failure.
         it(
           `${backend} S6 settles result on interrupt without reporting an agent error`,
           async () => {
@@ -391,7 +391,7 @@ export const SESSION_GROUPS = {
                 if (backend === 'opencode' && resume) seedOpencodeMockSession(path);
                 const obs = await driveSeam(backend, 'baseline', { spec: {
                   cwd: dir, resume, toolGrant: explicitToolGrant(['Read', 'Bash'], ['git status']),
-                  systemPrompt: 'Use native subagents for research; use cezar workers for work that needs a worktree.',
+                  systemPrompt: 'Use native subagents for research; use Squawk workers for work that needs a worktree.',
                   ...(governed ? { restrictCrossSessionMessaging: true } : {}),
                   env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
                 } });
@@ -431,10 +431,10 @@ export const SESSION_GROUPS = {
   },
 
   // D3 (hearsay-tools/cezarion#1994): at shipped defaults (no D1) a session refuses the
-  // runner's native cross-session messages, which bypass cezar's recorded conversations.
+  // runner's native cross-session messages, which bypass Squawk's recorded conversations.
   // Claude refuses inbound peer messages on every launch. Each other runner is a named
   // `capability-absent` exemption, pinned the other way round: its default wire carries no
-  // cross-session control, so the day cezar adds one, its exemption must go.
+  // cross-session control, so the day Squawk adds one, its exemption must go.
   'native-message'(r: HarnessRegistrar) {
     const { describeRunners, runners, it } = r;
     describeRunners('native-message', 'harness parity — D3 native cross-session messaging at shipped defaults', () => {
@@ -557,7 +557,7 @@ export const SESSION_GROUPS = {
     }, true);
   },
 
-  // #781: the `squawkTools` cell, live. One shared cezar tool list feeds every
+  // #781: the `squawkTools` cell, live. One shared Squawk tool list feeds every
   // runner's own wire (Claude's MCP config and generated allow-list entry, Codex
   // and Cursor forwarded env, OpenCode's runtime config, Pi's extension and tool
   // admission), and each mock lists the tools through the real bundled adapter.

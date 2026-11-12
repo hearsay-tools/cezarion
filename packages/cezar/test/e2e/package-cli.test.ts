@@ -49,7 +49,7 @@ async function installTarball(root: string) {
 }
 
 test('the release tarball installs and runs the dry-run CLI workflow', { timeout: 120_000 }, async () => {
-  // Cezar may set TMPDIR inside the checkout; installed resolution must have no
+  // Squawk may set TMPDIR inside the checkout; installed resolution must have no
   // repository node_modules anywhere in its parent chain.
   const root = await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'cezar-package-e2e-'));
   assert.ok(!root.startsWith(resolve(repoRoot, '../..') + '/'));

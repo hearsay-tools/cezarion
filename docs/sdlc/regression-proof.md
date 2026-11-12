@@ -87,7 +87,7 @@ node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts \
   --out ~/.cache/cez/mutants/result.json
 ```
 
-A whole-file run takes 20 minutes to 3 hours. In a Cezar task, start it with the `job start`
+A whole-file run takes 20 minutes to 3 hours. In a Squawk task, start it with the `job start`
 command that the `cezar_wait` tool description names, and wait for it with a process wait. A job
 started with `&`, `nohup` or a runner's background tool can end with the shell call or the session.
 

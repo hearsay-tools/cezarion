@@ -7,19 +7,19 @@ import { testHomeWrite, unsafeHomeWrites } from './test-home-write.ts';
 
 describe('test writes use explicit sandbox paths', () => {
   it.each([
-    "writeFileSync(join(squawkHomeDir(), 'config.json'), '{}')",
+    "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}')",
     "const root = homedir(); const file = join(root, 'config.json'); writeFileSync(file, '{}')",
     "const file = join(home(), 'x'); import { homedir as home } from 'node:os'; fs.promises.writeFile(file, '{}')",
     "import { rename as move } from 'node:fs/promises'; move('/tmp/a', join(os.homedir(), 'b'))",
     "const { rmSync: remove } = fs; remove(join(os['homedir'](), 'x'))",
-    "let root; root = squawkHomeDir(); mkdirSync(root)",
+    "let root; root = cezarHomeDir(); mkdirSync(root)",
     "const root = homedir(); fs.renameSync(root, '/tmp/x')",
     "fs.promises.rename('/tmp/x', join(homedir(), 'x'))",
     "fs.rmdirSync(join(homedir(), 'x'))",
     "fs.unlink(join(homedir(), 'x'), callback)",
     "import { writeFileSync as write } from 'node:fs'; const save = write; save(homedir(), 'x')",
     "writeFileSync(join((0, os.homedir)(), 'x'), 'x')",
-    "fs.rmSync(paths['squawkHomeDir']())",
+    "fs.rmSync(paths['cezarHomeDir']())",
   ])('rejects an ambient home reaching a write: %s', source => {
     expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
   });
@@ -29,7 +29,7 @@ describe('test writes use explicit sandbox paths', () => {
     "readFileSync(join(homedir(), 'config.json')); // test-home-read: inspect the selected home",
     "const home = resolveHome({purpose: 'cli'}); // test-home-read: pure resolution, result not written",
     "const file = join(tmp, 'x'); writeFileSync(file, 'homedir()')",
-    "// writeFileSync(homedir(), 'x')\nconst sample = `mkdirSync(squawkHomeDir())`",
+    "// writeFileSync(homedir(), 'x')\nconst sample = `mkdirSync(cezarHomeDir())`",
   ])('allows explicit sandbox writes and annotated reads: %s', source => {
     expect(unsafeHomeWrites(source)).toEqual([]);
   });
@@ -37,7 +37,7 @@ describe('test writes use explicit sandbox paths', () => {
   it.each(['test', 'testkit'].flatMap(kind => ['js', 'jsx', 'ts', 'tsx', 'mjs', 'mjsx', 'mts', 'mtsx', 'cjs', 'cjsx', 'cts', 'ctsx']
     .map(extension => `a.${kind}.${extension}`)))('covers %s repository-wide', file => {
     expect(testHomeWrite.applies(`scripts/${file}`)).toBe(true);
-    expect(testHomeWrite.check(`scripts/${file}`, "writeFileSync(join(squawkHomeDir(), 'config.json'), '{}')")).toHaveLength(1);
+    expect(testHomeWrite.check(`scripts/${file}`, "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}')")).toHaveLength(1);
   });
 
   it('keeps operational tools outside test-source enforcement', () => {
@@ -50,7 +50,7 @@ describe('test writes use explicit sandbox paths', () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-external-home-rule-'));
     try {
       mkdirSync(join(root, '.github/scripts'), { recursive: true });
-      writeFileSync(join(root, '.github/scripts/unsafe.test.cjs'), "writeFileSync(join(squawkHomeDir(), 'config.json'), '{}'); process.env.CEZ_HOME = '/host';");
+      writeFileSync(join(root, '.github/scripts/unsafe.test.cjs'), "writeFileSync(join(cezarHomeDir(), 'config.json'), '{}'); process.env.CEZ_HOME = '/host';");
       writeFileSync(join(root, '.github/scripts/mutants-file.cjs'), 'mkdirSync(homedir())');
       const problems = externalTestHomeProblems(root, ['.github/scripts/unsafe.test.cjs', '.github/scripts/mutants-file.cjs', 'deleted.test.mjs']);
       expect(problems).toEqual([expect.stringContaining('cez/home-boundary'), expect.stringContaining('cez/test-home-write')]);
@@ -155,9 +155,9 @@ describe('test writes use explicit sandbox paths', () => {
     "const os = require('node:os'); os.homedir()",
     "require('os').homedir()",
     "const {homedir: read} = require('node:os'); read()",
-    "import {squawkHomeDir as read} from '../paths.ts'; read()",
-    "import * as paths from '../paths.ts'; paths.squawkHomeDir()",
-    "const {squawkHomeDir: read} = require('../paths.cjs'); read()",
+    "import {cezarHomeDir as read} from '../paths.ts'; read()",
+    "import * as paths from '../paths.ts'; paths.cezarHomeDir()",
+    "const {cezarHomeDir: read} = require('../paths.cjs'); read()",
     "os['homedir']()",
     "os.homedir?.()",
     "os.homedir.call(null)",
@@ -183,7 +183,7 @@ describe('test writes use explicit sandbox paths', () => {
     "let read; ({homedir: (read as any)} = require('node:os'))",
     "let read; ({resolveHome: read} as any) = source",
     "let read; for ({resolveHome: read} of [await import('./resolve.ts')]) read()",
-    "for (const {squawkHomeDir: read = fallback} of sources) read()",
+    "for (const {cezarHomeDir: read = fallback} of sources) read()",
     "let read; for ({homedir: read} in sources) read()",
     "try {} catch ({homedir: read = fallback}) { read() }",
     "const {outer: [{resolveHome: read}]} = source",
@@ -199,14 +199,14 @@ describe('test writes use explicit sandbox paths', () => {
     "const read = os['homedir']",
     "(homedir satisfies any)()",
     "(resolveHome as any)()",
-    "squawkHomeDir!()",
+    "cezarHomeDir!()",
   ])('refuses guarded keys, specifiers and member values: %s', source => {
     expect(unsafeHomeWrites(source).length).toBeGreaterThan(0);
   });
 
   it.each([
     "function first() { const {homedir: read = fallback} = require('node:os') } // test-home-read: inspect sandbox path\nfunction second() { const read = () => Home.sandbox(dir).root; writeFileSync(read(), '{}') }",
-    "const data = {homedir: '/tmp', resolveHome() { return '/tmp' }, squawkHomeDir: value}",
+    "const data = {homedir: '/tmp', resolveHome() { return '/tmp' }, cezarHomeDir: value}",
     "interface Data { homedir(): string; resolveHome: string }; type X = typeof os.homedir",
     "import type {homedir} from 'node:os'; export type {homedir}",
     "import {type homedir as read} from 'node:os'",
@@ -259,6 +259,6 @@ describe('test writes use explicit sandbox paths', () => {
   it.each(['writeFile', 'writeFileSync', 'mkdir', 'mkdirSync', 'rm', 'rmSync', 'rmdir', 'rmdirSync',
     'rename', 'renameSync', 'unlink', 'unlinkSync'])('covers fs.%s and promise/callback forms', method => {
     expect(unsafeHomeWrites(`fs.${method}(join(homedir(), 'x'), '/tmp/b', callback)`)).toHaveLength(1);
-    expect(unsafeHomeWrites(`fs.promises.${method}(join(squawkHomeDir(), 'x'), '/tmp/b')`)).toHaveLength(1);
+    expect(unsafeHomeWrites(`fs.promises.${method}(join(cezarHomeDir(), 'x'), '/tmp/b')`)).toHaveLength(1);
   });
 });

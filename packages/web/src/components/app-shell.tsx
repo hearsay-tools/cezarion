@@ -60,7 +60,7 @@ export type AppShellProps = {
   /** Repo + branch for the brand chip. Null until Step 3.1/3.2 wires `/api/health` — the chip
    *  is simply absent rather than showing an invented repo name. */
   repo?: RepoChip | null | undefined
-  /** Running cezar version beside the wordmark. Null while health is unknown. */
+  /** Running Squawk version beside the wordmark. Null while health is unknown. */
   version?: string | null
   /** The npm registry's newer version, when the server's update check found one (#368). */
   latestVersion?: string | null

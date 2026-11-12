@@ -21,11 +21,11 @@ import { createApp, projectRouteManifest } from './server.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
 /**
- * Run controls when two cezar processes share a project (#779, plan step 3). The other process is
+ * Run controls when two Squawk processes share a project (#779, plan step 3). The other process is
  * a second store in this one: its claims carry another session. A real manager with no slots, so
  * nothing spawns.
  */
-describe('controls on a run another cezar process owns', () => {
+describe('controls on a run another Squawk process owns', () => {
   let repoRoot: string;
   let dataDir: string;
   let owner: RunStore;
