@@ -6,11 +6,12 @@ code statistics still use their existing paths until the remaining work in
 [hearsay-tools/squeal#167](https://github.com/hearsay-tools/squeal/issues/167) ships.
 CI passing does not replace this local check.
 
-The gate runs beside the push: collect it on the committed head and push
-without waiting for it. The PR may open while the report collects. Its
-completion gates the merge, not the opening: the auto-merge skill arms
-nothing before this report is complete with no blocker
-([`.ai/skills/auto-merge/SKILL.md`](../../auto-merge/SKILL.md)).
+Run it beside the push, as the reviewer round runs: start it on the committed head, push,
+and read the report when it finishes. It does not gate the push, and `npm run prepr` does
+not run it. It reuses Squeal's stored results at the branch's own content, so a warm
+daemon shortens it from about 11 minutes to about 2. An incomplete report still blocks
+the PR from merging, and auto-merge waits for it
+(hearsay-tools/cezarion#3289).
 
 ## 1. Collect the gate report
 
@@ -98,8 +99,8 @@ can expose unsupported evidence in this release; do not exempt them by hand.
 ## 3. Resolve findings
 
 Read each changed function and its tests. Fix violations within the approved
-scope, then collect a fresh report. If the fix needs a larger design, report
-the blocker on the PR and leave auto-merge off. Keep decisions visible rather than moving them
+scope, then collect a fresh report. If the fix needs a larger design, report the
+blocker before opening the PR. Keep decisions visible rather than moving them
 to a helper merely to lower one score.
 
 Squeal 0.1.423 does not implement inherited-refactor deferrals or owner-approved
@@ -124,6 +125,5 @@ versions, base/head identity and each finding with its action in the PR body.
 
 State that the **Squeal one-shot gate** supplied the local quality evidence.
 Do not call it a bundled-check pass or a daemon measurement. Only complete
-passing evidence permits the PR to merge: the auto-merge skill waits for this
-report before arming. CI and independent review remain
+passing evidence permits the PR to merge (auto-merge waits for it); it no longer gates opening it. CI and independent review remain
 separate gates. Keep hearsay-tools/cezarion#3096 open for the remaining migration.

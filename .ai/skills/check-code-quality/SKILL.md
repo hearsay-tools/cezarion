@@ -12,7 +12,7 @@ from the current task:
 | Request | Path |
 | --- | --- |
 | Get stats for a named file, function or module | Read [Measure requested code](references/measure.md) |
-| Prepare a PR or recheck its changed functions | Read [Before a PR](references/pre-pr.md) |
+| Check a PR's changed functions, beside the push, or recheck them | Read [Before a PR](references/pre-pr.md) |
 
 A measurement request ends with the requested stats and any coverage limits.
 The pre-PR path requires the complete Squeal one-shot report before the PR
