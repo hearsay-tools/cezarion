@@ -21,8 +21,9 @@ function outsideQueue(bound) {
 function assertCopied(copy, original, name) {
   let at = 0;
   for (const command of commands(copy)) {
-    at = commands(original).indexOf(command, at);
-    assert.ok(at >= 0, `${name}: ${command} is not in the ci.yml job, or not in its order`);
+    const found = commands(original).indexOf(command, at);
+    assert.ok(found >= 0, `${name}: ${command} is not in the ci.yml job, or not in its order`);
+    at = found + 1;
   }
 }
 
@@ -61,4 +62,10 @@ test('the full suite verifies the commit it is given and requires every job', ()
   assert.deepEqual(workflow.jobs.verify.needs.sort(), Object.keys(workflow.jobs).filter(name => name !== 'verify').sort());
   assert.equal(workflow.jobs.verify.if, 'always()');
   assert.deepEqual(workflow.permissions, { contents: 'read' });
+});
+
+test('the copy check follows ci.yml order through repeated commands', () => {
+  const job = runs => ({ steps: runs.map(run => ({ run })) });
+  assert.throws(() => assertCopied(job(['A', 'A', 'B']), job(['A', 'B', 'A']), 'repeat'), /A is not in the ci.yml job, or not in its order|B is not in the ci.yml job/);
+  assertCopied(job(['A', 'B', 'A']), job(['A', 'B', 'A']), 'same');
 });
