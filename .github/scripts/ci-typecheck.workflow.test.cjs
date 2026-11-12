@@ -46,7 +46,9 @@ test('typecheck keeps minimum Node, its bounded retry and an independent full ch
   ]);
   assert.equal(build.steps.some(step => step.run === 'npm run typecheck'), false);
   const index = run => build.steps.findIndex(step => step.run === run);
-  assert.ok(index('npm run test:unit') >= 0 && index('npm run test:unit') < index('npm run build'), 'unit tests run from source, before the build');
+  assert.equal(index('npm run test:unit'), -1, 'source unit tests run in their own parallel job');
+  assert.ok(ci.jobs['unit-tests'].steps.some(step => step.run === 'npm run test:unit:${{ matrix.suite }}'));
+  assert.deepEqual(ci.jobs['unit-tests'].needs, build.needs);
   assert.equal(index('npm run build:server'), -1);
   assert.deepEqual(build.needs, ['queue-proof', 'pr-test-input'], 'heavy build starts beside typecheck, preflight and review');
 });
@@ -58,7 +60,7 @@ test('required typecheck cannot fail or skip behind docs, infra or release-bump 
     for (const BUMP_PR of ['false', 'true']) for (const TYPECHECK_RESULT of ['success', 'failure', 'cancelled', 'skipped', '']) {
       const result = spawnSync('bash', ['-eu', '-c', gate.run], { encoding: 'utf8', env: {
         PATH: process.env.PATH, BASH_ENV: '/dev/null', CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: 'main', REVIEW_RESULT: 'success', EVENT_NAME: 'pull_request_target', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success',
-        COMPLEXITY_GATE_RESULT: 'success', CLONE_GATE_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success',
+        COMPLEXITY_GATE_RESULT: 'success', CLONE_GATE_RESULT: 'success', UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success',
         VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE, BUMP_PR, TYPECHECK_RESULT,
         PROOF_RESULT: 'success', PROOF_VERIFIED: 'false',
       } });

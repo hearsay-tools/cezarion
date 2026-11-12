@@ -24,7 +24,7 @@ function shell(job, overrides = {}) {
   const env = { PATH: process.env.PATH, BASH_ENV: '/dev/null', CANCELLED: 'false', EVENT_NAME: 'pull_request_target',
     BASE_REF: 'main', PR_NUMBER: '', PREFLIGHT_RESULT: 'success', REVIEW_RESULT: 'success', CLASSIFY_RESULT: 'success',
     SURFACE_RESULT: 'success', COMPLEXITY_RESULT: 'success', CLONE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success',
-    CLONE_GATE_RESULT: 'success', TYPECHECK_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success',
+    CLONE_GATE_RESULT: 'success', TYPECHECK_RESULT: 'success', UNIT_TESTS_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success',
     VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false',
     PROOF_RESULT: 'success', PROOF_VERIFIED: 'false', ...overrides };
   return spawnSync('bash', ['--noprofile', '--norc', '-eu', '-c', ci.jobs[job].steps[0].run], { env, encoding: 'utf8' });
@@ -71,7 +71,7 @@ test('a targeted review rerun reaches only the aggregate and its dependents, nev
 });
 test('passing review never excuses missing, blocked or failed tests', () => {
   for (const id of heavy) assert.equal(evaluate(ci.jobs[id].if, context()), true, id);
-  for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
+  for (const key of ['UNIT_TESTS_RESULT', 'BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT']) {
     for (const result of ['failure', 'skipped', 'cancelled', '']) assert.notEqual(shell('verify', { [key]: result }).status, 0);
   }
   assert.equal(shell('verify').status, 0);

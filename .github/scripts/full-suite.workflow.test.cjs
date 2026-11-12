@@ -32,14 +32,15 @@ function assertCopied(copy, original, name) {
 // changes this copy in the same commit.
 test('the full suite runs the commands, shards and bounds of the ci.yml jobs it copies', () => {
   const ci = read('ci.yml').jobs, suite = read('full-suite.yml').jobs;
-  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) assertCopied(suite[name], ci[name], name);
+  for (const name of ['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser']) assertCopied(suite[name], ci[name], name);
   assert.ok(commands(suite.typecheck).includes('npm run lint') && commands(suite.typecheck).includes('npm run typecheck'));
   // The citation check is a diff check against HEAD^1; ci.yml skips it on pushes, and so does this copy.
   assert.ok(suite.typecheck.steps.some(step => step.name === 'Lint workflows'), 'workflow lint runs in the copy');
-  for (const command of ['npm run test:unit', 'npm run test:package', 'npm run build']) assert.ok(commands(suite['build-and-package']).includes(command), command);
+  assert.ok(commands(suite['unit-tests']).includes('npm run test:unit:${{ matrix.suite }}'));
+  for (const command of ['npm run test:package', 'npm run build']) assert.ok(commands(suite['build-and-package']).includes(command), command);
   assert.equal(commands(suite.vitest).filter(command => command.startsWith('npm test')).length, 1);
   assert.equal(commands(suite['cockpit-browser']).filter(command => command.includes('npm run test:e2e')).length, 1);
-  for (const name of ['vitest', 'cockpit-browser']) {
+  for (const name of ['unit-tests', 'vitest', 'cockpit-browser']) {
     assert.deepEqual(suite[name].strategy.matrix, ci[name].strategy.matrix, `${name} shards`);
     assert.equal(suite[name].name, ci[name].name);
     assert.equal(suite[name]['runs-on'], ci[name]['runs-on']);

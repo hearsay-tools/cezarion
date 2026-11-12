@@ -24,7 +24,7 @@ function verificationJob(jobs) {
 function verificationJobs(jobs) {
   return (jobs || []).filter(job => job.name === VERIFICATION_JOB ||
     job.name === 'Typecheck, unit, build, and package' || job.name === 'Unit, build, and package' ||
-    job.name === 'Typecheck' || /^Vitest shard \d+\/\d+$/.test(job.name));
+    job.name === 'Unit tests (package)' || job.name === 'Unit tests (scripts)' || job.name === 'Build and package' || job.name === 'Typecheck' || /^Vitest shard \d+\/\d+$/.test(job.name));
 }
 
 function verificationComplete(job) {
