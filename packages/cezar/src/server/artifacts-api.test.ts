@@ -64,8 +64,10 @@ describe('task file links', () => {
       const response = await link(path);
       return { status: response.status, body: await response.json() };
     };
+    // Windows maps a host authority to a UNC path; POSIX refuses the URL itself.
+    const networkReason = process.platform === 'win32' ? 'Network file paths are not supported.' : 'Invalid local file URL or encoding.';
     expect(await refused('file://server/share/a.md')).toEqual({ status: 200,
-      body: { type: 'unavailable', path: 'file://server/share/a.md', reason: 'Invalid local file URL or encoding.' } });
+      body: { type: 'unavailable', path: 'file://server/share/a.md', reason: networkReason } });
     expect(await refused('file:///tmp/%zz')).toEqual({ status: 200,
       body: { type: 'unavailable', path: 'file:///tmp/%zz', reason: 'Invalid local file URL or encoding.' } });
     expect(await refused('javascript:bad')).toEqual({ status: 200,

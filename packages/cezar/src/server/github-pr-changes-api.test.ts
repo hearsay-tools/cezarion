@@ -38,6 +38,10 @@ describe('the GitHub PR changes API', () => {
     expect(await scoped.json()).toEqual(await legacy.clone().json());
     const body = (await legacy.json()) as ForgePrDiffResult;
     expect(body.available).toBe(true);
+    if (body.available) {
+      expect(body.files.some((file) => file.status === 'renamed' && file.previousPath)).toBe(true);
+      expect(body.truncated).toBe(true);
+    }
   });
 
   it('validates the number and exact refresh flag', async () => {
