@@ -45,7 +45,10 @@ test('the candidate stages under its own tag and the promotion publishes the sam
   assert.equal(promote.env.RELEASE_DIST_TAG, '${{ needs.plan.outputs.stable_tag }}');
   for (const step of [stage, promote]) assert.equal(step.env.HSQ_RELEASE_ROOT, '${{ github.workspace }}/source');
   const steps = jobs.release.steps.map(step => step.name);
-  assert.ok(steps.indexOf('Check the gates again') < steps.indexOf('Publish release'), 'the gates are checked again right before promotion');
+  assert.equal(steps.indexOf('Check the gates again'), steps.indexOf('Publish release') - 1, 'the gates are checked again right before promotion, after both builds');
+  const gate = jobs.release.steps.find(step => step.name === 'Check the gates again');
+  assert.equal(gate.env.VERSION, '${{ needs.plan.outputs.version }}');
+  assert.equal(gate.env.STABLE_TAG, '${{ needs.plan.outputs.stable_tag }}');
   assert.ok(steps.indexOf('Publish release') < steps.indexOf('Install through the alias and boot'));
   const smoke = jobs.release.steps.find(step => step.id === 'alias_smoke');
   assert.equal(smoke.env.PACKAGE, '${{ steps.release.outputs.installName }}');

@@ -203,8 +203,26 @@ test('the promotion re-check refuses a blocker opened during the candidate tests
       listJobsForWorkflowRun: async () => ({ data: [RESULT_JOB] }),
     } },
   };
-  await assert.rejects(plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '' }), /Promotion refused:\n- Open release-blocker issue #11/);
+  const registry = { versions: ['1.2.0', '1.2.1-rc.1'], time: { '1.2.0': '2026-11-10T00:00:00Z' }, distTags: { latest: '1.2.0' } };
+  const recheck = () => plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '', packageName: '@scope/pkg', version: '1.2.1', stableTag: 'latest', now: NOW, view: () => registry });
+  await assert.rejects(recheck(), /Promotion refused:\n- Open release-blocker issue #11/);
   open = [];
-  await plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '' });
+  await recheck();
   assert.equal(calls.length, 0);
+});
+
+test('a rerun of an older plan is refused when the registry moved since the plan', () => {
+  const at = (time, latest, extra = {}) => ({ versions: Object.keys(time), time, distTags: { latest, ...extra } });
+  const check = (registry, overrides = {}) => plan.registryChanges({ registry, previous: '1.2.0', version: '1.2.1', stableTag: 'latest', rollback: false, now: NOW, ...overrides });
+  assert.deepEqual(check(at({ '1.2.0': '2026-11-10T00:00:00Z' }, '1.2.0')), []);
+  // A newer release went out after this run planned 1.2.1: publishing would move latest backwards.
+  const moved = check(at({ '1.2.0': '2026-11-10T00:00:00Z', '1.3.0': '2026-11-12T10:00:00Z' }, '1.3.0'));
+  assert.match(moved.join('\n'), /latest moved from 1\.2\.0 to 1\.3\.0/);
+  assert.match(moved.join('\n'), /within 24 hours/);
+  // A maintenance release under latest-1.1 within 24 hours trips the cooldown, not the tag.
+  assert.match(check(at({ '1.2.0': '2026-11-10T00:00:00Z', '1.1.5': '2026-11-12T10:00:00Z' }, '1.2.0')).join('\n'), /within 24 hours/);
+  // A rollback skips the cooldown but still needs the latest it planned against.
+  assert.deepEqual(check(at({ '1.2.0': '2026-11-12T10:00:00Z' }, '1.2.0'), { rollback: true }), []);
+  // A retry of this promotion, already on latest, passes; release.mjs verifies its source.
+  assert.deepEqual(check(at({ '1.2.0': '2026-11-10T00:00:00Z', '1.2.1': '2026-11-12T11:00:00Z' }, '1.2.1')), []);
 });

@@ -238,15 +238,33 @@ async function planRelease({ github, context, inputs, packageName, now = Date.no
   return planOutputs({ rollback, packageName, sourceSha, version, registry, context, inputs, branch, ignore });
 }
 
+// A plan is only good for the registry it read. A rerun of an older run reuses its plan,
+// so the promotion refuses when `latest` moved, when its stable dist-tag no longer fits,
+// or when another stable version was published within 24 hours. A retry of this very
+// promotion (the version already on `latest`) passes; release.mjs verifies its source.
+function registryChanges({ registry, previous, version, stableTag, rollback, now }) {
+  const latest = registry.distTags.latest ?? '';
+  if (latest === version) return [];
+  const reasons = [];
+  if (latest !== previous) reasons.push(`latest moved from ${previous || 'nothing'} to ${latest} since the plan. Dispatch a new release.`);
+  else if (stableDistTag(version, registry.distTags) !== stableTag) reasons.push(`${version} no longer fits dist-tag ${stableTag}.`);
+  const others = Object.fromEntries(Object.entries(registry.time).filter(([entry]) => entry !== version));
+  const last = lastStablePublish(others);
+  if (!rollback && last !== null && now - last < COOLDOWN_MS) reasons.push(`A stable version was published ${new Date(last).toISOString()}, within 24 hours.`);
+  return reasons;
+}
+
 // Called again immediately before the promotion: a blocker opened during the candidate
-// tests stops the release.
-async function recheckGates({ github, context, mode, previous, ignoreBlockers }) {
-  const reasons = await readGates({ github, repo: context.repo, rollback: mode === 'rollback', latest: previous || undefined, ignore: parseIssueNumbers(ignoreBlockers) });
+// tests stops the release, and so does a registry that changed since the plan.
+async function recheckGates({ github, context, mode, previous, ignoreBlockers, packageName, version, stableTag, now = Date.now(), view = npmView }) {
+  const rollback = mode === 'rollback';
+  const reasons = registryChanges({ registry: view(packageName), previous: previous ?? '', version, stableTag, rollback, now });
+  reasons.push(...await readGates({ github, repo: context.repo, rollback, latest: previous || undefined, ignore: parseIssueNumbers(ignoreBlockers) }));
   if (reasons.length) throw new Error(`Promotion refused:\n- ${reasons.join('\n- ')}`);
 }
 
 module.exports = {
   compareVersions, nextCandidateVersion, candidateDistTag, stableDistTag, lastStablePublish, rollbackVersion, rollbackTag,
   parseIssueNumbers, blockingIssues, rehearsalOutcome, rehearsalVerdict, newestVerifiedCommit, verifiedMainCommit, npmView,
-  planRelease, recheckGates, COOLDOWN_MS,
+  planRelease, registryChanges, recheckGates, COOLDOWN_MS,
 };

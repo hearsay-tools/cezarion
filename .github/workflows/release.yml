@@ -248,21 +248,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A blocker opened during the candidate tests, or a failed rehearsal since the plan,
-      # stops the promotion before anything is published.
-      - name: Check the gates again
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          MODE: ${{ needs.plan.outputs.mode }}
-          PREVIOUS: ${{ needs.plan.outputs.previous }}
-          IGNORE_BLOCKERS: ${{ needs.plan.outputs.ignore_blockers }}
-        with:
-          retries: 3
-          script: |
-            await require('./.github/scripts/release-plan.cjs').recheckGates({
-              github, context, mode: process.env.MODE, previous: process.env.PREVIOUS, ignoreBlockers: process.env.IGNORE_BLOCKERS,
-            });
-
       - name: Check out the candidate commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -290,6 +275,26 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           npm run build
+
+      # Right before publication: a blocker opened during the candidate tests or the
+      # builds, a failed rehearsal, or a registry that changed since the plan (a rerun of
+      # an older run reuses its plan) stops the promotion.
+      - name: Check the gates again
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          PREVIOUS: ${{ needs.plan.outputs.previous }}
+          IGNORE_BLOCKERS: ${{ needs.plan.outputs.ignore_blockers }}
+          PACKAGE: ${{ needs.plan.outputs.package }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          STABLE_TAG: ${{ needs.plan.outputs.stable_tag }}
+        with:
+          retries: 3
+          script: |
+            await require('./.github/scripts/release-plan.cjs').recheckGates({
+              github, context, mode: process.env.MODE, previous: process.env.PREVIOUS, ignoreBlockers: process.env.IGNORE_BLOCKERS,
+              packageName: process.env.PACKAGE, version: process.env.VERSION, stableTag: process.env.STABLE_TAG,
+            });
 
       - name: Publish release
         id: release
