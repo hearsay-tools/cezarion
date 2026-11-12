@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  PROVIDER_IDS,
   ProviderAuthService,
   type ProviderConnectionState,
   type ProviderId,
@@ -303,7 +304,7 @@ describe('workspace provider API', () => {
     await apiRequest(server, '/api/v1/providers/status');
     await apiRequest(server, '/api/v1/providers/status?refresh=1');
 
-    expect(runCommand).toHaveBeenCalledTimes(12);
+    expect(runCommand).toHaveBeenCalledTimes(2 * PROVIDER_IDS.length);
   });
 
   it('GET without refresh reuses the completed provider cache', async () => {
@@ -317,7 +318,7 @@ describe('workspace provider API', () => {
     await apiRequest(server, '/api/v1/providers/status');
     await apiRequest(server, '/api/v1/providers/status');
 
-    expect(runCommand).toHaveBeenCalledTimes(6);
+    expect(runCommand).toHaveBeenCalledTimes(PROVIDER_IDS.length);
   });
 
   it('POST /api/v1/providers/:provider/retry clears only the current incident without enabling a disabled provider', async () => {
@@ -506,7 +507,7 @@ describe('workspace provider API', () => {
     const openTerminal = vi.fn(async () => true);
     const pending = connect(app({ providerAuth, openTerminal }), 'claude');
 
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6), { timeout: HANG_GUARD_MS });
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(PROVIDER_IDS.length), { timeout: HANG_GUARD_MS });
     providerAuth.reportRuntimeAuthFailure('claude');
     release();
 
