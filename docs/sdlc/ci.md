@@ -985,7 +985,9 @@ hearsay-tools/cezarion#3291).
   label `flake-report`. The occurrence marker
   `<!-- cez-flake-occurrence:v1:<owner>/<repo>:<run-id>:<attempt> -->` makes a rerun
   of the job write nothing twice: before any write it reads the reports and comments
-  of that attempt, on open and closed reports alike. The concurrency group `queue-flake-reports` is the
+  of that attempt, on open and closed reports alike. A comment also marks its files
+  and shards, so a replay that lost the artifact files no report without names for a
+  shard the attempt already reported. The concurrency group `queue-flake-reports` is the
   write lock.
 - **Labels.** `flake-report` and `flaky-test` must exist. When a flaked shard needs a
   report and either label is missing, the job fails before any write and names the

@@ -32,6 +32,7 @@ const MARK = {
   report: '<!-- cez-flake-report:v1 -->',
   occurrence: (key) => `<!-- cez-flake-occurrence:v1:${key} -->`,
   file: (name) => `<!-- cez-flake-file:v1:${name} -->`,
+  shard: (flake) => `<!-- cez-flake-shard:v1:${flake.kind.job}:${flake.shard} -->`,
 };
 const NOTES = {
   absent: 'No failed-file list from this run attempt is available.',
@@ -213,26 +214,25 @@ const FILE_MARK = /<!-- cez-flake-file:v1:(\S+) -->/g;
 const markedFiles = (text) => [...text.matchAll(FILE_MARK)].map((match) => match[1]);
 
 // What earlier deliveries of this run attempt already wrote, on open and closed reports alike:
-// the new report, if any, and every file a comment of the attempt names. A report or comment
-// updated after the run started is updated at or after `run.created_at`.
+// the new report, if any, and every file and shard a comment of the attempt names. A report or
+// comment updated after the run started is updated at or after `run.created_at`.
 async function recordedWrites({ github, base, run, key }) {
   const recent = (await listReports(github, base, { state: 'all', since: run.created_at })).filter(ours);
   const created = recent.some((item) => item.body.includes(MARK.occurrence(key)));
-  const names = new Set();
+  const commented = [];
   for (const issue of recent) {
     const comments = await github.paginate('GET /repos/{owner}/{repo}/issues/{issue_number}/comments', { ...base, issue_number: issue.number, per_page: 100 });
-    for (const comment of comments) {
-      if (comment.user?.login === BOT && (comment.body ?? '').includes(MARK.occurrence(key))) markedFiles(comment.body).forEach((name) => names.add(name));
-    }
+    commented.push(...comments.filter((comment) => comment.user?.login === BOT && (comment.body ?? '').includes(MARK.occurrence(key))).map((comment) => comment.body));
   }
-  return { created, names };
+  return { created, names: new Set(commented.flatMap(markedFiles)), commented: commented.join('\n') };
 }
 
 async function addOccurrence({ github, base, run, key, issue, flakes, names }) {
+  const shown = flakes.filter((flake) => flake.names.some((name) => names.has(name)));
   const body = [
-    MARK.occurrence(key), ...[...names].map(MARK.file), '',
+    MARK.occurrence(key), ...[...names].map(MARK.file), ...shown.map(MARK.shard), '',
     'A later merge group flaked on test files this report names: they failed the first run and passed the whole-shard rerun.', '',
-    ...details(base, run, flakes.filter((flake) => flake.names.some((name) => names.has(name))), names),
+    ...details(base, run, shown, names),
   ].join('\n');
   await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', { ...base, issue_number: issue.number, body });
   return 1;
@@ -272,7 +272,9 @@ async function writeReports({ github, base, run, flakes }) {
   }
   let reported = 0;
   for (const { issue, names } of held.values()) reported += await addOccurrence({ github, base, run, key, issue, flakes, names });
-  const fresh = flakes.filter((flake) => !flake.names.length || flake.names.some((name) => left.has(name)));
+  // A shard that lost its names since an earlier delivery commented on it is already reported.
+  const fresh = flakes.filter((flake) => flake.names.some((name) => left.has(name))
+    || (!flake.names.length && !recorded.commented.includes(MARK.shard(flake))));
   if (fresh.length) reported += await fileReport({ github, base, run, key, flakes: fresh, left });
   return reported;
 }

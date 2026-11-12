@@ -128,6 +128,17 @@ test('a replay after the commented report closed writes nothing again', async ()
   assert.equal(h.state.comments.length, 1);
 });
 
+test('a replay that lost the artifact after its attempt commented files no nameless duplicate', async () => {
+  const h = harness();
+  await reportQueueFlakes(h.options());
+  h.state.run.id = 502;
+  await reportQueueFlakes(h.options());
+  delete h.state.artifacts['failed-test-files-vitest-shard-2'];
+  assert.deepEqual(await reportQueueFlakes(h.options()), { flakes: 1, reported: 0 });
+  assert.equal(h.state.issues.length, 1);
+  assert.equal(h.state.comments.length, 1);
+});
+
 test('a replay after a comment landed and the new report failed files only the report', async () => {
   const h = harness();
   await reportQueueFlakes(h.options());
