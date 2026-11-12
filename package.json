@@ -35,7 +35,7 @@
     "test:parity": "node scripts/test-parity.mjs",
     "prepr": "node scripts/prepr.mjs",
     "metrics": "node scripts/metrics.mjs",
-    "test:unit": "npm run test:unit:package && npm run test:unit:scripts",
+    "test:unit": "npm run test:unit -w @wjarka/cezarion && node --import ./scripts/test-home-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs",
     "test:unit:package": "npm run test:unit -w @wjarka/cezarion",
     "test:unit:scripts": "node --import ./scripts/test-home-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs",
     "test:package": "node scripts/test-package.mjs",

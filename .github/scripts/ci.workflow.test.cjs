@@ -1004,7 +1004,7 @@ test('unit groups and build/package run in parallel without changing suite membe
   assert.ok(ci.jobs.verify.needs.includes('unit-tests'));
   assert.equal(ci.jobs.verify.steps[0].env.UNIT_TESTS_RESULT, "${{ needs['unit-tests'].result }}");
   const scripts = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'))).scripts;
-  assert.equal(scripts['test:unit'], 'npm run test:unit:package && npm run test:unit:scripts');
+  assert.equal(scripts['test:unit'], `${scripts['test:unit:package']} && ${scripts['test:unit:scripts']}`);
   assert.equal(scripts['test:unit:package'], 'npm run test:unit -w @wjarka/cezarion');
   assert.equal(scripts['test:unit:scripts'], 'node --import ./scripts/test-home-env.mjs --test .github/scripts/*.test.cjs scripts/*.test.mjs .ai/skills/*/scripts/*.test.mjs');
 });
