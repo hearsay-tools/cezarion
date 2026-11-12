@@ -821,15 +821,7 @@ jobs:
         if: github.event_name == 'merge_group' && steps.record.outcome == 'failure'
         run: node .github/scripts/vitest-rerun-reset.cjs . "$RUNNER_TEMP/failed-test-files.txt"
 
-      - name: Rerun server and cockpit unit suites with Squeal recording
-        id: rerun
-        if: github.event_name == 'merge_group' && steps.record.outcome == 'failure'
-        env:
-          VITEST_FILE_DURATION_CAP: '1'
-          SQUEAL_FETCHED: ${{ steps.squeal.outcome }}
-          PARTS_DIR: squeal-parts-rerun
-        run: *record-shard
-
+      # Before the rerun, so a rerun that reaches the job's time limit cannot cancel it.
       - name: Upload the first run's failed test files
         if: "!cancelled() && github.event_name == 'merge_group' && steps.record.outcome == 'failure'"
         continue-on-error: true
@@ -840,6 +832,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           overwrite: true
+
+      - name: Rerun server and cockpit unit suites with Squeal recording
+        id: rerun
+        if: github.event_name == 'merge_group' && steps.record.outcome == 'failure'
+        env:
+          VITEST_FILE_DURATION_CAP: '1'
+          SQUEAL_FETCHED: ${{ steps.squeal.outcome }}
+          PARTS_DIR: squeal-parts-rerun
+        run: *record-shard
 
       - name: Upload Squeal parts
         # A status function: without one GitHub adds success(), and a shard whose tests failed
@@ -1324,11 +1325,6 @@ jobs:
         if: github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'
         run: node .github/scripts/vitest-rerun-reset.cjs packages/web/e2e "$RUNNER_TEMP/failed-test-files.txt"
 
-      - name: Rerun cockpit browser E2E
-        id: e2e-rerun
-        if: github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'
-        run: *browser-shard
-
       - name: Upload the first run's failed test files
         if: "!cancelled() && github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'"
         continue-on-error: true
@@ -1339,6 +1335,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           overwrite: true
+
+      - name: Rerun cockpit browser E2E
+        id: e2e-rerun
+        if: github.event_name == 'merge_group' && steps.e2e.outcome == 'failure'
+        run: *browser-shard
 
       # A red spec writes `.ai/qa/failures/<spec>/<test>-<n>/` (screenshot, snapshot, probe)
       # through the e2e seam (#408). Ship it so the flake can be read instead of guessed at;

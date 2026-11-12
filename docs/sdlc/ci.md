@@ -922,10 +922,12 @@ hearsay-tools/cezarion#3290).
   again: the whole shard, not only the failed files, because a failure can depend on
   the state another file leaves. A failed rerun, or a failed reset, fails the entry, as
   a failure does today.
-- The job uploads the list as `failed-test-files-vitest-shard-N` or
+- Before the rerun, the job uploads the list as `failed-test-files-vitest-shard-N` or
   `failed-test-files-cockpit-browser-shard-N`, kept 7 days, only when the first run
-  failed. A run that failed before any test file finished leaves the list empty. Before
-  the rerun, the browser job also uploads the first run's failure bundles as
+  failed. The upload comes first so that a rerun that reaches the job's time limit,
+  which cancels every later step, cannot lose it. A run that failed before any test
+  file finished leaves the list empty. The browser job also uploads the first run's
+  failure bundles as
   `cockpit-failures-first-run-shard-N`, because each spec clears its old bundles when it
   runs again.
 - The rerun step's conclusion in the Actions API tells the cases apart: `skipped` when

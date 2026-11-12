@@ -64,12 +64,12 @@ test('only a merge-group shard whose first test step failed resets, reruns and u
       assert.doesNotMatch(s.if, /\b(always|failure|cancelled|success)\(/, `${id} ${s.name}`);
       assert.equal(s['continue-on-error'], undefined, `${id} ${s.name}`);
     }
-    assert.match(upload.if, /^!cancelled\(\) && /, `${id}: the list uploads after a failed rerun too`);
+    assert.match(upload.if, /^!cancelled\(\) && /, `${id}: the list uploads after a failed reset too`);
     assert.equal(upload['continue-on-error'], true, `${id}: the list never decides the verdict`);
   }
 });
 
-test('the rerun runs the whole shard again, after the reset that restores the first run\'s order', () => {
+test('the rerun runs the whole shard again, after the reset and the upload of the first run\'s list', () => {
   for (const [id, first, rerun, root] of SHARDS) {
     const job = ci().jobs[id];
     assert.equal(step(job, rerun).run, step(job, first).run, `${id}: the same command, the whole shard`);
@@ -77,7 +77,8 @@ test('the rerun runs the whole shard again, after the reset that restores the fi
     assert.ok(index(job, first) < index(job, 'reset') && index(job, 'reset') < index(job, rerun), `${id}: first run, reset, rerun`);
     const upload = job.steps.find((s) => s.with?.name?.startsWith('failed-test-files-'));
     assert.equal(upload.with.path, '${{ runner.temp }}/failed-test-files.txt', id);
-    assert.ok(index(job, rerun) < job.steps.indexOf(upload), id);
+    // A rerun that reaches the job's time limit cancels every later step.
+    assert.ok(index(job, 'reset') < job.steps.indexOf(upload) && job.steps.indexOf(upload) < index(job, rerun), `${id}: reset, list upload, rerun`);
   }
 });
 
