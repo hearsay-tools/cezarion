@@ -28,7 +28,7 @@ test('repeated delivery, retry after closure and a genuine closed recurrence are
  await reportFailure(h.options);assert.equal(h.state.issues.length,2);assert.match(h.state.issues[1].body,/issues\/1/);
 });
 test('partial issue creation repairs its missing comment on retry',async()=>{
- const h=harness();h.state.failComment=true;await assert.rejects(reportFailure(h.options));
+ const h=harness();h.state.failComment=true;await assert.rejects(reportFailure(h.options),/comment secret/);
  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,0);
  await reportFailure(h.options);assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
 });
@@ -76,7 +76,7 @@ test('a timed-out job beside a failed one reports both',async()=>{
  assert.deepEqual(h.state.issues.map(issue=>issue.title).sort(),['[Task]: Investigate delegation-integration.test.ts failure','[Task]: Investigate verification timeout']);
 });
 test('metadata and issue API failures propagate so workflow can fail visibly',async()=>{
- for(const flag of ['failRead','failCreate']) {const h=harness();h.state[flag]=true;await assert.rejects(reportFailure(h.options));assert.equal(h.state.comments.length,0);}
+ for(const [flag,error] of [['failRead',/read secret/],['failCreate',/write secret/]]) {const h=harness();h.state[flag]=true;await assert.rejects(reportFailure(h.options),error);assert.equal(h.state.comments.length,0);}
 });
 
 test('job log downloads omit credentials, enforce byte cap and reject redirects',async()=>{
@@ -96,7 +96,7 @@ test('changed log availability on duplicate delivery does not create a second re
 test('a lost response after a persisted comment is safe to retry',async()=>{
  const h=harness(), original=h.options.github.request;let lose=true;
  h.options.github.request=async(route,args)=>{const result=await original(route,args);if(lose && route.startsWith('POST ') && route.endsWith('/comments')){lose=false;throw new Error('connection lost');}return result;};
- await assert.rejects(reportFailure(h.options));await reportFailure(h.options);
+ await assert.rejects(reportFailure(h.options),/connection lost/);await reportFailure(h.options);
  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
 });
 test('Release maintenance branch is eligible and a failed job without steps still reports',async()=>{
@@ -119,7 +119,7 @@ test('two distinct long test paths in one job create separate reports',async()=>
 });
 test('repairing an unknown reservation keeps available diagnostic evidence',async()=>{
  const h=harness();h.state.log='src/index.ts(12,3): error TS2307: Cannot find module x';h.state.failComment=true;
- await assert.rejects(reportFailure(h.options));await reportFailure(h.options);
+ await assert.rejects(reportFailure(h.options),/comment secret/);await reportFailure(h.options);
  assert.equal(h.state.issues.length,1);assert.match(h.state.comments[0].body,/TS2307/);
 });
 function mainCi(h, patch={}) {
@@ -128,7 +128,7 @@ function mainCi(h, patch={}) {
 }
 test('main push CI routes only after evidence and repairs routing after retry',async()=>{
  const h=harness();mainCi(h);h.state.failComment=true;
- await assert.rejects(reportFailure(h.options));
+ await assert.rejects(reportFailure(h.options),/comment secret/);
  assert.ok(!h.calls.some(([route])=>route.endsWith('/labels')));
  await reportFailure(h.options);
  const comment=h.calls.findLastIndex(([route])=>route==='POST /repos/{owner}/{repo}/issues/{issue_number}/comments');
@@ -176,7 +176,7 @@ test('a time limit is not the cancellation: a later failure still reports',async
 
 test('routing failure retries without duplicating saved evidence or routing closed reports',async()=>{
  const h=harness();mainCi(h);h.state.failLabel=true;
- await assert.rejects(reportFailure(h.options));
+ await assert.rejects(reportFailure(h.options),/label secret/);
  assert.equal(h.state.comments.length,1);
  await reportFailure(h.options);assert.equal(h.state.comments.length,1);
  const count=h.calls.filter(([route])=>route.endsWith('/labels')).length;
