@@ -45,3 +45,12 @@ test('a rehearsal blocker carries no release version, and a release blocker need
   assert.equal(blockerVersion('no marker'), null);
   await assert.rejects(fileReleaseBlocker({ github: github(), repo: {}, kind: 'release', version: '1.2.1-rc.1', stage: 's', runUrl: 'u' }), /stable version/);
 });
+
+test('a stable publish that failed before any name reached the registry files nothing', () => {
+  const { publishedSome } = require('./release-blocker.cjs');
+  const seen = [];
+  const view = (name, version) => { seen.push(`${name}@${version}`); return name === 'alias'; };
+  assert.equal(publishedSome({ names: 'pkg,alias', version: '1.2.1', view }), true);
+  assert.deepEqual(seen, ['pkg@1.2.1', 'alias@1.2.1']);
+  assert.equal(publishedSome({ names: 'pkg', version: '1.2.1', view }), false);
+});

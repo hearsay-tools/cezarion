@@ -189,10 +189,16 @@ A failed candidate publishes no stable version and leaves `latest` unchanged. Th
 `<!-- cez-release-blocker:v1:release:<version> -->`); a repeat failure of the same
 version comments on it. A failed install through the alias after promotion files
 the same issue: that version is on `latest`, so [roll back](#rolling-back).
+So does a failed dist-tag check after promotion, which also stops the bump PR and the
+GitHub Release until a rerun passes, and a stable publish that stopped after some names
+already carry the version. A publish that failed before any name reached the registry
+files nothing: a rerun retries it. Before each publish, the workflow also checks that the
+candidate commit publishes the names the plan checked.
 
 ### Rolling back
 
-Dispatch **Release** with `rollback` checked. It releases the last good stable commit
+Dispatch **Release** from `main` with `rollback` checked (a rollback replaces the global
+`latest`, so a maintenance branch refuses it). It releases the last good stable commit
 again as the next patch version: the commit of the newest stable tag below `latest`
 (or the tag in `rollback_to`), published as the next patch version above `latest`
 (`1.2.2` after a broken `1.2.1`) through the same

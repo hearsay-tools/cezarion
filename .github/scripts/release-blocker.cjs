@@ -4,6 +4,8 @@
 // or a failed Nightly rehearsal. One open issue per release version, and one for the
 // rehearsal: a repeat adds a comment. The marker records the version, so a rollback
 // can tell the blocker of the release it replaces from every other blocker.
+const { execFileSync } = require('node:child_process');
+
 const BLOCKER_LABEL = 'release-blocker';
 const MARKER = /<!-- cez-release-blocker:v1:(release|rehearsal):([0-9A-Za-z.-]+) -->/;
 
@@ -44,6 +46,21 @@ function issueBody({ kind, version, stage, runUrl, key }) {
   ].join('\n');
 }
 
+// Whether any name already carries the version: a publish that stopped before the first
+// name left nothing to block, and a rerun retries it.
+function publishedSome({ names, version, view = viewVersion }) {
+  return String(names ?? '').split(',').filter(Boolean).some(name => view(name, version));
+}
+
+function viewVersion(name, version) {
+  try {
+    return execFileSync('npm', ['view', `${name}@${version}`, 'version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() === version;
+  } catch (error) {
+    if (/\bE404\b/.test(`${error.stdout ?? ''}${error.stderr ?? ''}`)) return false;
+    throw error;
+  }
+}
+
 async function fileReleaseBlocker({ github, repo, kind, version, stage, runUrl }) {
   const key = blockerKey({ kind, version });
   const tag = marker(kind, key);
@@ -61,4 +78,4 @@ async function fileReleaseBlocker({ github, repo, kind, version, stage, runUrl }
   return { number: data.number, url: data.html_url, created: true };
 }
 
-module.exports = { BLOCKER_LABEL, blockerVersion, fileReleaseBlocker, marker };
+module.exports = { BLOCKER_LABEL, blockerVersion, fileReleaseBlocker, marker, publishedSome };

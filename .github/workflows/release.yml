@@ -186,8 +186,10 @@ jobs:
         with:
           retries: 3
           script: |
+            const { publishedNames } = require('./.github/scripts/release-packages.cjs');
             require('./.github/scripts/release-plan.cjs').checkCandidateTag({
-              names: process.env.NAMES, version: process.env.VERSION, tag: process.env.TAG,
+              names: process.env.NAMES, sourceNames: publishedNames(`${process.env.GITHUB_WORKSPACE}/source`).join(','),
+              version: process.env.VERSION, tag: process.env.TAG,
             });
 
       - name: Publish the release candidate
@@ -224,6 +226,7 @@ jobs:
       actions: read # observe native PR CI and the last Nightly rehearsal
       issues: read # re-check open release-blocker issues
     outputs:
+      publish: ${{ steps.release.outcome }}
       alias_smoke: ${{ steps.alias_smoke.outcome }}
       dist_tags: ${{ steps.dist_tags.outcome }}
     steps:
@@ -317,7 +320,9 @@ jobs:
         with:
           retries: 3
           script: |
+            const { publishedNames } = require('./.github/scripts/release-packages.cjs');
             await require('./.github/scripts/release-plan.cjs').recheckGates({
+              sourceNames: publishedNames(`${process.env.GITHUB_WORKSPACE}/source`).join(','),
               github, context, mode: process.env.MODE, previous: process.env.PREVIOUS, ignoreBlockers: process.env.IGNORE_BLOCKERS,
               packageName: process.env.PACKAGE, names: process.env.NAMES, version: process.env.VERSION, stableTag: process.env.STABLE_TAG,
             });
@@ -364,7 +369,7 @@ jobs:
       # A rollback records its version on the dispatched branch's head: the old
       # commit's tree is history, and a bump from it would revert newer work.
       - name: Stamp the dispatch commit for the rollback bump
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && needs.plan.outputs.mode == 'rollback' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' && needs.plan.outputs.mode == 'rollback' }}
         env:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_DIST_TAG: ${{ needs.plan.outputs.stable_tag }}
@@ -373,7 +378,7 @@ jobs:
       # The checkouts keep no token, so no install or build step could read one. Only the
       # bump push gets it, with hooks off so no file a build wrote runs during the push.
       - name: Give the bump push its credential
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && needs.plan.outputs.record_bump == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
         working-directory: ${{ needs.plan.outputs.bump_dir }}
         env:
           TOKEN: ${{ github.token }}
@@ -385,7 +390,7 @@ jobs:
       # a failed bump PR must not prevent the published version's Release.
       - name: Open version-bump PR (patch/minor/major only)
         id: bump_pr
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && needs.plan.outputs.record_bump == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' && needs.plan.outputs.record_bump == 'true' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -403,7 +408,7 @@ jobs:
 
       - name: Create GitHub Release
         id: github_release
-        if: ${{ !cancelled() && steps.release.outputs.published == 'true' }}
+        if: ${{ !cancelled() && steps.release.outputs.published == 'true' && steps.dist_tags.outcome == 'success' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -443,7 +448,9 @@ jobs:
     needs: [plan, candidate, release]
     # A failed candidate publishes no stable version and leaves `latest` as it was; a
     # failed install of the promoted version needs a rollback. Both block the next release.
-    if: ${{ always() && needs.plan.result == 'success' && (needs.candidate.result == 'failure' || needs.release.outputs.dist_tags == 'failure' || needs.release.outputs.alias_smoke == 'failure') }}
+    # A stable publish that failed partway is filed only when some name already carries
+    # the version; the step below reads the registry before it files.
+    if: ${{ always() && needs.plan.result == 'success' && (needs.candidate.result == 'failure' || needs.release.outputs.publish == 'failure' || needs.release.outputs.dist_tags == 'failure' || needs.release.outputs.alias_smoke == 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -459,10 +466,16 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           VERSION: ${{ needs.plan.outputs.version }}
-          STAGE: ${{ needs.candidate.result == 'failure' && format('tests of release candidate {0}', needs.plan.outputs.candidate) || needs.release.outputs.dist_tags == 'failure' && format('dist-tags of {0} after promotion', needs.plan.outputs.version) || format('install of {0} through the alias after promotion', needs.plan.outputs.version) }}
+          STAGE: ${{ needs.candidate.result == 'failure' && format('tests of release candidate {0}', needs.plan.outputs.candidate) || needs.release.outputs.publish == 'failure' && format('publication of {0}, stopped partway', needs.plan.outputs.version) || needs.release.outputs.dist_tags == 'failure' && format('dist-tags of {0} after promotion', needs.plan.outputs.version) || format('install of {0} through the alias after promotion', needs.plan.outputs.version) }}
+          PARTIAL: ${{ needs.candidate.result != 'failure' && needs.release.outputs.publish == 'failure' }}
+          NAMES: ${{ needs.plan.outputs.names }}
         with:
           script: |
-            const { fileReleaseBlocker } = require('./.github/scripts/release-blocker.cjs');
+            const { fileReleaseBlocker, publishedSome } = require('./.github/scripts/release-blocker.cjs');
+            if (process.env.PARTIAL === 'true' && !publishedSome({ names: process.env.NAMES, version: process.env.VERSION })) {
+              core.info(`The publish of ${process.env.VERSION} failed before any name reached the registry; a rerun retries it, so no blocker.`);
+              return;
+            }
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const issue = await fileReleaseBlocker({ github, repo: context.repo, kind: 'release', version: process.env.VERSION, stage: process.env.STAGE, runUrl });
             await core.summary.addRaw(`Release blocker: ${issue.url}\n`).write();

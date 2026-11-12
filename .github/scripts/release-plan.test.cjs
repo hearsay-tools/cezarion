@@ -205,7 +205,7 @@ test('the promotion re-check refuses a blocker opened during the candidate tests
     } },
   };
   const registry = { versions: ['1.2.0', '1.2.1-rc.1'], time: { '1.2.0': '2026-11-10T00:00:00Z' }, distTags: { latest: '1.2.0' } };
-  const recheck = () => plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '', packageName: '@scope/pkg', names: '@scope/pkg,pkg', version: '1.2.1', stableTag: 'latest', now: NOW, view: () => registry });
+  const recheck = () => plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '', packageName: '@scope/pkg', names: '@scope/pkg,pkg', sourceNames: 'pkg,@scope/pkg', version: '1.2.1', stableTag: 'latest', now: NOW, view: () => registry });
   await assert.rejects(recheck(), /Promotion refused:\n- Open release-blocker issue #11/);
   open = [];
   await recheck();
@@ -232,9 +232,9 @@ test('no publish from a stale plan moves a dist-tag backwards', () => {
   const registry = { versions: [], time: { '1.2.0': '2026-11-01T00:00:00Z', '1.1.6': '2026-11-02T00:00:00Z' },
     distTags: { latest: '1.2.0', 'latest-1.1': '1.1.6', next: '1.3.0-rc.1' } };
   // A rerun stage of an old 1.2.1-rc.1 plan after 1.3.0-rc.1 took next.
-  assert.throws(() => plan.checkCandidateTag({ names: 'p', version: '1.2.1-rc.1', tag: 'next', view: () => registry }), /p: next points to 1\.3\.0-rc\.1/);
-  plan.checkCandidateTag({ names: 'p', version: '1.3.0-rc.2', tag: 'next', view: () => registry });
-  plan.checkCandidateTag({ names: 'p', version: '1.3.0-rc.1', tag: 'next', view: () => registry });
+  assert.throws(() => plan.checkCandidateTag({ names: 'p', sourceNames: 'p', version: '1.2.1-rc.1', tag: 'next', view: () => registry }), /p: next points to 1\.3\.0-rc\.1/);
+  plan.checkCandidateTag({ names: 'p', sourceNames: 'p', version: '1.3.0-rc.2', tag: 'next', view: () => registry });
+  plan.checkCandidateTag({ names: 'p', sourceNames: 'p', version: '1.3.0-rc.1', tag: 'next', view: () => registry });
   // An old maintenance plan for 1.1.5 after 1.1.6 took latest-1.1.
   const stale = plan.registryChanges({ registry, previous: '1.2.0', version: '1.1.5', stableTag: 'latest-1.1', rollback: false, now: NOW });
   assert.match(stale.join('\n'), /latest-1\.1 points to 1\.1\.6/);
@@ -245,8 +245,8 @@ test('every published name is checked, and a name the registry lacks has no tag 
   // A publish that failed partway left the alias ahead of the package.
   const views = { '@scope/pkg': { distTags: { next: '1.2.0-rc.1' } }, alias: { distTags: { next: '1.3.0-rc.1' } }, fresh: null };
   const view = (name, options) => { assert.deepEqual(options, { optional: true }); return views[name]; };
-  assert.throws(() => plan.checkCandidateTag({ names: '@scope/pkg,alias,fresh', version: '1.2.1-rc.1', tag: 'next', view }), /alias: next points to 1\.3\.0-rc\.1/);
-  plan.checkCandidateTag({ names: '@scope/pkg,fresh', version: '1.2.1-rc.1', tag: 'next', view });
+  assert.throws(() => plan.checkCandidateTag({ names: '@scope/pkg,alias,fresh', sourceNames: '@scope/pkg,alias,fresh', version: '1.2.1-rc.1', tag: 'next', view }), /alias: next points to 1\.3\.0-rc\.1/);
+  plan.checkCandidateTag({ names: '@scope/pkg,fresh', sourceNames: '@scope/pkg,fresh', version: '1.2.1-rc.1', tag: 'next', view });
 });
 
 test('a maintenance candidate upgrades from its own line, a main candidate from latest', async () => {
@@ -270,4 +270,13 @@ test('an optional registry read answers null for a missing package and throws on
   assert.equal(plan.npmView('missing', { optional: true }), null);
   assert.throws(() => plan.npmView('missing'), /Command failed/);
   assert.throws(() => plan.npmView('other', { optional: true }), /Command failed/);
+});
+
+test('the candidate commit must publish the names the plan checked, and a rollback runs from main', async () => {
+  const view = () => ({ distTags: {} });
+  assert.throws(() => plan.checkCandidateTag({ names: 'pkg,alias', sourceNames: 'pkg,alias,legacy', version: '1.2.1-rc.1', tag: 'next', view }),
+    /candidate commit publishes alias, legacy, pkg, the plan checked alias, pkg/);
+  assert.equal(plan.namesMismatch('pkg,alias', 'alias,pkg'), null);
+  const f = fixture({ ref: 'refs/heads/release/1.1.x', versions: ['1.2.0', '1.2.1'], distTags: { latest: '1.2.1' } });
+  await assert.rejects(f.run({ rollback: 'true' }), /Dispatch a rollback from main/);
 });

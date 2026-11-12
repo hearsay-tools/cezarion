@@ -243,6 +243,8 @@ async function planRelease({ github, context, inputs, packageName, aliasName, na
   const branch = context.ref.replace(/^refs\/heads\//, '');
   if (branch !== 'main' && !branch.startsWith('release/')) throw new Error('Dispatch the Release workflow from main or a release/** branch.');
   const rollback = inputs.rollback === true || inputs.rollback === 'true';
+  // A rollback replaces the global `latest`; its bump PR belongs on main, not a maintenance line.
+  if (rollback && branch !== 'main') throw new Error('Dispatch a rollback from main: it replaces latest and records its version on main.');
   const ignore = parseIssueNumbers(inputs.ignoreBlockers);
   if (ignore.length && !rollback) throw new Error('Only a rollback can name blockers that do not affect it.');
   const registry = view(packageName);
@@ -281,8 +283,18 @@ function splitNames(names) {
   return String(names ?? '').split(',').filter(Boolean);
 }
 
+// The plan reads the publishable names from the dispatch commit; the publish reads them
+// from the candidate commit. A name only one side has would skip the checks or fail late.
+function namesMismatch(names, sourceNames) {
+  const [planned, built] = [splitNames(names).sort(), splitNames(sourceNames).sort()];
+  return planned.join(',') === built.join(',') ? null
+    : `the candidate commit publishes ${built.join(', ') || 'nothing'}, the plan checked ${planned.join(', ') || 'nothing'}. Release from a commit with the current package set.`;
+}
+
 // Called right before the candidate is staged.
-function checkCandidateTag({ names, version, tag, view = npmView }) {
+function checkCandidateTag({ names, sourceNames, version, tag, view = npmView }) {
+  const mismatch = namesMismatch(names, sourceNames);
+  if (mismatch) throw new Error(`Staging refused: ${mismatch}`);
   const reasons = namesRegression({ names: splitNames(names), version, tag, view });
   if (reasons.length) throw new Error(`Staging refused:\n- ${reasons.join('\n- ')}`);
 }
@@ -301,9 +313,10 @@ function registryChanges({ registry, previous, version, stableTag, rollback, now
 
 // Called again immediately before the promotion: a blocker opened during the candidate
 // tests stops the release, and so does a registry that changed since the plan.
-async function recheckGates({ github, context, mode, previous, ignoreBlockers, packageName, names, version, stableTag, now = Date.now(), view = npmView }) {
+async function recheckGates({ github, context, mode, previous, ignoreBlockers, packageName, names, sourceNames, version, stableTag, now = Date.now(), view = npmView }) {
   const rollback = mode === 'rollback';
-  const reasons = registryChanges({ registry: view(packageName), previous: previous ?? '', version, stableTag, rollback, now });
+  const reasons = [namesMismatch(names, sourceNames)].filter(Boolean);
+  reasons.push(...registryChanges({ registry: view(packageName), previous: previous ?? '', version, stableTag, rollback, now }));
   const others = splitNames(names).filter(name => name !== packageName);
   reasons.push(...namesRegression({ names: others, version, tag: stableTag, view }));
   reasons.push(...await readGates({ github, repo: context.repo, rollback, latest: previous || undefined, ignore: parseIssueNumbers(ignoreBlockers) }));
@@ -313,5 +326,5 @@ async function recheckGates({ github, context, mode, previous, ignoreBlockers, p
 module.exports = {
   compareVersions, nextCandidateVersion, candidateDistTag, stableDistTag, lastStablePublish, rollbackVersion, rollbackTag,
   parseIssueNumbers, blockingIssues, rehearsalOutcome, rehearsalVerdict, newestVerifiedCommit, verifiedMainCommit, npmView,
-  upgradeBaseline, planRelease, tagRegression, checkCandidateTag, registryChanges, recheckGates, COOLDOWN_MS,
+  upgradeBaseline, namesMismatch, planRelease, tagRegression, checkCandidateTag, registryChanges, recheckGates, COOLDOWN_MS,
 };
