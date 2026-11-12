@@ -67,7 +67,7 @@ const providerHold = () => ({
  * The provider-error hold (hearsay-tools/squawk#3337): the run waits with a retry time and its error
  * kept, and is never `failed` on the way. Its lifecycle line names the error class and the first
  * attempt, and its retry time is the first back-off delay (1 minute) after the turn failed, read
- * against the run's creation.
+ * against the hold's lifecycle line.
  */
 function assertProviderHold(obs: RunObservation, label: string): void {
   expect(obs.statuses).not.toContain('failed');
@@ -77,9 +77,10 @@ function assertProviderHold(obs: RunObservation, label: string): void {
   const holds = obs.events.filter(event => event.type === 'lifecycle' && String(event.message).startsWith('provider error ('));
   expect(holds).toHaveLength(1);
   expect(String(holds[0]!.message)).toMatch(new RegExp(`^provider error \\(${label}: .+\\) — retrying automatically at .+ \\(attempt 1 of 12\\)$`));
-  const delay = Date.parse(obs.record!.autoResumeAt!) - Date.parse(obs.record!.createdAt);
-  expect(delay).toBeGreaterThanOrEqual(60_000);
-  expect(delay).toBeLessThanOrEqual(80_000);
+  // Measured from the hold's own lifecycle line, written with the hold, so host load does not move it.
+  const delay = Date.parse(obs.record!.autoResumeAt!) - Date.parse(String(holds[0]!.ts));
+  expect(delay).toBeGreaterThan(55_000);
+  expect(delay).toBeLessThanOrEqual(60_000);
 }
 
 const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
