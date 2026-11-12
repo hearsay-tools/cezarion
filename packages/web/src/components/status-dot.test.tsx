@@ -16,6 +16,8 @@ function renderDot(ui: React.ReactElement) {
 describe('StatusDot', () => {
   const TONES = ['success', 'pending', 'danger', 'accent', 'info', 'running', 'neutral'] as const satisfies readonly StatusDotTone[]
   const fillOf = (dot: Element) => dot.className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
+  // A painted fill: some bg- class, none of them transparent.
+  const painted = (fill: readonly string[]) => fill.length > 0 && !fill.includes('bg-transparent')
 
   it('gives every tone its own fill and names it in data-tone', () => {
     // The resolved colours (the sidebar-safe violet for running, #617) are sampled in quick-list.e2e.ts.
@@ -23,10 +25,10 @@ describe('StatusDot', () => {
       const dot = renderDot(<StatusDot tone={tone} />)
       expect(dot.getAttribute('data-tone')).toBe(tone)
       const fill = fillOf(dot)
+      expect(painted(fill), tone).toBe(true)
       cleanup()
       return fill.join(' ')
     })
-    expect(fills.every(Boolean)).toBe(true)
     expect(new Set(fills).size).toBe(TONES.length)
   })
 
@@ -60,13 +62,14 @@ describe('StatusDot', () => {
       expect(dot.getAttribute('data-shape')).toBe('filled')
     })
 
-    it('renders a ring hollow: a tone border instead of the filled dot\'s fill', () => {
-      const filled = fillOf(renderDot(<StatusDot tone="running" />))
-      cleanup()
-      const ring = renderDot(<StatusDot tone="running" shape="ring" />)
+    it.each(TONES)('renders a %s ring hollow, with a visible stroke', (tone) => {
+      const ring = renderDot(<StatusDot tone={tone} shape="ring" />)
+      const classes = ring.className.split(/\s+/)
       expect(ring.getAttribute('data-shape')).toBe('ring')
-      expect(fillOf(ring)).not.toEqual(filled)
-      expect(ring.className.split(/\s+/).some((cls) => /^border-(?!\[)/.test(cls))).toBe(true)
+      // No fill: the centre stays clear.
+      expect(fillOf(ring).filter((cls) => cls !== 'bg-transparent')).toEqual([])
+      // A stroke wider than zero: plain `border`, `border-N` or `border-[Npx]` with N > 0.
+      expect(classes.some((cls) => /^border(?:-[1-9]\d*|-\[(?:0?\.\d*[1-9]|[1-9][\d.]*)px\])?$/.test(cls))).toBe(true)
     })
 
     it('renders the workers shape as a bot glyph with the same accessible name', () => {

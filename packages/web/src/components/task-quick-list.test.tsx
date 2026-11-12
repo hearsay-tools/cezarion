@@ -1931,8 +1931,9 @@ describe('swipe to archive on touch (#780 §7)', () => {
     const parkedFill = fill()
     swipe('fin', -220, { release: false })
     expect(action('fin')!.getAttribute('data-past')).toBe('true')
-    // Past the commit point the action takes its own fill (--info; contrast in quick-list.e2e.ts).
+    // Past the commit point the action takes its own painted fill (--info; contrast in quick-list.e2e.ts).
     expect(fill()).not.toEqual([])
+    expect(fill()).not.toContain('bg-transparent')
     expect(fill()).not.toEqual(parkedFill)
     expect(action('fin')!.textContent).toBe('Release to archive')
     expect(onArchiveRun).not.toHaveBeenCalled()

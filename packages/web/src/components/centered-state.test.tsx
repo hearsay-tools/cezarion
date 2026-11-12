@@ -18,9 +18,12 @@ describe('CenteredState', () => {
     const tiles = (['primary', 'neutral', 'danger'] as const).map((tone) => {
       const { container } = render(<CenteredState icon={<SearchXIcon />} tone={tone} title="T" />)
       expect(container.querySelector('[data-slot="centered-state"]')?.getAttribute('data-tone')).toBe(tone)
-      const className = tileOf(container).className
+      // Each tone paints its own tile fill; borders and ink alone would not set the tiles apart.
+      const fill = tileOf(container).className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
+      expect(fill.length, tone).toBeGreaterThan(0)
+      expect(fill, tone).not.toContain('bg-transparent')
       cleanup()
-      return className
+      return fill.join(' ')
     })
     expect(new Set(tiles).size).toBe(3)
   })
