@@ -222,6 +222,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
     };
     const { readRunIndexFromDisk } = await import('../src/runs/run-index.ts');
     const { createApp } = await import('../src/server/server.ts');
+    const { RunManager } = await import('../src/workflows/run.ts');
     const { registerProject } = await import('../src/workspace/projects.ts');
     const gc = (globalThis as { gc?: () => void }).gc ?? (() => {});
 
@@ -363,7 +364,7 @@ async function runChild(options: ChildOptions, resultPath: string): Promise<void
       closePrevious();
       const routeStore = open();
       const app = createApp({
-        home, repoRoot: join(root, 'boot'), store: routeStore, version: '0.0.0-bench',
+        home, repoRoot: join(root, 'boot'), store: routeStore, version: '0.0.0-bench', createManager: (...args) => new RunManager(...args),
         manager: { finishBlockedReason: () => null } as unknown as Parameters<typeof createApp>[0]['manager'],
       });
       for (const route of routes) {

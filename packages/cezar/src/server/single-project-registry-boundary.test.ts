@@ -16,6 +16,7 @@ import { clearProjectProbeCache, registerProject } from '../workspace/projects.t
 import { apiRequest } from './loopback-request.testkit.ts';
 import { sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { createApp, startServer } from './server.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 // The background chain reads the registry, then sweeps preview leftovers: the sweep's argument is
 // the list that chain read.
@@ -70,7 +71,7 @@ describe('single-project registry boundary', () => {
   const bootDeps = () => {
     const store = RunStore.open(join(bootRoot, '.ai/cezar'), { keepLive: true });
     cleanups.push(() => store.close());
-    return { home: testHome(), repoRoot: bootRoot, bootProjectId: bootId, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' };
+    return { home: testHome(), repoRoot: bootRoot, bootProjectId: bootId, store, manager: { isActive: () => false } as unknown as RunManager, createManager: createRunManager, version: '0.0.0-test' };
   };
 
   const viaCreateApp = async (path: string): Promise<number> => {

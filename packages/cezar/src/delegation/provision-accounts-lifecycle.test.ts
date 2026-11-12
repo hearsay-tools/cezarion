@@ -19,6 +19,7 @@ import { ProjectContexts } from '../server/project-context.ts';
 import { readPersistedText } from '../runs/run-store.testkit.ts';
 import { provisionWorkflowFixture, delegationToken, until, PROVISION_ROWS } from './provision-workflows.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from '../server/run-manager.testkit.ts';
 
 // Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
 // the default 5s testTimeout / 10s hookTimeout cannot finish those waits. Teardown still cancels
@@ -296,7 +297,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
     // A restart into a lazily built context: the old manager and store go first.
     f.manager.dispose(); f.store.close();
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: async () => [{ id: 'lazy', root: f.root, status: 'ok' }], prepareManager: project => controller.attachProject(project) });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => [{ id: 'lazy', root: f.root, status: 'ok' }], prepareManager: project => controller.attachProject(project) });
     try {
       const context = await contexts.context('lazy');
       await until(() => sessions.length >= 1);

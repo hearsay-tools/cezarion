@@ -17,6 +17,7 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { ProjectContexts } from './project-context.ts';
 import { createApp } from './server.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /**
  * A project whose run store cannot be opened (#779, plan step 4) answers every route with why,
@@ -52,7 +53,7 @@ describe('a project whose run store cannot be opened', () => {
     delete process.env.CEZ_SINGLE_PROJECT;
     for (const root of [bootRoot, otherRoot]) mkdirSync(join(root, '.ai/cezar'), { recursive: true });
     clearProjectProbeCache();
-    contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+    contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
   });
 
   afterEach(() => {

@@ -56,7 +56,7 @@ import { createWorkspaceProjects, createWorkspaceProjectContexts, createTaskWebh
 import { subscribeRunFeed } from './run-event-feed.ts';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
-import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
+import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, createRunInputSchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
 import { workspaceEventsQuerySchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/workspace-events';
 import { automationListQuerySchema } from '@open-mercato/cezar-contract/automations';
 import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
@@ -65,7 +65,6 @@ import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
-import { createRunInputSchema } from '@open-mercato/cezar-contract/runs';
 import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -90,8 +89,7 @@ import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Hono, type Context } from 'hono';
-import type { Next } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { getRequestListener, serve, type ServerType } from '@hono/node-server';
 import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
@@ -190,8 +188,9 @@ import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract/artifacts';
 import { listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
-import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../workflows/run.ts';
-import type { PastedContent } from '../workflows/run/types.ts';
+import type { RunManager } from '../workflows/run.ts';
+import { toPastedContent, type PastedContent } from '../workflows/pasted-content.ts';
+import { isUntouchedCancelledRun } from '../workflows/run/run-guards.ts';
 import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, selectReclaimableWorktrees } from '../runs/retention.ts';
@@ -263,7 +262,7 @@ import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/u
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { createWorkspaceRunFeed } from './workspace-run-feed.ts';
-import { armPreview, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
+import { armPreview, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext, type RunManagerFactory } from './project-context.ts';
 
 import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
@@ -273,9 +272,8 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
+import { forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
-import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
 import { closingSignal, prepareBeforeTicks, prepareProject, prepareProjects } from '../project-migration/auto.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
@@ -354,6 +352,8 @@ export interface ServerDeps extends ActivityServerDeps {
    *  context is seeded from `deps.{store,manager}` (which src/index.ts already
    *  recovered/pruned at startup) and the resolver short-circuits to it. */
   contexts?: ProjectContexts | undefined;
+  /** Builds each non-boot project's manager for the default `contexts`; `serve` passes the real one. */
+  createManager?: RunManagerFactory | undefined;
   /** Boot project's shared automation store. `startServer` injects the
    *  coordinator-owned instance so HTTP routes and the scheduler never cache
    *  separate views of the same project files. */

@@ -1,7 +1,7 @@
 import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -26,6 +26,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -242,8 +243,10 @@ describe('a blocked filter never lets the cross-state search leak rows', () => {
     })
     renderAt('/github?filter=no-task')
     await screen.findByText(/task list is unavailable/)
+    vi.useFakeTimers()
     type('Search issues', 'unrelated')
-    await new Promise((resolve) => setTimeout(resolve, 900))
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    vi.useRealTimers()
     expect(sent.some((path) => path.includes('/github/search'))).toBe(false)
     expect(document.querySelector('[data-slot="gh-search-hits"]')).toBeNull()
     expect(numbers()).toEqual([])
@@ -254,8 +257,10 @@ describe('a blocked filter never lets the cross-state search leak rows', () => {
     const sent = stub({ gh: { ...GITHUB, viewerLogin: undefined }, search: () => ({ available: true, items: [pr(88)] }) })
     renderAt('/github/prs?filter=mine')
     await waitFor(() => expect(document.querySelector('[data-slot="gh-filter-gate"]')).not.toBeNull())
+    vi.useFakeTimers()
     type('Search prs', 'anything')
-    await new Promise((resolve) => setTimeout(resolve, 900))
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    vi.useRealTimers()
     expect(sent.some((path) => path.includes('/github/search'))).toBe(false)
     expect(numbers()).toEqual([])
   })

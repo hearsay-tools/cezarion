@@ -28,6 +28,7 @@ try {
   const { projectPaths } = await import(new URL('project-paths.js', runtime.url));
   dataDir = projectPaths(join(root, 'cold-project')).write;
   const { startServer } = await import(new URL('server/server.js', runtime.url));
+  const { RunManager } = await import(new URL('workflows/run.js', runtime.url));
   const { resolveHome } = await import(new URL('home/resolve.js', runtime.url));
   const home = resolveHome({ purpose: 'cli' });
   const { Home } = await import(new URL('home/home.js', runtime.url));
@@ -41,7 +42,7 @@ try {
   // second cold store on this same event loop. No transcript sidecar is primed.
   bootStore = RunStore.open(projectPaths(root).write);
   await bootStore.factsWarmIdle();
-  server = startServer({ home, repoRoot: root, store: bootStore, manager: {}, version: 'task4-measurement', bindHost: '127.0.0.1' }, 0);
+  server = startServer({ home, repoRoot: root, store: bootStore, manager: {}, createManager: (...args) => new RunManager(...args), version: 'task4-measurement', bindHost: '127.0.0.1' }, 0);
   if (!server.listening) await once(server, 'listening');
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
