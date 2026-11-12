@@ -935,7 +935,9 @@ hearsay-tools/cezarion#3290).
   runs again.
 - The rerun step's conclusion in the Actions API tells the cases apart: `skipped` when
   the first run passed, `success` when the first run failed and the rerun passed (a
-  flake), and `failure` when both failed.
+  flake), and `failure` when both failed. The first step's own conclusion cannot: the
+  API reports a failed `continue-on-error` step as `success`. The flake reporter reads
+  the rerun step (§ Flake reports from the merge queue).
 - In a merge group both jobs have a 40-minute limit, room for two runs inside the queue's
   45-minute check timeout. In merge-group runs of 2026-11-11, a Vitest shard's tests took
   up to 16 minutes and a browser shard's up to 13.
@@ -945,6 +947,59 @@ hearsay-tools/cezarion#3290).
 step order, the rerun's Squeal parts, the artifacts and the time limits.
 `.github/scripts/vitest-rerun-reset.test.cjs` runs Vitest on a fixture to pin the cache's
 place and format and the order the reset gives back.
+
+### Flake reports from the merge queue
+
+A shard that passes only on its rerun lets its entry merge, so nobody would hear about
+the flake. `report-queue-flakes.yml` (`Report Merge Queue Flakes`) files a report for it
+(`.ai/specs/2026-11-11-one-full-run-delivery-pipeline.md` § Queue, item 6;
+hearsay-tools/cezarion#3291).
+
+- **Trusted job.** It starts on every completed `CI` run whose event is `merge_group`,
+  after the entry's verdict is settled, and changes nothing in that run. It checks out
+  the default branch's head (`github.sha`), never the queued commit, and runs only
+  `.github/scripts/report-queue-flakes.cjs` in `actions/github-script`. Its token has
+  `actions: read`, `contents: read` and `issues: write`. The shard cannot write the
+  report itself: it runs queued code with a read-only token, and a queued PR could forge
+  test names.
+- **The signal.** It reads the run attempt's jobs through the Actions API. A
+  `Vitest shard N/4` or `Cockpit browser E2E shard N/4` job is a flake when its rerun
+  step concluded `success`: the rerun runs only after a failed first run (§ Rerun of a
+  failed queue shard). A shard whose rerun failed is a failure, not a flake.
+- **The names.** It downloads the shard's `failed-test-files-*-shard-N` artifact through
+  the Actions API, into memory, with a 64 KiB limit, and never writes it to disk. It
+  reads the archive as untrusted bytes: exactly one `failed-test-files.txt`, stored or
+  deflated, valid UTF-8. It keeps only paths with safe characters and a `.test.*` or
+  `.spec.*` suffix that are regular files in the merge group's tree, read through the
+  Git API (`git/trees/<sha>?recursive=1`). A report quotes each name as code and names
+  at most 50.
+- **No names.** With no artifact, an expired or malformed one, a list emptied by the
+  tree check, or a tree too large for one API read, the report says so and names no
+  file.
+- **One issue per merge group, keyed by test file.** The body carries
+  `<!-- cez-flake-file:v1:<path> -->` per file. A file that an open report from
+  `github-actions[bot]` already names gets one comment there per run attempt. Every
+  other file, and every flaked shard without a name, goes into one new issue with the
+  label `flake-report`. The occurrence marker
+  `<!-- cez-flake-occurrence:v1:<owner>/<repo>:<run-id>:<attempt> -->` makes a rerun
+  of the job write nothing twice. The concurrency group `queue-flake-reports` is the
+  write lock.
+- **Labels.** `flake-report` and `flaky-test` must exist. When a flaked shard needs a
+  report and either label is missing, the job fails before any write and names the
+  label.
+- **What a report starts.** Nothing. A maintainer who confirms the flake adds
+  `flaky-test`, and a Cezar automation starts a task to fix or quarantine the test
+  ([main CI repair](main-ci-repair.md#flake-reports-from-the-merge-queue)). A report never
+  gets `main-ci-failure`, so the main CI repair automation does not take it.
+
+`.github/scripts/report-queue-flakes.workflow.test.cjs` pins the trigger, the token, the
+trusted checkout, the absence of queued code, and that the jobs, steps and artifacts the
+reporter reads are the ones `ci.yml` runs. `.github/scripts/report-queue-flakes.test.cjs`
+and `.github/scripts/queue-flake-artifact.test.cjs` cover the reports, repeats, retries,
+dropped names and malformed archives.
+
+**Validation limit:** GitHub runs a `workflow_run` listener only from the default branch.
+Confirm the first real flake report after the merge; do not force a flake for this check.
 
 ### Docs-only queue entries
 
