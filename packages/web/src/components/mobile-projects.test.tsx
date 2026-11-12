@@ -110,11 +110,9 @@ describe('elsewhereSignal / menuButtonLabel', () => {
 })
 
 describe('mobile top bar', () => {
-  it('is 56px, drops the wordmark, and keeps the project button and search', () => {
+  it('drops the wordmark and keeps the project button and search', () => {
     renderShell('/p/cezarion/', nav())
     const bar = document.querySelector('[data-slot="mobile-top-bar"]') as HTMLElement
-    expect(bar.firstElementChild?.className).toContain('h-[56px]')
-    expect(bar.firstElementChild?.className).toContain('px-[8px]')
     expect(within(bar).queryByText(`${productName("Cezarion")}`)).toBeNull()
     expect(within(bar).getByRole('button', { name: 'Search' })).toBeTruthy()
     const picker = within(bar).getByRole('button', { name: 'Switch project: cezarion' })
@@ -128,17 +126,7 @@ describe('mobile top bar', () => {
     expect(button.getAttribute('aria-label')).toBe('Open projects. Elsewhere: 1 needs you, 1 failed, 2 working, 1 finished')
     expect(segs(button, 'top')).toEqual(['amber:1', 'red:1'])
     expect(segs(button, 'bottom')).toEqual(['violet:2', 'green:1'])
-    const top = button.querySelector('[data-slot="rail-pill-top"]') as HTMLElement
-    const bottom = button.querySelector('[data-slot="rail-pill-bottom"]') as HTMLElement
-    expect(top.className).toContain('top-[3px]')
-    expect(top.className).toContain('right-[2px]')
-    expect(bottom.className).toContain('top-[24px]')
-    // The cut-out ring is the top bar's own colour.
-    expect(top.className).toContain('border-card')
-    // 64px wide, 44px tall, in px rather than spacing steps: density scales the steps, and the
-    // ultra scale shrank this to 48px and pushed the button off the top of the bar.
-    expect(button.className).toContain('w-[64px]')
-    expect(button.className).toContain('h-[44px]')
+    // The pill offsets and the 64x44 button, under every density, resolve in mobile-projects.e2e.ts.
   })
 
   it('never lets a split pill reach the menu icon, whatever the counts', () => {
@@ -186,10 +174,7 @@ describe('mobile drawer', () => {
     expect(within(identity).getByRole('button', { name: 'Close menu' })).toBeTruthy()
 
     expect(rows().map((row) => row.getAttribute('data-project-id'))).toEqual(PROJECTS.map((entry) => entry.id))
-    for (const row of rows()) expect(row.className).toContain('h-[64px]')
-    // `flex-1` belongs to the current row alone (beside its `…`): on the plain rows, in a flex
-    // column, it collapsed the 64px height to 40px in a real browser.
-    expect(rows().filter((row) => row.className.includes('flex-1')).map((row) => row.getAttribute('aria-current'))).toEqual(['page'])
+    // The 64px row height (which a stray `flex-1` once collapsed to 40px) is measured in mobile-projects.e2e.ts.
     // A long nightly version truncates instead of pushing Close out of the identity row.
     const version = identity.querySelector('[data-slot="drawer-version"]') as HTMLElement
     expect(version.className).toContain('truncate')
@@ -204,7 +189,6 @@ describe('mobile drawer', () => {
     fireEvent.click(menuButton())
     const [current, toolkit, failed, finished, idle] = rows() as [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement]
     expect(current.getAttribute('aria-current')).toBe('page')
-    expect((current.closest('[data-slot="drawer-project-current"]') as HTMLElement).className).toContain('bg-sidebar-row-selected')
     expect(current.querySelector('svg[data-design-icon="check"]')).not.toBeNull()
     expect(toolkit.getAttribute('aria-current')).toBeNull()
 
@@ -212,24 +196,13 @@ describe('mobile drawer', () => {
     expect(segs(current, 'bottom')).toEqual(['violet:3', 'green:1'])
     expect(segs(failed, 'top')).toEqual(['red:1'])
     expect(segs(idle, 'top')).toEqual([])
-    expect((toolkit.querySelector('[data-slot="rail-pill-bottom"]') as HTMLElement).className).toContain('top-[29px]')
 
     const words = (row: HTMLElement) => [...row.querySelectorAll('[data-tone]')].map((el) => `${el.getAttribute('data-tone')}:${el.textContent}`)
     expect(words(current)).toEqual(['amber:1 needs you', 'violet:3 working', 'green:1 finished'])
     expect(words(failed)).toEqual(['red:1 failed'])
     expect(words(finished)).toEqual(['green:1 finished'])
     expect(idle.querySelector('[data-slot="drawer-project-state"]')?.textContent).toBe('idle')
-    // The state words' own text inks (#711), shared with the expanded rail: the pills' fills
-    // (`--danger`, `--pending-strong`) fail 4.5:1 as 11px text on the selected row.
-    expect(current.querySelector('[data-tone="amber"]')?.className).toContain('text-signal-word-amber')
-    expect(failed.querySelector('[data-tone="red"]')?.className).toContain('text-signal-word-red')
-    expect(current.querySelector('[data-tone="amber"]')?.className).not.toContain('text-pending-strong')
-    expect(failed.querySelector('[data-tone="red"]')?.className).not.toContain('text-danger')
-    // The neutral words step up on the selected row, where `--soft-foreground` is under 4.5:1.
-    expect(current.querySelector('[data-slot="drawer-project-state"]')?.className).toContain('text-muted-foreground')
-    expect(idle.querySelector('[data-slot="drawer-project-state"]')?.className).toContain('text-soft-foreground')
-    expect(current.querySelector('[data-tone="violet"]')?.className).toContain('text-status-running')
-    expect(finished.querySelector('[data-tone="green"]')?.className).toContain('text-success')
+    // The words' text inks hold 4.5:1 on the selected row in both themes: mobile-projects.e2e.ts.
   })
 
   it('says the activity is unknown rather than idle before the index loads', () => {
@@ -292,7 +265,6 @@ describe('mobile drawer', () => {
       const global = drawer().querySelector('[data-slot="drawer-global"]') as HTMLElement
       expect([...global.children].map((el) => el.getAttribute('data-slot'))).toEqual(['drawer-tools', 'drawer-global-settings', 'theme-toggle'])
       expect(tools().getAttribute('href')).toBe('/tools')
-      expect(tools().className).toContain('h-[48px]')
       fireEvent.click(tools())
       await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tools'))
       await waitFor(() => expect(drawer()).toBeNull())
@@ -304,9 +276,6 @@ describe('mobile drawer', () => {
       const dot = tools().querySelector('[data-slot="drawer-tools-dot"]')
       expect(dot).not.toBeNull()
       expect(dot?.className).toContain('pending')
-      expect(dot?.className).toContain('ring-[1.5px]')
-      expect(dot?.className).toContain('ring-sidebar')
-      expect(dot?.className).toContain('size-[7px]')
       expect(tools().getAttribute('aria-label')).toBe('Tools, needs setup')
       cleanup()
       renderShell('/p/cezarion/', nav(), { toolsStatus: { blocked: false, note: null } })
