@@ -1,3 +1,4 @@
+import { reportsIndex } from '../artifacts/reports-index.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { artifactDirectory, publishArtifact, readArtifact } from '../artifacts/store.ts';
 import { reclaimWorktrees } from './retention.ts';
@@ -217,7 +218,7 @@ describe('project run sources', () => {
   it('reads fallback artifacts and reports even when the legacy report backfill was complete', async () => {
     const old = record('old');
     seed('cezar', [old]);
-    await open().reports.list({});
+    await reportsIndex(open()).list({});
     const run = record('fallback report');
     const source = seed('squawk', [run]);
     const document = join(repo, 'report.html');
@@ -225,7 +226,7 @@ describe('project run sources', () => {
     const artifact = await publishArtifact(artifactDirectory(source, run.id), run.id, document);
     const store = open();
     expect((await readArtifact(artifactDirectory(store.sourceDataDir(run.id), run.id), run.id, artifact.id))?.bytes.toString()).toContain('Fallback report');
-    expect((await store.reports.list({}))).toMatchObject({ reports: [{ id: artifact.id, runId: run.id }] });
+    expect((await reportsIndex(store).list({}))).toMatchObject({ reports: [{ id: artifact.id, runId: run.id }] });
   });
 
   it('writes the report retry marker for a fallback-only run, so the watcher retries its scan', () => {

@@ -1,3 +1,4 @@
+import { reportsIndex } from '../artifacts/reports-index.ts';
 import { runCheckout, preparePublishCheckout, reclaimCheckoutError } from './run-checkout.ts';
 import { adoptFallbackControl, protectFallbackRun, runArtifactDirectory } from './project-run-files.ts';
 import { deleteSavedWorkflow } from './workflow-files.ts';
@@ -147,7 +148,6 @@ import {
   taskWebhooks as taskWebhookList,
 } from '../workspace/webhooks.ts';
 import { detectEnvironment } from '../core/backend-detect.ts';
-
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
@@ -5194,7 +5194,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   });
   const lifecycle = closingSignal(server);
   const startBackgroundServices = () => {
-    if (!deps.store.unavailable) deps.store.reports.start();
+    if (!deps.store.unavailable) reportsIndex(deps.store).start();
     void visibleProjects().then(async (projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];

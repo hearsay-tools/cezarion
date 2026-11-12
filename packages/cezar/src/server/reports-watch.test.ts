@@ -1,3 +1,4 @@
+import { reportsIndex } from '../artifacts/reports-index.ts';
 import { DatabaseSync } from 'node:sqlite';
 import * as fs from 'node:fs/promises';
 vi.mock('node:fs/promises', async original => ({ ...await original<typeof import('node:fs/promises')>() }));
@@ -21,13 +22,13 @@ async function publish(id: string, name = 'report.html') {
   const source = join(root, name); writeFileSync(source, '<p>Report</p>');
   return publishArtifact(artifactDirectory(dataDir, id), id, source);
 }
-const barrier = () => store.reports.backfill();
+const barrier = () => reportsIndex(store).backfill();
 
 it('emits only relevant metadata and never scans settled clean history', async () => {
   const run = task(); await publish(run.id); setRunStatus(store, run.id, 'done');
-  await store.reports.list({});
-  const frames: ReportsFrame[] = []; store.reports.onChange(frame => frames.push(frame));
-  vi.useFakeTimers(); const release = store.reports.watch();
+  await reportsIndex(store).list({});
+  const frames: ReportsFrame[] = []; reportsIndex(store).onChange(frame => frames.push(frame));
+  vi.useFakeTimers(); const release = reportsIndex(store).watch();
   const scans = vi.spyOn(fs, 'opendir');
   store.updateRun(run.id, { title: 'Renamed' }); store.flush();
   expect(frames).toEqual([expect.objectContaining({ type: 'metadata', metadataGeneration: 1, runs: [expect.objectContaining({ taskTitle: 'Renamed' })] })]);
@@ -40,9 +41,9 @@ it('emits only relevant metadata and never scans settled clean history', async (
   release();
 });
 it('scans live event bursts at most once per second and publishes changed sets and deletion', async () => {
-  const run = task(); vi.useFakeTimers(); await store.reports.list({});
-  const frames: ReportsFrame[] = []; store.reports.onChange(frame => frames.push(frame));
-  const release = store.reports.watch();
+  const run = task(); vi.useFakeTimers(); await reportsIndex(store).list({});
+  const frames: ReportsFrame[] = []; reportsIndex(store).onChange(frame => frames.push(frame));
+  const release = reportsIndex(store).watch();
   const artifact = await publish(run.id);
   store.updateRun(run.id, { title: 'First' }); store.flush();
   await vi.advanceTimersByTimeAsync(1_000); await barrier();
@@ -53,33 +54,33 @@ it('scans live event bursts at most once per second and publishes changed sets a
   expect(scans).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1); await barrier();
   expect(scans).toHaveBeenCalledTimes(1);
-  const generation = store.reports.state().generation;
+  const generation = reportsIndex(store).state().generation;
   rmSync(join(artifactDirectory(dataDir, run.id), artifact.id), { recursive: true });
   await vi.advanceTimersByTimeAsync(10_000); await barrier();
-  expect(store.reports.state().generation).toBe(generation + 1);
-  await publish(run.id, 'another.html'); await store.reports.reconcile();
-  const beforeDelete = store.reports.state().generation;
+  expect(reportsIndex(store).state().generation).toBe(generation + 1);
+  await publish(run.id, 'another.html'); await reportsIndex(store).reconcile();
+  const beforeDelete = reportsIndex(store).state().generation;
   store.deleteRun(run.id); store.flush();
-  expect(store.reports.state().generation).toBe(beforeDelete + 1);
+  expect(reportsIndex(store).state().generation).toBe(beforeDelete + 1);
   release();
 });
 it('finds quiet publications on the watched tick and stops when the last watcher leaves', async () => {
-  const run = task(); await store.reports.list({});
-  vi.useFakeTimers(); const release = store.reports.watch();
-  await publish(run.id); const initial = store.reports.state().generation;
+  const run = task(); await reportsIndex(store).list({});
+  vi.useFakeTimers(); const release = reportsIndex(store).watch();
+  await publish(run.id); const initial = reportsIndex(store).state().generation;
   await vi.advanceTimersByTimeAsync(5_000); await barrier();
-  expect(store.reports.state().generation).toBe(initial + 1);
+  expect(reportsIndex(store).state().generation).toBe(initial + 1);
   release(); const scans = vi.spyOn(fs, 'opendir');
   await vi.advanceTimersByTimeAsync(10_000); await barrier();
   expect(scans).not.toHaveBeenCalled();
 });
 it('retains unreadable cached rows and retries on the watched tick after repair', async () => {
-  const run = task(); const artifact = await publish(run.id); await store.reports.list({});
-  vi.useFakeTimers(); const release = store.reports.watch();
+  const run = task(); const artifact = await publish(run.id); await reportsIndex(store).list({});
+  vi.useFakeTimers(); const release = reportsIndex(store).watch();
   const blocked = vi.spyOn(fs, 'opendir').mockRejectedValue(Object.assign(new Error('permission'), { code: 'EACCES' }));
-  const before = store.reports.state().generation;
+  const before = reportsIndex(store).state().generation;
   await vi.advanceTimersByTimeAsync(5_000); await barrier();
-  expect(store.reports.state().generation).toBe(before);
+  expect(reportsIndex(store).state().generation).toBe(before);
   const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
   try {
     expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(artifact.id)).toBeTruthy();
@@ -88,15 +89,15 @@ it('retains unreadable cached rows and retries on the watched tick after repair'
   blocked.mockRestore();
   rmSync(join(artifactDirectory(dataDir, run.id), artifact.id), { recursive: true });
   await vi.advanceTimersByTimeAsync(5_000); await barrier();
-  expect(store.reports.state().generation).toBe(before + 1);
+  expect(reportsIndex(store).state().generation).toBe(before + 1);
   release();
 });
 it('coalesces topic frames and releases watch demand', async () => {
-  const run = task(); await publish(run.id); await store.reports.list({});
+  const run = task(); await publish(run.id); await reportsIndex(store).list({});
   vi.useFakeTimers();
-  const publisher = reportsPublisher(store.reports), send = vi.fn();
+  const publisher = reportsPublisher(reportsIndex(store)), send = vi.fn();
   const off = publisher.start(send);
-  expect(await publisher.snapshot()).toMatchObject({ type: 'snapshot', ...store.reports.state() });
+  expect(await publisher.snapshot()).toMatchObject({ type: 'snapshot', ...reportsIndex(store).state() });
   store.updateRun(run.id, { title: 'First' }); store.flush();
   store.updateRun(run.id, { title: 'Second' }); store.flush();
   await vi.advanceTimersByTimeAsync(500);
@@ -108,20 +109,20 @@ it('coalesces topic frames and releases watch demand', async () => {
   expect(send).toHaveBeenCalledTimes(1);
 });
 it('keeps terminal reconciliation when a shelf closes before its trailing scan', async () => {
-  const run = task(); store.reports.start(); await store.reports.list({});
-  vi.useFakeTimers(); const release = store.reports.watch();
+  const run = task(); reportsIndex(store).start(); await reportsIndex(store).list({});
+  vi.useFakeTimers(); const release = reportsIndex(store).watch();
   await publish(run.id);
   setRunStatus(store, run.id, 'done'); store.flush();
-  const before = store.reports.state().generation;
+  const before = reportsIndex(store).state().generation;
   release(); await barrier();
-  expect(store.reports.state().generation).toBe(before + 1);
+  expect(reportsIndex(store).state().generation).toBe(before + 1);
 });
 it('emits a content change when a selected settled page drops missing content', async () => {
   const run = task(); const artifact = await publish(run.id); setRunStatus(store, run.id, 'done');
-  await store.reports.list({});
-  const before = store.reports.state().generation;
+  await reportsIndex(store).list({});
+  const before = reportsIndex(store).state().generation;
   rmSync(join(artifactDirectory(dataDir, run.id), artifact.id, 'content'));
-  const page = await store.reports.list({});
+  const page = await reportsIndex(store).list({});
   expect(page).toMatchObject({ reports: [] });
-  expect(store.reports.state().generation).toBe(before + 1);
+  expect(reportsIndex(store).state().generation).toBe(before + 1);
 });
