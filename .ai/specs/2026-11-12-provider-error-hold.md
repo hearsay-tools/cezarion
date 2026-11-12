@@ -66,6 +66,10 @@ reader sees a transient `failed`: the worker cascade does not run, and a parent'
 not resolve on a worker that is held. `afterDropActive` arms the timer (`armHeldResume`) before
 it releases the slot, as before.
 
+A provider-error hold blocks no account: `deriveAccountHolds` and `resumeInFlight` skip it, since
+its error may be one model's, and a run that meets an account-wide limit holds by itself. A
+usage-limit hold still blocks its account until its reset time.
+
 `holdFor` returns no hold when: auto-resume is off (`autoResumeOnUsageLimit`, on by default), the
 run is archived, a root asked to Finish, the error is neither kind, a usage limit has no session
 to resume, or `autoResumeAttempts` reached 12 (it writes the cap note then).

@@ -53,7 +53,19 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, workerIds: [w.id] });
     expect(store.readEvents(p.id).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
   });
-  for (const status of ['done', 'failed', 'cancelled'] as const) {
+  // hearsay-tools/squawk#3337: a failed parent clears its wait but leaves unfinished children running.
+  it('parent failed clears wait and keeps unfinished children, preserving terminal artifacts', async () => {
+    const p = await parent(); const w = await worker(p.id); const done = await worker(p.id);
+    fixtureUpdateRun(done.id, { status: RUN_STATUS.review }); register(p.id, [w.id]);
+    setRunStatus(store, p.id, RUN_STATUS.failed);
+    await until(() => waitOf(store.getRun(p.id)) === undefined);
+    manager.reconcileWorkerWaits();
+    expect(store.getRun(w.id)?.status).not.toBe('cancelled'); expect(store.getRun(done.id)?.status).toBe('review');
+    // Its session is still live, which a settled parent never has: back to running before
+    // teardown stops it (hearsay-tools/cezarion#1804).
+    setRunStatus(store, p.id, RUN_STATUS.running);
+  });
+  for (const status of ['done', 'cancelled'] as const) {
     it(`parent ${status} clears wait and cancels unfinished children, preserving terminal artifacts`, async () => {
       const p = await parent(); const w = await worker(p.id); const done = await worker(p.id);
       fixtureUpdateRun(done.id, { status: RUN_STATUS.review }); register(p.id, [w.id]);

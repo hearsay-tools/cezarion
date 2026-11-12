@@ -10,7 +10,7 @@ import type { WorkflowDef } from './types.ts';
  * other resumes must remain eligible.
  */
 export function accountHeldFor(
-  run: Pick<RunRecord, 'runner' | 'agentProfile' | 'status' | 'autoResumeAttempts'>,
+  run: Pick<RunRecord, 'runner' | 'agentProfile' | 'status' | 'autoResumeAttempts' | 'autoResumeReason'>,
   holds: AccountHolds,
   fallbackRunner: RunnerId,
 ): boolean {
@@ -32,11 +32,12 @@ export function runAccountKey(
 
 /**
  * Whether an automatic resume has not completed its first turn. Such resumes bypass in-flight
- * holds, but not a future deadline hold.
+ * holds, but not a future deadline hold. A provider-error retry is not one: it holds no account
+ * (hearsay-tools/squawk#3337).
  */
-export function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts'>): boolean {
+export function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts' | 'autoResumeReason'>): boolean {
   return (
-    run.autoResumeAttempts !== undefined && (run.status === 'queued' || run.status === 'running')
+    run.autoResumeAttempts !== undefined && run.autoResumeReason !== 'provider-error' && (run.status === 'queued' || run.status === 'running')
   );
 }
 
@@ -88,7 +89,9 @@ export function deriveAccountHolds(
     // A holding run always carries the runner it actually ran on, so the fallback is unused
     // here — it is spelled out rather than `!` so a future record shape degrades, not throws.
     const key = () => runAccountKey(withExecutionAccount(run), run.runner ?? 'claude');
-    if (isUsageLimitHold(run)) {
+    // A provider-error hold blocks no account (hearsay-tools/squawk#3337): its error may be one
+    // model's, and a run that meets the same limit holds by itself.
+    if (isUsageLimitHold(run) && run.autoResumeReason !== 'provider-error') {
       const at = Date.parse(run.autoResumeAt);
       if (Number.isFinite(at) && at > now) deadline.add(key());
     } else if (resumeInFlight(run)) {
