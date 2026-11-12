@@ -125,7 +125,8 @@ Rows live in `RUN_TRIGGERS` (`workflows/run-states.ts`); this table is the desig
 | waiting:usage-limit | 12 retries ran | runner | `fail-continue` → failed, with `provider retry limit reached (12)` |
 | waiting:usage-limit | Auto-resume off, window missed by a day, or refused at fire | engine | `withdraw-hold` → failed with the kept error and a note (hold.withdrawn) |
 | waiting:usage-limit | Human Continue or message | human | `continue-line` → queued; resets the attempt count (hold.continue) |
-| waiting:usage-limit | Stop with open waits, per-task cancel, archive | human | `withdraw-hold` → failed, as today (hold.stop, hold.cancel, hold.archive) |
+| waiting:usage-limit | Stop with open waits, per-task cancel, archive | human | `withdraw-hold` → failed, as today (hold.stop, hold.cancel, hold.archive). A Stop also cancels a root's live workers |
+| failed (root) with live workers | Stop | human | Accepted: its live workers are cancelled, the root stays failed (`cancelRunWithoutSession`) |
 | waiting:usage-limit | One of its waits resolves | watcher | Stays held; the retry delivers it (hold.wait-resolves) |
 | waiting:usage-limit | Restart, no session in memory | recovery | Re-armed from `autoResumeAt` and `autoResumeReason`; an older row without the reason reads as `usage-limit` (hold.restart) |
 | failed (root) | Its live worker runs on and settles | worker | No cancel. The worker's result waits for `collect` after the parent's Continue |

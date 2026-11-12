@@ -107,6 +107,9 @@ it('parent failure leaves its live workers running (hearsay-tools/squawk#3337)',
     manager.reconcileWorkerWaits();
     expect(store.getRun(w.id)?.status).toBe('running');
     expect(store.getRun(w.id)?.stopping).toBeFalsy();
-    manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15_000);
+    // A human Stop of the failed parent still cancels its live workers.
+    expect(manager.cancel(p.id)).toBe(true);
+    await until(() => store.getRun(w.id)?.status === 'cancelled');
+    expect(store.getRun(p.id)?.status).toBe('failed');
   });
 });

@@ -14,6 +14,7 @@ import { createActiveRun } from '../active-run.ts';
 import { RunStore } from '../../runs/store.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './launch-read-resolver.ts';
+import { retryPrompt } from './auto-resume.ts';
 import { TrackedWork } from './tracked-work.ts';
 import type { RunModuleContext } from './types.ts';
 import { noRunners } from '../../core/runners-under-test.testkit.ts';
@@ -205,4 +206,11 @@ it('gives a fresh retry the held step\'s own prompt', () => {
   const run = { ...heldRun({ build: STEP_STATUS.done, review: STEP_STATUS.failed }, 'review'), workflowResumeStepId: 'review' };
   expect(atContinue.task(run)).toBe('Review this change: add the parser. Do not edit files.');
   expect(atContinue.task(makeRunRecord({ task: 'add the parser' }))).toBe('add the parser');
+});
+it('sends the held step\'s prompt with every provider retry, a launch id alone included', () => {
+  const held = { ...heldRun({ build: STEP_STATUS.done, review: STEP_STATUS.failed }, 'review'), workflowResumeStepId: 'review', autoResumeReason: 'provider-error' as const };
+  const launched = { ...held, steps: held.steps.map(step => ({ ...step, sessionId: 'launch-uuid' })) };
+  expect(retryPrompt(held)).toContain('before its agent session started');
+  for (const run of [held, launched]) expect(retryPrompt(run)).toContain('Review this change: add the parser. Do not edit files.');
+  expect(retryPrompt({ ...launched, autoResumeReason: 'usage-limit' })).not.toContain('Review this change');
 });

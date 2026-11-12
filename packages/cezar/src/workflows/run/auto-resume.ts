@@ -51,6 +51,17 @@ const PROVIDER_RETRY_PROMPT =
 const freshRetryPrompt = (prompt: string) =>
   `A provider error stopped this step before its agent session started, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) for any context. Your instructions:\n\n${prompt}`;
 
+/**
+ * What a resume says. A provider retry always carries the held step's own prompt: a native runner
+ * that failed before it reported its session leaves only Cezar's launch id, and that retry opens a
+ * new session too (hearsay-tools/squawk#3337).
+ */
+export function retryPrompt(run: RunRecord): string {
+  if (run.autoResumeReason !== 'provider-error') return AUTO_RESUME_PROMPT;
+  if (!run.steps.some((step) => step.sessionId)) return freshRetryPrompt(atContinue.task(run));
+  return `${PROVIDER_RETRY_PROMPT}\n\nIf this session does not hold the step's earlier work, your instructions:\n\n${atContinue.task(run)}`;
+}
+
 /** Why a run is on hold and when it resumes; written in the same status write as the hold. */
 export type HoldPlan = { autoResumeAt: string; autoResumeReason: 'usage-limit' | 'provider-error'; message: string };
 
@@ -156,7 +167,7 @@ export class AutoResumeScheduler {
     const provider = run.autoResumeReason === 'provider-error';
     // A provider error before the first session leaves none to resume: the retry starts one.
     const fresh = provider && !run.steps.some((step) => step.sessionId);
-    const text = !provider ? AUTO_RESUME_PROMPT : fresh ? freshRetryPrompt(atContinue.task(run)) : PROVIDER_RETRY_PROMPT;
+    const text = retryPrompt(run);
     // `continueRun` retires the pending resume (timer + record fields) on the way in — this is a
     // resume, not a user turn, so the counter is put back straight after.
     const resumed = this.host.continueRun(runId, { text, ...(fresh ? { freshSession: true as const } : {}) }, true);

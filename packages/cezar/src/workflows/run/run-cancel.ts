@@ -94,9 +94,13 @@ export class RunCancel {
     // Stop on a failed run that held wait results discards them, and the automatic resume that
     // would start a session on it later; the run stays failed. A usage-limit hold is that failed
     // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
-    if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
-      this.context.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
+    // A failed or held root keeps its live workers (hearsay-tools/squawk#3337) until a human stops it.
+    const liveWorkers = run?.delegation?.role === 'root'
+      ? this.context.store.listWorkersOf(runId).filter(child => ['queued', 'running', 'waiting'].includes(child.status)) : [];
+    if ((hadWaits || retiredRefusal || liveWorkers.length) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
+      if (hadWaits || retiredRefusal) this.context.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
       this.host.cancelAutoResume(runId);
+      for (const child of liveWorkers) this.cancel(child.id);
       this.context.store.flush();
       return true;
     }
