@@ -7,7 +7,7 @@ const { queueCiProof, REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
 const SHA = 'a'.repeat(40);
 const EXPECTED_QUEUE_JOBS = [
   'Classify pull request change surface', 'Classify PR shape', 'Check function complexity',
-  'Check new code clones', 'Review preflight', 'Typecheck', 'Unit, build, and package',
+  'Check new code clones', 'Review preflight', 'Typecheck', 'Unit tests (package)', 'Unit tests (scripts)', 'Build and package',
   'Vitest shard 1/8', 'Vitest shard 2/8', 'Vitest shard 3/8', 'Vitest shard 4/8',
   'Vitest shard 5/8', 'Vitest shard 6/8', 'Vitest shard 7/8', 'Vitest shard 8/8',
   'Cockpit browser E2E shard 1/8', 'Cockpit browser E2E shard 2/8',
@@ -159,7 +159,7 @@ for (const [label, change] of Object.entries({
   'a placeholder beside an expanded shard': s => { s.jobs.push({ id: 998, name: 'Vitest shard 2/8', status: 'completed', conclusion: 'failure' }); },
   'a missing placeholder': s => { s.jobs = s.jobs.filter(j => j.name !== SKIPPED_SUITE_JOBS[1]); },
   'a failed aggregate': s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'failure'; },
-  'a skipped build': s => { s.jobs.find(j => j.name === 'Unit, build, and package').conclusion = 'skipped'; },
+  'a skipped build': s => { s.jobs.find(j => j.name === 'Build and package').conclusion = 'skipped'; },
 })) test(`skipped queue suites force full CI fallback: ${label}`, async () => {
   const h = fixture(); skippedSuites(h.state); h.options.surfaceOf = () => 'docs-only';
   change(h.state, h.options);

@@ -364,7 +364,10 @@ function mergeMetrics(raw) {
 // a shard-count change is judged by the count its own Vitest shard jobs name.
 function rosterOf(jobs) {
   const count = jobs.map(job => /^Vitest shard [1-9]\d?\/([1-9]\d?)$/.exec(job.name)?.[1]).find(Boolean);
-  return count ? requiredQueueJobs(Number(count)) : REQUIRED_QUEUE_JOBS;
+  const roster = count ? requiredQueueJobs(Number(count)) : REQUIRED_QUEUE_JOBS;
+  // Historical runs predate the split; keep their original proof roster.
+  return jobs.some(job => job.name === 'Unit tests (package)' || job.name === 'Unit tests (scripts)') ? roster
+    : roster.filter(name => !name.startsWith('Unit tests (')).map(name => name === 'Build and package' ? 'Unit, build, and package' : name);
 }
 
 // The proof's own reason is in its job summary, which the API does not return.

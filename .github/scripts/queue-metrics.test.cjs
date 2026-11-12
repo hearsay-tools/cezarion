@@ -273,6 +273,8 @@ test('fallback reasons rebuild the checks queue-ci-proof.cjs makes', () => {
     .concat(['Vitest shard', 'Cockpit browser E2E shard'].flatMap(prefix => [1, 2, 3, 4].map(n => `${prefix} ${n}/4`)))
     .map((name, i) => ({ id: 100 + i, name, run_attempt: 1, status: 'completed', conclusion: 'success' }));
   assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: four })), 'unexplained');
+  const legacy = four.filter(job => !job.name.startsWith('Unit tests (')).map(job => ({ ...job, name: job.name === 'Build and package' ? 'Unit, build, and package' : job.name }));
+  assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: legacy })), 'unexplained');
   const missing = four.filter(job => job.name !== 'Cockpit browser E2E shard 4/4');
   assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: missing })), 'incomplete-gate');
 });

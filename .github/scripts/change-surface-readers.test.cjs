@@ -3,7 +3,7 @@
 // Vitest and cockpit browser E2E because no test reads those paths. This file
 // fails when package code starts reading such a path, so a new reader cannot
 // hide behind the docs-only skip. node:test entry files need no scan: the
-// unconditional build-and-package job runs every one of them, so a check on a
+// unconditional unit-tests job runs every one of them, so a check on a
 // docs-only file belongs there (packages/cezar/test/unit/message-docs.test.ts).
 //
 // It is a text scan, not a parser. It counts a path token that names a tracked
