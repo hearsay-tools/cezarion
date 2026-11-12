@@ -1,6 +1,6 @@
 import { workerOutcomeSchema } from './delegation.ts';
 import type { HumanAskClosedEvent, HumanInputDeliveredEvent, RunEvent } from './events.ts';
-import { runStatusSchema, stepStateSchema, stepStatusSchema } from './runs.ts';
+import { runStatusSchema, stepKindSchema, stepStatusSchema } from './run-status.ts';
 import type { RunRecord, StepState } from './runs.ts';
 import {
   humanWaitEntrySchema,
@@ -39,7 +39,7 @@ import type { HumanWaitEntry, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, Suba
 // hyphenated values read `WAIT_VIA['monitoring-line']`.
 export const RUN_STATUS = runStatusSchema.enum;
 export const STEP_STATUS = stepStatusSchema.enum;
-export const STEP_KIND = stepStateSchema.shape.kind.enum;
+export const STEP_KIND = stepKindSchema.enum;
 export const WAIT_PHASE = waitPhaseSchema.enum;
 export const WAIT_VIA = waitViaSchema.enum;
 export const WAIT_SOURCE = timerWaitEntrySchema.shape.source.enum;
