@@ -1,7 +1,8 @@
 # Follow an auto-merge PR until it merges
 
 Use this file for a PR you opened with the `auto-merge` label, right after you open
-it and after each push, CI result, review round and draft/ready change.
+it, before each push to it, and after each push, CI result, review round and
+draft/ready change.
 
 ## Squash, always
 
@@ -29,9 +30,10 @@ Act on the first row that matches:
 | --- | --- |
 | `MERGED` | Finished. |
 | No `auto-merge` label | The owner took the PR back. Follow it as an ordinary PR. |
-| New head or title since your last decision | Run the decision in [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) again. On `DOES NOT QUALIFY`, leave auto-merge. |
+| A push is about to happen while auto-merge is armed | Turn it off first: `gh pr merge <n> --disable-auto`. An armed request never carries across a push. Arm it again, for the new head, only as the `autoMergeRequest is null` row says. |
+| New head or title since your last decision | Run the decision in [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) again. On `DOES NOT QUALIFY`, leave auto-merge. A request left armed across the new head does not carry: turn it off (`gh pr merge <n> --disable-auto`) and arm it again only as the `autoMergeRequest is null` row says. |
 | `isInMergeQueue` is true | The merge is pending. Keep following it with `until: "merge_or_blocked"`; a null `autoMergeRequest` does not mean it needs another merge command. |
-| `autoMergeRequest` is null | Run `gh pr merge <n> --auto --squash`. When GitHub refuses because the PR is a draft, leave it as a draft and tell the owner it needs promotion: no workflow promotes a draft, including one a saved automation opened. When GitHub answers that the PR is in clean status, merge it now: `gh pr merge <n> --squash --match-head-commit <headRefOid>`. |
+| `autoMergeRequest` is null | Arm it only when both preconditions of [`.ai/skills/auto-merge/SKILL.md`](../SKILL.md) hold for this head: the reviewer round has no finding scored 5 or more, and the changed-function quality report is complete with no blocker. Then run `gh pr merge <n> --auto --squash`. When GitHub refuses because the PR is a draft, leave it as a draft and tell the owner it needs promotion: no workflow promotes a draft, including one a saved automation opened. When GitHub answers that the PR is in clean status, merge it now: `gh pr merge <n> --squash --match-head-commit <headRefOid>`. |
 | `autoMergeRequest` is set | Wait for the next event. |
 
 After requesting a merge, keep responsibility for the PR and register:
