@@ -92,7 +92,15 @@ test('the Squeal ref check runs on main pushes only, reads only, and is not requ
   assert.deepEqual(job.permissions, { contents: 'read' });
   assert.equal(job['continue-on-error'], undefined);
   // A warning-only job never turns the push run red: each step continues on error instead.
-  for (const s of job.steps) assert.equal(s['continue-on-error'], true, s.name);
+  const work = job.steps.filter((s) => s.id);
+  assert.deepEqual(work.map((s) => s.id), ['checkout', 'check']);
+  for (const s of work) assert.equal(s['continue-on-error'], true, s.name);
+  // A suppressed failure still warns: the last step runs on any outcome but success.
+  const last = job.steps.at(-1);
+  assert.match(last.if, /^always\(\)/);
+  assert.match(last.if, /steps\.checkout\.outcome != 'success'/);
+  assert.match(last.if, /steps\.check\.outcome != 'success'/);
+  assert.match(last.run, /::warning::/);
   const needs = (id) => [].concat(jobs[id].needs ?? []);
   for (const id of Object.keys(jobs)) assert.ok(!needs(id).includes('squeal-ref-check'), `${id} must not need it`);
 });
