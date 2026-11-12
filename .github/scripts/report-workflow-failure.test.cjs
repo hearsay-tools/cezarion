@@ -198,3 +198,29 @@ test('the reporter reads issues updated since the failed run was created',async(
  const reads=h.calls.filter(([route])=>route==='GET /repos/{owner}/{repo}/issues').map(([,args])=>[args.state,args.since]);
  assert.deepEqual(reads,[['open',undefined],['all',h.state.run.created_at]]);
 });
+test('replaying a main CI attempt reported before quota filtering keeps its saved summary',async()=>{
+ // Before quota filtering, a quota job and a TypeError job filed two reports
+ // and a summary linking both. A replay must find both, not shrink the set.
+ const {causesForStep}=require('./failure-diagnostics.cjs');
+ const {defaultBodyFor,commentFor}=require('./failure-issue-writer.cjs');
+ const {routeMainCiSummary}=require('./main-ci-summary.cjs');
+ const h=harness();mainCi(h);
+ const failed=h.state.jobs[0];
+ h.state.jobs.push({...structuredClone(failed),id:failed.id+1,name:'Cockpit browser E2E shard 2/8'});
+ h.state.jobLogs={[failed.id]:'TypeError: build failed',[failed.id+1]:'##[error]API rate limit exceeded for installation.'};
+ const run=h.state.run, runUrl=`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/attempts/${run.run_attempt}`;
+ const at=new Date(Date.parse(run.created_at)+60*60*1000).toISOString();
+ for(const job of h.state.jobs.filter(entry=>entry.conclusion==='failure')) {
+  const step=job.steps.find(entry=>entry.conclusion==='failure');
+  const [cause]=causesForStep({run,job,step,log:h.state.jobLogs[job.id]});
+  const signature=`<!-- cez-failure-signature:v1:${cause.signature} -->`;
+  const occurrence=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:${cause.signature} -->`;
+  const number=h.state.issues.length+1;
+  h.state.issues.push({number,state:'open',title:'[Task]: Investigate setup failure',labels:['area-ci'],created_at:at,updated_at:at,body:defaultBodyFor({cause,runUrl,signature,occurrence})});
+  h.state.comments.push({issue_number:number,body:commentFor({cause,run,job,step,runUrl,jobUrl:`https://github.com/hearsay-tools/cezarion/actions/runs/${run.id}/job/${job.id}`,occurrence})});
+ }
+ await routeMainCiSummary({github:h.options.github,owner:'hearsay-tools',repo:'cezarion',run,issues:[],reports:[{number:1},{number:2}]});
+ assert.equal(h.state.issues.length,3);
+ const result=await reportFailure(h.options);
+ assert.equal(result.reported,0);assert.equal(h.state.issues.length,3);assert.equal(h.state.comments.length,2);
+});

@@ -10,19 +10,28 @@ function harness() {
   const touch=number=>{const issue=state.issues.find(entry=>entry.number===number);if(issue)issue.updated_at=tick();};
   const listed=args=>state.issues.filter(issue=>(args.state==='all' || issue.state===args.state)
     && (args.since===undefined || !(Date.parse(issue.updated_at)<Date.parse(args.since))));
-  const raw=async(route,args={})=>{
-    calls.push([route,args]);
-    if(route==='GET /rate_limit') return {data:{resources:{core:{limit:5000,remaining:state.coreRemaining,reset:1794523443}}}};
-    if(route==='GET /search/issues') {
+  // Routes without a repository: the free quota read and issue search.
+  const unscoped={
+    'GET /rate_limit':()=>({data:{resources:{core:{limit:5000,remaining:state.coreRemaining,reset:1794523443}}}}),
+    'GET /search/issues':args=>{
       if(state.failSearch) throw new Error('search secret');
       const term=args.q.split(' ').at(-1);
       return {data:{items:structuredClone(state.issues.filter(issue=>issue.state==='closed' && (issue.body||'').includes(term)).reverse())}};
-    }
+    },
+  };
+  const jobLog=args=>{
+    const log=state.jobLogs?.[args.job_id] ?? state.log;
+    if(log===null) throw Object.assign(new Error('expired secret'),{status:410});
+    return {data:log};
+  };
+  const raw=async(route,args={})=>{
+    calls.push([route,args]);
+    if(unscoped[route]) return unscoped[route](args);
     assert.equal(args.owner,'hearsay-tools');assert.equal(args.repo,'cezarion');
     if (route.endsWith('/attempts/{attempt_number}')) {assert.equal(args.attempt_number,state.run.run_attempt);return {data:structuredClone(state.run)};}
     if(route.endsWith('/attempts/{attempt_number}/jobs')) {assert.equal(args.attempt_number,state.run.run_attempt);return {data:{jobs:structuredClone(state.jobs)}};}
     if(route==='GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations') return {data:structuredClone(state.annotations[args.check_run_id] ?? [])};
-    if(route.endsWith('/logs')) { if(state.log===null) throw Object.assign(new Error('expired secret'),{status:410});return {data:state.log};}
+    if(route.endsWith('/logs')) return jobLog(args);
     if(route==='GET /repos/{owner}/{repo}/issues') {if(state.failRead) throw new Error('read secret');return {data:structuredClone(listed(args))};}
     if(route==='GET /repos/{owner}/{repo}/issues/{issue_number}/comments')return {data:structuredClone(state.comments.filter(c=>c.issue_number===args.issue_number))};
     if(route==='POST /repos/{owner}/{repo}/issues') {

@@ -129,13 +129,16 @@ async function createFailureWriter({github,owner,repo,since,log=()=>{},maxIssues
   }
 
   async function reportStep({run,job,step,causes:found,labels=['area-ci'],bodyFor=defaultBodyFor}) {
-    if(found.some(isQuotaCause)) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
-    const causes=found.filter(cause=>!isQuotaCause(cause));
-    if(!causes.length) return [];
     const runUrl=`https://github.com/${owner}/${repo}/actions/runs/${run.id}/attempts/${run.run_attempt}`;
     const prefix=`<!-- cez-failure-occurrence:v1:${run.id}:${run.run_attempt}:${job.id}:${step.number}:`;
     const failureIssues=issues.filter(issue=>/<!-- cez-failure-signature:v1:[a-f0-9]{64} -->/.test(issue.body||''));
     const recorded=await recordedSignatures(failureIssues,prefix,run);
+    // A GitHub quota cause is not filed, unless an earlier reporter already
+    // recorded it for this step: a replay then returns that report unchanged.
+    const suppressed=found.filter(cause=>isQuotaCause(cause) && !recorded.has(cause.signature));
+    if(suppressed.length) log(`Run ${run.id} attempt ${run.run_attempt}, job ${job.id}, step ${step.number}: hit the GitHub API rate limit; no issue filed for this transient cause.`);
+    const causes=found.filter(cause=>!suppressed.includes(cause));
+    if(!causes.length) return [];
     const effectiveCauses=effectiveCausesFor(causes,causesForStep({run,job,step,log:''})[0],recorded);
     const results=[];
     for(const cause of effectiveCauses) {

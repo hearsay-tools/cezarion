@@ -75,9 +75,9 @@ jobs:
             core.summary.addRaw(`Observed reporting-workflow failures: ${manifest.reporterFailures || 0}.\n\n`);
             core.summary.addRaw(`Evidence gaps (unavailable, expired or oversized logs): ${(manifest.problems || []).filter(p => p.code === 'logs-unavailable' || p.code === 'log-size').length}.\n\n`);
             core.summary.addRaw('The coverage artifact lists processed intervals, numeric source IDs, fixed problem codes and replay windows. Later retries of runs created before this window require a manual replay of their creation window.\n');
-            const quota = manifest.suppressed || { quotaPatterns: 0, occurrences: 0, runs: [] };
-            if (quota.quotaPatterns) {
-              const message = `GitHub API rate-limit failures, not filed: ${quota.quotaPatterns} pattern(s), ${quota.occurrences} occurrence(s) in ${quota.runs.length} run(s): ${quota.runs.slice(0, 20).join(', ')}${quota.runs.length > 20 ? ', …' : ''}.`;
+            const quota = manifest.suppressed || { occurrences: 0, runs: [] };
+            if (quota.occurrences) {
+              const message = `GitHub API rate-limit failures, not filed: ${quota.occurrences} occurrence(s) in ${quota.runs.length} run(s): ${quota.runs.slice(0, 20).join(', ')}${quota.runs.length > 20 ? ', …' : ''}.`;
               core.warning(message);
               core.summary.addRaw(`${message}\n\n`);
             }

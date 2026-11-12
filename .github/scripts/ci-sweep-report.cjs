@@ -1,5 +1,5 @@
 const {createFailureWriter}=require('./failure-issue-writer.cjs');
-const {sanitize,hash,isQuotaCause}=require('./failure-diagnostics.cjs');
+const {sanitize,hash}=require('./failure-diagnostics.cjs');
 const code=text=>sanitize(text).split('\n').map(line=>`    ${line}`).join('\n');
 const signatureMarker=signature=>`<!-- cez-failure-signature:v1:${signature} -->`;
 const runLink=(base,run)=>`${base}/actions/runs/${run.id}/attempts/${run.run_attempt}`;
@@ -97,16 +97,7 @@ async function upsertSummaries(ctx,pattern,targets) {
     }
   }
 }
-// GitHub quota errors are not filed (the writer drops them too). The manifest
-// records them so a sweep with no reports still shows they happened.
-function suppressQuotaPattern(manifest,pattern) {
-  const suppressed=manifest.suppressed;
-  suppressed.quotaPatterns++;
-  suppressed.occurrences+=pattern.occurrences.length;
-  suppressed.runs=[...new Set([...suppressed.runs,...pattern.occurrences.map(o=>o.run.id)])].sort((a,b)=>a-b);
-}
 async function reportPattern(ctx,pattern) {
-  if(isQuotaCause(pattern.cause)) {suppressQuotaPattern(ctx.api.manifest,pattern);return;}
   const marker=signatureMarker(pattern.cause.signature);
   const owners=ctx.writer.issues.filter(i=>(i.body||'').includes(marker));
   const openOwners=owners.filter(i=>i.state==='open');

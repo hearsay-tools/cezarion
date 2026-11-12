@@ -60,10 +60,10 @@ test('unavailable logs surface as evidence gaps in a complete summary',async()=>
 });
 test('suppressed GitHub quota failures appear in the summary and as a warning',async()=>{
  const runs=Array.from({length:21},(_,index)=>index+1);
- const manifest={version:1,complete:true,start:'2026-09-01T00:00:00Z',end:'2026-09-10T00:00:00Z',problems:[],reports:{issues:0,occurrences:0},suppressed:{quotaPatterns:2,occurrences:30,runs}};
+ const manifest={version:1,complete:true,start:'2026-09-01T00:00:00Z',end:'2026-09-10T00:00:00Z',problems:[],reports:{issues:0,occurrences:0},suppressed:{occurrences:30,runs}};
  const result=await execute(harness(),{},async()=>manifest);
- const message='GitHub API rate-limit failures, not filed: 2 pattern(s), 30 occurrence(s) in 21 run(s): '+runs.slice(0,20).join(', ')+', ….';
+ const message='GitHub API rate-limit failures, not filed: 30 occurrence(s) in 21 run(s): '+runs.slice(0,20).join(', ')+', ….';
  assert.deepEqual(result.warnings,[message]);assert.ok(result.summary.includes(message+'\n\n'));assert.deepEqual(result.errors,[]);
- const quiet=await execute(harness(),{},async()=>({...manifest,suppressed:{quotaPatterns:0,occurrences:0,runs:[]}}));
+ const quiet=await execute(harness(),{},async()=>({...manifest,suppressed:{occurrences:0,runs:[]}}));
  assert.deepEqual(quiet.warnings,[]);assert.doesNotMatch(quiet.summary.join(''),/rate-limit/);
 });

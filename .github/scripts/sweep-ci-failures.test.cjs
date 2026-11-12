@@ -72,3 +72,24 @@ test('manual replay accepts an inclusive single-second creation window',async()=
  assert.equal(m.complete,true);assert.equal(m.start,instant);assert.equal(m.end,instant);
  assert.ok(h.calls.length>0);
 });
+test('every GitHub quota failure is counted, even below the recurrence threshold, and none is filed',async()=>{
+ const h=harness();recurring(h);
+ // Each run's request ID differs, so each line has its own signature and no
+ // pattern recurs.
+ for(const [id,request,at] of [[10,'08C0:1C9592:4FCCB:842A3:6AF6010B','18:10:19'],[20,'1440:4495E:83B2DE:1A20552:6AF6012D','18:10:53'],[30,'D078:25955F:A505FA:204CE77:6AF6013F','18:11:11']])
+  h.state.logs.set(id,`##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID ${request} and timestamp 2026-11-12 ${at} UTC.`);
+ const m=await sweep(h);
+ assert.equal(m.complete,true);assert.equal(m.patterns,0);
+ assert.deepEqual(m.suppressed,{occurrences:3,runs:[1,2,3]});
+ assert.equal(h.state.issues.length,0);assert.equal(h.state.comments.length,0);
+});
+test('quota counts survive a failed issue read',async()=>{
+ const h=harness();recurring(h);
+ // Runs 1-3 recur and need an issue read; run 4 failed on the quota only.
+ const quotaRun=run(4);h.state.runs.push(quotaRun);h.state.attempts.set('4:1',quotaRun);h.state.jobs.set('4:1',[job(40)]);
+ h.state.logs.set(40,'##[error]API rate limit exceeded for installation.');
+ const request=h.github.request;
+ h.github.request=async(route,args)=>{if(route==='GET /repos/{owner}/{repo}/issues')throw Object.assign(new Error('read failed'),{status:500});return request(route,args);};
+ const m=await sweep(h);
+ assert.equal(m.complete,false);assert.deepEqual(m.suppressed,{occurrences:1,runs:[4]});
+});
