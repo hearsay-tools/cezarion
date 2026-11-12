@@ -8,9 +8,9 @@ const GITHUB_PATCH_LIMITS = Object.freeze({ fileBytes: 102_400 });
 
 // The `git` arguments that give GitHub's patch shape, whatever the user's settings: each
 // diff.*, color.* or core.* key in `git help -c` that changes a patch's bytes or makes Git
-// call a text file binary is pinned here, and paths are read literally. Renames, where a
-// caller turns them on, use git's default limit of 1000.
-const PATCH_DIFF = Object.freeze(['--literal-pathspecs', '-c', 'diff.suppressBlankEmpty=false', '-c', 'core.quotePath=true',
+// call a text file binary is pinned here. Renames, where a caller turns them on, use git's
+// default limit of 1000.
+const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', '-c', 'core.quotePath=true',
   '-c', 'core.abbrev=7', '-c', 'core.bigFileThreshold=512m', '-c', `core.attributesFile=${devNull}`,
   'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--unified=3',
   '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/',
@@ -29,11 +29,38 @@ function patchFacts(patch) {
   return { bytes: patch.length, nul: patch.includes(0) };
 }
 
-// A rename is measured as GitHub shows it: the patch between the old and the new path.
-function localPatch(cwd, from, to, file) {
-  const paths = file.previous_filename ? [file.previous_filename, file.filename] : [file.filename];
-  const renames = file.previous_filename ? '--find-renames' : '--no-renames';
-  return gitBytes(cwd, ...PATCH_DIFF, renames, from, to, '--', ...paths);
+/** Rows of `git diff --numstat -z` with renames on: a rename row names its old and new path. */
+function numstatRows(numstat) {
+  const tokens = numstat.split('\0');
+  const rows = [];
+  for (let i = 0; i < tokens.length && tokens[i]; i++) {
+    const [, added, deleted, path] = /^([^\t]*)\t([^\t]*)\t(.*)$/s.exec(tokens[i]);
+    const paths = path === '' ? [tokens[++i], tokens[++i]] : [path];
+    rows.push({ added, deleted, paths });
+  }
+  return rows;
+}
+
+const FILE_HEADER = Buffer.from('diff --git ');
+
+/** One whole-range patch split at each file header. A content line starts with +, - or space. */
+function splitPatches(patch) {
+  const starts = patch.subarray(0, FILE_HEADER.length).equals(FILE_HEADER) ? [0] : [];
+  const boundary = Buffer.concat([Buffer.from('\n'), FILE_HEADER]);
+  for (let at = patch.indexOf(boundary); at !== -1; at = patch.indexOf(boundary, at + 1)) starts.push(at + 1);
+  return starts.map((start, k) => patch.subarray(start, starts[k + 1] ?? patch.length));
+}
+
+/**
+ * Each changed file's numstat counts, paths and patch facts, with renames on as on GitHub.
+ * Two whole-range reads in Git's one file order, so no pathspec can select a second file.
+ * `read(args)` runs git with those arguments and returns its stdout as a Buffer.
+ */
+function localPatches(read, from, to) {
+  const rows = numstatRows(read([...PATCH_DIFF, '--find-renames', '--numstat', '-z', from, to]).toString('utf8'));
+  const patches = splitPatches(read([...PATCH_DIFF, '--find-renames', from, to]));
+  if (patches.length !== rows.length) throw new Error(`git diff gave ${patches.length} file patches for ${rows.length} changed files`);
+  return rows.map((row, k) => ({ ...row, facts: patchFacts(patches[k]) }));
 }
 
 /** Why GitHub returned no patch for a file, from its local patch facts. */
@@ -113,11 +140,12 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   const mergeBase = git(cwd, 'merge-base', context.sha, expected.head.sha).trim();
   const stats = diffStats(git(cwd, 'diff', '--no-ext-diff', '--no-textconv',
     '--no-renames', '--numstat', '-z', `${mergeBase}...${expected.head.sha}`, '--'));
-  const local = new Map(files.filter(file => typeof file.patch !== 'string')
-    .map(file => [file.filename, patchFacts(localPatch(cwd, mergeBase, expected.head.sha, file))]));
+  const local = files.some(file => typeof file.patch !== 'string')
+    ? new Map(localPatches(args => gitBytes(cwd, ...args), mergeBase, expected.head.sha).map(row => [row.paths.at(-1), row.facts]))
+    : new Map();
   const { data: current } = await github.rest.pulls.get(params);
   if (!sameRevision(current, expected)) return report(core, ['PR head or base changed during the patch check; run CI for the current revision.']);
   return report(core, missingPatches(files, stats, pr.changed_files, local));
 }
 
-module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, diffStats, patchFacts, patchCause, missingPatches, checkPullRequest };
+module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, diffStats, numstatRows, splitPatches, localPatches, patchFacts, patchCause, missingPatches, checkPullRequest };

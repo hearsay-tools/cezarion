@@ -4,9 +4,9 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { daemonAlive, fallbackLines, focusedTests, gitIo, judgeSqueal, numstatRows, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+import { daemonAlive, fallbackLines, focusedTests, gitIo, judgeSqueal, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
 
-const { GITHUB_PATCH_LIMITS } = createRequire(import.meta.url)('../.github/scripts/missing-patches.cjs');
+const { GITHUB_PATCH_LIMITS, numstatRows } = createRequire(import.meta.url)('../.github/scripts/missing-patches.cjs');
 
 const file = (path, state, verdict) => ({ path, state, ...(verdict ? { verdict } : {}) });
 const status = (testFiles, extra = {}) => ({ selection: { testFiles, verdict: { failures: { tests: 0, testFiles: 0 } } }, lint: { failing: 0, linting: { done: 1, total: 1 } }, ...extra });
@@ -90,7 +90,7 @@ const ok = out => ({ code: 0, out, err: '' });
 const live = (testFiles, lint) => JSON.stringify({ available: true, daemon: { state: 'alive' }, selection: { testFiles }, lint });
 const doneLint = { failing: 0, pending: 0, stale: 0, unknown: 0 };
 
-function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tscripts/x.mjs\0', patch = 'small\n', clock = { t: 0 }, noBase = false } = {}) {
+function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tscripts/x.mjs\0', patch = 'diff --git a/scripts/x.mjs b/scripts/x.mjs\n+small\n', clock = { t: 0 }, noBase = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -253,7 +253,7 @@ test('patch limits pass under the bound and print the total changed lines', asyn
 });
 
 test('prepr fails on a patch-limit refusal', async () => {
-  const io = fakeIo({ patch: 'a\0b', responses: { squeal: ok(live([], doneLint)) } });
+  const io = fakeIo({ patch: 'diff --git a/scripts/x.mjs b/scripts/x.mjs\n+a\0b\n', responses: { squeal: ok(live([], doneLint)) } });
   const r = await prepr({ io, waitMs: 1000 });
   assert.equal(r.failed, true);
   assert.match(r.report, /FAIL: patch limits: "scripts\/x\.mjs": its diff contains a NUL byte/);
@@ -316,4 +316,18 @@ test('patch limits read each path literally, so a glob character selects only it
 test('a failed Git read stops prepr instead of reading as no change', async t => {
   const io = fixtureRepo(t, cwd => fs.writeFileSync(path.join(cwd, 'a.txt'), 'a\n'));
   assert.throws(() => io.gitBytes('diff', 'no-such-ref'), /git diff no-such-ref failed \(exit 128\)/);
+});
+
+test('patch limits measure a file replaced by a directory as separate patches', async t => {
+  // Distinct lines, so Git pairs no two of the three files as a rename.
+  const half = tag => Array.from({ length: Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 200) + 10 }, (_, i) => `${tag} ${i} `.padEnd(99, tag) + '\n').join('');
+  const io = fixtureRepo(t, cwd => {
+    fs.rmSync(path.join(cwd, 'foo'));
+    fs.mkdirSync(path.join(cwd, 'foo'));
+    fs.writeFileSync(path.join(cwd, 'foo', 'a.md'), half('a'));
+    fs.writeFileSync(path.join(cwd, 'foo', 'b.md'), half('b'));
+  }, cwd => fs.writeFileSync(path.join(cwd, 'foo'), half('x')));
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
 });

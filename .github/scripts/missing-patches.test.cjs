@@ -156,7 +156,8 @@ test('PR check classifies each file with no API patch from the local diff', asyn
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 'test@example.invalid');
   const line = 'x'.repeat(99) + '\n';
-  fs.writeFileSync(path.join(cwd, 'old name.md'), line.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
+  // Its own content, so Git pairs it only with its new name, not with large.md.
+  fs.writeFileSync(path.join(cwd, 'old name.md'), line.replaceAll('x', 'r').repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
   git('add', '--all');
   git('commit', '-m', 'base');
   const base = git('rev-parse', 'HEAD').trim();
