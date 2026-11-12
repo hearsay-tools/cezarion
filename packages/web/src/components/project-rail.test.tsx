@@ -653,7 +653,7 @@ describe('ProjectRail reorder', () => {
     expect(onReorder).toHaveBeenCalledWith(['beta', 'alpha', 'gamma'])
 
     // The guard is released one tick later: a click elsewhere is no longer cancelled.
-    act(() => vi.runOnlyPendingTimers())
+    act(() => vi.advanceTimersByTime(0))
     vi.useRealTimers()
     const later = new MouseEvent('click', { bubbles: true, cancelable: true })
     document.body.dispatchEvent(later)
