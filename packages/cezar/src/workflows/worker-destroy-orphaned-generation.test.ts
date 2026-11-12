@@ -20,6 +20,7 @@ import { ensureOwnedWorkspace } from '../delegation/workspace.ts';
 import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { until, root, store, manager, parent, releases, worker, workspace, useWorkerDestroyFixture } from './worker-destroy.testkit.ts';
@@ -65,7 +66,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect(readRecord(w.id)).toMatchObject({ generation: prior.generation, controller: { pid: process.pid }, processes: [{ pid: first!.proc.pid }] });
       manager.dispose(); setRunStatus(store, w.id, status); store.flush();
       setController(w.id, { pid: await deadPid(), startToken: '1' });
-      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+      store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
       const service = new DelegationService(); service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
       return { w, child: first!, prior, reopened, other, service, launches: () => launches };
     }
@@ -134,7 +135,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       rmSync(recordPath(w.id));
       const prior = store.readWorkerExecution(w.id);
       store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-      const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+      const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
       // Neither holder exits on its own, so each destroy waits out its deadline (hearsay-tools/cezarion#469).
       const service = new DelegationService({ terminationTimeoutMs: 1_500 }); service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
       type ScanRead = { cwd?: string | undefined; readlinkError?: string | undefined };
@@ -392,7 +393,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       store.commitWorkerExecutionStart(w.id); setRunStatus(store, w.id, RUN_STATUS.failed); store.flush();
       manager.dispose(); store.close(); rmSync(recordPath(w.id)); // an absent legacy ledger leaves the scan as the only evidence
       const holder = await nonDumpableHolder(workspace(w).path);
-      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { createRunner, home: testHome() });
+      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
       const service = new DelegationService({ terminationTimeoutMs: 1_500 }); const detach = service.registerProject({ home: testHome(), id: 'reopened', root, store: reopened, manager: other });
       try {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });

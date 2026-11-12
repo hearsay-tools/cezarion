@@ -15,6 +15,7 @@ import { readPersistedRuns, seedRuns, setRunStatus } from '../runs/run-store.tes
 import { RunStore } from '../runs/store.ts';
 import { seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { RunManager } from '../workflows/run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
@@ -52,7 +53,7 @@ function seedFamily(mixed: boolean, live = true) {
 }
 function start() {
   store = RunStore.open(primary, { keepLive: true });
-  manager = new RunManager(store, root, { createRunner, home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+  manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
   app = createApp({ home: testHome(), repoRoot: root, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
 }
 const post = (path: string, body?: unknown) => apiRequest(app, `/api/v1/runs/${path}`, { method: 'POST',

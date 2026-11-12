@@ -1,5 +1,5 @@
 // Register the external CI mock before loading RunManager.
-import { ciWaitOf, lastCiWaitOf, githubByPr, registerPr } from './ci-wait-fixture.testkit.ts';
+import { ciWaitOf, lastCiWaitOf, githubByPr, registerPr, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
@@ -11,7 +11,7 @@ import { manager, semaphore, store, until, useWorkerWaitFixture, work } from './
 
 
 describe('CI wait retry', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
   it('CI retry matrix covers every runner with a native hold scenario', () => {
     for (const runner of RUNNER_IDS) {

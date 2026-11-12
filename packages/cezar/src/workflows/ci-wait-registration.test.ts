@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { manager, store, root, parent, controlledWire, until, useWorkerWaitFixture, toolGenerationOf } from './worker-wait.testkit.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import * as runners from '../core/runner-factory.ts';
@@ -74,7 +75,7 @@ function registrationFixture() {
 }
 
 describe('CI registration guards before and after metadata lookup', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
   it.each(codes.flatMap(code => [false, true].map(duringLookup => ({ code, duringLookup })))
     .filter(({ code, duringLookup }) => !moduleRow(code, duringLookup)))
@@ -172,7 +173,7 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
 
 // hearsay-tools/cezarion#1425: a checks wait never stands in for a merge wait on the same PR.
 describe('PR wait targets', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
   it('opens a checks wait and a merge wait on one PR as two waits, and shares one lookup for a repeat', async () => {
     const gate = join(root, 'end-turn');
@@ -204,7 +205,7 @@ describe('PR wait targets', { timeout: 30_000 }, () => {
 });
 
 describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
   it.each(['registration_aborted', 'turn_changed', 'capability_revoked'] as const)
   ('reports %s even if the interrupted lookup rejects', async code => {

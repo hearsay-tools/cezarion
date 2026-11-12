@@ -72,8 +72,13 @@ export function projectWarmupEnabled(env: NodeJS.ProcessEnv = process.env): bool
   return productEnv('PROJECT_WARMUP', env) !== '0';
 }
 
-/** Builds one project's RunManager: the entry point's choice, so the project registry does not load the engine. */
-export type RunManagerFactory = (...args: ConstructorParameters<typeof RunManager>) => RunManager;
+/** Builds one project's RunManager: the entry point's choice, so the project registry does not load the engine.
+ *  The factory also supplies the manager's CI resources, so the registry does not load the CI watcher. */
+export type RunManagerFactory = (
+  store: ConstructorParameters<typeof RunManager>[0],
+  repoRoot: ConstructorParameters<typeof RunManager>[1],
+  options: Omit<ConstructorParameters<typeof RunManager>[2], 'acquireCiResources'>,
+) => RunManager;
 
 export interface ProjectContextDeps {
   forgeFactory?: ForgeFactory | undefined;

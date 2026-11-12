@@ -19,7 +19,7 @@ import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
 const observed = vi.hoisted(() => ({
-  options: new WeakMap<object, ConstructorParameters<typeof RunManager>[2]>(),
+  options: new WeakMap<object, Parameters<RunManagerFactory>[2]>(),
   subscriptions: [] as Array<{ listener: ReturnType<typeof vi.fn>; unsubscribe: ReturnType<typeof vi.fn> }>,
 }));
 /** The real factory, recording each manager's constructor options. */

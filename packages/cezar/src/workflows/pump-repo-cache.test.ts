@@ -7,6 +7,7 @@ import { RunStore } from '../runs/store.ts';
 import * as git from '../server/git.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
 describe('scheduler repository probe budget (#364)', () => {
@@ -16,7 +17,7 @@ describe('scheduler repository probe budget (#364)', () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-pump-repo-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     const semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } });
-    const manager = new RunManager(store, root, { createRunner, home: testHome(), semaphore });
+    const manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), semaphore });
     fixtures.push({ root, store, manager });
     return { root, pump: () => semaphore.release() };
   }

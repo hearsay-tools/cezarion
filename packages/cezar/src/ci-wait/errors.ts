@@ -50,6 +50,17 @@ export function toolsUnavailableMessage(detail: string, directory: string | unde
   return `Cezar tools could not start: ${detail}. Every agent session needs ${where}. ${fix}, then Continue the task.`;
 }
 
+/**
+ * hearsay-tools/cezarion#2397: every agent session needs the lifecycle tools, so a controller that
+ * cannot start fails the launch with this error. Its message names the cause and the fix.
+ */
+export class ToolsUnavailableError extends Error {
+  constructor(readonly detail: string, readonly directory: string | undefined) {
+    super(toolsUnavailableMessage(detail, directory));
+    this.name = 'ToolsUnavailableError';
+  }
+}
+
 // hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
 const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   duplicate_deadline: 'Deadline change refused. The retained wait is still active with its original deadline. Do not cancel it to remove a duplicate.',

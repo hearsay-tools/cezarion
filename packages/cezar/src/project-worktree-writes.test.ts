@@ -10,6 +10,7 @@ import { seedRuns } from './runs/run-store.testkit.ts';
 import { RunStore } from './runs/store.ts';
 import { collectChanges, commitAll, createOrSwitchBranch, pushCurrentBranch } from './server/git-changes.ts';
 import { RunManager } from './workflows/run.ts';
+import { acquireInertCiResources } from './ci-wait/inert-ci-resources.testkit.ts';
 import { runGroupedCommand } from './workflows/grouped-command.ts';
 import { runWorktreeSetup } from './worktree-setup.ts';
 import { withWorktreeFiles } from './worktree-manifest.ts';
@@ -31,7 +32,7 @@ it('refuses Continue before claiming or copying a fallback family; record-only e
   seedRuns(source, [run]);
   const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   const createRunner = vi.fn(() => { throw new Error('must not launch'); });
-  const manager = new RunManager(store, root, { createRunner, home: testHome() });
+  const manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
   try {
     expect(manager.continueRun(run.id)).toEqual({ ok: false, error: expect.stringMatching(refusal) });
     expect(createRunner).not.toHaveBeenCalled();

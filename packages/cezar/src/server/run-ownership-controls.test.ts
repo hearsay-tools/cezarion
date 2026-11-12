@@ -13,6 +13,7 @@ import { setRunStatus, crashStore, readPersistedRuns } from '../runs/run-store.t
 import { RUN_IN_USE_ELSEWHERE, RunStore } from '../runs/store.ts';
 import { createFixtureManager, fixtureWork, fixtureWorkSettled, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { RunManager } from '../workflows/run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -44,7 +45,7 @@ describe('controls on a run another cezar process owns', () => {
     runId = owner.createRun({ title: 'theirs', workflow: 'quick-task', task: 'theirs', steps: [] }).id;
     owner.flush();
     store = RunStore.open(dataDir, { keepLive: true });
-    manager = new RunManager(store, repoRoot, { createRunner, home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
     app = createApp({ home: testHome(), repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 

@@ -7,12 +7,6 @@ import { ProcessWaitSupervisor, type ProcessWatchRequest } from '../process-wait
 import { manager, parent, restart, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait-claude.testkit.ts';
 import { waitResultText } from './waits.ts';
 
-// Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.
-vi.mock('../ci-wait/resources.ts', async importOriginal => {
-  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
-  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: { close() {} } }) };
-});
-
 // hearsay-tools/cezarion#1446: a process wait through RunManager. Only the process watch is
 // controlled; the store, scheduler and runner wire stay real.
 const children: ChildProcess[] = [];
