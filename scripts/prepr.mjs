@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // One local gate before a PR opens (spec: .ai/specs/2026-11-11-one-full-run-delivery-pipeline.md,
 // § Before the PR). It reads Squeal's results for the changed files and for lint, and runs
-// what Squeal does not cover: typecheck, citations and clones. CI runs everything else.
+// what Squeal does not cover: typecheck, citations, clones and GitHub's per-file patch limits. CI runs everything else.
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change-surface.cjs');
+const require = createRequire(import.meta.url);
+const { isDocsPath } = require('../.github/scripts/change-surface.cjs');
+const { GITHUB_PATCH_LIMITS, diffStats, patchFacts } = require('../.github/scripts/missing-patches.cjs');
 
 export const SQUEAL_WAIT_MS = 120_000;
 
@@ -68,6 +70,7 @@ export const realIo = {
   sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   now: () => Date.now(),
   git: (...a) => spawnSync('git', a, { encoding: 'utf8' }).stdout,
+  gitBytes: (...a) => spawnSync('git', a, { maxBuffer: 256 << 20 }).stdout,
 };
 
 export async function squealChecks(paths, waitMs, io = realIo) {
@@ -130,9 +133,40 @@ export async function fallbackLines(base, io = realIo) {
   ];
 }
 
-function changedFiles(base, io) {
+function mergeBaseOf(base, io) {
   const mergeBase = io.git('merge-base', base, 'HEAD').trim();
   if (!mergeBase) throw new Error(`No merge base with ${base}: run \`git fetch origin main\` first.`);
+  return mergeBase;
+}
+
+const DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames'];
+
+/**
+ * Report lines for GitHub's per-file patch limits on the committed branch: a file diff over
+ * GITHUB_PATCH_LIMITS.fileBytes or one with a NUL byte gets no API patch, and the PR gate fails.
+ */
+export function patchLimitLines(base, io = realIo) {
+  const mergeBase = mergeBaseOf(base, io);
+  const stats = diffStats(io.git(...DIFF, '--numstat', '-z', mergeBase, 'HEAD'));
+  const limit = GITHUB_PATCH_LIMITS.fileBytes;
+  let added = 0;
+  let deleted = 0;
+  const refused = [];
+  for (const [file, counts] of stats) {
+    if (counts.added === '-') continue;
+    added += Number(counts.added);
+    deleted += Number(counts.deleted);
+    const facts = patchFacts(io.gitBytes(...DIFF, mergeBase, 'HEAD', '--', file));
+    const cause = facts.nul ? 'its diff contains a NUL byte'
+      : facts.bytes > limit ? `its diff is ${facts.bytes} bytes, over GitHub's ${limit}-byte per-file patch limit` : '';
+    if (cause) refused.push(entry(false, `patch limits: ${JSON.stringify(file)}: ${cause}, so GitHub returns no patch and the PR gate fails. Split the change.`));
+  }
+  if (refused.length) return refused;
+  return [entry(true, `patch limits: every file diff is at most ${limit} bytes with no NUL byte; ${added + deleted} changed lines (+${added}/-${deleted}) in ${stats.size} file${stats.size === 1 ? '' : 's'}`)];
+}
+
+function changedFiles(base, io) {
+  const mergeBase = mergeBaseOf(base, io);
   const tracked = io.git('diff', '--name-only', '--no-renames', '-z', mergeBase);
   const untracked = io.git('ls-files', '--others', '--exclude-standard', '-z');
   return [...new Set(`${tracked}\0${untracked}`.split('\0').filter(Boolean))];
@@ -149,6 +183,7 @@ export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS, io 
   const directRuns = direct.map(([, cmd, args]) => io.run(cmd, args));
   const squeal = files.length ? await squealChecks(files, waitMs, io) : NO_SQUEAL;
   const entries = squeal.daemon ? squealLines(squeal, waitMs) : await fallbackLines(base, io);
+  entries.push(...patchLimitLines(base, io));
   for (const [i, [name]] of direct.entries()) {
     const r = await directRuns[i];
     entries.push(entry(r.code === 0, `${name}${detail(r)}`));

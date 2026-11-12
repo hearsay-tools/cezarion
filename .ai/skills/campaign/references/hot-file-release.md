@@ -98,6 +98,16 @@ affected verification and this release check before release; use the worker
 brief's existing push rules. A release without a live rebase remains tied to the
 captured original heads and the trial evidence.
 
+## Fold held branches into one PR
+
+A plan can fold held branches into one PR head, for example the held parts of
+one large file into the PR that switches to them. Before the fold merges, build
+the combined branch in a disposable clone, as in step 3, and run `npm run prepr`
+there. Each part can be under [GitHub's patch limits](../../../../docs/sdlc/ci.md#github-patch-limits)
+while their combined diff of one file is over them. A failed `patch limits`
+entry keeps the fold held: the parts land as separate PRs, or the plan splits
+the file's change again. Record the entry with the release evidence.
+
 ## Record and reply
 
 Save the base, original and trial heads, compared paths/hunks, semantic checks,

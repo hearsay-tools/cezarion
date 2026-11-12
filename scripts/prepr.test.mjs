@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { daemonAlive, fallbackLines, focusedTests, judgeSqueal, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+import { daemonAlive, fallbackLines, focusedTests, judgeSqueal, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+
+const { GITHUB_PATCH_LIMITS } = createRequire(import.meta.url)('../.github/scripts/missing-patches.cjs');
 
 const file = (path, state, verdict) => ({ path, state, ...(verdict ? { verdict } : {}) });
 const status = (testFiles, extra = {}) => ({ selection: { testFiles, verdict: { failures: { tests: 0, testFiles: 0 } } }, lint: { failing: 0, linting: { done: 1, total: 1 } }, ...extra });
@@ -84,7 +91,7 @@ const ok = out => ({ code: 0, out, err: '' });
 const live = (testFiles, lint) => JSON.stringify({ available: true, daemon: { state: 'alive' }, selection: { testFiles }, lint });
 const doneLint = { failing: 0, pending: 0, stale: 0, unknown: 0 };
 
-function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', clock = { t: 0 }, noBase = false } = {}) {
+function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tscripts/x.mjs\0', patch = 'small\n', clock = { t: 0 }, noBase = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -96,7 +103,8 @@ function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', clock = { t: 0 }, n
     },
     sleep: async ms => { clock.t += ms; },
     now: () => clock.t,
-    git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
+    git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a.includes('--numstat') ? numstat : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
+    gitBytes: () => Buffer.from(patch),
   };
 }
 
@@ -198,4 +206,54 @@ test('squealChecks passes a process timeout to the wait', async () => {
   io.run = async (cmd, args, o) => { options ??= o; return run(cmd, args, o); };
   await squealChecks(['a.ts'], 1000, io);
   assert.equal(options.timeout, 11_000);
+});
+
+function fixtureRepo(t, write) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'prepr-patch-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const io = {
+    git: (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' }).stdout,
+    gitBytes: (...a) => spawnSync('git', a, { cwd, maxBuffer: 64 << 20 }).stdout,
+  };
+  for (const a of [['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid'], ['commit', '--allow-empty', '-m', 'base'], ['switch', '-c', 'topic']]) io.git(...a);
+  write(cwd);
+  io.git('add', '--all');
+  io.git('commit', '-m', 'head');
+  return io;
+}
+
+const LINE = 'x'.repeat(99) + '\n';
+
+test('patch limits refuse a file diff over the GitHub bound and a NUL byte, naming the file and the limit', async t => {
+  const io = fixtureRepo(t, cwd => {
+    fs.writeFileSync(path.join(cwd, 'large.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
+    // Git reads only the first 8000 bytes for binary detection, so this file stays text.
+    fs.writeFileSync(path.join(cwd, 'nul.txt'), Buffer.concat([Buffer.from(LINE.repeat(100)), Buffer.from([0, 10])]));
+    fs.writeFileSync(path.join(cwd, 'small.txt'), 'small\n');
+    fs.writeFileSync(path.join(cwd, 'image.bin'), Buffer.alloc(GITHUB_PATCH_LIMITS.fileBytes * 2));
+  });
+  const lines = patchLimitLines('main', io);
+  assert.ok(lines.every(l => !l.ok));
+  const text = lines.map(l => l.text).join('\n');
+  assert.match(text, new RegExp(`"large\\.md": its diff is \\d+ bytes, over GitHub's ${GITHUB_PATCH_LIMITS.fileBytes}-byte per-file patch limit`));
+  assert.match(text, /"nul\.txt": its diff contains a NUL byte/);
+  assert.doesNotMatch(text, /small\.txt|image\.bin/);
+});
+
+test('patch limits pass under the bound and print the total changed lines', async t => {
+  const io = fixtureRepo(t, cwd => {
+    fs.writeFileSync(path.join(cwd, 'a.md'), LINE.repeat(1000));
+    fs.writeFileSync(path.join(cwd, 'b.md'), 'b\n');
+  });
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true);
+  assert.match(line.text, new RegExp(`pass: patch limits: every file diff is at most ${GITHUB_PATCH_LIMITS.fileBytes} bytes with no NUL byte; 1001 changed lines \\(\\+1001/-0\\) in 2 files`));
+});
+
+test('prepr fails on a patch-limit refusal', async () => {
+  const io = fakeIo({ patch: 'a\0b', responses: { squeal: ok(live([], doneLint)) } });
+  const r = await prepr({ io, waitMs: 1000 });
+  assert.equal(r.failed, true);
+  assert.match(r.report, /FAIL: patch limits: "scripts\/x\.mjs": its diff contains a NUL byte/);
 });

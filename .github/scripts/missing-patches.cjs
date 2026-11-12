@@ -1,8 +1,46 @@
 // Trusted CI code. PR trees are Git data and are never checked out or executed.
 const { execFileSync } = require('node:child_process');
 
+// The largest local `git diff` of one file that GitHub still returns as a patch. Measured on
+// this repository's PRs; docs/sdlc/ci.md § GitHub patch limits names it, and scripts/prepr.mjs reads it.
+const GITHUB_PATCH_LIMITS = Object.freeze({ fileBytes: 102_400 });
+
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 << 20, stdio: 'pipe' });
+}
+
+function gitBytes(cwd, ...args) {
+  return execFileSync('git', args, { cwd, maxBuffer: 256 << 20, stdio: 'pipe' });
+}
+
+/** Size and NUL presence of one file's local patch (a Buffer). */
+function patchFacts(patch) {
+  return { bytes: patch.length, nul: patch.includes(0) };
+}
+
+function localPatch(cwd, from, to, file) {
+  return gitBytes(cwd, 'diff', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', file);
+}
+
+/** Why GitHub returned no patch for a file, from its local patch facts. */
+function patchCause(facts, totalLines) {
+  if (!facts) return 'no local diff was read to classify it';
+  if (facts.nul) return 'its local diff contains a NUL byte, and GitHub returns no patch for one';
+  if (facts.bytes > GITHUB_PATCH_LIMITS.fileBytes) {
+    return `its local diff is ${facts.bytes} bytes, over GitHub's ${GITHUB_PATCH_LIMITS.fileBytes}-byte per-file patch limit`;
+  }
+  return `its local diff is ${facts.bytes} bytes with no NUL byte, under every per-file limit, so GitHub probably dropped it for the PR's total size (${totalLines} changed lines)`;
+}
+
+function totals(files) {
+  const added = files.reduce((sum, file) => sum + (file.additions ?? 0), 0);
+  const deleted = files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
+  return { added, deleted, lines: added + deleted };
+}
+
+function limitSummary(files) {
+  const { added, deleted, lines } = totals(files);
+  return `GitHub returns no patch for a file diff over ${GITHUB_PATCH_LIMITS.fileBytes} bytes or one with a NUL byte, and can drop patches when a PR's total diff is large. This PR changes ${lines} lines (+${added}/-${deleted}) in ${files.length} file${files.length === 1 ? '' : 's'}.`;
 }
 
 function diffStats(numstat) {
@@ -15,7 +53,7 @@ function diffStats(numstat) {
   return paths;
 }
 
-function missingPatches(files, stats, changedFiles) {
+function missingPatches(files, stats, changedFiles, local = new Map()) {
   const reasons = [];
   if (files.length !== changedFiles || files.length >= 3000) {
     reasons.push(`GitHub's PR file list is incomplete or reaches its 3000-file limit (${files.length} returned, ${changedFiles} changed). Split the PR so GitHub can return every file.`);
@@ -26,8 +64,10 @@ function missingPatches(files, stats, changedFiles) {
     if (counts?.added === '-' && counts.deleted === '-') continue;
     if (file.additions === 0 && file.deletions === 0 && counts?.added === '0' && counts.deleted === '0') continue;
     if (['renamed', 'copied'].includes(file.status) && file.additions === 0 && file.deletions === 0) continue;
-    reasons.push(`${JSON.stringify(file.filename)}: ${file.status}, +${file.additions}/-${file.deletions}, has no GitHub patch. Split the PR so each file's diff is small enough for GitHub to return a patch.`);
+    const cause = patchCause(local.get(file.filename), totals(files).lines);
+    reasons.push(`${JSON.stringify(file.filename)}: ${file.status}, +${file.additions}/-${file.deletions}, has no GitHub patch: ${cause}. Split the PR so each file's diff is small enough for GitHub to return a patch.`);
   }
+  if (reasons.length) reasons.push(limitSummary(files));
   return reasons;
 }
 
@@ -59,9 +99,11 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   const mergeBase = git(cwd, 'merge-base', context.sha, expected.head.sha).trim();
   const stats = diffStats(git(cwd, 'diff', '--no-ext-diff', '--no-textconv',
     '--no-renames', '--numstat', '-z', `${mergeBase}...${expected.head.sha}`, '--'));
+  const local = new Map(files.filter(file => typeof file.patch !== 'string')
+    .map(file => [file.filename, patchFacts(localPatch(cwd, mergeBase, expected.head.sha, file.filename))]));
   const { data: current } = await github.rest.pulls.get(params);
   if (!sameRevision(current, expected)) return report(core, ['PR head or base changed during the patch check; run CI for the current revision.']);
-  return report(core, missingPatches(files, stats, pr.changed_files));
+  return report(core, missingPatches(files, stats, pr.changed_files, local));
 }
 
-module.exports = { diffStats, missingPatches, checkPullRequest };
+module.exports = { GITHUB_PATCH_LIMITS, diffStats, patchFacts, patchCause, missingPatches, checkPullRequest };
