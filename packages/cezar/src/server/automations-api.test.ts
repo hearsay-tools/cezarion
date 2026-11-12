@@ -886,9 +886,9 @@ describe('GitHub automation API', () => {
     }
   }, 30_000);
 
-  // The timer reserves the receipt, THEN its launcher builds a non-boot project's context
-  // lazily — and building it reconciles receipts. The reservation this process is launching right
-  // now is not a crash leftover: it must neither flip to launch-error nor log a false `failed`.
+  // A non-boot project's context can be built lazily after the timer reserved the receipt, and
+  // building it reconciles receipts. The reservation this process is launching right now is not a
+  // crash leftover: it must neither flip to launch-error nor log a false `failed`.
   it('the first launch in a non-boot project whose context is not built yet logs no failure', async () => {
     const savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
@@ -926,10 +926,24 @@ describe('GitHub automation API', () => {
     });
     const boot = await registerProject(root, undefined, testHome());
     const second = await registerProject(other, undefined, testHome());
+    const automations = AutomationStore.open(dataDir);
+    // No crash leftover exists here, so a reserved receipt is the launch this process has in flight.
+    const reservedInFlight = () => [...automations.latestReceipts().values()].some((receipt) => receipt.status === 'reserved');
+    // `ready()` builds the context before the receipt is reserved. Drop every context built with no
+    // reservation in flight, so the launcher's own call builds it, and reconciles, while reserved.
+    let builtWhileReserved = 0;
+    const build = contexts.context.bind(contexts);
+    vi.spyOn(contexts, 'context').mockImplementation(async (projectId) => {
+      const reserved = projectId === second.id && reservedInFlight();
+      const context = await build(projectId);
+      if (projectId !== second.id) return context;
+      if (reserved) builtWhileReserved += 1;
+      else contexts.dispose(projectId);
+      return context;
+    });
     const server = startServer({ home: testHome(), ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), contexts, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-      const automations = AutomationStore.open(dataDir);
       await vi.waitFor(() => {
         expect(automations.logs({ automationId: 'nightly' }).some((row) => row.result === 'launched')).toBe(true);
       }, { timeout: 15_000, interval: 20 });
@@ -941,6 +955,7 @@ describe('GitHub automation API', () => {
       expect(automations.receipts().filter((row) => row.status === 'launch-error')).toEqual([]);
       // The context build that reconciles receipts runs inside the fire: its rows land before it settles.
       await Promise.allSettled(fired.mock.results.map((result) => result.value));
+      expect(builtWhileReserved).toBe(1);
       expect(automations.logs({ automationId: 'nightly' }).map((row) => row.result)).toEqual(['launched']);
       expect(second.id).not.toBe(boot.id);
     } finally {

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryControl, readDeliveryControl, type DeliveryControlOptions, type DeliveryKind } from '../../scripts/mock-delivery-control.mjs';
 import { RUNNER_IDS, type AgentEvent, type AgentSession, type RunnerId } from './agent-runner.ts';
 import { driveSeam, exemptionFor, HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
+import type { UiEvent } from './ui-events.ts';
 
 // These tests exercise the native mocks as test infrastructure: ignoring a configured
 // control would make delivery tests silently run the ordinary scenario.
@@ -126,7 +127,7 @@ const EXEMPT: Partial<Record<RunnerId, Partial<Record<DeliveryKind, string>>>> =
   cursor: { reject: 'U13' },
 };
 const ENV_BASE = { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' };
-type Wire = { v1: readonly AgentEvent[] };
+type Wire = { v1: readonly AgentEvent[]; v2: readonly UiEvent[] };
 /** A baseline turn on a fresh native subprocess, then `exercise` once it has ended. */
 function seam(runner: RunnerId, path: string, exercise?: (session: AgentSession, wire: Wire) => Promise<void>) {
   return driveSeam(runner, 'baseline', {
@@ -215,9 +216,11 @@ describe.each(RUNNER_IDS)('%s native delivery control', runner => {
       const input = send(session, 'mock:agent-echo delay-owned-ack');
       await waitFor(holdAck.held);
       // The turn's content and its end follow on the wire while the ACK is held, so the runner
-      // has read past the point where it could settle the input. Cursor print sends nothing
-      // while held: its acknowledgement is its first model work.
-      if (runner !== 'cursor') await waitFor(() => echoed(wire, 'delay-owned-ack') && turnEnds(wire) === 2);
+      // has read past the point where it could settle the input. Cursor print holds before its
+      // first model work, its acknowledgement; the runner has mapped the init frame it wrote
+      // before the hold once the second turn starts.
+      if (runner === 'cursor') await waitFor(() => wire.v2.filter(event => event.type === 'turn.started').length === 2);
+      else await waitFor(() => echoed(wire, 'delay-owned-ack') && turnEnds(wire) === 2);
       expect(input.state.settled).toBe(false);
       holdAck.release();
       await input.done;
