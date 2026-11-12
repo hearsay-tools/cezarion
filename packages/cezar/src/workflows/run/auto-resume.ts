@@ -171,7 +171,7 @@ export class AutoResumeScheduler {
     // `continueRun` retires the pending resume (timer + record fields) on the way in — this is a
     // resume, not a user turn, so the counter is put back straight after.
     const retryRunner = provider ? atContinue.heldRunner(run) : undefined;
-    const resumed = this.host.continueRun(runId, { text, ...(fresh ? { freshSession: true as const } : {}), ...(retryRunner ? { retryRunner } : {}) }, true);
+    const resumed = this.host.continueRun(runId, { text, ...(provider ? { providerRetry: true as const } : {}), ...(fresh ? { freshSession: true as const } : {}), ...(retryRunner ? { retryRunner } : {}) }, true);
     if (!resumed.ok) {
       // Refusals happen before `continueRun` retires anything, so the deadline is still on the
       // record — and a deadline in the past is a promise the cockpit keeps displaying and the

@@ -224,6 +224,16 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await expect.poll(() => store.getRun(record.id)?.steps.find(step => step.id === 'check')?.status, { timeout: 30_000 }).toBe('done');
   }, 60_000);
 
+  it('a human Continue on a provider hold drops the retry reason in its own write', async () => {
+    manager = createFixtureManager(store, repoRoot);
+    const record = manager.startRun(workflow, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    expect(store.getRun(record.id)?.autoResumeReason).toBe('provider-error');
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-done take it from here' }, true)).toEqual({ ok: true });
+    // A restart before the Continue starts must not take it for the automatic retry.
+    expect(readPersistedRuns(join(repoRoot, '.ai/cezar')).find(run => run.id === record.id)?.autoResumeReason).toBeUndefined();
+  }, 30_000);
+
   it('fails a run plainly on a request error, which is no provider error', async () => {
     manager = createFixtureManager(store, repoRoot);
     const record = manager.startRun(workflow, { task: 'mock:request-error ship it', worktree: false });

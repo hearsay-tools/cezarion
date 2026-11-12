@@ -31,6 +31,9 @@ export type ContinueRunOptions = {
   /** A provider-error retry runs on the held step's own runner, without rewriting the run's
    *  (hearsay-tools/squawk#3337): a mixed-runner workflow's step keeps its runner and model. */
   retryRunner?: RunnerId;
+  /** Set by the provider-error retry alone. Any other continuation drops the hold's reason in its
+   *  own accepted write, so a restart cannot take it for the retry (hearsay-tools/squawk#3337). */
+  providerRetry?: true;
 };
 
 export type ContinuationRefusal = { ok: false; error: string };
