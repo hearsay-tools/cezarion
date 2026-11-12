@@ -886,7 +886,7 @@ jobs:
       # with its exit code (hearsay-tools/squeal spec 018 D20).
       - name: Set up Squeal
         if: (github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.squeal_gate_trial == true && inputs.pr_number == ''))
-        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+        uses: hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6 # v0.1.460
 
       - name: Run server and cockpit unit suites with Squeal recording
         id: record
@@ -1013,7 +1013,7 @@ jobs:
       # Squeal's action, as in the shards; a refusal or crash of the Squeal command is a
       # warning (hearsay-tools/squeal spec 018 D20).
       - name: Set up Squeal
-        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+        uses: hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6 # v0.1.460
 
       - name: Download Squeal parts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1066,7 +1066,7 @@ jobs:
       # Squeal's action, as in the shards; a refusal or crash of the Squeal command is a
       # warning (hearsay-tools/squeal spec 018 D20).
       - name: Set up Squeal
-        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+        uses: hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6 # v0.1.460
 
       - name: Download Squeal results
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1185,7 +1185,7 @@ jobs:
       # Squeal's action, as in the shards; it never fails the job (hearsay-tools/squeal spec 018 D20).
       - name: Set up Squeal
         continue-on-error: true
-        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+        uses: hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6 # v0.1.460
 
       - name: Download Squeal parts
         continue-on-error: true
@@ -1344,7 +1344,7 @@ jobs:
       - name: Set up Squeal
         if: matrix.run == 'squeal'
         continue-on-error: true
-        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+        uses: hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6 # v0.1.460
 
       # The shard command of a dispatch, with its V8 coverage. Bash's `time` gives the wall and
       # CPU (user + sys) time of the command and every process it waited for. The step keeps
@@ -1568,7 +1568,7 @@ jobs:
       - name: Set up Squeal
         id: squeal_setup
         continue-on-error: true
-        uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
+        uses: hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6 # v0.1.460
 
       # The gate's exit code is its verdict: 0 pass, 1 violations, 3 incomplete, 2 a setup or
       # usage error. Its budget is twice the default 600 s, so a slow build still gives a report;

@@ -19,8 +19,8 @@ const step = (job, id) => job.steps.find((s) => s.id === id || s.name === id);
 // Squeal's GitHub Action (hearsay-tools/squeal spec 018 D20) puts `squeal` on the PATH and never
 // fails the job. Like every action here it is pinned to a full commit SHA; the comment names its
 // release tag.
-const SQUEAL_ACTION = 'hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a';
-const SQUEAL_PIN = `uses: ${SQUEAL_ACTION} # v0.1.443`;
+const SQUEAL_ACTION = 'hearsay-tools/squeal/ci@6a7b41c08d5b2d27412cad1b1c139e65144876e6';
+const SQUEAL_PIN = `uses: ${SQUEAL_ACTION} # v0.1.460`;
 
 function expression(raw, context) {
   const code = String(raw).replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([\w]+-[\w-]+)/g, "needs['$1']");
