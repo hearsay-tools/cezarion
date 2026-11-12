@@ -280,3 +280,22 @@ test('the candidate commit must publish the names the plan checked, and a rollba
   const f = fixture({ ref: 'refs/heads/release/1.1.x', versions: ['1.2.0', '1.2.1'], distTags: { latest: '1.2.1' } });
   await assert.rejects(f.run({ rollback: 'true' }), /Dispatch a rollback from main/);
 });
+
+test('the promotion refuses when a partial publish left the alias ahead of the package', async () => {
+  // The package still holds latest 1.2.0, but an earlier partial publish moved the alias to 1.3.0.
+  const views = {
+    '@scope/pkg': { versions: ['1.2.0'], time: { '1.2.0': '2026-11-10T00:00:00Z' }, distTags: { latest: '1.2.0' } },
+    alias: { versions: ['1.2.0', '1.3.0'], time: {}, distTags: { latest: '1.3.0' } },
+  };
+  const github = {
+    paginate: async (method, args) => (method === github.rest.issues.listForRepo ? [] : (await method(args)).data),
+    rest: { issues: { listForRepo() {} }, actions: {
+      listWorkflowRuns: async () => ({ data: { workflow_runs: [{ id: 1, status: 'completed', conclusion: 'success', created_at: '2026-11-12T00:00:00Z' }] } }),
+      listJobsForWorkflowRun: async () => ({ data: [RESULT_JOB] }),
+    } },
+  };
+  const recheck = version => plan.recheckGates({ github, context: { repo: {} }, mode: 'release', previous: '1.2.0', ignoreBlockers: '',
+    packageName: '@scope/pkg', names: '@scope/pkg,alias', sourceNames: '@scope/pkg,alias', version, stableTag: 'latest', now: NOW, view: name => views[name] });
+  await assert.rejects(recheck('1.2.1'), /alias: latest points to 1\.3\.0; publishing 1\.2\.1 under it would move it backwards/);
+  await recheck('1.3.1');
+});
