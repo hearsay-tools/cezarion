@@ -51,4 +51,5 @@ Implementation: [2026-11-09-wait-kind-table-and-engine.md](../../.ai/specs/2026-
 Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts),
 [waits-store.test.ts](../../packages/cezar/src/runs/waits-store.test.ts),
 [waits.test.ts](../../packages/cezar/src/workflows/waits.test.ts), and the wait parity cells
-([waits-parity-cells.testkit.ts](../../packages/cezar/src/workflows/waits-parity-cells.testkit.ts)).
+([waits-parity-cells.testkit.ts](../../packages/cezar/src/workflows/waits-parity-cells.testkit.ts) registers
+the `waits-parity-<part>-cells.testkit.ts` module of each part).
