@@ -22,6 +22,7 @@ import { processesWithCwdUnder } from '../delegation/process-liveness.ts';
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { until, root, store, manager, releases, worker, workspace, useWorkerDestroyFixture } from './worker-destroy.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { workerCleanups } from '../delegation/worker-cleanup.ts';
 
 describe('worker termination barrier', { timeout: 30_000 }, () => {
  useWorkerDestroyFixture();
@@ -34,7 +35,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const generation = store.commitWorkerExecutionStart(w.id);
       await ensureOwnedWorkspace(root, w);
       setRunStatus(store, w.id, RUN_STATUS.done); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
-      const service = new DelegationService(); const detach = service.registerProject({ home: testHome(), id: 'p', root, store, manager });
+      const service = new DelegationService(workerCleanups()); const detach = service.registerProject({ home: testHome(), id: 'p', root, store, manager });
       return { w, service, detach };
     }
 
@@ -156,7 +157,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
     });
 
     const service = (projectStore: RunStore, projectManager: RunManager) => {
-      const delegation = new DelegationService(); delegation.registerProject({ home: testHome(), id: 'p', root, store: projectStore, manager: projectManager });
+      const delegation = new DelegationService(workerCleanups()); delegation.registerProject({ home: testHome(), id: 'p', root, store: projectStore, manager: projectManager });
       return delegation;
     };
 

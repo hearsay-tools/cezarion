@@ -12,6 +12,7 @@ import { workerCleanupInternals } from './service.testkit.ts';
 import { DelegationService } from './service.ts';
 
 import { f, linux, cadence, settled, destroyOf, useDestroyBackoffFixture } from './service-destroy-backoff.testkit.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 /** Resolves once every operation already queued on the service's serialization `key` settled. */
 function serializedAfter(service: DelegationService, key: string): Promise<void> {
@@ -61,7 +62,7 @@ describe('destroy backoff recovery', { timeout: 30_000 }, () => {
     // One instant for the persisted attempt and the restarted service's clock: no wall time passes between them.
     const restartedAt = Date.now();
     f.store.commitDestroyRetry(workerId, { attempts: 7, nextAt: new Date(restartedAt + 2_000).toISOString() });
-    const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 }, now: () => restartedAt });
+    const restarted = new DelegationService(workerCleanups({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 }, now: () => restartedAt }));
     const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       const [cleanup] = workerCleanupInternals(restarted);

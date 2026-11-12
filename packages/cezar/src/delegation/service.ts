@@ -60,6 +60,7 @@ import {
   type WorkerParams,
   type WorkerSpawnRequest,
   type WorkerSteerRequest,
+  type WorkerDestroyResult,
   type WorkerWait,
   type WorkerWaitRequest,
   type WorkerWorkspace,
@@ -81,7 +82,6 @@ import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MESSAGING_OFF, requireWorkersAllowed } from './policy.ts';
 import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
-import { WorkerCleanup, type WorkerCleanupOptions } from './worker-cleanup.ts';
 
 export type DelegationManager = Pick<RunManager,
   | 'acknowledgeInbox' | 'awaitRunTermination' | 'builtinSkills' | 'canClaimInboxInput'
@@ -93,6 +93,17 @@ export type DelegationManager = Pick<RunManager,
   | 'steerWorker' | 'takeWorkerTerminationBlocker'>;
 
 export type DelegationProject = { home: Home; id: string; root: string; store: RunStore; manager: DelegationManager };
+
+/** One registered project's destroy state and retry lifecycle, as `WorkerCleanup` (`worker-cleanup.ts`) implements it. */
+export type WorkerCleanupPort = {
+  request(workerId: string, check: () => RunRecord): Promise<WorkerDestroyResult>;
+  armAfterRecovery(): void;
+  detach(): void;
+};
+/** Builds a project's cleanup when it registers. The process entries supply `workerCleanups()`, as they
+ *  supply discovery; a service built without one refuses destroys, so it never loads the removal path. */
+export type WorkerCleanupFactory = (project: DelegationProject, isAttached: () => boolean,
+  serialized: <T>(key: string, operation: () => Promise<T>) => Promise<T>) => WorkerCleanupPort;
 
 /**
  * Resolve an explicit workflow or skill. With neither, use the built-in quick-task constant, not
@@ -273,16 +284,16 @@ export class DelegationService {
   }
   private projects = new Map<string, DelegationProject>();
   private serial = new Map<string, Promise<unknown>>();
-  private cleanups = new Map<string, WorkerCleanup>();
-  constructor(private readonly cleanupOptions: WorkerCleanupOptions = {}) {}
+  private cleanups = new Map<string, WorkerCleanupPort>();
+  constructor(private readonly cleanup?: WorkerCleanupFactory) {}
   registerProject(project: DelegationProject): () => void {
     const existing = this.projects.get(project.id);
     if (existing?.store === project.store && existing.manager === project.manager) return () => {};
     this.cleanups.get(project.id)?.detach();
     existing?.manager.pauseWorkerCleanup();
     this.projects.set(project.id, project);
-    this.cleanups.set(project.id, new WorkerCleanup(project, () => this.projects.get(project.id) === project,
-      (key, operation) => this.serialized(key, operation), this.cleanupOptions));
+    if (this.cleanup) this.cleanups.set(project.id, this.cleanup(project, () => this.projects.get(project.id) === project,
+      (key, operation) => this.serialized(key, operation)));
     return () => { if (this.projects.get(project.id) === project) { this.cleanups.get(project.id)?.detach(); project.manager.pauseWorkerCleanup(); this.projects.delete(project.id); this.cleanups.delete(project.id); } };
   }
   /** Called only after manager recovery, when persisted destroy intents may be retried. */
@@ -291,6 +302,11 @@ export class DelegationService {
   projectDataDir(caller: Caller): string | undefined {
     const project = isAuthenticatedCaller(caller) ? this.projects.get(caller.projectId) : undefined;
     return project ? projectPaths(project.root).write : undefined;
+  }
+  private cleanupFor(project: DelegationProject): WorkerCleanupPort {
+    const cleanup = this.cleanups.get(project.id);
+    if (!cleanup) throw new DelegationPolicyError('unavailable_transport', 'Worker cleanup is unavailable');
+    return cleanup;
   }
   private context(caller: Caller) {
     const project = isAuthenticatedCaller(caller) ? this.projects.get(caller.projectId) : undefined;
@@ -774,7 +790,7 @@ export class DelegationService {
   }
   async destroy(caller: Caller, params: WorkerParams) {
     const { project, worker } = this.target(caller, params, 'destroy');
-    return this.cleanups.get(project.id)!.request(worker.id, () => this.target(caller, params, 'destroy').worker);
+    return this.cleanupFor(project).request(worker.id, () => this.target(caller, params, 'destroy').worker);
   }
   /** Existing human HTTP authority, bound to its resolved project; never mint a pretend agent caller. */
   async destroyForHuman(projectId: string, workerId: string) {
@@ -786,7 +802,7 @@ export class DelegationService {
       return worker;
     };
     check();
-    return this.cleanups.get(project.id)!.request(workerId, check);
+    return this.cleanupFor(project).request(workerId, check);
   }
 }
 

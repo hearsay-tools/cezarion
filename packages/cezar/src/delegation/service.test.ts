@@ -22,10 +22,11 @@ import type { Caller } from './credentials.ts';
 import { fixture, seedWorkerWait, workerCleanupInternals } from "./service.testkit.ts";
 import { ensureOwnedWorkspace } from "./workspace.ts";
 import { DelegationService } from './service.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { scopeFixtureProcesses(); f = fixture(); });
+  beforeEach(() => { scopeFixtureProcesses(); f = fixture(workerCleanups()); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
   const input = () => ({ task: 'do work', baseline: 'parent-head', requestId: randomUUID() });
   it('accepts one durable owned creation, no resource before admission, replay survives moving HEAD and restart', async () => {
@@ -358,7 +359,7 @@ describe('delegation service durable authority', () => {
 
   it('retries a persisted incomplete destroy after termination becomes proven', async () => {
     await f.close();
-    f = fixture({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    f = fixture(workerCleanups({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } }));
     const { workerId } = await f.service.spawn(f.caller, input());
     f.store.commitWorkerExecutionStart(workerId);
     const worker = f.store.getRun(workerId)!;
@@ -387,7 +388,7 @@ describe('delegation service durable authority', () => {
       requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['worktree', 'branch'],
     } } }]);
 
-    const restarted = new DelegationService({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    const restarted = new DelegationService(workerCleanups({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } }));
     const cleanups = () => [...workerCleanupInternals(restarted)];
     const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
@@ -424,7 +425,7 @@ describe('delegation service durable authority', () => {
   });
   it.each([false, true])('revokes an in-flight retry after project replacement when termination resolves %s', async terminated => {
     await f.close();
-    f = fixture({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    f = fixture(workerCleanups({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } }));
     const { workerId } = await f.service.spawn(f.caller, input());
     const worker = f.store.getRun(workerId)!;
     const generation = f.store.commitWorkerExecutionStart(workerId);

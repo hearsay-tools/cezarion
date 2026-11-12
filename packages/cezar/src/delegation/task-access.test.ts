@@ -9,11 +9,12 @@ import { setRunStatus } from '../runs/run-store.testkit.ts';
 import { fixture } from './service.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { MESSAGING_OFF, WORKERS_OFF } from './policy.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 // Per-task access (hearsay-tools/cezarion#2784): the human's two switches, read at every call.
 describe('task access', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { f = fixture(); });
+  beforeEach(() => { f = fixture(workerCleanups()); });
   afterEach(async () => {
     for (const run of f.store.listRuns()) if (f.manager.isActive(run.id)) f.manager.cancel(run.id);
     await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs();

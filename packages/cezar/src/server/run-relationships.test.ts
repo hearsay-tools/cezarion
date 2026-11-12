@@ -6,8 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { runRelationshipsSchema, type WorkerSpawnResult } from '@open-mercato/cezar-contract/delegation';
 import { createApp } from './server.ts';
 import { fixture } from '../delegation/service.testkit.ts';
+import { workerCleanups } from '../delegation/worker-cleanup.ts';
 let f: ReturnType<typeof fixture>;
-beforeEach(() => { f = fixture(); });
+beforeEach(() => { f = fixture(workerCleanups()); });
 afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 // Exercise all 32 real durable creations; this is not a 5s filesystem throughput assertion.
 it('reads all owned workers including archived records through each human project alias with the parent workers switch off', { timeout: 30_000 }, async () => {

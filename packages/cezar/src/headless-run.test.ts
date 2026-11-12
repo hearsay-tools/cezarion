@@ -6,6 +6,7 @@ import { testHome } from './home/test-home.testkit.ts';
 import { defaultHeadlessDeps, printHeadlessEvent, runHeadless, type HeadlessDeps } from './headless-run.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { QUICK_TASK_WORKFLOW } from './workflows/types.ts';
+import type { WorkerCleanupFactory } from './delegation/service.ts';
 
 const access = { allowWorkers: false, allowMessaging: true };
 
@@ -61,7 +62,8 @@ function fixture() {
       opts.repoHandleSignal.addEventListener('abort', () => { trace.push('abort'); });
       return store;
     }),
-    DelegationController: { start: vi.fn(async () => delegation) },
+    DelegationController: { start: vi.fn(async (_cleanup?: WorkerCleanupFactory) => delegation) },
+    workerCleanup: vi.fn<WorkerCleanupFactory>(),
     createHostDiscovery: vi.fn(() => ({ models: 'catalog' })),
     forwardToSessionGroups: vi.fn((signal: string) => { trace.push(`forward ${signal}`); }),
     ProviderRuntimeAuthObserver: vi.fn(class { watch = watch; }),
@@ -93,6 +95,12 @@ describe('runHeadless', () => {
     expect(f.delegation.attachProject).toHaveBeenCalledWith(expect.objectContaining({ id: 'headless', root: '/repo', home: f.home, store: f.store }));
     expect(f.output.log.mock.calls.some(([line]) => String(line).includes('changes ready for review'))).toBe(final === 'review');
     expect(f.fakeProcess.eventNames()).toEqual([]);
+  });
+
+  it('starts delegation with worker cleanup, so a worker can be destroyed', async () => {
+    const f = fixture();
+    await f.run();
+    expect(f.deps.DelegationController.start).toHaveBeenCalledWith(f.deps.workerCleanup);
   });
 
   it('keeps the review branch and missing-record fallbacks', async () => {

@@ -1,6 +1,7 @@
 import { commandText } from './home/command.ts';
 import { createHostDiscovery } from './discovery/catalog.ts';
 import { DelegationController } from './delegation/provision.ts';
+import type { WorkerCleanupFactory } from './delegation/service.ts';
 import { ProviderAuthService, providerAuthChecksDisabled } from './core/provider-auth.ts';
 import { applyProviderEnablement } from './core/provider-availability.ts';
 import { forwardToSessionGroups } from './core/session-process.ts';
@@ -32,6 +33,8 @@ export type HeadlessDeps = typeof defaultHeadlessDeps & {
   initWorkspace: (repoRoot: string, home: Home) => Promise<string | undefined>;
   openStore: (repoRoot: string, opts: { repoHandleSignal: AbortSignal }) => RunStore;
   onTerminal: () => boolean;
+  /** The process entry's worker cleanup, so the run's delegation can destroy workers. */
+  workerCleanup: WorkerCleanupFactory;
 };
 
 export async function runHeadless(
@@ -85,7 +88,7 @@ export async function runHeadless(
     deps.process.exitCode = 1;
     return;
   }
-  const delegation = await deps.DelegationController.start();
+  const delegation = await deps.DelegationController.start(deps.workerCleanup);
   delegation.service.setDiscovery(deps.createHostDiscovery(repoRoot, providerAuth, home));
   // Agent sessions lead their own process groups (hearsay-tools/cezarion#890): pass Ctrl-C and
   // SIGTERM on, then end by the same signal, as this process did before it had a handler.

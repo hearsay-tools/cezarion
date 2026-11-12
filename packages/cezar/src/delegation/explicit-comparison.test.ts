@@ -8,9 +8,10 @@ import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { fixture } from './service.testkit.ts';
 import { ensureOwnedWorkspace } from './workspace.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 let f: ReturnType<typeof fixture>;
-beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
+beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(workerCleanups()); });
 afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.name=QA', '-c', 'user.email=qa@cezar.test', ...args], { encoding: 'utf8' }).trim();
 

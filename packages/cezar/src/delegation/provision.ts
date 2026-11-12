@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
 import { messagingAllowed, workersAllowed } from '@open-mercato/cezar-contract/task-options';
-import { DelegationService, rootDelegation, type DelegationProject } from './service.ts';
+import { DelegationService, rootDelegation, type DelegationProject, type WorkerCleanupFactory } from './service.ts';
 import { WORKERS_OFF } from './policy.ts';
 import { openCompletionRequests } from '../workflows/completion-policy.ts';
 import { createDelegationRoutes } from './routes.ts';
@@ -158,15 +158,17 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
 
 /** Owns one invisible loopback listener in this controller, for cockpit AND headless use. */
 export class DelegationController {
-  readonly service = new DelegationService();
+  readonly service: DelegationService;
   readonly credentials = new CredentialRegistry();
   private transport?: Awaited<ReturnType<typeof startDelegationTransport>> | undefined;
   private projects = new Map<string, { project: DelegationProject; detach(): void }>();
   private closed = false;
   private warned = false;
+  /** `cleanup` lets the service destroy workers; the process entries pass `workerCleanups()`. */
+  constructor(cleanup?: WorkerCleanupFactory) { this.service = new DelegationService(cleanup); }
   get url(): string | undefined { return this.transport?.url; }
-  static async start(): Promise<DelegationController> {
-    const controller = new DelegationController();
+  static async start(cleanup?: WorkerCleanupFactory): Promise<DelegationController> {
+    const controller = new DelegationController(cleanup);
     // Always on since hearsay-tools/cezarion#2784: each task's switches gate workers and messaging.
     try { controller.transport = await startDelegationTransport(createDelegationApp(createDelegationRoutes(controller.service, controller.credentials))); }
     catch { controller.unavailable(); }

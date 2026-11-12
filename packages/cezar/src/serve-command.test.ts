@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { serveCommand, defaultServeDeps, type ServeDeps } from './serve-command.ts';
 import { testHome } from './home/test-home.testkit.ts';
+import type { WorkerCleanupFactory } from './delegation/service.ts';
 
 type ManagerOptions = ConstructorParameters<ServeDeps['RunManager']>[2];
 
@@ -35,7 +36,7 @@ function fixture() {
     PreviewHost: vi.fn(function () { return {}; }),
     ToolActivityTracker: vi.fn(function () { return {}; }),
     RunManager: vi.fn(function (_store: unknown, _root: string, _opts: ManagerOptions) { return manager; }),
-    DelegationController: { start: vi.fn().mockResolvedValue(delegation) },
+    DelegationController: { start: vi.fn(async (_cleanup?: WorkerCleanupFactory) => delegation) },
     ProviderAuthService: vi.fn(function () { return {}; }),
     createHostDiscovery: vi.fn(() => discovery),
     WorkspaceEventBus: vi.fn(function () { return events; }),
@@ -59,6 +60,7 @@ function fixture() {
     sweepMergedBranches: vi.fn().mockResolvedValue(undefined),
     process: processStub,
     console: { log: vi.fn(), error: vi.fn() },
+    workerCleanup: vi.fn<WorkerCleanupFactory>(),
   };
   const deps = effects as unknown as ServeDeps;
   const run = (openBrowser = false, restartExact = false, bindHost: string | undefined = undefined) => {
@@ -68,6 +70,12 @@ function fixture() {
 }
 
 describe('serveCommand', () => {
+  it('starts delegation with worker cleanup, so a worker can be destroyed', async () => {
+    const f = fixture();
+    await f.run();
+    expect(f.effects.DelegationController.start).toHaveBeenCalledWith(f.effects.workerCleanup);
+  });
+
   it('holds ownership and the actual listener before workspace writes, then recovers before serving', async () => {
     const f = fixture();
     await f.run();

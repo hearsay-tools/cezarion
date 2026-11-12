@@ -15,6 +15,7 @@ import { removeWorktree } from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
 import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
+import { workerCleanups } from './worker-cleanup.ts';
 
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs') & { default: typeof import('node:fs') }>();
@@ -27,7 +28,7 @@ vi.mock('node:fs', async importOriginal => {
 
 describe('parent-owned collected worker results', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(workerCleanups()); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function worker() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
@@ -224,7 +225,7 @@ describe('parent-owned collected worker results', () => {
 
 describe('unchanged worker results (hearsay-tools/cezarion#879)', () => {
   let f: ReturnType<typeof fixture>;
-  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(); });
+  beforeEach(() => { onTestFinished(scopeFixtureProcesses()); f = fixture(workerCleanups()); });
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   async function collected() {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
