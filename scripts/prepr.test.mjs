@@ -102,8 +102,8 @@ function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tsc
     },
     sleep: async ms => { clock.t += ms; },
     now: () => clock.t,
-    git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a.includes('--numstat') ? numstat : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
-    gitBytes: () => Buffer.from(patch),
+    git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
+    gitBytes: (...a) => Buffer.from(a.includes('--numstat') ? numstat : patch),
   };
 }
 
@@ -300,4 +300,20 @@ test('patch limits measure GitHub\'s patch shape, whatever the user\'s diff sett
   }, cwd => fs.writeFileSync(path.join(cwd, 'big.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10)));
   const [line] = patchLimitLines('main', io);
   assert.equal(line.ok, true, line.text);
+});
+
+test('patch limits read each path literally, so a glob character selects only its own file', async t => {
+  const half = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 200) + 10);
+  const io = fixtureRepo(t, cwd => {
+    fs.writeFileSync(path.join(cwd, 'a[1].txt'), half);
+    fs.writeFileSync(path.join(cwd, 'a1.txt'), half);
+  });
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+});
+
+test('a failed Git read stops prepr instead of reading as no change', async t => {
+  const io = fixtureRepo(t, cwd => fs.writeFileSync(path.join(cwd, 'a.txt'), 'a\n'));
+  assert.throws(() => io.gitBytes('diff', 'no-such-ref'), /git diff no-such-ref failed \(exit 128\)/);
 });

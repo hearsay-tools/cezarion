@@ -68,7 +68,13 @@ const NO_SQUEAL = { daemon: true, state: 'pass', count: 0, failed: [], missing: 
 /** Git readers for one checkout: `git` returns text, `gitBytes` a Buffer. */
 export const gitIo = (cwd = undefined) => ({
   git: (...a) => spawnSync('git', a, { cwd, encoding: 'utf8' }).stdout,
-  gitBytes: (...a) => spawnSync('git', a, { cwd, maxBuffer: 256 << 20 }).stdout,
+  // A failed read throws: an empty patch from a failed command is not an empty change.
+  gitBytes: (...a) => {
+    const r = spawnSync('git', a, { cwd, maxBuffer: 256 << 20 });
+    if (r.status === 0) return r.stdout;
+    const args = a.filter((x, i) => x !== '-c' && a[i - 1] !== '-c' && !x.startsWith('--')).join(' ');
+    throw new Error(`git ${args} failed (exit ${r.status ?? r.signal ?? r.error?.code}): ${String(r.stderr ?? r.error).trim()}`);
+  },
 });
 
 export const realIo = {
@@ -165,7 +171,7 @@ export function numstatRows(numstat) {
  */
 export function patchLimitLines(base, io = realIo) {
   const mergeBase = mergeBaseOf(base, io);
-  const rows = numstatRows(io.git(...DIFF, '--numstat', '-z', mergeBase, 'HEAD'));
+  const rows = numstatRows(io.gitBytes(...DIFF, '--numstat', '-z', mergeBase, 'HEAD').toString('utf8'));
   const limit = GITHUB_PATCH_LIMITS.fileBytes;
   let added = 0;
   let deleted = 0;

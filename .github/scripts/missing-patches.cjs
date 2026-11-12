@@ -8,13 +8,13 @@ const GITHUB_PATCH_LIMITS = Object.freeze({ fileBytes: 102_400 });
 
 // The `git` arguments that give GitHub's patch shape, whatever the user's settings: each
 // diff.*, color.* or core.* key in `git help -c` that changes a patch's bytes or makes Git
-// call a text file binary is pinned here. Renames, where a caller turns them on, use git's
-// default limit of 1000.
-const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', '-c', 'core.quotePath=true',
+// call a text file binary is pinned here, and paths are read literally. Renames, where a
+// caller turns them on, use git's default limit of 1000.
+const PATCH_DIFF = Object.freeze(['--literal-pathspecs', '-c', 'diff.suppressBlankEmpty=false', '-c', 'core.quotePath=true',
   '-c', 'core.abbrev=7', '-c', 'core.bigFileThreshold=512m', '-c', `core.attributesFile=${devNull}`,
   'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--unified=3',
   '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/',
-  '--dst-prefix=b/', '--submodule=short', '--ignore-submodules=none', '-l1000']);
+  '--dst-prefix=b/', '--submodule=short', '--ignore-submodules=none', '-l1000', `-O${devNull}`]);
 
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 << 20, stdio: 'pipe' });
