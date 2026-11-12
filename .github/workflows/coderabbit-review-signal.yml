@@ -13,5 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 1
     permissions: {}
+    # One review with N inline comments fires N+1 events. A newer event in the
+    # same PR cancels the older run, so a burst ends in one completed run that
+    # starts after the last event. Consumers skip cancelled runs before any read.
+    concurrency:
+      group: coderabbit-review-signal-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
-      - run: 'true'
+      - run: sleep 30
