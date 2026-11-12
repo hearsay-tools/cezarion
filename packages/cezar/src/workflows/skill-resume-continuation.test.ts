@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as realDelay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentRunSpec, AgentSession } from '../core/agent-runner.ts';
@@ -37,6 +38,9 @@ vi.mock('../skills.ts', async (importOriginal) => {
 // A launch creates a worktree and runs git; under full-suite load that outlasts
 // vi.waitFor's 1 s default (seen failing in the #790 gate run).
 const LAUNCH_WAIT_MS = 15_000;
+/** `awaitContinuedSkill`'s own bound on the team-skill wait. The bound tests move a fake clock by
+ *  exactly this much, so a slow host cannot fail them and a longer bound cannot pass them. */
+const CONTINUED_SKILL_WAIT_MS = 1_500;
 const execFileAsync = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const EXTRA_PROMPT = 'EXTRA-PROMPT-790';
@@ -129,6 +133,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     for (const release of releases) release();
     for (const session of sessions) session.finish();
     await drainFixtureManagers(repoRoot);
@@ -211,15 +216,34 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     expect(manager.isActive(id)).toBe(false);
   });
 
+  /** Wait on real time while the fake clock stays put. `vi.waitFor` and `expect.poll` both move a
+   *  fake clock on every check, which would walk it past any bound; `node:timers/promises` is not
+   *  faked. */
+  async function untilOnRealTime(condition: () => boolean, what: string): Promise<void> {
+    // bound: a hang guard only; LAUNCH_WAIT_MS covers a launch under full-suite load.
+    const deadline = performance.now() + LAUNCH_WAIT_MS;
+    while (!condition()) {
+      if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+      await realDelay(20);
+    }
+  }
+
+  /** Continue `id` on a fake clock and move it past the team-skill bound once the wait has
+   *  started: the launch must follow. */
+  async function continueOnceTheBoundPasses(id: string, wait: { mock: { calls: unknown[] } }): Promise<void> {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
+    await untilOnRealTime(() => wait.mock.calls.length === 1, 'the team-skill wait to start');
+    await vi.advanceTimersByTimeAsync(CONTINUED_SKILL_WAIT_MS);
+    await untilOnRealTime(() => launches.length > 0, 'the continued session to launch');
+  }
+
   it('bounds the team-skill wait when the continued skill is missing', async () => {
     vi.mocked(discoverSkills).mockResolvedValue([]);
     const wait = vi.spyOn(skillsRemote, 'waitForTeamSkills').mockReturnValue(new Promise(() => {}));
     const id = terminalSkillRun(TEAM_SKILL);
-    const started = Date.now();
 
-    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
-    expect(Date.now() - started).toBeLessThan(4_000);
+    await continueOnceTheBoundPasses(id, wait);
     expect(wait).toHaveBeenCalledTimes(1);
     expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
     expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(TEAM_SKILL_BODY);
@@ -260,11 +284,11 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     await heldFetchTeamSource({ [TEAM_SKILL]: TEAM_SKILL_BODY });
     const fullLoad = vi.spyOn(skillsRemote, 'waitForTeamSkills');
     const id = terminalSkillRun(TEAM_SKILL);
-    const started = Date.now();
+    // The fake clock never moves, so the bound never ends the wait: only the clone's list can.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
-    expect(Date.now() - started).toBeLessThan(4_000);
+    await untilOnRealTime(() => launches.length > 0, 'the continued session to launch');
     expect(fullLoad).toHaveBeenCalledTimes(1);
     expect(launches[0]!.spec.systemPrompt).toContain(`Selected skill: /${TEAM_SKILL}`);
     expect(launches[0]!.spec.systemPrompt).toContain(TEAM_SKILL_BODY);
@@ -275,11 +299,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('warns once and starts within the bound when no source has the skill while the fetch hangs (#859)', async () => {
     await heldFetchTeamSource({ 'other-playbook': 'OTHER-BODY' });
     const id = terminalSkillRun(TEAM_SKILL);
-    const started = Date.now();
 
-    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
-    expect(Date.now() - started).toBeLessThan(4_000);
+    await continueOnceTheBoundPasses(id, vi.spyOn(skillsRemote, 'waitForTeamSkills'));
     expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
     expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(`Selected skill: /${TEAM_SKILL}`);
     sessions[0]!.finish();
@@ -288,11 +309,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('warns once and starts within the bound when no clone exists and the fetch hangs (#859)', async () => {
     await heldFetchTeamSource(undefined);
     const id = terminalSkillRun(TEAM_SKILL);
-    const started = Date.now();
 
-    expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
-    expect(Date.now() - started).toBeLessThan(4_000);
+    await continueOnceTheBoundPasses(id, vi.spyOn(skillsRemote, 'waitForTeamSkills'));
     expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
     expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(TEAM_SKILL_BODY);
     sessions[0]!.finish();

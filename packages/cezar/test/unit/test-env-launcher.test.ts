@@ -807,11 +807,8 @@ exec "${commandPath('curl')}" "$@"
     Array.from({ length: 20 }, (_, i) => `boot-line-${i + 6}`));
   assert.equal(result.stdout, '', 'a failed boot must not emit running markers');
   // Observe termination, including delivery of the launcher's SIGTERM after it exits.
-  for (let tries = 0; tries < 100; tries++) {
-    try { process.kill(pid, 0); } catch { launchedPids.delete(pid); return; }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-  }
-  assert.fail('timed-out app is still alive');
+  await waitForExit(pid, 'timed-out app', () => result.stderr);
+  launchedPids.delete(pid);
 });
 
 test('unset health timeout allows 180 elapsed seconds before stopping an unhealthy app', () => {
@@ -903,7 +900,8 @@ for (const withSetsid of [true, false]) {
         } catch (error) {
           assert.equal((error as NodeJS.ErrnoException).code, 'ESRCH');
         }
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+        // The SIGTERM has acted once the caller's group is empty: an app left in it is gone by then.
+        await waitForGroupExit(callerPid);
       }
       assert.equal(process.kill(first.app.pid, 0), true);
       const health = await fetch(`${first.baseUrl}/api/health`).then((response) => response.json());
@@ -1127,6 +1125,19 @@ async function waitForExit(pid: number, what: string, log: () => string): Promis
   while (alive(pid)) {
     assert.ok(Date.now() < deadline, `${what} (pid ${pid}) is still running:\n${log()}`);
     await delay(50);
+  }
+}
+
+async function waitForGroupExit(pgid: number): Promise<void> {
+  // bound: a hang guard; a signalled group empties within one scheduling turn of its members.
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try { process.kill(-pgid, 0); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+      throw error;
+    }
+    assert.ok(Date.now() < deadline, `process group ${pgid} is still running`);
+    await delay(20);
   }
 }
 

@@ -209,17 +209,18 @@ it.each(RESTART_RUNNERS.r47)('%s settles a same-boot crash as gone once recorded
       expect(store.readEvents(w.id).some(e => e.type === 'lifecycle' && /execution was finalized/.test(String(e.message)))).toBe(true);
       expect(store.readEvents(w.id).some(e => e.type === 'lifecycle' && /abandoned/.test(String(e.message)))).toBe(false);
       expect(manager.finish(p.id)).toBe(false); // earlier partial collection cannot authorize Finish
-      // A live mutation keeper must not be stolen. Release at 5s also bounds the red test:
-      // the old unbounded cleanup then wrongly deletes resources after waiting for the keeper.
-      let release!: () => void; let entered!: () => void;
+      // A live mutation keeper must not be stolen, and the destroy must give up on it rather than
+      // wait for it: the keeper is released only after the destroy returns. The timer ends a red
+      // test instead: the old unbounded cleanup then wrongly deletes resources after the release.
+      let release!: () => void; let entered!: () => void; let released = false;
       const ready = new Promise<void>(resolve => { entered = resolve; });
-      const held = withWorktreeMutation(root, async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); });
+      const held = withWorktreeMutation(root, async () => { entered(); await new Promise<void>(resolve => { release = () => { released = true; resolve(); }; }); });
       await ready;
-      const timer = setTimeout(() => release(), 5_000);
-      const lockStart = performance.now();
+      // bound: a hang guard for the red test only; a bounded destroy returns long before it.
+      const timer = setTimeout(() => release(), 15_000);
       try {
         expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'], error: expect.stringMatching(/lock.*busy|lock.*timed out/i) });
-        expect(performance.now() - lockStart).toBeLessThan(4_000);
+        expect(released).toBe(false);
         expect(existsSync(workspace.path)).toBe(true);
         expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe(workspace.branch);
       } finally { clearTimeout(timer); release(); await held; }
