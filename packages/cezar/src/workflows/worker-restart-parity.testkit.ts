@@ -14,6 +14,7 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import * as worktreeLock from '../git-worktree-lock.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { historyPaths } from '../runs/history-file.ts';
@@ -218,12 +219,15 @@ it.each(RESTART_RUNNERS.r47)('%s settles a same-boot crash as gone once recorded
       await ready;
       // bound: a hang guard for the red test only; a bounded destroy returns long before it.
       const timer = setTimeout(() => release(), 15_000);
+      const locks = vi.spyOn(worktreeLock, 'withWorktreeMutation');
       try {
         expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'], error: expect.stringMatching(/lock.*busy|lock.*timed out/i) });
         expect(released).toBe(false);
+        // The destroy asks for the lock with its own short budget, never the default two minutes.
+        expect(locks.mock.calls.map(([, , options]) => options?.waitMs)).toEqual([1_000]);
         expect(existsSync(workspace.path)).toBe(true);
         expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe(workspace.branch);
-      } finally { clearTimeout(timer); release(); await held; }
+      } finally { locks.mockRestore(); clearTimeout(timer); release(); await held; }
       // Timed-out cleanup must withdraw, so unlocking cannot run it later.
       expect(existsSync(workspace.path)).toBe(true);
       await ambient.write();

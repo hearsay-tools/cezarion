@@ -28,8 +28,17 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
   const run = { id: 'run-1', previewServers: [registration] };
   const ctx: RunContext = { runId: run.id, title: 'teardown', worktreePath: root, dataDir: root, store: { getRun: () => run, appendEvent: () => undefined } as unknown as RunContext['store'] };
   let dev!: DevServer;
+  // The real teardown runs; the stop the host awaits settles only once the test opens the gate.
+  let tornDown: Promise<void> | undefined;
+  let openGate!: () => void;
+  const gate = new Promise<void>(resolve => { openGate = resolve; });
   const host = new PreviewHost({ home: testHome(),
-    createServer: opts => (dev = new DevServer({ ...opts, probeMs: 20 })),
+    createServer: opts => {
+      dev = new DevServer({ ...opts, probeMs: 20 });
+      const stop = dev.stop.bind(dev);
+      dev.stop = reason => { tornDown ??= stop(reason); return tornDown.then(() => gate); };
+      return dev;
+    },
     launchBrowser: async () => { throw new ChromiumMissingError(); },
   });
   let stopping: Promise<unknown> | undefined;
@@ -44,13 +53,18 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
     expect(await probePort(port)).toBe(true);
     await host.open(ctx, fakeViewer(), { port });
     if (action === 'replacement') run.previewServers = [{ ...registration, command: 'changed' }];
-    cleanup = action === 'release' ? host.release(run.id) : host.replaced(run.id, port);
-    // The child holds the port until KILL: a cleanup that settled before the teardown finished
-    // would find the port still taken.
-    await cleanup;
+    let settled = false;
+    cleanup = (action === 'release' ? host.release(run.id) : host.replaced(run.id, port)).then(() => { settled = true; });
+    // The real teardown ends with a timer-driven KILL. A cleanup that did not wait for the stop has
+    // only promise work left, so it would have settled before this resolves.
+    await tornDown;
     expect(await probePort(port)).toBe(false);
+    expect(settled).toBe(false);
+    openGate();
+    await cleanup;
     expect(await stopping).toMatchObject({ ok: false });
   } finally {
+    openGate();
     await stopping;
     await cleanup;
     await host.release(run.id);
