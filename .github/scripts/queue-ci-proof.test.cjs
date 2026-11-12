@@ -70,7 +70,7 @@ for (const [label, [reason, change]] of Object.entries({
 });
 test('pending queue completion gets a bounded wait and then full fallback', async () => {
   const h = fixture(); h.state.run.status = 'in_progress'; h.state.run.conclusion = null;
-  assert.equal((await queueCiProof(h.options)).verified, false); assert.equal(h.state.now, 60000);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'source-pending' }); assert.equal(h.state.now, 60000);
 });
 test('completion during the short metadata wait is accepted', async () => {
   const h = fixture(); h.state.run.status = 'in_progress'; h.state.run.conclusion = null;
