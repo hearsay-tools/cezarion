@@ -1926,9 +1926,12 @@ describe('swipe to archive on touch (#780 §7)', () => {
   it('a long swipe switches to the "Release to archive" state and archives on release', () => {
     const onArchiveRun = vi.fn()
     renderList({ runs: [run({ id: 'fin' })], onArchiveRun })
+    swipe('fin', -50)
+    const parkedFill = action('fin')!.className
     swipe('fin', -220, { release: false })
-    // The --info fill of this state is checked for contrast in quick-list.e2e.ts.
     expect(action('fin')!.getAttribute('data-past')).toBe('true')
+    // Past the commit point the action takes its own fill (--info; contrast in quick-list.e2e.ts).
+    expect(action('fin')!.className).not.toBe(parkedFill)
     expect(action('fin')!.textContent).toBe('Release to archive')
     expect(onArchiveRun).not.toHaveBeenCalled()
     fireEvent.pointerUp(layer('fin'), { pointerId: 1, clientX: 80, clientY: 20 })
