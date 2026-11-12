@@ -97,7 +97,7 @@ files one issue per approved group:
 
 | Destination | Repository | Labels |
 | --- | --- | --- |
-| `project` | `hearsay-tools/cezarion`, written to the task template | `friction`, `friction-log` and one `area-*` label |
+| `project` | `hearsay-tools/squawk`, written to the task template | `friction`, `friction-log` and one `area-*` label |
 | `squeal` | `hearsay-tools/squeal`, written to its friction template | `friction` |
 | `sdlc` | The `SDLC feedback` binding's repository, with no project detail | `friction-log`, `dev-flow` |
 

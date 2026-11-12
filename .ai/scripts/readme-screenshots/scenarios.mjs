@@ -18,7 +18,7 @@ export const CELLS = Object.freeze([
 ]);
 
 /** The GitHub repository the demo checkout's `origin` names, so the GitHub cell shows its issues. */
-export const GITHUB_REPO = 'hearsay-tools/cezarion';
+export const GITHUB_REPO = 'hearsay-tools/squawk';
 
 /**
  * Text that gives a dry run away. The capture refuses a page whose visible text matches one,
