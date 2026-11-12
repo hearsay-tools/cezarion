@@ -28,6 +28,9 @@ export type ContinueRunOptions = {
   /** A provider-error retry of a run that never recorded a session starts a fresh one
    *  (hearsay-tools/squawk#3337). */
   freshSession?: true;
+  /** A provider-error retry runs on the held step's own runner, without rewriting the run's
+   *  (hearsay-tools/squawk#3337): a mixed-runner workflow's step keeps its runner and model. */
+  retryRunner?: RunnerId;
 };
 
 export type ContinuationRefusal = { ok: false; error: string };
@@ -90,7 +93,7 @@ export function sessionRefusal(sessionStep: StepState | undefined, untouched: bo
 /** Session ids belong to their provider and account, including mixed-chain worker steps. */
 export function sessionAffinity(run: RunRecord, opts: ContinueRunOptions, identity: WorkerStepIdentity | undefined,
   sessionStep: StepState | undefined, untouched: boolean) {
-  const originalRunner = identity?.account.provider ?? run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
+  const originalRunner = identity?.account.provider ?? opts.retryRunner ?? run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
   const targetRunner = opts.runner ?? originalRunner;
   // Legacy sessions without explicit affinity belong to the run's current runner/account.
   const sessionBackend = sessionStep?.backend ?? run.runner ?? 'claude';
