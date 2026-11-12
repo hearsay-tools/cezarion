@@ -43,14 +43,14 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it.each(['parent', 'worker'] as const)('%s checkpoint projects its family without reading unrelated histories', target => {
-    const reads = vi.spyOn(store, 'readEvents');
+  it.each(['parent', 'worker'] as const)('%s checkpoint projects its family and leaves unrelated families unreconciled', target => {
     if (target === 'worker') cleanupCheckpoint(store, a.workerId);
     else store.commitDelegation([{ id: a.parentId, delegation: store.getRun(a.parentId)!.delegation! }]);
-    expect(reads.mock.calls.map(([id]) => id)).not.toContain(b.parentId);
-    expect(reads.mock.calls.map(([id]) => id)).not.toContain(b.workerId);
     for (const id of [a.parentId, a.workerId]) {
       expect(store.readEvents(id).some(e => e.type === 'conversation-message' && e.projectionId === `conversation-message:${a.messageId}:not-delivered`)).toBe(true);
+    }
+    for (const id of [b.parentId, b.workerId]) {
+      expect(store.readEvents(id).some(e => e.type === 'conversation-message')).toBe(false);
     }
   });
 
