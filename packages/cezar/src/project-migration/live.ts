@@ -3,12 +3,12 @@ import { join } from 'node:path';
 import type { Home } from '../home/home.ts';
 import { readCockpitLeases } from '../home/leases.ts';
 import { pathPresent, projectPaths } from '../project-paths.ts';
+import { projectLiveTasks } from '../runs/live-tasks.ts';
 import { claimOwnerLive } from '../runs/run-claims.ts';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { parseRunRecords, type RunRecord, type RunStore } from '../runs/store.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { anotherCockpitOwner, type LiveProjectTask } from '../server/cockpit-ownership.ts';
-import { projectLiveTasks } from '../server/project-context.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { readQuiescentRunDatabase } from './plan.ts';
 
