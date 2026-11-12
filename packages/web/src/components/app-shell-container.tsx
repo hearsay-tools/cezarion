@@ -5,7 +5,7 @@ import { useLocation } from 'react-router'
 
 import { useHealth, useProjectRuns, useProjects } from '@/api/queries'
 import type { HealthResponse, ProjectListEntry, ProjectsResponse, RunSummary } from '@open-mercato/cezar-api-client'
-import { AppShell, type RepoChip } from '@/components/app-shell'
+import { AppShell } from '@/components/app-shell'
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ProviderBannerContainer } from '@/components/provider-banner-container'
@@ -22,26 +22,11 @@ import { GithubSidebar } from '@/routes/github/github-sidebar'
 import { SettingsSidebar } from '@/routes/settings/settings-sidebar'
 import { useActiveProjectId, stripProjectPrefix } from '@/lib/project-router'
 import { listCounts, runTitle } from '@/lib/task-groups'
-import { pageTitleContext, type PageTitleContext } from '@/routes'
+import { pageTitleContext, type PageTitleContext } from '@/lib/page-title'
+import { repoChipOf, type RepoChip } from '@/lib/repo-chip'
 
-/**
- * Derive the sidebar's repo chip from `/api/health`.
- *
- * Null — the chip renders nothing — whenever there is nothing true to say: health hasn't
- * answered yet, or cezar is running outside a git repository (`repo: null`), which is a
- * supported way to run it. An empty chip is honest; "loading…" or a guessed folder name is not.
- *
- * The name is the repo root's basename: `/home/me/Projects/cezar` → `cezar`. Both separators,
- * because the server sends whatever path git gave it, and a trailing one is stripped first so
- * `/repo/` doesn't chip as an empty string.
- */
-export function repoChipOf(health: HealthResponse | undefined): RepoChip | null {
-  const repo = health?.repo
-  if (!repo) return null
-  const name = repo.root.replace(/[\\/]+$/, '').split(/[\\/]/).pop()
-  if (!name) return null
-  return { name, branch: repo.branch }
-}
+// Moved to `lib/repo-chip`; kept importable from here.
+export { repoChipOf } from '@/lib/repo-chip'
 
 /** Boot project, sidebar scope and the URL's registry row — the identity the rest of the shell
  *  reads, including the `default` alias when neither the URL nor health/registry has named a
