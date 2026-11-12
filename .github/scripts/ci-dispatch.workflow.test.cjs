@@ -71,7 +71,7 @@ process.stdout.write(JSON.stringify(value));
     for (const step of job.steps) {
       if (step.if && !runInNewContext(step.if.replace(/needs\.([\w-]+)/g, "needs['$1']"), context)) continue;
       if (step.uses?.startsWith('actions/checkout@')) {
-        if (['typecheck', 'build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
+        if (['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
         assert.equal(evaluate(step.with.ref, context), BASE, 'classifier comes from API base, never dispatch head');
         checkoutClassifier(dir, rebrand);
       }
@@ -138,7 +138,7 @@ test('dispatch cannot skip tests for incomplete lists, docs, code, or non-versio
 
 test('verification uses a PR merge ref only after validating dispatch attribution', () => {
   const moved = prFixture(); moved.head.sha = 'c'.repeat(40);
-  for (const job of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const job of ['typecheck', 'unit-tests', 'build-and-package', 'vitest', 'cockpit-browser']) {
     assert.equal(classify(job), 'refs/pull/42/merge');
     for (const options of [{ pr: moved }, { number: '' }, { number: 'bad' }, { apiFails: true }]) {
       assert.equal(classify(job, options), HEAD, `${job}: ${JSON.stringify(options)}`);

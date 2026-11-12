@@ -13,7 +13,7 @@ const suitesOf = count => ['Vitest shard', 'Cockpit browser E2E shard'].map(pref
   shards: Array.from({ length: count }, (_, i) => `${prefix} ${i + 1}/${count}`),
   skipped: `${prefix} \${{ matrix.shard }}/${count}` }));
 const requiredQueueJobs = (count = SHARDS) => [
-  'Classify pull request change surface', 'Classify PR shape', 'Check function complexity', 'Check new code clones', 'Review preflight', 'Typecheck', 'Unit, build, and package',
+  'Classify pull request change surface', 'Classify PR shape', 'Check function complexity', 'Check new code clones', 'Review preflight', 'Typecheck', 'Unit tests (package)', 'Unit tests (scripts)', 'Build and package',
   ...suitesOf(count).flatMap(suite => suite.shards), VERIFY, REVIEW, 'Validate reviewed queue entry',
 ];
 const SUITES = suitesOf(SHARDS);
