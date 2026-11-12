@@ -130,8 +130,9 @@ function NavigationProbe() {
 }
 
 function renderAt(entry: string) {
+  const client = createQueryClient()
   render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={client}>
       <ThemeProvider>
         <AppearanceProvider>
           <MemoryRouter initialEntries={[entry]}>
@@ -144,6 +145,7 @@ function renderAt(entry: string) {
       </ThemeProvider>
     </QueryClientProvider>,
   )
+  return client
 }
 
 /** An element inside the item route, or null — never `undefined`, so `not.toBeNull()` means it. */
@@ -321,15 +323,16 @@ describe('TaskGithubItemRoute', () => {
         releaseRetry = () => resolve(json({ available: true, item: { ...PR_5, title: 'The other project’s PR' } }))
       }) as unknown as Response
     }
-    renderAt('/p/other/tasks/r1/pr/5')
+    const client = renderAt('/p/other/tasks/r1/pr/5')
     fireEvent.click(await screen.findByRole('button', { name: 'Retry' }, { timeout: 5000 }))
     await waitFor(() => expect(releaseRetry).toBeDefined())
     fireEvent.click(screen.getByRole('button', { name: 'Open the third project’s PR tab' }))
     expect(await screen.findByRole('heading', { name: /The third project’s PR/ })).toBeTruthy()
 
+    expect(client.isMutating()).toBe(1)
     releaseRetry!()
-    // Give the late answer every chance to land in the wrong cache entry.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    // The Retry settles only after it has filed its answer in the cache.
+    await waitFor(() => expect(client.isMutating()).toBe(0))
     expect(screen.getByRole('heading', { name: /The third project’s PR/ })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: /The other project’s PR/ })).toBeNull()
 

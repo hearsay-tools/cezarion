@@ -365,7 +365,11 @@ describe('Diff facade — Markdown preview (hearsay-tools/cezarion#1012)', () =>
     const { rerender } = await renderDiff(<Diff files={[GUIDE]} preview loadFileText={loadFileText} />, 'docs/guide.md')
     await waitFor(() => expect(findCard('docs/guide.md').querySelector('h1')).not.toBeNull())
     rerender(<Diff files={[{ ...GUIDE }]} preview loadFileText={(path) => loadFileText(path)} />)
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    // React flushes this commit's effects before it renders the next one, so once the changed
+    // patch has reached its own loader, the same-patch refresh has had its chance to refetch.
+    const nextLoader = vi.fn().mockResolvedValue('# Guide')
+    rerender(<Diff files={[withPatch(GUIDE, '+More')]} preview loadFileText={nextLoader} />)
+    await waitFor(() => expect(nextLoader).toHaveBeenCalledTimes(1))
     expect(loadFileText).toHaveBeenCalledTimes(1)
   })
 
