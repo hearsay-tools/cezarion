@@ -33,6 +33,7 @@ import {
   usePutAgentConfigFile,
   useRun,
   useRunChanges,
+  useProjectRuns,
   useRuns,
   useArchivedRuns,
   useSkills,
@@ -837,6 +838,39 @@ describe('useRuns', () => {
     expect(result.current.data).toHaveLength(1)
     expect(result.current.data?.[0]?.title).toBe('Fix it')
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe('/api/v1/run-summaries?archived=recent')
+  })
+})
+
+describe('useProjectRuns key changes (hearsay-tools/squawk#3048)', () => {
+  // The first props answer; the second props' fetch is held, so the hook shows what it keeps
+  // while the new key has no data of its own.
+  it.each([
+    { name: 'keeps the same project\'s list when its id key moves to the default alias', from: { projectId: 'boot', boot: false }, to: { projectId: 'boot', boot: true }, kept: true },
+    { name: 'starts empty when another project moves to the default alias', from: { projectId: 'shop', boot: false }, to: { projectId: 'boot', boot: true }, kept: false },
+    { name: 'starts empty when the default alias moves to a project id key', from: { projectId: 'boot', boot: true }, to: { projectId: 'boot', boot: false }, kept: false },
+  ])('$name', async ({ from, to, kept }) => {
+    const first = [{ id: 'first-run', title: 'First', status: RUN_STATUS.running }]
+    const held = deferredResponse()
+    fetchMock.mockResolvedValueOnce(json(first)).mockReturnValueOnce(held.promise)
+    const client = createQueryClient()
+    const { result, rerender } = renderHook(({ projectId, boot }) => useProjectRuns(projectId, true, boot), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+      initialProps: from,
+    })
+    await waitFor(() => expect(result.current.data).toEqual(first))
+
+    rerender(to)
+    const toKey = [projectAddress(to).cacheScope, 'runs', 'list']
+    await waitFor(() => expect(client.getQueryState(toKey)?.fetchStatus).toBe('fetching'))
+    expect(result.current.data).toEqual(kept ? first : undefined)
+    expect(result.current.isPlaceholderData).toBe(kept)
+    // A placeholder is shown only: the new key holds nothing until its own fetch answers.
+    expect(client.getQueryData(toKey)).toBeUndefined()
+
+    const second = [{ id: 'second-run', title: 'Second', status: RUN_STATUS.running }]
+    await act(async () => { held.resolve(json(second)) })
+    await waitFor(() => expect(result.current.data).toEqual(second))
+    expect(result.current.isPlaceholderData).toBe(false)
   })
 })
 
