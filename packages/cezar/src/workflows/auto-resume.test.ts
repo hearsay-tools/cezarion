@@ -208,6 +208,22 @@ describe('a run stopped by a usage limit resumes itself', () => {
     expect(store.readEvents(record.id).some(event => String(event.message ?? '').includes('could not start'))).toBe(false);
   }, 40_000);
 
+  it('runs the steps after the failed one once a provider retry succeeds', async () => {
+    const twoSteps: WorkflowDef = { name: 'two-steps', source: 'built-in', steps: [
+      { id: 'work', name: 'Work', prompt: '{{task}}' },
+      { id: 'check', name: 'Check', prompt: 'mock:cezar-done check the work' },
+    ] };
+    const first = createFixtureManager(store, repoRoot);
+    const record = first.startRun(twoSteps, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    first.dispose();
+    expect(store.getRun(record.id)?.workflowResumeStepId).toBe('work');
+    store.updateRun(record.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString(), task: 'mock:cezar-done ship it' });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    await expect.poll(() => store.getRun(record.id)?.steps.find(step => step.id === 'check')?.status, { timeout: 30_000 }).toBe('done');
+  }, 60_000);
+
   it('fails a run plainly on a request error, which is no provider error', async () => {
     manager = createFixtureManager(store, repoRoot);
     const record = manager.startRun(workflow, { task: 'mock:request-error ship it', worktree: false });

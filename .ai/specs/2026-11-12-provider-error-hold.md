@@ -120,6 +120,7 @@ Rows live in `RUN_TRIGGERS` (`workflows/run-states.ts`); this table is the desig
 | running, waiting:capacity | A Continue's session fails otherwise | runner | `fail-continue` → failed (running.continue-fail) |
 | waiting (closing wakes owed) | A step fails | runner | Parks as today; at the delivery cap, the provider-error check above runs before `fail-continue` |
 | waiting:usage-limit | The retry time passes | timer | `continue-line` → queued; a fresh session when no session is recorded (hold.fires) |
+| waiting:usage-limit | The retry of a failed workflow step succeeds | runner | The hold saved that step as `workflowResumeStepId`, so the workflow's later steps run (`settleResumedWorkflowStep`) |
 | waiting:usage-limit | The retry fails again with a provider error | runner | Back to the hold, attempt + 1, the next delay |
 | waiting:usage-limit | 12 retries ran | runner | `fail-continue` → failed, with `provider retry limit reached (12)` |
 | waiting:usage-limit | Auto-resume off, window missed by a day, or refused at fire | engine | `withdraw-hold` → failed with the kept error and a note (hold.withdrawn) |

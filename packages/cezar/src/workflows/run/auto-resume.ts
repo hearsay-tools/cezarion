@@ -111,7 +111,10 @@ export class AutoResumeScheduler {
   holdFailure(runId: string, error: string): boolean {
     const plan = this.holdFor(runId, error);
     if (!plan) return false;
-    this.host.move(runId, 'hold-failure', { error, autoResumeAt: plan.autoResumeAt, autoResumeReason: plan.autoResumeReason });
+    const run = this.context.store.getRun(runId);
+    const resumeStep = run ? atContinue.heldStep(run) : undefined;
+    this.host.move(runId, 'hold-failure', { error, autoResumeAt: plan.autoResumeAt, autoResumeReason: plan.autoResumeReason,
+      ...(resumeStep ? { workflowResumeStepId: resumeStep } : {}) });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: plan.message });
     return true;
   }
