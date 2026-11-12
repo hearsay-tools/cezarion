@@ -20,6 +20,7 @@ import { fireCapturedTimer, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciNativeMessages, toolCall, gate, thenSay } from './waits-parity.testkit.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { type WaitParityPart, type WaitCells, type WaitPartScope, waitPartModule, familyTest, type WaitParityFamily, type WaitFold, type WaitFoldScope, waitFoldModule, foldCells } from './waits-parity-catalog.testkit.ts';
 import { productName } from '../home/display.ts';
 
@@ -68,13 +69,11 @@ export const agentWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter
 export const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 export const listed = (id: string, waitId: string) => store.getRun(id)?.waits?.find(wait => wait.id === waitId && wait.phase === WAIT_PHASE.open);
 export const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
-const toolResources = vi.hoisted(() => ({ current: undefined as { controller(): Promise<unknown> } | undefined }));
-vi.mock('../ci-wait/resources.ts', async importOriginal => {
-  const actual = await importOriginal<typeof import('../ci-wait/resources.ts')>();
-  return { ...actual, acquireCiResources: (...args: Parameters<typeof actual.acquireCiResources>) => {
-    const resource = actual.acquireCiResources(...args); toolResources.current = resource; return resource;
-  } };
-});
+const toolResources = { current: undefined as { controller(): Promise<unknown> } | undefined };
+/** Pass to `useWorkerWaitFixture`: the real CI resources, kept so a cell can reach the controller. */
+const acquireCapturedCiResources = (...args: Parameters<typeof acquireCiResources>) => {
+  const resource = acquireCiResources(...args); toolResources.current = resource; return resource;
+};
 const runnerBoundary = vi.hoisted(() => ({
   sessions: new Map<string, import('../core/agent-runner.ts').AgentSession>(),
   beforeReturn: undefined as ((runId: string) => void) | undefined,
@@ -398,7 +397,7 @@ export async function timerWaits(id: string) {
 export function describeWaitCells(register: () => void): void {
   useRunners(boundaryRunners(withClaudeWorkers(runnersUnderTest())));
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
-    useWorkerWaitFixture();
+    useWorkerWaitFixture({ acquireCiResources: acquireCapturedCiResources });
     beforeEach(() => {
       doneOffsets.clear();
       runnerBoundary.sessions.clear(); runnerBoundary.beforeReturn = undefined; accelerateRetries = false; retryClock = observeBackoffs();

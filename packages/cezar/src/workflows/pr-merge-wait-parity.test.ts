@@ -10,6 +10,7 @@ import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { GithubCiClient } from '../ci-wait/github.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, store, restart, root, semaphore, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
@@ -33,32 +34,30 @@ vi.mock('node:timers/promises', async importOriginal => {
     });
   } };
 });
-const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined,
-  supervisor: undefined as CiWatcherSupervisor | undefined, replay: async (_result?: CiWaitResult) => {} }));
-vi.mock('../ci-wait/resources.ts', async importOriginal => {
-  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
-  return { acquireCiResources(workspace: object) {
-    const shared = original.acquireCiResources(workspace);
-    // Each restart owns a fresh supervisor. The initial fixture chooses its wire later.
-    let selected = resources.github ? new CiWatcherSupervisor({ github: resources.github }) : undefined;
-    const current = () => selected ??= resources.supervisor!;
-    // The manager holds this forwarding boundary before the test chooses its GitHub wire.
-    const supervisor = {
-      resolve: (...args: Parameters<CiWatcherSupervisor['resolve']>) => current().resolve(...args),
-      watch: (...args: Parameters<CiWatcherSupervisor['watch']>) => {
-        const result = current().watch(...args).then(value => value);
-        const then = result.then.bind(result);
-        vi.spyOn(result, 'then').mockImplementation((fulfilled, rejected) => {
-          resources.replay = async override => { if (override) await fulfilled?.(override); else await then(fulfilled, rejected); };
-          return then(fulfilled, rejected);
-        });
-        return result;
-      },
-      close() {},
-    };
-    return { ...shared, supervisor, release() { selected?.close(); shared.release(); } };
-  } };
-});
+const resources = { github: undefined as GithubCiClient | undefined,
+  supervisor: undefined as CiWatcherSupervisor | undefined, replay: async (_result?: CiWaitResult) => {} };
+/** Pass to `useWorkerWaitFixture`: the real CI resources, with a supervisor the test chooses per restart. */
+function acquireReplayCiResources(workspace: object) {
+  const shared = acquireCiResources(workspace);
+  // Each restart owns a fresh supervisor. The initial fixture chooses its wire later.
+  let selected = resources.github ? new CiWatcherSupervisor({ github: resources.github }) : undefined;
+  const current = () => selected ??= resources.supervisor!;
+  // The manager holds this forwarding boundary before the test chooses its GitHub wire.
+  const supervisor = {
+    resolve: (...args: Parameters<CiWatcherSupervisor['resolve']>) => current().resolve(...args),
+    watch: (...args: Parameters<CiWatcherSupervisor['watch']>) => {
+      const result = current().watch(...args).then(value => value);
+      const then = result.then.bind(result);
+      vi.spyOn(result, 'then').mockImplementation((fulfilled, rejected) => {
+        resources.replay = async override => { if (override) await fulfilled?.(override); else await then(fulfilled, rejected); };
+        return then(fulfilled, rejected);
+      });
+      return result;
+    },
+    close() {},
+  };
+  return { ...shared, supervisor, release() { selected?.close(); shared.release(); } };
+}
 const pr = 'https://github.com/acme/repo/pull/12';
 const open = (id: string) => store.getRun(id)?.waits?.find(wait => wait.kind === 'pr');
 const last = (id: string) => store.getRun(id)?.lastWaits?.find(wait => wait.kind === 'pr');
@@ -81,7 +80,7 @@ function assertIgnoredResolution(runId: string, waitId: string, result: CiWaitRe
 // R97–R99 (hearsay-tools/cezarion#1425): a merge wait polls the real metadata parser over a native
 // gh wire. Green checks do not end it; GitHub's merge does, with one committed, delivered input.
 describe('native PR merge wait parity', { timeout: 35_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireReplayCiResources });
   afterEach(() => { resources.github = undefined; for (const probe of [...probes]) probe.resume(); vi.restoreAllMocks(); });
   for (const mode of ['fresh', 'continued', 'recovered'] as const) for (const runner of parityRunners('pr-merge-wait', mode === 'fresh' ? 'R97' : mode === 'continued' ? 'R98' : 'R99')) {
     const cell = mode === 'fresh' ? 'R97' : mode === 'continued' ? 'R98' : 'R99';

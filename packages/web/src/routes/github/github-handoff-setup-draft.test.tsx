@@ -11,6 +11,7 @@ import { resetToasts } from '@/components/ui/toaster'
 import { githubTaskRef } from '@/lib/github-task'
 
 import { ListViewportResizeObserver } from './github-geometry.testkit'
+import { cssRules, paintsBefore, targets } from '@/test/css-rules'
 import { readFollowupPrompt, readFollowupSelection, writeFollowupSelection } from './hand-to-agent-draft'
 
 beforeAll(() => {
@@ -41,16 +42,19 @@ describe('GitHub handoff field chrome (#243)', () => {
   ].find((file) => existsSync(file))
   if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
   const css = readFileSync(cssPath, 'utf8')
+  const rules = cssRules(css)
 
   it('styles row dividers and the phone preview on the row item, which survives virtualization (hearsay-tools/cezarion#1183)', () => {
     expect(css).toMatch(/\[data-slot='gh-row-item'\]\[data-divided\]\s*\{\s*border-block-start:/)
     expect(css).toMatch(/\[data-mobile-preview\] \[data-slot='gh-row-item'\]\[data-compact-hidden\]\s*\{\s*display:\s*none/)
-    expect(css).not.toMatch(/\[data-slot='gh-rows'\] > li/)
+    expect(rules.map((rule) => rule.selector).filter((selector) => selector.includes("[data-slot='gh-rows'] > li"))).toEqual([])
   })
 
   it('keeps phone filters wrapping instead of stacking a column that hides the first row (#325)', () => {
-    expect(css).not.toMatch(/\[data-slot='gh-issue-filters'\]\s*\{[^}]*flex-direction:\s*column/)
-    expect(css).not.toMatch(/\[data-slot='gh-filter-toolbar'\]\s*\{[^}]*flex-direction:\s*column/)
+    const stacked = rules.filter((rule) =>
+      (targets(rule.selector, "[data-slot='gh-issue-filters']") || targets(rule.selector, "[data-slot='gh-filter-toolbar']"))
+      && /column/.test(`${rule.declarations['flex-direction'] ?? ''} ${rule.declarations['flex-flow'] ?? ''}`))
+    expect(stacked.map((rule) => rule.selector)).toEqual([])
   })
 
   it('keeps the Workflow trigger in the shared field grammar — no workflow-only overrides (#262)', () => {
@@ -80,9 +84,8 @@ describe('GitHub handoff field chrome (#243)', () => {
   })
 
   it('does not paint in-button Model/Runner/Effort ::before labels — PickerPill fieldLabel owns the name (#272)', () => {
-    expect(css).not.toMatch(/\[data-slot='model-pill'\]::before\s*\{[^}]*content:\s*'Model'/)
-    expect(css).not.toMatch(/\[data-slot='runner-pill'\]::before\s*\{[^}]*content:\s*'Runner'/)
-    expect(css).not.toMatch(/\[data-slot='effort-pill'\]::before\s*\{[^}]*content:\s*'Effort'/)
+    const painted = rules.filter((rule) => paintsBefore(rule.selector, "pill']") && (rule.declarations.content ?? 'none') !== 'none')
+    expect(painted.map((rule) => rule.selector)).toEqual([])
   })
 
   it('gives the prompt textarea its own bordered typing area', () => {

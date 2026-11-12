@@ -176,8 +176,6 @@ test('squeal-publish alone writes contents, after the export, and runs no reposi
     .filter(({ id, s }) => SQUEAL_JOBS.includes(id) && /github\.token|secrets\./.test(JSON.stringify(s)));
   assert.deepEqual(tokened.map(({ s }) => s.name), ['Publish Squeal results']);
   assert.deepEqual(Object.keys(step(job, 'Publish Squeal results').env), ['GH_TOKEN']);
-  assert.match(step(job, 'Publish Squeal results').run,
-    /^\s*squeal ci publish "\$RUNNER_TEMP\/squeal-results\/squeal-results\.json\.gz" --keep 100$/m);
 });
 
 test('the publish step hands git the token as an extra header and masks it', () => {

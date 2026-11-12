@@ -1,32 +1,17 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
-import { exitedStat, linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
+import { linuxBootId, processStartToken, pidExists, sameIncarnation, recordedProcessLive, type RecordedProcess } from '../core/process-stat.ts';
 
 /**
  * Synchronous process evidence for worker recovery and resource cleanup. Unreadable cwd is no
  * evidence; other uncertainty stays alive or unknown, never proven gone.
  */
-// A process's start identity lives with the helper that starts detached processes (hearsay-tools/cezarion#1717).
-export { parseProcStat, processStartToken };
-/** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
-export type RecordedProcess = { pid: number; startToken?: string | undefined; pgid?: number | undefined };
+export { parseProcStat, processStartToken, recordedProcessLive, type RecordedProcess } from '../core/process-stat.ts';
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
-function pidExists(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
-  if (process.platform !== 'linux') return true;
-  // A zombie leader can still have live threads. Unreadable stat is not proof of exit.
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return !exitedStat(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/));
-  } catch { return true; }
-}
-
-const LINUX_TOKEN = /^(?:[0-9a-f-]{36}:)?(\d+)$/;
 const LINUX_BOOT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 /** A known different boot proves that no descendant of this controller can still exist. */
 function controllerPredatesBoot(token: string | undefined, boot: string | undefined): boolean {
@@ -36,22 +21,6 @@ function controllerPredatesBoot(token: string | undefined, boot: string | undefi
 /** A different recorded Linux boot proves every original process group ended. */
 export function processPredatesCurrentBoot(entry: RecordedProcess): boolean {
   return process.platform === 'linux' && controllerPredatesBoot(entry.startToken, linuxBootId());
-}
-
-/** Liveness-only comparison: when exactly one Linux token lacks the boot id (it was unreadable on one
- * side), the `starttime` suffix decides. Reaping still requires an exact match. */
-function sameIncarnation(recorded: string, current: string): boolean {
-  if (recorded === current) return true;
-  const a = LINUX_TOKEN.exec(recorded), b = LINUX_TOKEN.exec(current);
-  return !!a && !!b && recorded.includes(':') !== current.includes(':') && a[1] === b[1];
-}
-
-/** Live and the same incarnation. A token-less entry (or an unreadable current token) counts while the PID exists. */
-export function recordedProcessLive(entry: RecordedProcess): boolean {
-  if (!pidExists(entry.pid)) return false;
-  if (entry.startToken === undefined) return true;
-  const current = processStartToken(entry.pid);
-  return current === undefined || sameIncarnation(entry.startToken, current);
 }
 
 /** Whether a recorded session leader's group may be signalled (hearsay-tools/cezarion#890). A live

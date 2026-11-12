@@ -302,14 +302,13 @@ describe('automation task templates', () => {
       const reserved = launching.reserveReceipt({ automationId: 'nightly', revision: 2, eventId: `schedule:${occurrence.at}`, occurrenceAt: occurrence.at })!;
       // The lazily built context may hold a different store instance on the same directory.
       const building = AutomationStore.open(dataDir);
+      // A reconciled reservation writes its `failed` row through `appendLog` inside the reconcile call.
+      const appendLog = vi.spyOn(building, 'appendLog');
       expect(reconcileAutomationReceipts(building, runs)).toBe(0);
       expect(building.latestReceipts().get(reserved.receiptKey)).toMatchObject({ status: 'reserved' });
       launching.appendReceipt({ ...reserved, status: 'launched', runId: 'run-1', updatedAt: occurrence.at });
       expect(building.isReservationInFlight(reserved.receiptId)).toBe(false);
-      // bound: negative window. A wrongly reconciled reservation would append its `failed` row
-      // through withLogLease, which takes the free log lock at once, so 20 ms is several turns of
-      // the event loop; the case proves no such row follows.
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(appendLog).not.toHaveBeenCalled();
       expect(building.logs({ automationId: 'nightly' })).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }
   });

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { CiWaitResult, ProcessWaitResult } from '@open-mercato/cezar-contract';
 import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { takeRunExitViolations } from '../runs/run-exits.ts';
@@ -248,7 +249,7 @@ const EXAMPLES: Array<[Reply, Command[]]> = [
 ];
 
 describe('the run state table drives a real run', { timeout: 600_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
 
   it('reaches the state each trigger row names, across restarts with no live session', async () => {

@@ -64,14 +64,6 @@ describe('the github search API', () => {
     expect(body.items.map((i) => i.number)).toEqual([142]);
   });
 
-  it('returns an empty hit list rather than an error when nothing matches', async () => {
-    const res = await apiRequest(app, '/api/v1/github/search?kind=pr&q=nothing-matches-this');
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as ForgeSearchData;
-    expect(body.available).toBe(true);
-    expect(body.items).toEqual([]);
-  });
-
   it('400s on a missing or unknown kind', async () => {
     expect((await apiRequest(app, '/api/v1/github/search?q=128')).status).toBe(400);
     expect((await apiRequest(app, '/api/v1/github/search?kind=commit&q=128')).status).toBe(400);

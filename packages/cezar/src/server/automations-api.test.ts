@@ -15,7 +15,8 @@ import { nextOccurrence } from '@open-mercato/cezar-contract/automation-schedule
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
 import { ScheduleRunner } from '../automations/schedule-runner.ts';
-import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
+import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
+import { observationClock } from '../core/observation-clock.testkit.ts';
 import { AutomationStore } from '../automations/store.ts';
 import { isScheduleAutomation } from '../automations/types.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
@@ -728,6 +729,9 @@ describe('GitHub automation API', () => {
     const backlog = { eventId: 'old', event: 'issue.opened' as const, timestamp: new Date(Date.now() - 20 * DAY).toISOString(), tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Old', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
     const poll = vi.spyOn(GithubPoller.prototype, 'poll').mockResolvedValue({ candidates: [backlog], truncated: false, pages: 1 });
     const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
+    const checks = vi.spyOn(ProjectAutomationScheduler.prototype, 'check');
+    // The workspace timer runs on a frozen clock, so the test decides when it fires.
+    const timer = observationClock(() => /\bat WorkspaceAutomationScheduler\.schedule \(/.test(new Error().stack ?? ''));
     const manager = Object.assign(recordingManager(), { isActive: () => false });
     // Registered, as `cez` registers the repo it boots in: the coordinator only keeps a store for
     // a project the registry lists, so an unregistered root would never reach the timer at all.
@@ -736,12 +740,15 @@ describe('GitHub automation API', () => {
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
-      // Long enough for a past-due poll armed at boot to fire and launch.
-      // bound: negative window. A past-due poll is armed with a zero delay, so it fires on the first timer turn; 300 ms is far longer.
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // start() resolves once the timer is armed from the boot's state. A past-due poll is armed
+      // with a zero delay: fire what is due now, and let each check it starts finish.
+      await started.mock.results[0]!.value;
+      await timer.advance(0);
+      await Promise.allSettled(checks.mock.results.map((result) => result.value));
       return { stale, poll: poll.mock.calls.length, launches: manager.startRun.mock.calls.length };
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      timer.restore();
       vi.restoreAllMocks();
       vi.unstubAllEnvs();
       if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
@@ -865,9 +872,8 @@ describe('GitHub automation API', () => {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
       await vi.waitFor(() => expect(fired).toHaveBeenCalled(), { timeout: 15_000, interval: 20 });
-      // Long enough for a fire that would launch to have launched, failed and been recorded.
-      // bound: negative window. The fire has already run (the `fired` wait above), so a launch is a few event-loop turns behind it; 300 ms is far longer.
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // A launch, its failure and their records all land before the fire settles.
+      await Promise.allSettled(fired.mock.results.map((result) => result.value));
       const automations = AutomationStore.open(dataDir);
       expect(manager.startRun).not.toHaveBeenCalled();
       expect(automations.latestReceipts().size).toBe(0);
@@ -881,9 +887,9 @@ describe('GitHub automation API', () => {
     }
   }, 30_000);
 
-  // The timer reserves the receipt, THEN its launcher builds a non-boot project's context
-  // lazily — and building it reconciles receipts. The reservation this process is launching right
-  // now is not a crash leftover: it must neither flip to launch-error nor log a false `failed`.
+  // A non-boot project's context can be built lazily after the timer reserved the receipt, and
+  // building it reconciles receipts. The reservation this process is launching right now is not a
+  // crash leftover: it must neither flip to launch-error nor log a false `failed`.
   it('the first launch in a non-boot project whose context is not built yet logs no failure', async () => {
     const savedDryRun = process.env.CEZ_DRY_RUN;
     process.env.CEZ_DRY_RUN = '1';
@@ -909,6 +915,7 @@ describe('GitHub automation API', () => {
     }));
     writeFileSync(join(dataDir, 'automation-state.json'), JSON.stringify({ version: 1, states: { nightly: { revision: 1, nextRunAt: occurrenceAt } } }));
     const startRun = vi.fn();
+    const fired = vi.spyOn(ScheduleRunner.prototype, 'fire');
     const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome()),
       prepareManager: ({ store: projectStore, manager }) => {
         const launch = vi.spyOn(manager, 'startRun').mockImplementation((workflow, input) => {
@@ -920,10 +927,24 @@ describe('GitHub automation API', () => {
     });
     const boot = await registerProject(root, undefined, testHome());
     const second = await registerProject(other, undefined, testHome());
+    const automations = AutomationStore.open(dataDir);
+    // No crash leftover exists here, so a reserved receipt is the launch this process has in flight.
+    const reservedInFlight = () => [...automations.latestReceipts().values()].some((receipt) => receipt.status === 'reserved');
+    // `ready()` builds the context before the receipt is reserved. Drop every context built with no
+    // reservation in flight, so the launcher's own call builds it, and reconciles, while reserved.
+    let builtWhileReserved = 0;
+    const build = contexts.context.bind(contexts);
+    vi.spyOn(contexts, 'context').mockImplementation(async (projectId) => {
+      const reserved = projectId === second.id && reservedInFlight();
+      const context = await build(projectId);
+      if (projectId !== second.id) return context;
+      if (reserved) builtWhileReserved += 1;
+      else contexts.dispose(projectId);
+      return context;
+    });
     const server = startServer({ home: testHome(), ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), contexts, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-      const automations = AutomationStore.open(dataDir);
       await vi.waitFor(() => {
         expect(automations.logs({ automationId: 'nightly' }).some((row) => row.result === 'launched')).toBe(true);
       }, { timeout: 15_000, interval: 20 });
@@ -933,9 +954,9 @@ describe('GitHub automation API', () => {
       expect(contexts.peek(second.id)?.store.getRun(receipt!.runId!)).toBeDefined();
       expect(store.getRun(receipt!.runId!)).toBeUndefined();
       expect(automations.receipts().filter((row) => row.status === 'launch-error')).toEqual([]);
-      // Give a best-effort reconcile row time to land before asserting it never did.
-      // bound: negative window. The reconcile row is one best-effort write after the launch receipt, a few event-loop turns away; 100 ms covers it.
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // The context build that reconciles receipts runs inside the fire: its rows land before it settles.
+      await Promise.allSettled(fired.mock.results.map((result) => result.value));
+      expect(builtWhileReserved).toBe(1);
       expect(automations.logs({ automationId: 'nightly' }).map((row) => row.result)).toEqual(['launched']);
       expect(second.id).not.toBe(boot.id);
     } finally {

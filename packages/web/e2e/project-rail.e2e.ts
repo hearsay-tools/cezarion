@@ -395,6 +395,12 @@ describe('expandable project rail (#711)', () => {
       browser.waitForFunction(`document.querySelector('${other}')?.getAttribute('aria-current') === 'page'`)
       browser.evaluate(`document.querySelector('${other}').scrollIntoView({ block: 'nearest' })`)
       check('selected')
+      // Contrast holds on a transparent row too, so compare the resting fills directly.
+      browser.moveTo(0, 0)
+      const fills = browser.evaluate(`[${JSON.stringify(other)}, ${JSON.stringify(`${mark(bootProject)} a`)}]
+        .map((selector) => getComputedStyle(document.querySelector(selector)).backgroundColor)`) as [string, string]
+      expect(fills[0], `${theme} current row fill`).not.toBe('rgba(0, 0, 0, 0)')
+      expect(fills[0], `${theme} current vs other row fill`).not.toBe(fills[1])
       browser.screenshot(join(artifactsDir, `project-rail-expanded-selected-${theme}.png`), { viewport: true })
       collapse()
       browser.evaluate(`localStorage.setItem('cez-theme', 'dark')`)

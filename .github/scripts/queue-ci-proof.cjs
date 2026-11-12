@@ -131,7 +131,8 @@ async function pollQueueRun({ read, fullName, workflowId, sha, poll, deadline, n
   if (run.status !== 'completed') {
     if (poll === 6 || now() >= deadline) return { reason: 'source-pending' };
     await sleep(Math.min(10000, deadline - now()));
-    return {};
+    // No read fits after the deadline, so a run still pending then is the reason.
+    return now() >= deadline ? { reason: 'source-pending' } : {};
   }
   return { run };
 }

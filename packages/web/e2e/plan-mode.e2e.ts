@@ -141,6 +141,13 @@ describe('plan mode against a live dry-run server', () => {
     // branch row and moves Plan first down 29 px. A click that resolves its point before that
     // render lands on the composer grid instead. Settle the target with no query in flight.
     settleVisual(browser, '[data-slot="mode-plan"]', { idle: true })
+    // Both segments' fills, read once their `transition-colors` ended. Start is selected now.
+    const fills = () => waitForSettledSample<{ start: string; plan: string }>(browser, `(() => {
+      const fill = (selector) => getComputedStyle(document.querySelector(selector)).backgroundColor
+      return { start: fill('[data-slot="mode-seg"] [role="radio"]:not([data-slot="mode-plan"])'), plan: fill('[data-slot="mode-plan"]') }
+    })()`, undefined, '[data-slot="mode-seg"]')
+    const startSelected = fills()
+    expect(startSelected.plan).not.toBe(startSelected.start)
     browser.click('[data-slot="mode-plan"]')
     try {
       browser.waitForFunction(
@@ -154,14 +161,10 @@ describe('plan mode against a live dry-run server', () => {
       })`), null, 2))
       browser.screenshot(join(artifactsDir, 'plan-mode-toggle.png'), { viewport: true })
     }
-    // The unmistakable selected state: the segment took the contrast fill (mockup .plan-active).
-    expect(
-      browser.evaluate(
-        `getComputedStyle(document.querySelector('[data-slot="mode-plan"]')).backgroundColor ===
-         getComputedStyle(document.documentElement).getPropertyValue('--contrast') ||
-         document.querySelector('[data-slot="mode-plan"]').className.includes('bg-contrast')`,
-      ),
-    ).toBe(true)
+    // The unmistakable selected state: Plan first takes the selected fill and Start gives it up.
+    const planSelected = fills()
+    expect(planSelected.plan).toBe(startSelected.start)
+    expect(planSelected.start).not.toBe(startSelected.start)
 
     browser.click('[data-slot="composer"] textarea')
     browser.fill('[data-slot="composer"] textarea', 'Tighten the flaky suite end to end.')

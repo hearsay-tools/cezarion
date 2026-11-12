@@ -20,6 +20,7 @@ const { RunStore } = await load('runs/store.js')
 const { projectPaths } = await load('project-paths.js')
 const { UiEventSink } = await load('runs/ui-event-sink.js')
 const { RunManager } = await load('workflows/run.js')
+const { acquireCiResources } = await load('ci-wait/resources.js')
 const { startServer } = await load('server/server.js')
 const { ProjectContexts } = await load('server/project-context.js')
 const { resolveHome } = await load('home/resolve.js')
@@ -73,8 +74,8 @@ const seed = (dir, projectId) => {
 }
 const store = seed(root, 'boot')
 for (const project of projects.slice(1)) { const extra = seed(project.root, project.id); extra.close() }
-const manager = new RunManager(store, root, { home })
-const contexts = new ProjectContexts({ home, createManager: (...args) => new RunManager(...args), listProjects: async () => projects })
+const manager = new RunManager(store, root, { home, acquireCiResources })
+const contexts = new ProjectContexts({ home, createManager: (store, root, options) => new RunManager(store, root, { ...options, acquireCiResources }), listProjects: async () => projects })
 const stores = new Map([['boot', store]])
 for (const project of projects.slice(1)) stores.set(project.id, (await contexts.context(project.id)).store)
 const runs = [...stores].flatMap(([projectId, value]) => value.listRunIds().map(runId => ({ projectId, runId })))

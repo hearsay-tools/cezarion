@@ -51,6 +51,7 @@ export async function crashAfterContinue(repoRoot: string, dataDir: string, runI
   const script = `
     import { RunStore } from ${JSON.stringify(new URL('../runs/store.ts', import.meta.url).href)};
     import { RunManager } from ${JSON.stringify(new URL('./run.ts', import.meta.url).href)};
+    import { acquireInertCiResources } from ${JSON.stringify(new URL('../ci-wait/inert-ci-resources.testkit.ts', import.meta.url).href)};
     import { createRunner } from ${JSON.stringify(new URL('../core/runner-factory.ts', import.meta.url).href)};
     import { WorkspaceSemaphore } from ${JSON.stringify(new URL('../workspace/semaphore.ts', import.meta.url).href)};
     import { Home } from ${JSON.stringify(new URL('../home/home.ts', import.meta.url).href)};
@@ -58,7 +59,7 @@ export async function crashAfterContinue(repoRoot: string, dataDir: string, runI
     const input = JSON.parse(process.argv[1]);
     const store = RunStore.open(input.dataDir, { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ home, initial: { maxParallel: 0 } });
-    const manager = new RunManager(store, input.repoRoot, { home, createRunner, semaphore });
+    const manager = new RunManager(store, input.repoRoot, { acquireCiResources: acquireInertCiResources, home, createRunner, semaphore });
     const accepted = manager.continueRun(input.runId, { text: 'read my durable continuation brief', images: input.images }, input.mode === 'capacity');
     if (!accepted.ok) throw new Error(accepted.error);
     process.exit(0);

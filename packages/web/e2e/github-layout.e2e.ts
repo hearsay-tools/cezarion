@@ -188,11 +188,10 @@ it.each(['light', 'dark'])('scrolls stacked panes in document flow at 900px, %s 
 
 describe('the GitHub tab against the live dry-run server', () => {
   it.each([900, 540])('on desktop hides the GitHub title then scrolls list and detail independently (#523), height %i', async (height) => {
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     const template = gh.issues[0]
-    expect(template).toBeDefined()
-    if (!template) return
+    if (!template) throw new Error('the dry-run catalog serves no issue')
 
     const longBody = Array.from({ length: 80 }, (_, index) => `Fixture paragraph ${index}.`).join('\n\n')
     const issues = Array.from({ length: 40 }, (_, index) => ({
@@ -371,7 +370,7 @@ describe('the GitHub tab against the live dry-run server', () => {
   })
 
   it('lays out long issue and pull-request titles at the review viewports in both themes and densities', async () => {
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
 
     const longTitle =
       'Keep the shared GitHub synchronization workflow readable when several records begin with exactly the same words but end differently'
@@ -664,7 +663,7 @@ it.each([1440, 402, 360].flatMap(width => ['light', 'dark'].map(theme => ({ widt
 // controls, pushing the board picker and the list down and then back up. A DOM assertion cannot see
 // that, so a frame-by-frame sampler records the geometry across the whole delayed refresh.
 it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(viewport => ['light', 'dark'].flatMap(theme => ['ready', 'unavailable'].map(outcome => ({ ...viewport, theme, outcome })))))('keeps filter geometry still while project boards refresh then settle as $outcome at $width / $theme (#721)', async ({ width, height, theme, outcome }) => {
-  if (!forgeAvailable) return
+  expect(forgeAvailable).toBe(true)
   const gh = await api<GithubPayload>('/api/v1/github')
   const generation = '00000000-0000-4000-8000-000000000721'
   const projects = [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/mock/projects/1' }]
@@ -762,7 +761,7 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
 // Review of #721: with NO cached boards the picker used to be sized by its option text, so
 // "Loading boards…" -> "Boards unavailable" (or long board names) moved the picker and search.
 it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(viewport => ['light', 'dark'].flatMap(theme => ['unavailable', 'long names'].map(outcome => ({ ...viewport, theme, outcome })))))('keeps filter geometry still without cached boards, settling as $outcome at $width / $theme (#721)', async ({ width, height, theme, outcome }) => {
-  if (!forgeAvailable) return
+  expect(forgeAvailable).toBe(true)
   const gh = await api<GithubPayload>('/api/v1/github')
   const generation = '00000000-0000-4000-8000-000000000722'
   const projects = [
@@ -830,7 +829,7 @@ it.each([{ width: 1440, height: 900 }, { width: 360, height: 640 }].flatMap(view
 // Review of #721: a CLOSED status button holding keyboard focus is hidden by success; focus must be
 // handed to a visible control before that, and focus that was elsewhere must stay where it was.
 it.each([1440, 360].flatMap(width => ['status button', 'search'].map(focus => ({ width, focus }))))('hands focus on from the closed status button but leaves other focus alone at $width ($focus) (#721)', async ({ width, focus }) => {
-  if (!forgeAvailable) return
+  expect(forgeAvailable).toBe(true)
   const gh = await api<GithubPayload>('/api/v1/github')
   const generation = '00000000-0000-4000-8000-000000000723'
   const projects = [{ id: 'P1', title: 'Delivery', url: 'https://github.com/orgs/mock/projects/1' }]

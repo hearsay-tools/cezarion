@@ -19,7 +19,7 @@ import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
 
 const observed = vi.hoisted(() => ({
-  options: new WeakMap<object, ConstructorParameters<typeof RunManager>[2]>(),
+  options: new WeakMap<object, Parameters<RunManagerFactory>[2]>(),
   subscriptions: [] as Array<{ listener: ReturnType<typeof vi.fn>; unsubscribe: ReturnType<typeof vi.fn> }>,
 }));
 /** The real factory, recording each manager's constructor options. */
@@ -28,6 +28,16 @@ function createManager(...args: Parameters<RunManagerFactory>): RunManager {
   observed.options.set(manager, args[2]);
   return manager;
 }
+// Every preview sweep a context build starts, so a test can await the one that decides its outcome.
+const previewSweeps = vi.hoisted(() => [] as Promise<number>[]);
+vi.mock('../preview/dev-server.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../preview/dev-server.ts')>();
+  return { ...actual, sweepPreviewLeftovers: (...args: Parameters<typeof actual.sweepPreviewLeftovers>) => {
+    const sweep = actual.sweepPreviewLeftovers(...args);
+    previewSweeps.push(sweep);
+    return sweep;
+  } };
+});
 vi.mock('../core/process-usage.ts', async importOriginal => {
   const actual = await importOriginal<typeof import('../core/process-usage.ts')>();
   return { ...actual, onUsage: (listener: Parameters<typeof actual.onUsage>[0]) => {
@@ -180,8 +190,8 @@ describe('ProjectContexts', () => {
       expect(release).toHaveBeenCalledWith(run.id);
 
       await contexts.context('a');
-      // bound: negative window. A kill would be delivered at once and the child would exit within milliseconds; 300 ms is far longer.
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Any sweep the rebuild started has removed the record and killed the group by now.
+      await Promise.all(previewSweeps);
       expect(child.exitCode).toBeNull();
       expect(child.signalCode).toBeNull();
       expect(existsSync(join(dir, '5173.pid.json'))).toBe(true);

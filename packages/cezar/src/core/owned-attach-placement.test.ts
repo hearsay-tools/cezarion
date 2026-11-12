@@ -15,7 +15,7 @@ import './every-runner.testkit.ts';
 import { fixture } from '../delegation/service.testkit.ts';
 import { parentFileSnapshotPath, placeWorkerAttachments } from '../delegation/context.ts';
 import { ensureOwnedWorkspace, readOwnedDiff } from '../delegation/workspace.ts';
-import { autosaveCommit } from '../git-worktree.ts';
+import { autosaveCommit } from '../autosave-commit.ts';
 
 // A one-shot hook around `open`: it may change the filesystem just before a matching path is opened,
 // and its returned step receives the opened handle, so a test can land a race or a failing write.

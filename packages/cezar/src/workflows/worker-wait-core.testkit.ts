@@ -31,6 +31,8 @@ import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { MAX_AUTO_CONTINUES, RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
+import type { CiResources } from '../ci-wait/resource-pool.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
@@ -48,6 +50,8 @@ export let store: RunStore;
 export let manager: RunManager;
 export let semaphore: WorkspaceSemaphore;
 export let work: TrackedWork;
+/** The CI resources every manager of this fixture acquires: `useWorkerWaitFixture`'s choice. */
+let ciResources: (workspace: object) => CiResources = acquireInertCiResources;
 const toolGenerations = new Map<string, string>();
 /** Capture the generation passed through the public tool-handler boundary. */
 export function toolGenerationOf(id: string): string {
@@ -102,8 +106,9 @@ export function track() {
  * no turn-end or finalize autosave has a commit to make: each one cost about 20 Git calls behind
  * its process-holder scans, most of a waits cell's cleanup (hearsay-tools/cezarion#1665).
  */
-export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain'; mockNotes?: true; unreadInputGraceMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number } = {}): void {
+export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain'; mockNotes?: true; unreadInputGraceMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; acquireCiResources?: (workspace: object) => CiResources } = {}): void {
   beforeEach(() => {
+    ciResources = options.acquireCiResources ?? acquireInertCiResources;
     // Native mock children belong to this fixture; specialized holder tests supply their own scope.
     if (options.processScope !== false) onTestFinished(scopeFixtureProcesses());
     saved = { ...process.env }; began = performance.now(); checkpoints = []; failureState = undefined; checkpoint('setup');
@@ -119,7 +124,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     work = new TrackedWork(); toolGenerations.clear();
     semaphore = new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 1 } });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, root, { createRunner: fixtureRunners, semaphore, work, ...(options.unreadInputGraceMs === undefined ? {} : { unreadInputGraceMs: options.unreadInputGraceMs }),
+    manager = new RunManager(store, root, { acquireCiResources: ciResources, createRunner: fixtureRunners, semaphore, work, ...(options.unreadInputGraceMs === undefined ? {} : { unreadInputGraceMs: options.unreadInputGraceMs }),
       ...(options.subagentGraceMs === undefined ? { home: testHome(),} : { home: testHome(), subagentGraceMs: options.subagentGraceMs }),
       ...(options.subagentDeadlineMs === undefined ? { home: testHome(),} : { home: testHome(), subagentDeadlineMs: options.subagentDeadlineMs }) }); track();
   });
@@ -288,7 +293,7 @@ export async function restart(fakeClock = false, diskCheckpoint?: readonly unkno
   for (const [path, content] of events ?? []) writeFileSync(path, content);
   store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   if (fakeClock) vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-  manager = new RunManager(store, root, { createRunner: fixtureRunners, home: testHome(), semaphore, work }); track(); checkpoint('restart-recover-start');
+  manager = new RunManager(store, root, { acquireCiResources: ciResources, createRunner: fixtureRunners, home: testHome(), semaphore, work }); track(); checkpoint('restart-recover-start');
   await manager.recover(); checkpoint('restart-recovered');
 }
 
@@ -335,6 +340,6 @@ export function reopenRuntime() {
     if (!(error instanceof RunStoreOpenError)) throw error;
     store = RunStore.unavailable(join(root, '.ai/cezar'), error);
   }
-  manager = new RunManager(store, root, { createRunner: fixtureRunners, home: testHome(), semaphore, work });
+  manager = new RunManager(store, root, { acquireCiResources: ciResources, createRunner: fixtureRunners, home: testHome(), semaphore, work });
   track();
 }

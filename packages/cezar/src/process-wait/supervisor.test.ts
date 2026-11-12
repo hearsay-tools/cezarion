@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { ProcessWaitSupervisor, probeProcessWait, type ProcessWatchRequest } from './supervisor.ts';
 
@@ -19,6 +19,7 @@ const request = (proc: ChildProcess, over: Partial<ProcessWatchRequest> = {}): P
 const alive = (proc: ChildProcess) => proc.exitCode === null && proc.signalCode === null;
 beforeEach(() => { root = realpathSync(mkdtempSync(join(tmpdir(), 'cez-process-wait-'))); });
 afterEach(() => {
+  vi.useRealTimers();
   for (const proc of children.splice(0)) if (alive(proc)) proc.kill('SIGKILL');
   rmSync(root, { recursive: true, force: true });
 });
@@ -59,15 +60,18 @@ describe('ProcessWaitSupervisor', () => {
   });
 
   it('stops polling on abort and never settles', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const proc = child('sleep 30');
     const abort = new AbortController();
     let settled = false;
     void supervisor().watch(request(proc), abort.signal).then(() => { settled = true; });
+    expect(vi.getTimerCount()).toBe(1);
     abort.abort();
+    expect(vi.getTimerCount()).toBe(0);
     proc.kill('SIGKILL');
     await new Promise<void>(resolve => proc.once('exit', () => resolve()));
-    // bound: the poll interval is 20 ms; ten intervals pass with no settlement after the abort.
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Ten poll intervals after the abort, on the fake clock: a poll left armed would see the exit.
+    await vi.advanceTimersByTimeAsync(200);
     expect(settled).toBe(false);
   });
 });

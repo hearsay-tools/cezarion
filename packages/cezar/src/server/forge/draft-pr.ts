@@ -3,7 +3,7 @@ import { productEnv } from '../../core/product-env.ts';
 import { withoutHomeEnv } from '../../core/agent-env.ts';
 import { execFile } from 'node:child_process';
 import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-contract/handoff';
-import { autosaveCommit } from '../../git-worktree.ts';
+import { autosaveCommit } from '../../autosave-commit.ts';
 import type { DraftPrInput, DraftPrOutcome } from './types.ts';
 
 // ---- draft-PR creation (review gate, spec 009) ------------------------------

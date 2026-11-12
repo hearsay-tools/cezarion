@@ -1,30 +1,29 @@
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 
-import { expect, vi } from 'vitest';
+import { expect } from 'vitest';
 
 import type { CiWait, CiWaitResult } from '@open-mercato/cezar-contract';
 import { manager, parent, store, until, toolGenerationOf } from './worker-wait-claude.testkit.ts';
 import { timed, fireCapturedTimer, type TimedWait } from './waits.testkit.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 
 // Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.
-const hoistedResource = vi.hoisted(() => ({ supervisor: {} }));
+const hoistedResource = { supervisor: {} };
 export const externalResource = hoistedResource;
-vi.mock('../ci-wait/resources.ts', async importOriginal => {
-  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
-  return { acquireCiResources: (workspace: object) => {
-    const resources = original.acquireCiResources(workspace);
-    const current = () => 'resolve' in hoistedResource.supervisor
-      ? hoistedResource.supervisor as Pick<typeof resources.supervisor, 'resolve' | 'watch' | 'close'>
-      : resources.supervisor;
-    return { ...resources, supervisor: {
-      resolve: (...args: Parameters<typeof resources.supervisor.resolve>) =>
-        current().resolve(...args),
-      watch: (...args: Parameters<typeof resources.supervisor.watch>) =>
-        current().watch(...args),
-      close: () => current().close(),
-    } };
+/** Pass to `useWorkerWaitFixture`: the real CI resources, with the supervisor a test sets in `externalResource`. */
+export function acquireExternalCiResources(workspace: object) {
+  const resources = acquireCiResources(workspace);
+  const current = () => 'resolve' in hoistedResource.supervisor
+    ? hoistedResource.supervisor as Pick<typeof resources.supervisor, 'resolve' | 'watch' | 'close'>
+    : resources.supervisor;
+  return { ...resources, supervisor: {
+    resolve: (...args: Parameters<typeof resources.supervisor.resolve>) =>
+      current().resolve(...args),
+    watch: (...args: Parameters<typeof resources.supervisor.watch>) =>
+      current().watch(...args),
+    close: () => current().close(),
   } };
-});
+}
 
 export const pr = 'https://github.com/acme/repo/pull/12';
 export const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };

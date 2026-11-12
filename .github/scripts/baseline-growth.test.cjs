@@ -92,11 +92,15 @@ test('invalid JSON fails closed, including new files and an override', (t) => {
   assert.throws(() => checkBaselineGrowth({ cwd: r.cwd, base: r.base, head: r.commit(), allowGrowth: true }));
 });
 
-test('the auto-merge gate calls the same comparison and never accepts a label override', () => {
-  const source = fs.readFileSync(path.join(root, '.ai/skills/auto-merge/check.mjs'), 'utf8');
-  assert.match(source, /import .*checkBaselineGrowth.*baseline-growth\.cjs/);
-  assert.match(source, /checkBaselineGrowth\(\{ base, head \}\)/);
-  assert.doesNotMatch(source, /allowGrowth: true/);
+test('the auto-merge gate refuses baseline growth, with no override', (t) => {
+  const r = repository(t);
+  r.write('deep/space name.baseline.json', '{"max":3}');
+  const head = r.commit();
+  const check = path.join(root, '.ai/skills/auto-merge/check.mjs');
+  const result = spawnSync(process.execPath, [check, '--title', 'fix: raise an allowance', '--base', r.base, '--head', head],
+    { cwd: r.cwd, encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^- ratchet baseline growth: .*deep\/space name\.baseline\.json/m);
 });
 
 test('trusted PR gate uses live labels and head blobs, and refuses changed metadata', async (t) => {

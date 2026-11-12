@@ -19,7 +19,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
-import { fixture, seedWorkerWait } from "./service.testkit.ts";
+import { fixture, seedWorkerWait, workerCleanupInternals } from "./service.testkit.ts";
 import { ensureOwnedWorkspace } from "./workspace.ts";
 import { DelegationService } from './service.ts';
 
@@ -388,21 +388,30 @@ describe('delegation service durable authority', () => {
     } } }]);
 
     const restarted = new DelegationService({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    const cleanups = () => [...workerCleanupInternals(restarted)];
     const detach = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
+    const [armed] = cleanups();
+    expect(armed?.destroyRetryTimers.get('project')?.has(workerId)).toBe(true);
     detach();
-    // bound: negative window. The ticks are 50 ms apart, so 120 ms spans two of them: a retry the detach failed to cancel would have run by now.
-    await new Promise(resolve => setTimeout(resolve, 120));
+    // The detach disarms the retry before its first tick, and leaves no cleanup to arm another.
+    expect(armed?.destroyRetryTimers.size).toBe(0);
+    expect(cleanups()).toEqual([]);
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
     expect(existsSync(workspace.path)).toBe(true);
 
     const stale = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
+    const [staleCleanup] = cleanups();
+    expect(staleCleanup?.destroyRetryTimers.get('project')?.has(workerId)).toBe(true);
     const replacementManager = createFixtureManager(f.store, f.root);
     const replaced = restarted.registerProject({ home: testHome(), id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    // The replacement disarms the replaced registration's retry before its first tick.
+    expect(staleCleanup?.destroyRetryTimers.size).toBe(0);
+    const [replacement] = cleanups();
+    expect(replacement).not.toBe(staleCleanup);
     stale(); // a stale detach must not detach the replacement
-    // bound: negative window, as above. The replaced project's armed timer fires within one 50 ms tick and must find itself replaced; 120 ms spans two ticks.
-    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(cleanups()).toEqual([replacement]);
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
     replaced();
     replacementManager.dispose();

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parityRunners } from '../core/parity-classes.testkit.ts';
 import { GithubCiClient } from '../ci-wait/github.ts';
 import { manager, store, root, restart, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 // Control only the supervisor's probe boundary, retaining abort behavior and real
@@ -33,7 +34,7 @@ export const GROUPS = { fresh: parityRunners('ci-wait-rerun', 'R85'), recovered:
 export function registerGroup(group: keyof typeof GROUPS) {
 const recovered = group === 'recovered';
 describe('hidden CI reruns across native harnesses', {timeout:30_000},()=>{
- useWorkerWaitFixture();
+ useWorkerWaitFixture({ acquireCiResources });
  for(const runner of GROUPS[group]) {
   it(`${runner} R85 ${recovered?'recovered without a session':'fresh'} keeps partial green pending until rerun checks return`,async()=>{
    const state=join(root,'rerun-state');writeFileSync(state,'hidden');

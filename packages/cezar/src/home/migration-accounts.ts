@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { expandTilde } from '../paths.ts';
 import { loadWorkspaceConfigSync } from '../workspace/config.ts';
 import { parseAgentAccountEntries, readAgentAccountSource, type AgentAccount } from '../workspace/agent-accounts.ts';
-import { recordedProcessLive } from '../delegation/process-liveness.ts';
+import { recordedProcessLive } from '../core/process-stat.ts';
 import type { Home } from './home.ts';
 import { replacePrivateTree, insideDirectory, migrationPrivacy } from './migration-files.ts';
 import { HomeStore } from './store.ts';

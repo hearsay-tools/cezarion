@@ -8,6 +8,7 @@ import type { SubagentWaitEntry, TimerWaitEntry, Wait } from '@open-mercato/ceza
 import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionReasonProblem } from '../core/exemption-reason.testkit.ts';
+import { observationClock } from '../core/observation-clock.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity-core.testkit.ts';
 import { reportsNativeSubagents } from './run/subagent-waits.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
@@ -44,6 +45,9 @@ const nudges = (id: string) => store.readEvents(id).filter(event => event.type =
 /** Wakes the waits spent: the count less the no-wait nudges a mock's markerless reply earns. */
 const wakes = (id: string) => (store.getRun(id)?.automaticWakes ?? 0) - nudges(id);
 const wakeInputs = (id: string, waitId: string) => (store.getRun(id)?.agentInputs ?? []).filter(input => input.id === waitId);
+/** The grace a child end arms (`SubagentWaits.armGrace`), on a fake clock the cell moves; the
+ *  mock runner keeps real time. */
+const graceClock = () => observationClock(() => /SubagentWaits\.armGrace/.test(new Error().stack ?? ''));
 
 /** A run parked on the subagent wait; `release()` lets the mock end its children. */
 async function parkedOnSubagents(runner: RunnerId, tokens = '') {
@@ -89,13 +93,15 @@ export function subagentCells(runners: readonly RunnerId[]): void {
           turnId: 'seed', seconds: 600, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString() };
         store.commitWait(id, timer);
         const turns = store.readEvents(id).filter(event => event.type === 'turn.started').length;
+        const grace = graceClock();
         release();
         await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.cancelled);
         expect(settledOf(id, wait.id)).toMatchObject({ result: { reason: 'superseded' } });
         expect(settledOf(id, timer.id)).toMatchObject({ phase: WAIT_PHASE.cancelled });
         await until(() => store.readEvents(id).filter(event => event.type === 'turn.started').length > turns);
-        // bound: the cancelled grace must not fire after the runner's own turn started.
-        await new Promise(resolve => setTimeout(resolve, 600));
+        // The runner's own turn cleared the grace, and past it no wake goes.
+        expect(grace.pending).toBe(0);
+        await grace.advance(200);
         expect(wakeInputs(id, wait.id)).toEqual([]);
         expect(wakes(id)).toBe(0);
       });
@@ -113,10 +119,15 @@ export function subagentCells(runners: readonly RunnerId[]): void {
 
       cell('U35', async () => {
         const { id, wait, release } = await parkedOnSubagents(runner, 'subagent-duplicate');
+        const grace = graceClock();
         release();
+        await until(() => grace.pending > 0);
+        await grace.advance(200);
         await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered && store.getRun(id)?.status === RUN_STATUS.waiting);
-        // bound: a second notification would open a second wake within the grace.
-        await new Promise(resolve => setTimeout(resolve, 600));
+        // The wake turn read the whole stream, the second notification included: it armed no
+        // second grace, and past one no second wake goes.
+        expect(grace.captured).toBe(1);
+        await grace.advance(200);
         const subagentWaits = [...store.getRun(id)?.waits ?? [], ...store.getRun(id)?.lastWaits ?? []].filter(entry => entry.kind === WAIT_KIND.subagent);
         expect(subagentWaits.map(entry => entry.id)).toEqual([wait.id]);
         expect(wakes(id)).toBe(0);

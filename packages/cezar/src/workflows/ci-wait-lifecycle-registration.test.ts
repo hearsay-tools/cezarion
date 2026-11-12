@@ -1,5 +1,5 @@
 // Register the external CI mock before loading RunManager.
-import { pr, identity, externalResource, success, ciWaitOf, lastCiWaitOf, parked, github, register } from './ci-wait-fixture.testkit.ts';
+import { pr, identity, externalResource, success, ciWaitOf, lastCiWaitOf, parked, github, register, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 
 describe('CI wait registration', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
 
   it('rejects registration outside an active run without writing a receipt', async () => {

@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { pollFor, pollJson } from './poll'
+import { waitForSettledSample } from './visual-ready'
 import {
   applyContrastQaVariant,
   contrastQaVariants,
@@ -115,10 +116,14 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('keeps selected and hovered skill descriptions AA-readable with visible keyboard focus', () => {
-    // The grouped table opens no skill by default (hearsay-tools/cezarion#1607), so the URL selects ALPHA.
-    browser.goto(`${baseUrl}${scoped(`/skills?skill=${ALPHA}`)}`)
-    browser.waitForFunction(`document.querySelector('${row(ALPHA)} > span:last-child') !== null`)
+    // Its own session with a hover-capable pointer: the spec's session reports `(hover: none)`,
+    // where the row's `hover:` wash never applies.
+    const browser = AgentBrowser.open(`${sessionId}-hover`, { launchArgs: HOVER_POINTER_ARGS })
     try {
+      browser.setViewport(DESKTOP.width, DESKTOP.height)
+      // The grouped table opens no skill by default (hearsay-tools/cezarion#1607), so the URL selects ALPHA.
+      browser.goto(`${baseUrl}${scoped(`/skills?skill=${ALPHA}`)}`)
+      browser.waitForFunction(`document.querySelector('${row(ALPHA)} > span:last-child') !== null`)
       for (const variant of contrastQaVariants) {
         applyContrastQaVariant(browser, variant)
         const selectedSelector = `${row(ALPHA)} > span:last-child`
@@ -127,9 +132,16 @@ describe('settings → skills against the live dry-run server', () => {
 
         // Scroll BETA into view: at 360×640 the row can start under the mobile tab bar.
         browser.evaluate(`document.querySelector(${JSON.stringify(row(BETA))}).scrollIntoView({ block: 'center' })`)
-        browser.hover(row(BETA))
         const hoveredSelector = `${row(BETA)} > span:last-child`
-        const hovered = browser.evaluate(contrastSampleExpression(hoveredSelector)) as ContrastSample
+        browser.moveTo(0, 0)
+        // Held, so a hover wash left by the previous pointer position has cleared before it is the baseline.
+        const rest = waitForSettledSample<ContrastSample>(browser, contrastSampleExpression(hoveredSelector))
+        browser.hover(row(BETA))
+        // The row's hover wash is the state under test: wait until it replaced the rest surface.
+        const hovered = browser.waitForValue<ContrastSample>(
+          contrastSampleExpression(hoveredSelector),
+          (sample) => sample.background !== rest.background,
+        )
         expect(hovered.ratio, `${variant.id} hover: ${hovered.foreground} on ${hovered.background}`).toBeGreaterThanOrEqual(4.5)
 
         focusWithKeyboard(browser, row(ALPHA))
@@ -152,7 +164,7 @@ describe('settings → skills against the live dry-run server', () => {
         browser.screenshot(`${artifactsDir}/issue-165-skills-${variant.id}.png`, { viewport: true })
       }
     } finally {
-      restoreContrastQaDefaults(browser)
+      browser.close()
     }
   })
 

@@ -125,9 +125,8 @@ function declaredDelivery(backend: RunnerId, it: typeof registerTest = registerT
           await waitFor(() => !!input(store, runId, id)?.deliveredAt);
           expect(firstAfter(store, runId, 'turn-end', start)).toBeUndefined();
         } else {
-          // A boundary wire refuses busy input: nothing reaches it until the answer ends.
-          // bound: observe the real runner's busy answer boundary while CEZ_MOCK_STEER_MS holds content for 1,500 ms; a boundary wire must not deliver input.
-          await new Promise(resolve => setTimeout(resolve, 300));
+          // A boundary wire refuses busy input: `send` offered it to the session, which refused it.
+          // The order check after the release proves nothing reached the wire before the answer ended.
           expect(input(store, runId, id)?.deliveredAt).toBeUndefined();
         }
         expect(checkpoints(store, runId, askSeq)).toEqual([]);
@@ -152,16 +151,19 @@ function pendingQuestion(backend: RunnerId, it: typeof registerTest = registerTe
     await withAnsweredWorker(backend, {}, async answerFixture => {
       const { runId, askSeq, send } = answerFixture;
       let { store, manager } = answerFixture;
-      const quiet = () => new Promise(resolve => setTimeout(resolve, 300)); // bound: proves a held message stays undelivered
+      // Messages held behind a native question, each with the question it waits behind.
+      const heldBehindNative: { id: string; seq: number }[] = [];
       // hearsay-tools/cezarion#1235 phase 3a (§ Messages beside a pending question): a native
       // question takes nothing but its answer, so the message waits for the answer's turn end; a
       // cezar_ask question takes it beside the card. Either way it is never the answer.
       const question = (seq: number) => store.getRun(runId)?.waits?.find(wait => wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open && wait.askSeq === seq);
       const expectBesideOrHeld = async (id: string, seq: number) => {
         if (question(seq)?.via === WAIT_VIA['native-ask']) {
-          await quiet();
+          // `send` offered it to the run, which held it; the order check at the end proves it
+          // reached the wire only after the question's answer.
           expect(input(store, runId, id)?.deliveredAt).toBeUndefined();
           expect(question(seq)).toBeDefined();
+          heldBehindNative.push({ id, seq });
         } else {
           await waitFor(() => !!input(store, runId, id)?.deliveredAt);
           // The beside turn ends and parks for a question again.
@@ -189,7 +191,8 @@ function pendingQuestion(backend: RunnerId, it: typeof registerTest = registerTe
       const start = lastSeq(store, runId);
       const answer = `Vitest ${promptFor(backend, held.scenario)}`;
       expect(pending.routedMessageId).toBeDefined();
-      await send(answer, pending.routedMessageId);
+      // Each question's answer, by the question's seq.
+      const answers = new Map([[answered, await send(answer, pending.routedMessageId)]]);
       await waitFor(() => firstAfter(store, runId, 'ask.requested', start) !== undefined);
       const newer = firstAfter(store, runId, 'ask.requested', start)!;
       await waitFor(() => store.getRun(runId)?.status === RUN_STATUS.waiting);
@@ -203,12 +206,17 @@ function pendingQuestion(backend: RunnerId, it: typeof registerTest = registerTe
       const routedTo = () => store.readEvents(runId).find(event => event.type === 'worker-question-routed' && event.askSeq === newer);
       await waitFor(() => routedTo() !== undefined);
       const routed = routedTo()!;
-      await send('Vitest', String(routed.messageId));
+      answers.set(newer, await send('Vitest', String(routed.messageId)));
       await waitFor(() => [early, later].every(id => !!input(store, runId, id)?.deliveredAt));
       expect(projectionSeq(store, runId, later, 'delivered')).toBeGreaterThan(newer);
       expect(checkpoints(store, runId, answered)).toHaveLength(1);
       await waitFor(() => checkpoints(store, runId, newer).length === 1);
       expect(checkpoints(store, runId, newer)[0]).toMatchObject({ source: 'parent' });
+      // A native question takes nothing but its answer: a held message reaches the wire only after
+      // that answer did.
+      for (const { id, seq } of heldBehindNative) {
+        expect(projectionSeq(store, runId, id, 'delivered')).toBeGreaterThan(projectionSeq(store, runId, answers.get(seq)!, 'delivered')!);
+      }
       await waitFor(() => store.getRun(runId)?.status === RUN_STATUS.waiting);
     });
   }, 60_000);

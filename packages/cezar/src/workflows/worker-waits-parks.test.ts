@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { observationClock } from '../core/observation-clock.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { IDLE_TIMEOUT_MS } from './run.ts';
@@ -19,7 +20,7 @@ import { productName } from '../home/display.ts';
  * next resolution reopens it; a restart re-arms deadlines and re-observes outcomes.
  */
 describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
 
   const parkedOn = (runId: string, waitId: string) =>

@@ -95,9 +95,10 @@ describe.skipIf(process.platform === 'win32')('mock OpenCode server outlives no 
     // bound: the prompt is already accepted, so only the turn's start remains.
     await vi.waitFor(() => expect(existsSync(join(cwd, 'watchdog.pid'))).toBe(true), { timeout: 10_000, interval: 20 });
     process.kill(mock, 'SIGTERM');
-    // A SIGTERM handler that exited would end the mock at once; this one is a no-op.
-    // bound: proves an absence, so it needs real time; 300 ms is far above a signal's delivery.
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // The mode's handler publishes a receipt and returns; a handler that exits, or the default
+    // action, ends the mock without one.
+    // bound: the signal is already sent, so only its delivery remains.
+    await vi.waitFor(() => expect(existsSync(join(cwd, 'sigterm-ignored.pid'))).toBe(true), { timeout: 10_000, interval: 20 });
     expect(alive(mock)).toBe(true);
     await killParent(parent);
     // bound: the acceptance criterion of #1449; the mode's own 12 s timer is longer.

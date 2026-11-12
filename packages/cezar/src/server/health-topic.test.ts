@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { createApp, type ServerDeps } from './server.ts';
+import { createApp, WorkspaceEventBus, type ServerDeps } from './server.ts';
 import type { SocketHub, TopicPublisher } from './ws.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.ts';
@@ -85,7 +85,7 @@ describe('health topic + cache (live-server path)', () => {
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ defaultRunner: runner }));
   };
 
-  const build = () => {
+  const build = (over: Partial<ServerDeps> = {}) => {
     const { hub, topics, families } = stubHub();
     const deps: ServerDeps = { home: testHome(),
       repoRoot,
@@ -94,6 +94,7 @@ describe('health topic + cache (live-server path)', () => {
       version: '0.0.0-test',
       socketHub: hub,
       squawkPort: () => 4321,
+      ...over,
     };
     return { app: createApp(deps), topics, families };
   };
@@ -158,9 +159,23 @@ describe('health topic + cache (live-server path)', () => {
 
   it('pre-warms the cache at boot so the first GET is already warm', async () => {
     setRunner('claude');
-    const { app } = build();
+    const workspaceEvents = new WorkspaceEventBus();
+    // No request is made before this lands, so only the boot pre-warm can compute it. The
+    // snapshot carrying the backend checks is the last refresh the boot schedules.
+    // bound: TEST_BUDGET_MS on the case is the hang guard.
+    const warmed = new Promise<void>((resolve) => {
+      const off = workspaceEvents.on((event, data) => {
+        if (event !== 'health' || (data as { checks: unknown[] }).checks.length === 0) return;
+        off();
+        resolve();
+      });
+    });
+    const { app } = build({ workspaceEvents });
     currentApp = app;
-    await settle();
+    await warmed;
+
+    setRunner('codex');
+    // The frozen clock keeps the boot snapshot inside the TTL, so the first GET serves it.
     expect(await runner()).toBe('claude');
   }, TEST_BUDGET_MS);
 

@@ -4,7 +4,10 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fsp from 'node:fs/promises';
+// A spreadable copy, so the refusal test can watch the resolver's filesystem calls.
+vi.mock('node:fs/promises', async (importOriginal) => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
 import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
 import { artifactListSchema, artifactMetadataResponseSchema, fileLinkResultSchema, filePreviewDataSchema } from '@open-mercato/cezar-contract/artifacts';
@@ -26,7 +29,7 @@ describe('task file links', () => {
     writeFileSync(join(working, 'ADR space.md'), '# working copy');
     writeFileSync(join(root, 'ADR space.md'), '# project copy');
   });
-  afterEach(() => { store.flush(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { vi.restoreAllMocks(); store.flush(); rmSync(root, { recursive: true, force: true }); });
   const get = (suffix: string, alias = '') => apiRequest(createApp({ home: testHome(), repoRoot: root, store, manager: {} as RunManager, version: 'test' }), `/api/v1${alias}/runs/${runId}${suffix}`);
   const link = (path: string, alias = '') => get(`/file-link?path=${encodeURIComponent(path)}`, alias);
 
@@ -57,11 +60,22 @@ describe('task file links', () => {
     expect(await (await link('alias/config')).json()).toMatchObject({ type: 'unavailable' });
   });
   it('refuses network file authorities and malformed paths without fetching them', async () => {
-    for (const path of ['file://server/share/a.md', 'file:///tmp/%zz', 'javascript:bad', 'bad\0path']) {
+    const touched = (['lstat', 'realpath', 'open', 'opendir'] as const).map((name) => vi.spyOn(fsp, name));
+    const refused = async (path: string) => {
       const response = await link(path);
-      expect([200, 400]).toContain(response.status);
-      if (response.status === 200) expect(await response.json()).toMatchObject({ type: 'unavailable' });
-    }
+      return { status: response.status, body: await response.json() };
+    };
+    // Windows maps a host authority to a UNC path; POSIX refuses the URL itself.
+    const networkReason = process.platform === 'win32' ? 'Network file paths are not supported.' : 'Invalid local file URL or encoding.';
+    expect(await refused('file://server/share/a.md')).toEqual({ status: 200,
+      body: { type: 'unavailable', path: 'file://server/share/a.md', reason: networkReason } });
+    expect(await refused('file:///tmp/%zz')).toEqual({ status: 200,
+      body: { type: 'unavailable', path: 'file:///tmp/%zz', reason: 'Invalid local file URL or encoding.' } });
+    expect(await refused('javascript:bad')).toEqual({ status: 200,
+      body: { type: 'unavailable', path: 'javascript:bad', reason: 'Not a local file path.' } });
+    expect(await refused('bad\0path')).toEqual({ status: 400, body: { error: 'path: Path contains NUL' } });
+    // Neither the requested path nor the published snapshots were read.
+    for (const spy of touched) expect(spy).not.toHaveBeenCalled();
   });
   it('does not serve active content as raw bytes', async () => {
     writeFileSync(join(working, 'bad.svg'), '<svg><script>alert(1)</script></svg>');

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.js';
 import { RunManager } from './run.js';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import type { WorkflowDef } from './types.js';
 import { createRunner } from '../core/runner-factory.ts';
 
@@ -28,7 +29,7 @@ describe('Pi provider failure survives teardown (#73)', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_PI_BIN', new URL('../core/__fixtures__/pi/stub-sigterm.mjs', import.meta.url).pathname);
     store = RunStore.open(join(root, '.ai/cezar'));
-    manager = new RunManager(store, root, { createRunner, home: testHome() });
+    manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
   });
   afterEach(() => {
     manager.dispose();

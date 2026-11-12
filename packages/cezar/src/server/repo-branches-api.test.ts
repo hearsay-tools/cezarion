@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoBranchesResponse, RepoResponse } from '@open-mercato/cezar-contract';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import type { BranchForge } from './repo-branches.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -66,7 +67,7 @@ describe('the repo branches API', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     forgeCalls = 0;
     // A real manager: a delete claims the owning runs through it, the claim Continue is refused by.
-    manager = new RunManager(store, repoRoot, { createRunner, home: testHome() });
+    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome() });
     app = createApp({ home: testHome(),
       repoRoot,
       store,

@@ -9,6 +9,7 @@ import { workspaceQueryKeys } from '@/api/queries'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { resetToasts } from '@/components/ui/toaster'
 import { resetDraft, writeDraft } from './new-task-draft'
+import { cssRules, paintsBefore, targets } from '@/test/css-rules'
 
 beforeAll(() => {
   // cmdk scrolls the selected item into view; jsdom has no scrollIntoView.
@@ -1177,23 +1178,32 @@ describe('the composer runner pill carries the account', () => {
 
 describe('field chrome (#267)', () => {
   const routeDir = path.dirname(fileURLToPath(import.meta.url))
-  const indexCss = readFileSync(path.resolve(routeDir, '../styles/index.css'), 'utf8')
-  const newTaskCss = readFileSync(path.resolve(routeDir, 'new-task.css'), 'utf8')
+  const rules = [
+    ...cssRules(readFileSync(path.resolve(routeDir, '../styles/index.css'), 'utf8')),
+    ...cssRules(readFileSync(path.resolve(routeDir, 'new-task.css'), 'utf8')),
+  ]
+  const declared = (subject: string, props: readonly string[]) =>
+    rules.filter((rule) => targets(rule.selector, subject)).flatMap((rule) =>
+      props.flatMap((prop) => (prop in rule.declarations ? [`${rule.selector} { ${prop}: ${rule.declarations[prop]} }`] : [])))
+  const borderless = /^(?:0(?:px)?|none|transparent)(?: |$)/
 
   it('keeps the prompt editor a bordered card, not a full-bleed strip, on mobile', () => {
-    expect(indexCss).not.toContain('border: 0; border-radius: 0; background: transparent')
-    expect(newTaskCss).toMatch(/\.new-task-editor \{[^}]*padding: 12px/)
+    expect(declared('.new-task-editor', ['border', 'border-width', 'border-style', 'border-color', 'border-radius', 'background', 'background-color'])
+      .filter((rule) => borderless.test(rule.slice(rule.indexOf(': ') + 2)))).toEqual([])
+    const mobile = rules.find((rule) => rule.selector === '.new-task-editor' && rule.at.includes('@media (max-width: 767px)'))
+    expect(mobile?.declarations.padding).toBe('12px')
   })
 
-  it('keeps the model pill bordered and its Model label visible on mobile', () => {
-    expect(newTaskCss).not.toContain('border-color: transparent')
-    expect(newTaskCss).not.toContain('.new-task-model-label > span > span:first-child')
+  it('keeps the model pill bordered and its field label visible on mobile', () => {
+    expect([...declared("[data-slot='model-pill']", ['border', 'border-width', 'border-style', 'border-color']), ...declared("[data-slot$='pill']", ['border', 'border-width', 'border-style', 'border-color'])]
+      .filter((rule) => borderless.test(rule.slice(rule.indexOf(': ') + 2)))).toEqual([])
+    expect(declared("[data-slot='picker-label']", ['display', 'visibility'])).toEqual([])
     // the all-breakpoint pill geometry the mobile rules must not override away
-    expect(newTaskCss).toContain('border-color: var(--border); border-radius: 9px; min-height: 44px')
+    const pill = rules.find((rule) => rule.selector === "[data-route='new'] .new-task-agent-options [data-slot$='pill']" && rule.at.length === 0)
+    expect(pill?.declarations).toMatchObject({ 'border-color': 'var(--border)', 'border-radius': '9px', 'min-height': '44px' })
   })
 
   it('does not paint a Runner ::before on agent-option pills (#272)', () => {
-    expect(indexCss).not.toMatch(/\[data-slot='runner-pill'\]::before/)
-    expect(newTaskCss).not.toMatch(/\[data-slot='runner-pill'\]::before/)
+    expect(rules.filter((rule) => paintsBefore(rule.selector, "pill']")).map((rule) => rule.selector)).toEqual([])
   })
 })

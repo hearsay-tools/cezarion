@@ -40,9 +40,9 @@ export const OWNED_INPUT_GROUPS = {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
             const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
+            const session = [...fixtureWork(manager).liveSessions].find(live => live.open)!;
+            const offered = vi.spyOn(session, 'sendAgentMessage');
             expect(manager.steerWorker(runId, second)).toBe('queued');
-            // bound: observe the real runner's native ask boundary for 150 ms; refused steering must not start a turn or answer the ask.
-            await new Promise(resolve => setTimeout(resolve, 150));
             expect(store.getRun(runId)?.status).toBe('waiting');
             // #505: input queued before the session opened steers into the opening turn on a
             // `steer` runner. A native ask holds a `boundary` runner's turn open, so nothing reaches
@@ -58,10 +58,18 @@ export const OWNED_INPUT_GROUPS = {
               const beside = store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('parent steering')).map(e => String(e.text)).join('\n');
               expect(beside).toContain('Still open:');
               expect(store.transcriptFacts(runId).pendingAsk?.seq).toBe(askSeq);
+            } else if (steer) {
+              // The opening turn's acknowledgement records the delivery.
+              await waitFor(() => delivered(first.id));
             } else {
-              expect(delivered(first.id)).toBe(steer);
+              expect(delivered(first.id)).toBe(false);
             }
             // Input accepted while the question is pending never reaches the session before the answer.
+            // Each flush offers input synchronously: in steerWorker, or in the handler that recorded
+            // the first input's delivery. Neither offered the second input to the session at the ask.
+            const offers = offered.mock.calls.filter(call => JSON.stringify(call[0]).includes('second steering'));
+            offered.mockRestore();
+            expect(offers).toEqual([]);
             expect(delivered(second.id)).toBe(false);
             expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
             expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([]);

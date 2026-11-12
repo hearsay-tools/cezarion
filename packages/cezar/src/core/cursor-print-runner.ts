@@ -179,10 +179,10 @@ class CursorPrintSession implements AgentSession {
   private prepareSquawkPlugin(): void {
     const tools = this.spec.squawkTools;
     if (!tools) return;
-    const dir = join(this.ensureScratch(), 'cezar-tools');
+    const dir = join(this.ensureScratch(), 'squawk-tools');
     mkdirSync(dir, { mode: 0o700 });
     writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
-      name: 'cezar-tools', version: '0.0.1', description: 'Cezar task tools',
+      name: 'squawk-tools', version: '0.0.1', description: 'Cezar task tools',
     }), { mode: 0o600 });
     const env = Object.fromEntries(squawkToolEnvNames(this.spec.env ?? {}).filter(name => this.spec.env?.[name] !== undefined)
       .map(name => [name, '${' + name + '}']));

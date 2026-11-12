@@ -216,11 +216,14 @@ describe('ProjectContexts.warmAll', () => {
     // has to notice it went stale before it opens the store and recovers.
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
+    let waiting!: () => void;
+    const atLock = new Promise<void>((resolve) => { waiting = resolve; });
+    const ownership = { acquire: () => { waiting(); return gate; } } as unknown as CockpitOwnership;
     const recover = vi.spyOn(RunManager.prototype, 'recover');
     const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: async () => [{ id: 'early', root: root(), status: 'not-git' }], ownership });
     const building = contexts.context('early');
-    await Promise.resolve();
+    // Shut down only once the build is waiting for the lock, past every earlier stale check.
+    await atLock;
     contexts.disposeAll();
     release();
     await expect(building).rejects.toBeInstanceOf(ProjectContextsClosedError);

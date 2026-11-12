@@ -13,6 +13,8 @@ import type { HarnessParityPart } from './harness-parity-parts.testkit.ts';
 import { describeHarnessPart, probeEnv, readRecording, type Cells, type HarnessGroup, type HarnessRegistrar, type HarnessRegistration, type SeamCriterion } from './harness-parity-registrar.testkit.ts';
 import { FOLLOW_ON_ROWS, INPUT_ROWS } from './harness-parity-rows.testkit.ts';
 import { SEAM_CRITERIA, seamRows } from './harness-parity-seam-tier.testkit.ts';
+import { autoEndObservationClock } from './observation-clock.testkit.ts';
+import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 import { runnersUnderTest } from './runners-under-test.testkit.ts';
 import { shellQuote } from './shell-env.ts';
 import { explicitToolGrant } from './tool-grant.testkit.ts';
@@ -242,22 +244,27 @@ export const SESSION_GROUPS = {
 
         it(`${backend} S13 auto-end checks a late hold at execution and resumes after the next admitted turn`, async () => {
           let hold = false; let checks = 0;
-          await driveSeam(backend, 'hold', {
-            sessionOptions: { autoEndAfterFirstTurn: true, shouldAutoEnd: () => { checks++; return !hold; } },
-            whileOpen: async (session, { v1 }) => {
-              await waitFor(() => v1.some(e => e.type === 'turn-end'));
-              // The runner has already armed its timer. The new wait must still veto it.
-              hold = true;
-              // bound: observe past the real runner's 250 ms auto-end timer, which must recheck the newly held wait.
-              await new Promise(resolve => setTimeout(resolve, 400));
-              expect(checks).toBeGreaterThan(0); expect(session.open).toBe(true);
-              hold = false;
-              await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo admitted wake' }])).resolves.toBeUndefined();
-              await waitFor(() => v1.filter(e => e.type === 'turn-end').length >= 2);
-              await session.result;
-              expect(session.open).toBe(false); expect(checks).toBeGreaterThan(1);
-            },
-          });
+          const autoEnd = autoEndObservationClock();
+          try {
+            await driveSeam(backend, 'hold', {
+              sessionOptions: { autoEndAfterFirstTurn: true, shouldAutoEnd: () => { checks++; return !hold; } },
+              whileOpen: async (session, { v1 }) => {
+                await waitFor(() => v1.some(e => e.type === 'turn-end'));
+                await waitFor(() => autoEnd.pending === 1);
+                // The runner has already armed its timer. The new wait must still veto it.
+                hold = true;
+                await autoEnd.advance(AUTO_END_DELAY_MS);
+                expect(checks).toBeGreaterThan(0); expect(session.open).toBe(true);
+                hold = false;
+                await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo admitted wake' }])).resolves.toBeUndefined();
+                await waitFor(() => v1.filter(e => e.type === 'turn-end').length >= 2);
+                await waitFor(() => autoEnd.pending === 1);
+                await autoEnd.advance(AUTO_END_DELAY_MS);
+                await session.result;
+                expect(session.open).toBe(false); expect(checks).toBeGreaterThan(1);
+              },
+            });
+          } finally { autoEnd.restore(); }
         }, 45_000);
 
         // A native ask is the runner's own: it refuses non-human input until a human answers. A
@@ -265,7 +272,7 @@ export const SESSION_GROUPS = {
         // that input instead (R6); the exemption pins that the seam does not.
         const s11 = exemptionFor('S11', backend);
         it(s11 ? `${backend} is exempt from S11 — ${s11.reason}` : `${backend} S11 non-human input cannot answer a native ask`, async () => {
-          await driveSeam(backend, 'ask', {
+          const obs = await driveSeam(backend, 'ask', {
             whileOpen: async (session, { v1, v2 }) => {
               await waitFor(() => v2.some(e => e.type === 'ask.requested') || v1.some(e => e.type === 'turn-end'));
               const ends = v1.filter(e => e.type === 'turn-end').length;
@@ -276,17 +283,17 @@ export const SESSION_GROUPS = {
                 await waitFor(() => textEvents(v1).some(text => text.includes('agent steering')));
                 return;
               }
-              expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).toBe(false);
-              // bound: observe the real runner's native ask boundary for 150 ms; refused steering must not start a turn or answer the ask.
-              await new Promise(resolve => setTimeout(resolve, 150));
-              expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(ends);
-              expect(textEvents(v1).join('\n')).not.toContain('agent steering');
+              expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo refused steering' }])).toBe(false);
               expect(session.sendMessage([{ type: 'text', text: 'Vitest' }])).toBe(true);
               await waitFor(() => v1.filter(e => e.type === 'turn-end').length > ends);
+              // The human answer, not the refused steering, ended the asking turn.
+              expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(ends + 1);
               await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).resolves.toBeUndefined();
               await waitFor(() => textEvents(v1).some(text => text.includes('agent steering')));
             },
           });
+          // driveSeam returns after the session result, so the wire has drained: refused steering never reached it.
+          if (!s11) expect(textEvents(obs.v1).join('\n')).not.toContain('refused steering');
         }, 45_000);
 
         // #505: a `steer` runner admits non-human input mid-turn; a `boundary` runner refuses

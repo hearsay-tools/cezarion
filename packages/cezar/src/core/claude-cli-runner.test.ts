@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt } from './agent-runner.ts';
 import { buildClaudeArgs, ClaudeCliRunner, claudeHelpFeatures } from './claude-cli-runner.ts';
-import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
+import { AUTO_END_DELAY_MS, EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
+import { autoEndObservationClock } from './observation-clock.testkit.ts';
 import type { UiEvent } from './ui-events.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 import { TOOL_GRANT_CASES } from './tool-grant-parity-cells.testkit.ts';
@@ -573,8 +574,6 @@ describe('Claude non-human stdin acknowledgement boundary', () => {
  * the bundled mock still runs its own clock in a real child process.
  */
 describe('Claude auto-end with a prompt turn still pending (#146)', () => {
-  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
   /** A controlled child over real pipes: the test decides exactly when each
    *  `result` frame lands, and records the moment the runner closes stdin. */
   function pipeFixture() {
@@ -695,6 +694,7 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     const runner = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 60_000 });
     const events: AgentEvent[] = [];
     const cwd = mkdtempSync(join(tmpdir(), 'cez-claude-queued-turn-'));
+    const autoEnd = autoEndObservationClock();
     const turnEnds = () => events.filter(event => event.type === 'turn-end').length;
     let openAtSecondTurnEnd: boolean | undefined;
     const session = runner.startSession(
@@ -716,18 +716,23 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
       expect(session.sendMessage([{ type: 'text', text: 'mock:hold follow-up' }])).toBe(true);
       // bound: wait for this native turn-end before sending the next input.
       await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 10_000 });
-      // bound: observe past Claude's 250 ms auto-end timer while the real mock holds its follow-up turn for 750 ms.
-      await sleep(400);
+      // The opening result arms no close window while the follow-up turn is still running.
+      expect(autoEnd.captured).toBe(0);
+      await autoEnd.advance(AUTO_END_DELAY_MS);
       expect(session.open).toBe(true);
       // bound: wait for this native turn-end before sending the next input.
       await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 10_000 });
       expect(openAtSecondTurnEnd).toBe(true);
+      // The final result arms the one close window.
+      expect(autoEnd.pending).toBe(1);
+      await autoEnd.advance(AUTO_END_DELAY_MS);
       const result = await session.result;
       expect(session.open).toBe(false);
       expect(result.text).toContain('parity hold');
     } finally {
       session.interrupt();
       await session.result.catch(() => undefined);
+      autoEnd.restore();
       rmSync(cwd, { force: true, recursive: true });
     }
   });
@@ -950,10 +955,9 @@ describe('Claude failed result (#505 review)', () => {
     while (!events.some(e => e.type === 'turn-end')) { if (Date.now() - start > 10_000) throw new Error('no turn-end'); await new Promise(r => setTimeout(r, 10)); }
     await session.sendAgentMessage([{ type: 'text', text: 'mock:auth-error guidance' }], ['in-failed']);
     while (!events.some(e => e.type === 'error') && events.filter(e => e.type === 'turn-end').length < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn'); await new Promise(r => setTimeout(r, 10)); }
-    // bound: observe the real mock-claude result boundary for late replay acknowledgements or duplicate turn announcements (200 ms).
-    await new Promise(r => setTimeout(r, 200));
+    // The session's result settles only after the mock's stdout drained: no late frame remains.
+    session.end(); await session.result.catch(() => undefined);
     expect(consumed).toEqual([]);
-    session.interrupt(); await session.result.catch(() => undefined);
   });
 });
 
@@ -1007,10 +1011,9 @@ describe('Claude queued-turn announcement with a synchronous follow-up (#505 loc
       { onUiEvent: event => ui.push(event) });
     const start = Date.now();
     while (ends < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn-end'); await new Promise(r => setTimeout(r, 10)); }
-    // bound: observe the real mock-claude result boundary for late replay acknowledgements or duplicate turn announcements (200 ms).
-    await new Promise(r => setTimeout(r, 200));
-    expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(ui.filter(e => e.type === 'turn.completed').length);
+    // The session's result settles only after the mock's stdout drained: no late frame remains.
     session.end(); await session.result;
+    expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(ui.filter(e => e.type === 'turn.completed').length);
   });
 });
 

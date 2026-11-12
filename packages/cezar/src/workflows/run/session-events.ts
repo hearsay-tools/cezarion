@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { AgentTempDirError } from '../../runs/agent-tmpdir.ts';
-import { ToolsUnavailableError } from '../../ci-wait/controller.ts';
+import { ToolsUnavailableError } from '../../ci-wait/errors.ts';
 import { AgentAccountUnavailableError } from '../../workspace/agent-profiles.ts';
 import { artifactInstructions } from '../../artifacts/lifecycle.ts';
 import { jobInstructions } from '../../jobs/command.ts';

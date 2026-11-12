@@ -184,32 +184,11 @@ describe('ProjectRail pills', () => {
     expect(segments('toolkit-dev', 'bottom')).toEqual([{ tone: 'violet', text: '9', width: '18px' }])
   })
 
-  it('places the pills on the mark corners and keeps them off the click target', () => {
+  it('keeps the corner pills off the click target and out of the accessibility tree', () => {
+    // Their corner geometry and per-theme inks resolve in project-rail.e2e.ts.
     renderRail({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, inMotion: 1 })]]) })
-    const top = pill('toolkit-dev', 'top') as HTMLElement
-    const bottom = pill('toolkit-dev', 'bottom') as HTMLElement
-    for (const el of [top, bottom]) {
-      expect(el.className).toContain('h-[17px]')
-      expect(el.className).toContain('rounded-[9px]')
-      expect(el.className).toContain('border-2')
-      expect(el.className).toContain('border-background')
-      expect(el.className).toContain('-right-[4px]')
-      expect(el.className).toContain('pointer-events-none')
-      expect(el.getAttribute('aria-hidden')).toBe('true')
-    }
-    expect(top.className).toContain('-top-[6px]')
-    expect(bottom.className).toContain('top-[25px]')
-  })
-
-  it('fills each segment from its own token, and inks amber apart from the rest', () => {
-    renderRail({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, failedUnread: 1, inMotion: 1, finishedUnread: 1 })]]) })
-    const cls = (tone: string) => (mark('toolkit-dev').querySelector(`[data-segment="${tone}"]`) as HTMLElement).className
-    expect(cls('amber')).toContain('bg-pending')
-    expect(cls('amber')).toContain('text-signal-ink-amber')
-    expect(cls('red')).toContain('bg-danger')
-    expect(cls('violet')).toContain('bg-status-running')
-    expect(cls('green')).toContain('bg-success')
-    for (const tone of ['red', 'violet', 'green']) expect(cls(tone)).toContain('text-signal-ink')
+    const pills = [pill('toolkit-dev', 'top'), pill('toolkit-dev', 'bottom')] as HTMLElement[]
+    expect(pills.map((el) => [el.className.includes('pointer-events-none'), el.getAttribute('aria-hidden')])).toEqual([[true, 'true'], [true, 'true']])
   })
 })
 
@@ -239,7 +218,7 @@ describe('ProjectRail expand toggle (#711)', () => {
   const toggle = () => document.querySelector('[data-slot="rail-expand-toggle"]') as HTMLButtonElement | null
   const nav = () => screen.getByRole('navigation', { name: 'Projects' })
 
-  it('defaults to collapsed, with a borderless icon toggle first in the bottom group', () => {
+  it('defaults to collapsed, with the icon toggle first in the bottom group', () => {
     setViewport(1440)
     renderRail()
     expect(nav().style.width).toBe('60px')
@@ -248,9 +227,6 @@ describe('ProjectRail expand toggle (#711)', () => {
     expect(button.getAttribute('aria-label')).toBe('Expand projects')
     expect(button.getAttribute('title')).toBe('Expand projects')
     expect(button.getAttribute('aria-controls')).toBe(nav().id)
-    expect(button.className).not.toMatch(/\bborder\b/)
-    expect(button.className).toContain('rounded-[8px]')
-    expect(button.className).toContain('hover:bg-sidebar-row-hover')
     const bottom = document.querySelector('[data-slot="rail-bottom"]')!
     expect(bottom.firstElementChild).toBe(button)
   })
@@ -298,7 +274,6 @@ describe('ProjectRail expand toggle (#711)', () => {
     setViewport(1440)
     renderRail()
     expect(nav().className).toContain('transition-[width]')
-    expect(nav().className).toContain('duration-[160ms]')
     expect(nav().className).toContain('motion-reduce:transition-none')
   })
 })
@@ -353,28 +328,18 @@ describe('ProjectRail expanded rows (#711)', () => {
     expect(link.getAttribute('title')).toBeNull()
   })
 
-  it('paints the words with the shared text inks, never the pill fills', () => {
-    renderExpanded({ signals: new Map([['toolkit-dev', signal({ needsYou: 1, failedUnread: 1 })], ['open_mercato', signal({ inMotion: 1, finishedUnread: 1 })]]) })
-    const cls = (id: string, tone: string) => (row(id).querySelector(`[data-tone="${tone}"]`) as HTMLElement).className
-    expect(cls('toolkit-dev', 'amber')).toContain('text-signal-word-amber')
-    expect(cls('toolkit-dev', 'red')).toContain('text-signal-word-red')
-    expect(cls('open_mercato', 'violet')).toContain('text-status-running')
-    expect(cls('open_mercato', 'green')).toContain('text-success')
-  })
-
-  it('fills the current row, borders its mark on --sidebar, and drops the left bar', () => {
+  it('fills the current row apart from the others and drops the left bar', () => {
+    // Name and state-word contrast on default, hovered and selected rows: project-rail.e2e.ts.
     renderExpanded()
     const current = row('toolkit-dev')
-    expect(current.getAttribute('aria-current')).toBe('page')
-    expect(current.className).toContain('bg-sidebar-row-selected')
-    const markEl = current.querySelector('[data-slot="rail-mark"]') as HTMLElement
-    expect(markEl.className).toContain('border-soft-foreground')
-    expect(markEl.className).toContain('bg-sidebar')
-    expect(document.querySelector('[data-slot="rail-current-bar"]')).toBeNull()
-    expect(current.querySelector('[data-slot="rail-project-name"]')?.className).toContain('text-foreground')
     const other = row('open_mercato')
-    expect(other.className).toContain('hover:bg-sidebar-row-hover')
-    expect(other.querySelector('[data-slot="rail-project-name"]')?.className).toContain('text-muted-foreground')
+    expect(current.getAttribute('aria-current')).toBe('page')
+    expect(other.getAttribute('aria-current')).toBeNull()
+    // The resting fill (not a hover variant) is what shows which project is open.
+    const restFill = (el: Element) => el.className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
+    expect(restFill(current)).not.toEqual([])
+    expect(restFill(current)).not.toEqual(restFill(other))
+    expect(document.querySelector('[data-slot="rail-current-bar"]')).toBeNull()
     expect(other.querySelector('[data-slot="rail-project-state"]')?.textContent).toBe('idle')
   })
 
