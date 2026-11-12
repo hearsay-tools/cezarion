@@ -12,10 +12,10 @@ import { automationCliCommand, automationsPrompt } from '../automations/prompts.
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
-import { registryEntry } from '../runs/webhook.ts';
 import { agentWebhooksPrompt, webhookCliCommand } from '../webhooks/prompt.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { registerProject } from '../workspace/projects.ts';
+import { registryEntry } from '../workspace/registry-entry.ts';
 import { agentWebhooks } from '../workspace/webhooks.ts';
 import { skillSystemPrompt, type RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';

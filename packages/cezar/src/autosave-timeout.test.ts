@@ -11,7 +11,7 @@ vi.mock('node:fs/promises', async importOriginal => {
   return { ...actual };
 });
 
-import { autosaveCommit } from './git-worktree.ts';
+import { autosaveCommit } from './autosave-commit.ts';
 import { killFromPidFile, readPids, requirePid, writePidSource } from './pid-file.testkit.ts';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();

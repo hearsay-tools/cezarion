@@ -1,4 +1,4 @@
-import * as git from '../git-worktree.ts';
+import * as git from '../autosave-commit.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentSession } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';

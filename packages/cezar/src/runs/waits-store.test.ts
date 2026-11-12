@@ -1,6 +1,6 @@
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { setRunStatus } from './run-store.testkit.ts';
-import { openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
+import { crashAfterNextCommit, openTestRunStore, runPersistence } from './run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,7 +24,7 @@ import { RunDatabase, RunDatabaseUnsupportedSchemaError, RUN_DATABASE_SCHEMA_VER
 import { readRunIndexFromDisk } from './run-index.ts';
 import { isLiveRecord } from './run-row.ts';
 import { holdsWorkerWait, parseRunRecords, RunStore, workerWaitEntry, type RunRecord } from './store.ts';
-import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
+import { crashStore, readPersistedRuns, seedRuns } from './run-store.testkit.ts';
 
 /**
  * The wait list on the run record (spec 2026-10-17-unified-waits, phase 1:
@@ -221,6 +221,8 @@ describe('wait checkpoints', () => {
   afterEach(() => { vi.restoreAllMocks(); store.flush(); rmSync(directory, { recursive: true, force: true }); });
   const input = (waitId: string, text = 'wake'): AgentInput => ({ id: waitId, parentRunId: id, source: 'lifecycle', text, createdAt: new Date().toISOString() });
   const reopen = () => { store.close(); store = openTestRunStore(directory, { keepLive: true }); return store.getRun(id)!; };
+  /** What a store reopened after a crash reads: only committed writes survive. */
+  const crashAndReopen = (runId = id) => { crashStore(store); store = openTestRunStore(directory, { keepLive: true }); return store.getRun(runId)!; };
 
   it('commitWait upserts by wait id and appends its input once', () => {
     const wait = ciEntry();
@@ -292,10 +294,9 @@ describe('wait checkpoints', () => {
     store.commitWait(id, { ...second, phase: WAIT_PHASE.open });
     store.commitWait(id, second, input(second.id));
     store.commitWait(id, open);
-    const commits = vi.spyOn(runPersistence(store), 'persist');
+    crashAfterNextCommit(store);
     store.commitOutcome(id, { kind: 'delivered', inputIds: [first.id, open.id], at: iso(1_000) });
-    expect(commits).toHaveBeenCalledTimes(1);
-    for (const run of [store.getRun(id)!, reopen()]) {
+    for (const run of [store.getRun(id)!, crashAndReopen()]) {
       // The open wait named in the batch is not resolved, so it stays open.
       expect(run.waits).toEqual([second, open]);
       expect(run.lastWaits).toEqual([{ ...first, phase: WAIT_PHASE.delivered, deliveredAt: expect.any(String) }]);
@@ -311,10 +312,9 @@ describe('wait checkpoints', () => {
     store.commitWait(id, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(id, resolved, input(resolved.id));
     store.updateRun(id, { automaticWakes: 6, waitDeliveryFailures: 2 });
-    const commits = vi.spyOn(runPersistence(store), 'persist');
+    crashAfterNextCommit(store);
     store.commitOutcome(id, [{ kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }]);
-    expect(commits).toHaveBeenCalledTimes(1);
-    for (const run of [store.getRun(id)!, reopen()]) {
+    for (const run of [store.getRun(id)!, crashAndReopen()]) {
       expect(run.lastWaits).toEqual([{ ...resolved, phase: WAIT_PHASE.delivered, deliveredAt: expect.any(String) }]);
       expect(run.automaticWakes).toBe(7);
       expect(run.waitDeliveryFailures).toBeUndefined();
@@ -330,12 +330,9 @@ describe('wait checkpoints', () => {
     store.commitWait(runId, { ...resolved, phase: WAIT_PHASE.open });
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
     store.move(runId, 'park-release', {}, { stepId });
-    const commits = vi.spyOn(runPersistence(store), 'persist');
+    crashAfterNextCommit(store);
     store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { exit: 'resume', resumeStepId: stepId });
-    expect(commits).toHaveBeenCalledTimes(1);
-    const before = store.getRun(runId)!;
-    reopen();
-    for (const run of [before, store.getRun(runId)!]) {
+    for (const run of [store.getRun(runId)!, crashAndReopen(runId)]) {
       expect(run.status).toBe('running');
       expect(run.steps.find(step => step.id === stepId)?.status).toBe('running');
     }

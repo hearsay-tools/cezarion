@@ -19,6 +19,7 @@ import { taskWebhooks } from '../workspace/webhooks.ts';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -254,7 +255,7 @@ describe('task webhook API', () => {
         await mergeWriteWorkspaceConfig((config) => {
           config.projects.find((p) => p.id === entry.id)!.webhook = { url: 'https://bot.example/hook', token: 't' };
         }, testHome());
-        const app = makeApp({ semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
+        const app = makeApp({ createManager: createRunManager, semaphore: new WorkspaceSemaphore({ home: testHome(), initial: { maxParallel: 0 } }) });
         const res = await apiRequest(app, `/api/v1/p/${entry.id}/runs/live`);
         const after = (await res.json()) as RunRecord;
         expect(after.status).not.toBe('running');

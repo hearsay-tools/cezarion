@@ -74,7 +74,7 @@ const seed = (dir, projectId) => {
 const store = seed(root, 'boot')
 for (const project of projects.slice(1)) { const extra = seed(project.root, project.id); extra.close() }
 const manager = new RunManager(store, root, { home })
-const contexts = new ProjectContexts({ home, listProjects: async () => projects })
+const contexts = new ProjectContexts({ home, createManager: (...args) => new RunManager(...args), listProjects: async () => projects })
 const stores = new Map([['boot', store]])
 for (const project of projects.slice(1)) stores.set(project.id, (await contexts.context(project.id)).store)
 const runs = [...stores].flatMap(([projectId, value]) => value.listRunIds().map(runId => ({ projectId, runId })))

@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import * as worktrees from '../git-worktree.ts';
+import * as worktrees from '../autosave-commit.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { waitFor } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';

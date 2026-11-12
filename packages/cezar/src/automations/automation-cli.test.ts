@@ -318,7 +318,6 @@ describe('cez automation', () => {
       const created = last();
       expect(created).toMatchObject({ id: expect.any(String), enabled: false, kind: 'schedule', name: 'Nightly' });
       expect(created.url).toBe(`${cockpit.origin}/p/default/automations/${String(created.id)}`);
-      expect(created.url).toBe(automationPageUrl(cockpit, String(created.id)));
       expect(await run(['create', '--json', JSON.stringify({ ...definition, enabled: true })])).toBe(EXIT.ok);
       expect(posted[1]?.body).toMatchObject({ enable: true });
       expect(posted[1]?.body).not.toHaveProperty('enabled');

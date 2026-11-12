@@ -41,6 +41,7 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { ProjectContexts, projectLiveTasks, sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { createApp } from './server.ts';
 import { createWorkspaceProjects } from './workspace-projects.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /**
  * The exclusive project migration fence (hearsay-tools/cezarion#3087): one claim file beside both
@@ -65,7 +66,7 @@ function owner(): CockpitOwnership {
 }
 
 function contextsFor(ownership: CockpitOwnership | undefined, ...projects: Array<{ id: string; root: string }>): ProjectContexts {
-  const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, rebrand: false,
+  const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, rebrand: false,
     listProjects: async () => projects.map(({ id, root }) => ({ id, root, status: 'not-git' as const })) });
   disposers.push(() => contexts.disposeAll());
   return contexts;
@@ -464,10 +465,11 @@ describe('with the release switch off', () => {
     try {
       const { SUBCOMMAND_NAMES: names, loadSubcommand: load } = await import('../subcommands.ts');
       const { ProjectContexts: SwitchOffContexts } = await import('./project-context.ts');
+      const { createRunManager: switchOffManager } = await import('./run-manager.testkit.ts');
       expect(names.includes('migrate-project')).toBe(false);
       expect(await load('migrate-project', undefined, false)).toBeUndefined();
       const { ai, root } = project();
-      const contexts = new SwitchOffContexts({ createRunner, home: testHome(), ownership: owner(), rebrand: false,
+      const contexts = new SwitchOffContexts({ createRunner, createManager: switchOffManager, home: testHome(), ownership: owner(), rebrand: false,
         listProjects: async () => [{ id: 'p', root, status: 'not-git' as const }] });
       disposers.push(() => contexts.disposeAll());
       await contexts.context('p');
@@ -687,7 +689,7 @@ describe('admission sweep', () => {
     cockpit.publishUrl('http://127.0.0.1:4321');
     const contexts = contextsFor(cockpit, { id: ownedId!, root: owned.root });
     const ctx = await contexts.context(ownedId!);
-    const app = createApp({ home: testHome(), repoRoot: owned.root, store: ctx.store, manager: ctx.manager, ownership: cockpit, version: '0.0.0-test' });
+    const app = createApp({ home: testHome(), repoRoot: owned.root, store: ctx.store, manager: ctx.manager, createManager: createRunManager, ownership: cockpit, version: '0.0.0-test' });
     const migrator = owner();
     const fences = [await cockpit.fenceProject(ctx.dataDir, { liveTasks: () => projectLiveTasks(ctx.store) }), await migrator.fenceProject(cold.dataDir, none)];
     const leftover = join(cold.dataDir, 'preview', 'run-x', '3000.pid.json');

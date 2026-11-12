@@ -23,6 +23,7 @@ import { crashAt, fence, migrate, moved, TIMEOUT } from './engine.testkit.ts';
 import { migrateProject, resumeProjectMigration } from './engine.ts';
 import { planProjectMigration } from './plan.ts';
 import { buildMigrationProject, git, projectSnapshot, removeMigrationProject, TASK, WORKER, type MigrationProject } from './project-migration.testkit.ts';
+import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /**
  * The write root of a moved project (hearsay-tools/cezarion#3150), with the release switch on
@@ -132,7 +133,7 @@ describe('a moved project with the release switch on', { timeout: TIMEOUT }, () 
   it('moves an unmoved project at its first idle open, writes the context to .ai/squawk/, and skips a marked one', async () => {
     newTask(project.root);
     const ownership = new CockpitOwnership();
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership, listProjects: async () => [{ id: 'p', root: project.root, status: 'ok' as const }] });
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership, listProjects: async () => [{ id: 'p', root: project.root, status: 'ok' as const }] });
     try {
       const context = await contexts.context('p');
       expect(projectMoveMarked(project.root)).toBe(true);

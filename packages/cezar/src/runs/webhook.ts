@@ -2,13 +2,12 @@ import { projectPaths } from '../project-paths.ts';
 import { productEnv } from '../core/product-env.ts';
 import type { Home } from '../home/home.ts';
 import { randomUUID } from 'node:crypto';
-import { realpath } from 'node:fs/promises';
 import type { ApiRun, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
 import { pendingAskOf, type PendingAsk } from '@open-mercato/cezar-contract/pending-ask';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { projectStatus } from '../task-cli/projections.ts';
-import { loadWorkspaceConfig, type WorkspaceProject } from '../workspace/config.ts';
+import { registryEntry } from '../workspace/registry-entry.ts';
 import { taskWebhooks } from '../workspace/webhooks.ts';
 import { deriveRunContextEvents } from './event-history.ts';
 import type { RunRecord, RunStore } from './store.ts';
@@ -493,11 +492,5 @@ async function registryWebhooks(id: string, root: string, home: Home): Promise<{
   return entry ? { id: entry.id, webhooks: taskWebhooks(entry) } : undefined;
 }
 
-/** `id` may be the reserved `default` alias, which resolves to the registry entry holding `root`. */
-export async function registryEntry(id: string, root: string, home: Home): Promise<WorkspaceProject | undefined> {
-  const projects = (await loadWorkspaceConfig(home.workspaceConfig)).projects;
-  const real = id === 'default' ? await realpath(root).catch(() => root) : root;
-  return id === 'default'
-    ? projects.find((project) => project.root === real || project.root === root)
-    : projects.find((project) => project.id === id);
-}
+export { registryEntry } from '../workspace/registry-entry.ts';
+

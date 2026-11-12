@@ -697,7 +697,8 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     unmount()
   })
 
-  it('flushes an archived update before a later deletion so the row cannot return', async () => {
+  it('flushes an archived update before a later deletion so the row cannot return', () => {
+    vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const run = runRecord('r1', { status: RUN_STATUS.done })
@@ -708,8 +709,11 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     source.emit('run-deleted', stampedDeleted(run.id, BOOT))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
-    await new Promise(resolve => setTimeout(resolve, 70))
+    act(() => vi.advanceTimersByTime(50))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
+    // The deletion took the queued update with it: the frame finds nothing left to discard, so
+    // nothing marks the whole list for a refetch.
+    expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
   })
 
   it('writes queued events to their receipt-time project keys across a scope switch', () => {
@@ -757,7 +761,8 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
   })
 
-  it('does not overwrite a newer authoritative archived row when the burst flushes', async () => {
+  it('does not overwrite a newer authoritative archived row when the burst flushes', () => {
+    vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const run = runRecord('r1', { status: RUN_STATUS.done })
@@ -769,8 +774,8 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{
       ...run, title: 'Server-renamed title', archived: true, archivedAt: '2026-09-28T00:00:00.000Z',
     }])
-    await waitFor(() => expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true))
-    await new Promise(resolve => setTimeout(resolve, 70))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
+    act(() => vi.advanceTimersByTime(50))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.title).toBe('Server-renamed title')
   })
 

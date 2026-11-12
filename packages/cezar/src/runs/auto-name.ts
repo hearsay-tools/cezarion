@@ -3,7 +3,7 @@ import type { Home } from '../home/home.ts';
 import { z } from 'zod';
 import { loadConfig } from '../config.ts';
 import type { RunnerFactory } from '../core/agent-runner.ts';
-import { parseStructured } from '../planner.ts';
+import { parseStructured } from '../core/structured-output.ts';
 import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { extractTaskRefs, refineTaskRefs, titleRefNumber, type TaskRefs } from './task-refs.ts';
 

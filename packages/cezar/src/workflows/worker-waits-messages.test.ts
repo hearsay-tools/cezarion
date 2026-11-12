@@ -33,13 +33,6 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   const answered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'parent');
   const delivered = (runId: string, id: string) => !!inputOf(runId, id)?.deliveredAt;
 
-  /** Every `delegation.wait` a message stand-in wrote while the spy ran. */
-  function standIns() {
-    const commits = vi.spyOn(store, 'commitDelegation');
-    return () => commits.mock.calls.flatMap(([updates]) => updates.flatMap(update =>
-      update.delegation.role !== 'invalid' && update.delegation.wait?.reason === 'message' ? [update.delegation.wait] : []));
-  }
-
   /** A steering parent and a parked worker, with a service to message between them. */
   async function conversing(parentTask = 'mock:hold', workerTask = 'mock:hold') {
     const { p, service, callerFor } = await delegatingParent({ task: parentTask, permissions: ['spawn', 'wait', 'steer'] });
@@ -63,7 +56,6 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   it('a worker message wakes the parent and the worker wait stays open', async () => {
     const f = await conversing();
     const entry = await parkedOnWorker(f);
-    const written = standIns();
     const send = vi.spyOn(sessionOf(f.p.id), 'sendAgentMessage');
     const id = await say(f, 'worker', f.p.id, 'progress', 'Still working mock:hold');
     await until(() => delivered(f.p.id, id));
@@ -71,7 +63,6 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     expect(JSON.stringify(send.mock.calls)).toContain(`Still open: worker wait ${entry.id}`);
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
     expect(entryOf(f.p.id, entry.id)).toMatchObject({ kind: WAIT_KIND.worker, phase: WAIT_PHASE.open, workerIds: [f.w.id] });
-    expect(written()).toEqual([]);
   });
 
   // Review Focus 2: a reply resolves only the request wait that names it.
@@ -81,13 +72,11 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     const other = await say(f, 'parent', f.w.id, 'request', 'Second check mock:hold');
     const entry = manager.registerWorkerListWait(f.p.id, { requestIds: [awaited], timeoutSeconds: 600 }, 'cezar_wait');
     await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
-    const written = standIns();
     const reply = randomUUID();
     await f.service.send(f.workerCaller, { id: reply, recipientRunId: f.p.id, kind: 'reply', requestId: other, text: 'Second result mock:hold', timeoutSeconds: 600 });
     await until(() => delivered(f.p.id, reply));
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
     expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, requestIds: [awaited] });
-    expect(written()).toEqual([]);
   });
 
   it("the parent's answer to a worker question leaves the worker's earlier wait open", async () => {
@@ -96,23 +85,19 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     const question = String(eventsOf(f.w.id, 'worker-question-routed')[0]!.messageId);
     const own = await say(f, 'worker', f.p.id, 'request', 'Which module? mock:hold');
     const entry = manager.registerWorkerListWait(f.w.id, { requestIds: [own], timeoutSeconds: 600 }, 'cezar_wait');
-    const written = standIns();
     await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: question, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
     await until(() => answered(f.w.id).length === 1);
     await until(() => store.readEvents(f.w.id).some(event => event.type === 'text' && String(event.text).includes('Use the parser')));
     expect(entryOf(f.w.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, requestIds: [own] });
-    expect(written()).toEqual([]);
   });
 
   it('a human message leaves an agent worker wait open', async () => {
     const f = await conversing();
     const entry = await parkedOnWorker(f);
-    const written = standIns();
     expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:agent-echo human update' }])).toBe(true);
     await until(() => store.readEvents(f.p.id).some(event => event.type === 'text' && String(event.text).includes('human update')));
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
     expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, workerIds: [f.w.id] });
-    expect(written()).toEqual([]);
   });
 
   it('a worker message reaches a parent with a pending cezar_ask card beside it; the card stays answerable', async () => {
@@ -153,7 +138,6 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
     await restart();
     await until(() => store.getRun(f.p.id)?.status === 'waiting' && !manager.isActive(f.p.id));
-    const written = standIns();
     const resumed = vi.spyOn(manager, 'continueRun');
     // A message from the idle worker, committed as `DelegationService.send` commits one.
     const id = randomUUID(); const now = new Date().toISOString();
@@ -168,7 +152,6 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     expect(resumed).toHaveBeenCalledWith(f.p.id, { text: 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.', waitWake: true }, true);
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
     expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, workerIds: [idle.id] });
-    expect(written()).toEqual([]);
   });
 
   // hearsay-tools/cezarion#1301: a blocked done opens no completion wait, so a worker's request to

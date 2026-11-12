@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { autosaveCommit } from './git-worktree.ts';
+import { autosaveCommit } from './autosave-commit.ts';
 import { testHome } from './home/test-home.testkit.ts';
 import { seedRuns } from './runs/run-store.testkit.ts';
 import { RunStore } from './runs/store.ts';
