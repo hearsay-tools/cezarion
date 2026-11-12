@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router'
 
 import { useProjectRepo } from '@/api/queries'
-import { useSidebarNavigate } from '@/components/app-shell'
+import { useSidebarNavigate } from '@/components/shell-contexts'
 import { SIDEBAR_LIST_BODY_CLASS } from '@/components/nav-row-styles'
 
 import { GitCheckoutBlock } from './git-checkout-block'

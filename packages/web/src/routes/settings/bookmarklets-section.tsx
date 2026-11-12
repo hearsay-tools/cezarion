@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { useHealth, useLaunchKey, useProjects, useSkills } from '@/api/queries'
 import type { Skill } from '@open-mercato/cezar-api-client'
-import { repoChipOf } from '@/components/app-shell-container'
+import { repoChipOf } from '@/lib/repo-chip'
 import { CenteredState } from '@/components/centered-state'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
