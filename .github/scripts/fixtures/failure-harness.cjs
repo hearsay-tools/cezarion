@@ -29,6 +29,10 @@ function harness() {
       if(state.failCreate) throw new Error('write secret');
       const at=tick(), issue={number:state.issues.length+1,state:'open',created_at:at,updated_at:at,...args};state.issues.push(issue);return {data:issue};
     }
+    if(route==='PATCH /repos/{owner}/{repo}/issues/{issue_number}') {
+      const issue=state.issues.find(entry=>entry.number===args.issue_number);
+      issue.body=args.body;touch(issue.number);return {data:structuredClone(issue)};
+    }
     if(route==='POST /repos/{owner}/{repo}/issues/{issue_number}/comments') {
       if(state.failComment) {state.failComment=false;throw new Error('comment secret');}
       state.comments.push(args);touch(args.issue_number);return {data:{id:state.comments.length}};
