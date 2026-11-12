@@ -1,27 +1,25 @@
 'use strict';
 
 // The board follows the head (hearsay-tools/cezarion#603, hearsay-tools/cezarion#3288).
-// Readiness never changes draft state: agents open pull requests ready, and a
-// human's draft stays a draft.
+// Reconcile CodeRabbit admission (coderabbit-reconcile.cjs) reads the live head
+// once and calls these helpers for the board decision. It never changes draft
+// state: agents open pull requests ready, and a human's draft stays a draft.
 //   - The PR's and its closing issues' cards move to In review once the PR is
 //     ready, every required check on the live head passes and no thread is open.
 //   - Any other state moves them to In progress: a new head, a pending or red
 //     check, an open thread, or a draft.
 // Human draft/ready flips arrive as their own events and resync the board.
 
-const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
-const { readNativeReview } = require('./native-review-proof.cjs');
-const { positive } = require('./queue-ci-proof.cjs');
-const { discover: discoverAdmission, eligiblePull } = require('./coderabbit-reconcile.cjs');
+const { pages } = require('./queue-ci-proof.cjs');
 
 const REVIEW_CHECK = 'Automated Code Review';
 const PASSING = new Set(['success', 'skipped', 'neutral']);
 const BOARD = { progress: 'In progress', review: 'In review' };
 const DONE_STATUS = 'done';
-const PULL_ACTIONS = new Set(['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
 
-async function requiredCheckNames({ github, owner, repo, branch }) {
-  const { data: rules } = await github.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', { owner, repo, branch, per_page: 100 });
+// `read` is the deadline-bound reader from queue-ci-proof.cjs.
+async function requiredCheckNames(read, branch) {
+  const rules = await read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch, per_page: 100 });
   if (!Array.isArray(rules)) throw new Error('Could not read the branch rules.');
   const names = new Set([REVIEW_CHECK]);
   for (const rule of rules) {
@@ -67,10 +65,19 @@ function evaluateChecks({ required, checkRuns, statuses = [] }) {
   return result;
 }
 
-async function readHeadChecks({ github, owner, repo, sha }) {
-  const checkRuns = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: sha, per_page: 100 });
-  const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha, per_page: 100 });
-  return { checkRuns, statuses: combined?.statuses || [] };
+// Three reads: the branch rules, the head's check runs and its commit statuses.
+async function readHeadChecks(read, sha) {
+  const required = await requiredCheckNames(read, 'main');
+  const checkRuns = await pages(read, 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs', { ref: sha }, 'check_runs');
+  const combined = await read('GET /repos/{owner}/{repo}/commits/{ref}/status', { ref: sha, per_page: 100 });
+  return { checkRuns, ...evaluateChecks({ required, checkRuns, statuses: combined?.statuses || [] }) };
+}
+
+// The native review job's check run. While no run of it on the head has
+// completed, neither the targeted rerun nor In review can follow, so the
+// native proof and admission reads are skipped.
+function reviewCheckCompleted(checkRuns) {
+  return (checkRuns || []).some(run => run?.name === REVIEW_CHECK && run.status === 'completed');
 }
 
 const BOARD_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
@@ -143,53 +150,10 @@ async function syncBoard({ projectGithub, owner, repo, pullNumber, status, log }
   }
 }
 
-// Board sync covers same-repository PRs only.
-function sameRepo(pull, owner, repo) {
-  return pull?.head?.repo?.full_name === `${owner}/${repo}`;
-}
-
-async function followPull({ github, projectGithub, owner, repo, candidate, sha, checks, deadline, log }) {
-  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
-  if (live?.state !== 'open' || live.head?.sha !== sha || !sameRepo(live, owner, repo)) return;
-  let admitted = false;
-  try {
-    const proof = await readNativeReview({ github, owner, repo, pr: live, deadline });
-    const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: live.number, head: sha, deadline,
-      releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
-    admitted = checks.ready && proof.passed && admission.admitted;
-  } catch (error) {
-    log(`PR ${live.number}: fresh review proof unavailable: ${error.message}`);
-  }
-  const { data: final } = await github.rest.pulls.get({ owner, repo, pull_number: live.number });
-  if (final?.state !== 'open' || final.head?.sha !== sha || !sameRepo(final, owner, repo) || final.base?.ref !== 'main') return;
-  const status = admitted && !final.draft ? BOARD.review : BOARD.progress;
-  log(`PR ${final.number}: board follows ${status} (admitted=${admitted}, draft=${final.draft}).`);
-  await syncBoard({ projectGithub, owner, repo, pullNumber: final.number, status, log });
-}
-
-async function discoverReadiness({ github, owner, repo, eventName, payload, log = () => {} }) {
-  if (eventName !== 'pull_request_target') {
-    return discoverAdmission({ github, owner, repo, eventName, payload, log });
-  }
-  if (payload.repository?.full_name !== `${owner}/${repo}`) throw new Error('Foreign event');
-  if (!PULL_ACTIONS.has(payload.action) || !positive(payload.pull_request?.number)) return { numbers: [] };
-  const number = payload.pull_request.number;
-  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: number });
-  return { numbers: live?.number === number && eligiblePull(live, `${owner}/${repo}`) ? [number] : [] };
-}
-
-async function refreshReadiness({ github, projectGithub = null, owner, repo, pullNumber,
-  now = Date.now, log = () => {} }) {
-  if (!positive(pullNumber)) throw new Error('Missing trusted readiness PR number');
-  const deadline = now() + 120000;
-  // The workflow's PR-number lock is already held. Re-read all mutable state;
-  // an old event can wake this PR but cannot supply a head or draft decision.
-  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: pullNumber });
-  if (live?.number !== pullNumber || !eligiblePull(live, `${owner}/${repo}`)) return;
-  const required = await requiredCheckNames({ github, owner, repo, branch: 'main' });
-  const sha = live.head.sha;
-  const checks = evaluateChecks({ required, ...(await readHeadChecks({ github, owner, repo, sha })) });
-  return followPull({ github, projectGithub, owner, repo, candidate: live, sha, checks, deadline, log });
+// One board decision: In review only when the PR is ready, every required
+// check on the live head passes, and native proof and fresh admission hold.
+function boardStatus({ checks, admitted, draft }) {
+  return checks?.ready && admitted && !draft ? BOARD.review : BOARD.progress;
 }
 
 module.exports = {
@@ -198,8 +162,9 @@ module.exports = {
   requiredCheckNames,
   latestByName,
   evaluateChecks,
+  readHeadChecks,
+  reviewCheckCompleted,
   boardMoves,
+  boardStatus,
   syncBoard,
-  discoverReadiness,
-  refreshReadiness,
 };

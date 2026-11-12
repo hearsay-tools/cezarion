@@ -2,7 +2,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const readiness = require('./pr-readiness.cjs');
 const {
   REVIEW_CHECK,
   BOARD,
@@ -10,12 +9,13 @@ const {
   evaluateChecks,
   boardMoves,
   syncBoard,
-  discoverReadiness,
-  refreshReadiness,
 } = require('./pr-readiness.cjs');
+// The board follows the merged per-PR job of Reconcile CodeRabbit admission.
+const { discover, reconcile } = require('./coderabbit-reconcile.cjs');
+const { reader } = require('./queue-ci-proof.cjs');
 
-const { reviewState, reviewData } = require('./coderabbit.testkit.cjs');
-const workflowPath = path.join(__dirname, '..', 'workflows', 'pr-readiness.yml');
+const { reviewState, reviewData, providerRead } = require('./coderabbit.testkit.cjs');
+const workflowPath = path.join(__dirname, '..', 'workflows', 'coderabbit-reconcile.yml');
 const owner = 'o';
 const repo = 'r';
 const sha = 'a'.repeat(40);
@@ -40,7 +40,7 @@ function checkRun(id, name, conclusion, status = 'completed') {
 }
 
 // A GitHub client double: every call is recorded, and each read answers from `state`.
-// Readiness never changes draft state, so any other GraphQL call fails the test.
+// Its only write is the targeted native rerun; nothing changes draft state.
 function fakeGithub(state = {}) {
   const calls = [];
   const s = {
@@ -59,25 +59,9 @@ function fakeGithub(state = {}) {
     calls,
     state: s,
     request: async (route, params) => {
-      calls.push(['request', route, params.branch]);
-      if (route.endsWith('/rules/branches/{branch}')) return { data: s.rules };
+      calls.push(['request', route, params]);
       s.pr = s.live?.(params.pull_number ?? 7) ?? s.pulls.find(p => p.number === (params.pull_number ?? 7)) ?? s.pulls[0];
       return { data: structuredClone(reviewData(s, route, params)) };
-    },
-    paginate: async (method, params) => method(params),
-    rest: {
-      pulls: {
-        list: (params) => { calls.push(['pulls.list', params.base]); return s.pulls; },
-        get: async ({ pull_number: number }) => ({ data: s.live?.(number) ?? s.pulls.find((pull) => pull.number === number) }),
-      },
-      checks: { listForRef: ({ ref }) => { calls.push(['checks', ref]); return s.checkRuns; } },
-      repos: { getCombinedStatusForRef: async () => ({ data: { statuses: s.statuses } }) },
-    },
-    graphql: async (query) => {
-      if (query.includes('reviewThreads')) {
-        return { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: s.threads } } } };
-      }
-      throw new Error(`readiness must not change draft state: ${query}`);
     },
   };
   return github;
@@ -92,12 +76,13 @@ function eventArgs(args) {
     payload.action ??= 'completed';
     payload.check_run = { ...args.github.state.checks[0], ...payload.check_run };
   }
-  return { ...args, owner, repo, payload };
+  const s = args.github.state;
+  return { now: () => s.clock, sleep: async ms => { s.clock += ms; }, ...args, owner, repo, payload };
 }
 async function handleEvent(args) {
   const input = eventArgs(args);
-  const { numbers } = await discoverReadiness(input);
-  return Promise.all(numbers.map(pullNumber => refreshReadiness({ ...input, pullNumber })));
+  const { numbers } = await discover(input);
+  return Promise.all(numbers.map(pullNumber => reconcile({ ...input, pullNumber })));
 }
 
 async function completeRun(github, extra = {}) {
@@ -156,8 +141,9 @@ test('requires the ruleset checks plus the automated review check', async () => 
     { type: 'pull_request', parameters: {} },
     { type: 'required_status_checks', parameters: { required_status_checks: [{ context: VERIFY }, { context: '' }, {}] } },
   ] });
-  assert.deepEqual(await requiredCheckNames({ github, owner, repo, branch: 'main' }), [REVIEW_CHECK, VERIFY].sort());
-  await assert.rejects(requiredCheckNames({ github: fakeGithub({ rules: null }), owner, repo, branch: 'main' }), /branch rules/);
+  const read = client => reader(client, owner, repo, Date.now() + 60000, Date.now);
+  assert.deepEqual(await requiredCheckNames(read(github), 'main'), [REVIEW_CHECK, VERIFY].sort());
+  await assert.rejects(requiredCheckNames(read(fakeGithub({ rules: { message: 'not a list' } })), 'main'), /branch rules/);
 });
 
 test('evaluates the latest run per required check, and commit statuses as a fallback', () => {
@@ -184,7 +170,8 @@ test('a ready PR whose head checks are green moves its linked cards to In review
   const board = fakeBoard({ current: 'In progress' });
   await completeRun(github, { projectGithub: board });
   assert.deepEqual(board.moves.map(({ itemId, optionId }) => [itemId, optionId]), [['PR_ITEM', 'opt-review'], ['ISSUE_ITEM', 'opt-review']]);
-  assert.ok(github.calls.some(([name, ref]) => name === 'checks' && ref === sha), 'checks are read for the run head, not a branch');
+  assert.ok(github.calls.some(([, route, params]) => route.endsWith('/commits/{ref}/check-runs') && !params.check_name
+    && params.ref === sha), 'checks are read for the run head, not a branch');
 });
 
 test('a skipped protected review cannot replace native success', async () => {
@@ -263,7 +250,7 @@ test('ignores workflow runs that did not come from a pull request', async () => 
     const board = fakeBoard({ current: 'In progress' });
     await handleEvent({ github, projectGithub: board, owner, repo, eventName: 'workflow_run', payload });
     assert.deepEqual(board.numbers, []);
-    assert.equal(github.calls.some(([name, route]) => name === 'pulls.list' || route === 'GET /repos/{owner}/{repo}/pulls'), false);
+    assert.equal(github.calls.some(([, route]) => route === 'GET /repos/{owner}/{repo}/pulls'), false);
   }
 });
 
@@ -334,54 +321,6 @@ test('a manual dispatch re-checks one PR after a thread is resolved by hand', as
   }
 });
 
-test('the readiness workflow runs trusted code with read-only repository permissions', async () => {
-  const { parse } = await import('yaml');
-  const source = fs.readFileSync(workflowPath, 'utf8');
-  const workflow = parse(source);
-  assert.deepEqual(workflow.on.pull_request_target.types, ['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
-  assert.deepEqual(workflow.on.pull_request_target.branches, ['main']);
-  assert.deepEqual(workflow.on.workflow_run, { workflows: ['CI', 'CodeRabbit review signal'], types: ['completed'] });
-  assert.equal(workflow.on.workflow_dispatch.inputs.pr_number.required, true);
-  assert.deepEqual(workflow.permissions, {});
-  assert.equal(workflow.concurrency, undefined, 'discovery cannot coalesce different PRs');
-  const discovery = workflow.jobs.discover;
-  assert.equal(discovery.concurrency, undefined, 'each event discovers independently');
-  assert.deepEqual(discovery.permissions, { actions: 'read', checks: 'read', contents: 'read', 'pull-requests': 'read' });
-  assert.deepEqual(discovery.outputs, { numbers: '${{ steps.discover.outputs.numbers }}' });
-  assert.equal(discovery.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
-  assert.equal(discovery.steps[0].with['persist-credentials'], false);
-  assert.match(discovery.steps[1].with.script, /discoverReadiness/);
-  assert.equal(discovery.steps[1].with.retries, 0);
-  const job = workflow.jobs.readiness;
-  assert.equal(job.needs, 'discover');
-  assert.equal(job.if, "needs.discover.outputs.numbers != '[]'");
-  assert.deepEqual(job.strategy, { 'fail-fast': false, 'max-parallel': 4,
-    matrix: { pr: '${{ fromJSON(needs.discover.outputs.numbers) }}' } });
-  assert.deepEqual(job.concurrency, { group: 'pr-readiness-pr-${{ matrix.pr }}', 'cancel-in-progress': false });
-  assert.deepEqual(job.permissions, { actions: 'read', checks: 'read', contents: 'read', 'pull-requests': 'read', statuses: 'read' });
-  const [checkout, token, script] = job.steps;
-  assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}', 'the script always comes from the default branch');
-  assert.equal(checkout.with['persist-credentials'], false);
-  assert.equal(job.steps.filter((step) => String(step.uses).startsWith('actions/checkout')).length, 1, 'no pull-request code is checked out');
-  assert.doesNotMatch(source, /refs\/pull\/|head\.sha \}\}\n\s+persist/);
-  for (const step of job.steps) assert.match(step.uses, /@[0-9a-f]{40}$|@[0-9a-f]{40} /, `${step.name} must be pinned to a commit`);
-  assert.match(source, /uses: actions\/[\w-]+@[0-9a-f]{40}/);
-  assert.equal(token['continue-on-error'], true, 'a missing App permission must not fail readiness');
-  assert.equal(token.with['permission-organization-projects'], 'write');
-  assert.match(token.if, /vars\.RELEASE_APP_CLIENT_ID != ''/);
-  assert.equal(token.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
-  assert.equal(token.with['app-id'], undefined);
-  assert.match(script.with.script, /process\.env\.BOARD_TOKEN \? getOctokit\(process\.env\.BOARD_TOKEN\) : null/);
-  assert.match(script.with.script, /require\('\.\/\.github\/scripts\/pr-readiness\.cjs'\)/);
-  assert.equal(script.env.BOARD_TOKEN, '${{ steps.board_app.outputs.token }}');
-  assert.equal(script.env.READINESS_PR, '${{ matrix.pr }}');
-  assert.match(script.with.script, /refreshReadiness/);
-  assert.doesNotMatch(script.with.script, /payload:|head_sha|head\.sha/);
-  assert.equal(script.with.retries, 0);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'pr-readiness.cjs'), 'utf8'),
-    /convertPullRequestToDraft|markPullRequestReadyForReview/);
-});
-
 for (const condition of ['pending', 'failed', 'reopened thread', 'native failure', 'native dispatch']) {
   test(`cards leave In review on fresh ${condition} despite historical green check names`, async () => {
     const github = fakeGithub();
@@ -416,8 +355,7 @@ function barrier() {
 async function workflowQueue(onEnqueue = () => {}) {
   const { parse } = await import('yaml');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
-  const matrix = Boolean(workflow.jobs.discover);
-  const expression = (workflow.jobs.readiness.concurrency ?? workflow.concurrency).group;
+  const expression = workflow.jobs.reconcile.concurrency.group;
   const slots = new Map();
   function group(input, number) {
     const context = { github: { event: input.payload }, inputs: input.payload.inputs, matrix: { pr: number } };
@@ -426,10 +364,10 @@ async function workflowQueue(onEnqueue = () => {}) {
   }
   return async args => {
     const input = eventArgs(args);
-    const numbers = matrix ? (await readiness.discoverReadiness(input)).numbers : [null];
+    const { numbers } = await discover(input);
     return Promise.all(numbers.map(number => {
       const key = group(input, number);
-      const work = () => matrix ? readiness.refreshReadiness({ ...input, pullNumber: number }) : readiness.handleEvent(input);
+      const work = () => reconcile({ ...input, pullNumber: number });
       const result = scheduleLatest(slots, key, work);
       onEnqueue(number);
       return result;
@@ -462,23 +400,19 @@ function startQueued(slots, key, slot, job) {
   });
 }
 
-function holdFinalPull(github) {
+// Holds the first board read: the job has decided its status from proof and
+// admission, and still holds the PR lock, but has not moved a card yet.
+function holdBoard(board) {
   const held = barrier(), release = barrier();
-  const request = github.request, get = github.rest.pulls.get;
-  let providerReads = 0, blocked = false;
-  github.request = async (route, args) => {
-    const result = await request(route, args);
-    if (route.endsWith('/commits/{ref}/check-runs')) providerReads++;
-    return result;
-  };
-  github.rest.pulls.get = async args => {
-    const result = structuredClone(await get(args));
-    if (providerReads >= 2 && !blocked) {
+  const graphql = board.graphql;
+  let blocked = false;
+  board.graphql = async (query, variables) => {
+    if (!blocked && !query.includes('updateProjectV2ItemFieldValue')) {
       blocked = true;
       held.resolve();
       await release.promise;
     }
-    return result;
+    return graphql(query, variables);
   };
   return { held: held.promise, release: release.resolve };
 }
@@ -488,7 +422,7 @@ function holdFinalPull(github) {
 test('cross-kind readiness jobs serialize revocation after an older admitted CI job', { timeout: 10000 }, async () => {
   const github = fakeGithub();
   const board = fakeBoard({ current: 'In progress' });
-  const hold = holdFinalPull(github), queued = barrier();
+  const hold = holdBoard(board), queued = barrier();
   let count = 0;
   const enqueue = await workflowQueue(() => { if (++count === 2) queued.resolve(); });
   const older = enqueue({ github, projectGithub: board, eventName: 'workflow_run', payload: workflowRun() });
@@ -497,9 +431,6 @@ test('cross-kind readiness jobs serialize revocation after an older admitted CI 
   github.state.checks[0].conclusion = null;
   const revocation = enqueue({ github, projectGithub: board, eventName: 'check_run', payload: { action: 'created' } });
   await queued.promise;
-  // The old workflow's different key starts revocation immediately. Drain that
-  // job before releasing the older cached decision to make its overwrite exact.
-  if (!readiness.refreshReadiness) await revocation;
   hold.release();
   await Promise.all([older, revocation]);
   assert.deepEqual(cards(board), IN_PROGRESS, 'pending provider must win after both jobs settle');
@@ -543,8 +474,8 @@ test('independent automatic A and B events keep separate discovery and productio
   b.state.checks[0].pull_requests = structuredClone(b.state.run.pull_requests);
   const boardA = fakeBoard({ current: 'In progress' }), boardB = fakeBoard({ current: 'In progress' });
   const held = barrier(), release = barrier(), bMoved = barrier();
-  const get = a.rest.pulls.get, graphql = boardB.graphql;
-  a.rest.pulls.get = async args => { held.resolve(); await release.promise; return get(args); };
+  const graphqlA = boardA.graphql, graphql = boardB.graphql;
+  boardA.graphql = async (query, vars) => { held.resolve(); await release.promise; return graphqlA(query, vars); };
   boardB.graphql = async (query, vars) => {
     const result = await graphql(query, vars);
     if (query.includes('updateProjectV2ItemFieldValue')) bMoved.resolve();
@@ -566,7 +497,7 @@ test('independent automatic A and B events keep separate discovery and productio
 // bound: explicit read/queue barriers control replacement, not elapsed time.
 test('a human wake replacing a pending revoker still revokes failed admission', { timeout: 10000 }, async () => {
   const github = fakeGithub(), board = fakeBoard({ current: 'In progress' });
-  const hold = holdFinalPull(github), pending = barrier(), replacement = barrier();
+  const hold = holdBoard(board), pending = barrier(), replacement = barrier();
   let count = 0;
   const enqueue = await workflowQueue(() => {
     count++;
@@ -581,8 +512,6 @@ test('a human wake replacing a pending revoker still revokes failed admission', 
   const human = enqueue({ github, projectGithub: board, eventName: 'pull_request_target', payload: {
     action: 'ready_for_review', pull_request: pullFixture() } });
   await replacement.promise;
-  // Under the former branch/SHA grouping the check job runs independently.
-  if (!readiness.refreshReadiness) await revoker;
   hold.release();
   await Promise.all([older, revoker, human]);
   assert.deepEqual(cards(board), IN_PROGRESS);
@@ -607,7 +536,7 @@ test('a head change after proof is read refuses a stale board move', async () =>
   const request = github.request;
   github.request = async (route, args) => {
     const result = await request(route, args);
-    if (route.endsWith('/commits/{ref}/check-runs') && ++providerReads === 2) {
+    if (providerRead(route, args) && ++providerReads === 2) {
       github.state.pulls[0].head.sha = 'd'.repeat(40);
     }
     return result;
@@ -628,16 +557,19 @@ test('readiness accepts the official no-permission signal association instead of
   await handleEvent({ github, projectGithub: board, eventName: 'workflow_run', payload });
   assert.deepEqual(cards(board), IN_REVIEW);
   github.state.signal.workflow_id = 9;
-  assert.deepEqual(await discoverReadiness(eventArgs({ github, eventName: 'workflow_run', payload })), { numbers: [] });
+  assert.deepEqual(await discover(eventArgs({ github, eventName: 'workflow_run', payload })), { numbers: [] });
 });
 
 
 // bound: hold the exact old failed decision while two pending jobs coalesce.
 test('a human wake replacing pending promotion still promotes current admitted proof', { timeout: 10000 }, async () => {
-  const github = fakeGithub();
+  // The old native gate failed with the provider, so the old job decides
+  // In progress without a rerun; a new CI attempt then passes both.
+  const github = fakeGithub({ checkRuns: [checkRun(1, VERIFY, 'success'), checkRun(2, REVIEW_CHECK, 'failure')] });
   github.state.checks[0].conclusion = 'failure';
+  github.state.jobs[0].conclusion = 'failure';
   const board = fakeBoard({ current: 'In review' });
-  const hold = holdFinalPull(github), pending = barrier(), replacement = barrier();
+  const hold = holdBoard(board), pending = barrier(), replacement = barrier();
   let count = 0;
   const enqueue = await workflowQueue(() => {
     if (++count === 2) pending.resolve();
@@ -646,6 +578,8 @@ test('a human wake replacing pending promotion still promotes current admitted p
   const older = enqueue({ github, projectGithub: board, eventName: 'workflow_run', payload: workflowRun() });
   await hold.held;
   github.state.checks[0].conclusion = 'success';
+  github.state.jobs[0].conclusion = 'success';
+  github.state.checkRuns[1].conclusion = 'success';
   const promotion = enqueue({ github, projectGithub: board, eventName: 'workflow_run', payload: workflowRun() });
   await pending.promise;
   const human = enqueue({ github, projectGithub: board, eventName: 'pull_request_target', payload: {
@@ -663,10 +597,10 @@ for (const event of ['CI', 'provider']) test(`readiness ${event} discovery bound
     head: { sha: 'b'.repeat(40), ref: 'other', repo: { full_name: 'o/r' } } })));
   github.state.checks[0].pull_requests = structuredClone(github.state.run.pull_requests);
   const input = eventArgs({ github, projectGithub: board, eventName: event === 'CI' ? 'workflow_run' : 'check_run', payload: event === 'CI' ? workflowRun() : {} });
-  const result = await discoverReadiness(input);
+  const result = await discover(input);
   assert.deepEqual(result, { numbers: [7] });
-  assert.equal(github.calls.some(([name, route]) => name === 'pulls.list' || route === 'GET /repos/{owner}/{repo}/pulls'), false);
-  await Promise.all(result.numbers.map(pullNumber => refreshReadiness({ ...input, pullNumber })));
+  assert.equal(github.calls.some(([, route]) => route === 'GET /repos/{owner}/{repo}/pulls'), false);
+  await Promise.all(result.numbers.map(pullNumber => reconcile({ ...input, pullNumber })));
   assert.deepEqual(board.numbers, [7]);
   assert.deepEqual(cards(board), IN_REVIEW);
 });
@@ -692,4 +626,17 @@ for (const condition of ['failed native aggregate', 'skipped native review', 'mi
   if (condition === 'missing required check') github.state.checkRuns = [];
   await completeRun(github, { projectGithub: board });
   assert.deepEqual(board.moves, []);
+});
+
+// Per-PR reads with a board token: 4 head reads, then native proof (6) and
+// admission (5) only when they can change the decision, then one final PR read.
+for (const [label, checkRuns, reads, cardState] of [
+  ['a running native review', [checkRun(1, VERIFY, null, 'in_progress'), checkRun(2, REVIEW_CHECK, null, 'in_progress')], 5, IN_PROGRESS],
+  ['a green head', undefined, 16, IN_REVIEW],
+]) test(`board sync for ${label} costs ${reads} reads`, async () => {
+  const github = fakeGithub(checkRuns ? { checkRuns } : {});
+  const board = fakeBoard({ current: 'Todo' });
+  await reconcile({ ...eventArgs({ github, projectGithub: board }), pullNumber: 7 });
+  assert.equal(github.calls.length, reads);
+  assert.deepEqual(cards(board), cardState);
 });

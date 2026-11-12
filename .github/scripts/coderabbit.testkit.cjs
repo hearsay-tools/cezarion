@@ -28,8 +28,19 @@ function actionsData(s, route, args) {
   }
   throw new Error(`Unexpected actions route ${route}`);
 }
+// The head's check runs follow the native jobs unless a test sets `checkRuns`.
+const headCheckRuns = s => s.checkRuns ?? s.jobs.map(({ id, name, status, conclusion }) => ({ id, name, status, conclusion }));
+// A provider read names the CodeRabbit check; the board's head listing does not.
+const providerRead = (route, args) => route.endsWith('/commits/{ref}/check-runs') && Boolean(args?.check_name);
 function reviewData(s, route, args) {
   if (route.endsWith('/pulls/{pull_number}')) return s.pr;
+  if (route.endsWith('/rules/branches/{branch}')) return s.rules ?? [{ type: 'required_status_checks',
+    parameters: { required_status_checks: [{ context: 'Unit, build, E2E, and package' }] } }];
+  if (route.endsWith('/commits/{ref}/status')) return { statuses: s.statuses ?? [] };
+  if (route.endsWith('/commits/{ref}/check-runs') && !args.check_name) {
+    const runs = headCheckRuns(s);
+    return { total_count: runs.length, check_runs: runs };
+  }
   if (route.endsWith('/commits/{ref}/check-runs')) return { total_count: s.checkTotal ?? s.checks.length, check_runs: s.checkPages?.[args.page - 1] ?? s.checks };
   if (route.endsWith('/check-runs/{check_run_id}')) return s.checks.find(c => c.id === args.check_run_id);
   if (route.endsWith('/pulls/{pull_number}/files')) return s.files;
@@ -49,4 +60,4 @@ function fixture() {
   } };
   return { s, github, now: () => s.clock, sleep: async ms => { s.clock += ms; } };
 }
-module.exports = { fixture, reviewState, reviewData, HEAD, BASE };
+module.exports = { fixture, reviewState, reviewData, providerRead, HEAD, BASE };

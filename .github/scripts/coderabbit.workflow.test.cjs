@@ -24,6 +24,10 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   assert.deepEqual(w.permissions, {});
   assert.deepEqual(w.on.check_run.types, ['created', 'completed']);
   assert.deepEqual(w.on.workflow_run, { workflows: ['CI', 'CodeRabbit review signal'], types: ['completed'] });
+  // PR Readiness merged here: human draft/ready flips and new heads resync the board.
+  assert.deepEqual(w.on.pull_request_target, { types: ['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft'],
+    branches: ['main'] });
+  assert.equal(fs.existsSync(path.join(__dirname, '../workflows/pr-readiness.yml')), false);
   assert.equal(w.on.pull_request_review, undefined); assert.equal(w.on.pull_request_review_comment, undefined);
   assert.equal(w.on.workflow_dispatch.inputs.pr_number.required, true);
   assert.equal(w.concurrency, undefined, 'discovery cannot be coalesced across PRs');
@@ -33,20 +37,46 @@ test('reconciler has only trusted default-branch triggers and targeted Actions w
   assert.deepEqual(job.strategy, { 'fail-fast': false, 'max-parallel': 4,
     matrix: { pr: '${{ fromJSON(needs.discover.outputs.numbers) }}' } });
   assert.equal(discovery.concurrency, undefined, 'each event discovers independently');
+  // Another app's check run starts no job; every other event reaches the script.
+  assert.match(discovery.if, /^github\.event_name != 'check_run'\s+\|\| \(github\.event\.check_run\.app\.id == 347564 && github\.event\.check_run\.app\.slug == 'coderabbitai'\s+&& github\.event\.check_run\.name == 'CodeRabbit'\)$/);
   assert.deepEqual(discovery.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', actions: 'read' });
-  assert.equal(discovery.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
-  assert.equal(discovery.steps[0].with['persist-credentials'], false);
-  assert.equal(discovery.steps[1].with.retries, 0);
-  assert.match(discovery.steps[1].with.script, /await discover/);
-  assert.match(discovery.steps[1].with.script, /core.setOutput\('numbers'/);
-  assert.equal(job.steps[1].env.RECONCILE_TARGET, undefined, 'queue only PR identity');
   assert.deepEqual(discovery.outputs, { numbers: '${{ steps.discover.outputs.numbers }}' });
-  assert.equal(job.steps[1].env.RECONCILE_PR, '${{ matrix.pr }}');
-  assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', actions: 'write' });
-  assert.equal(job.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
-  assert.equal(job.steps[0].with['persist-credentials'], false);
-  assert.equal(job.steps[1].with.retries, 0);
-  assert.doesNotMatch(JSON.stringify(w), /secrets\.|refs\/pull\/|create-github-app-token/);
+  assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', statuses: 'read', actions: 'write' });
+  const appToken = (step, permissions) => {
+    assert.equal(step['continue-on-error'], true, 'a missing App or permission degrades, never fails the job');
+    assert.equal(step.if, "vars.RELEASE_APP_CLIENT_ID != ''");
+    assert.equal(step.with['client-id'], '${{ vars.RELEASE_APP_CLIENT_ID }}');
+    assert.equal(step.with['private-key'], '${{ secrets.RELEASE_APP_PRIVATE_KEY }}');
+    assert.deepEqual(Object.keys(step.with).filter(key => key.startsWith('permission-')).map(key => [key, step.with[key]]), permissions);
+  };
+  const reads = names => names.map(name => [`permission-${name}`, 'read']);
+  const [discoverCheckout, discoverToken, discoverScript] = discovery.steps;
+  appToken(discoverToken, reads(['actions', 'checks', 'pull-requests']));
+  assert.equal(discoverScript.env.READ_TOKEN, '${{ steps.read_app.outputs.token }}');
+  assert.match(discoverScript.with.script, /process\.env\.READ_TOKEN \? getOctokit\(process\.env\.READ_TOKEN\) : github/);
+  assert.match(discoverScript.with.script, /await discover\(\{ github: reads/);
+  assert.match(discoverScript.with.script, /core.setOutput\('numbers'/);
+  const [checkout, readToken, boardToken, script] = job.steps;
+  appToken(readToken, reads(['actions', 'checks', 'contents', 'pull-requests', 'statuses']));
+  appToken(boardToken, [['permission-organization-projects', 'write']]);
+  assert.equal(script.env.READ_TOKEN, '${{ steps.read_app.outputs.token }}');
+  assert.equal(script.env.BOARD_TOKEN, '${{ steps.board_app.outputs.token }}');
+  assert.equal(script.env.RECONCILE_PR, '${{ matrix.pr }}');
+  assert.equal(script.env.RECONCILE_TARGET, undefined, 'queue only PR identity');
+  assert.match(script.with.script, /const readGithub = process\.env\.READ_TOKEN \? getOctokit\(process\.env\.READ_TOKEN\) : github;/);
+  assert.match(script.with.script, /reconcile\(\{ github, readGithub, projectGithub,/, 'the rerun write stays on GITHUB_TOKEN');
+  assert.doesNotMatch(script.with.script, /payload:|head_sha|head\.sha/);
+  for (const [stepCheckout, steps] of [[discoverCheckout, discovery.steps], [checkout, job.steps]]) {
+    assert.equal(stepCheckout.with.ref, '${{ github.event.repository.default_branch }}', 'the script always comes from main');
+    assert.equal(stepCheckout.with['persist-credentials'], false);
+    assert.equal(steps.filter(step => String(step.uses).startsWith('actions/checkout')).length, 1, 'no PR code is checked out');
+    for (const step of steps) assert.match(step.uses, /@[0-9a-f]{40}$/, `${step.name ?? step.id} must be pinned to a commit`);
+    assert.equal(steps.at(-1).with.retries, 0);
+  }
+  assert.doesNotMatch(JSON.stringify(w), /refs\/pull\//);
+  assert.deepEqual([...JSON.stringify(w).matchAll(/secrets\.(\w+)/g)].map(m => m[1]), ['RELEASE_APP_PRIVATE_KEY', 'RELEASE_APP_PRIVATE_KEY', 'RELEASE_APP_PRIVATE_KEY']);
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'pr-readiness.cjs'), 'utf8')
+    + fs.readFileSync(path.join(__dirname, 'coderabbit-reconcile.cjs'), 'utf8'), /convertPullRequestToDraft|markPullRequestReadyForReview/);
 });
 test('PR-context review signals have no permissions, secrets, checkout or trusted outputs', () => {
   const w = read('coderabbit-review-signal.yml');
