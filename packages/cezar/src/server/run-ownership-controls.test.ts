@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { setRunStatus, crashStore, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { RUN_IN_USE_ELSEWHERE, RunStore } from '../runs/store.ts';
-import { createFixtureManager, fixtureWork, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { createFixtureManager, fixtureWork, fixtureWorkSettled, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -173,8 +173,8 @@ describe('adopting a dead owner\'s run for a control', () => {
     expect(store.runOwnership(run.id)).toBe('orphaned');
     return run.id;
   };
-  /** Long enough for anything recovery queued to reach the runner. */
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+  /** Everything the control set going has settled: a queued run would have reached the runner. */
+  const settle = () => fixtureWorkSettled(repoRoot);
 
   it.each([
     ['archive', 'unstarted', 'POST', '/archive'], ['archive', 'running', 'POST', '/archive'],
@@ -217,10 +217,11 @@ describe('adopting a dead owner\'s run for a control', () => {
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ continued: true });
-    await settle();
     // Restarted as the untouched workflow it was, or its last session resumed with the user's message.
-    expect(started).toEqual([shape === 'running' ? 'runContinuation' : 'execute']);
-    if (shape === 'running') expect(store.readEvents(id).some((event) => JSON.stringify(event).includes('carry on from here'))).toBe(true);
+    // bound: the resumed run reaches the runner through the pump; the bound only ends a hang.
+    await vi.waitFor(() => expect(started).toEqual([shape === 'running' ? 'runContinuation' : 'execute']), { timeout: 10_000 });
+    // bound: the continuation records the user's message as it starts; the bound only ends a hang.
+    if (shape === 'running') await vi.waitFor(() => expect(store.readEvents(id).some((event) => JSON.stringify(event).includes('carry on from here'))).toBe(true), { timeout: 10_000 });
     else expect(store.getRun(id)?.status).not.toBe('cancelled');
   });
 });

@@ -168,8 +168,10 @@ describe('the preview WebSocket', () => {
     expect(status).toBe('open');
     await vi.waitFor(() => expect(messages).toEqual([JSON.stringify({ t: 'state', stage: 'worktree-removed' })]), { timeout: HANG_GUARD_MS });
     ws.send(JSON.stringify({ t: 'open', target: { port: 5173 } }));
-    // bound: negative window. The server handles the frame within a few event-loop turns on loopback; a host call it wrongly made would be in `calls` by then.
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // The server reads frames in order: its pong to this later ping proves it dispatched the open.
+    const pong = once(ws, 'pong');
+    ws.ping();
+    await pong;
     expect(calls).toEqual([]);
     ws.close();
   });
