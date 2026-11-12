@@ -7,7 +7,7 @@ import { controlledWire, manager, parent, root, store, toolGenerationOf, until }
 export const pr = 'https://github.com/acme/repo/pull/12';
 export const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 
-export const handlers = (runId: string) => manager.cezarToolHandlers(runId, toolGenerationOf(runId));
+export const handlers = (runId: string) => manager.squawkToolHandlers(runId, toolGenerationOf(runId));
 export const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 export const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.find(wait => wait.id === waitId);
 export const inputOf = (runId: string, id: string) => store.getRun(runId)?.agentInputs?.find(input => input.id === id);

@@ -110,7 +110,7 @@ export function asksCells(runners: RunnerId[], it: typeof registerTest = registe
       const wire = gatedProviderFailure(root, runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']! });
       await until(wire.held);
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
       if (!registered.ok) throw Error('registration refused');
       // Registered mid-turn, so nothing is shown before the turn ends.
@@ -129,7 +129,7 @@ export function asksCells(runners: RunnerId[], it: typeof registerTest = registe
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
       if (!registered.ok) throw Error('registration refused');
       // Registered at a boundary: the card is shown at once.
@@ -197,7 +197,7 @@ export function asksCells(runners: RunnerId[], it: typeof registerTest = registe
       expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
       expect(hasPendingAsk(store, run.id)).toBeFalsy();
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      const tools = manager.cezarToolHandlers(run.id, toolGenerationOf(run.id));
+      const tools = manager.squawkToolHandlers(run.id, toolGenerationOf(run.id));
       const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u5d' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered)) throw Error('registration refused');
       expect(store.getRun(run.id)?.lastWaits?.find(wait => wait.id === noWait.id)?.phase).toBe('cancelled');

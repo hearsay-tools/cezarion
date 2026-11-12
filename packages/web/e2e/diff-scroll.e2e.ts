@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, squawkCli, fixtureServeEnv } from './agent-browser'
 // fixture-server starts: 1
 
 /**
@@ -104,7 +104,7 @@ beforeAll(async () => {
   repo = mkdtempSync(join(tmpdir(), 'cezar-e2e-diff-scroll-'))
   buildFixtureRepo(repo)
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', repo, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(repo), stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

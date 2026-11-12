@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { pollFor } from './poll'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
@@ -106,7 +106,7 @@ beforeAll(async () => {
   // runners and this repo's dev boxes restrict unprivileged user namespaces (AppArmor), and the
   // pane then shows 5.4. That state has its own unit coverage; this spec is about streaming, so it always opts
   // out the documented way.
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot, { CEZ_PREVIEW: '1', CEZ_PREVIEW_NO_SANDBOX: '1' }),
     stdio: 'ignore',
   })

@@ -10,9 +10,9 @@ import { worktreeSetupEnv } from '../worktree-setup.ts';
 import { withPreviewCdp } from '../preview/agent-address.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { productEnvEntries } from './product-env.ts';
-import { cezarToolEnvNames } from '../ci-wait/tools.ts';
+import { squawkToolEnvNames } from '../ci-wait/tools.ts';
 import { systemdUnit } from '../server-install/platforms/ubuntu-vps.ts';
-import { cezarLaunchdPlist } from '../server-install/platforms/macosx-ngrok.ts';
+import { squawkLaunchdPlist } from '../server-install/platforms/macosx-ngrok.ts';
 
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, {recursive: true, force: true}); });
@@ -56,7 +56,7 @@ it.each([false, true])('preview capability binds matching aliases and revokes bo
 it('generated intentional clears and native adapter allowlists preserve preferred empty values', () => {
   expect(productEnvEntries('TODOS_FILE', '', false)).toEqual({CEZ_TODOS_FILE: ''});
   expect(productEnvEntries('TODOS_FILE', '', true)).toEqual({HSQ_TODOS_FILE: '', CEZ_TODOS_FILE: ''});
-  expect(cezarToolEnvNames({CEZ_AUTOMATIONS: '0', HSQ_AUTOMATIONS: '', HSQ_TOOL_TOKEN: 'token'})).toEqual([
+  expect(squawkToolEnvNames({CEZ_AUTOMATIONS: '0', HSQ_AUTOMATIONS: '', HSQ_TOOL_TOKEN: 'token'})).toEqual([
     'CEZ_TOOL_TOKEN', 'HSQ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', 'CEZ_AUTOMATIONS', 'HSQ_AUTOMATIONS',
   ]);
 });
@@ -67,7 +67,7 @@ it.each([false, true])('service installers emit matching REMOTE env names with r
   expect(unit).toContain('Environment=HSQ_REMOTE=1');
   const installed = Object.fromEntries([...unit.matchAll(/^Environment=(\w+)=(.*)$/gm)].map(match => [match[1]!, match[2]!]));
   expect(resolveCapabilities({HSQ_REMOTE: '0', ...installed}, '127.0.0.1')).toMatchObject({localHandoff: false, settingsAdmin: false});
-  const plist = cezarLaunchdPlist('/repo', 4321, ['/bin/cez'], rebrand);
+  const plist = squawkLaunchdPlist('/repo', 4321, ['/bin/cez'], rebrand);
   expect(plist).toContain('<key>CEZ_REMOTE</key>\n      <string>1</string>');
   expect(plist).toContain('<key>HSQ_REMOTE</key>\n      <string>1</string>');
   const agent = Object.fromEntries([...plist.matchAll(/<key>((?:CEZ|HSQ)_REMOTE)<\/key>\s*<string>([^<]*)<\/string>/g)].map(match => [match[1]!, match[2]!]));

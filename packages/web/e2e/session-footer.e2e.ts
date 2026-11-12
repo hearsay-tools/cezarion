@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 import recordJson from './fixtures/thread-run.record.json'
@@ -34,7 +34,7 @@ beforeAll(async () => {
     ...record, id, steps: [record.steps[0]!], pullRequestUrl: undefined,
   } satisfies Partial<RunRecord>)))
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${runId}.ndjson`), largeThreadEvents(60).map(event => JSON.stringify(event)).join('\n') + '\n')
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot), stdio: 'pipe',
   })
   baseUrl = await waitForFixtureServer(server)

@@ -9,7 +9,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
 import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
@@ -45,7 +45,7 @@ beforeAll(async () => {
     pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451',
     steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
   } satisfies Partial<RunRecord>) satisfies RunRecord])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

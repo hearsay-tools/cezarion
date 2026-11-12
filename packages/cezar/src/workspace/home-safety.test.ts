@@ -9,7 +9,7 @@ import { homedir, tmpdir, userInfo } from 'node:os'; // test-home-read: import f
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
+import { assertSquawkHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from './config.ts';
 
 vi.mock('node:os', async (importOriginal) => {
@@ -166,9 +166,9 @@ describe('cezar home write safety', () => {
     process.env.HOME = fakeUserHome;
     const sandboxed = join(pinned, 'config.json');
 
-    expect(() => assertCezarHomeWriteIsSandboxed(sandboxed)).not.toThrow();
+    expect(() => assertSquawkHomeWriteIsSandboxed(sandboxed)).not.toThrow();
     expect(() =>
-      assertCezarHomeWriteIsSandboxed(join(homedir(), '.cezar', 'config.json'), { VITEST: undefined }), // test-home-read: probe the write refusal guard without writing
+      assertSquawkHomeWriteIsSandboxed(join(homedir(), '.cezar', 'config.json'), { VITEST: undefined }), // test-home-read: probe the write refusal guard without writing
     ).not.toThrow();
   });
 });

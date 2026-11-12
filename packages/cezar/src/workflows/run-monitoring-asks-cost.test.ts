@@ -46,9 +46,9 @@ describe('RunManager reported cost accounting', () => {
 
   it.each(['fresh', 'legacy-inflated', 'missed-persist'] as const)('counts cumulative Claude USD across Continue steps (%s)', async (priorState) => {
     let launches = 0;
-    const tools = new Map<string, ReturnType<RunManager['cezarToolHandlers']>>();
-    const handlers = manager.cezarToolHandlers.bind(manager);
-    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    const tools = new Map<string, ReturnType<RunManager['squawkToolHandlers']>>();
+    const handlers = manager.squawkToolHandlers.bind(manager);
+    vi.spyOn(manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
       const result = handlers(id, generation); tools.set(id, result); return result;
     });
     runnerHook.runner = {

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor, pollJson } from './poll'
 // fixture-server starts: 1
@@ -34,7 +34,7 @@ appendFileSync(${JSON.stringify(ghCalls)}, JSON.stringify(args) + '\\n');
 if (args[0] === 'api' && args.includes('/search/issues')) process.stdout.write('{"items":[]}');
 else { process.stderr.write('Unexpected fixture gh command'); process.exitCode = 1; }
 `, { mode: 0o755 })
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { PATH: `${bin}${delimiter}${process.env.PATH ?? ''}` }), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

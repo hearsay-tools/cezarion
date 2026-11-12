@@ -35,7 +35,7 @@ import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
 import { codexApproval, isCodexApprovalRequest, type CodexApproval } from './codex-approvals.ts';
-import { cezarToolEnvNames } from '../ci-wait/tool-catalog.ts';
+import { squawkToolEnvNames } from '../ci-wait/tool-catalog.ts';
 import {
   CodexAppServerRpc,
   CodexRpcResponseError,
@@ -89,7 +89,7 @@ export interface CodexRunnerOptions {
  * 2026-07-17-permission-modes). Held against the recorded JSON-RPC by the harness parity matrix.
  */
 export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
-  cezarTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars and default_tools_approval_mode approve' },
+  squawkTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars and default_tools_approval_mode approve' },
   systemPrompt: { honored: true, via: 'prepended to the opening turn/start input through prependSystemPrompt' },
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
@@ -214,7 +214,7 @@ class CodexSession implements AgentSession {
   private spawnFailed: Error | null = null;
   private timedOut = false;
   /** Explicit teardown or automatic cleanup with positive live evidence. */
-  private terminatedByCezar = false;
+  private terminatedBySquawk = false;
   private explicitEnd = false;
   private automaticCleanupStarted = false;
   /** Native termination, independent of signal delivery (`child.killed`). */
@@ -329,17 +329,17 @@ class CodexSession implements AgentSession {
   private resultFromExit(exitCode: number | null, stderr: string, limitMs: number, spec: AgentRunSpec): AgentRunResult {
     if (this.spawnFailed) throw this.spawnFailed;
     // Preserve diagnostics even when an RPC/startup failure already owns the error.
-    if (stderr.trim() && (this.failure || sessionStderrIsUnexpected(exitCode, this.timedOut, this.terminatedByCezar))) {
+    if (stderr.trim() && (this.failure || sessionStderrIsUnexpected(exitCode, this.timedOut, this.terminatedBySquawk))) {
       this.emit({ type: 'note', message: `codex app-server stderr:\n${stderr}` });
     }
     // Before the first prompt ACK, process/pipe closure can own the failure
     // before the ordinary crash branch. Keep its phase context and expose
     // the drained terminal exception on the same v1 error seam as later exits.
-    if (this.failure) this.throwOwnedFailure(stderr, exitCode, this.startupComplete, this.timedOut, this.terminatedByCezar);
+    if (this.failure) this.throwOwnedFailure(stderr, exitCode, this.startupComplete, this.timedOut, this.terminatedBySquawk);
     return this.resultFromCleanExit(exitCode, stderr, limitMs, spec);
   }
-  private throwOwnedFailure(stderr: string, exitCode: number | null, startupComplete: boolean, timedOut: boolean, terminatedByCezar: boolean): never {
-    if (!startupCrashOwnsFailure({ startupComplete, timedOut, terminatedByCezar }, stderr, exitCode)) throw this.failure;
+  private throwOwnedFailure(stderr: string, exitCode: number | null, startupComplete: boolean, timedOut: boolean, terminatedBySquawk: boolean): never {
+    if (!startupCrashOwnsFailure({ startupComplete, timedOut, terminatedBySquawk }, stderr, exitCode)) throw this.failure;
     const detail = summarizeRunnerStderr(stderr);
     const message = `codex app-server exited with code ${exitCode}${detail ? ` — ${detail}` : ''} (${this.failure!.message})`;
     this.emit({ type: 'error', message });
@@ -353,7 +353,7 @@ class CodexSession implements AgentSession {
       tokensUsed: this.tokensUsed, sessionId: this.threadId ?? spec.sessionId,
     };
     const settled = sessionExitEvent({
-      timedOut: this.timedOut, terminatedByCezar: this.terminatedByCezar, exitCode, signalCode: this.child.signalCode,
+      timedOut: this.timedOut, terminatedBySquawk: this.terminatedBySquawk, exitCode, signalCode: this.child.signalCode,
       limitMs, stderrSummary: summarizeRunnerStderr(stderr),
     });
     if (settled && 'failure' in settled) { this.emit({ type: 'error', message: settled.failure }); throw new Error(settled.failure); }
@@ -522,7 +522,7 @@ class CodexSession implements AgentSession {
   end(explicit = true): void {
     if (explicit && !this.hasExited()) {
       this.explicitEnd = true;
-      this.terminatedByCezar ||= this.automaticCleanupStarted;
+      this.terminatedBySquawk ||= this.automaticCleanupStarted;
     }
     if (!this.stdinOpen) return;
     this.closeInput('session ended');
@@ -535,7 +535,7 @@ class CodexSession implements AgentSession {
         },
         (state) => {
           this.automaticCleanupStarted = true;
-          this.terminatedByCezar ||= this.explicitEnd || state === 'live';
+          this.terminatedBySquawk ||= this.explicitEnd || state === 'live';
         },
       );
     } catch { /* already gone */ }
@@ -552,7 +552,7 @@ class CodexSession implements AgentSession {
       void this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId }).catch(() => undefined);
     }
     this.closeInput('codex session stopped');
-    this.terminatedByCezar = true;
+    this.terminatedBySquawk = true;
     signalSession(this.child, 'SIGTERM');
     this.stopKillTimer = setTimeout(() => {
       if (!this.hasExited()) signalSession(this.child, 'SIGKILL');
@@ -636,13 +636,13 @@ class CodexSession implements AgentSession {
       ...codexPermissionOverrides(requirements, restrictNetwork),
       // Start and resume accept dotted config overrides; no global config write. Governed sessions
       // keep multi-agent and lose only the cross-thread message board (hearsay-tools/cezarion#2279).
-      ...((restrictNetwork || this.spec.restrictCrossSessionMessaging || this.spec.cezarTools) ? { config: {
+      ...((restrictNetwork || this.spec.restrictCrossSessionMessaging || this.spec.squawkTools) ? { config: {
         ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
         ...(this.spec.restrictCrossSessionMessaging ? { 'features.agent_message_board': false } : {}),
         // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
         // server's mode is `approve`, and cezar's own tools must never wait on that.
         // approval_policy stays the user's (#381); older Codex ignores the unknown key.
-        ...(this.spec.cezarTools ? { [`mcp_servers.${this.spec.cezarTools.name}`]: { command: this.spec.cezarTools.command, args: this.spec.cezarTools.args, env_vars: cezarToolEnvNames(this.spec.env ?? {}), default_tools_approval_mode: 'approve' } } : {}),
+        ...(this.spec.squawkTools ? { [`mcp_servers.${this.spec.squawkTools.name}`]: { command: this.spec.squawkTools.command, args: this.spec.squawkTools.args, env_vars: squawkToolEnvNames(this.spec.env ?? {}), default_tools_approval_mode: 'approve' } } : {}),
       } } : {}),
     };
     let threadResponse: Record<string, unknown>;
@@ -860,7 +860,7 @@ class CodexSession implements AgentSession {
 
   private handleApprovalRequest(method: string, rpcId: number | string, params: unknown): void {
     const duplicate = [...this.pendingApprovals.entries()].find(([, pending]) => pending.rpcId === rpcId);
-    const approval = codexApproval(method, rpcId, params, this.spec.cezarTools?.name);
+    const approval = codexApproval(method, rpcId, params, this.spec.squawkTools?.name);
     const routing = params as Record<string, unknown> | undefined;
     if (!approval || !this.activeTurnId || routing?.threadId !== this.threadId || approval.turnId !== this.activeTurnId ||
       duplicate) {
@@ -1093,7 +1093,7 @@ class CodexSession implements AgentSession {
   }
 
   private emitTurnEnd(error: string | undefined): void {
-    if (error !== undefined && !this.terminatedByCezar) this.emit({ type: 'error', message: error });
+    if (error !== undefined && !this.terminatedBySquawk) this.emit({ type: 'error', message: error });
     this.agentInputReady = this.open;
     // A completed turn processed its own input; a failed one may never have reached the
     // model, so its input stays pending and is reported unconsumed below.

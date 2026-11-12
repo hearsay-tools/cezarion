@@ -30,7 +30,7 @@ interface WorkerQuestionsHost {
   openHumanAlias(id: string, state: ActiveRun | undefined, via: WaitVia, card?: AskRequest): HumanWaitEntry | undefined;
   prepareHumanAsk(state: ActiveRun): void;
   markHumanWaitSurfaced(id: string, wait: HumanWaitEntry, card?: AskRequest): void;
-  withdrawCezarHumanWaits(id: string): void;
+  withdrawSquawkHumanWaits(id: string): void;
   routeWorkerQuestion(id: string): void;
   noticeParkedWorker(id: string): void;
   retireUnreadParentQuestion(id: string, request: string): void;
@@ -182,7 +182,7 @@ export class WorkerQuestions {
     catch (error) { console.warn(`${logPrefix()} worker question not closed: ${error instanceof Error ? error.message : String(error)}`); return; }
     if (detail) this.context.store.appendEvent(workerId, { type: 'note', tone: 'warning', message: `Question not delivered to the parent: ${detail}.` });
     this.context.store.appendEvent(workerId, { type: 'human-ask-closed', askSeq, reason });
-    this.host.withdrawCezarHumanWaits(workerId);
+    this.host.withdrawSquawkHumanWaits(workerId);
     this.host.updatePendingHumanAsk(workerId, hasPendingHumanAsk(workerId, id => pendingHumanAskSeq(this.context.store, id)));
   }
 
@@ -434,7 +434,7 @@ export class WorkerQuestions {
       }
     }
     this.context.store.appendEvent(runId, { type: 'human-ask-closed', askSeq: ask.seq, reason: 'superseded' });
-    this.host.withdrawCezarHumanWaits(runId);
+    this.host.withdrawSquawkHumanWaits(runId);
     this.host.updatePendingHumanAsk(runId, hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id)));
     return true;
   }

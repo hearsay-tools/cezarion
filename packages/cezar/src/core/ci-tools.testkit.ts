@@ -10,11 +10,11 @@ import { buildClaudeArgs } from './claude-cli-runner.ts';
 import { buildPiArgs } from './pi-runner.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { allowedToolsForStep } from '../workflows/types.ts';
-import { askAnswerHint, askToolDefinition, cancelWaitToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
+import { askAnswerHint, askToolDefinition, cancelWaitToolDefinition, squawkServerInstructions, squawkTools, waitToolDefinition } from '../ci-wait/tools.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const descriptor = { name: 'cezar_ci_test', command: process.execPath, args: ['/installed/dist/ci-wait/mcp.js'] };
-const spec = { cwd: '/tmp', userPrompt: 'task', cezarTools: descriptor };
+const spec = { cwd: '/tmp', userPrompt: 'task', squawkTools: descriptor };
 
 export function registerCiDefinitionsAndInjection() {
 // hearsay-tools/cezarion#1233: one wait tool and one cancel tool reach every runner through
@@ -56,7 +56,7 @@ describe('wait tool definitions', () => {
     expect(askToolDefinition.description).toMatch(/Then end your turn; the user's answer wakes you\.$/);
     expect(askToolDefinition.description).not.toContain('assistant text');
     expect(askToolDefinition.description).toContain('a header of at most 12 characters, a short question of at most 400 characters');
-    expect(cezarServerInstructions()).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
+    expect(squawkServerInstructions()).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
   });
 
   // hearsay-tools/cezarion#1428: a rejected card's arguments never reach the user, so the retry
@@ -69,9 +69,9 @@ describe('wait tool definitions', () => {
 
   it('lists no cezar_wait_for_ci: no tool, no trigger line, no admission (hearsay-tools/cezarion#1236)', () => {
     for (const env of [{}, { CEZ_PREVIEW: '1' }]) {
-      expect(cezarTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
-      expect(cezarTools(env).map(tool => tool.definition.name)).not.toContain('cezar_wait_for_ci');
-      const instructions = cezarServerInstructions(env);
+      expect(squawkTools(env).map(tool => tool.definition.name).slice(0, 4)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+      expect(squawkTools(env).map(tool => tool.definition.name)).not.toContain('cezar_wait_for_ci');
+      const instructions = squawkServerInstructions(env);
       expect(instructions).not.toContain('- cezar_wait_for_ci:');
       expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
@@ -150,7 +150,7 @@ describe('CI tool injection', () => {
       try {
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: descriptor, resume, restrictCrossSessionMessaging: true, env: { CEZ_MOCK_ARGS_FILE: file, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { squawkTools: descriptor, resume, restrictCrossSessionMessaging: true, env: { CEZ_MOCK_ARGS_FILE: file, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         if (backend === 'claude') expect(rows[0]).toContain('--mcp-config');
@@ -207,7 +207,7 @@ describe('CI H1 executable harness parity', () => {
         const resultFile = join(dir, 'result');
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, userPrompt: `mock:ci-wait ${valid ? wait.prUrl : 'https://github.com/owner/repo/issues/1'}`, env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { squawkTools: session.descriptor, resume, userPrompt: `mock:ci-wait ${valid ? wait.prUrl : 'https://github.com/owner/repo/issues/1'}`, env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         expect(registrations).toBe(valid ? 1 : 0);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
@@ -286,7 +286,7 @@ describe('U0 wait tools on every native wire', () => {
         const resultFile = join(dir, 'result');
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, toolGrant, restrictCrossSessionMessaging: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { squawkTools: session.descriptor, resume, toolGrant, restrictCrossSessionMessaging: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
         expect(result.names).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);

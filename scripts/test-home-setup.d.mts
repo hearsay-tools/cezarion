@@ -1,6 +1,6 @@
 export interface TestHomeOptions {
   userHome: string;
-  cezarHome?: string;
+  squawkHome?: string;
   keepHostHome?: boolean;
 }
 export function configureTestHome(options: TestHomeOptions, env?: NodeJS.ProcessEnv): {

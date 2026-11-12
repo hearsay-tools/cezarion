@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION } from './run.ts';
 import { manager, spendWorkerBudget, store, until, worker } from './worker-wait-claude.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
-import { conversationOf, eventsOf, cezarAnswered, closedAs, noHumanCard, steeringParent, fillInbox, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
+import { conversationOf, eventsOf, squawkAnswered, closedAs, noHumanCard, steeringParent, fillInbox, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
@@ -13,7 +13,7 @@ it('answers the worker for the parent when the parent cannot take another messag
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     fillInbox(p.id);
     const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
-    await until(() => cezarAnswered(w.id).length === 1);
+    await until(() => squawkAnswered(w.id).length === 1);
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
     const answer = store.getRun(w.id)?.agentInputs?.filter(input => input.purpose === 'undelivered-question');
     expect(answer).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String), text: expect.stringContaining(`Not delivered to your parent task ${p.id}: the parent conversation is at capacity.`) })]);
@@ -65,7 +65,7 @@ it('closes the question without an answer when the worker spent its automatic-wa
     const w = await worker(p.id, 'mock:cezar-ask'); spendWorkerBudget(w.id); manager.enqueueOwnedRun(w.id);
     await until(() => closedAs(w.id).length === 1);
     expect(closedAs(w.id)).toEqual(['undeliverable']);
-    expect(cezarAnswered(w.id)).toEqual([]);
+    expect(squawkAnswered(w.id)).toEqual([]);
     expect(store.getRun(w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question') ?? false).toBe(false);
     noHumanCard(w.id);
   });
@@ -88,7 +88,7 @@ it('closes the question without an answer when the worker spent its automatic-wa
     route.mockRestore();
     await manager.recover(p.id);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the question is not a valid request' })]);
-    await until(() => cezarAnswered(w.id).length === 1);
+    await until(() => squawkAnswered(w.id).length === 1);
     noHumanCard(w.id);
   });
 
@@ -103,7 +103,7 @@ it('closes the question without an answer when the worker spent its automatic-wa
     const ask = eventsOf(w.id, 'ask.requested');
     expect(ask).toEqual([expect.objectContaining({ questions: [{ header: WORKER_FALLBACK_HEADER, question: WORKER_FALLBACK_QUESTION(w.id) }] })]);
     expect(eventsOf(w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq: ask[0]!.seq, reason: 'undeliverable' })]);
-    expect(cezarAnswered(w.id)).toEqual([]);
+    expect(squawkAnswered(w.id)).toEqual([]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
     noHumanCard(w.id);

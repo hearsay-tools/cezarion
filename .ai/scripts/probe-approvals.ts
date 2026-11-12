@@ -34,12 +34,12 @@ import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { parseArgs } from 'node:util';
-import type { CezarAskAnswer, CezarCancelWaitAnswer, CezarDoneAnswer, Wait } from '../../packages/contract/src/index.ts';
+import type { SquawkAskAnswer, SquawkCancelWaitAnswer, SquawkDoneAnswer, Wait } from '../../packages/contract/src/index.ts';
 import type { AgentEvent, AgentSession } from '../../packages/cezar/src/core/agent-runner.ts';
 import { CodexAppServerRunner } from '../../packages/cezar/src/core/codex-app-server-runner.ts';
 import { resolveCodexExecutable } from '../../packages/cezar/src/core/codex-app-server-transport.ts';
 import type { UiEvent } from '../../packages/cezar/src/core/ui-events.ts';
-import { CiToolController, type CezarToolHandlers, type WaitRegistration } from '../../packages/cezar/src/ci-wait/controller.ts';
+import { CiToolController, type SquawkToolHandlers, type WaitRegistration } from '../../packages/cezar/src/ci-wait/controller.ts';
 import { agentHomePaths } from '../../packages/cezar/src/paths.ts';
 
 type Frame = Record<string, unknown>;
@@ -106,11 +106,11 @@ const tee = (from) => {
     for (const line of lines) if (line) appendFileSync(log, JSON.stringify({ from, line }) + '\\n');
   };
 };
-const fromCezar = tee('cezar');
+const fromSquawk = tee('cezar');
 const fromCodex = tee('codex');
 process.stdin.setEncoding('utf8');
 child.stdout.setEncoding('utf8');
-process.stdin.on('data', (chunk) => { fromCezar(chunk); child.stdin.write(chunk); });
+process.stdin.on('data', (chunk) => { fromSquawk(chunk); child.stdin.write(chunk); });
 process.stdin.on('end', () => child.stdin.end());
 child.stdin.on('error', () => {});
 child.stdout.on('data', (chunk) => { fromCodex(chunk); process.stdout.write(chunk); });
@@ -212,9 +212,9 @@ function threadApprovalPolicy(wire: WireLine[]): unknown {
 }
 
 /** cezar's tool socket with stub handlers: each call is recorded, and a timer wait gets a receipt. */
-function stubHandlers(calls: Frame[]): CezarToolHandlers {
+function stubHandlers(calls: Frame[]): SquawkToolHandlers {
   const message = 'The approval probe answers cezar_wait timers only.';
-  const registerWait: CezarToolHandlers['registerWait'] = async (request, via) => {
+  const registerWait: SquawkToolHandlers['registerWait'] = async (request, via) => {
     calls.push({ tool: via, request });
     if (request.kind !== 'timer') return { answer: { ok: false, code: 'unavailable', message } } satisfies WaitRegistration;
     const now = new Date();
@@ -226,9 +226,9 @@ function stubHandlers(calls: Frame[]): CezarToolHandlers {
   };
   return {
     registerWait,
-    ask: async (request) => { calls.push({ tool: 'cezar_ask', request }); return { ok: false, code: 'unavailable', message } satisfies CezarAskAnswer; },
-    cancelWait: async (request) => { calls.push({ tool: 'cezar_cancel_wait', request }); return { cancelled: false, code: 'unavailable', message } satisfies CezarCancelWaitAnswer; },
-    finishTurn: async (request) => { calls.push({ tool: 'cezar_done', request }); return { ok: false, code: 'unavailable', message } satisfies CezarDoneAnswer; },
+    ask: async (request) => { calls.push({ tool: 'cezar_ask', request }); return { ok: false, code: 'unavailable', message } satisfies SquawkAskAnswer; },
+    cancelWait: async (request) => { calls.push({ tool: 'cezar_cancel_wait', request }); return { cancelled: false, code: 'unavailable', message } satisfies SquawkCancelWaitAnswer; },
+    finishTurn: async (request) => { calls.push({ tool: 'cezar_done', request }); return { ok: false, code: 'unavailable', message } satisfies SquawkDoneAnswer; },
   };
 }
 
@@ -295,16 +295,16 @@ function report(): void {
   const requests = serverRequests(wire);
   const calls = mcpToolCalls(wire);
   const marker = readNdjson(markerLog);
-  const cezarServer = tools.descriptor.name;
+  const squawkServer = tools.descriptor.name;
   say('thread', { approvalPolicy: threadApprovalPolicy(wire) });
   say('server-requests', requests);
   say('mcp-tool-calls', calls);
   say('tool-socket', socketCalls);
   say('marker', marker);
   say('verdict', {
-    cezarServer,
-    cezarApprovalRequests: requests.filter((request) => request.server === cezarServer).length,
-    cezarToolCalls: calls.filter((call) => call.server === cezarServer).map((call) => `${call.tool}: ${call.status}`),
+    squawkServer,
+    squawkApprovalRequests: requests.filter((request) => request.server === squawkServer).length,
+    squawkToolCalls: calls.filter((call) => call.server === squawkServer).map((call) => `${call.tool}: ${call.status}`),
     toolSocketSawCall: socketCalls.length > 0,
     markerApprovalReplies: requests.filter((request) => request.server === MARKER).map((request) => request.reply),
     markerToolCalls: calls.filter((call) => call.server === MARKER).map((call) => `${call.tool}: ${call.status}`),
@@ -326,7 +326,7 @@ async function finish(why: string, failed: boolean): Promise<void> {
 
 session = new CodexAppServerRunner({ bin: shim }).startSession({
   userPrompt: PROMPT, cwd: project, toolGrant: { kind: 'unset' }, ...(model ? { model } : {}), effort: 'low', timeoutMs: HANG_GUARD_MS + END_GRACE_MS,
-  cezarTools: tools.descriptor, env: { CODEX_HOME: codexHome, ...tools.env },
+  squawkTools: tools.descriptor, env: { CODEX_HOME: codexHome, ...tools.env },
 }, onEvent, { autoEndAfterFirstTurn: true, onUiEvent });
 session.result.then(
   () => finish(guardFired ? 'hang guard' : answerMissing ? `answer "${answer}" not offered` : 'turn ended', false),

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { runsOn } from './parity-classes.testkit.ts';
-import { CEZAR_ASK_QUESTION, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
+import { SQUAWK_ASK_QUESTION, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { driveRun } from './workflow-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
@@ -76,7 +76,7 @@ describe('intermediate workflow ASK parity — #427', () => {
           expect(run().status).toBe('waiting');
           expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
           expect(events().filter(e => e.type === 'ask.requested')).toMatchObject([
-            { stepId: 'implement', questions: [{ question: CEZAR_ASK_QUESTION }] },
+            { stepId: 'implement', questions: [{ question: SQUAWK_ASK_QUESTION }] },
           ]);
           expect(checks()).toEqual([]);
           const session = [...fixtureWork(manager).liveSessions][0]!;

@@ -4,7 +4,7 @@ import { previewHint, previewResult, validateRegistration } from './registration
 
 const worktreePath = '/repo/.ai/cezar/worktrees/run-1';
 const request = { command: 'npm run dev -- --port 5173 --strictPort', port: 5173 };
-const base = { request, worktreePath, cezarPort: 4321, existing: [] as PreviewServer[], runId: 'run-1', enabled: true, headless: false };
+const base = { request, worktreePath, squawkPort: 4321, existing: [] as PreviewServer[], runId: 'run-1', enabled: true, headless: false };
 const server = (port: number): PreviewServer => ({ port, command: 'npm run dev', label: 'npm', registeredAt: new Date().toISOString(), answeredAtRegistration: false });
 
 describe('validateRegistration (#781)', () => {

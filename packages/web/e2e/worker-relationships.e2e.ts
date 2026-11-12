@@ -11,7 +11,7 @@ import { seedRuns } from './seed-runs'
 import { clickAppearanceControl } from './appearance-control'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { seedTranscript } from './seed-transcript'
 import { largeThreadEvents } from './fixtures/make-large-thread'
 // fixture-server starts: 1
@@ -68,7 +68,7 @@ beforeAll(async () => {
   mkdirSync(join(root, '.cez-home'), { recursive: true })
   const home = Home.sandbox(join(root, '.cez-home'))
   Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'other-project', name: 'Other project', root: other, source: 'local', addedAt: now, lastOpenedAt: now }] })))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTONAME: '0' }), stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout?.on('data', chunk => { diagnostic += String(chunk) }); server.stderr?.on('data', chunk => { diagnostic += String(chunk) })
   try { base = await waitForFixtureServer(server) }
   catch (error) { throw new Error(`${String(error)}\n${diagnostic}`, { cause: error }) }

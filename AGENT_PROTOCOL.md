@@ -109,9 +109,9 @@ tools. Read each fact from its owner:
 - `WAIT_KINDS` in `packages/cezar/src/workflows/run/wait-kinds.ts`: one typed row for each wait
   kind, with its deadline, slot, wake budget, resolvers, cancel paths and texts. A new kind is a
   new row ([ADR 0061](docs/adr/0061-one-wait-engine-executes-wait-kind-rows.md)).
-- `cezarTools` in `packages/cezar/src/ci-wait/tools.ts`: the one list of cezar tools, with the
+- `squawkTools` in `packages/cezar/src/ci-wait/tools.ts`: the one list of cezar tools, with the
   descriptions that the agent reads. Every runner's adapter, extension and allow-list read
-  it, and `cezarToolEnvNames` lists the environment names a harness forwards. A new tool is
+  it, and `squawkToolEnvNames` lists the environment names a harness forwards. A new tool is
   one entry there. `errors.ts` beside it and `workflows/completion-policy.ts` hold the refusal
   messages.
 - The `CI_*` constants in `packages/cezar/src/ci-wait/supervisor.ts` and `github.ts`: the PR

@@ -69,14 +69,14 @@ const mcpToolApprovalRequest = (serverName, tool, overrides = {}) => ({
   message: `Allow the ${serverName} MCP server to run tool "${tool}"?`,
   requestedSchema: { type: 'object', properties: {} }, ...overrides,
 });
-const cezarServer = () => Object.entries(ciWire?.config ?? {}).find(([key]) => key.startsWith('mcp_servers.cezar_ci_'));
+const squawkServer = () => Object.entries(ciWire?.config ?? {}).find(([key]) => key.startsWith('mcp_servers.cezar_ci_'));
 const clientReplies = new Map();
 const requestClient = (id, method, params) => new Promise((resolve) => { clientReplies.set(id, resolve); emit({ id, method, params }); });
 let mcpGateSerial = 0;
 // Codex gates every MCP tool call by the server's (or tool's) approval mode and asks
 // unless it is `approve`, whatever `approval_policy` says.
 async function mcpToolGate(tool) {
-  const [key, server] = cezarServer() ?? [];
+  const [key, server] = squawkServer() ?? [];
   if (!server || server.default_tools_approval_mode === 'approve') return true;
   const reply = await requestClient(`mcp-gate-${++mcpGateSerial}`, 'mcpServer/elicitation/request',
     mcpToolApprovalRequest(key.slice('mcp_servers.'.length), tool));
@@ -94,7 +94,7 @@ async function lifecycle([name, args]) {
 const scenarioContext = {
   runner: 'codex', lifecycle, session: {}, unsupported: ['cezar-wait'], nativeFailureControl: Boolean(failureControl),
   async toolPrompt(prompt) {
-    const tool = (await tools()).cezarToolName(prompt) ?? 'cezar_wait';
+    const tool = (await tools()).squawkToolName(prompt) ?? 'cezar_wait';
     return await mcpToolGate(tool) ? (await tools()).toolPrompt('codex', ciWire, prompt) : 'user rejected MCP tool call';
   },
   async ciPrompt(prompt) {
@@ -581,7 +581,7 @@ function replyWithMcpApproval(turnText, msg, mcpApproval) {
 }
 
 function approvalServer(variant) {
-  return variant === 'own' ? (cezarServer()?.[0].slice('mcp_servers.'.length) ?? 'cezar_ci_mock') : 'docs';
+  return variant === 'own' ? (squawkServer()?.[0].slice('mcp_servers.'.length) ?? 'cezar_ci_mock') : 'docs';
 }
 
 async function replyWithApproval(turnText, msg) {

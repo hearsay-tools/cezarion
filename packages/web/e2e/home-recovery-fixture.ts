@@ -7,7 +7,7 @@ import { migrateLegacyHome } from '../../cezar/src/home/migrate'
 import { acceptHomeRecovery, getHomeRecovery } from '../../cezar/src/home/recovery'
 import { readMigrationRecord } from '../../cezar/src/home/migration-record'
 import { mergeWriteWorkspaceConfig } from '../../cezar/src/workspace/config'
-import { cezarCli, fixtureServeEnv } from './agent-browser'
+import { squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 
 export type HomeRecoveryControl =
@@ -34,7 +34,7 @@ export async function createHomeRecoveryFixture() {
   Home.seed(legacy, legacy.workspaceUiState, { recoveryFixture: 'original' })
   migrateLegacyHome(legacy, home)
   const server = spawnFixtureServer([join(import.meta.dirname, 'home-recovery-server.mjs'),
-    dirname(cezarCli), root, env.CEZ_HOME!], { env: { ...env, CEZ_HOME: legacy.root } })
+    dirname(squawkCli), root, env.CEZ_HOME!], { env: { ...env, CEZ_HOME: legacy.root } })
   try {
     const origin = await waitForFixtureServer(server)
     const control = async (command: HomeRecoveryControl): Promise<void> => {

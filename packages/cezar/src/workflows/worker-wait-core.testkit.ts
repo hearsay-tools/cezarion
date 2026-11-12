@@ -84,8 +84,8 @@ export const bookkeeping: Promise<unknown>[] = [];
 export const executions: Promise<unknown>[] = [];
 export function track() {
   observeWaitTimers(manager, store);
-  const handlers = manager.cezarToolHandlers.bind(manager);
-  vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+  const handlers = manager.squawkToolHandlers.bind(manager);
+  vi.spyOn(manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
     toolGenerations.set(id, generation);
     return handlers(id, generation);
   });

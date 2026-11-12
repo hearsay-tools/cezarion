@@ -148,7 +148,7 @@ describe('successful run settlement (#473)', () => {
     f.manager = manager;
     let fail!: (error: Error) => void;
     let finish!: (result: AgentRunResult) => void;
-    const tools = vi.spyOn(manager, 'cezarToolHandlers');
+    const tools = vi.spyOn(manager, 'squawkToolHandlers');
     let started = false;
     const startSession = vi.fn<NonNullable<typeof runnerHook.runner>['startSession']>((_spec, onEvent) => {
       const session: AgentSession = { open: true, result: new Promise((resolve, reject) => { finish = resolve; fail = reject; }),

@@ -84,7 +84,7 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     expect(manager.cancelWait(run.id, wait.id, generationOf(run.id))).toEqual({ cancelled: false, code: 'not_found' });
     expect(waitById(run.id, kept.id)?.phase).toBe('open');
     // The tool answer lists what is still open.
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).cancelWait({ wait_id: kept.id }, new AbortController().signal);
+    const answer = await manager.squawkToolHandlers(run.id, generationOf(run.id)).cancelWait({ wait_id: kept.id }, new AbortController().signal);
     expect(answer).toEqual({ cancelled: true, wait_id: kept.id, open_waits: [] });
     await vi.advanceTimersByTimeAsync(600_000);
     expect(inputsFor(run.id, kept.id)).toEqual([]);
@@ -125,7 +125,7 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     const run = await waitingParent();
     const interval = vi.spyOn(semaphore, 'monitoringWakeIntervalMinutes').mockReturnValue(null);
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'timers_disabled' });
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.squawkToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'timers_disabled', open_waits: [] });
     // A refused registration registers nothing, so Cezar's own wait stays.
     expect(store.getRun(run.id)?.waits?.map(wait => wait.via)).toEqual(['no-wait']);
@@ -161,7 +161,7 @@ describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
     for (let n = 0; n < WAIT_LIMIT; n++) opened.push(await registerTimer(run.id, 60 + n));
     await expect(registerTimer(run.id, 600)).rejects.toMatchObject({ code: 'capacity' });
     await expect(registerPr(run.id, 12)).rejects.toMatchObject({ code: 'capacity' });
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 600 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.squawkToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 600 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'capacity' });
     expect(answer.answer.open_waits).toHaveLength(WAIT_LIMIT);
     // Only open waits count, as the store counts them: a resolved one frees its place.

@@ -10,7 +10,7 @@ import { basename, join } from 'node:path'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { seedTranscript } from './seed-transcript'
 import { focusWithKeyboard, contrastSampleExpression } from './contrast'
@@ -39,7 +39,7 @@ beforeAll(async () => {
   Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }, { id: 'empty', root: empty }] })))
   const source = join(root, 'quarterly.html')
   writeFileSync(source, '<title>Quarterly report</title><h1>Published results</h1>')
-  const publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+  const publication = JSON.parse(execFileSync(process.execPath, [squawkCli, 'artifact', 'publish', source], {
     cwd: project, env: { ...env, CEZ_PROJECT_ID: 'shelf', CEZ_TASK_ID: runIds[0], CEZ_ARTIFACTS_DIR: join(dir, `${runIds[0]}-artifacts`) }, encoding: 'utf8',
   })) as { artifact: { sha256: string; size: number }; id: string }
   // The first snapshot uses the real CLI. Seed the remaining owned snapshots explicitly:
@@ -63,7 +63,7 @@ beforeAll(async () => {
       text: `Published results: [Quarterly report](/p/shelf/tasks/${runIds[14]}/files?artifact=${ids[14]})` },
   }) + '\n')
   rmSync(source)
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)
   expect(await bootProjectId(baseUrl)).toBe('shelf')
   browser = AgentBrowser.open(`reports-${process.pid}`)
@@ -177,7 +177,7 @@ it('shows a deleted snapshot as missing and drops reports after snapshot or task
     mkdirSync(env.CEZ_HOME!, { recursive: true })
     const home = Home.sandbox(env.CEZ_HOME!)
     Home.seedBytes(home, home.workspaceConfig, Buffer.from(JSON.stringify({ projects: [{ id: 'shelf', root: project }] })))
-    deletionServer = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
+    deletionServer = spawnFixtureServer([squawkCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
     const browser = deletionBrowser = AgentBrowser.open(`report-deletion-${process.pid}`)
     const baseUrl = await waitForFixtureServer(deletionServer)
     browser.goto(baseUrl + path)

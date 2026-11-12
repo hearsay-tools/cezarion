@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
 import { previewRefusal } from './errors.ts';
-import { cezarAskAnswerSchema, cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
+import { squawkAskAnswerSchema, squawkCancelWaitAnswerSchema, squawkDoneAnswerSchema, squawkWaitAnswerSchema, type SquawkAskAnswer, type SquawkCancelWaitAnswer, type SquawkDoneAnswer, type SquawkWaitAnswer } from '@open-mercato/cezar-contract/waits';
 import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduledTasksAnswerSchema, type ScheduleTaskAnswer, type ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { previewServeResultSchema, previewStopResultSchema, type PreviewStopResult, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 
@@ -24,31 +24,31 @@ export function callPreviewStop(input: unknown, env: NodeJS.ProcessEnv = process
 }
 
 /** hearsay-tools/cezarion#1233: unparsed like preview, so the server names the failing field. */
-export async function callCezarWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarWaitAnswer> {
+export async function callSquawkWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<SquawkWaitAnswer> {
   if (!productEnv('TOOL_SOCKET', env) || !productEnv('TOOL_TOKEN', env)) return { ok: false, effect: 'refused', code: 'unavailable', message: 'No local tool capability is configured. Nothing was created.' };
   const identified = input && typeof input === 'object' && !Array.isArray(input)
     ? { ...input, operation_id: 'operation_id' in input ? input.operation_id : randomUUID() } : input;
   const operationId = identified && typeof identified === 'object' && 'operation_id' in identified && typeof identified.operation_id === 'string' ? identified.operation_id : undefined;
-  const unknown: CezarWaitAnswer = { ok: false, effect: 'unknown', code: 'outcome_unknown', ...(operationId ? { operation_id: operationId } : {}),
+  const unknown: SquawkWaitAnswer = { ok: false, effect: 'unknown', code: 'outcome_unknown', ...(operationId ? { operation_id: operationId } : {}),
     message: 'Registration outcome is unknown. Retry the same operation_id and arguments to recover its receipt. Do not assume nothing was created, cancel a retained wait, or add a fallback timer.' };
   const deadline = Date.now() + 15_000;
-  const first = await callTool(identified, env, 'wait', cezarWaitAnswerSchema, unknown, 32_768, 7_500, true);
+  const first = await callTool(identified, env, 'wait', squawkWaitAnswerSchema, unknown, 32_768, 7_500, true);
   if (first.ok || first.code !== 'outcome_unknown' || !operationId || Date.now() >= deadline) return first;
-  return callTool(identified, env, 'wait', cezarWaitAnswerSchema, unknown, 32_768, Math.max(1, deadline - Date.now()), true);
+  return callTool(identified, env, 'wait', squawkWaitAnswerSchema, unknown, 32_768, Math.max(1, deadline - Date.now()), true);
 }
 
-export function callCezarCancelWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarCancelWaitAnswer> {
-  return callTool(input, env, 'cancel-wait', cezarCancelWaitAnswerSchema, { cancelled: false, code: 'unavailable', message: UNAVAILABLE });
+export function callSquawkCancelWait(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<SquawkCancelWaitAnswer> {
+  return callTool(input, env, 'cancel-wait', squawkCancelWaitAnswerSchema, { cancelled: false, code: 'unavailable', message: UNAVAILABLE });
 }
 
 /** hearsay-tools/cezarion#1234: unparsed too, so the server names an unknown field. */
-export function callCezarDone(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarDoneAnswer> {
-  return callTool(input, env, 'done', cezarDoneAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
+export function callSquawkDone(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<SquawkDoneAnswer> {
+  return callTool(input, env, 'done', squawkDoneAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
 }
 
 /** hearsay-tools/cezarion#1234: unparsed too, so the server names the failing question. */
-export function callCezarAsk(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<CezarAskAnswer> {
-  return callTool(input, env, 'ask', cezarAskAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
+export function callSquawkAsk(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<SquawkAskAnswer> {
+  return callTool(input, env, 'ask', squawkAskAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
 }
 
 /**

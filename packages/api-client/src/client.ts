@@ -5,9 +5,9 @@ import type { SuccessStatusCode } from 'hono/utils/http-status'
 
 /**
  * Typed HTTP client for /api/v1. Supply the service AppType as a type argument; this package has
- * no runtime service dependency. Example: createCezarClient<AppType>({ baseUrl }).
+ * no runtime service dependency. Example: createSquawkClient<AppType>({ baseUrl }).
  */
-export interface CezarClientOptions {
+export interface SquawkClientOptions {
   /**
    * Where the service lives — `https://cezar.example.com`, or a path prefix behind a proxy.
    *
@@ -36,12 +36,12 @@ export interface CezarClientOptions {
  * consumer that does not want the server package installed, still gets a working (untyped)
  * client instead of a type error.
  */
-export function createCezarClient<
+export function createSquawkClient<
   // The three `any`s are Hono's own constraint on `hc` (Env, Schema, BasePath) — narrowing
   // them here would reject perfectly good app types. `Hono` as the default is the untyped
-  // fallback: `createCezarClient()` with no type argument still returns a working client.
+  // fallback: `createSquawkClient()` with no type argument still returns a working client.
   T extends Hono<any, any, any> = Hono,
->(options: CezarClientOptions = {}): ReturnType<typeof hc<T>> {
+>(options: SquawkClientOptions = {}): ReturnType<typeof hc<T>> {
   const { baseUrl = '', token, headers, fetch } = options
   return hc<T>(baseUrl, {
     headers: {

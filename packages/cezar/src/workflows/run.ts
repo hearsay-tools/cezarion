@@ -11,11 +11,11 @@ import { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 export { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 export { isUntouchedCancelledRun } from './run/run-guards.ts';
 import * as completionGateReads from './run/completion-gate.ts';
-import { cezarToolHandlers } from './run/cezar-tools.ts';
+import { squawkToolHandlers } from './run/squawk-tools.ts';
 import type { DelegationExecutionSettings, StartRunInput, Execution, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
-import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { type SquawkDoneAnswer, type SquawkDoneRequest, type SquawkWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { nativeTimerDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
@@ -41,7 +41,7 @@ import { type PreviewHostLike } from '../preview/registration.ts';
 import type { CiResources } from '../ci-wait/resource-pool.ts';
 import type { CiProgressRegistry } from '../ci-wait/progress.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
-import type { CezarToolHandlers } from '../ci-wait/controller.ts';
+import type { SquawkToolHandlers } from '../ci-wait/controller.ts';
 import type { WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { onUsage, type ProcessUsage } from '../core/process-usage.ts';
@@ -128,7 +128,7 @@ export class RunManager {
   /** The runner factory this manager was built with, for the planner beside it. */
   get createRunner(): RunnerFactory { return this.#context.createRunner; }
   /** #781: cezar's own listening port, which no dev server may register. */
-  readonly #cezarPort: (() => number | undefined) | undefined;
+  readonly #squawkPort: (() => number | undefined) | undefined;
   #ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
 
   #disposed = false;
@@ -164,13 +164,13 @@ export class RunManager {
   constructor(
     store: RunStore,
     repoRoot: string,
-    options: { home: Home; createRunner: RunnerFactory; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined; acquireCiResources: (workspace: object) => CiResources },
+    options: { home: Home; createRunner: RunnerFactory; work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; squawkPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined; toolActivity?: ToolActivityTracker | undefined; acquireCiResources: (workspace: object) => CiResources },
   ) {
     this.#store = store;
     this.#repoRoot = repoRoot;
     this.#dataDir = projectPaths(repoRoot).write;
     this.#preview = options.preview;
-    this.#cezarPort = options.cezarPort;
+    this.#squawkPort = options.squawkPort;
     /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.#semaphore = options.semaphore ?? new WorkspaceSemaphore({ home: options.home });
@@ -185,7 +185,7 @@ export class RunManager {
       waitingBeforeFinalWorkflowStep: (...args) => this.#waitingBeforeFinalWorkflowStep(...args),
       parentCompletionBlockers: (...args) => this.#parentCompletionBlockers(...args),
       get ciResources() { return facade.#ciResources; },
-      cezarToolHandlers: (...args) => this.cezarToolHandlers(...args),
+      squawkToolHandlers: (...args) => this.squawkToolHandlers(...args),
       get delegationProvisioner() { return facade.#delegationProvisioner; },
       set delegationProvisioner(value) { facade.#delegationProvisioner = value; },
       claimWorktreeReclaim: (...args) => this.claimWorktreeReclaim(...args),
@@ -224,7 +224,7 @@ export class RunManager {
       cancelWait: (...args) => this.cancelWait(...args),
       acceptDone: (...args) => this.acceptDone(...args),
       get preview() { return facade.#preview; },
-      get cezarPort() { return facade.#cezarPort; },
+      get squawkPort() { return facade.#squawkPort; },
     });
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
     if (options.cockpit) this.setCockpitAddress(options.cockpit);
@@ -346,11 +346,11 @@ export class RunManager {
    * answers list the waits still open; a coded refusal answers with its fixed message, never the
    * thrower's text, and anything else is left to the tool server's `unavailable`.
    */
-  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers { return cezarToolHandlers(runId, generation, this.#modules.cezarToolsHost); }
+  squawkToolHandlers(runId: string, generation: string): SquawkToolHandlers { return squawkToolHandlers(runId, generation, this.#modules.squawkToolsHost); }
 
-  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer { return this.#modules.runFinish.acceptDone(runId, generation, request, signal); }
+  acceptDone(runId: string, generation: string, request: SquawkDoneRequest, signal?: AbortSignal): SquawkDoneAnswer { return this.#modules.runFinish.acceptDone(runId, generation, request, signal); }
 
-  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.#modules.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
+  async registerWait(runId: string, request: SquawkWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.#modules.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
   cancelWait(runId: string, waitId: string, generation: string) { return this.#modules.waitRegistry.cancelWait(runId, waitId, generation); }
 
 

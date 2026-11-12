@@ -52,7 +52,7 @@ async function checkTaskScope(client, sessionID, args) {
 }
 
 // The only export: OpenCode may call every exported function as a plugin.
-export const CezarTaskScope = async ({ client }) => ({
+export const SquawkTaskScope = async ({ client }) => ({
   'tool.execute.before': async (input, output) => {
     if (input.tool === 'task') await checkTaskScope(client, input.sessionID, output.args);
   },

@@ -166,7 +166,7 @@ function laterDoneSurvivesAck(ctx: RowContext): Promise<void> {
 async function doneRefusedBesideQuestion({ runId, send, attention, run }: RowContext): Promise<void> {
   await send(script(WAIT, ASK, thenSay(ACK_TEXT)));
   attention('needs you', true);
-  const tools = manager.cezarToolHandlers(runId, toolGenerationOf(runId));
+  const tools = manager.squawkToolHandlers(runId, toolGenerationOf(runId));
   const answer = await tools.finishTurn({ summary: 'Complete.' }, new AbortController().signal);
   expect(answer).toMatchObject({ ok: false, code: 'human_question_pending' });
   attention('needs you', true);

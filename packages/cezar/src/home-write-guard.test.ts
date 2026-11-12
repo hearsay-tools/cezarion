@@ -39,7 +39,7 @@ vi.mock('node:fs/promises', () => ({ mkdir: vi.fn(), writeFile: vi.fn(), rename:
 
 import { existsSync, realpathSync, lstatSync, mkdirSync, openSync, fsyncSync, chmodSync, linkSync, unlinkSync, writeFileSync, renameSync, rmSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
-import { assertCezarHomeWriteIsSandboxed } from './paths.ts';
+import { assertSquawkHomeWriteIsSandboxed } from './paths.ts';
 import { atomicWriteJsonSync } from './workspace/config.ts';
 import { mergeWriteAgentAccounts } from './workspace/agent-accounts.ts';
 import { disableRemoteSettings, enableRemoteSettings } from './remote-settings.ts';
@@ -260,18 +260,18 @@ describe('home write guard with HOME pinned to a sandbox', () => {
   it('does not let a custom env without VITEST bypass the process guard', async () => {
     await expect(enableRemoteSettings(4321, { CEZ_HOME: realHome }, undefined, testHome({ CEZ_HOME: realHome }))).rejects.toThrow('refusing to write');
     expect(mkdir).not.toHaveBeenCalled();
-    expect(() => assertCezarHomeWriteIsSandboxed(join(realHome, 'file'), {})).toThrow('refusing to write');
+    expect(() => assertSquawkHomeWriteIsSandboxed(join(realHome, 'file'), {})).toThrow('refusing to write');
   });
 
   it.each(['NODE_TEST_CONTEXT', 'JEST_WORKER_ID', 'STRYKER_MUTATOR'])('recognizes %s in the process', (key) => {
     vi.stubEnv('VITEST', '');
     vi.stubEnv(key, '1');
-    expect(() => assertCezarHomeWriteIsSandboxed(realHome, {})).toThrow('refusing to write');
+    expect(() => assertSquawkHomeWriteIsSandboxed(realHome, {})).toThrow('refusing to write');
   });
 
   it('allows a sandbox and a sibling path during a test', () => {
-    expect(() => assertCezarHomeWriteIsSandboxed('/tmp/cez-guard-sandbox/file')).not.toThrow();
-    expect(() => assertCezarHomeWriteIsSandboxed(`${realHome}-other/file`)).not.toThrow();
+    expect(() => assertSquawkHomeWriteIsSandboxed('/tmp/cez-guard-sandbox/file')).not.toThrow();
+    expect(() => assertSquawkHomeWriteIsSandboxed(`${realHome}-other/file`)).not.toThrow();
   });
 
   it('keeps a remote grant in its checked directory when env changes during mkdir', async () => {
@@ -293,7 +293,7 @@ describe('home write guard with HOME pinned to a sandbox', () => {
     for (const key of Object.keys(process.env)) {
       if (['VITEST', 'NODE_TEST_CONTEXT', 'JEST_WORKER_ID'].includes(key) || key.startsWith('STRYKER_')) vi.stubEnv(key, undefined);
     }
-    expect(() => assertCezarHomeWriteIsSandboxed(realHome, { VITEST: 'true' })).not.toThrow();
+    expect(() => assertSquawkHomeWriteIsSandboxed(realHome, { VITEST: 'true' })).not.toThrow();
   });
 });
 
@@ -310,9 +310,9 @@ it('refuses every split default kind root and descendant from the account home',
         join(account, '.local', 'share', 'hearsay-squawk'), join(account, '.cache', 'hearsay-squawk'),
         join(account, '.local', 'state', 'hearsay-squawk', 'run')];
   for (const root of roots) {
-    expect(() => assertCezarHomeWriteIsSandboxed(root, {})).toThrow('refusing to write');
-    expect(() => assertCezarHomeWriteIsSandboxed(join(root, 'nested', 'file.json'), {})).toThrow('refusing to write');
-    if (!root.endsWith(sep + 'run')) expect(() => assertCezarHomeWriteIsSandboxed(root + '-sandbox', {})).not.toThrow();
+    expect(() => assertSquawkHomeWriteIsSandboxed(root, {})).toThrow('refusing to write');
+    expect(() => assertSquawkHomeWriteIsSandboxed(join(root, 'nested', 'file.json'), {})).toThrow('refusing to write');
+    if (!root.endsWith(sep + 'run')) expect(() => assertSquawkHomeWriteIsSandboxed(root + '-sandbox', {})).not.toThrow();
   }
   for (const mutation of mutations) expect(mutation).not.toHaveBeenCalled();
 });

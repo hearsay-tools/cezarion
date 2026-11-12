@@ -5,9 +5,9 @@ import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../.
 import type { RunStore, RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { AutomationToolService, RunModuleContext } from './types.ts';
-import type { CezarToolHandlers } from '../../ci-wait/controller.ts';
+import type { SquawkToolHandlers } from '../../ci-wait/controller.ts';
 import { askErrorMessage, waitErrorMessage, scheduleRefusal } from '../../ci-wait/errors.ts';
-import { askErrorCodeSchema,  type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarWaitRequestInput, type CezarAskRequest, type CezarDoneRequest, type CezarDoneAnswer, type WaitVia, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema,  type SquawkAskAnswer, type SquawkCancelWaitAnswer, type SquawkWaitRequestInput, type SquawkAskRequest, type SquawkDoneRequest, type SquawkDoneAnswer, type WaitVia, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { PreviewServeRequest, PreviewServeResult, PreviewStopRequest, PreviewStopResult } from '@open-mercato/cezar-contract/preview';
 import { CANCEL_MESSAGES, openWaitList } from '../waits.ts';
 
@@ -36,20 +36,20 @@ export class AutomationToolsSlot {
 
 export type ToolHost = {
   store: RunStore;
-  registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, signal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry>;
-  registerAsk(runId: string, request: CezarAskRequest, generation: string, signal?: AbortSignal): Promise<HumanWaitEntry>;
+  registerWait(runId: string, request: SquawkWaitRequestInput, via: WaitVia, generation: string, signal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry>;
+  registerAsk(runId: string, request: SquawkAskRequest, generation: string, signal?: AbortSignal): Promise<HumanWaitEntry>;
   cancelWait(runId: string, waitId: string, generation: string): { cancelled: true } | { cancelled: false; code: 'not_found' | 'already_resolved' | 'human_question' };
-  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer;
+  acceptDone(runId: string, generation: string, request: SquawkDoneRequest, signal?: AbortSignal): SquawkDoneAnswer;
   registerPreviewServer(runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult>;
   stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult>;
   awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined>;
 };
-export function cezarToolHandlers(runId: string, generation: string, host: ToolHost): CezarToolHandlers {
+export function squawkToolHandlers(runId: string, generation: string, host: ToolHost): SquawkToolHandlers {
   const listOpen = () => openWaitList(host.store.getRun(runId)?.waits ?? []);
   const thrownCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return {
     registerWait: registrationToolHandler(runId, generation, host),
-    ask: async (request, signal): Promise<CezarAskAnswer> => {
+    ask: async (request, signal): Promise<SquawkAskAnswer> => {
       try {
         const wait = await host.registerAsk(runId, request, generation, signal);
         return { ok: true, wait_id: wait.id, open_waits: listOpen() };
@@ -64,7 +64,7 @@ export function cezarToolHandlers(runId: string, generation: string, host: ToolH
       try { outcome = host.cancelWait(runId, wait_id, generation); }
       catch { return { cancelled: false, code: 'unavailable', message: waitErrorMessage('unavailable'), open_waits: listOpen() }; }
       if (outcome.cancelled) return { cancelled: true, wait_id, open_waits: listOpen() };
-      return { cancelled: false, code: outcome.code, message: CANCEL_MESSAGES[outcome.code], open_waits: listOpen() } satisfies CezarCancelWaitAnswer;
+      return { cancelled: false, code: outcome.code, message: CANCEL_MESSAGES[outcome.code], open_waits: listOpen() } satisfies SquawkCancelWaitAnswer;
     },
     finishTurn: async (request, signal) => host.acceptDone(runId, generation, request, signal),
     registerPreview: (request, signal) => host.registerPreviewServer(runId, request, signal),
@@ -100,7 +100,7 @@ export function toolSessionRefusal(run: RunRecord | undefined, state: ActiveRun 
 export interface CiSessionHost {
   active: ReadonlyMap<string, ActiveRun>;
   ciResources(): CiResources;
-  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers;
+  squawkToolHandlers(runId: string, generation: string): SquawkToolHandlers;
   preview(): PreviewHostLike | undefined;
   cockpit(): { origin: string; projectId: string } | undefined;
 }
@@ -116,7 +116,7 @@ export async function provisionCiSession(context: RunModuleContext, host: CiSess
   // which fails this launch; no session runs without the lifecycle tools.
   const controller = await host.ciResources().controller();
   if (context.disposed() || state.liveSession.cancelled || host.active.get(runId) !== state) return;
-  const provisioned = previewCdpSession(controller.provision(host.cezarToolHandlers(runId, generation)), { host: host.preview(), cockpitOrigin: host.cockpit()?.origin, runId, worktree: !!context.store.getRun(runId)?.worktreePath, context: () => previewRunContext(context.store, context.dataDir, runId) });
+  const provisioned = previewCdpSession(controller.provision(host.squawkToolHandlers(runId, generation)), { host: host.preview(), cockpitOrigin: host.cockpit()?.origin, runId, worktree: !!context.store.getRun(runId)?.worktreePath, context: () => previewRunContext(context.store, context.dataDir, runId) });
   state.liveSession.installCiRevoker(provisioned.revoke);
   return provisioned;
 }

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { artifactsDir } from './github-fixture'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
@@ -107,7 +107,7 @@ beforeAll(async () => {
   ])
   seedRuns(rootB, [run(rootB, 'b-only', { title: 'B only worktree' })])
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)

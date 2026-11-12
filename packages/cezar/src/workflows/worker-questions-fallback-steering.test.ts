@@ -8,7 +8,7 @@ import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import type { RunRecord } from '../runs/store.ts';
-import { conversationOf, eventsOf, cezarAnswered, noHumanCard, idleWorker, steer, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
+import { conversationOf, eventsOf, squawkAnswered, noHumanCard, idleWorker, steer, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
 describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
@@ -90,7 +90,7 @@ it("a worker's own question still holds a parent's steer", async () => {
   it('answers the worker for the parent when the parent may not message its workers', async () => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
-    await until(() => cezarAnswered(w.id).length === 1);
+    await until(() => squawkAnswered(w.id).length === 1);
     expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the parent may not message its workers' })]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     noHumanCard(w.id);

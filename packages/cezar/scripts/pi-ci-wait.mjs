@@ -2,10 +2,10 @@
 // Resolve beside this installed script; no private workspace dependency or download.
 import { existsSync } from 'node:fs';
 const source = new URL('../src/ci-wait/tools.ts', import.meta.url);
-const { cezarTools } = await import(existsSync(source) ? source.href : new URL('../dist/ci-wait/tools.js', import.meta.url).href);
+const { squawkTools } = await import(existsSync(source) ? source.href : new URL('../dist/ci-wait/tools.js', import.meta.url).href);
 // #781: the shared cezar tool list, read in Pi's own process, whose env carries the opt-in.
 export default function ciWaitExtension(pi) {
-  for (const tool of cezarTools(process.env)) {
+  for (const tool of squawkTools(process.env)) {
     pi.registerTool({
       name: tool.definition.name,
       label: tool.label,

@@ -6,7 +6,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { dismissWithEscape, hoverVisiblePoint } from './contrast'
 import { waitForSettledSample } from './visual-ready'
@@ -48,7 +48,7 @@ beforeAll(async () => {
   seedRuns(root, [record, wide,
     ({ ...record, id: 'long', title: 'Long collection', issueNumber: undefined, pullRequests: Array.from({ length: 25 }, (_, n) => ({ number: 300 + n, url: `https://github.com/mock/repo/pull/${300 + n}`, source: 'created' as const })) } satisfies Partial<RunRecord>),
     ({ ...record, id: 'legacy', title: 'Legacy task', pullRequests: undefined, prNumber: 128, issueNumber: undefined } satisfies Partial<RunRecord>)])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor } from './poll'
 // fixture-server starts: 1
@@ -218,7 +218,7 @@ beforeAll(async () => {
   const publish = (name: string, html: string) => {
     const source = join(root, name)
     writeFileSync(source, html)
-    const published = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+    const published = JSON.parse(execFileSync(process.execPath, [squawkCli, 'artifact', 'publish', source], {
       cwd: project, env: { ...env, CEZ_PROJECT_ID: 'reader', CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
     }))
     rmSync(source)
@@ -236,7 +236,7 @@ beforeAll(async () => {
   })
   seedRuns(project, [run])
   mkdirSync(evidenceDir, { recursive: true })
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)
   expect(await bootProjectId(baseUrl)).toBe('reader')
   browser = AgentBrowser.open(`html-reader-${process.pid}`)

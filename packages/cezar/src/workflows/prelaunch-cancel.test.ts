@@ -267,7 +267,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(p.store.getRun(id)?.status).toBe('waiting');
     expect(launches).toHaveBeenCalledTimes(1);
     expect(provision).toHaveBeenCalledTimes(1);
-    expect(launches.mock.calls[0]![0].cezarTools).toEqual(provision.mock.results[0]!.value.descriptor);
+    expect(launches.mock.calls[0]![0].squawkTools).toEqual(provision.mock.results[0]!.value.descriptor);
     expect(launches.mock.results[0]!.value).not.toBeInstanceOf(Promise);
   });
 

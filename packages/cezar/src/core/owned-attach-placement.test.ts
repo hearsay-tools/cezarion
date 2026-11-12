@@ -43,7 +43,7 @@ const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'eviden
 // the worker's worktree holds at the moment its session starts (hearsay-tools/cezarion#1149).
 describe('attached parent files in the worker worktree', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  const tools = new Map<string, ReturnType<typeof f.manager.cezarToolHandlers>>();
+  const tools = new Map<string, ReturnType<typeof f.manager.squawkToolHandlers>>();
   const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string | undefined; finish(): void; done(runId: string): Promise<void> }> = [];
   const spawn = (paths: readonly string[]) => f.service.spawn(f.caller, { task: 'inspect', baseline: 'parent-head', requestId: randomUUID(),
     context: { artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) } satisfies WorkerSpawnRequest['context'] });
@@ -67,8 +67,8 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture();
     tools.clear();
-    const handlers = f.manager.cezarToolHandlers.bind(f.manager);
-    vi.spyOn(f.manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    const handlers = f.manager.squawkToolHandlers.bind(f.manager);
+    vi.spyOn(f.manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
       const launched = handlers(id, generation);
       tools.set(id, launched);
       return launched;

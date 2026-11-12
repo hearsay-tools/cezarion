@@ -6,7 +6,7 @@ import { WAIT_SOURCE } from '@open-mercato/cezar-api-client/contract/test-factor
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns, recordedRun } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import recordJson from './fixtures/thread-run.record.json'
@@ -63,7 +63,7 @@ beforeAll(async () => {
     .map(([id, title]) => ({ ...record, id: id!, title: title!, titleSummary: title, task: 'Coordinate the peers.', pullRequestUrl: undefined } satisfies Partial<RunRecord>)))
   seedTranscript(join(root, '.ai/cezar/runs', `${self}.ndjson`),
     events.map((event, n) => JSON.stringify({ seq: n + 1, ts: '2026-10-28T12:05:00Z', ...event })).join('\n') + '\n')
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root), stdio: 'ignore' })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root), stdio: 'ignore' })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   browser = AgentBrowser.open(`e2e-peer-cards-${process.pid}`)

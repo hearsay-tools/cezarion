@@ -11,7 +11,7 @@ import type { AgentSession, AgentRunResult } from '../core/agent-runner.ts';
 import { RUN_STATUS, STEP_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
+import { squawkDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { manager, parent, restart, root, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { toolCall } from './waits-parity.testkit.ts';
@@ -183,7 +183,7 @@ describe('root request completion without a live session', () => {
     expect(refusal.message).toContain('5 more incoming requests omitted');
     expect(refusal.message).toContain('hsq message conversation <sender>');
     expect(refusal.message.length).toBeLessThanOrEqual(4096);
-    expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: refusal.code, message: refusal.message }).success).toBe(true);
+    expect(squawkDoneAnswerSchema.safeParse({ ok: false, code: refusal.code, message: refusal.message }).success).toBe(true);
     // The first cezar_done is refused with the request list; a second one in the same completion
     // cycle finishes without replying, and every request settles.
     expect(manager.sendMessage(recipient.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${toolCall('cezar_done', {})}` }])).toBe(true);
@@ -206,6 +206,6 @@ describe('root request completion without a live session', () => {
       expect(refusal.message).toContain(request.recipientRunId);
       expect(refusal.message).toContain(request.deadline);
     }
-    expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: refusal.code, message: refusal.message, open_waits: [] }).success).toBe(true);
+    expect(squawkDoneAnswerSchema.safeParse({ ok: false, code: refusal.code, message: refusal.message, open_waits: [] }).success).toBe(true);
   });
 });

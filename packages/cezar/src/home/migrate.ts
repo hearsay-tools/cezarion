@@ -9,7 +9,7 @@ import { createInstallMarker, readInstallMarker, underTestRunner, writeMigration
 import { claimMigration, removeStaleMigrationClaim } from './migration-claim.ts';
 import { copyMigrationAccounts } from './migration-accounts.ts';
 import { insideDirectory, migrationFiles, migrationPrivacy, replacePrivateTree, writeLegacyArchive } from './migration-files.ts';
-import { archiveExcludes, isCezarMigrationJson, migrationRecordFor, planLegacyMigration, type MigrationPlan } from './migration-plan.ts';
+import { archiveExcludes, isSquawkMigrationJson, migrationRecordFor, planLegacyMigration, type MigrationPlan } from './migration-plan.ts';
 import { migrationRecordSchema, movedHomeSchema, readMigrationRecord, writeMigrationRecord, type MigrationFile, type MigrationRecord } from './migration-record.ts';
 import { registryFiles } from './entry-authorization.ts';
 import { privateDirectory, protectPrivatePath, replacePrivate, syncDirectory } from './private-files.ts';
@@ -60,7 +60,7 @@ function copyFile(legacy: Home, target: Home, file: MigrationFile): void {
   const source = join(legacy.root, file.path);
   assertHomePath(legacy.root, source);
   const bytes = readBytes(source);
-  if (bytes !== null && isCezarMigrationJson(file.path)) JSON.parse(bytes.toString('utf8'));
+  if (bytes !== null && isSquawkMigrationJson(file.path)) JSON.parse(bytes.toString('utf8'));
   if (homeFileSchema.safeParse(file.target.path).success) {
     const log = new VersionLog(root, file.target.path, migrationPrivacy);
     log.replace(path, bytes);

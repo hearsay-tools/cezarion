@@ -23,7 +23,7 @@ import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semap
  * A peer is a root task of the project; it needs no session to send, so it is a record here.
  */
 
-const handlers = (runId: string) => manager.cezarToolHandlers(runId, toolGenerationOf(runId));
+const handlers = (runId: string) => manager.squawkToolHandlers(runId, toolGenerationOf(runId));
 const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.filter(wait => wait.id === waitId).at(-1);
 const anyOf = (runId: string, waitId: string) => entryOf(runId, waitId) ?? settledOf(runId, waitId);

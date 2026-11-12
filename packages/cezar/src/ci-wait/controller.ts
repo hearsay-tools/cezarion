@@ -15,7 +15,7 @@ import { askErrorMessage, askInvalidInput, ciErrorMessage, ToolsUnavailableError
 export { ToolsUnavailableError } from './errors.ts';
 import { automationsToolEnabled, previewToolEnabled } from './tool-catalog.ts';
 import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduleTaskRequestSchema, scheduledTasksAnswerSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduleTaskRequest, type ScheduledTasksAnswer, type ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequestInput, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
+import { squawkAskAnswerSchema, squawkAskRequestSchema, squawkCancelWaitAnswerSchema, squawkCancelWaitRequestSchema, squawkDoneAnswerSchema, squawkDoneRequestSchema, squawkWaitAnswerSchema, squawkWaitRequestSchema, type SquawkAskAnswer, type SquawkAskRequest, type SquawkCancelWaitAnswer, type SquawkCancelWaitRequest, type SquawkDoneAnswer, type SquawkDoneRequest, type SquawkWaitAnswer, type SquawkWaitRequestInput, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import { ciWaitErrorCodeSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, previewStopResultSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { jsonZodValidator } from '../server/validators.ts';
@@ -26,20 +26,20 @@ import type { AgentRunSpec } from '../core/agent-runner.ts';
  * registration also carries the entry it opened.
  */
 export type WaitRegistration =
-  | { answer: Extract<CezarWaitAnswer, { ok: true }>; wait: Wait }
-  | { answer: Extract<CezarWaitAnswer, { ok: false }> };
+  | { answer: Extract<SquawkWaitAnswer, { ok: true }>; wait: Wait }
+  | { answer: Extract<SquawkWaitAnswer, { ok: false }> };
 /** `signal` aborts when the session's capability is revoked (cancel, stop, session end). */
 type PreviewRegistration = (request: PreviewServeRequest, signal: AbortSignal) => Promise<PreviewServeResult>;
 type PreviewStop = (request: PreviewStopRequest, signal: AbortSignal) => Promise<PreviewStopResult>;
 /** The session's trusted callbacks: run identity comes from here, never from the model's arguments. */
-export type CezarToolHandlers = {
+export type SquawkToolHandlers = {
   /** `via` names the tool that opened the wait. */
-  registerWait: (request: CezarWaitRequestInput, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
+  registerWait: (request: SquawkWaitRequestInput, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
   /** `cezar_ask` (hearsay-tools/cezarion#1234): opens the run's human wait with its card. */
-  ask: (request: CezarAskRequest, signal: AbortSignal) => Promise<CezarAskAnswer>;
-  cancelWait: (request: CezarCancelWaitRequest, signal: AbortSignal) => Promise<CezarCancelWaitAnswer>;
+  ask: (request: SquawkAskRequest, signal: AbortSignal) => Promise<SquawkAskAnswer>;
+  cancelWait: (request: SquawkCancelWaitRequest, signal: AbortSignal) => Promise<SquawkCancelWaitAnswer>;
   /** `cezar_done` (hearsay-tools/cezarion#1234): accepted means the run, or a workflow step that is not the last, finishes at this turn's end (hearsay-tools/cezarion#1620). */
-  finishTurn: (request: CezarDoneRequest, signal: AbortSignal) => Promise<CezarDoneAnswer>;
+  finishTurn: (request: SquawkDoneRequest, signal: AbortSignal) => Promise<SquawkDoneAnswer>;
   /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
   registerPreview?: PreviewRegistration | undefined;
   stopPreview?: PreviewStop | undefined;
@@ -47,8 +47,8 @@ export type CezarToolHandlers = {
   scheduleTask?: (request: ScheduleTaskRequest, signal: AbortSignal) => Promise<ScheduleTaskAnswer>;
   scheduledTasks?: (request: ScheduledTasksRequest, signal: AbortSignal) => Promise<ScheduledTasksAnswer>;
 };
-type Capability = CezarToolHandlers & { lifetime: AbortController };
-export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
+type Capability = SquawkToolHandlers & { lifetime: AbortController };
+export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['squawkTools']>; env: Record<string, string>; revoke(): void };
 /** `cezar_ask` carries up to 20,000 characters of context (hearsay-tools/cezarion#1458). JSON can
  *  escape a character to six bytes, so the largest valid card (context, four questions with four
  *  options, every field at its limit) is about 166 KB; 256 KiB admits it with room to spare. */
@@ -106,7 +106,7 @@ export class CiToolController {
     }
   }
 
-  provision(handlers: CezarToolHandlers, rebrand?: boolean): CiToolSession {
+  provision(handlers: SquawkToolHandlers, rebrand?: boolean): CiToolSession {
     if (this.closed) throw new ToolsUnavailableError('the tool controller was closed', socketRoot());
     const token = randomBytes(32).toString('hex');
     const capability: Capability = { ...handlers, lifetime: new AbortController() };
@@ -190,12 +190,12 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     })
     .use('/api/v1/tools/wait', requireCapability)
     // The agent fixes a bad call from the message, so refusals answer 200 with a typed result.
-    .post('/api/v1/tools/wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, effect: 'refused' as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB. Nothing was created.' }) }), jsonZodValidator(cezarWaitRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, effect: 'refused' as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
+    .post('/api/v1/tools/wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, effect: 'refused' as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB. Nothing was created.' }) }), jsonZodValidator(squawkWaitRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, effect: 'refused' as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
         const { answer } = await capability.registerWait(c.req.valid('json'), 'cezar_wait', capability.lifetime.signal);
         // A registration receipt already committed remains true after capability revocation.
-        return c.json(cezarWaitAnswerSchema.parse(answer));
+        return c.json(squawkWaitAnswerSchema.parse(answer));
       } catch (error) {
         return capabilityRevoked(c, capability, () => {
           const code = ciRefusalCode(thrownCode(error));
@@ -206,10 +206,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       }
     })
     .use('/api/v1/tools/ask', requireCapability)
-    .post('/api/v1/tools/ask', bodyLimit({ maxSize: ASK_BODY_LIMIT, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 256 KiB.' }) }), jsonZodValidator(cezarAskRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: askInvalidInput(error) }) }), async c => {
+    .post('/api/v1/tools/ask', bodyLimit({ maxSize: ASK_BODY_LIMIT, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 256 KiB.' }) }), jsonZodValidator(squawkAskRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: askInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
-        const answer = cezarAskAnswerSchema.parse(await capability.ask(c.req.valid('json'), capability.lifetime.signal));
+        const answer = squawkAskAnswerSchema.parse(await capability.ask(c.req.valid('json'), capability.lifetime.signal));
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
@@ -217,10 +217,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       }
     })
     .use('/api/v1/tools/cancel-wait', requireCapability)
-    .post('/api/v1/tools/cancel-wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarCancelWaitRequestSchema, { invalid: (c, error) => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
+    .post('/api/v1/tools/cancel-wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(squawkCancelWaitRequestSchema, { invalid: (c, error) => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
-        const answer = cezarCancelWaitAnswerSchema.parse(await capability.cancelWait(c.req.valid('json'), capability.lifetime.signal));
+        const answer = squawkCancelWaitAnswerSchema.parse(await capability.cancelWait(c.req.valid('json'), capability.lifetime.signal));
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
@@ -228,10 +228,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       }
     })
     .use('/api/v1/tools/done', requireCapability)
-    .post('/api/v1/tools/done', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarDoneRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: doneInvalidInput(error) }) }), async c => {
+    .post('/api/v1/tools/done', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(squawkDoneRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: doneInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
-        const answer = cezarDoneAnswerSchema.parse(await capability.finishTurn(c.req.valid('json'), capability.lifetime.signal));
+        const answer = squawkDoneAnswerSchema.parse(await capability.finishTurn(c.req.valid('json'), capability.lifetime.signal));
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {

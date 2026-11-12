@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, readTestEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, restoreContrastQaDefaults } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor, pollJson } from './poll'
@@ -76,7 +76,7 @@ describe('scheduled automations on a default-on fixture server', () => {
     const git = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' })
     git('init', '-q', '-b', 'main')
     git('-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture')
-    server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+    server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(root), stdio: 'ignore',
     })
     base = await waitForFixtureServer(server)

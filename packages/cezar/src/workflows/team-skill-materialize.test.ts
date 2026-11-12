@@ -24,7 +24,7 @@ import { bareDirFor, refreshTeamSkills } from '../skills-remote.ts';
 import { seedTeamDirSkillClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
 import { RunManager } from './run.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import type { CezarToolHandlers } from '../ci-wait/controller.ts';
+import type { SquawkToolHandlers } from '../ci-wait/controller.ts';
 import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from './types.ts';
 
 const LAUNCH_WAIT_MS = 15_000;
@@ -42,7 +42,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   let store: RunStore;
   let manager: RunManager;
   let launches: AgentRunSpec[];
-  let tools: Map<string, CezarToolHandlers>;
+  let tools: Map<string, SquawkToolHandlers>;
   let sessions: Array<(done?: boolean) => Promise<void>>;
   let sent: string[];
   let cleanup: string[];
@@ -69,8 +69,8 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
     tools = new Map();
-    const handlers = manager.cezarToolHandlers.bind(manager);
-    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    const handlers = manager.squawkToolHandlers.bind(manager);
+    vi.spyOn(manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
       const value = handlers(id, generation); tools.set(id, value); return value;
     });
     vi.spyOn(runners, 'createRunner').mockImplementation((backend) => ({

@@ -8,7 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { focusWithKeyboard } from './contrast'
 import { artifactsDir } from './github-fixture'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -179,7 +179,7 @@ beforeAll(async () => {
     run('task-archived', { issueNumber: 106, archived: true, archivedAt: ago(1_000) }),
     run('task-pr-only', { pullRequestUrl: `https://github.com/${REPO}/pull/201` }),
   ])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     // CEZ_AUTOMATIONS=1 adds Automations, so the view tabs carry their most crowded set: a More menu beside six views.
     env: { ...fixtureServeEnv(root), CEZ_AUTOMATIONS: '1' }, stdio: 'ignore',
   })

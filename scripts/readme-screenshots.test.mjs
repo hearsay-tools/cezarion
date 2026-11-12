@@ -8,7 +8,7 @@ import { test } from 'node:test';
 
 import { Cockpit, findAgentBrowser, ghConfigDir, missingPrerequisites, parseOptions, REPO_ROOT, serverEnv, USAGE, waitUntil, writeAgentLauncher } from '../.ai/scripts/readme-screenshots/capture.mjs';
 import { applyChange, controlResponse, HELP_TEXT, main, parseLine, playTurn, VERSION_TEXT } from '../.ai/scripts/readme-screenshots/demo-agent.mjs';
-import { cezarFiles, createDemoRepos, DEMO_SKILLS, DEMO_WORKFLOWS, STOREFRONT_FILES } from '../.ai/scripts/readme-screenshots/demo-repos.mjs';
+import { squawkFiles, createDemoRepos, DEMO_SKILLS, DEMO_WORKFLOWS, STOREFRONT_FILES } from '../.ai/scripts/readme-screenshots/demo-repos.mjs';
 import { CELLS, editedText, findMockText, FOLLOW_UP_REPLY, GITHUB_REPO, LIVE_RUN_TASK, pickScenario, SCENARIOS, SEED_TASKS, testText, turnScript } from '../.ai/scripts/readme-screenshots/scenarios.mjs';
 
 function scratch(t, prefix) {
@@ -185,7 +185,7 @@ test('createDemoRepos builds both projects on main, without the excluded paths',
     assert.equal(git(repo, 'branch', '--show-current'), 'main');
     assert.equal(git(repo, 'rev-list', '--count', 'HEAD'), '1');
     assert.equal(git(repo, 'status', '--porcelain'), '');
-    for (const path of Object.keys(cezarFiles())) assert.ok(existsSync(join(repo, path)), path);
+    for (const path of Object.keys(squawkFiles())) assert.ok(existsSync(join(repo, path)), path);
   }
   for (const path of Object.keys(STOREFRONT_FILES)) assert.ok(existsSync(join(repos.storefront, path)), path);
   assert.equal(git(repos.cezarion, 'remote', 'get-url', 'origin'), `https://github.com/${GITHUB_REPO}.git`);

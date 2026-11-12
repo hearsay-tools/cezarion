@@ -7,7 +7,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
 import { settleVisual, waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
@@ -64,7 +64,7 @@ beforeAll(async () => {
     record(RUN_ID, RUN_STATUS.review, { diffStat: { adds: 12, dels: 3, files: 3 } }),
     record('tab-bar-done', RUN_STATUS.done),
   ])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)

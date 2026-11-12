@@ -7,7 +7,7 @@ const AGENT_HOME_KEYS = [
 ]
 
 /** Script-only setup: never import product modules before test-file mocks. */
-export function configureTestHome({ userHome, cezarHome = join(userHome, '.cezar'), keepHostHome = false }, env = process.env) {
+export function configureTestHome({ userHome, squawkHome = join(userHome, '.cezar'), keepHostHome = false }, env = process.env) {
   // Scrub once per file/process. Tests may set their own flags in beforeAll.
   for (const key of Object.keys(env)) {
     if (/^(?:CEZ|HSQ)_/.test(key.toUpperCase())) delete env[key]
@@ -18,8 +18,8 @@ export function configureTestHome({ userHome, cezarHome = join(userHome, '.cezar
   }
   const pinHome = () => {
     if (!env.CEZ_HOME) {
-      ensureTestInstallMarker(cezarHome)
-      select(cezarHome)
+      ensureTestInstallMarker(squawkHome)
+      select(squawkHome)
     }
   }
   const pinUserHome = () => {
@@ -27,7 +27,7 @@ export function configureTestHome({ userHome, cezarHome = join(userHome, '.cezar
     // Every other home override still points into their private sandbox.
     if (!keepHostHome) env.HOME = env.USERPROFILE = userHome
     for (const key of AGENT_HOME_KEYS) delete env[key]
-    env.HSQ_HOME = env.CEZ_HOME || cezarHome
+    env.HSQ_HOME = env.CEZ_HOME || squawkHome
     env.APPDATA = join(userHome, 'AppData', 'Roaming')
     env.LOCALAPPDATA = join(userHome, 'AppData', 'Local')
     env.XDG_CONFIG_HOME = join(userHome, '.config')

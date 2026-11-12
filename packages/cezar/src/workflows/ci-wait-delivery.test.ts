@@ -43,7 +43,7 @@ describe('CI wait delivery', { timeout: 30_000 }, () => {
     vi.spyOn(runners, 'createRunner').mockReturnValue(runner);
     const run = await parent();
     const wait = await register(run.id);
-    const answer = await manager.cezarToolHandlers(run.id, toolGenerationOf(run.id)).ask({
+    const answer = await manager.squawkToolHandlers(run.id, toolGenerationOf(run.id)).ask({
       context: 'Choose before continuing.', questions: [{ header: 'Choice', question: 'Which option?' }],
     }, new AbortController().signal);
     expect(answer.ok).toBe(true);

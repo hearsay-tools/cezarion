@@ -10,7 +10,7 @@ import { seedRuns, recordedRun } from './seed-runs'
 import { settleVisual } from './visual-ready'
 import { dismissWithEscape } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, pollFor, pollJson } from './poll'
 import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
@@ -35,7 +35,7 @@ beforeAll(async () => {
     return ({ ...record, id: `fixture-${variant}`, title: `Validate task views (${variant})`, status: RUN_STATUS.done, archived: false, worktreePath, branch: `cez/fixture-${variant}`, inputTokens: 42000, outputTokens: 6000, costUsd: 0.42, peakRssBytes: 440401920, diffStat: { adds: 2, dels: 0, files: 1 } } satisfies Partial<RunRecord>)
   })
   seedRuns(root, runs)
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   // The fixture has no GitHub remote, so create refuses a GitHub automation (#766); a schedule needs none.

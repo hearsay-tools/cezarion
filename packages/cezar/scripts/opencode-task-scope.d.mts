@@ -15,4 +15,4 @@ export interface TaskScopeHooks {
   ) => Promise<void>;
 }
 
-export declare const CezarTaskScope: (input: { client: TaskScopeClient }) => Promise<TaskScopeHooks>;
+export declare const SquawkTaskScope: (input: { client: TaskScopeClient }) => Promise<TaskScopeHooks>;

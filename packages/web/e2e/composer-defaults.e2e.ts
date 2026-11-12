@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { ApiRun, CreateRunInput, RunRecord, WorkspaceConfigResponse } from '@open-mercato/cezar-api-client'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, getJson } from './agent-browser'
 import { pollFor } from './poll'
 // fixture-server starts: 1
 
@@ -69,7 +69,7 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
 
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: { ...fixtureServeEnv(dataRoot), CEZ_AUTONOMOUS_DEFAULT: '' }, stdio: 'ignore' },
   )
   baseUrl = await waitForFixtureServer(server)

@@ -8,7 +8,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, getJson } from './agent-browser'
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 // fixture-server starts: 1
 
@@ -37,7 +37,7 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-handoff-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   seedRuns(root, [fixture('desktop'), fixture('mobile')])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)

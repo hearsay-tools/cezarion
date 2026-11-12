@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv, getJson } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
 // fixture-server starts: 1
 
@@ -71,7 +71,7 @@ async function bootFixture(
   const repo = mkdtempSync(join(tmpdir(), `cezar-e2e-repo-git-diff-${label}-`))
   buildFixtureRepo(repo, count, lines)
 
-  const server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'],
+  const server = spawnFixtureServer([squawkCli, 'serve', '--repo', repo, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(repo), stdio: 'ignore' },
   )
   const baseUrl = await waitForFixtureServer(server)

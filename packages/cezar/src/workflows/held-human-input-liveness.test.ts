@@ -33,7 +33,7 @@ const SINGLE_STEP: WorkflowDef = {
   steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }],
 };
 
-const launchedTools = new WeakMap<RunManager, ReturnType<RunManager['cezarToolHandlers']>>();
+const launchedTools = new WeakMap<RunManager, ReturnType<RunManager['squawkToolHandlers']>>();
 
 /** The turn calls cezar_done, then ends (hearsay-tools/cezarion#2397). */
 async function doneTurn(manager: RunManager, onEvent: ((event: AgentEvent) => void) | undefined): Promise<void> {
@@ -66,8 +66,8 @@ describe('held human input liveness bound (#486)', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot, { home: testHome(), unreadInputGraceMs: 300 });
-    const handlers = manager.cezarToolHandlers.bind(manager);
-    vi.spyOn(manager, 'cezarToolHandlers').mockImplementation((id, generation) => {
+    const handlers = manager.squawkToolHandlers.bind(manager);
+    vi.spyOn(manager, 'squawkToolHandlers').mockImplementation((id, generation) => {
       const tools = handlers(id, generation);
       launchedTools.set(manager, tools);
       return tools;

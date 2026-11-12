@@ -6,7 +6,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { waitForSettledSample } from './visual-ready'
 import { focusWithKeyboard } from './contrast'
@@ -28,7 +28,7 @@ beforeAll(async () => {
     tokensUsed: 0, archived: false, steps: [],
   } satisfies Partial<RunRecord>)))
   seedRuns(root, runs)
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)

@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stat, access, rm, mkdtemp, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { cezarAskAnswerSchema, cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarDoneAnswer, type Wait } from '@open-mercato/cezar-contract/waits';
+import { squawkAskAnswerSchema, squawkCancelWaitAnswerSchema, squawkDoneAnswerSchema, squawkWaitAnswerSchema, type SquawkAskAnswer, type SquawkCancelWaitAnswer, type SquawkDoneAnswer, type Wait } from '@open-mercato/cezar-contract/waits';
 import { fork, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { request } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { CiToolController, type CezarToolHandlers, type WaitRegistration } from './controller.ts';
-import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait } from './client.ts';
+import { CiToolController, type SquawkToolHandlers, type WaitRegistration } from './controller.ts';
+import { callSquawkAsk, callSquawkCancelWait, callSquawkDone, callSquawkWait } from './client.ts';
 
 const OBSOLETE_HUMAN_WAIT_KIND = 'human';
 
@@ -21,11 +21,11 @@ const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'generati
 const entry: Wait = { kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, ...wait, phase: WAIT_PHASE.open };
 const openWait = { wait_id: wait.id, kind: WAIT_KIND.pr, deadline: wait.deadline, summary: 'CI for owner/repo#1' };
 const registered: WaitRegistration = { answer: { ok: true, wait_id: wait.id, kind: WAIT_KIND.pr, deadline: wait.deadline, open_waits: [openWait] }, wait: entry };
-const cancelled: CezarCancelWaitAnswer = { cancelled: true, wait_id: wait.id, open_waits: [] };
-const accepted: CezarDoneAnswer = { ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [openWait] };
+const cancelled: SquawkCancelWaitAnswer = { cancelled: true, wait_id: wait.id, open_waits: [] };
+const accepted: SquawkDoneAnswer = { ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [openWait] };
 const humanId = '22222222-2222-4222-8222-222222222222';
-const asked: CezarAskAnswer = { ok: true, wait_id: humanId, open_waits: [openWait, { wait_id: humanId, kind: WAIT_KIND.human, summary: 'human: Which area?' }] };
-function handlers(overrides: Partial<CezarToolHandlers> = {}): CezarToolHandlers {
+const asked: SquawkAskAnswer = { ok: true, wait_id: humanId, open_waits: [openWait, { wait_id: humanId, kind: WAIT_KIND.human, summary: 'human: Which area?' }] };
+function handlers(overrides: Partial<SquawkToolHandlers> = {}): SquawkToolHandlers {
   return { registerWait: async () => registered, ask: async () => asked, cancelWait: async () => cancelled, finishTurn: async () => accepted, ...overrides };
 }
 const coded = (code: string) => async (): Promise<never> => { throw Object.assign(new Error('secret-sensitive'), { code }); };
@@ -62,12 +62,12 @@ describe('private CI controller', () => {
       expect((await stat(dirname(session.env.CEZ_TOOL_SOCKET!))).mode & 0o777).toBe(0o700);
       expect((await stat(session.env.CEZ_TOOL_SOCKET!)).mode & 0o777).toBe(0o600);
     }
-    const answer = await callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
+    const answer = await callSquawkWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
     expect(answer).toMatchObject({ ok: true, wait_id: wait.id });
     expect(answer).not.toHaveProperty('generation');
     expect(answer).not.toHaveProperty('turnId');
     await owner.close();
-    await expect(callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
+    await expect(callSquawkWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
     if (process.platform !== 'win32') await expect(access(dirname(session.env.CEZ_TOOL_SOCKET!))).rejects.toThrow();
   });
   it('rejects unknown/invalid/oversized bodies and unknown capabilities before registration', async () => {
@@ -83,11 +83,11 @@ describe('private CI controller', () => {
   it('revokes pending registration authority and rejects late receipt', async () => {
     let complete!: () => void; let signal!: AbortSignal;
     const session = (await controller()).provision(handlers({ registerWait: async (_request, _via, active) => { signal = active; await new Promise<void>(resolve => complete = resolve); active.throwIfAborted(); return registered; } }));
-    const pending = callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
+    const pending = callSquawkWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
     await vi.waitFor(() => expect(complete).toBeDefined(), { timeout: HANG_GUARD_MS });
     session.revoke(); expect(signal.aborted).toBe(true); complete();
     await expect(pending).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
-    await expect(callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
+    await expect(callSquawkWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'outcome_unknown' });
   });
   it('keeps Unix socket paths short even when the inherited temporary directory is long', async () => {
     if (process.platform === 'win32') return;
@@ -98,7 +98,7 @@ describe('private CI controller', () => {
       process.env.TMPDIR = nested;
       const session = (await controller()).provision(handlers());
       expect(Buffer.byteLength(session.env.CEZ_TOOL_SOCKET!)).toBeLessThan(100);
-      await expect(callCezarWait({kind: WAIT_KIND.pr,pr:wait.prUrl}, session.env)).resolves.toMatchObject({ok:true,wait_id:wait.id});
+      await expect(callSquawkWait({kind: WAIT_KIND.pr,pr:wait.prUrl}, session.env)).resolves.toMatchObject({ok:true,wait_id:wait.id});
     } finally { if (previous === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previous; await rm(base, {recursive:true,force:true}); }
   });
 
@@ -106,7 +106,7 @@ describe('private CI controller', () => {
     const session = (await controller()).provision(handlers({ registerWait: coded('wait_conflict') }));
     const response = await raw(session.env, JSON.stringify({kind: WAIT_KIND.pr,pr:wait.prUrl}));
     expect(JSON.parse(response.body)).toEqual({ok:false,effect:'refused',code:'wait_conflict',message:'A different CI wait is already active for this run.'});
-    await expect(callCezarWait({kind: WAIT_KIND.pr,pr:wait.prUrl},session.env)).resolves.toMatchObject({ok:false,code:'wait_conflict'});
+    await expect(callSquawkWait({kind: WAIT_KIND.pr,pr:wait.prUrl},session.env)).resolves.toMatchObject({ok:false,code:'wait_conflict'});
   });
 
   it('bounds registration errors and never returns exception secrets', async () => {
@@ -159,19 +159,19 @@ describe('private CI controller', () => {
       expect(opened.isError).not.toBe(true);
       const [text] = (opened.content as Array<{ text: string }>).map(part => part.text);
       const [json, hint] = text!.split('\n');
-      expect(cezarWaitAnswerSchema.parse(JSON.parse(json!))).toEqual(registered.answer);
+      expect(squawkWaitAnswerSchema.parse(JSON.parse(json!))).toEqual(registered.answer);
       expect(hint).toBe('Registered. End your turn to wait; any open wait wakes you when it resolves.');
       expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.pr, pr: wait.prUrl, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800, operation_id: expect.any(String) }, 'cezar_wait', expect.any(AbortSignal));
       const closed = await client.callTool({ name: 'cezar_cancel_wait', arguments: { wait_id: wait.id } });
       expect(closed.isError).not.toBe(true);
-      expect(cezarCancelWaitAnswerSchema.parse(JSON.parse((closed.content as Array<{ text: string }>)[0]!.text.split('\n')[0]!))).toEqual(cancelled);
+      expect(squawkCancelWaitAnswerSchema.parse(JSON.parse((closed.content as Array<{ text: string }>)[0]!.text.split('\n')[0]!))).toEqual(cancelled);
       expect(cancel).toHaveBeenCalledWith({ wait_id: wait.id }, expect.any(AbortSignal));
       const refused = await client.callTool({ name: 'cezar_wait', arguments: { kind: WAIT_KIND.timer, seconds: 59 } });
       expect(refused.isError).toBe(true); expect(register).toHaveBeenCalledTimes(1);
       const done = await client.callTool({ name: 'cezar_done', arguments: {} });
       expect(done.isError).not.toBe(true);
       const [doneJson, doneHint] = (done.content as Array<{ text: string }>)[0]!.text.split('\n');
-      expect(cezarDoneAnswerSchema.parse(JSON.parse(doneJson!))).toEqual(accepted);
+      expect(squawkDoneAnswerSchema.parse(JSON.parse(doneJson!))).toEqual(accepted);
       expect(doneHint).toBe('Accepted. End your turn; Cezar finishes the task at its end.');
     } finally { await client.close(); }
   }, 15000);
@@ -185,15 +185,15 @@ describe('private wait routes', () => {
     const session = (await controller()).provision(handlers({ registerWait: register, cancelWait: cancel }));
     const opened = await raw(session.env, JSON.stringify({ kind: WAIT_KIND.pr, pr: wait.prUrl }), undefined, 'wait');
     expect(opened.status).toBe(200);
-    expect(cezarWaitAnswerSchema.parse(JSON.parse(opened.body))).toEqual(registered.answer);
+    expect(squawkWaitAnswerSchema.parse(JSON.parse(opened.body))).toEqual(registered.answer);
     expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.pr, pr: wait.prUrl, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 }, 'cezar_wait', expect.any(AbortSignal));
-    await expect(callCezarWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'deploy' }, session.env)).resolves.toEqual(registered.answer);
+    await expect(callSquawkWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'deploy' }, session.env)).resolves.toEqual(registered.answer);
     expect(register).toHaveBeenLastCalledWith({ kind: WAIT_KIND.timer, seconds: 600, note: 'deploy', operation_id: expect.any(String) }, 'cezar_wait', expect.any(AbortSignal));
     const closed = await raw(session.env, JSON.stringify({ wait_id: wait.id }), undefined, 'cancel-wait');
     expect(closed.status).toBe(200);
-    expect(cezarCancelWaitAnswerSchema.parse(JSON.parse(closed.body))).toEqual(cancelled);
+    expect(squawkCancelWaitAnswerSchema.parse(JSON.parse(closed.body))).toEqual(cancelled);
     expect(cancel).toHaveBeenCalledWith({ wait_id: wait.id }, expect.any(AbortSignal));
-    await expect(callCezarCancelWait({ wait_id: wait.id }, session.env)).resolves.toEqual(cancelled);
+    await expect(callSquawkCancelWait({ wait_id: wait.id }, session.env)).resolves.toEqual(cancelled);
     // The removed alias: the authorized POST finds no route and registers nothing.
     const calls = register.mock.calls.length;
     expect((await raw(session.env, JSON.stringify({ pr: wait.prUrl, timeout_seconds: 60 }), undefined, 'ci-wait')).status).toBe(404);
@@ -205,21 +205,21 @@ describe('private wait routes', () => {
     const session = (await controller()).provision(handlers({ registerWait: register, cancelWait: cancel }));
     const below = await raw(session.env, JSON.stringify({ kind: WAIT_KIND.timer, seconds: 59 }), undefined, 'wait');
     expect(below.status).toBe(200);
-    const answer = cezarWaitAnswerSchema.parse(JSON.parse(below.body));
+    const answer = squawkWaitAnswerSchema.parse(JSON.parse(below.body));
     expect(answer).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(answer.ok === false && answer.message).toMatch(/seconds.*60.*7200/);
     for (const body of [{ kind: WAIT_KIND.timer, seconds: 7201 }, { kind: WAIT_KIND.worker }, { kind: WAIT_KIND.pr, pr: wait.prUrl, runId: 'injected' }, { pr: wait.prUrl }]) {
-      expect(await callCezarWait(body, session.env)).toMatchObject({ ok: false, code: 'invalid_request' });
+      expect(await callSquawkWait(body, session.env)).toMatchObject({ ok: false, code: 'invalid_request' });
     }
     expect(JSON.parse((await raw(session.env, '{', undefined, 'wait')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(JSON.parse((await raw(session.env, ' '.repeat(16385), undefined, 'wait')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     // A field of another kind is refused by name.
-    const stray = await callCezarWait({ kind: WAIT_KIND.timer, seconds: 120, worker_ids: ['11111111-1111-4111-8111-111111111111'] }, session.env);
+    const stray = await callSquawkWait({ kind: WAIT_KIND.timer, seconds: 120, worker_ids: ['11111111-1111-4111-8111-111111111111'] }, session.env);
     expect(stray).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(stray.ok === false && stray.message).toContain('"worker_ids"');
     expect(register).not.toHaveBeenCalled();
     for (const body of [{ wait_id: 'w1' }, { wait_id: wait.id, extra: 1 }, {}]) {
-      expect(await callCezarCancelWait(body, session.env)).toMatchObject({ cancelled: false, code: 'invalid_request' });
+      expect(await callSquawkCancelWait(body, session.env)).toMatchObject({ cancelled: false, code: 'invalid_request' });
     }
     expect(cancel).not.toHaveBeenCalled();
     expect((await raw(session.env, JSON.stringify({ kind: WAIT_KIND.timer, seconds: 600 }), 'invalid', 'wait')).status).toBe(401);
@@ -235,21 +235,21 @@ describe('private wait routes', () => {
     expect(JSON.parse(failed.body)).toMatchObject({ cancelled: false, code: 'unavailable' });
     expect(refused.body + failed.body).not.toContain('secret-sensitive');
     session.revoke();
-    expect(await callCezarWait({ kind: WAIT_KIND.timer, seconds: 600 }, session.env)).toMatchObject({ ok: false, code: 'outcome_unknown' });
-    expect(await callCezarCancelWait({ wait_id: wait.id }, session.env)).toMatchObject({ cancelled: false, code: 'unavailable' });
+    expect(await callSquawkWait({ kind: WAIT_KIND.timer, seconds: 600 }, session.env)).toMatchObject({ ok: false, code: 'outcome_unknown' });
+    expect(await callSquawkCancelWait({ wait_id: wait.id }, session.env)).toMatchObject({ cancelled: false, code: 'unavailable' });
   });
 
   // hearsay-tools/cezarion#1234: `cezar_done` is the same shape of route: refusals answer 200.
   it('POST /tools/done answers the handler\'s refusal with 200 and ok false', async () => {
-    const refusal: CezarDoneAnswer = { ok: false, code: 'workers_outstanding', message: 'Worker w is still running.', workers: [{ worker_id: 'w', reason: 'outstanding' }], open_waits: [] };
-    const finish = vi.fn(async (): Promise<CezarDoneAnswer> => refusal);
+    const refusal: SquawkDoneAnswer = { ok: false, code: 'workers_outstanding', message: 'Worker w is still running.', workers: [{ worker_id: 'w', reason: 'outstanding' }], open_waits: [] };
+    const finish = vi.fn(async (): Promise<SquawkDoneAnswer> => refusal);
     const session = (await controller()).provision(handlers({ finishTurn: finish }));
     const refused = await raw(session.env, JSON.stringify({}), undefined, 'done');
     expect(refused.status).toBe(200);
-    expect(cezarDoneAnswerSchema.parse(JSON.parse(refused.body))).toEqual(refusal);
+    expect(squawkDoneAnswerSchema.parse(JSON.parse(refused.body))).toEqual(refusal);
     expect(finish).toHaveBeenLastCalledWith({}, expect.any(AbortSignal));
     finish.mockResolvedValueOnce(accepted);
-    await expect(callCezarDone({ summary: 'shipped' }, session.env)).resolves.toEqual(accepted);
+    await expect(callSquawkDone({ summary: 'shipped' }, session.env)).resolves.toEqual(accepted);
     expect(finish).toHaveBeenLastCalledWith({ summary: 'shipped' }, expect.any(AbortSignal));
   });
 
@@ -264,16 +264,16 @@ describe('private wait routes', () => {
     expect(revoked.status).toBe(401);
     expect(JSON.parse(revoked.body)).toMatchObject({ code: 'capability_revoked' });
     expect((await raw(session.env, JSON.stringify({}), undefined, 'done')).status).toBe(401);
-    expect(await callCezarDone({}, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(await callSquawkDone({}, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
   });
 
   it('POST /tools/done answers an unknown field with invalid_request without calling the handler', async () => {
-    const finish = vi.fn(async (): Promise<CezarDoneAnswer> => accepted);
+    const finish = vi.fn(async (): Promise<SquawkDoneAnswer> => accepted);
     const session = (await controller()).provision(handlers({ finishTurn: finish }));
     const unknown = await raw(session.env, JSON.stringify({ force: true }), undefined, 'done');
     expect(unknown.status).toBe(200);
     expect(JSON.parse(unknown.body)).toEqual({ ok: false, code: 'invalid_request', message: 'Unknown field "force": cezar_done takes only an optional summary of at most 2000 characters.' });
-    expect(await callCezarDone({ summary: 'x'.repeat(2001) }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`summary` must be a string of at most 2000 characters.' });
+    expect(await callSquawkDone({ summary: 'x'.repeat(2001) }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`summary` must be a string of at most 2000 characters.' });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'done')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(JSON.parse((await raw(session.env, ' '.repeat(16385), undefined, 'done')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect((await raw(session.env, JSON.stringify({}), 'invalid', 'done')).status).toBe(401);
@@ -284,15 +284,15 @@ describe('private wait routes', () => {
   const card = { context: '## Findings\n\n- one', questions: [{ header: 'Area', question: 'Which area?', options: [{ label: 'Parser' }, { label: 'Lexer' }] }, { header: 'Name', question: 'What should it be called?' }] };
   const askTail = 'The user never sees a rejected call. Put the draft, findings, evidence and option meanings in context, and keep each question short. cezar_ask takes context and questions: context of 1–20000 characters of Markdown, shown above the card, and 1–4 questions with unique texts, each with a header of 1–12 characters, a question of 1–400 characters, an optional id of 1–64 characters, and either 2–4 options with unique labels of 1–60 characters and descriptions of at most 280 characters, or no options for an open question.';
   it('POST /tools/ask routes the card to the ask handler and answers its refusal with 200', async () => {
-    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked);
     const session = (await controller()).provision(handlers({ ask }));
     const opened = await raw(session.env, JSON.stringify(card), undefined, 'ask');
     expect(opened.status).toBe(200);
-    expect(cezarAskAnswerSchema.parse(JSON.parse(opened.body))).toEqual(asked);
+    expect(squawkAskAnswerSchema.parse(JSON.parse(opened.body))).toEqual(asked);
     expect(ask).toHaveBeenLastCalledWith(card, expect.any(AbortSignal));
-    const refusal: CezarAskAnswer = { ok: false, code: 'autonomous_run', message: 'Assume and continue.', open_waits: [] };
+    const refusal: SquawkAskAnswer = { ok: false, code: 'autonomous_run', message: 'Assume and continue.', open_waits: [] };
     ask.mockResolvedValueOnce(refusal);
-    await expect(callCezarAsk(card, session.env)).resolves.toEqual(refusal);
+    await expect(callSquawkAsk(card, session.env)).resolves.toEqual(refusal);
     // A throw never forwards its text.
     ask.mockImplementationOnce(coded('capacity'));
     const failed = await raw(session.env, JSON.stringify(card), undefined, 'ask');
@@ -300,18 +300,18 @@ describe('private wait routes', () => {
     expect(failed.body).not.toContain('secret-sensitive');
     session.revoke();
     expect((await raw(session.env, JSON.stringify(card), undefined, 'ask')).status).toBe(401);
-    expect(await callCezarAsk(card, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(await callSquawkAsk(card, session.env)).toMatchObject({ ok: false, code: 'unavailable' });
   });
 
   it('POST /tools/ask answers a call without a card with invalid_request, and cezar_wait points the old human kind at it', async () => {
-    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked); const register = vi.fn(async () => registered);
+    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked); const register = vi.fn(async () => registered);
     const session = (await controller()).provision(handlers({ ask, registerWait: register }));
-    expect(await callCezarAsk({}, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown; \`questions\` must be a list of 1–4 questions with unique texts. ${askTail}` });
-    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` must be 2–4 options with unique labels, or left out for an open question. ${askTail}` });
-    expect(await callCezarAsk({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
+    expect(await callSquawkAsk({}, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown; \`questions\` must be a list of 1–4 questions with unique texts. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` must be 2–4 options with unique labels, or left out for an open question. ${askTail}` });
+    expect(await callSquawkAsk({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(JSON.parse((await raw(session.env, ' '.repeat(262_145), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
-    expect(await callCezarWait({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, effect: 'refused', code: 'invalid_request', message: '`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
+    expect(await callSquawkWait({ kind: OBSOLETE_HUMAN_WAIT_KIND, ...card }, session.env)).toEqual({ ok: false, effect: 'refused', code: 'invalid_request', message: '`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
     expect(ask).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
     expect((await raw(session.env, JSON.stringify(card), 'invalid', 'ask')).status).toBe(401);
@@ -322,24 +322,24 @@ describe('private wait routes', () => {
   // under a 13-character header, the agent fixed one field per rejection, then asked about
   // findings "listed above" that it never sent as assistant text.
   it('POST /tools/ask names every failing field with its limit, and points longer context to the context field', async () => {
-    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked);
     const session = (await controller()).provision(handlers({ ask }));
     const findings = 'F'.repeat(785);
     const options = [{ label: 'All' }, { label: 'None' }];
-    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'File friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.header\` must be 1–12 characters; \`questions.0.question\` must be 1–400 characters. ${askTail}` });
-    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.question\` must be 1–400 characters. ${askTail}` });
-    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'L'.repeat(61), description: 'D'.repeat(281) }, { label: 'B' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options.0.label\` must be 1–60 characters; \`questions.0.options.0.description\` must be at most 280 characters. ${askTail}` });
-    expect(await callCezarAsk({ context: 'c', questions: [{ header: '', question: 'Which?', id: '' }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.id\` must be 1–64 characters; \`questions.0.header\` must be 1–12 characters. ${askTail}` });
-    expect(await callCezarAsk({ context: 'c', questions: ['which?'] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0\` must be an object with a header and a question. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: [{ header: 'File friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.header\` must be 1–12 characters; \`questions.0.question\` must be 1–400 characters. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: [{ header: 'Friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.question\` must be 1–400 characters. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'L'.repeat(61), description: 'D'.repeat(281) }, { label: 'B' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options.0.label\` must be 1–60 characters; \`questions.0.options.0.description\` must be at most 280 characters. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: [{ header: '', question: 'Which?', id: '' }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.id\` must be 1–64 characters; \`questions.0.header\` must be 1–12 characters. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: ['which?'] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0\` must be an object with a header and a question. ${askTail}` });
     // Every failing field, however many: a capped list sends the agent into another rejection.
     const overlong = [0, 1, 2, 3].map(index => ({ header: `Header ${index} too long`, question: `${index}${findings}` }));
-    expect(await callCezarAsk({ context: 'c', questions: overlong }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `${[0, 1, 2, 3].map(index => `\`questions.${index}.header\` must be 1–12 characters; \`questions.${index}.question\` must be 1–400 characters`).join('; ')}. ${askTail}` });
-    expect(await callCezarAsk([], session.env)).toEqual({ ok: false, code: 'invalid_request', message: `The arguments must be a JSON object. ${askTail}` });
+    expect(await callSquawkAsk({ context: 'c', questions: overlong }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `${[0, 1, 2, 3].map(index => `\`questions.${index}.header\` must be 1–12 characters; \`questions.${index}.question\` must be 1–400 characters`).join('; ')}. ${askTail}` });
+    expect(await callSquawkAsk([], session.env)).toEqual({ ok: false, code: 'invalid_request', message: `The arguments must be a JSON object. ${askTail}` });
     // The message never echoes the value the agent sent.
-    expect(JSON.stringify(await callCezarAsk({ context: 'c', questions: [{ header: 'File friction', question: findings }] }, session.env))).not.toContain('FFFF');
+    expect(JSON.stringify(await callSquawkAsk({ context: 'c', questions: [{ header: 'File friction', question: findings }] }, session.env))).not.toContain('FFFF');
     expect(ask).not.toHaveBeenCalled();
     const short = { context: 'c', questions: [{ header: 'Friction', question: 'Which project friction findings (listed above) should I file on hearsay-tools/cezarion?', options }] };
-    await expect(callCezarAsk(short, session.env)).resolves.toEqual(asked);
+    await expect(callSquawkAsk(short, session.env)).resolves.toEqual(asked);
     expect(ask).toHaveBeenLastCalledWith(short, expect.any(AbortSignal));
   });
 
@@ -347,30 +347,30 @@ describe('private wait routes', () => {
   // hearsay-tools/cezarion#1458: content in prose between tool calls may never reach the user, so
   // the call itself carries it. A call without it is refused by name and limit.
   it('POST /tools/ask refuses a card without context, and takes 20000 multi-byte characters of it', async () => {
-    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked);
     const session = (await controller()).provision(handlers({ ask }));
     const { context: _context, ...bare } = card;
-    expect(await callCezarAsk(bare, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown. ${askTail}` });
-    expect(await callCezarAsk({ ...card, context: '' }, session.env)).toMatchObject({ ok: false, message: expect.stringContaining('`context` must be 1–20000 characters') });
-    expect(await callCezarAsk({ ...card, context: 'x'.repeat(20_001) }, session.env)).toMatchObject({ ok: false, message: expect.stringContaining('`context` must be 1–20000 characters') });
+    expect(await callSquawkAsk(bare, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown. ${askTail}` });
+    expect(await callSquawkAsk({ ...card, context: '' }, session.env)).toMatchObject({ ok: false, message: expect.stringContaining('`context` must be 1–20000 characters') });
+    expect(await callSquawkAsk({ ...card, context: 'x'.repeat(20_001) }, session.env)).toMatchObject({ ok: false, message: expect.stringContaining('`context` must be 1–20000 characters') });
     expect(ask).not.toHaveBeenCalled();
     const long = { ...card, context: '"é\n'.repeat(6_666) + 'éé' };
     expect(long.context).toHaveLength(20_000);
-    await expect(callCezarAsk(long, session.env)).resolves.toEqual(asked);
+    await expect(callSquawkAsk(long, session.env)).resolves.toEqual(asked);
     expect(ask).toHaveBeenLastCalledWith(long, expect.any(AbortSignal));
   });
 
   // Review of hearsay-tools/cezarion#1458: the body limit admits the largest card the schema
   // accepts, every field at its limit in characters JSON escapes to six bytes.
   it('POST /tools/ask admits the largest schema-valid card, however its JSON is escaped', async () => {
-    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const ask = vi.fn(async (): Promise<SquawkAskAnswer> => asked);
     const session = (await controller()).provision(handlers({ ask }));
     const esc = (n: number, tag: string) => tag + '\u0001'.repeat(n - tag.length);
     const largest = { context: esc(20_000, ''), questions: [0, 1, 2, 3].map(q => ({
       id: esc(64, `${q}`), header: esc(12, `${q}`), question: esc(400, `${q}`), multiSelect: true,
       options: [0, 1, 2, 3].map(o => ({ label: esc(60, `${o}`), description: esc(280, `${o}`) })) })) };
     expect(JSON.stringify(largest).length).toBeGreaterThan(131_072);
-    await expect(callCezarAsk(largest, session.env)).resolves.toEqual(asked);
+    await expect(callSquawkAsk(largest, session.env)).resolves.toEqual(asked);
   });
 });
 
@@ -407,7 +407,7 @@ it('recovers the same operation after a committed registration loses its respons
     if (++attempts === 1) throw new Error('response lost after commit');
     return { ...registered, answer: { ...registered.answer, effect: 'unchanged', operation_id: committedId, replayed: true } };
   } }));
-  const answer = await callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
+  const answer = await callSquawkWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
   expect(attempts).toBe(2);
   expect(answer).toMatchObject({ ok: true, effect: 'unchanged', operation_id: committedId, wait_id: wait.id });
 });
@@ -418,14 +418,14 @@ it('reports unknown after both registration responses are lost, with a stable re
   const session = server.provision(handlers({ registerWait: async request => {
     ids.push(request.operation_id); throw new Error('no response evidence');
   } }));
-  const answer = await callCezarWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
+  const answer = await callSquawkWait({ kind: WAIT_KIND.pr, pr: wait.prUrl }, session.env);
   expect(ids).toHaveLength(2);
   expect(ids[0]).toBe(ids[1]);
   expect(answer).toMatchObject({ ok: false, effect: 'unknown', code: 'outcome_unknown', operation_id: ids[0] });
 });
 
 it('says nothing was created when no local tool capability exists before dispatch', async () => {
-  expect(await callCezarWait({ kind: WAIT_KIND.timer, seconds: 60 }, {})).toMatchObject({ ok: false, effect: 'refused', message: expect.stringContaining('Nothing was created') });
+  expect(await callSquawkWait({ kind: WAIT_KIND.timer, seconds: 60 }, {})).toMatchObject({ ok: false, effect: 'refused', message: expect.stringContaining('Nothing was created') });
 });
 
 it.each([false, true])('controller emits matching generated env names with rebrand=%s', async rebrand => {

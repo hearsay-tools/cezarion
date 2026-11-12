@@ -93,7 +93,7 @@ describe('health topic + cache (live-server path)', () => {
       manager: {} as RunManager,
       version: '0.0.0-test',
       socketHub: hub,
-      cezarPort: () => 4321,
+      squawkPort: () => 4321,
       ...over,
     };
     return { app: createApp(deps), topics, families };

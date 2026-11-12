@@ -265,7 +265,7 @@ export class RunSettlement {
     const message = turn.sessionError ?? state.inputState.agentInputError ?? (err instanceof Error ? err.message : String(err));
     sink.sessionEnded('error', message);
     this.context.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
-    this.humanWaits.withdrawCezarHumanWaits(runId);
+    this.humanWaits.withdrawSquawkHumanWaits(runId);
     const delivery = this.host.closingWakeDecision(runId, completionGateReads.holdsClosingWakes(this.context, this.completionGateHost, runId), state.liveSession.cancelled, message);
     if (delivery === 'park') {
       // Retain the wait and scheduler wake source while closing this attempt.

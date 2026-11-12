@@ -6,7 +6,7 @@ import { RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-api-clie
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
@@ -42,7 +42,7 @@ beforeAll(async () => {
     referencedIssueUrl: 'https://github.com/o/r/issues/46390003',
     steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.failed, iterations: 1, tokensUsed: 0, sessionId: 'ellipsis-fixture' }],
   } satisfies Partial<RunRecord>)])
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
+  server = spawnFixtureServer([squawkCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)

@@ -1,4 +1,4 @@
-import { isCezarHumanWait } from './run/wait-kinds.ts';
+import { isSquawkHumanWait } from './run/wait-kinds.ts';
 import { WAIT_KINDS } from './run/wait-kinds.ts';
 import { type ProcessWaitResult, type PeerWaitResult, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
@@ -65,7 +65,7 @@ export function chargesBudgetMessage(input: Pick<AgentInput, 'conversation'>): b
 /** The open waits as both tools list them back to the agent. A human wait has no deadline, and
  *  Cezar's own deadline-less worker wait is not the agent's to list (hearsay-tools/cezarion#1301). */
 export function openWaitList(waits: readonly Wait[]): OpenWait[] {
-  return waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait) && (WAIT_KINDS[wait.kind].deadline === 'none' || WAIT_KINDS[wait.kind].hasDeadline(wait))).map((wait): OpenWait => WAIT_KINDS[wait.kind].deadline === 'none'
+  return waits.filter((wait) => wait.phase === 'open' && !isSquawkHumanWait(wait) && (WAIT_KINDS[wait.kind].deadline === 'none' || WAIT_KINDS[wait.kind].hasDeadline(wait))).map((wait): OpenWait => WAIT_KINDS[wait.kind].deadline === 'none'
     ? { wait_id: wait.id, kind: wait.kind as 'human', summary: WAIT_KINDS[wait.kind].summary(wait) }
     : { wait_id: wait.id, kind: wait.kind as Exclude<Wait['kind'], 'human'>, deadline: ('deadline' in wait ? wait.deadline : undefined)!, summary: WAIT_KINDS[wait.kind].summary(wait) });
 }
@@ -101,4 +101,4 @@ export function settledWaitEntry(latest: Wait, result: WaitResult | undefined, o
   return WAIT_KINDS[latest.kind].resolve(latest, result, observed, resolvedAt);
 }
 
-export { normalizePrUrl, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, waitResultText, subagentWaitResultText, describeWait, openWaitsFooter } from './run/wait-kinds.ts';
+export { normalizePrUrl, isSquawkHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, waitResultText, subagentWaitResultText, describeWait, openWaitsFooter } from './run/wait-kinds.ts';

@@ -74,7 +74,7 @@ export function writeTree(root, files) {
 }
 
 /** The cezar workflows and skills both demo repositories carry. */
-export function cezarFiles() {
+export function squawkFiles() {
   const files = {};
   for (const [name, text] of Object.entries(DEMO_WORKFLOWS)) files[`.ai/cezar/workflows/${name}`] = text;
   for (const [name, description] of Object.entries(DEMO_SKILLS)) {
@@ -114,7 +114,7 @@ export function createDemoRepos({ source, root, env }) {
   copyCheckout(source, cezarion, env);
   writeTree(storefront, STOREFRONT_FILES);
   for (const repo of [cezarion, storefront]) {
-    writeTree(repo, cezarFiles());
+    writeTree(repo, squawkFiles());
     commitAll(repo, env);
   }
   git(cezarion, env, 'remote', 'add', 'origin', `https://github.com/${GITHUB_REPO}.git`);

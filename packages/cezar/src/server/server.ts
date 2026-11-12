@@ -415,7 +415,7 @@ export interface ServerDeps extends ActivityServerDeps {
    *  and every run manager answers `headless`. */
   previewHost?: PreviewHost | undefined;
   /** The port the cockpit listens on, once it does: `cezar_preview_serve` refuses it. */
-  cezarPort?: () => number | undefined;
+  squawkPort?: () => number | undefined;
   /** Shared workspace identity and upgrade lookup; direct createApp callers get a local instance. */
   workspaceProjects?: WorkspaceProjects;
   /** Re-arm the workspace automation timer after definition mutations. */
@@ -722,7 +722,7 @@ export function createApp(deps: ServerDeps) {
   };
   // Hosted-mode gate (spec §"Deployment modes") — read per request so
   // CEZ_REMOTE flips take effect live (and tests can toggle it).
-  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.(), deps.home);
+  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.squawkPort?.(), deps.home);
   const singleProjectRefusal = (
     action: 'adding projects' | 'editing projects' | 'removing projects' | 'folder browsing',
   ) => ({ error: `single-project mode is enabled; ${action} is disabled` });
@@ -742,7 +742,7 @@ export function createApp(deps: ServerDeps) {
   // count against the same workspace semaphore as the boot manager (step 2.5).
   const contexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
     listProjects: () => workspaceProjects.listVisibleProjects(),
-    cezarPort: deps.cezarPort,
+    squawkPort: deps.squawkPort,
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -5001,7 +5001,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const socketHub = deps.socketHub ?? createSocketHub();
   // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
   let listeningPort: number | undefined;
-  const cezarPort = deps.cezarPort ?? (() => listeningPort);
+  const squawkPort = deps.squawkPort ?? (() => listeningPort);
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost, home: deps.home });
   // Every registry reader below sees what createApp sees: single-project mode hides other projects.
   const visibleProjects = () => workspaceProjects.listVisibleProjects();
@@ -5019,7 +5019,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const sharedContexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
     ownership: deps.ownership,
     listProjects: visibleProjects,
-    cezarPort,
+    squawkPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
   });
@@ -5067,7 +5067,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     automationStore: bootAutomationStore,
     workspaceEvents,
     socketHub,
-    cezarPort,
+    squawkPort,
     workspaceProjects,
     archiveOnMergeChanged: () => archiveOnMerge.invalidate(),
     automationsChanged: () => rescheduleAutomations(),

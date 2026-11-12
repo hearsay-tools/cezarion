@@ -58,7 +58,7 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), preview, cezarPort: () => 4321 });
+    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), preview, squawkPort: () => 4321 });
   });
 
   afterEach(async () => {
@@ -176,10 +176,10 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
   });
 
   it('answers unavailable until the cockpit knows its own port, so cezar_port cannot be skipped', async () => {
-    // Recovered runs launch before `startServer` binds: `cezarPort()` is undefined in that window.
+    // Recovered runs launch before `startServer` binds: `squawkPort()` is undefined in that window.
     let boundPort: number | undefined;
     manager!.dispose();
-    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), preview, cezarPort: () => boundPort });
+    manager = new RunManager(store, repoRoot, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), preview, squawkPort: () => boundPort });
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
     const record = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'build the members page' });
     const register = await callbackAt(provision, 0);

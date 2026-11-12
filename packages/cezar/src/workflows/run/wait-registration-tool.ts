@@ -1,10 +1,10 @@
 import { WAIT_KINDS } from './wait-kinds.ts';
 import { randomUUID } from 'node:crypto';
-import { cezarWaitRequestSchema, waitErrorCodeSchema, type CezarWaitRequestInput, type Wait, type WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
-import type { CezarToolHandlers, WaitRegistration } from '../../ci-wait/controller.ts';
+import { squawkWaitRequestSchema, waitErrorCodeSchema, type SquawkWaitRequestInput, type Wait, type WaitRegistrationReceipt } from '@open-mercato/cezar-contract/waits';
+import type { SquawkToolHandlers, WaitRegistration } from '../../ci-wait/controller.ts';
 import { waitErrorMessage } from '../../ci-wait/errors.ts';
 import { openWaitList, waitAnswerKind } from '../waits.ts';
-import type { ToolHost } from './cezar-tools.ts';
+import type { ToolHost } from './squawk-tools.ts';
 import { registrationIdentity, replayRegistration } from './wait-registration.ts';
 
 function accepted(host: ToolHost, runId: string, wait: Wait, receipt: WaitRegistrationReceipt | undefined, operationId: string, replayed: boolean): WaitRegistration {
@@ -15,7 +15,7 @@ function accepted(host: ToolHost, runId: string, wait: Wait, receipt: WaitRegist
     deduplicated: receipt?.deduplicated ?? false, replayed, wait_phase: current?.phase ?? 'unavailable',
     wait_id: wait.id, kind: waitAnswerKind(wait), deadline: wait.deadline, open_waits: openWaitList(run?.waits ?? []) }, wait };
 }
-function refused(host: ToolHost, runId: string, request: CezarWaitRequestInput, error: unknown): WaitRegistration {
+function refused(host: ToolHost, runId: string, request: SquawkWaitRequestInput, error: unknown): WaitRegistration {
   const fields = error && typeof error === 'object' ? error : {};
   const code = waitErrorCodeSchema.safeParse('code' in fields ? fields.code : undefined);
   if (!code.success) throw error;
@@ -36,12 +36,12 @@ function serializeOperation(store: object, key: string, action: () => Promise<Wa
   void result.finally(() => { if (pending.get(key) === result) pending.delete(key); }).catch(() => undefined);
   return result;
 }
-export function registrationToolHandler(runId: string, generation: string, host: ToolHost): CezarToolHandlers['registerWait'] {
+export function registrationToolHandler(runId: string, generation: string, host: ToolHost): SquawkToolHandlers['registerWait'] {
   return async (request, via, signal) => {
     const identified = { ...request, operation_id: request.operation_id ?? randomUUID() };
     return serializeOperation(host.store, `${runId}\n${identified.operation_id}`, async () => {
     try {
-      const identity = registrationIdentity(cezarWaitRequestSchema.parse(identified));
+      const identity = registrationIdentity(squawkWaitRequestSchema.parse(identified));
       const before = !!host.store.getRun(runId)?.waitRegistrations?.some(row => row.operationId === identified.operation_id);
       let wait;
       try { wait = await host.registerWait(runId, identified, via, generation, signal); }

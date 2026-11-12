@@ -151,7 +151,7 @@ const PROBE_IMAGE: ContentBlock = {
 
 /** One probe per field — the `Record` fails to compile when `AgentRunSpec` grows. */
 export const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
-  cezarTools: { kind: 'boundary', without: {}, with: { cezarTools: { name: 'cezar_ci_probe', command: 'node', args: ['/installed/ci-wait/mcp.js'] } } },
+  squawkTools: { kind: 'boundary', without: {}, with: { squawkTools: { name: 'cezar_ci_probe', command: 'node', args: ['/installed/ci-wait/mcp.js'] } } },
   systemPrompt: { kind: 'boundary', without: {}, with: { systemPrompt: 'parity probe system prompt' } },
   // Markerless on purpose, so every mock still answers with its default turn.
   userPrompt: { kind: 'boundary', without: {}, with: { userPrompt: 'inspect the working tree, then report' } },
@@ -564,7 +564,7 @@ export const SESSION_GROUPS = {
     }, true);
   },
 
-  // #781: the `cezarTools` cell, live. One shared cezar tool list feeds every
+  // #781: the `squawkTools` cell, live. One shared cezar tool list feeds every
   // runner's own wire (Claude's MCP config and generated allow-list entry, Codex
   // and Cursor forwarded env, OpenCode's runtime config, Pi's extension and tool
   // admission), and each mock lists the tools through the real bundled adapter.
@@ -573,7 +573,7 @@ export const SESSION_GROUPS = {
   // Exercise the default and both explicit automation states on every native wire.
   tools(r: HarnessRegistrar) {
     const { describeRunners, runners, it } = r;
-    describeRunners('tools', 'harness parity — cezarTools list behind CEZ_PREVIEW', () => {
+    describeRunners('tools', 'harness parity — squawkTools list behind CEZ_PREVIEW', () => {
       const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
       // hearsay-tools/cezarion#1305: pi also runs the default list, which admits the tools through no allowlist.
       const lists = (backend: RunnerId) => [
@@ -589,7 +589,7 @@ export const SESSION_GROUPS = {
           const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
           try {
             const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: WAIT_KIND.pr, deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, phase: WAIT_PHASE.open } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
-            const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, toolGrant, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+            const obs = await driveSeam(backend, 'baseline', { spec: { squawkTools: session.descriptor, toolGrant, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
             expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
             const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
             const expected = [...waits, ...(value === '1' ? ['cezar_preview_serve', 'cezar_preview_stop'] : []), ...(value !== '0' ? ['cezar_schedule_task', 'cezar_scheduled_tasks'] : [])];
@@ -635,7 +635,7 @@ export const SESSION_GROUPS = {
             const record = join(dir, 'env.json');
             const recorder = pathToFileURL(fileURLToPath(new URL('../../scripts/mock-env-record.mjs', import.meta.url))).href;
             const preload = `${process.env.NODE_OPTIONS ?? ''} --import=${recorder}`.trim();
-            const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, env: { ...session.env, NODE_OPTIONS: preload, CEZ_MOCK_ENV_RECORD: record, CEZ_MOCK_ENV_RECORD_NAMES: 'CEZ_PREVIEW_CDP_URL', CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+            const obs = await driveSeam(backend, 'baseline', { spec: { squawkTools: session.descriptor, env: { ...session.env, NODE_OPTIONS: preload, CEZ_MOCK_ENV_RECORD: record, CEZ_MOCK_ENV_RECORD_NAMES: 'CEZ_PREVIEW_CDP_URL', CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
             expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
             const seen = JSON.parse(readFileSync(record, 'utf8')) as { CEZ_PREVIEW_CDP_URL: string | null };
             if (!enabled) {
