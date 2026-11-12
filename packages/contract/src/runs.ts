@@ -324,8 +324,7 @@ export const runRecordSchema = z.object({
   autoResumeAt: z.string().optional(),
   /** Consecutive automatic resumes since the last human turn, against the safety cap. */
   autoResumeAttempts: z.number().optional(),
-  /** Why the hold waits (hearsay-tools/squawk#3337): a usage limit with a reset time, or a provider
-   *  error retried with back-off. Read only beside `autoResumeAt`; absent reads as `usage-limit`. */
+  /** Why the hold waits: `usage-limit`, or a `provider-error` retried with back-off (hearsay-tools/squawk#3337). */
   autoResumeReason: z.enum(['usage-limit', 'provider-error']).optional(),
   createdAt: z.string(),
   startedAt: z.string().optional(),

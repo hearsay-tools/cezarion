@@ -274,7 +274,7 @@ export class RunSettlement {
       this.host.move(runId, 'park', { error: `continue failed: ${message}` });
       return;
     }
-    if (this.holdOnProviderFailure(runId, `continue failed: ${message}`)) return;
+    if (this.autoResumeScheduler.holdFailure(runId, `continue failed: ${message}`)) return;
     this.host.move(runId, 'fail-continue', { error: `continue failed: ${message}` });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
     if (delivery === 'capped') this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });
@@ -321,23 +321,9 @@ export class RunSettlement {
     this.host.move(runId, 'cancel');
   }
 
-  /**
-   * A provider error or a usage limit holds the run instead of failing it
-   * (hearsay-tools/squawk#3337): one status write, `running` to the hold, so its workers keep
-   * running and a parent waiting on it sees no failure. `afterDropActive` arms the timer before
-   * the slot is released. True when the run is held.
-   */
-  private holdOnProviderFailure(runId: string, error: string): boolean {
-    const plan = this.autoResumeScheduler.holdFor(runId, error);
-    if (!plan) return false;
-    this.host.move(runId, 'hold-failure', { error, autoResumeAt: plan.autoResumeAt, autoResumeReason: plan.autoResumeReason });
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: plan.message });
-    return true;
-  }
-
   /** The failed settlement. A capped wake delivery adds the cap's note. */
   settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
-    if (this.holdOnProviderFailure(runId, runError)) return;
+    if (this.autoResumeScheduler.holdFailure(runId, runError)) return;
     this.host.move(runId, 'fail', { error: runError });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
     if (deliveryCapped) this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });

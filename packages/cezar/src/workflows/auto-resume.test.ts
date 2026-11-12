@@ -163,7 +163,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     const record = manager.startRun(workflow, { task: 'mock:rate-limit ship it', worktree: false });
     await settle(record.id);
     const held = store.getRun(record.id)!;
-    expect(held).toMatchObject({ status: 'waiting', autoResumeReason: 'provider-error', error: expect.stringContaining('API Error: 429') });
+    expect(held).toMatchObject({ status: RUN_STATUS.waiting, autoResumeReason: 'provider-error', error: expect.stringContaining('API Error: 429') });
     const delay = Date.parse(held.autoResumeAt!) - before;
     expect(delay).toBeGreaterThanOrEqual(60_000);
     expect(delay).toBeLessThan(60_000 + 20_000);
@@ -183,7 +183,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await second.recover();
     await expect.poll(() => store.getRun(record.id)?.autoResumeAttempts, { timeout: 20_000 }).toBe(1);
     await expect.poll(() => store.readEvents(record.id).some(event => String(event.message ?? '').includes('(attempt 2 of 12)')), { timeout: 20_000 }).toBe(true);
-    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', autoResumeReason: 'provider-error' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeReason: 'provider-error' });
     second.dispose();
 
     store.updateRun(record.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString(), autoResumeAttempts: MAX_AUTO_RESUMES - 1 });
@@ -212,7 +212,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     manager = createFixtureManager(store, repoRoot);
     const record = manager.startRun(workflow, { task: 'mock:request-error ship it', worktree: false });
     await settle(record.id);
-    expect(store.getRun(record.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('invalid_request_error') });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('invalid_request_error') });
     expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
   }, 30_000);
 

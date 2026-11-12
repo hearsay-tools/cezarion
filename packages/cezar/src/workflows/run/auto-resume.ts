@@ -7,6 +7,7 @@ import type { ContinueRunOptions } from '../continuation-admission.ts';
 import { formatWakeInstant } from '../run-scheduling.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
+import { atContinue } from './launch-read-resolver.ts';
 
 interface AutoResumeHost {
   move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
@@ -102,6 +103,19 @@ export class AutoResumeScheduler {
       message: `provider error (${PROVIDER_ERROR_LABELS[provider!.kind]}: ${provider!.detail}) — retrying automatically at ${formatWakeInstant(at)} (attempt ${attempts + 1} of ${MAX_AUTO_RESUMES})` };
   }
 
+  /**
+   * Hold a failing run in its failure's own status write (exit `hold-failure`), so its workers
+   * keep running and a parent waiting on it sees no failure. `afterDropActive` arms the timer
+   * before the slot is released. True when the run is held.
+   */
+  holdFailure(runId: string, error: string): boolean {
+    const plan = this.holdFor(runId, error);
+    if (!plan) return false;
+    this.host.move(runId, 'hold-failure', { error, autoResumeAt: plan.autoResumeAt, autoResumeReason: plan.autoResumeReason });
+    this.context.store.appendEvent(runId, { type: 'lifecycle', message: plan.message });
+    return true;
+  }
+
   /** Arm the timer of a hold the settlement wrote. Runs before the slot is released (see the caller). */
   armHeldResume(runId: string): void {
     if (this.autoResumeTimers.has(runId)) return;
@@ -139,7 +153,7 @@ export class AutoResumeScheduler {
     const provider = run.autoResumeReason === 'provider-error';
     // A provider error before the first session leaves none to resume: the retry starts one.
     const fresh = provider && !run.steps.some((step) => step.sessionId);
-    const text = !provider ? AUTO_RESUME_PROMPT : fresh ? freshRetryPrompt(run.task) : PROVIDER_RETRY_PROMPT;
+    const text = !provider ? AUTO_RESUME_PROMPT : fresh ? freshRetryPrompt(atContinue.task(run)) : PROVIDER_RETRY_PROMPT;
     // `continueRun` retires the pending resume (timer + record fields) on the way in — this is a
     // resume, not a user turn, so the counter is put back straight after.
     const resumed = this.host.continueRun(runId, { text, ...(fresh ? { freshSession: true as const } : {}) }, true);
