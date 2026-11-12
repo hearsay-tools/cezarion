@@ -14,5 +14,10 @@ const inertSupervisor: CiSupervisorLike = {
 /** The default CI resources of the engine testkits: the real shared pool and tool controller,
  *  without `ci-wait/supervisor.ts`. Managers on one semaphore share one pool, as in production. */
 export function acquireInertCiResources(workspace: object): CiResources {
-  return acquirePooledCiResources(workspace, () => inertSupervisor);
+  return acquirePooledCiResources(workspace, createInertSupervisor);
+}
+
+/** One function for every acquire: the pool tells supervisor factories apart by identity. */
+function createInertSupervisor(): CiSupervisorLike {
+  return inertSupervisor;
 }

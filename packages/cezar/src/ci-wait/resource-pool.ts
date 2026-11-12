@@ -18,6 +18,8 @@ export interface CiResources<Supervisor extends CiSupervisorLike = CiSupervisorL
 /** The workspace semaphore is shared by cockpit projects; headless callers have one too. */
 const workspaces = new WeakMap<object, {
   refs: number;
+  /** The factory that built `supervisor`: every manager on one workspace must pass the same one. */
+  createSupervisor: (progress: CiProgressRegistry) => CiSupervisorLike;
   supervisor: CiSupervisorLike;
   /** The check progress the supervisor publishes, for the activity view. */
   progress: CiProgressRegistry;
@@ -25,15 +27,19 @@ const workspaces = new WeakMap<object, {
 }>();
 
 /** The first acquire for a workspace builds its supervisor; later acquires share it until the
- *  last release. `ci-wait/resources.ts` binds the real `CiWatcherSupervisor`. */
+ *  last release. `ci-wait/resources.ts` binds the real `CiWatcherSupervisor`. A later acquire with
+ *  another factory throws, so a test's stand-in and the real watcher never share a workspace. */
 export function acquirePooledCiResources<Supervisor extends CiSupervisorLike>(
   workspace: object,
   createSupervisor: (progress: CiProgressRegistry) => Supervisor,
 ): CiResources<Supervisor> {
   let resource = workspaces.get(workspace);
+  if (resource && resource.createSupervisor !== createSupervisor) {
+    throw new Error('This workspace already holds CI resources from another supervisor factory. Every RunManager on one semaphore must pass the same acquireCiResources.');
+  }
   if (!resource) {
     const progress = new CiProgressRegistry();
-    resource = { refs: 0, supervisor: createSupervisor(progress), progress };
+    resource = { refs: 0, createSupervisor, supervisor: createSupervisor(progress), progress };
     workspaces.set(workspace, resource);
   }
   const shared = resource;
