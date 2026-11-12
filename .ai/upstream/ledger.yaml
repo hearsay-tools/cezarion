@@ -57,6 +57,11 @@ scans:
     since: f6b910f302793bb349282742ed9b7b8091a0190d
     added: 104
     report: scans/2026-11-02.md
+  - date: 2026-11-09
+    upstreamHead: bf656d01dfd5f4daef4863dbe99b7eb2714f641a
+    since: aa35a4f1fe7e5525ffcc2eb9c773773cbe56ce9e
+    added: 48
+    report: scans/2026-11-09.md
 entries:
   - sha: 3c8657688d48b7391d985560e1b0acda28e5ad9e
     pr: 943
@@ -3596,3 +3601,338 @@ entries:
     status: pending
     hint:
       conflicts: 5
+  - sha: 698a406eeb5467a4820056d935f2e852b57afeeb
+    pr: 1868
+    title: "feat(e2e): set up with e2e 0.21's host flags (#1868)"
+    date: 2026-11-02
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 788f499699b0f7d856265f5061bdc000eca6cadd
+    pr: 1723
+    title: "test(web): complete health fixture with webhook capability (#1723)"
+    date: 2026-11-02
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 1b354045dccbe5c26a719ece554dfd4610633883
+    pr: 1392
+    title: "fix(attachments): stop pasted screenshots going invisible to the agent (#1392)"
+    date: 2026-11-02
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 4073c635cf71d1574a946dccfb7249a39bd2597a
+    pr: 1389
+    title: "fix(test-env): prove instance identity before reuse and teardown (#898) (#1389)"
+    date: 2026-11-02
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 2240debc84ec3f07cbbcf9ff8ed3c61fe6107ae8
+    pr: 1888
+    title: "feat(codex): add per-task reasoning effort selection (#1888)"
+    date: 2026-11-03
+    status: pending
+    hint:
+      conflicts: 65
+  - sha: 1622604b84329fe4b8aebe3646c8a62cc90f31e0
+    pr: 1826
+    title: "fix(opencode): support OpenCode 2.x by probing the server API (#1513) (#1826)"
+    date: 2026-11-03
+    status: pending
+    hint:
+      conflicts: 5
+  - sha: 7c998bb8d57a77dac6965087e5ac37f2cf42d4e7
+    pr: 1916
+    title: "feat(kimi): Kimi Code ACP runner (#1916)"
+    date: 2026-11-03
+    status: pending
+    hint:
+      conflicts: 61
+  - sha: b15531bd41584dcc7e68808acb8030808787f7da
+    pr: 1915
+    title: "feat(web): copy a diff file's path from its header (#1915)"
+    date: 2026-11-03
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 7db7460eb7f54a1e40f2f2ee70e3f4dafb05d4a5
+    pr: 1917
+    title: "feat(runners): Gemini CLI runner over ACP (#581) (#1917)"
+    date: 2026-11-03
+    status: pending
+    hint:
+      conflicts: 75
+  - sha: 0ff3291bd83bb05469836910bc36252f6e4e0320
+    pr: 1624
+    title: "feat: HTML artifacts in the cockpit and Assess Impact for PRs and specs (#1624)"
+    date: 2026-11-03
+    status: pending
+    hint:
+      conflicts: 61
+  - sha: e5bf7fde329e3cbc5ebc97ada1117f863aa0b088
+    pr: 1876
+    title: "fix(tests): isolate Windows home safety fixtures (#1853) (#1876)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 246b8fea904faffbca95e9d078cb0185bf837f9c
+    pr: 1885
+    title: "docs(changelog): add the 0.18.0 entry (#1885)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 8a1fea3f2f371444a05d51151644d592569e73ed
+    pr: 1139
+    title: "feat(omp): add omp as a selectable agent runner (#1139)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 73
+  - sha: 3fdb0badb97da4f45f6b1ea31757488efd436c8f
+    pr: 1188
+    title: "fix(agent-pipeline): re-sync the GitHub tracker descriptor with upstream (#1188)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 5ff489fc78e957690d3ea854a6b15403ca1598de
+    pr: 1396
+    title: "fix(runners): mark Codex, Copilot, Cursor, OpenCode and Pi sessions closed when the child exits (#1396)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: e958ecc14e0f62d1f1af4bf2c8957fb9d652c714
+    pr: 1625
+    title: "feat(header): live Claude usage gauges in the task header (#1625)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: 71e2eb181dda0839c981aa3532daa69d8fab021c
+    pr: 1748
+    title: "fix(cockpit): group a task's PR chips behind +N in the sidebar and palette (#1748)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 4b9f2f77f02deea285b70ae4d372b5ec6ebc3216
+    pr: 1944
+    title: "feat(star-count): refresh alongside other requests, at most every 15 minutes (#1944)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: 7c367e3a63b09f3608bcb7d941c70e458f5668e4
+    pr: 1850
+    title: "fix(web): keep closed-run provider gates optimistic while status loads (#719) (#1850)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: c77663f7b2cb9cda9e71477ecc55351993d4616a
+    pr: 1198
+    title: "fix(runs): park autonomous runs stuck on empty turns; exempt supervision turns from the nudge budget (#1198)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 7
+  - sha: 93d17f122b85e5ddd50b15aaae1d42e879089cdb
+    pr: 1281
+    title: "fix(runs): recover missing sessions on Continue (#1281)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 8
+  - sha: fa19dea032e4a216bcd47e4c0070fdf8193f67d9
+    pr: 1821
+    title: "fix(server): bound cursorless run SSE replay to a tail read with a gap frame (#882) (#1821)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: 6d280bee4fd607554464a24be1276bf147960665
+    pr: 1825
+    title: "fix(runs): keep a task's TMPDIR outside the checkout (supersedes #1129) (#1825)"
+    date: 2026-11-04
+    status: pending
+    hint:
+      conflicts: 10
+  - sha: 4157aaee34bfe64f48bf676271cc1acbe28853c9
+    pr: 1935
+    title: 'feat(runs): show idle-closed tasks as "closed · idle" instead of failed (#1935)'
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 29
+  - sha: aad51073b0899baf6611f2d50d0e87d3be59cabb
+    title: Merge commit from fork
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 6b1e93b59871f558fa85f90beed7bf4485148491
+    pr: 1982
+    title: "fix(security): bind outbox reads and repair to checked files (#1981) (#1982)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: e9238a04887279aca2996993f76662c78a78e48a
+    pr: 1967
+    title: "feat(web): fold the sidebar into an icon rail with a project header (#1967)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 9c045363a4058026a55cb4fafaa61ca2fc0f564b
+    pr: 1986
+    title: "fix(automations): paused automations stop dispatching and disclose pending work (#1986)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 14
+  - sha: 7ec0660172292e6675d02bc43cc8eebae3cfca74
+    pr: 1976
+    title: "fix(web): open the task from the sidebar row's status dot (#1976)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: eae917c46bde7262c21f2491dff12ca29233dc8c
+    pr: 1951
+    title: "docs(specs): project slash commands in / autocomplete and Skills list (#1951)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 26eb313a2099740b66292d1c26fdc16e63182789
+    pr: 1934
+    title: "docs(specs): add spec for idle-closed-attention-state (FR #1933) (#1934)"
+    date: 2026-11-07
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: 1a314f3217ece121b72a6cd5a7e90357a1e18f32
+    pr: 1932
+    title: "feat(web): copy button for every agent command, short ones included (#1931) (#1932)"
+    date: 2026-11-07
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: 5b5531f7fd7256e17d0f9ee4dc8c578ba8165485
+    pr: 1971
+    title: "fix(runs): take a follow-up Continue or message on a settling run instead of a 409 (77117b95, 2a1bd85a) (#1971)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: df0fc57d7aac67f54e4dc4382ab52b45bdd19d55
+    pr: 1973
+    title: "fix(web): stop reporting foreign aborts and extension errors as cockpit crashes (#1973)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: caf1898fca40be6e7edd3a83b7b48059779e47a0
+    pr: 1970
+    title: "fix(telemetry): stop reporting reset-less limits and ChatGPT-unsupported models as agent errors (#1970)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: ea2bb2632cbc639f9d6226c5decb6b6ae3878fbd
+    pr: 1972
+    title: "fix(agents): a 143 exit from cezar's own shutdown signal is not an agent crash (#1972)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 4
+  - sha: 2ebd980ec207ae260e6f90d64457f51f2528e39e
+    pr: 1979
+    title: "fix(github): load private attachment images securely (#1902) (#1979)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 6
+  - sha: bde4e54a68c9202441ec85fcfe932c3e65464443
+    pr: 1978
+    title: "fix(security): normalize URL and attachment suffixes in linear time (#1978)"
+    date: 2026-11-06
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: d2b15c46395754f416e22c45224cff784634c701
+    pr: 1998
+    title: "fix(webhooks): close the webhook event stream when the page is left (#1998)"
+    date: 2026-11-07
+    status: pending
+    hint:
+      conflicts: 3
+  - sha: a0e39453bce53fd800ece924e7898d269be69bbe
+    pr: 1081
+    title: "fix(codex): surface usage-limit failures (#1081)"
+    date: 2026-11-07
+    status: pending
+    hint:
+      conflicts: 11
+  - sha: ea724fe43aa50f223d3a6d4eaf6b3a21d4fd620b
+    pr: 1953
+    title: "feat(automations): export and import automations and the cezar configuration (#1953)"
+    date: 2026-11-08
+    status: pending
+    hint:
+      conflicts: 15
+  - sha: 49aa091141add2c48f62eb45210b245136fad9da
+    pr: 2010
+    title: "fix(web): make Mod+B leave Focus on the task assets view (#2010)"
+    date: 2026-11-08
+    status: pending
+    hint:
+      conflicts: 2
+  - sha: 98e699f2db96d399a88a5c14a31dbe066ee9983a
+    pr: 1999
+    title: "fix(security): create handoff journals exclusively (#1999)"
+    date: 2026-11-08
+    status: pending
+    hint:
+      conflicts: 0
+  - sha: e8c808907908e506fbe883d5f366f24ea2fe3122
+    pr: 1987
+    title: "docs(changelog): draft the 0.19.0 entry as # Unreleased (#1987)"
+    date: 2026-11-08
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 77c4365db159ed50fea60a05571eb45f0104c27f
+    pr: 1968
+    title: "feat(runners): Claude reasoning effort, discovered per model (#808) (#1968)"
+    date: 2026-11-08
+    status: pending
+    hint:
+      conflicts: 24
+  - sha: db234af6c24ad10491bcc2d8057c94500cc27402
+    pr: 2017
+    title: "docs(changelog): add the 0.19.0 entry (#2017)"
+    date: 2026-11-09
+    status: pending
+    hint:
+      conflicts: 1
+  - sha: 14fb402db6481ef14cb1c145ca74027df07dcf4b
+    pr: 2021
+    title: "fix(worktrees): never reclaim a worktree a running cezar uses (#2021)"
+    date: 2026-11-09
+    status: pending
+    hint:
+      conflicts: 11
+  - sha: bf656d01dfd5f4daef4863dbe99b7eb2714f641a
+    pr: 2015
+    title: "chore(release): open 0.20.0 on main (#2015)"
+    date: 2026-11-09
+    status: pending
+    hint:
+      conflicts: 7
