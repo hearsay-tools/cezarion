@@ -1,6 +1,7 @@
 name: PR Readiness
 
-# Draft until every required check on the head is green (#603). Runs only the
+# The board follows the head's required checks and review threads
+# (hearsay-tools/cezarion#3288). Never changes draft state. Runs only the
 # default branch's trusted script and never checks out pull-request code.
 on:
   pull_request_target:
@@ -13,7 +14,7 @@ on:
   check_run:
     types: [created, completed]
   # Actions has no review-thread event: after a manual thread change, dispatch
-  # reconciliation, then this workflow if draft state needs refreshing.
+  # reconciliation, then this workflow if the board needs refreshing.
   workflow_dispatch:
     inputs:
       pr_number:
@@ -65,10 +66,8 @@ jobs:
     permissions:
       actions: read
       checks: read
-      # convertPullRequestToDraft / markPullRequestReadyForReview refuse the
-      # workflow token without it. No step checks out or pushes PR code.
-      contents: write
-      pull-requests: write
+      contents: read
+      pull-requests: read
       statuses: read
     steps:
       - name: Checkout trusted readiness script
@@ -92,7 +91,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-organization-projects: write
 
-      - name: Follow the head's checks with draft state and board status
+      - name: Follow the head's checks and threads with board status
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}

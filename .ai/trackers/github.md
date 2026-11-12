@@ -13,7 +13,7 @@ How it is used at runtime: `om-setup-agent-pipeline` copies this file into the r
 
 - Issue and PR identifiers passed to tracker operations are numbers. In documentation, qualify citations as `hearsay-tools/cezarion#123` (fork) or `open-mercato/cezar#123` (upstream), or use a repository-qualified GitHub link. See `AGENTS.md` § Issue and PR citations. Literal CLI arguments and example markers remain unchanged.
 - A PR is linked to the issue it resolves with `Fixes #{issueId}` (or `Closes #{issueId}`) in the PR body; GitHub then closes the issue on merge. To reference without auto-closing, use a plain issue link.
-- PRs open as **drafts** when a skill says so; a human (or **mark-pr-ready**) promotes them.
+- PRs open ready. A draft is a human's choice; a human (or **mark-pr-ready** on a human's word) promotes it. `pr-readiness.yml` never changes draft state, so no workflow promotes a draft (`AGENTS.md` § Dev flow bindings, Board).
 - Claim/lock signals on an issue or PR are: assignee set to the automation user, the `in-progress` label, and a `🤖`-prefixed claim comment. All three are set on claim; the label is guarded (below).
 - Long, multi-line comment bodies are posted with `--body-file` (or a heredoc via process substitution) so formatting is preserved.
 - CI status truth comes from **get-pr-checks**; the set of *required* checks comes from **get-required-checks** (branch protection). When branch protection is not readable (404), treat every reported check as required.
@@ -180,9 +180,9 @@ gh search prs --repo {owner}/{repo} "#{issueId}" --state open --json number,titl
 ```
 
 #### create-pr
-Base branch, draft flag, title, body → PR.
+Base branch, draft flag, title, body → PR. Add `--draft` only when the draft flag is set; this repository opens PRs ready (`AGENTS.md` § Dev flow bindings, Board).
 ```bash
-gh pr create --repo {owner}/{repo} --base "$BASE_BRANCH" --draft --title "<title>" --body "<body>"
+gh pr create --repo {owner}/{repo} --base "$BASE_BRANCH" --title "<title>" --body "<body>"
 PR_URL=$(gh pr view --json url --jq .url)
 PR_NUMBER=$(gh pr view --json number --jq .number)
 ```

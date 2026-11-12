@@ -1,13 +1,13 @@
 'use strict';
 
-// Draft follows the head (#603): Ready for review means a human can look now,
-// because agentic work and every required check on THIS head are done.
-//   - An unverified live head converts the PR back to draft on its next wake.
-//   - A completed CI or Automated Code Review run marks the PR ready once every
-//     required check on the live head passes and no review thread is open.
-//   - The linked issues' board cards follow: draft → In progress, ready → In review.
-// Flips made with the workflow token fire no workflow events, so the board is
-// synced inline after each flip; human flips arrive as their own events.
+// The board follows the head (hearsay-tools/cezarion#603, hearsay-tools/cezarion#3288).
+// Readiness never changes draft state: agents open pull requests ready, and a
+// human's draft stays a draft.
+//   - The PR's and its closing issues' cards move to In review once the PR is
+//     ready, every required check on the live head passes and no thread is open.
+//   - Any other state moves them to In progress: a new head, a pending or red
+//     check, an open thread, or a draft.
+// Human draft/ready flips arrive as their own events and resync the board.
 
 const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
@@ -16,7 +16,7 @@ const { discover: discoverAdmission, eligiblePull } = require('./coderabbit-reco
 
 const REVIEW_CHECK = 'Automated Code Review';
 const PASSING = new Set(['success', 'skipped', 'neutral']);
-const BOARD = { draft: 'In progress', ready: 'In review' };
+const BOARD = { progress: 'In progress', review: 'In review' };
 const DONE_STATUS = 'done';
 const PULL_ACTIONS = new Set(['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
 
@@ -73,13 +73,6 @@ async function readHeadChecks({ github, owner, repo, sha }) {
   return { checkRuns, statuses: combined?.statuses || [] };
 }
 
-async function setDraft({ github, pull, draft }) {
-  const mutation = draft
-    ? 'mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }'
-    : 'mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }';
-  await github.graphql(mutation, { id: pull.node_id });
-}
-
 const BOARD_QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
@@ -128,9 +121,8 @@ function boardMoves(data, status) {
 }
 
 // Board access is optional: without a project-capable token the sync reports
-// why and returns, and the draft/ready gate is unaffected.
-async function syncBoard({ projectGithub, owner, repo, pullNumber, draft, log }) {
-  const status = draft ? BOARD.draft : BOARD.ready;
+// why and returns.
+async function syncBoard({ projectGithub, owner, repo, pullNumber, status, log }) {
   if (!projectGithub) {
     log(`Board sync skipped for #${pullNumber}: no project token (grant the release App Organization projects access).`);
     return { moved: 0, skipped: 'no-token' };
@@ -151,7 +143,7 @@ async function syncBoard({ projectGithub, owner, repo, pullNumber, draft, log })
   }
 }
 
-// The workflow token cannot flip a fork's PR; those keep their draft state.
+// Board sync covers same-repository PRs only.
 function sameRepo(pull, owner, repo) {
   return pull?.head?.repo?.full_name === `${owner}/${repo}`;
 }
@@ -170,13 +162,9 @@ async function followPull({ github, projectGithub, owner, repo, candidate, sha, 
   }
   const { data: final } = await github.rest.pulls.get({ owner, repo, pull_number: live.number });
   if (final?.state !== 'open' || final.head?.sha !== sha || !sameRepo(final, owner, repo) || final.base?.ref !== 'main') return;
-  const draft = !admitted;
-  if (final.draft === draft) log(`PR ${final.number}: readiness unchanged (admitted=${admitted}).`);
-  else {
-    await setDraft({ github, pull: final, draft });
-    log(`PR ${final.number}: ${draft ? 'converted back to draft' : 'marked ready for review'} from fresh admission.`);
-  }
-  await syncBoard({ projectGithub, owner, repo, pullNumber: final.number, draft, log });
+  const status = admitted && !final.draft ? BOARD.review : BOARD.progress;
+  log(`PR ${final.number}: board follows ${status} (admitted=${admitted}, draft=${final.draft}).`);
+  await syncBoard({ projectGithub, owner, repo, pullNumber: final.number, status, log });
 }
 
 async function discoverReadiness({ github, owner, repo, eventName, payload, log = () => {} }) {

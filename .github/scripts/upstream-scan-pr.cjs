@@ -1,7 +1,7 @@
 // Open the weekly upstream-scan PR (spec .ai/specs/2026-09-18-upstream-ledger.md).
 // Runs inside actions/github-script after upstream-scan.cjs printed its summary
 // into SCAN_JSON. Nothing new → no git, no PR. Otherwise commit `.ai/upstream`
-// on `upstream-scan/<date>` and open one draft PR against BASE_BRANCH.
+// on `upstream-scan/<date>` and open one ready PR against BASE_BRANCH.
 // Only PR creation uses prGithub (the installation-token client), so native
 // pull_request_target CI starts; git and lookups retain the workflow token.
 //
@@ -65,7 +65,7 @@ async function openScanPr({ github, prGithub, context, core, env = process.env, 
     ...context.repo,
     base,
     head: branch,
-    draft: true,
+    draft: false,
     title: `chore(upstream): scan ${summary.date} — ${summary.added} new upstream commits`,
     body: body(summary, readFile(summary.report)),
   });

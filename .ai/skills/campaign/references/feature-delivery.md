@@ -48,8 +48,8 @@ invalidates release: request a fresh check under campaign/references/hot-file-re
 Use implement-issue from its current approved Plan handoff. Follow its
 verification, code-quality, PR-body and PR-checks rules. The coordinator owns
 the issue claim, board, labels, landing and friction posts. Send required label
-requests to it before the first push that needs them. Keep draft-state control
-with pr-readiness.yml. Read auto-merge before opening the PR; owner-merge mode
+requests to it before the first push that needs them. Open the PR ready, not
+draft. Read auto-merge before opening the PR; owner-merge mode
 requires owner review, and this worker leaves landing to the coordinator/owner.
 
 Deliver: <acceptance criteria and evidence checks>.
@@ -71,7 +71,7 @@ covered suites, and run build, typecheck and packaged checks when required.
 For a regression fix, prove the regression fails at proof_base and passes
 with the fix. Record preserved guarantees when changing a test's expectation.
 
-Report the draft PR, head, criterion-to-check results, changed contracts,
+Report the PR, head, criterion-to-check results, changed contracts,
 limitations and friction. Fix in-scope CI/review findings; report inherited
 failures with evidence. Register a PR wait. Rebase only when the coordinator
 requests it, push with --force-with-lease, then refresh affected evidence.

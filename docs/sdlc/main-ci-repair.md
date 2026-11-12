@@ -78,7 +78,7 @@ close another PR or copy its commits without that decision. Continue recognizes
 the task's own assignment and claim. Cross-attempt ownership transfer is outside
 this change; routing one summary prevents competing repairs within one attempt.
 
-Bounded repairs restore established behavior and end in a verified draft PR.
+Bounded repairs restore established behavior and end in a verified ready PR.
 Unclear evidence, design conflicts or policy changes require a human decision in
 the same task. Tasks never merge, weaken checks, quarantine tests, enable
 automations or repeatedly rerun CI to obtain green. The summary groups evidence;

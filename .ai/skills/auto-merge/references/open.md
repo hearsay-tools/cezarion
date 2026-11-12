@@ -7,7 +7,7 @@ The `auto-merge` label and the PR's `## Auto-merge` section show the owner what
 merged without review, so the owner can tighten the rules where something
 slipped. Write the section for that reader.
 
-Open the PR as a draft, as usual. Add the label
+Open the PR ready, as usual. Add the label
 (`gh pr edit <n> --add-label auto-merge`) and this section to the body:
 
 ```markdown
