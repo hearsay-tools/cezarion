@@ -47,6 +47,18 @@ test('assignShards includes new files with a positive fallback duration', async 
   assert.ok(result.every((shard) => shard.length > 0));
 });
 
+test('unknown files use the upper quartile, ignoring invalid and undiscovered weights', async () => {
+  const { assignShards, default: Sequencer } = await import(moduleUrl);
+  assert.deepEqual(assignShards(['new'], { bad: -1 }, 2), [['new'], []]);
+  const specifications = ['a', 'b', 'c', 'd', 'new'].map(file => ({
+    moduleId: `/repo/${file}`, project: { name: 'test' },
+  }));
+  const sequencer = new Sequencer({ config: { root: '/repo', shard: { index: 1, count: 2 } } });
+  sequencer.durations = { a: 10, b: 20, c: 30, d: 40, removed: 10000 };
+  assert.deepEqual((await sequencer.shard(specifications)).map(spec => spec.moduleId),
+    ['/repo/d', '/repo/b', '/repo/a']);
+});
+
 test('assignShards is stable when discovery order changes', async () => {
   const assignShards = await allocator();
   const durations = { 'a.test.ts': 5, 'b.test.ts': 4, 'c.test.ts': 3, 'd.test.ts': 2 };

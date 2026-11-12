@@ -16,6 +16,21 @@ This page is about one thing: how a spec waits. Most red shards on `main`
 and on unrelated pull requests have been sampling races, not product bugs (#369, #393, #394,
 #405, #409), and every one of them looked like a flake until the page state was in hand.
 
+## Shard duration weights
+
+CI uses eight duration-weighted browser shards. The sequencer discovers every
+spec from Vitest and uses `.github/cockpit-test-durations.json` only to balance
+the shards. Unknown specs get the upper quartile of known durations, with a
+positive fallback even when no measurement exists. Removed specs are ignored.
+
+The daily **Refresh test durations** workflow takes per-spec medians from three
+recent successful full eight-shard CI runs on `main` or its merge queue. It opens
+a normal PR for added or removed specs, or a duration change of at least 25% and
+5 seconds. Each manifest records its source runs and any estimates. Updates use bounded
+batches with a baseline commit so GitHub can return every patch. The
+[CI guide](../../../docs/sdlc/ci.md) describes the sample rules and read-only
+dispatch proof. Browser spec count, shard count and test behavior stay unchanged.
+
 ## QA screenshots of one element
 
 Use `browser.screenshotElement(selector, path)` for viewport evidence of a specific

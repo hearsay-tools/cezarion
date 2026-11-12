@@ -11,13 +11,10 @@ function positiveDuration(value) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
-function fallbackDuration(measured) {
+export function fallbackDuration(measured) {
   const values = Object.values(measured).filter(positiveDuration).sort((a, b) => a - b);
   if (values.length === 0) return 1;
-  const middle = Math.floor(values.length / 2);
-  return values.length % 2 === 1
-    ? values[middle]
-    : (values[middle - 1] + values[middle]) / 2;
+  return values[Math.ceil(values.length * 0.75) - 1];
 }
 
 /** Deterministically assign every discovered file using longest-processing-time bins. */
