@@ -520,36 +520,49 @@ describe('a store that cannot be opened is never an empty one', () => {
     expect(runIds(open())).toEqual(['bb', 'a']);
   });
 
-  it('a busy database at boot is waited out with growing pauses', async () => {
+  /** Stand in for `open`'s blocking pause: record each pause, move the faked clock by it, and
+   *  return at once. `onPause` sees the pauses so far. */
+  function fakePauses(onPause: (pauses: number[]) => void = () => {}): { pauses: number[]; restore: () => void } {
+    const pauses: number[] = [];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const wait = vi.spyOn(Atomics, 'wait').mockImplementation((_array, _index, _value, timeout) => {
+      pauses.push(timeout ?? Number.POSITIVE_INFINITY);
+      vi.setSystemTime(Date.now() + (timeout ?? 0));
+      onPause(pauses);
+      return 'timed-out';
+    });
+    return { pauses, restore: () => { wait.mockRestore(); vi.useRealTimers(); } };
+  }
+
+  it('a busy database at boot is waited out with growing pauses', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a'), record('bb')]));
     RunDatabase.open(join(dataDir, RUNS_DB_FILE)).close();
-    const holder = runChild('holds-the-write-lock', `
-      import { DatabaseSync } from 'node:sqlite';
-      const [dataDir, scratch] = process.argv.slice(2);
-      const db = new DatabaseSync(dataDir + '/runs.db');
-      db.exec('BEGIN IMMEDIATE');
-      writeFileSync(scratch + '/locked', '');
-      sleep(600);
-      db.exec('ROLLBACK');
-      db.close();
-    `);
-    await waitForFile(join(scratch, 'locked'));
-    expect(runIds(open({ retryBusy: true }))).toEqual(['bb', 'a']);
-    expect((await exitOf(holder)).code).toBe(0);
+    const release = blockRunWrites(dataDir);
+    const clock = fakePauses((pauses) => { if (pauses.length === 3) release(); });
+    try {
+      expect(runIds(open({ retryBusy: true }))).toEqual(['bb', 'a']);
+    } finally {
+      clock.restore();
+      release();
+    }
+    expect(clock.pauses).toEqual([50, 100, 200]);
   });
 
   it('a database still busy after the boot wait says how long it waited', () => {
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([record('a')]));
     RunDatabase.open(join(dataDir, RUNS_DB_FILE)).close();
     const release = blockRunWrites(dataDir);
+    const clock = fakePauses();
     try {
       const failure = openFailure({ retryBusy: true });
       expect(failure.kind).toBe('busy');
       expect(failure.message).toMatch(/has held its write lock for over 3\.\d s\./);
     } finally {
+      clock.restore();
       release();
     }
-  }, 10_000);
+    expect(clock.pauses).toEqual([50, 100, 200, 400, 800, 1600]);
+  });
 
   it.skipIf(process.getuid?.() === 0)('a directory this user cannot write: a permission error naming it', () => {
     chmodSync(dataDir, 0o500);

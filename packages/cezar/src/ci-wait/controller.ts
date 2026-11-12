@@ -12,7 +12,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import { previewStopResult } from '../preview/registration.ts';
 import { askErrorMessage, askInvalidInput, ciErrorMessage, toolsUnavailableMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
-import { automationsToolEnabled, previewToolEnabled } from './tools.ts';
+import { automationsToolEnabled, previewToolEnabled } from './tool-catalog.ts';
 import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduleTaskRequestSchema, scheduledTasksAnswerSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduleTaskRequest, type ScheduledTasksAnswer, type ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequestInput, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import { ciWaitErrorCodeSchema } from '@open-mercato/cezar-contract/ci-wait';

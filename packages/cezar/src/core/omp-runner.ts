@@ -32,7 +32,7 @@ import { ompRequestedTools } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
-import { cezarToolNames } from '../ci-wait/tools.js';
+import { cezarToolNames } from '../ci-wait/tool-catalog.js';
 import { readNdjson } from './ndjson.js';
 import {
   createOmpUiState,

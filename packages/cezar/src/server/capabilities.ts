@@ -1,4 +1,5 @@
 import { productEnv, remoteEnvEnabled } from '../core/product-env.ts';
+import { automationsEnabled } from '../automations/enabled.ts';
 /**
  * Server capabilities reported by `/api/health` — the UI hides what the server
  * says isn't there, and the matching endpoints refuse as defense in depth.
@@ -152,7 +153,7 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
     settingsAdmin: localHandoff || remoteSettingsAdmin,
     remoteSettingsAdmin,
     singleProject: productEnv('SINGLE_PROJECT', env) === '1',
-    automations: productEnv('AUTOMATIONS', env) !== '0',
+    automations: automationsEnabled(env),
     preview: productEnv('PREVIEW', env) === '1',
     // Boot-time flag, like `automations`. The key is read here only as present or absent; the
     // fake engine under CEZ_DRY_RUN needs none.

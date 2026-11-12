@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { previewClientMessageSchema, type PreviewServerMessage } from '@open-mercato/cezar-contract/preview';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { previewToolEnabled } from '../ci-wait/tools.ts';
+import { previewToolEnabled } from '../ci-wait/tool-catalog.ts';
 import type { PreviewHost, RunContext } from '../preview/host.ts';
 import type { Viewer } from '../preview/session.ts';
 import { PROJECT_ID_RE } from '../workspace/config.ts';

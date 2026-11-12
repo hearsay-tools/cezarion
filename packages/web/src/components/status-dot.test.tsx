@@ -1,6 +1,8 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { isPainted, paintClasses, type PaintedProperty } from '@/test/paint'
+
 import { StatusDot, type StatusDotTone } from './status-dot'
 
 // Explicit rather than relying on RTL's auto-cleanup, which only runs when vitest `globals` is on.
@@ -14,39 +16,35 @@ function renderDot(ui: React.ReactElement) {
 }
 
 describe('StatusDot', () => {
-  describe('tone → class mapping', () => {
-    it.each([
-      { tone: 'success', expected: 'bg-success' },
-      { tone: 'pending', expected: 'bg-pending' },
-      { tone: 'danger', expected: 'bg-danger' },
-      { tone: 'accent', expected: 'bg-accent-strong' },
-      { tone: 'info', expected: 'bg-info' },
-      // #617: the running family paints the sidebar-safe violet, never the `--running` fill.
-      { tone: 'running', expected: 'bg-status-running' },
-      { tone: 'neutral', expected: 'bg-soft-foreground' },
-    ] as const satisfies readonly { tone: StatusDotTone; expected: string }[])(
-      '$tone',
-      ({ tone, expected }) => {
-        const dot = renderDot(<StatusDot tone={tone} />)
+  const TONES = ['success', 'pending', 'danger', 'accent', 'info', 'running', 'neutral'] as const satisfies readonly StatusDotTone[]
+  const fillOf = (dot: Element) => paintClasses(dot, 'fill')
+  // One rendered dot per tone, for a property that must be painted and set the tones apart.
+  const perTone = (shape: 'filled' | 'ring' | 'workers', property: PaintedProperty) => TONES.map((tone) => {
+    const paint = paintClasses(renderDot(<StatusDot tone={tone} shape={shape} />), property)
+    cleanup()
+    return { tone, paint }
+  })
+  const expectPaintedApart = (rows: readonly { tone: string; paint: string[] }[]) => {
+    for (const { tone, paint } of rows) expect(isPainted(paint), `${tone}: ${paint.join(' ')}`).toBe(true)
+    expect(new Set(rows.map(({ paint }) => paint.join(' '))).size).toBe(rows.length)
+  }
 
-        expect(dot.className).toContain(expected)
-        expect(dot.getAttribute('data-tone')).toBe(tone)
-      }
-    )
+  it('gives every tone its own fill and names it in data-tone', () => {
+    // The resolved colours (the sidebar-safe violet for running) are sampled in quick-list.e2e.ts.
+    for (const tone of TONES) {
+      expect(renderDot(<StatusDot tone={tone} />).getAttribute('data-tone')).toBe(tone)
+      cleanup()
+    }
+    expectPaintedApart(perTone('filled', 'fill'))
   })
 
   it('defaults to the neutral tone', () => {
     const dot = renderDot(<StatusDot />)
 
     expect(dot.getAttribute('data-tone')).toBe('neutral')
-    expect(dot.className).toContain('bg-soft-foreground')
-  })
-
-  it('renders at the design system 7px size', () => {
-    const dot = renderDot(<StatusDot />)
-
-    expect(dot.className).toContain('size-[7px]')
-    expect(dot.className).toContain('rounded-full')
+    const neutral = fillOf(dot)
+    cleanup()
+    expect(fillOf(renderDot(<StatusDot tone="neutral" />))).toEqual(neutral)
   })
 
   it('pulses only when asked to', () => {
@@ -68,37 +66,36 @@ describe('StatusDot', () => {
     it('defaults to a filled dot', () => {
       const dot = renderDot(<StatusDot tone="success" />)
       expect(dot.getAttribute('data-shape')).toBe('filled')
-      expect(dot.className).toContain('bg-success')
     })
 
-    it('renders a ring as the same 7px box with a 1.5px stroke and a transparent centre', () => {
-      const dot = renderDot(<StatusDot tone="running" shape="ring" />)
-      expect(dot.getAttribute('data-shape')).toBe('ring')
-      expect(dot.className).toContain('size-[7px]')
-      expect(dot.className).toContain('rounded-full')
-      expect(dot.className).toContain('border-[1.5px]')
-      expect(dot.className).toContain('border-status-running')
-      expect(dot.className).toContain('bg-transparent')
-      expect(dot.className).not.toContain('bg-status-running')
+    it.each(TONES)('renders a %s ring hollow, with a visible stroke', (tone) => {
+      const ring = renderDot(<StatusDot tone={tone} shape="ring" />)
+      const classes = ring.className.split(/\s+/)
+      expect(ring.getAttribute('data-shape')).toBe('ring')
+      // No fill: the centre stays clear.
+      expect(fillOf(ring).filter((cls) => cls !== 'bg-transparent')).toEqual([])
+      // A stroke wider than zero: plain `border`, `border-N` or `border-[Npx]` with N > 0.
+      expect(classes.some((cls) => /^border(?:-[1-9]\d*|-\[(?:0?\.\d*[1-9]|[1-9][\d.]*)px\])?$/.test(cls))).toBe(true)
     })
 
-    it('renders the workers shape as the 12px bot glyph with the same accessible name', () => {
+    it('strokes each ring tone in its own painted colour', () => {
+      expectPaintedApart(perTone('ring', 'stroke'))
+    })
+
+    it('inks each workers glyph tone in its own painted colour', () => {
+      expectPaintedApart(perTone('workers', 'ink'))
+    })
+
+    it('renders the workers shape as a bot glyph with the same accessible name', () => {
       const dot = renderDot(<StatusDot tone="running" shape="workers" role="img" aria-label="waiting on 2 workers" />)
       expect(dot.getAttribute('data-shape')).toBe('workers')
       expect(dot.getAttribute('role')).toBe('img')
       expect(dot.getAttribute('aria-label')).toBe('waiting on 2 workers')
-      expect(dot.className).toContain('text-status-running')
-      // Explicit px, not a spacing unit: `size-3` follows `--spacing` and shrinks under density.
-      expect(dot.className).toContain('size-[12px]')
-      expect(dot.className).not.toMatch(/(^|\s)size-3(\s|$)/)
-      expect(dot.className).not.toContain('rounded-full')
+      // The 12px box under every density and the lucide `bot` glyph: quick-list.e2e.ts.
       const svg = dot.querySelector('svg')
       expect(svg).not.toBeNull()
       expect(svg?.getAttribute('aria-hidden')).toBe('true')
-      // The lucide `bot` glyph the issue names, not the exported design-icon outline.
-      expect(svg?.getAttribute('class')).toContain('lucide-bot')
       expect(svg?.getAttribute('data-design-icon')).toBeNull()
-      expect(svg?.getAttribute('class')).toContain('size-[12px]')
     })
 
     it('pulses a ring when asked, like a filled dot', () => {

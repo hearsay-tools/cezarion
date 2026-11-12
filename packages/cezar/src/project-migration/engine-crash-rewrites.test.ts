@@ -12,6 +12,7 @@ import { migrateProject, resumeProjectMigration } from './engine.ts';
 import { Crash, crashAt, crashThenRecover, disposers, fence, beforeRepair, moved, owners, recordedMigration, rows, TIMEOUT } from './engine.testkit.ts';
 import { readProjectMigrationJournal } from './journal.ts';
 import { projectSnapshot, removeMigrationProject, TASK, type MigrationProject } from './project-migration.testkit.ts';
+import { createRunManager } from '../server/run-manager.testkit.ts';
 
 /** Crash recovery of the project migration engine from its repair on (hearsay-tools/cezarion#3088): a
  *  crash at every fault point of the worktree repair, the receipts, the run store and the run files,
@@ -59,7 +60,7 @@ describe('crash recovery from the repair on', { timeout: TIMEOUT }, () => {
     crashed.release();
     const ownership = new CockpitOwnership();
     owners.push(ownership);
-    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+    const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), ownership,
       listProjects: async () => [{ id: 'p', root: project.root, status: 'not-git' as const }] });
     disposers.push(() => contexts.disposeAll());
     await expect(ownership.acquire(project.newDir)).rejects.toBeInstanceOf(ProjectMigrationFencedError);

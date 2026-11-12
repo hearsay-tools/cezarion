@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { autosaveCommit, type AutosaveOutcome } from './git-worktree.ts';
+import { autosaveCommit, type AutosaveOutcome } from './autosave-commit.ts';
 
 const run = promisify(execFile);
 // The fixture reads Git directly, so a test's PATH shim reaches only the save.

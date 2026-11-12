@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { autosaveCommit, createWorktree } from '../git-worktree.ts';
+import { createWorktree } from '../git-worktree.ts';
+import { autosaveCommit } from '../autosave-commit.ts';
 import { createOwnedWorkspace, ensureOwnedWorkspace, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
 import { roots, fixture, durableRun, git, receiptPath, WORKSPACE_TEST_TIMEOUT_MS } from './workspace-fixture.testkit.ts';
 

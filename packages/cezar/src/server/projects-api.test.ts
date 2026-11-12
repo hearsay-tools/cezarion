@@ -37,6 +37,7 @@ import {
 } from './server.ts';
 import { setRunStatus, seedRuns } from '../runs/run-store.testkit.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { createRunManager } from './run-manager.testkit.ts';
 
 /**
  * Multi-project workspace API (spec 2026-07-20-multi-project-workspace, step
@@ -167,7 +168,7 @@ describe('workspace projects API', () => {
       const registeredRoot = join(otherRoot, basename(repoRoot));
       mkdirSync(registeredRoot);
       const registered = await registerProject(registeredRoot, undefined, testHome());
-      const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+      const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
 
       const body = await getProjects({ contexts });
       expect(registered.id).toBe(allocateProjectSlug(repoRoot, []));
@@ -456,7 +457,7 @@ describe('workspace projects API', () => {
 
     it('refuses removal in single-project mode before registry or context side effects', async () => {
       const other = await registerProject(otherRoot, undefined, testHome());
-      const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+      const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
       process.env.CEZ_SINGLE_PROJECT = '1';
 
       const { status, body } = await del(other.id, { contexts });
@@ -515,7 +516,7 @@ describe('workspace projects API', () => {
     });
 
     it('409s while the project has running tasks, and removes nothing', async () => {
-      const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
+      const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome())});
       const other = await registerProject(otherRoot, undefined, testHome());
       // Build the context the way a first API touch would, THEN put a live run in its store —
       // seeding first would make `manager.recover()` resume it, which is not what is under test.
@@ -562,7 +563,7 @@ describe('workspace projects API', () => {
       const gate = new Promise<void>((resolve) => { release = resolve; });
       // Past the registry lookup, as a real build is when recovery is what takes the time.
       const ownership = { acquire: () => gate } as unknown as CockpitOwnership;
-      const contexts = new ProjectContexts({ createRunner, home: testHome(), listProjects: () => listProjects(undefined, testHome()), ownership });
+      const contexts = new ProjectContexts({ createRunner, createManager: createRunManager, home: testHome(), listProjects: () => listProjects(undefined, testHome()), ownership });
       // The build stays gated until the removal reaches its wait for it.
       const settle = contexts.settle.bind(contexts);
       vi.spyOn(contexts, 'settle').mockImplementation((id) => { release(); return settle(id); });

@@ -1,6 +1,6 @@
 import { productEnv } from '../../core/product-env.ts';
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../../autosave-cleanup.ts';
-import { autosaveCommit, type AutosaveOutcome, type AutosaveReason } from '../../git-worktree.ts';
+import { autosaveCommit, type AutosaveOutcome, type AutosaveReason } from '../../autosave-commit.ts';
 import { recordHandoffAutosave, recordHandoffPeriodicAutosave } from '../../handoff.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunModuleContext } from './types.ts';

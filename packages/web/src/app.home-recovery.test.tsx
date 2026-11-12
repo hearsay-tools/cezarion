@@ -15,7 +15,7 @@ vi.mock('./components/app-shell-container', () => ({ AppShellContainer: passthro
 vi.mock('./components/last-location-controller', () => ({ LastLocationController: () => null }))
 vi.mock('./components/run-notifications', () => ({ RunNotifications: () => null }))
 vi.mock('./components/ui/toaster', () => ({ Toaster: () => null }))
-vi.mock('./routes', () => ({ AppRoutes: () => <div>Active route</div> }))
+vi.mock('./routes', () => ({ AppRoutes: () => <div>Active route</div>, matchProjectRoute: () => null }))
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 

@@ -5,7 +5,7 @@ import { requestOutcomeSchema } from './conversations.ts';
 import { workerWaitModeSchema } from './delegation.ts';
 import { runnerSchema } from './runner.ts';
 import { PROJECT_ID_PATTERN } from './project-limits.ts';
-import { runStatusSchema } from './runs.ts';
+import { runStatusSchema } from './run-status.ts';
 import type { ToolKind } from './tool-display.ts';
 
 /**

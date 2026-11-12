@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { repoInfoSchema } from './repo-info.ts';
-import { runStatusSchema } from './runs.ts';
+import { runStatusSchema } from './run-status.ts';
 
 /**
  * The repo / git family of `/api/v1` — the Repo view, the structured diff shapes the Changes and
@@ -304,21 +304,6 @@ export const worktreeEntrySchema = z.discriminatedUnion('type', [
 ]);
 export type WorktreeEntry = z.infer<typeof worktreeEntrySchema>;
 
-/**
- * The lifecycle states a task can be in. Declared here (module-local, not exported) only because
- * `GET /api/v1/worktrees` echoes a run's `status` verbatim and the runs family's own contract
- * module does not exist yet — replace with that module's `runStatusSchema` when it lands.
- */
-const worktreeRunStatusSchema = z.enum([
-  'queued',
-  'running',
-  'waiting',
-  'review',
-  'done',
-  'failed',
-  'cancelled',
-]);
-
 /** One materialized task worktree in the management panel (#483). `sizeBytes` is null when `du`
  *  is unavailable (Windows / missing). `reclaimable` = finished, has a directory, not yet
  *  reclaimed (retention's rule). `pastKeep` = reclaimable AND outside the newest `keep`, i.e.
@@ -326,7 +311,7 @@ const worktreeRunStatusSchema = z.enum([
 export const worktreeInfoSchema = z.object({
   runId: z.string(),
   title: z.string(),
-  status: worktreeRunStatusSchema,
+  status: runStatusSchema,
   branch: z.string().nullable(),
   sizeBytes: z.number().nullable(),
   finishedAt: z.string().nullable(),

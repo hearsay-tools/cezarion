@@ -2,8 +2,8 @@ import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit'
 import { chmodSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   RUN_DATABASE_SCHEMA_VERSION,
@@ -29,6 +29,36 @@ function openDb(at = path): RunDatabase {
   const db = RunDatabase.open(at);
   open.push(db);
   return db;
+}
+
+/** The SQL text of each statement `read` runs, read from the product's own prepared statements. */
+function statementsRunBy(read: () => unknown): string[] {
+  const seen: string[] = [];
+  const spies = (['all', 'get', 'iterate'] as const).map((method) => {
+    const original = StatementSync.prototype[method] as (...args: unknown[]) => unknown;
+    return vi.spyOn(StatementSync.prototype, method).mockImplementation(function (this: StatementSync, ...args: unknown[]) {
+      seen.push(this.sourceSQL);
+      return original.apply(this, args);
+    } as never);
+  });
+  try {
+    read();
+  } finally {
+    for (const spy of spies) spy.mockRestore();
+  }
+  return seen;
+}
+
+/** The query plan of every statement `read` runs, one string per statement, steps joined by ` | `. */
+function planOf(read: () => unknown): string[] {
+  const statements = statementsRunBy(read);
+  expect(statements.length).toBeGreaterThan(0);
+  const raw = new DatabaseSync(path, { readOnly: true });
+  try {
+    return statements.map((sql) => raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((step) => String(step.detail)).join(' | '));
+  } finally {
+    raw.close();
+  }
 }
 
 function row(id: string, overrides: Partial<RunRowInput> = {}): RunRowInput {
@@ -189,15 +219,8 @@ describe('RunDatabase', () => {
   });
 
   it('serves the newest-first summary read from one index, without a sort step', () => {
-    openDb();
-    const raw = new DatabaseSync(path);
-    try {
-      const plan = raw.prepare('EXPLAIN QUERY PLAN SELECT id, created_at, revision, summary FROM runs ORDER BY created_at DESC, seq LIMIT 201')
-        .all().map((step) => String(step.detail));
-      expect(plan).toEqual(['SCAN runs USING INDEX runs_created_at']);
-    } finally {
-      raw.close();
-    }
+    const db = openDb();
+    expect(planOf(() => db.listSummaries())).toEqual(['SCAN runs USING INDEX runs_created_at']);
   });
 
   it('lists every row newest first', () => {
@@ -464,21 +487,18 @@ describe('RunDatabase', () => {
     it('serves every named query from its index', () => {
       const db = openDb();
       seed(db);
-      const raw = new DatabaseSync(path);
-      try {
-        const plan = (sql: string) => raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((r) => String(r.detail)).join(' | ');
-        expect(plan('SELECT id FROM runs WHERE live = 1')).toContain('USING INDEX runs_live');
-        expect(plan("SELECT id FROM runs WHERE parent_run_id = 'x'")).toContain('runs_parent_run_id');
-        expect(plan("SELECT id FROM runs WHERE client_request_id = 'x'")).toContain('runs_client_request_id');
-        expect(plan("SELECT id FROM runs WHERE group_id = 'x'")).toContain('runs_group_id');
-        expect(plan('SELECT id FROM runs WHERE worktree_path IS NOT NULL')).toContain('runs_worktree_path');
-        expect(plan('SELECT id FROM runs WHERE branch IS NOT NULL')).toContain('runs_branch');
-        // The run lists' window (#864): neither half scans the table.
-        expect(plan('SELECT id FROM runs WHERE archived = 0 ORDER BY created_at DESC, seq')).toContain('runs_unarchived')
-        expect(plan('SELECT id FROM runs WHERE archived = 1 AND parent_run_id IS NULL ORDER BY created_at DESC, seq LIMIT 201')).toContain('runs_archived_roots')
-      } finally {
-        raw.close();
-      }
+      expect(planOf(() => db.listLive())).toEqual([expect.stringContaining('USING INDEX runs_live')]);
+      expect(planOf(() => db.listByParent('root-1'))).toEqual([expect.stringContaining('runs_parent_run_id')]);
+      expect(planOf(() => db.listIdsByParent('root-1'))).toEqual([expect.stringContaining('runs_parent_run_id')]);
+      expect(planOf(() => db.findByClientRequestId('client-1'))).toEqual([expect.stringContaining('runs_client_request_id')]);
+      expect(planOf(() => db.listWithWorktree())).toEqual([expect.stringContaining('runs_worktree_path')]);
+      expect(planOf(() => db.findResourceHolders({ branch: 'cez/new', worktreePath: '/w/new' })))
+        .toEqual([expect.stringMatching(/runs_branch.*runs_worktree_path/)]);
+      // The run lists' window (hearsay-tools/cezarion#864): neither half scans the table.
+      const [window] = planOf(() => db.listWindowSummaries(201));
+      expect(window).toMatch(/SCAN runs USING INDEX runs_unarchived .*SEARCH runs USING INDEX runs_archived_roots/);
+      const [rootWindow] = planOf(() => db.listWindowSummaries(201, { roots: true }));
+      expect(rootWindow).toMatch(/SEARCH runs USING INDEX runs_archived_roots .*SEARCH runs USING INDEX runs_archived_roots/);
     });
   });
 

@@ -74,15 +74,22 @@ describe('HistoryCompressor', () => {
   });
 
   it('idle resolves after the queue drains', async () => {
-    vi.spyOn(historyFile, 'compressHistory').mockImplementation(async () => {
-      // bound: not a wait on the product. It keeps the queue draining when `idle()` is called; the test awaits `idle()`, never this timer.
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    const finished: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(historyFile, 'compressHistory').mockImplementation(async (_dataDir, id) => {
+      await gate;
+      finished.push(id);
       return 'compressed';
     });
     const compressor = new HistoryCompressor(dataDir(), () => true);
-    compressor.enqueue(randomUUID());
-    compressor.enqueue(randomUUID());
-    await compressor.idle();
+    const a = randomUUID();
+    const b = randomUUID();
+    compressor.enqueue(a);
+    compressor.enqueue(b);
+    const drained = compressor.idle().then(() => [...finished]);
+    release();
+    expect(await drained).toEqual([a, b]);
     await expect(compressor.idle()).resolves.toBeUndefined();
     compressor.stop();
   });

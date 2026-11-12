@@ -5,10 +5,10 @@ import { provisionArtifactDirectory } from '../../artifacts/lifecycle.ts';
 import { handoffPath, refreshHandoffRecords } from '../../handoff.ts';
 import { agentTmpEnv } from '../../runs/agent-tmpdir.ts';
 import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
-import { resolveCapabilities } from '../../server/capabilities.ts';
+import { automationsEnabled } from '../../automations/enabled.ts';
 import { automationCliCommand, automationsPrompt } from '../../automations/prompts.ts';
 import { createAutomationSkill } from '../../automations/builtin-skill.ts';
-import { registryEntry } from '../../runs/webhook.ts';
+import { registryEntry } from '../../workspace/registry-entry.ts';
 import { agentWebhooksPrompt, webhookCliCommand } from '../../webhooks/prompt.ts';
 import { agentWebhooks } from '../../workspace/webhooks.ts';
 import type { Skill } from '../../skills.ts';
@@ -59,7 +59,7 @@ export function agentEnvForStep(...args: Parameters<typeof atStepOpen.agentEnvFo
 
 /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
 export function automationsReachable(cockpit: CockpitAddress): boolean {
-  return !!cockpit && resolveCapabilities().automations;
+  return !!cockpit && automationsEnabled();
 }
 
 /** The built-in skills this manager may offer now; empty unless automations are reachable. */

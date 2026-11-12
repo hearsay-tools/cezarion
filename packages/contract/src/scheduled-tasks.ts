@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { onceStatusSchema } from './automations.ts';
+import { isRealOnceAt, onceInstant, onceStatusSchema } from './automation-schedule.ts';
 import { zonedParts } from './zoned-time.ts';
-import { isRealOnceAt, onceInstant } from './automation-schedule.ts';
 
 /**
  * The two session tools for one-time scheduled tasks (hearsay-tools/cezarion#1465):

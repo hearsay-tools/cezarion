@@ -13,6 +13,7 @@ vi.mock('@/api/client', async (importOriginal) => ({
 }))
 
 import * as client from '@/api/client'
+import { matchProjectRoute } from '@/routes'
 import { visibleSettingsSections } from '@/routes/settings/registry'
 import { projectSwitchTarget, resolveProjectSwitch } from './project-switch'
 
@@ -30,7 +31,7 @@ const registry = {
   })),
 } as ProjectsResponse
 const capabilities = undefined as Capabilities | undefined
-const ctx = { registry, capabilities }
+const ctx = { registry, capabilities, matchRoute: matchProjectRoute }
 const saved = (pathname: string, extra: object = {}) => ({ projectId: 'other', pathname, ...extra })
 const apiError = (status: number, message = `HTTP ${status}`) => new client.ApiError(status, message)
 
@@ -88,7 +89,7 @@ describe('projectSwitchTarget', () => {
   })
 
   it('hides the sections a single-project server hides', () => {
-    const single = { registry, capabilities: { singleProject: true } as Capabilities }
+    const single = { registry, capabilities: { singleProject: true } as Capabilities, matchRoute: matchProjectRoute }
     expect(projectSwitchTarget('other', saved('/p/other/settings/projects'), ctx).href).toBe('/p/other/settings/projects')
     expect(projectSwitchTarget('other', saved('/p/other/settings/projects'), single).href).toBe('/p/other/')
   })

@@ -6,7 +6,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Home } from './home.ts';
 import { HomeStore } from './store.ts';
 import { VersionLog } from './version-log.ts';
-import { acceptHomeRecovery, getHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from './recovery.ts';
+import { acceptHomeRecovery, getHomeRecovery, restoreHomeRecovery } from './recovery.ts';
+import { subscribeHomeRecovery } from './recovery-watch.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { cleanStoreRoots, storeRoot } from './store.testkit.ts';
 

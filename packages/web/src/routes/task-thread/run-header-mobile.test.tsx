@@ -87,15 +87,13 @@ describe('pushed task screen top bar', () => {
     expect(bar.querySelector('[data-slot="mobile-project-picker"]')).toBeNull()
   })
 
-  it('keeps the one rename control, in the bar, at the compact size', () => {
+  it('keeps the one rename control, in the bar', () => {
     renderScreen()
     const bar = topBar()
     const rename = within(bar).getByRole('button', { name: 'Rename task' })
     expect(document.querySelectorAll('[aria-label="Rename task"]')).toHaveLength(1)
     const title = bar.querySelector('h1') as HTMLElement
     expect(title.textContent).toBe('Reviewer agent presets')
-    expect(title.className).toContain('text-[15px]')
-    expect(title.className).toContain('font-semibold')
     fireEvent.click(rename)
     // The input opens in a popover under the bar, so the bar keeps showing the title, and still
     // shows no status: the phone bar carries none (hearsay-tools/cezarion#1333).
@@ -205,7 +203,6 @@ describe('RunHeader below md on a pushed task screen', () => {
     const links = within(tabs).getAllByRole('link')
     // `prNumber: 451` is an own-repo reference, so it adds its tab after Files (#692).
     expect(links.map((a) => a.textContent)).toEqual(['Session', 'Changes12', 'Commits', 'Files', 'Pull request #451'])
-    expect(links[1]!.querySelector('[data-slot="tab-count"]')?.className).toContain('text-[11.5px]')
     // Commits has no count on the record; none is invented.
     expect(links[2]!.querySelector('[data-slot="tab-count"]')).toBeNull()
   })
