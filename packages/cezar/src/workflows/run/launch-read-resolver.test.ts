@@ -201,6 +201,8 @@ it('holds the failing workflow step, not an earlier one a retry already recovere
   expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.failed }, 'review'))).toBe('review');
   expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.pending }, 'build'))).toBe('build');
   expect(atContinue.heldStep({ ...heldRun({ build: STEP_STATUS.failed }, 'build'), workflowResumeStepId: 'build' })).toBe('build');
+  // A later Continue's failure, after the recovered workflow finished, is no workflow step's.
+  expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.done, 'continue-2': STEP_STATUS.failed }, 'continue-2'))).toBeUndefined();
 });
 it('gives a fresh retry the held step\'s own prompt', () => {
   const run = { ...heldRun({ build: STEP_STATUS.done, review: STEP_STATUS.failed }, 'review'), workflowResumeStepId: 'review' };

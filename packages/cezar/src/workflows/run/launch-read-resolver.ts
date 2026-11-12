@@ -648,11 +648,11 @@ function continuationNextStep(store: Pick<RunStore, 'getRun'>, runId: string, wa
  *  so a successful retry runs the steps after it instead of settling the run. */
 function heldWorkflowStepId(run: RunRecord): string | undefined {
   if (run.workflowResumeStepId) return run.workflowResumeStepId;
-  // The step this run is on; else the latest failed agent step, since an earlier step that a retry
-  // already recovered keeps its failed status (`settleResumedWorkflowStep`).
-  const failed = (run.workflowDef?.steps ?? []).filter(step => stepKind(step) === 'agent' &&
-    run.steps.find(persisted => persisted.id === step.id)?.status === 'failed');
-  return (failed.find(step => step.id === run.currentStepId) ?? failed.at(-1))?.id;
+  // Only the workflow step the run is on, and only when it failed. An earlier step a retry already
+  // recovered keeps its failed status (`settleResumedWorkflowStep`), and a later Continue's own
+  // failure is no workflow step's, so neither becomes the cursor.
+  const current = run.workflowDef?.steps.find(step => step.id === run.currentStepId && stepKind(step) === 'agent');
+  return current && run.steps.find(persisted => persisted.id === current.id)?.status === 'failed' ? current.id : undefined;
 }
 
 /** The runner the held workflow step ran on, which its retry keeps (hearsay-tools/squawk#3337). */
