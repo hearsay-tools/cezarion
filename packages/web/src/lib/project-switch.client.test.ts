@@ -1,6 +1,7 @@
 import type { ProjectsResponse } from '@open-mercato/cezar-api-client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { matchProjectRoute } from '@/routes'
 import { resolveProjectSwitch } from './project-switch'
 
 /** The same decisions through the REAL api client and a stubbed `fetch`, so the wire shapes and
@@ -15,7 +16,7 @@ const registry = {
 } as ProjectsResponse
 const OWN = 'https://github.com/acme/widgets'
 const go = (pathname: string, repoBaseOf: ((id: string) => string | undefined) | undefined = () => OWN) =>
-  resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, capabilities: undefined, repoBaseOf })
+  resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, capabilities: undefined, repoBaseOf, matchRoute: matchProjectRoute })
 
 function answer(routes: Record<string, { status?: number | undefined; body: unknown }>) {
   vi.stubGlobal(
