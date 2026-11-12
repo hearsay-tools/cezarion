@@ -14,6 +14,27 @@ tag can consume its five-minute job budget before classification. Only the PR
 baseline and patch checks read history; § CI verification says what each gate fetches.
 For pull requests, the PR-shape check requires GitHub to return a patch for every file, except binary files and files with no content change, and rejects incomplete file lists.
 
+<a id="github-patch-limits"></a>
+
+**GitHub patch limits.** GitHub returns no API patch for a file in three cases. The check
+reads the PR's local `git diff` to name the case for each file, and prints the PR's total
+changed lines:
+
+- **Per-file size.** The file's diff is over `GITHUB_PATCH_LIMITS.fileBytes` in
+  [`.github/scripts/missing-patches.cjs`](../../.github/scripts/missing-patches.cjs), the
+  one place the number is kept. It counts bytes, not lines: a one-line file over the bound
+  gets no patch either. The value lies between the largest local diff that got a patch
+  and the smallest that did not, on this repository's PRs.
+- **NUL byte.** The diff contains a NUL byte. Git reads only the start of a file to find
+  binary content, so a later NUL leaves the file text to Git but not to GitHub.
+- **Total size.** A file under both limits that still has no patch. GitHub may drop
+  patches for a very large PR, but no measured PR shows a line bound, so `npm run prepr`
+  does not refuse on total size.
+
+`npm run prepr` (§ Before the PR) refuses the first two cases on the committed branch, so
+a split happens before the push. Split a file's change across PRs, or generate large data
+at test time.
+
 Main PRs start heavy verification (unit tests, build/package, Vitest and browser shards)
 as soon as their queue proof, change classification and immutable PR inputs are ready.
 **Unit tests (package)** and **Unit tests (scripts)** run the two groups of
@@ -56,9 +77,10 @@ post-build package check.
 
 `npm run prepr` is the one local gate before a PR opens. It prints one verdict and the
 evidence block for the PR body. It reads Squeal's results for the changed files and for
-lint, and runs typecheck (not for a docs-only change), citations and clones. Run it on
-the committed head. Its exit code is non-zero on a failing test, a lint finding, a type
-error, a bare citation or a new clone.
+lint, and runs typecheck (not for a docs-only change), citations, clones and the
+[GitHub patch limits](#github-patch-limits). Run it on the committed head. Its exit code
+is non-zero on a failing test, a lint finding, a type error, a bare citation, a new clone,
+or a committed file diff over the per-file patch limit or with a NUL byte.
 
 - The Squeal wait is bounded at 2 minutes (`--wait-ms`). When it ends with no failure,
   the command names the files with no result and passes. CI runs them.
@@ -239,7 +261,7 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+On merge groups and manual dispatches, the full Vitest suite runs once across the eight LTS shards. Main pushes reuse eligible exact-SHA queue proof or run full CI as a fallback. PRs select tests as described above. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, upper-quartile fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
 comparison, runner cost, failures and coverage investigation. Four workers per shard,
@@ -326,11 +348,38 @@ Job wall time is GitHub's `startedAt` to `completedAt`, excluding queue time. Th
 
 The balanced GitHub-hosted [run 34995104039](https://github.com/hearsay-tools/cezarion/actions/runs/34995104039) passed with browser job times of 3m51s, 3m45s, 4m00s and 3m45s. The subsequent [Blacksmith 4-vCPU run 35002322591](https://github.com/hearsay-tools/cezarion/actions/runs/35002322591) passed in 3m11s, 3m42s, 2m51s and 3m33s. The owner chose GitHub-hosted runners for browser shards because the 18-second reduction in the longest job did not justify the additional cost. These are single-run measurements with different Node versions and intervening test fixes, not a controlled hardware-only comparison. Duration balancing, current-LTS selection and the test fixes remain in place. Browser setup uses `check-latest: true` with `lts/*` so an older matching version in a runner image cannot silently replace the current LTS patch. The first Blacksmith attempt selected cached Node 24.13.0 instead of the GitHub run's 24.20.0 and failed on all four shards with socket errors; it is retained as a failed comparison, not timing evidence.
 
-Browser sharding now reuses the unit sequencer's longest-first allocator with a separate duration manifest. It assigns each next file to the lightest shard, resolves ties deterministically, and gives new specs the median known duration. The manifest never controls discovery, so removed specs are ignored and new specs remain included. The initial browser weights come from the successful run above and predict 203.48–204.95s of tests per shard, before setup; this is an allocation estimate, not a measured balanced CI result. The sequencer only overrides shard allocation, preserving Vitest's normal execution order for local full runs and within each shard.
+Browser sharding now reuses the unit sequencer's longest-first allocator with a separate duration manifest. It assigns each next file to the lightest shard, resolves ties deterministically, and gives new specs the upper-quartile known duration. The manifest never controls discovery, so removed specs are ignored and new specs remain included. The initial browser weights come from the successful run above and predict 203.48–204.95s of tests per shard, before setup; this is an allocation estimate, not a measured balanced CI result. The sequencer only overrides shard allocation, preserving Vitest's normal execution order for local full runs and within each shard.
 
-Refresh browser weights from successful per-file suite summary lines in CI logs (not individual test timings), using filenames relative to `packages/web/e2e`, and update the manifest's provenance with the source run and commit. Keep the unit manifest separate: browser durations and unit durations measure different suites.
+`refresh-test-durations.yml` refreshes both manifests daily at 04:25 UTC. It reads
+up to 100 recent successful `ci.yml` runs and takes the three newest measured
+full eight-shard runs for each suite, from `main` pushes or `main` merge groups,
+within 14 days. PR selections, skipped shards and exact-SHA proof reuse are not
+samples. It reads passed per-file suite summaries, including skipped-test
+annotations, and takes each current file's median available duration. Browser
+keys are relative to `packages/web/e2e`; unit keys are repository-relative.
+`_provenance.runs` records run IDs, commits and job IDs. A new file without a
+measurement gets the measured upper quartile and appears in `estimatedFiles`.
+Deleted files leave the manifest through the bounded batches below. Fewer than three measured runs leave that
+suite's manifest unchanged and appear in the run summary.
 
-The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the median known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
+The workflow opens one ready PR when the file inventory changes, or when any
+median changes by at least **25% and 5 seconds**. Each manifest batch changes
+at most 100 entries. It measures the actual Git patch and halves the batch until
+the patch fits **40,000 bytes**, well below GitHub's omitted-patch boundary.
+Inventory changes go first. Each batch records `baselineCommit`, `updatedFiles`,
+its three source runs and `remainingChanges`; weights outside that batch retain
+the baseline manifest's measurements. A later run proposes the next batch after
+the current PR lands. An entry that cannot fit leaves that manifest unchanged
+and appears in the summary. The initial unit backlog therefore converges through
+normal reviewed PRs; this browser fix leaves the unit data unchanged.
+It leaves an existing refresh
+PR for normal CI and review instead of pushing over it. The existing release
+App creates the PR so native PR CI and CodeRabbit run. It does not merge the PR.
+A manual dispatch defaults to `dry_run: true`; branch dispatches and PR proofs
+cannot publish. Use `gh workflow run refresh-test-durations.yml --ref <branch>`
+for a read-only proof, and cite the run summary. Required checks never depend
+on this maintenance workflow.
+The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the upper-quartile known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
 
 When a PR adds or splits a Vitest unit test file taking longer than about one
 minute on CI, add or update its repository-relative path and measured duration
@@ -339,7 +388,7 @@ passed per-file Vitest suite-summary line in the CI log, not an individual test
 timing or total job duration; record the source run and commit in provenance.
 For split files, measure each resulting file separately. Keep browser E2E weights
 in their separate manifest. The paragraph above gives the
-sequencer's balancing-only role and median fallback for unlisted files.
+sequencer's balancing-only role and upper-quartile fallback for unlisted files.
 
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 
@@ -654,6 +703,49 @@ gh workflow run ci.yml --ref <branch> -f squeal_coverage_proof=true
 `.github/scripts/ci-squeal-coverage-proof.workflow.test.cjs` pins the trigger, the three runs,
 their artifacts and the steps' scripts; `.github/scripts/squeal-coverage-proof.test.cjs` pins the
 comparison.
+
+### Squeal packaged test trial
+
+A manual trial checks whether Squeal's one-shot quality gate can measure code that only the
+packaged tests load, with configuration Squeal already supports: a node:test entry with a
+`prepare` command, and child-process coverage (hearsay-tools/squeal spec 020 D12 and D15, row
+020-32; hearsay-tools/squeal#194). Today `squeal code --base origin/main` reads such functions
+as `no-loader`, because no runner lists `packages/cezar/test/e2e`. The trial runs only on request.
+To replay the change that hearsay-tools/squeal#194 reports, hearsay-tools/cezarion#3297:
+
+```bash
+gh workflow run ci.yml --ref <branch> -f squeal_package_trial=true \
+  -f squeal_package_trial_commit=b12aed82bd9e3f7d96d8fd868fd641c9d874b307
+```
+
+- Only a dispatch with `squeal_package_trial` and no `pr_number` takes the trial. Every other
+  dispatch, including the bare proof of a `ci.yml` change (§ Proving a `ci.yml` change), is
+  unchanged. Dispatches of one branch share a concurrency group and cancel each other, so start
+  the trial after the bare proof ends.
+- Without `squeal_package_trial_commit`, the trial measures the dispatched commit against
+  `origin/main`. With a full commit SHA, it measures that commit against its first parent.
+- `squeal.config.json` in the repository does not change. The gate reads `prepare` and
+  `coverage.children` at the merge base, so the `Squeal packaged test trial` job
+  (`squeal-package-trial`) builds two local commits: the merge base, and the measured commit's
+  tree on top of it, each with two keys added to its `squeal.config.json`. The keys are a
+  node:test entry `test:package` (`npm run test:package` without its wrapper: the `cwd` and
+  `argv` of `test:unit`, `include: ["test/e2e/*.test.ts"]`, and `prepare`
+  `npm --prefix ../.. run build`, 600 seconds) and `coverage.children: true`.
+- The job checks out the local head, installs its dependencies, sets up Squeal's action and runs
+  `squeal code --base squeal-package-trial-base --json --timeout 1200`. The gate runs the
+  `prepare` build before the first selected packaged test file; its output goes to the log.
+- Its job summary gives the measured commit, the verdict and exit code, the changed functions by
+  state, each runner's run with its `prepare` result and child coverage files, and a table of the
+  changed functions that the packaged tests load or that are not `pass`. The
+  `squeal-package-trial` artifact holds `report.json` (`squeal-code-gate/1`), the gate's stderr,
+  exit code and time, the two `squeal.config.json` files the gate read and `commits.json`, kept
+  14 days.
+- Nothing depends on it. The job is outside `verify.needs` and the merge-queue roster, only a
+  manual dispatch runs it, every step continues on error and the job sets `continue-on-error`.
+
+`.github/scripts/ci-squeal-package-trial.workflow.test.cjs` pins the trigger, the trial keys
+against `scripts/test-package.mjs` and `test:unit`, the local commits, the gate command and the
+summary.
 
 ### Upstream scan PRs
 

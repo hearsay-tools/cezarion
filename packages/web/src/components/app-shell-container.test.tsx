@@ -388,6 +388,46 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(document.querySelector('[data-run-id="active-session"]')).not.toBeNull())
   })
 
+  it('keeps the task rows mounted while health renames the boot list to its default key (hearsay-tools/squawk#3048)', async () => {
+    const boot = run({ id: 'boot-task', titleSummary: 'Boot task' })
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    let releaseHealth!: () => void
+    const healthHeld = new Promise<void>(resolve => { releaseHealth = resolve })
+    let releaseDefaultList!: () => void
+    const defaultListHeld = new Promise<void>(resolve => { releaseDefaultList = resolve })
+    const listRequests: string[] = []
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input).replace('?archived=recent', '')
+      if (path === '/api/v1/health') { await healthHeld; return json({ ...HEALTH, bootProject: 'cezar' }) }
+      // The registry never answers here, so health alone names the boot project.
+      if (path === '/api/v1/projects') return new Promise<Response>(() => {})
+      if (path === '/api/v1/p/cezar/run-summaries') {
+        listRequests.push(path)
+        // The first list answers under the project id key; the `default` key's own fetch waits.
+        if (listRequests.length > 1) await defaultListHeld
+        return json([boot])
+      }
+      if (path === '/api/v1/providers/status') return json(PROVIDERS)
+      if (path === '/api/v1/workspace/ui-state') return json({})
+      return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
+    })
+    const { client } = renderShell('/p/cezar/new')
+    await waitFor(() => expect(document.querySelector('[data-run-id="boot-task"]')).not.toBeNull())
+    expect(client.getQueryData(['cezar', 'runs', 'list'])).toEqual([boot])
+    // A tap needs the SAME element: a row that unmounts and mounts again also drops the tap.
+    const row = document.querySelector('[data-run-id="boot-task"]')
+
+    // Health names `cezar` as the boot project: the sidebar's key becomes `['default', …]`,
+    // which has no data yet, and its fetch is held.
+    await act(async () => { releaseHealth() })
+    await waitFor(() => expect(client.getQueryState(['default', 'runs', 'list'])?.fetchStatus).toBe('fetching'))
+    expect(document.querySelector('[data-run-id="boot-task"]')).toBe(row)
+
+    await act(async () => { releaseDefaultList() })
+    await waitFor(() => expect(client.getQueryData(['default', 'runs', 'list'])).toEqual([boot]))
+    expect(document.querySelector('[data-run-id="boot-task"]')).toBe(row)
+  })
+
   it('counts only current-project sessions in Active/Automations', async () => {
     localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ shop: false }))
     const bootActive = run({ id: 'boot-active', titleSummary: 'Boot active' })

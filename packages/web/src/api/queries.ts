@@ -1055,18 +1055,18 @@ export function useRunsIndex(enabled = true, refetchIntervalMs: number = RUNS_IN
  * row, never a runs request (spec, "40 registered projects" row) — while still reading any
  * cached answer, which is what lets a collapsed group keep its attention badge.
  *
- * `boot: true` aliases the key scope to `'default'`: the boot project mounts UNSCOPED
- * (routes.tsx keeps its legacy `/api/*` surface), so its main view and the SSE patcher both
- * live under the `'default'`-led keys — the boot group must read that SAME entry, or its list
- * and needs-you badge freeze at whatever the expand-time fetch answered. The fetch itself
- * still goes to `/api/p/<bootId>/runs`, which the server answers byte-identically (the
- * route-parity contract).
+ * `boot: true` aliases the key scope to `'default'`: the boot project's main view and the SSE
+ * patcher keep its list there, so reading any other entry would freeze it. The fetch still goes
+ * to `/api/p/<bootId>/runs` (route parity). If health or the registry names the boot project
+ * after the list answered under its id key, that list stays as placeholder data until `'default'`
+ * answers, so the sidebar rows never unmount (hearsay-tools/squawk#3048). Other moves start empty.
  */
 export function useProjectRuns(projectId: string, enabled = true, boot = false) {
   return useQuery({
     queryKey: [projectAddress({ projectId, boot }).cacheScope, 'runs', 'list'] as const,
     queryFn: ({ signal }) => getRuns(projectAddress({ projectId, boot }), { signal }),
     enabled,
+    placeholderData: (previous, previousQuery) => (boot && previousQuery?.queryKey[0] === projectId ? previous : undefined),
   })
 }
 

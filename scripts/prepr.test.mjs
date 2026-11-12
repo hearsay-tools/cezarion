@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { daemonAlive, fallbackLines, focusedTests, judgeSqueal, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+import { daemonAlive, fallbackLines, focusedTests, gitIo, judgeSqueal, patchLimitLines, prepr, SQUEAL_WAIT_MS, squealChecks, squealLines } from './prepr.mjs';
+
+const { GITHUB_PATCH_LIMITS, numstatRows } = createRequire(import.meta.url)('../.github/scripts/missing-patches.cjs');
 
 const file = (path, state, verdict) => ({ path, state, ...(verdict ? { verdict } : {}) });
 const status = (testFiles, extra = {}) => ({ selection: { testFiles, verdict: { failures: { tests: 0, testFiles: 0 } } }, lint: { failing: 0, linting: { done: 1, total: 1 } }, ...extra });
@@ -84,7 +90,7 @@ const ok = out => ({ code: 0, out, err: '' });
 const live = (testFiles, lint) => JSON.stringify({ available: true, daemon: { state: 'alive' }, selection: { testFiles }, lint });
 const doneLint = { failing: 0, pending: 0, stale: 0, unknown: 0 };
 
-function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', clock = { t: 0 }, noBase = false } = {}) {
+function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tscripts/x.mjs\0', nameStatus = 'M\0scripts/x.mjs\0', patch = 'diff --git a/scripts/x.mjs b/scripts/x.mjs\n+small\n', clock = { t: 0 }, noBase = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -97,6 +103,7 @@ function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', clock = { t: 0 }, n
     sleep: async ms => { clock.t += ms; },
     now: () => clock.t,
     git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
+    gitBytes: (...a) => Buffer.from(a.includes('--numstat') ? numstat : a.includes('--name-status') ? nameStatus : patch),
   };
 }
 
@@ -198,4 +205,146 @@ test('squealChecks passes a process timeout to the wait', async () => {
   io.run = async (cmd, args, o) => { options ??= o; return run(cmd, args, o); };
   await squealChecks(['a.ts'], 1000, io);
   assert.equal(options.timeout, 11_000);
+});
+
+function fixtureRepo(t, write, seed = () => {}) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'prepr-patch-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const io = gitIo(cwd);
+  for (const a of [['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid']]) io.git(...a);
+  seed(cwd);
+  for (const a of [['add', '--all'], ['commit', '--allow-empty', '-m', 'base'], ['switch', '-c', 'topic']]) io.git(...a);
+  write(cwd, io);
+  io.git('add', '--all');
+  io.git('commit', '-m', 'head');
+  return io;
+}
+
+const LINE = 'x'.repeat(99) + '\n';
+
+test('patch limits refuse a file diff over the GitHub bound and a NUL byte, naming the file and the limit', async t => {
+  const io = fixtureRepo(t, (cwd, git) => {
+    // User settings that would make Git treat a large text file as binary and skip it.
+    fs.writeFileSync(path.join(cwd, '.git', 'user-attributes'), '*.md binary\n*.txt -diff\n');
+    for (const [key, value] of [['core.bigFileThreshold', '100k'], ['core.attributesFile', path.join(cwd, '.git', 'user-attributes')]]) git.git('config', key, value);
+    fs.writeFileSync(path.join(cwd, 'large.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
+    // Git reads only the first 8000 bytes for binary detection, so this file stays text.
+    fs.writeFileSync(path.join(cwd, 'nul.txt'), Buffer.concat([Buffer.from(LINE.repeat(100)), Buffer.from([0, 10])]));
+    fs.writeFileSync(path.join(cwd, 'small.txt'), 'small\n');
+    fs.writeFileSync(path.join(cwd, 'image.bin'), Buffer.alloc(GITHUB_PATCH_LIMITS.fileBytes * 2));
+  });
+  const lines = patchLimitLines('main', io);
+  assert.ok(lines.every(l => !l.ok));
+  const text = lines.map(l => l.text).join('\n');
+  assert.match(text, new RegExp(`"large\\.md": its diff is \\d+ bytes, over GitHub's ${GITHUB_PATCH_LIMITS.fileBytes}-byte per-file patch limit`));
+  assert.match(text, /"nul\.txt": its diff contains a NUL byte/);
+  assert.doesNotMatch(text, /small\.txt|image\.bin/);
+  assert.match(lines.at(-1).text, /FAIL: patch limits: 2 of 4 file diffs refused; \d+ changed lines \(\+\d+\/-0\) in 4 files/);
+});
+
+test('patch limits pass under the bound and print the total changed lines', async t => {
+  const io = fixtureRepo(t, cwd => {
+    fs.writeFileSync(path.join(cwd, 'a.md'), LINE.repeat(1000));
+    fs.writeFileSync(path.join(cwd, 'b.md'), 'b\n');
+  });
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true);
+  assert.match(line.text, new RegExp(`pass: patch limits: every file diff is at most ${GITHUB_PATCH_LIMITS.fileBytes} bytes with no NUL byte; 1001 changed lines \\(\\+1001/-0\\) in 2 files`));
+});
+
+test('prepr fails on a patch-limit refusal', async () => {
+  const io = fakeIo({ patch: 'diff --git a/scripts/x.mjs b/scripts/x.mjs\n+a\0b\n', responses: { squeal: ok(live([], doneLint)) } });
+  const r = await prepr({ io, waitMs: 1000 });
+  assert.equal(r.failed, true);
+  assert.match(r.report, /FAIL: patch limits: "scripts\/x\.mjs": its diff contains a NUL byte/);
+});
+
+test('patch limits measure a renamed file by its rename patch, as GitHub does', async t => {
+  const large = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10);
+  const io = fixtureRepo(t, (cwd, git) => {
+    // A user rename limit below the candidates would turn the edited rename into a delete and an add.
+    git.git('config', 'diff.renameLimit', '1');
+    fs.renameSync(path.join(cwd, 'moved.md'), path.join(cwd, 'dir moved.md'));
+    fs.renameSync(path.join(cwd, 'edited.md'), path.join(cwd, 'edited-new.md'));
+    fs.appendFileSync(path.join(cwd, 'edited-new.md'), 'one more line\n');
+    fs.renameSync(path.join(cwd, 'second.md'), path.join(cwd, 'second-new.md'));
+    fs.appendFileSync(path.join(cwd, 'second-new.md'), 'one more line\n');
+  }, cwd => {
+    fs.writeFileSync(path.join(cwd, 'moved.md'), large);
+    fs.writeFileSync(path.join(cwd, 'edited.md'), large + 'edited\n');
+    fs.writeFileSync(path.join(cwd, 'second.md'), large + 'second\n');
+  });
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+  assert.match(line.text, /2 changed lines \(\+2\/-0\) in 3 files/);
+});
+
+test('numstat rows keep tabs in a path and read a rename row as two paths', () => {
+  assert.deepEqual(numstatRows('1200\t0\tdocs/large\tfile.md\0' + '3\t1\t\0old\tname.md\0new name.md\0' + '-\t-\tbin\0'), [
+    { added: '1200', deleted: '0', paths: ['docs/large\tfile.md'] },
+    { added: '3', deleted: '1', paths: ['old\tname.md', 'new name.md'] },
+    { added: '-', deleted: '-', paths: ['bin'] },
+  ]);
+});
+
+test('patch limits measure GitHub\'s patch shape, whatever the user\'s diff settings', async t => {
+  const saved = { GIT_DIFF_OPTS: process.env.GIT_DIFF_OPTS, GIT_EXTERNAL_DIFF: process.env.GIT_EXTERNAL_DIFF };
+  t.after(() => { for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  process.env.GIT_DIFF_OPTS = '--unified=100000';
+  process.env.GIT_EXTERNAL_DIFF = 'false';
+  const io = fixtureRepo(t, (cwd, git) => {
+    const settings = [['diff.context', '0'], ['diff.interHunkContext', '100000'], ['diff.noprefix', 'true'],
+      ['color.diff', 'always'], ['diff.algorithm', 'patience'], ['diff.relative', 'true'], ['diff.suppressBlankEmpty', 'true']];
+    for (const [key, value] of settings) git.git('config', key, value);
+    const lines = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10).split('\n');
+    lines[0] = 'first edited';
+    lines[lines.length - 2] = 'last edited';
+    fs.writeFileSync(path.join(cwd, 'big.md'), lines.join('\n'));
+  }, cwd => fs.writeFileSync(path.join(cwd, 'big.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10)));
+  const [line] = patchLimitLines('main', io);
+  assert.equal(line.ok, true, line.text);
+});
+
+test('patch limits read each path literally, so a glob character selects only its own file', async t => {
+  const half = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 200) + 10);
+  const io = fixtureRepo(t, cwd => {
+    fs.writeFileSync(path.join(cwd, 'a[1].txt'), half);
+    fs.writeFileSync(path.join(cwd, 'a1.txt'), half);
+  });
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+});
+
+test('a failed Git read stops prepr instead of reading as no change', async t => {
+  const io = fixtureRepo(t, cwd => fs.writeFileSync(path.join(cwd, 'a.txt'), 'a\n'));
+  assert.throws(() => io.gitBytes('diff', 'no-such-ref'), /git diff no-such-ref failed \(exit 128\)/);
+});
+
+test('patch limits measure a file replaced by a directory as separate patches', async t => {
+  // Distinct lines, so Git pairs no two of the three files as a rename.
+  const half = tag => Array.from({ length: Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 200) + 10 }, (_, i) => `${tag} ${i} `.padEnd(99, tag) + '\n').join('');
+  const io = fixtureRepo(t, cwd => {
+    fs.rmSync(path.join(cwd, 'foo'));
+    fs.mkdirSync(path.join(cwd, 'foo'));
+    fs.writeFileSync(path.join(cwd, 'foo', 'a.md'), half('a'));
+    fs.writeFileSync(path.join(cwd, 'foo', 'b.md'), half('b'));
+  }, cwd => fs.writeFileSync(path.join(cwd, 'foo'), half('x')));
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+});
+
+test('patch limits read a type change, which Git writes as two patch blocks for one file', async t => {
+  const io = fixtureRepo(t, cwd => {
+    fs.rmSync(path.join(cwd, 'link'));
+    fs.writeFileSync(path.join(cwd, 'link'), 'now a file\n');
+    fs.writeFileSync(path.join(cwd, 'after.md'), 'after\n');
+  }, cwd => fs.symlinkSync('target', path.join(cwd, 'link')));
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+  assert.match(line.text, /3 changed lines \(\+2\/-1\) in 2 files/);
 });
