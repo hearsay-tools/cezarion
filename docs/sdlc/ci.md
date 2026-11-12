@@ -532,6 +532,11 @@ can import those passes instead of running the same test files again
   That pushes `refs/squeal/<sha>` and deletes refs beyond the newest 100 main commits; it
   runs only git and reads `squeal.config.json`. The token reaches only that step, as a git
   extra header in its environment.
+- The `Check the Squeal shared results ref` job (`squeal-ref-check`) runs only in the push
+  run for `main`, with `contents: read`. It reads `refs/squeal/<sha>` for the pushed commit
+  through the Git API. A missing ref shows a warning annotation and a warning in the run
+  summary; a present ref shows a one-line note. An unreadable ref also warns. The job never
+  fails, and it is outside `verify.needs`.
 - Neither job is in `verify.needs` or the merge-queue roster: their failure never blocks a
   merge. With `shared.ref` in `squeal.config.json`, developers' Squeal daemons fetch the
   nearest published ref.
@@ -541,7 +546,8 @@ can import those passes instead of running the same test files again
 
 `.github/scripts/ci-squeal-results.workflow.test.cjs` pins the event selection, the
 unchanged command and exit code, both jobs' permissions, the publish job's token handling
-and their absence from required checks.
+and their absence from required checks. `.github/scripts/main-ci-escalation.test.cjs` pins
+the ref check.
 To move to another Squeal release, change `SQUEAL_TAG` and `SQUEAL_COMMIT` in the vitest job's
 `Fetch the Squeal release` step; both Squeal jobs reuse it.
 
@@ -704,7 +710,7 @@ organization/repository PR permission settings and historical recovery steps.
 
 ### Release and Nightly failure reporting
 
-`report-workflow-failure.yml` listens for completed Release and Nightly failures, and for CI runs from pushes to `main` ([main CI repair](main-ci-repair.md)), and files `area-ci` issues with failed-job/step metadata and bounded sanitized diagnostics. It reads the exact failed attempt, so a later retry does not erase the original failure. A job stopped at its `timeout-minutes` is reported as a timeout: Actions records it as `cancelled`, so the listener reads cancelled runs and checks each cancelled job's check-run annotation. Success, cancellation by a person or a concurrency group, intentional skips, and unrelated workflows do not create reports. In a cancelled run, a failed job that starts after the cancellation, such as the `always()` verification gate, does not create a report either. Verification, publishing, finalization, and setup remain distinct in occurrence context.
+`report-workflow-failure.yml` listens for completed Release and Nightly failures, and for CI runs from pushes to `main` ([main CI repair](main-ci-repair.md)), and files `area-ci` issues with failed-job/step metadata and bounded sanitized diagnostics. It reads the exact failed attempt, so a later retry does not erase the original failure. A job stopped at its `timeout-minutes` is reported as a timeout: Actions records it as `cancelled`, so the listener reads cancelled runs and checks each cancelled job's check-run annotation. Success, cancellation by a person or a concurrency group, intentional skips, and unrelated workflows do not create reports. In a cancelled run, a failed job that starts after the cancellation, such as the `always()` verification gate, does not create a report either. Verification, publishing, finalization, and setup remain distinct in occurrence context. `main-ci-escalation.yml` mentions the repository's admins once on a `main-ci-failure` summary still open after 60 minutes ([main CI repair](main-ci-repair.md#escalation-after-60-minutes)).
 
 A recognized test and its error diagnostic can match across both workflows. Existing open reports receive deduplicated occurrence comments; failures recurring after closure create linked issues. A shared queued concurrency group serializes all issue writes, and durable issue/comment markers support retry after partial API writes. Missing logs still produce metadata reports; reporter failures surface in its own Actions job and summary without changing or retrying the source workflow.
 
