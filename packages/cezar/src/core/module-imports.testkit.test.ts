@@ -71,5 +71,7 @@ describe('siblingImports', () => {
     expect(() => siblingImports(partFile(`import './kit-own.testkit.ts?raw';`), CELLS)).toThrow('query or a hash');
     expect(() => siblingImports(partFile(`import './kit-own.testkit.js';`), CELLS)).toThrow('another extension');
     expect(() => siblingImports(partFile(`import './kit-own.testkit';`), CELLS)).toThrow('another extension or none');
+    expect(() => siblingImports(partFile(`import './kit-own.testkit.tsx';`), CELLS)).toThrow('another extension or none');
+    expect(() => siblingImports(partFile(`import './kit-own.testkit.jsx';`), CELLS)).toThrow('another extension or none');
   });
 });

@@ -46,12 +46,12 @@ export function runtimeImports(source: string, file = 'source'): string[] {
   return found;
 }
 
-const SOURCE_EXTENSION = /\.[cm]?[jt]s$/;
+const ANY_EXTENSION = /\.[^./]+$/;
 
 /** The modules in the file's own directory that the file loads and whose name `name` matches, as
  *  file names. Each relative specifier is resolved against the file first, so `././x.ts` and
  *  `../dir/x.ts` name the same module as `./x.ts`. A relative load with a query or a hash, or one
- *  that names a matching module by another extension or by none (the resolver tries extensions), throws:
+ *  that names a matching module by any other extension or by none (the resolver tries extensions), throws:
  *  the guard cannot tell what it loads. */
 export function siblingImports(file: URL, name: RegExp): string[] {
   const path = fileURLToPath(file);
@@ -64,7 +64,9 @@ export function siblingImports(file: URL, name: RegExp): string[] {
     if (dirname(targetPath) !== dirname(path)) continue;
     const module = basename(targetPath);
     if (name.test(module)) found.push(module);
-    else if (name.test(`${module.replace(SOURCE_EXTENSION, '')}.ts`)) throw new Error(`${basename(path)}: ${specifier} names a module by another extension or none`);
+    else if (name.test(`${module}.ts`) || name.test(module.replace(ANY_EXTENSION, '.ts'))) {
+      throw new Error(`${basename(path)}: ${specifier} names a module by another extension or none`);
+    }
   }
   return found;
 }
