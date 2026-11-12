@@ -8,6 +8,14 @@ const read = file => yaml.parse(fs.readFileSync(path.join(__dirname, '..', 'work
 // ci.yml expressions that only choose between PR, queue and dispatch paths.
 const plain = command => command.replace(/ \$\{\{ \(github\.event_name[^}]*\}\}/g, '');
 const commands = job => (job.steps || []).filter(step => step.run).map(step => plain(step.run.trim()));
+// A bound such as `${{ github.event_name == 'merge_group' && 40 || 30 }}` resolved for any
+// event other than merge_group.
+function outsideQueue(bound) {
+  if (typeof bound === 'number') return bound;
+  const match = /^\$\{\{ github\.event_name == 'merge_group' && \d+ \|\| (\d+) \}\}$/.exec(bound);
+  assert.ok(match, `unexpected bound expression: ${bound}`);
+  return Number(match[1]);
+}
 // Every command of the copy runs in the ci.yml job, in the same order. ci.yml adds only
 // its PR, queue and coverage plumbing around them.
 function assertCopied(copy, original, name) {
@@ -35,8 +43,10 @@ test('the full suite runs the commands, shards and bounds of the ci.yml jobs it 
     assert.equal(suite[name].name, ci[name].name);
     assert.equal(suite[name]['runs-on'], ci[name]['runs-on']);
   }
-  assert.equal(suite['cockpit-browser']['timeout-minutes'], ci['cockpit-browser']['timeout-minutes']);
-  assert.equal(suite['build-and-package']['timeout-minutes'], ci['build-and-package']['timeout-minutes']);
+  // ci.yml raises some bounds for its merge-queue shard rerun; this copy runs no rerun and
+  // keeps the bound ci.yml gives every other event.
+  assert.equal(suite['cockpit-browser']['timeout-minutes'], outsideQueue(ci['cockpit-browser']['timeout-minutes']));
+  assert.equal(suite['build-and-package']['timeout-minutes'], outsideQueue(ci['build-and-package']['timeout-minutes']));
 });
 
 test('the full suite verifies the commit it is given and requires every job', () => {
