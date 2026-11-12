@@ -30,6 +30,7 @@ import { resolveConflictsPrompt } from './task-thread/run-actions'
 afterEach(() => {
   act(() => resetToasts())
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   // Reference statuses are remembered for the LIFETIME OF THE TAB, deliberately (a re-keyed batch
   // must not blank the chips) — which in vitest means one case's statuses would otherwise be
@@ -883,10 +884,12 @@ it('mounts summary actions only while the row is expanded', async () => {
 
       // Leaving the trigger starts a close; entering the list cancels it, which is the only way
       // the links are reachable at all.
+      vi.useFakeTimers()
       fireEvent.pointerLeave(overflow(), { pointerType: 'mouse' })
       const list = document.querySelector('[data-slot="reference-overflow-list"]')!
       fireEvent.pointerEnter(list, { pointerType: 'mouse' })
-      await new Promise((resolve) => setTimeout(resolve, 350))
+      act(() => vi.advanceTimersByTime(350))
+      vi.useRealTimers()
       expect(listed()).toHaveLength(3)
     })
 
