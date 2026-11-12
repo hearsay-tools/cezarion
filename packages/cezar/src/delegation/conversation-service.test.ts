@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
+import { FRESH_SESSION_NOTICE } from './service.ts';
+import { ensureOwnedWorkspace } from './workspace.ts';
 import { projectConversationEvents } from './conversations.ts';
 import {
   conversationSendResultSchema,
@@ -153,13 +155,13 @@ describe('durable conversations', () => {
     await expect(f.service.inbox(foreign)).rejects.toMatchObject({ code: 'denied_scope' });
     await f.service.releaseInbox(a.caller, { receiptId: batch.receiptId! });
   });
-  async function completedWorker(status: 'done' | 'review' = 'done') {
+  async function completedWorker(status: 'done' | 'review' | 'failed' | 'cancelled' = 'done', session: string | null = 'previous-session') {
     const w = await worker();
     // This service fixture holds the scheduler; remove its original queued job
     // before publishing a completed execution with a resumable provider session.
     f.manager.cancel(w.id);
     await f.manager.awaitRunTermination(w.id, 5_000);
-    f.store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
+    f.store.updateStep(w.id, 'task', { status: STEP_STATUS.done, ...(session ? { sessionId: session } : {}), backend: 'claude' });
     const generation = f.store.commitWorkerExecutionStart(w.id);
     setRunStatus(f.store, w.id, status);
     f.store.commitWorkerExecutionComplete(w.id, generation);
@@ -190,6 +192,31 @@ describe('durable conversations', () => {
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(reopened.getRun(w.id)?.continuationMessage).toEqual(f.store.getRun(w.id)?.continuationMessage);
     expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { messages: [a.message] } }); reopened.flush();
+  });
+  // hearsay-tools/squawk#3337: a cancelled worker, and one with no recorded session, restart from their worktree.
+  it('parent --resume restarts a cancelled worker whose worktree and branch exist', async () => {
+    const w = await completedWorker('cancelled');
+    await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
+    const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Finish the parser change', timeoutSeconds: 600, resume: true };
+    expect(await f.service.send(f.caller, request)).toMatchObject({ delivery: 'queued', message: { state: 'accepted', resumed: true } });
+    expect(f.store.getRun(w.id)).toMatchObject({ status: RUN_STATUS.queued, delegation: { executionRevision: 1 },
+      continuationMessage: { text: expect.not.stringContaining(FRESH_SESSION_NOTICE) } });
+  });
+  it('parent --resume starts a fresh session for a failed worker with no recorded session', async () => {
+    const w = await completedWorker('failed', null);
+    await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
+    const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Retry on another runner', timeoutSeconds: 600, resume: true };
+    expect(await f.service.send(f.caller, request)).toMatchObject({ delivery: 'queued', message: { state: 'accepted', resumed: true } });
+    expect(f.store.getRun(w.id)).toMatchObject({ status: RUN_STATUS.queued,
+      continuationMessage: { text: expect.stringContaining(FRESH_SESSION_NOTICE) } });
+  });
+  it('refuses --resume of a cancelled worker whose worktree is gone, accepting nothing', async () => {
+    const w = await completedWorker('cancelled');
+    const before = structuredClone(f.store.getRun(w.id));
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Work', timeoutSeconds: 600, resume: true }))
+      .rejects.toMatchObject({ code: 'incompatible_state', message: expect.stringMatching(/worktree or branch is gone/) });
+    expect(f.store.getRun(w.id)).toEqual(before);
+    expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
   });
   it('allows a bounded day for resume requests but keeps ordinary requests bounded to 30 minutes', async () => {
     const w = await completedWorker();

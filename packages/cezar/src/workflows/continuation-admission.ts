@@ -38,7 +38,7 @@ export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions, hom
 
 export function parentMessageRefusal(run: RunRecord, defer: boolean, conversation: ContinuationConversation): ContinuationRefusal | undefined {
   if (conversation && (!defer || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== conversation.rootId ||
-    !['done', 'review', 'failed'].includes(run.status))) {
+    !['done', 'review', 'failed', 'cancelled'].includes(run.status))) {
     return { ok: false, error: 'Only a settled owned worker can be resumed by its parent message' };
   }
 }
@@ -77,8 +77,10 @@ export function answerRefusal(run: RunRecord, opts: ContinueRunOptions, defer: b
   }
 }
 
-export function sessionRefusal(sessionStep: StepState | undefined, untouched: boolean): ContinuationRefusal | undefined {
-  if (!sessionStep?.sessionId && !untouched) return { ok: false, error: 'no agent session to resume' };
+/** A parent's resume of its owned worker starts a fresh session when none was recorded
+ *  (hearsay-tools/squawk#3337): the work so far is in the worker's worktree and branch. */
+export function sessionRefusal(sessionStep: StepState | undefined, untouched: boolean, freshAllowed = false): ContinuationRefusal | undefined {
+  if (!sessionStep?.sessionId && !untouched && !freshAllowed) return { ok: false, error: 'no agent session to resume' };
 }
 
 /** Session ids belong to their provider and account, including mixed-chain worker steps. */
@@ -317,7 +319,7 @@ export class ContinuationChecks {
     const sessionStep = [...run.steps].reverse().find(s => s.sessionId);
     // Command/check steps may have changed the repo; only an untouched workflow can restart.
     const untouched = this.reads.untouched(run);
-    const absent = sessionRefusal(sessionStep, untouched);
+    const absent = sessionRefusal(sessionStep, untouched, run.delegation?.role === 'worker' && !!this.conversation);
     if (absent) return absent;
     const affinity = sessionAffinity(run, this.opts, identity, sessionStep, untouched);
     const resumeSessionId = affinity.resume ? this.reads.sessionId(sessionStep) : undefined;

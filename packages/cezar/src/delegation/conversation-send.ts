@@ -48,9 +48,10 @@ export function sendAdmission(pair: ConversationPair, root: RunRecord, request: 
     : resumable && !resume ? notDeliveredInstruction(pair, root) : undefined;
   return { destroyed, resumable, resume, instruction };
 }
+/** A cancelled worker resumes like a settled one (hearsay-tools/squawk#3337); destroy is the permanent end. */
 function assertSendResume(recipient: RunRecord, resume: boolean, destroyed: boolean): void {
   if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
-    recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
+    recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
       `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
 }
 export function sendMessage(pair: ConversationPair, request: ConversationSendRequest, requestHash: string, now: string,
