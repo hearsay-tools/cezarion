@@ -223,7 +223,10 @@ function fixtureRepo(t, write, seed = () => {}) {
 const LINE = 'x'.repeat(99) + '\n';
 
 test('patch limits refuse a file diff over the GitHub bound and a NUL byte, naming the file and the limit', async t => {
-  const io = fixtureRepo(t, cwd => {
+  const io = fixtureRepo(t, (cwd, git) => {
+    // User settings that would make Git treat a large text file as binary and skip it.
+    fs.writeFileSync(path.join(cwd, '.git', 'user-attributes'), '*.md binary\n*.txt -diff\n');
+    for (const [key, value] of [['core.bigFileThreshold', '100k'], ['core.attributesFile', path.join(cwd, '.git', 'user-attributes')]]) git.git('config', key, value);
     fs.writeFileSync(path.join(cwd, 'large.md'), LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
     // Git reads only the first 8000 bytes for binary detection, so this file stays text.
     fs.writeFileSync(path.join(cwd, 'nul.txt'), Buffer.concat([Buffer.from(LINE.repeat(100)), Buffer.from([0, 10])]));

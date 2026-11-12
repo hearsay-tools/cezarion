@@ -1,14 +1,17 @@
 // Trusted CI code. PR trees are Git data and are never checked out or executed.
 const { execFileSync } = require('node:child_process');
+const { devNull } = require('node:os');
 
 // The largest local `git diff` of one file that GitHub still returns as a patch. Measured on
 // this repository's PRs; docs/sdlc/ci.md § GitHub patch limits names it, and scripts/prepr.mjs reads it.
 const GITHUB_PATCH_LIMITS = Object.freeze({ fileBytes: 102_400 });
 
 // The `git` arguments that give GitHub's patch shape, whatever the user's settings: each
-// diff.*, color.* or core.quotePath key in `git help -c` that changes a patch's bytes is
-// pinned here. Renames, where a caller turns them on, use git's default limit of 1000.
+// diff.*, color.* or core.* key in `git help -c` that changes a patch's bytes or makes Git
+// call a text file binary is pinned here. Renames, where a caller turns them on, use git's
+// default limit of 1000.
 const PATCH_DIFF = Object.freeze(['-c', 'diff.suppressBlankEmpty=false', '-c', 'core.quotePath=true',
+  '-c', 'core.abbrev=7', '-c', 'core.bigFileThreshold=512m', '-c', `core.attributesFile=${devNull}`,
   'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-relative', '--unified=3',
   '--inter-hunk-context=0', '--diff-algorithm=myers', '--indent-heuristic', '--src-prefix=a/',
   '--dst-prefix=b/', '--submodule=short', '--ignore-submodules=none', '-l1000']);
