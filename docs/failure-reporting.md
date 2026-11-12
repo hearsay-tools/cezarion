@@ -2,6 +2,8 @@
 
 `Report Release and Nightly Failures` creates `area-ci` issues after failed Release or Nightly attempts. It starts working when `.github/workflows/report-workflow-failure.yml` reaches the default branch. It does not retry publishing or change the original run's conclusion.
 
+These reports hold per-step evidence. The Release and Nightly workflows also file their own `release-blocker` issue for a failed release candidate, a failed install after promotion or a failed rehearsal; that issue stops the next stable release ([release gates](publishing.md#release-gates)).
+
 Release runs on `main` and `release/*` qualify; Nightly runs on `main` qualify. Both workflow name and file path must match, and the source repository must match. Success, intentional skips, and other workflows produce no reports. The reporter fetches the event's exact attempt, including when a later attempt has already started. Failed or timed-out jobs contribute reports; skipped dependent jobs do not. A job that Actions stops at its `timeout-minutes` ends `cancelled`, and so does its run, exactly like a job a person or a concurrency group cancelled. The reporter therefore also reads cancelled runs and reports a cancelled job only when its check-run annotation says it exceeded the maximum execution time. A run cancelled any other way produces no report (hearsay-tools/cezarion#1272). A failed job with no recorded failing step still produces a metadata report.
 
 ## What an issue contains

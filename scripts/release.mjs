@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// Publish stable releases from explicit workflow dispatch and pure version decisions.
-// Stamp private manifests without publishing them; publish dependencies first with --tag latest.
+// Publish stable releases and release candidates from explicit workflow dispatch and pure
+// version decisions. RELEASE_VERSION and RELEASE_DIST_TAG name a planned target (a candidate
+// `x.y.z-rc.n` under `next`, or its stable version under `latest`); without them the bump
+// decides, under `latest`. --stamp-only writes the stamped manifests and publishes nothing.
+// Stamp private manifests without publishing them; publish dependencies first.
 // The build and pack gate run beforehand; publishing uses --ignore-scripts.
 // Without supported credentials, preserve the visible dry-run behavior.
 
@@ -12,9 +15,10 @@ import { fileURLToPath } from 'node:url';
 import { isPublishable, publicationManifests, RELEASE_MANIFEST_DIRS, releaseRunCommand } from '../packages/cezar/dist/release/manifests.js';
 import { withCompatibilityPackages } from '../packages/cezar/dist/release/compatibility.js';
 import { withPublicationPackage } from '../packages/cezar/dist/release/publication.js';
+import { stampManifests } from '../packages/cezar/dist/release/snapshot.js';
 import {
-  computeStableVersion,
   isReleaseBump,
+  resolveReleaseTarget,
   stampStableManifests,
 } from '../packages/cezar/dist/release/stable.js';
 
@@ -48,13 +52,16 @@ if (!isReleaseBump(bump)) {
 const manifests = Object.fromEntries(order.map((key) => [key, readManifest(dirs[key])]));
 
 // The service manifest is the base: it is the package whose version the release is named after.
-const version = computeStableVersion(bump, manifests.cezar.version);
-if (!version) {
-  console.error(
-    `release: cannot ${bump}-bump base version "${manifests.cezar.version}" — a stable release must start from a plain x.y.z.`,
-  );
+const target = resolveReleaseTarget(bump, manifests.cezar.version, {
+  version: process.env.RELEASE_VERSION?.trim(),
+  distTag: process.env.RELEASE_DIST_TAG?.trim(),
+});
+if ('error' in target) {
+  console.error(`release: ${target.error}`);
   process.exit(1);
 }
+const { version, distTag } = target;
+const stampOnly = process.argv.includes('--stamp-only');
 
 let dryRun = process.argv.includes('--dry-run');
 const token = process.env.NODE_AUTH_TOKEN ?? '';
@@ -64,14 +71,19 @@ const token = process.env.NODE_AUTH_TOKEN ?? '';
 const oidc = Boolean(
   process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
 );
-if (!dryRun && !token && !oidc) {
+if (!stampOnly && !dryRun && !token && !oidc) {
   console.log('release: NPM_TOKEN is not configured — forcing --dry-run.');
   console.log('release: see docs/publishing.md for the one-time admin setup.');
   dryRun = true;
 }
 
-const stamped = stampStableManifests(manifests, version);
+const stamped = target.exactPins ? stampManifests(manifests, version) : stampStableManifests(manifests, version);
 for (const key of order) writeManifest(dirs[key], stamped[key]);
+if (stampOnly) {
+  console.log(`release: stamped the manifests to ${version}; --stamp-only publishes nothing.`);
+  emitOutput({ published: false, stamped: true, version });
+  process.exit(0);
+}
 const publication = publicationManifests(stamped);
 // A renamed stable package packs outside Git. Require its source before any npm
 // publication; otherwise a successful publish could not be verified on retry.
@@ -82,7 +94,7 @@ if (!dryRun && publication.cezar.name !== stamped.cezar.name) {
 }
 const stampedNames = order.map((key) => publication[key].name);
 console.log(
-  `release: stamped ${stampedNames.join(' + ')} to ${version} (bump ${bump}, dist-tag latest${dryRun ? ', dry run' : ''})`,
+  `release: stamped ${stampedNames.join(' + ')} to ${version} (bump ${bump}, dist-tag ${distTag}${dryRun ? ', dry run' : ''})`,
 );
 
 // Token publishes from Actions still need --provenance. Trusted publishing
@@ -120,7 +132,7 @@ const versionOnRegistry = (name, ver) => {
 const publish = (dir, label) => {
   const args = [
     'publish',
-    '--tag', 'latest',
+    '--tag', distTag,
     '--access', 'public',
     '--ignore-scripts',
     ...provenance,
@@ -134,7 +146,10 @@ const publish = (dir, label) => {
 // exactly this reason. A `private` manifest is stamped above but never published: it is part of
 // the release (its version moves, its pins are rewritten) without being on the registry.
 const published = [];
+// The name users install through: the alias, or the compatibility alias after the rebrand.
+let installName = publication.alias?.name ?? publication.cezar.name;
 withCompatibilityPackages(dirs.cezar, publication.cezar, compatibility => {
+  if (!publication.alias && compatibility.legacyAlias) installName = compatibility.legacyAlias.manifest.name;
   const targets = [
     ...order.map(key => ({ key, dir: dirs[key], manifest: publication[key] })),
     ...Object.entries(compatibility).map(([key, value]) => ({ key, ...value })),
@@ -169,6 +184,8 @@ emitOutput({
   dryRun,
   bump,
   version,
+  distTag,
+  installName,
   rootName: publication.cezar.name,
   apiClientName: stamped.apiClient.name,
   runCommand: releaseRunCommand(publication, version),
