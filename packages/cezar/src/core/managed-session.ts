@@ -2,6 +2,10 @@ import type { AgentEvent, AgentRunner, AgentRunSpec, AgentSession, SessionOption
 import { DEFAULT_NO_PROGRESS_TIMEOUT_MS } from './runner-runtime.ts';
 import { classifyProviderError } from './provider-error.ts';
 
+/** The events that show the model working again, which forget a provider-retry note. Session,
+ *  usage and cost metadata do not (hearsay-tools/squawk#3337). */
+const MODEL_PROGRESS: ReadonlySet<AgentEvent['type']> = new Set(['text', 'tool-call', 'tool-result', 'image']);
+
 /** Wall-clock limits and open-turn liveness are independent. Native stream
  * activity refreshes this guard even when a mapper/coalescer emits no UI event.
  * Turn boundaries and human questions park it; starting/answering a turn rearms it.
@@ -45,7 +49,7 @@ export function startManagedSession(
   try {
     session = runner.startSession(spec, event => {
       if (event.type === 'note') providerNote = classifyProviderError(event.message) ? event.message : providerNote;
-      else if (event.type !== 'error') providerNote = undefined;
+      else if (MODEL_PROGRESS.has(event.type)) providerNote = undefined;
       if (event.type === 'turn-end') pause();
       if (event.type === 'error' || event.type === 'done') stop();
       onEvent(event);

@@ -29,6 +29,9 @@ describe('managed open-turn watchdog', () => {
   it('names the provider error a kill interrupts, so the run holds instead of failing', async () => {
     const f = fixture();
     f.emit({ type: 'note', message: 'Claude API retry: API Error: 529 overloaded_error (attempt 7)' });
+    // Metadata is no model progress: the provider note survives it.
+    f.emit({ type: 'session', sessionId: 'new-session' });
+    f.emit({ type: 'token-usage', tokensUsed: 10 });
     await vi.advanceTimersByTimeAsync(LIMIT);
     const message = (f.events.find(e => e.type === 'error') as { message: string }).message;
     expect(message).toContain('no progress for 30 minutes');
