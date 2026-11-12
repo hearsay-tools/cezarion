@@ -155,9 +155,13 @@ test('PR check classifies each file with no API patch from the local diff', asyn
   git('init');
   git('config', 'user.name', 'Test');
   git('config', 'user.email', 'test@example.invalid');
-  git('commit', '--allow-empty', '-m', 'base');
-  const base = git('rev-parse', 'HEAD').trim();
   const line = 'x'.repeat(99) + '\n';
+  fs.writeFileSync(path.join(cwd, 'old name.md'), line.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
+  git('add', '--all');
+  git('commit', '-m', 'base');
+  const base = git('rev-parse', 'HEAD').trim();
+  fs.renameSync(path.join(cwd, 'old name.md'), path.join(cwd, 'new name.md'));
+  fs.appendFileSync(path.join(cwd, 'new name.md'), 'edit\n');
   fs.writeFileSync(path.join(cwd, 'large.md'), line.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10));
   // Git reads only the first 8000 bytes for binary detection, so a later NUL leaves the file text.
   fs.writeFileSync(path.join(cwd, 'nul.txt'), Buffer.concat([Buffer.from(line.repeat(100)), Buffer.from([0]), Buffer.from('\n')]));
@@ -170,8 +174,9 @@ test('PR check classifies each file with no API patch from the local diff', asyn
     { filename: 'large.md', status: 'added', additions: 1034, deletions: 0 },
     { filename: 'nul.txt', status: 'added', additions: 101, deletions: 0 },
     { filename: 'small.txt', status: 'added', additions: 1, deletions: 0 },
+    { filename: 'new name.md', previous_filename: 'old name.md', status: 'renamed', additions: 1, deletions: 0 },
   ];
-  const pr = { number: 1, base: { sha: base, ref: 'main' }, head: { sha: head }, changed_files: 3 };
+  const pr = { number: 1, base: { sha: base, ref: 'main' }, head: { sha: head }, changed_files: 4 };
   const context = { sha: base, eventName: 'pull_request_target', repo: { owner: 'test', repo: 'repo' }, payload: { pull_request: pr } };
   const github = { rest: { pulls: { get: async () => ({ data: pr }), listFiles: () => {} } }, paginate: async () => files };
   const reasons = await checkPullRequest({ github, context, core: { info: () => {} }, cwd });
@@ -179,9 +184,11 @@ test('PR check classifies each file with no API patch from the local diff', asyn
   const limit = String(GITHUB_PATCH_LIMITS.fileBytes);
   assert.match(reasons.find(r => r.startsWith('"large.md"')), new RegExp(`local diff is \\d+ bytes, over GitHub's ${limit}-byte per-file patch limit`));
   assert.match(reasons.find(r => r.startsWith('"nul.txt"')), /local diff contains a NUL byte/);
-  assert.match(reasons.find(r => r.startsWith('"small.txt"')), /under every per-file limit.*PR's total size \(1136 changed lines\)/);
+  assert.match(reasons.find(r => r.startsWith('"small.txt"')), /under every per-file limit.*PR's total size \(1137 changed lines\)/);
+  // The rename patch holds only the edit, so a large renamed file is under the per-file limit.
+  assert.match(reasons.find(r => r.startsWith('"new name.md"')), /local diff is \d{3} bytes with no NUL byte/);
   const summary = reasons.at(-1);
-  assert.match(summary, /This PR changes 1136 lines \(\+1136\/-0\) in 3 files/);
+  assert.match(summary, /This PR changes 1137 lines \(\+1137\/-0\) in 4 files/);
   assert.match(summary, new RegExp(`over ${limit} bytes`));
   assert.match(summary, /NUL byte/);
   assert.match(summary, /total diff is large/);

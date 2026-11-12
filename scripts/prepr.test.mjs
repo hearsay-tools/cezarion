@@ -207,11 +207,13 @@ test('squealChecks passes a process timeout to the wait', async () => {
   assert.equal(options.timeout, 11_000);
 });
 
-function fixtureRepo(t, write) {
+function fixtureRepo(t, write, seed = () => {}) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'prepr-patch-'));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
   const io = gitIo(cwd);
-  for (const a of [['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid'], ['commit', '--allow-empty', '-m', 'base'], ['switch', '-c', 'topic']]) io.git(...a);
+  for (const a of [['init', '-b', 'main'], ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.invalid']]) io.git(...a);
+  seed(cwd);
+  for (const a of [['add', '--all'], ['commit', '--allow-empty', '-m', 'base'], ['switch', '-c', 'topic']]) io.git(...a);
   write(cwd);
   io.git('add', '--all');
   io.git('commit', '-m', 'head');
@@ -252,4 +254,20 @@ test('prepr fails on a patch-limit refusal', async () => {
   const r = await prepr({ io, waitMs: 1000 });
   assert.equal(r.failed, true);
   assert.match(r.report, /FAIL: patch limits: "scripts\/x\.mjs": its diff contains a NUL byte/);
+});
+
+test('patch limits measure a renamed file by its rename patch, as GitHub does', async t => {
+  const large = LINE.repeat(Math.ceil(GITHUB_PATCH_LIMITS.fileBytes / 100) + 10);
+  const io = fixtureRepo(t, cwd => {
+    fs.renameSync(path.join(cwd, 'moved.md'), path.join(cwd, 'dir moved.md'));
+    fs.renameSync(path.join(cwd, 'edited.md'), path.join(cwd, 'edited-new.md'));
+    fs.appendFileSync(path.join(cwd, 'edited-new.md'), 'one more line\n');
+  }, cwd => {
+    fs.writeFileSync(path.join(cwd, 'moved.md'), large);
+    fs.writeFileSync(path.join(cwd, 'edited.md'), large + 'edited\n');
+  });
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+  assert.match(line.text, /1 changed lines \(\+1\/-0\) in 2 files/);
 });

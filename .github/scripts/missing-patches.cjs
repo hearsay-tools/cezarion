@@ -18,8 +18,11 @@ function patchFacts(patch) {
   return { bytes: patch.length, nul: patch.includes(0) };
 }
 
+// A rename is measured as GitHub shows it: the patch between the old and the new path.
 function localPatch(cwd, from, to, file) {
-  return gitBytes(cwd, 'diff', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', file);
+  const paths = file.previous_filename ? [file.previous_filename, file.filename] : [file.filename];
+  const renames = file.previous_filename ? '--find-renames' : '--no-renames';
+  return gitBytes(cwd, 'diff', '--no-ext-diff', '--no-textconv', renames, from, to, '--', ...paths);
 }
 
 /** Why GitHub returned no patch for a file, from its local patch facts. */
@@ -100,7 +103,7 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   const stats = diffStats(git(cwd, 'diff', '--no-ext-diff', '--no-textconv',
     '--no-renames', '--numstat', '-z', `${mergeBase}...${expected.head.sha}`, '--'));
   const local = new Map(files.filter(file => typeof file.patch !== 'string')
-    .map(file => [file.filename, patchFacts(localPatch(cwd, mergeBase, expected.head.sha, file.filename))]));
+    .map(file => [file.filename, patchFacts(localPatch(cwd, mergeBase, expected.head.sha, file))]));
   const { data: current } = await github.rest.pulls.get(params);
   if (!sameRevision(current, expected)) return report(core, ['PR head or base changed during the patch check; run CI for the current revision.']);
   return report(core, missingPatches(files, stats, pr.changed_files, local));

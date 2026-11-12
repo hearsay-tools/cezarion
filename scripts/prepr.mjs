@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { isDocsPath } = require('../.github/scripts/change-surface.cjs');
-const { GITHUB_PATCH_LIMITS, diffStats, patchFacts } = require('../.github/scripts/missing-patches.cjs');
+const { GITHUB_PATCH_LIMITS, patchFacts } = require('../.github/scripts/missing-patches.cjs');
 
 export const SQUEAL_WAIT_MS = 120_000;
 
@@ -144,30 +144,43 @@ function mergeBaseOf(base, io) {
   return mergeBase;
 }
 
-const DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames'];
+const DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--find-renames'];
+
+/** Rows of `git diff --numstat -z` with renames on: a rename row names its old and new path. */
+export function numstatRows(numstat) {
+  const tokens = numstat.split('\0');
+  const rows = [];
+  for (let i = 0; i < tokens.length && tokens[i]; i++) {
+    const [added, deleted, path] = tokens[i].split('\t');
+    const paths = path === '' ? [tokens[++i], tokens[++i]] : [path];
+    rows.push({ added, deleted, paths });
+  }
+  return rows;
+}
 
 /**
  * Report lines for GitHub's per-file patch limits on the committed branch: a file diff over
  * GITHUB_PATCH_LIMITS.fileBytes or one with a NUL byte gets no API patch, and the PR gate fails.
+ * Renames are on, as on GitHub, so a moved file is measured by its rename patch.
  */
 export function patchLimitLines(base, io = realIo) {
   const mergeBase = mergeBaseOf(base, io);
-  const stats = diffStats(io.git(...DIFF, '--numstat', '-z', mergeBase, 'HEAD'));
+  const rows = numstatRows(io.git(...DIFF, '--numstat', '-z', mergeBase, 'HEAD'));
   const limit = GITHUB_PATCH_LIMITS.fileBytes;
   let added = 0;
   let deleted = 0;
   const refused = [];
-  for (const [file, counts] of stats) {
-    if (counts.added === '-') continue;
-    added += Number(counts.added);
-    deleted += Number(counts.deleted);
-    const facts = patchFacts(io.gitBytes(...DIFF, mergeBase, 'HEAD', '--', file));
+  for (const row of rows) {
+    if (row.added === '-') continue;
+    added += Number(row.added);
+    deleted += Number(row.deleted);
+    const facts = patchFacts(io.gitBytes(...DIFF, mergeBase, 'HEAD', '--', ...row.paths));
     const cause = facts.nul ? 'its diff contains a NUL byte'
       : facts.bytes > limit ? `its diff is ${facts.bytes} bytes, over GitHub's ${limit}-byte per-file patch limit` : '';
-    if (cause) refused.push(entry(false, `patch limits: ${JSON.stringify(file)}: ${cause}, so GitHub returns no patch and the PR gate fails. Split the change.`));
+    if (cause) refused.push(entry(false, `patch limits: ${JSON.stringify(row.paths.at(-1))}: ${cause}, so GitHub returns no patch and the PR gate fails. Split the change.`));
   }
   if (refused.length) return refused;
-  return [entry(true, `patch limits: every file diff is at most ${limit} bytes with no NUL byte; ${added + deleted} changed lines (+${added}/-${deleted}) in ${stats.size} file${stats.size === 1 ? '' : 's'}`)];
+  return [entry(true, `patch limits: every file diff is at most ${limit} bytes with no NUL byte; ${added + deleted} changed lines (+${added}/-${deleted}) in ${rows.length} file${rows.length === 1 ? '' : 's'}`)];
 }
 
 function changedFiles(base, io) {
