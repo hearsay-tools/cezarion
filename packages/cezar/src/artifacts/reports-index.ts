@@ -15,8 +15,9 @@ import { artifactRunsRoot, scanArtifactsForIndex, checkArtifactContentForIndex }
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
 const instances = new WeakMap<RunStore, ReportsIndex>();
-export function reportsIndex(db: RunDatabase | null, store: RunStore, dataDir: string, failure?: Error): ReportsIndex {
-  if (!db) throw failure ?? new Error('runs database unavailable');
+export function reportsIndex(store: RunStore): ReportsIndex {
+  const { db, dataDir, openFailure } = store.reportSource();
+  if (!db) throw openFailure ?? new Error('runs database unavailable');
   let index = instances.get(store);
   if (!index) { index = new ReportsIndex(db, store, dataDir); instances.set(store, index); }
   return index;

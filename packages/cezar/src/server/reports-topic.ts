@@ -1,5 +1,5 @@
 import type { ReportsFrame, ReportsMetadata } from '@open-mercato/cezar-contract/reports';
-import type { ReportsIndex } from '../artifacts/reports-index.ts';
+import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import type { SocketHub, TopicPublisher } from './ws.ts';
 import type { WorkspaceProjects } from './workspace-projects.ts';
 
@@ -31,6 +31,6 @@ export function registerReportsTopic(hub: SocketHub, projects: Pick<WorkspacePro
   hub.registerTopicFamily('reports:project:', async projectId => {
     const project = await projects.resolveLiveProject(projectId);
     if (project.store.unavailable) return undefined;
-    return reportsPublisher(project.store.reports);
+    return reportsPublisher(reportsIndex(project.store));
   }, { loopbackReadable: false });
 }

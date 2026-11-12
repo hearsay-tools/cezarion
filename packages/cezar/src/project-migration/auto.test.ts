@@ -1,3 +1,4 @@
+import { reportsIndex } from '../artifacts/reports-index.ts';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
@@ -127,7 +128,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       const context = await run.contexts.context('p');
       expect(movedState()).toBe(true);
       expect(context.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
-      await context.store.reports.idle();
+      await reportsIndex(context.store).idle();
     } finally { release(); }
   });
 
@@ -149,7 +150,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(existsSync(artifactDirectory(context.dataDir, TASK))).toBe(true);
       expect(artifactDirectory(context.dataDir, TASK)).toBe(join(realpathSync(project.dataDir), 'runs', `${TASK}-artifacts`));
       // The reports index reads the kept task's artifacts in .ai/cezar/, and keeps its report.
-      expect(await context.store.reports.list({})).toMatchObject({ reports: [{ id: project.artifactId, runId: TASK }] });
+      expect(await reportsIndex(context.store).list({})).toMatchObject({ reports: [{ id: project.artifactId, runId: TASK }] });
       // Everything else moved, and is written in the new directory.
       expect(existsSync(join(project.newDir, 'workflows/local.yaml'))).toBe(true);
       expect(existsSync(join(project.newDir, 'runs', `${PARENT}-worker-results`))).toBe(true);
@@ -186,7 +187,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(existsSync(join(project.newDir, LEGACY_RUNS_FILE))).toBe(false);
       expect(readdirSync(project.dataDir).filter(name => !name.startsWith('cockpit.lock')).sort()).toEqual(['context.yaml', 'skills', 'workflows']);
       expect(handoffPath(reopened.dataDir, TASK)).toBe(join(project.newDir, 'runs', `${TASK}.handoff.md`));
-      await reopened.store.reports.idle();
+      await reportsIndex(reopened.store).idle();
     } finally { warn.mockRestore(); }
   });
 
@@ -209,7 +210,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     expect(movedState()).toBe(false);
     const context = await run.contexts.context('p');
     expect(context.store.getRun(TASK)?.worktreePath).toBe(project.taskPath);
-    await context.store.reports.idle();
+    await reportsIndex(context.store).idle();
   });
 
   it('waits, with a notice, when another process holds the project\'s fence at the moment of the move', async () => {
@@ -251,7 +252,7 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
       expect(movedState()).toBe(true);
       expect(context.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
       expect(lines.filter(line => line.startsWith('[hsq] Moved the state of'))).toHaveLength(1);
-      await context.store.reports.idle();
+      await reportsIndex(context.store).idle();
     } finally { log.mockRestore(); vi.mocked(RunStore.open).mockRestore(); }
   });
 
@@ -375,6 +376,6 @@ describe('the automatic project move', { timeout: TIMEOUT }, () => {
     expect(movedState()).toBe(false);
     expect(existsSync(project.newDir)).toBe(false);
     expect(context.store.getRun(TASK)?.worktreePath).toBe(project.taskPath);
-    await context.store.reports.idle();
+    await reportsIndex(context.store).idle();
   });
 });

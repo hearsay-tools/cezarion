@@ -1,3 +1,4 @@
+import { reportsIndex } from '../artifacts/reports-index.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -68,7 +69,7 @@ describe('crash recovery from the repair on', { timeout: TIMEOUT }, () => {
     // Early recovery (hearsay-tools/cezarion#3089): the build finishes the journal first.
     const context = await contexts.context('p');
     expect(projectAdmissionRefusal(project.newDir)).toBeUndefined();
-    await context.store.reports.idle();
+    await reportsIndex(context.store).idle();
     expect(context.store.getRun(TASK)?.worktreePath).toBe(moved(project, project.taskPath));
     expect(existsSync(join(project.dataDir, RUNS_DB_FILE))).toBe(false);
   });
