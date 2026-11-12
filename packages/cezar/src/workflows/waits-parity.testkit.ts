@@ -8,6 +8,12 @@ import { readMockRecords } from '../mock-records.testkit.ts';
 // hearsay-tools/cezarion#1233: the wait list's RUNNER_IDS cells. U0 (tool admission) lives in
 // `core/ci-tools-wait-cancel.test.ts` and `core/ci-tools-ask-done.test.ts`.
 export const WAIT_CRITERIA = [
+  { id: 'U29p', scenario: 'baseline', name: 'empty process deadlines cost no budget, even at the cap without a session' },
+  { id: 'U29q', scenario: 'baseline', name: 'empty peer deadlines cost no budget, even at the cap without a session' },
+  { id: 'U29m', scenario: 'baseline', name: 'a mixed empty-deadline and process-exit batch charges once' },
+  { id: 'U28w', scenario: 'baseline', name: 'worker accepts a two-hour wait and names the range above it' },
+  { id: 'U28r', scenario: 'baseline', name: 'request accepts a two-hour wait and names the range above it' },
+  { id: 'U28p', scenario: 'baseline', name: 'peer accepts a two-hour wait and names the range above it' },
   { id: 'U1', scenario: 'baseline', name: 'ci and timer register through cezar_wait on the native wire, park, and wake with their result' },
   { id: 'U4', scenario: 'baseline', name: 'cezar_cancel_wait cancels and no observation is delivered' },
   { id: 'U9', scenario: 'provider-error-controlled', name: 'provider failure and clean close with a ci or timer wait open leave the run recoverable and the next wake delivers' },

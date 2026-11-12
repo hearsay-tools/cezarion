@@ -224,7 +224,7 @@ const WAIT_FIELD_RULES: Record<string, string> = {
   pr: 'must be an HTTPS GitHub pull request URL (kind "pr")',
   until: 'must be "checks", "merge" or "merge_or_blocked" (kind "pr")',
   wake_on_conflict: 'must be true or false (kind "pr")',
-  timeout_seconds: 'must be an integer between 1 and 7200 (kind "pr" or "process") or between 1 and 1800 (kind "worker", "request" or "peer")',
+  timeout_seconds: 'must be an integer between 1 and 7200 (kind "pr", "process", "worker", "request" or "peer")',
   worker_ids: 'must be 1 to 32 unique worker ids you own (kind "worker")',
   request_ids: 'must be 1 to 32 unique ids of requests you sent (kind "request")',
   peer_ids: 'must be 1 to 32 unique ids of peer root tasks in this project (kind "peer")',

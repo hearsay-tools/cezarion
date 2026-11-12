@@ -47,7 +47,7 @@ export function processes() {
     new Promise<ProcessWaitResult>(resolve => { watches.push({ signal, settle: resolve }); }));
   return {
     watches: () => watches.length,
-    settle: (result: Omit<ProcessWaitResult, 'observedAt'>) => watches.at(-1)!.settle({ observedAt: new Date().toISOString(), ...result }),
+    settle: (result: Omit<ProcessWaitResult, 'observedAt'>, index = watches.length - 1) => watches[index]!.settle({ observedAt: new Date().toISOString(), ...result }),
     aborted: () => watches.at(-1)?.signal.aborted,
   };
 }

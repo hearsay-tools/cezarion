@@ -30,12 +30,12 @@ describe('conversation request rules', () => {
 
   it('defaults the request deadline and limits extended deadlines to resume requests', () => {
     expect(conversationSendRequestSchema.parse(request).timeoutSeconds).toBe(600);
-    expect(conversationSendRequestSchema.safeParse({ ...request, timeoutSeconds: 1800 }).success).toBe(true);
-    expect(conversationSendRequestSchema.safeParse({ ...request, timeoutSeconds: 1801 }).success).toBe(false);
-    expect(conversationSendRequestSchema.safeParse({ ...request, resume: false, timeoutSeconds: 1801 }).success).toBe(false);
+    expect(conversationSendRequestSchema.safeParse({ ...request, timeoutSeconds: 7200 }).success).toBe(true);
+    expect(conversationSendRequestSchema.safeParse({ ...request, timeoutSeconds: 7201 }).success).toBe(false);
+    expect(conversationSendRequestSchema.safeParse({ ...request, resume: false, timeoutSeconds: 7201 }).success).toBe(false);
     expect(conversationSendRequestSchema.safeParse({ ...request, resume: true, timeoutSeconds: 86400 }).success).toBe(true);
     expect(conversationSendRequestSchema.safeParse({ ...request, resume: true, timeoutSeconds: 86401 }).success).toBe(false);
-    expect(conversationSendRequestSchema.safeParse({ ...request, kind: 'progress', resume: true, timeoutSeconds: 1801 }).success).toBe(false);
+    expect(conversationSendRequestSchema.safeParse({ ...request, kind: 'progress', resume: true, timeoutSeconds: 7201 }).success).toBe(false);
   });
 
   it.each(['request', 'progress', 'reply', 'follow-up'])('checks request attribution and resume for %s', kind => {
@@ -141,8 +141,8 @@ describe('conversation refusal details', () => {
   const request = { id, recipientRunId: other, kind: 'request', text: 'inspect this' };
 
   it('names each refused send combination at its path', () => {
-    expect(issuesOf(conversationSendRequestSchema, { ...request, timeoutSeconds: 1801 })).toEqual([
-      { code: 'custom', message: 'Only --resume requests accept deadlines above 1800 seconds (maximum 86400)', path: ['timeoutSeconds'] },
+    expect(issuesOf(conversationSendRequestSchema, { ...request, timeoutSeconds: 7201 })).toEqual([
+      { code: 'custom', message: 'Only --resume requests accept deadlines above 7200 seconds (maximum 86400)', path: ['timeoutSeconds'] },
     ]);
     expect(issuesOf(conversationSendRequestSchema, { ...request, kind: 'reply' })).toEqual([
       { code: 'custom', message: 'Replies and follow-ups require a request ID; new messages must omit it', path: [] },
@@ -162,8 +162,8 @@ describe('conversation refusal details', () => {
   });
 
   it('bounds the request wait deadline and accepts every mode', () => {
-    for (const timeoutSeconds of [1, 900, 1800]) accepts(requestWaitRequestSchema, { requestIds: [id], timeoutSeconds });
-    for (const timeoutSeconds of [0, 1801, 1.5]) refuses(requestWaitRequestSchema, { requestIds: [id], timeoutSeconds });
+    for (const timeoutSeconds of [1, 900, 7200]) accepts(requestWaitRequestSchema, { requestIds: [id], timeoutSeconds });
+    for (const timeoutSeconds of [0, 7201, 1.5]) refuses(requestWaitRequestSchema, { requestIds: [id], timeoutSeconds });
     acceptsEach(requestWaitRequestSchema, { requestIds: [id], timeoutSeconds: 600 }, 'mode', ['one', 'any', 'all']);
   });
 });

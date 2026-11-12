@@ -222,9 +222,9 @@ a row that drops one changes behavior. "No" in *Budget* means the wake is free. 
 
 | Field | pr | timer | process | human | worker | peer | subagent |
 |---|---|---|---|---|---|---|---|
-| Deadline | required, 1-7,200 s, default 1,800 (`packages/contract/src/ci-wait.ts:21`; set at `workflows/waits.ts:301`) | agent timer: `seconds`, 60-7,200 s (`waits.ts:293`; contract `waits.ts:29-30`). Monitoring timer: the `ScheduleWakeup` delay clamped to 60 s and `scheduleWakeupMaxSeconds`, else the monitoring interval (`run/turn-settler.ts:464`, `:468`) | required, 1-7,200 s, default 1,800 (`waits.ts:307`; contract `waits.ts:33-34`) | none (contract `waits.ts:322`; `waits.ts:120-122`) | agent wait (`source` agent): required, 1-1,800 s, default 600 (contract `waits.ts:270`; `run/wait-registry.ts:108`). Cezar's completion wait (`source` cezar, `via` completion): none (`:131-133`; `hasWorkerDeadline`, contract `waits.ts:200`) | required, 1-1,800 s, default 600 (contract `waits.ts:270`; `wait-scope.ts:63`) | 30 min after the last child event, moved on each refresh (`run/subagent-waits.ts:166-168`, `:182-190`) |
+| Deadline | required, 1-7,200 s, default 1,800 (`packages/contract/src/ci-wait.ts:21`; set at `workflows/waits.ts:301`) | agent timer: `seconds`, 60-7,200 s (`waits.ts:293`; contract `waits.ts:29-30`). Monitoring timer: the `ScheduleWakeup` delay clamped to 60 s and `scheduleWakeupMaxSeconds`, else the monitoring interval (`run/turn-settler.ts:464`, `:468`) | required, 1-7,200 s, default 1,800 (`waits.ts:307`; contract `waits.ts:33-34`) | none (contract `waits.ts:322`; `waits.ts:120-122`) | agent wait (`source` agent): required, 1-7,200 s, default 600 (contract `waits.ts:270`; `run/wait-registry.ts:108`). Cezar's completion wait (`source` cezar, `via` completion): none (`:131-133`; `hasWorkerDeadline`, contract `waits.ts:200`) | required, 1-7,200 s, default 600 (contract `waits.ts:270`; `wait-scope.ts:63`) | 30 min after the last child event, moved on each refresh (`run/subagent-waits.ts:166-168`, `:182-190`) |
 | Keeps slot | yes when it is the top wait: no open human, worker, peer or subagent wait ranks above it, and no usage-limit hold (`run/wake-admission.ts:425-427`; order in contract `computeWaitingOn`, `waits.ts:572-598`) | as pr | as pr | no: any open human wait, of either source, parks for the user first (`run/wake-admission.ts:172-176`) | no (`:426`) | no (`:426`) | yes, whichever wait ranks first: any open subagent wait, or live children without one, keeps the session and a slot (`:409-421`) |
-| Budget | no (`waits.ts:70`) | yes, agent and monitoring timers alike (`:70`) | yes (`:70`) | no | no | yes (`:70`) | only when resolved by its deadline, `result.reason` `timeout` (`:69`) |
+| Budget | no | yes, agent and monitoring timers alike | yes except an empty deadline observation | no | no | yes except an empty deadline observation | only when resolved by its deadline, `result.reason` `timeout` (`:69`) |
 | Cancel | yes | yes | yes | only while not shown, `askSeq` unset (`run/wait-registry.ts:380`). Cezar's own human wait (`source` cezar) is not listed to the agent (`waits.ts:85-87`, `:120`) | yes. Cezar's completion wait (no deadline) is not listed to the agent (`waits.ts:120`). `cez worker cancel-wait` cancels only a wait with a deadline (`run/run-cancel.ts:119`) | yes; also `cez message cancel-wait` (`run/wait-registry.ts:176-185`) | yes |
 | `timers_disabled` | not checked | agent timer: refused (`run/wait-registry.ts:270`). Monitoring timer: Cezar opens a human wait (`via` `monitoring-line`) instead (`run/turn-settler.ts:446-450`) | refused (`run/wait-registry.ts:328`) | — | — | — | — |
 | Wake budget at registration | not checked | agent timer: refused when spent (`:271`). Monitoring timer: when spent, Cezar notes the cap once and opens its `budget` human wait (`run/turn-settler.ts:452-461`); on an autonomous run with wakes left and a continuation possible, no timer opens (`:439`) | refused when spent (`run/wait-registry.ts:329`) | `cezar_ask` on an autonomous run is refused (`autonomous_run`) while wakes remain (`:233`) | — | — | — |
@@ -475,12 +475,13 @@ The code wins. This spec changes none of them; a row records what the code does.
   child event (`run/subagent-waits.ts:182-190`).
 - **"Nothing else ends a wait as a side effect"** (L70-71). These end a wait too: the agent's own
   registration cancels Cezar's human waits (`run/human-waits.ts:132-137`); a step's `timeoutMs`
-  cancels human waits (`run/step-loop.ts:411-416`); the spent wake budget cancels timer, process,
-  peer and timed-out subagent waits (`run/wake-admission.ts:58-67`); a runner resume supersedes
+  cancels human waits (`run/step-loop.ts:411-416`); the spent wake budget cancels timer, chargeable process,
+  chargeable peer and timed-out subagent waits (`run/wake-admission.ts:58-67`); a runner resume supersedes
   the subagent wait and open timers (`run/subagent-waits.ts:222-229`).
 - **Which wakes cost budget.** L326 names timer expiries, L1352 adds process wakes, and the
   [communication protocol](2026-10-27-task-communication-protocol.md) § 8 adds peer wakes. The code
-  charges timer, process, peer, and a subagent wait resolved by its deadline
+  charges timer, substantive process and peer outcomes, and a subagent wait resolved by its deadline;
+  empty dependency deadline observations do not charge
   (`workflows/waits.ts:66-71`).
 
 ## Open decisions
@@ -491,8 +492,9 @@ The code wins. This spec changes none of them; a row records what the code does.
 ## Coordination
 
 - Out of scope: the web package; engine-only parity cells (hearsay-tools/cezarion#2959), which are
-  cheaper after P3; raising the 1,800 s cap and not charging a wake for a deadline that resolved
-  nothing (row edits after this epic); the process exit-file race (hearsay-tools/cezarion#2904).
+  cheaper after P3; the later 7,200 s dependency cap and empty-deadline charging change
+  ([ADR 0061](../../docs/adr/0061-one-wait-engine-executes-wait-kind-rows.md#longer-dependency-waits-and-empty-deadline-wakes),
+  [hearsay-tools/squawk#3339](https://github.com/hearsay-tools/squawk/issues/3339)); the process exit-file race (hearsay-tools/cezarion#2904).
 - hearsay-tools/cezarion#2445 and hearsay-tools/cezarion#2452 remove unreachable settlement paths
   in `run/turn-settler.ts`. Their coordinators check overlap with 1.2 and 3.1 there.
 - Each slice's pull request names this spec and the epic. The planner gets each slice's pull

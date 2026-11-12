@@ -191,7 +191,14 @@ describe('durable conversations', () => {
     expect(reopened.getRun(w.id)?.continuationMessage).toEqual(f.store.getRun(w.id)?.continuationMessage);
     expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ conversation: { messages: [a.message] } }); reopened.flush();
   });
-  it('allows a bounded day for resume requests but keeps ordinary requests bounded to 30 minutes', async () => {
+  it.each(['queued', 'running', 'waiting'] as const)('accepts a two-hour request for an active %s recipient', async status => {
+    const w = await worker();
+    setRunStatus(f.store, w.id, status);
+    const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'Review', timeoutSeconds: 7200 });
+    expect(sent.message.state).toBe('accepted');
+    expect(Date.parse(sent.message.deadline!) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
+  });
+  it('allows a bounded day for resume requests but keeps ordinary requests bounded to two hours', async () => {
     const w = await completedWorker();
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'request' as const, text: 'Fix review', timeoutSeconds: 86400 };
     await expect(f.service.send(f.caller, request)).rejects.toThrow();

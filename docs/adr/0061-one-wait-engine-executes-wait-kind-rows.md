@@ -53,3 +53,39 @@ Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.tes
 [waits.test.ts](../../packages/cezar/src/workflows/waits.test.ts), and the wait parity cells
 ([waits-parity-cells.testkit.ts](../../packages/cezar/src/workflows/waits-parity-cells.testkit.ts) registers
 the `waits-parity-<part>-cells.testkit.ts` module of each part).
+
+## Longer dependency waits and empty deadline wakes
+
+[hearsay-tools/squawk#3339](https://github.com/hearsay-tools/squawk/issues/3339)
+raises worker, request and peer waits and ordinary request deadlines to 1–7,200 seconds.
+Their default stays 600 seconds. Resume requests keep their separate 86,400-second maximum.
+Timeout refusals state the accepted range. Existing stored waits retain their deadline.
+
+The wait-kind row decides charging from the resolved result. A dependency wait's own deadline,
+with no dependency resolved, delivers its observation without spending automatic-wake budget.
+Worker and request results remain free. Process completion and probe errors, substantive peer
+outcomes and peer messages retain their charging rules. Explicit timers and native-subagent
+safety deadlines remain charged: their deadline is their intended signal. A mixed batch costs
+one unit when it contains any chargeable result, even beside a free deadline observation.
+
+The old cap bounded the time until an agent received a liveness observation. The new maximum
+keeps that guarantee while allowing a longer explicit interval; it does not extend an existing
+wait or request. The budget still bounds timer polling and peer-message loops. It no longer
+limits empty dependency-deadline observations.
+
+| Case | Trigger / observation | Behavior at shipped defaults |
+| --- | --- | --- |
+| Worker, request or peer wait; active-recipient request | Timeout omitted | 600-second deadline; explicit 1–7,200 accepted, above 7,200 refused with the range |
+| Worker or request wait | Its deadline; no target resolved | Deliver timeout and partial observations; no budget charge, as before |
+| Peer wait | Its deadline; no peer wrote or settled | Deliver timeout; no budget charge |
+| Process wait | Its deadline; process still runs | Deliver deadline; no budget charge |
+| Peer wait | Named peer message, settlement or deletion | Deliver the substantive observation; retain the existing charge |
+| Process wait | Exit file, process exit or probe error | Deliver the observation; retain the existing charge |
+| Timer or native-subagent safety wait | Its deadline | Retain the existing charge and cap behavior |
+| Empty dependency deadline with budget spent | Deadline fires | Deliver the free observation; do not cancel it for the spent budget |
+| Mixed batch | Free dependency deadline and chargeable result | Charge once; with budget spent, suppress only the chargeable result |
+| Restart, including no live session | Saved dependency deadline has passed | Resolve durably and deliver through normal continuation; the empty deadline stays free |
+| Queued or running task | Deadline resolves before the next turn boundary | Commit once; deliver at the normal boundary with the same charging rule |
+| Waiting task | Deadline resolves | Normal wake admission delivers the result with the same charging rule |
+| Finish pending, stopping, terminal or deleted task | Deadline callback or recovery | Existing lifecycle guards and cancellation apply; no new continuation is authorized |
+| Request recipient becomes unavailable | Settlement, deletion or unreadable record | Existing request outcomes and refusal/recovery behavior stay unchanged; the longer limit changes no relationship rule |

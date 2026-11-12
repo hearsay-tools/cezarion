@@ -69,7 +69,7 @@ export type WaitKindRow<K extends Wait['kind']> = WaitKindSpec & {
   repeatTimeout: (wait: Wait) => number | undefined;
   requestedTimeout: (request: CezarWaitRequest) => number | undefined;
 
-  chargesWake: K extends 'subagent' ? 'timeout' : boolean;
+  chargesWake: K extends 'process' | 'peer' | 'subagent' ? (wait: Wait) => boolean : boolean;
   refusesSpentBudget: boolean;
   holdsSession: boolean;
   cancellable: K extends 'human' ? 'unshown' : true;
@@ -194,7 +194,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     registration: 'process', requestKinds: ['process'],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
-    chargesWake: true, refusesSpentBudget: true, holdsSession: false, cancellable: true, timersDisabled: true,
+    chargesWake: wait => (wait as ProcessWaitEntry).result?.outcome !== 'deadline', refusesSpentBudget: true, holdsSession: false, cancellable: true, timersDisabled: true,
     deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the process is not signalled'], resolves: [
     { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
   ] },
@@ -220,7 +220,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     registration: 'none', requestKinds: [],
     delegation: false,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: ['open', 'resolved'],
-    chargesWake: 'timeout', refusesSpentBudget: false, holdsSession: true, cancellable: true, timersDisabled: false,
+    chargesWake: wait => (wait as SubagentWaitEntry).result?.reason === 'timeout', refusesSpentBudget: false, holdsSession: true, cancellable: true, timersDisabled: false,
     deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the runner starts a parent turn itself', 'every child already ended at the turn end', 'the deadline with the wake budget spent'], resolves: [
     { trigger: 'every child ended and no parent turn started within 15 s', firedBy: 'runner' },
     { trigger: 'the deadline, 30 minutes after the last child event', firedBy: 'timer' },
@@ -248,11 +248,11 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindRow<K> } = {
     registration: 'peer', requestKinds: ['peer'],
     delegation: true,
     userAnswers: false, holdsConversationInput: false, runnerResumeCancels: [],
-    chargesWake: true, refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
+    chargesWake: wait => (wait as PeerWaitEntry).result?.reason !== 'timeout', refusesSpentBudget: false, holdsSession: false, cancellable: true, timersDisabled: false,
     deadline: 'required', keepsSlot: false, cancels: [...ENDS_WAITS, 'the wake budget is spent at its resolution'], resolves: [
     { trigger: 'a message of any kind from a named peer', firedBy: 'peer' },
     { trigger: 'a named peer settles or is deleted', firedBy: 'watcher' },
-    { trigger: 'the deadline (1 to 1,800 s, default 600)', firedBy: 'timer' },
+    { trigger: 'the deadline (1 to 7,200 s, default 600)', firedBy: 'timer' },
   ] },
   worker: {
     ...waitSelectors('worker'),

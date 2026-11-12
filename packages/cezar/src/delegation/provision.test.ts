@@ -96,7 +96,7 @@ describe('session provisioning', () => {
   // hearsay-tools/cezarion#1995: the peer wait and the request kind are taught where the request wait is.
   it('teaches the peer wait and cezar_wait kinds request and peer', () => {
     const { instructions } = provision()!;
-    expect(instructions).toMatch(/wait --peer <task-id> \[--peer <another-task-id>\] --timeout-seconds <1-1800> \(or cezar_wait with kind "peer"\)/);
+    expect(instructions).toMatch(/wait --peer <task-id> \[--peer <another-task-id>\] --timeout-seconds <1-7200> \(or cezar_wait with kind "peer"\)/);
     expect(instructions).toContain('(or cezar_wait with kind "request") to register a request wait');
     expect(instructions).toContain("except a named peer's message to a peer wait");
   });

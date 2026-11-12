@@ -478,7 +478,7 @@ describe('worker wait entry', () => {
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1, R1], requestOutcomes: [] })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: Array.from({ length: 33 }, (_, i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`), requestOutcomes: [] })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], timeoutSeconds: 0 })).success).toBe(false);
-    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], timeoutSeconds: 1801 })).success).toBe(false);
+    expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], timeoutSeconds: 7201 })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], deadline: undefined })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], stray: true })).success).toBe(false);
     expect(waitSchema.safeParse(workerBase({ requestIds: [R1], requestOutcomes: [], phase: WAIT_PHASE.resolved, result: { reason: 'outcome' } })).success).toBe(true);
@@ -508,11 +508,20 @@ describe('worker wait entry', () => {
 });
 
 describe('cezar_wait worker request', () => {
-  it('cezar_wait worker request: mode one needs one id; timeout defaults to 600; 1801 refused', () => {
+  it.each([
+    { kind: WAIT_KIND.worker, worker_ids: [W1] },
+    { kind: 'request', request_ids: [R1] },
+    { kind: WAIT_KIND.peer, peer_ids: [W1] },
+  ])('accepts a two-hour $kind wait and refuses the next second', request => {
+    expect(cezarWaitRequestSchema.parse({ ...request, timeout_seconds: 7200 })).toMatchObject({ timeout_seconds: 7200 });
+    expect(cezarWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 }).success).toBe(false);
+  });
+
+  it('cezar_wait worker request: mode one needs one id; timeout defaults to 600; 7201 refused', () => {
     expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.worker, worker_ids: [W1] })).toEqual({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 600 });
     expect(cezarWaitRequestSchema.parse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'all', timeout_seconds: 1800 }))
       .toMatchObject({ mode: 'all', timeout_seconds: 1800 });
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 1801 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 7201 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
     // mode one: exactly one id, of either kind.
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.worker, worker_ids: [W1], mode: 'one' }).success).toBe(true);
@@ -528,14 +537,14 @@ describe('cezar_wait worker request', () => {
     expect(cezarWaitRequestSchema.parse({ kind: 'request', request_ids: [R1] })).toEqual({ kind: 'request', request_ids: [R1], timeout_seconds: 600 });
   });
 
-  it('kind peer names 1 to 32 unique peers, with a deadline of 1 to 1800 seconds, default 600', () => {
+  it('kind peer names 1 to 32 unique peers, with a deadline of 1 to 7200 seconds, default 600', () => {
     expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.peer, peer_ids: [W1] })).toEqual({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 600 });
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [] }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1, W1] }).success).toBe(false);
     const ids = Array.from({ length: 33 }, (_, i) => `99999999-9999-4999-8999-${String(i).padStart(12, '0')}`);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids.slice(0, 32) }).success).toBe(true);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 1801 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 7201 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
     // No "any peer" form, and no mode: every named peer ends it.
     expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer }).success).toBe(false);
@@ -804,12 +813,12 @@ describe('peer waits', () => {
     deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, peerIds: [P1], ...over,
   });
 
-  it('stores 1 to 32 named peers with a required deadline of 1 to 1800 seconds and a reason once resolved', () => {
+  it('stores 1 to 32 named peers with a required deadline of 1 to 7200 seconds and a reason once resolved', () => {
     expect(waitSchema.safeParse(peerBase()).success).toBe(true);
     expect(waitSchema.safeParse(peerBase({ via: WAIT_VIA['cez-message-wait'] })).success).toBe(true);
     expect(waitSchema.safeParse(peerBase({ deadline: undefined })).success).toBe(false);
     expect(waitSchema.safeParse(peerBase({ peerIds: [] })).success).toBe(false);
-    expect(waitSchema.safeParse(peerBase({ timeoutSeconds: 1801 })).success).toBe(false);
+    expect(waitSchema.safeParse(peerBase({ timeoutSeconds: 7201 })).success).toBe(false);
     for (const result of [{ reason: 'message', peerRunId: P1, messageId: R1 }, { reason: 'settled', peerRunId: P1 }, { reason: 'timeout' }]) {
       expect(peerWaitEntrySchema.safeParse(peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z', result })).success).toBe(true);
     }

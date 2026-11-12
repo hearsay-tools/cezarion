@@ -216,7 +216,7 @@ shell open while waiting for a queued child.
 1. `wait` checks ownership, nonempty unique worker set, parent session eligibility,
    and absence of a pending human question or another outstanding wait.
 2. Persist wait intent and deadline, then return. Default timeout is 600 seconds;
-   accepted values are 1–1800 seconds. Wait ends on the first selected worker
+   accepted values are 1–7200 seconds. Wait ends on the first selected worker
    terminal outcome, returning the selected workers' current statuses.
 3. At the parent's turn boundary, park it as a worker wait and release its slot.
    Reconcile already-terminal workers at registration and again at park, so a

@@ -177,6 +177,25 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     expect(anyOf(a, entry.id)).toMatchObject({ result: { reason: 'timeout' } });
   });
 
+  it.each([7, MAX_AUTO_CONTINUES])('three empty peer deadlines leave a budget of %s unchanged', async budget => {
+    const clock = observationClock(delay => delay !== undefined && delay > 590_000 && delay <= 600_000);
+    const { a, b, entry } = await parkedOnPeer();
+    // Keep a dependency open so each wake parks without a no-wait nudge.
+    const anchor = await waitOnPeers(a, [peer()], 720);
+    store.updateRun(a, { automaticWakes: budget });
+    let next = entry;
+    for (let index = 0; index < 3; index++) {
+      clock.fire(index);
+      await until(() => settledOf(a, next.id)?.phase === WAIT_PHASE.delivered);
+      await until(() => store.getRun(a)?.status === RUN_STATUS.waiting);
+      expect(settledOf(a, next.id)).toMatchObject({ result: { reason: 'timeout' } });
+      expect(store.getRun(a)?.automaticWakes).toBe(budget);
+      expect(entryOf(a, anchor.id)?.phase).toBe(WAIT_PHASE.open);
+      if (index < 2) next = await waitOnPeers(a, [b]);
+    }
+    expect(notes(a).filter(note => note.includes('cap reached'))).toEqual([]);
+  });
+
   it('another wait resolving beside it wakes the run and the peer wait stays open', async () => {
     const { a, entry } = await parkedOnPeer();
     const gone = spawnSync('true').pid;

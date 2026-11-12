@@ -102,9 +102,13 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
   });
-  it('sends a long resume deadline through the HTTP boundary and rejects it for an ordinary request', async () => {
+  it('sends a two-hour ordinary request and keeps longer resume deadlines restricted', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
     const args = ['request', workerId, 'Fix review', '--id', randomUUID(), '--timeout-seconds', '7200'];
+    expect(await runMessageCommand(args, env)).toBe(0);
+    expect(Date.parse(json().message.deadline) - Date.parse(json().message.createdAt)).toBe(7_200_000);
+    args[args.length - 1] = '7201';
+    args[4] = randomUUID();
     expect(await runMessageCommand(args, env)).toBe(1);
     expect(json().code).toBe('invalid_input');
     expect(await runWorkerCommand(['resume', ...args.slice(1)], env)).toBe(1);
@@ -117,7 +121,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     f.store.commitWorkerExecutionComplete(workerId, generation);
     expect(await runWorkerCommand(['resume', ...args.slice(1)], env)).toBe(0);
     const sent = json();
-    expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
+    expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_201_000);
   });
   // hearsay-tools/cezarion#1235: the help a parent reads says waits coexist and how to stop one.
   it('documents that several waits coexist, that messages close none, and how cancel-wait stops one', async () => {
@@ -531,7 +535,18 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     }
     expect(waitRequests).toHaveBeenCalledTimes(2);
   });
-  it.each([['spawn', 'task'], ['inspect', 'bad-id'], ['wait', randomUUID(), '--timeout-seconds', '0'], ['wait', randomUUID(), '--timeout-seconds', '1801'], ['wait', randomUUID(), '--timeout-seconds', '1e2'], ['inspect', randomUUID(), '--origin', 'http://evil'], ['inspect', randomUUID(), '--token', 'override'], ['inspect', randomUUID(), '--url', 'http://evil'], ['stop', randomUUID(), 'extra'], ['stop', randomUUID(), '--baseline', 'HEAD']])('rejects invalid arguments %j', async (...argv) => {
+  it.each([
+    ['worker', ['wait', randomUUID()]],
+    ['request', ['wait', '--request', randomUUID()]],
+    ['peer', ['wait', '--peer', randomUUID()]],
+  ])('names the accepted range for an invalid %s wait timeout', async (kind, args) => {
+    for (const value of ['0', '7201', '1e2']) {
+      const command = kind === 'worker' ? runWorkerCommand : runMessageCommand;
+      expect(await command([...args, '--timeout-seconds', value], env)).toBe(1);
+      expect(json()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('integer between 1 and 7200') });
+    }
+  });
+  it.each([['spawn', 'task'], ['inspect', 'bad-id'], ['wait', randomUUID(), '--timeout-seconds', '0'], ['wait', randomUUID(), '--timeout-seconds', '7201'], ['wait', randomUUID(), '--timeout-seconds', '1e2'], ['inspect', randomUUID(), '--origin', 'http://evil'], ['inspect', randomUUID(), '--token', 'override'], ['inspect', randomUUID(), '--url', 'http://evil'], ['stop', randomUUID(), 'extra'], ['stop', randomUUID(), '--baseline', 'HEAD']])('rejects invalid arguments %j', async (...argv) => {
     expect(await runWorkerCommand(argv, env)).toBe(1); expect(json().code).toBe('invalid_input');
   });
   it.each(['https://127.0.0.1:123/api/v1/delegation', 'http://example.com:123/api/v1/delegation', 'http://127.evil.example:123/api/v1/delegation', 'http://127.0.0.1:123/api/v1/delegation?token=x', 'http://user:pass@127.0.0.1:123/api/v1/delegation', 'http://127.0.0.1:123/api/v1/runs'])('rejects unprovisionable endpoint %s', async url => {

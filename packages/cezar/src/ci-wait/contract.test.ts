@@ -204,7 +204,7 @@ it('cezar_wait advertises worker, request and peer fields with their bounds', ()
   expect(schema.properties.mode.description).toMatch(/^kind "worker" or "request":/);
   // One flat field serves every kind: it advertises ci's bounds and names the others in the description.
   expect(schema.properties.timeout_seconds).toMatchObject({ minimum: 1, maximum: 7200 });
-  expect(schema.properties.timeout_seconds.description).toMatch(/kind "worker", "request" or "peer".*1800.*600/);
+  expect(schema.properties.timeout_seconds.description).toMatch(/kind "worker", "request" or "peer".*7200.*600/);
   expect(waitToolDefinition.description).toMatch(/kind "request"/);
   expect(waitToolDefinition.description).toMatch(/kind "peer"/);
   expect(waitToolDefinition.description).toMatch(/worker/);
@@ -296,4 +296,14 @@ describe('wait result guidance', () => {
   it.each(cases)('%s gives guidance consistent with its effect and current state', (_name, answer, guidance) => {
     expect(waitAnswerHint(answer)).toContain(guidance);
   });
+});
+
+it.each([
+  { kind: WAIT_KIND.worker, worker_ids: ['11111111-1111-4111-8111-111111111111'] },
+  { kind: 'request', request_ids: ['11111111-1111-4111-8111-111111111111'] },
+  { kind: WAIT_KIND.peer, peer_ids: ['11111111-1111-4111-8111-111111111111'] },
+])('names the accepted timeout range above the $kind bound', request => {
+  const result = cezarWaitRequestSchema.safeParse({ ...request, timeout_seconds: 7201 });
+  expect(result.success).toBe(false);
+  expect(waitInvalidInput(result.success ? undefined : result.error)).toBe('`timeout_seconds` must be an integer between 1 and 7200 (kind "pr", "process", "worker", "request" or "peer").');
 });

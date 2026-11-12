@@ -144,3 +144,17 @@ not prepare or migrate the home. If resolution fails, help describes the data
 folder without a path and still exits successfully. Switch-off help keeps
 `~/.cezar/versions`.
 Discovery's missing-cockpit hint uses the switch-aware preferred command.
+
+## Dependency wait bounds
+
+`cezar_wait`, `hsq worker wait` and `hsq message wait` accept worker, request
+and peer deadlines of 1–7,200 seconds, default 600. Ordinary `hsq message request`
+deadlines use the same range; a settled worker resume request can reach 86,400
+seconds. Timeout refusals name the accepted range. A wait does not extend a
+request deadline or cancel its dependency when it expires.
+
+An empty dependency deadline (worker, request, peer or process) wakes the task
+without spending automatic-wake budget. Peer messages and substantive peer and
+process outcomes retain their charging rules. Explicit timer and native-subagent
+safety deadlines remain charged. See [ADR 0061](../adr/0061-one-wait-engine-executes-wait-kind-rows.md#longer-dependency-waits-and-empty-deadline-wakes)
+for mixed batches, spent budgets and restart behavior.
