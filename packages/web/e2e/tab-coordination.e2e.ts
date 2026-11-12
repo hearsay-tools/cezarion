@@ -30,6 +30,41 @@ const waitText = (request: Request, session: string, text: string, deadline = In
   await read(request, session, `document.body.innerText.includes(${JSON.stringify(text)})`) ? true : undefined,
   async () => `transcript never contained ${text}: ${await read(request, session, 'document.body.innerText')}`, { timeoutMs: 22_000, tries: 100, deadline })
 
+const expectFiniteProjectsResponse = async (request: Request, session: string, deadline = Infinity) => {
+  // Start one request. Poll its result, never retry the request or its failure.
+  await read(request, session, `(() => {
+    const probe = window.__finiteHttpProbe = { controller: new AbortController() };
+    probe.done = (async () => {
+      try {
+        const response = await fetch('/api/v1/projects', { signal: probe.controller.signal });
+        await response.text();
+        probe.result = { ok: response.ok, url: response.url, status: response.status };
+      } catch (error) {
+        probe.result = { error: { name: error.name, message: error.message } };
+      }
+    })();
+    return true;
+  })()`)
+  try {
+    // bound: ten documents contend for HTTP/1.1 slots. Match the 20 s demand-drain
+    // guard in teardown; wait for one response body without retrying the request.
+    const response = await pollFor(
+      async () => await read(request, session, 'window.__finiteHttpProbe.result'),
+      () => 'the finite projects request never completed',
+      { timeoutMs: 20_000, tries: 100, deadline },
+    )
+    expect(response).toMatchObject({ ok: true, url: `${fixture.origin}/api/v1/projects`, status: 200 })
+  } finally {
+    // Abort on a failed wait and drain before pagehide or target cleanup.
+    await read(request, session, `(async () => {
+      window.__finiteHttpProbe.controller.abort();
+      await window.__finiteHttpProbe.done;
+      delete window.__finiteHttpProbe;
+      return true;
+    })()`)
+  }
+}
+
 it.each([false, true])('ten mixed tabs (separate visible windows: %s) share worker transport and preserve project transcripts', async windows => {
   await browser.withCdp(async (request, subscribe) => {
     const pages: Array<{ targetId: string; sessionId: string }> = []
@@ -80,7 +115,7 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
       expect(protocols.has('http/1.1')).toBe(true)
       const visibility = await Promise.all(pages.map(page => read(request, page.sessionId, 'document.visibilityState')))
       expect(visibility.filter(v => v === 'visible')).toHaveLength(windows ? 10 : 1)
-      expect(await read(request, pages[primary]!.sessionId, `(async()=>{try{const r=await fetch('/api/v1/projects',{signal:AbortSignal.timeout(2000)});await r.text();return r.ok}catch{return false}})()`)).toBe(true)
+      await expectFiniteProjectsResponse(request, pages[primary]!.sessionId)
       const unique = `isolated-${Date.now()}`
       await fixture.control({ publish: unique, runs: [selected[primary]] })
       await waitText(request, pages[primary]!.sessionId, unique)
@@ -168,38 +203,7 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
       }
       expect(persistent).toEqual([])
       const session = pages[0]!.sessionId
-      // Start one request. Poll its result, never retry the request or its failure.
-      await read(request, session, `(() => {
-        const probe = window.__finiteHttpProbe = { controller: new AbortController() };
-        probe.done = (async () => {
-          try {
-            const response = await fetch('/api/v1/projects', { signal: probe.controller.signal });
-            await response.text();
-            probe.result = { ok: response.ok, url: response.url, status: response.status };
-          } catch (error) {
-            probe.result = { error: { name: error.name, message: error.message } };
-          }
-        })();
-        return true;
-      })()`)
-      try {
-        // bound: ten visible documents contend for HTTP/1.1 slots. Use the same 20 s
-        // demand-drain guard as teardown; completion is the response body, not elapsed time.
-        const response = await pollFor(
-          async () => await read(request, session, 'window.__finiteHttpProbe.result'),
-          () => 'the finite projects request never completed',
-          { timeoutMs: 20_000, tries: 100, deadline },
-        )
-        expect(response).toMatchObject({ ok: true, url: `${fixture.origin}/api/v1/projects`, status: 200 })
-      } finally {
-        // Abort on a failed wait and drain before pagehide or target cleanup.
-        await read(request, session, `(async () => {
-          window.__finiteHttpProbe.controller.abort();
-          await window.__finiteHttpProbe.done;
-          delete window.__finiteHttpProbe;
-          return true;
-        })()`)
-      }
+      await expectFiniteProjectsResponse(request, session, deadline)
       await request('Runtime.evaluate', { expression: 'window.dispatchEvent(new Event("pagehide"))' }, pages[0]!.sessionId)
       await request('Runtime.evaluate', { expression: 'window.dispatchEvent(new PageTransitionEvent("pageshow",{persisted:true}))' }, pages[0]!.sessionId)
       const restored = `${text}-restored`
