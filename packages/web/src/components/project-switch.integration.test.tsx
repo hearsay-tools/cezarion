@@ -233,3 +233,27 @@ describe('switch intent', () => {
     expect(at()).toBe('/p/boot/skills?q=1')
   })
 })
+
+describe('route matcher wiring', () => {
+  it('fails loudly when no route matcher is provided, instead of sending every switch home', () => {
+    function Bare() {
+      useProjectSwitch()
+      return null
+    }
+    // React logs the render error before it rethrows; the assertion below is the signal.
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() =>
+        render(
+          <QueryClientProvider client={createQueryClient()}>
+            <MemoryRouter initialEntries={['/p/boot/']}>
+              <Bare />
+            </MemoryRouter>
+          </QueryClientProvider>,
+        ),
+      ).toThrow('useProjectSwitch needs a ProjectRouteMatcherContext provider')
+    } finally {
+      quiet.mockRestore()
+    }
+  })
+})
