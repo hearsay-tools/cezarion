@@ -7,7 +7,7 @@ import { controlLocation } from '@open-mercato/cezar-api-client/contract/control
 import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useSidebarArchive } from '@/components/sidebar-archive'
-import { useSidebarNavigate } from '@/components/app-shell'
+import { useSidebarNavigate } from '@/components/shell-contexts'
 import { useSwipeToArchive } from '@/components/use-swipe-to-archive'
 import { useHealth, usePinRun, useProjectUiState, useProjectRuns, useProjectRepoBase, useProjects, useReferenceProjectId, useRuns } from '@/api/queries'
 import { Link, scopeTo, useNavigate, useProjectMatch } from '@/lib/project-router'
