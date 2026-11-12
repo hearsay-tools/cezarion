@@ -35,7 +35,7 @@ import { codexStreamError } from './codex-stream-error.ts';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 import { codexNetworkIsRestricted, codexPermissionOverrides } from './codex-permissions.ts';
 import { codexApproval, isCodexApprovalRequest, type CodexApproval } from './codex-approvals.ts';
-import { cezarToolEnvNames } from '../ci-wait/tools.ts';
+import { cezarToolEnvNames } from '../ci-wait/tool-catalog.ts';
 import {
   CodexAppServerRpc,
   CodexRpcResponseError,

@@ -1,6 +1,6 @@
 import { productEnvEntries } from '../core/product-env.ts';
 import { existsSync } from 'node:fs';
-import { previewToolEnabled } from '../ci-wait/tools.ts';
+import { previewToolEnabled } from '../ci-wait/tool-catalog.ts';
 import type { AgentGrant, RunContext } from './host.ts';
 import type { PreviewHostLike } from './registration.ts';
 
