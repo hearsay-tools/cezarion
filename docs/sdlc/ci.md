@@ -180,9 +180,9 @@ preflight and run beside the protected review result; `verify` requires both. Ot
 `.node-version`, the four cockpit browser shards the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
-- Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
+- Four Vitest shards on `ubuntu-24.04` each install dependencies and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4. In merge groups the same command runs under `squeal ci record` (§ Squeal shared results), and in a Squeal gate trial dispatch without `--coverage.enabled` (§ Squeal quality gate trial).
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs Node unit tests from source, then the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. Only the packaged tests and their typecheck read build output. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on GitHub-hosted `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
@@ -480,7 +480,7 @@ can import those passes instead of running the same test files again
   the command exactly as before.
 - The `Export Squeal results` job (`squeal-export`) runs after all four shards pass in a
   merge group, with `contents: read` and no stored credentials. It checks out
-  `merge_group.head_sha`, installs dependencies, builds the server, downloads the parts, runs
+  `merge_group.head_sha`, installs dependencies, downloads the parts, runs
   `squeal ci export` and uploads `squeal-results.json.gz` as the `squeal-results` artifact,
   kept 3 days. It runs the queued code, so it never holds write access.
 - The `Publish Squeal shared results` job (`squeal-publish`) is the only job with
@@ -524,7 +524,7 @@ gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
   `squeal-parts-shard-N`; the run collects and merges no V8 coverage.
 - The `Squeal quality gate trial` job (`squeal-gate-trial`) runs after the shards pass or
   fail. It checks out the dispatched commit with the history of main, installs dependencies,
-  builds the server, fetches the pinned Squeal release, downloads the parts and runs
+  fetches the pinned Squeal release, downloads the parts and runs
   `squeal code --base origin/main --json --parts <shard directories>`. A selected test file
   whose part certifies its inputs here comes from the parts; the gate runs the others itself,
   for up to 600 seconds.
