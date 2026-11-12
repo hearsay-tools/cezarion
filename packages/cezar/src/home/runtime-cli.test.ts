@@ -1,7 +1,6 @@
 import { projectPaths } from '../project-paths.ts';
 import { productIdentity } from './identity.ts';
 import { productName } from './display.ts';
-import { REBRAND_SWITCH } from './switch.ts';
 import { expect, it, vi } from 'vitest';
 import * as homes from './resolve.ts';
 
@@ -18,8 +17,7 @@ it('prints global CLI help without preparing a Home', async () => {
     await import('../index.ts');
     await help;
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Usage:'));
-    // With the switch on, help resolves (never prepares) Home to name its versions directory.
-    expect(resolve).toHaveBeenCalledTimes(REBRAND_SWITCH ? 1 : 0);
+    expect(resolve).not.toHaveBeenCalled();
   } finally {
     process.argv = argv;
     vi.restoreAllMocks();

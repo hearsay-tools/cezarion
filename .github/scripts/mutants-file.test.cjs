@@ -60,9 +60,9 @@ test('ast-grep assigns nested names, methods, anonymous callbacks, and module co
   assert.equal(at(10), 'arrow');
 });
 
-test('targets have the 33 baseline paths, derived tiers, and eight guard groups', () => {
+test('targets have the 32 baseline paths, derived tiers, and eight guard groups', () => {
   const targets = require('../mutants/targets.json');
-  assert.equal(Object.keys(targets).length, 33);
+  assert.equal(Object.keys(targets).length, 32);
   for (const [file, target] of Object.entries(targets)) {
     assert.ok(fs.existsSync(path.join(root, file)), file);
     assert.equal(target.tier, file.startsWith('packages/web/') && file.endsWith('.tsx') ? 'component' : 'logic');

@@ -9,8 +9,7 @@ import { VersionLog } from './version-log.ts';
 import { cleanStoreRoots, storeChild, storeRoot } from './store.testkit.ts';
 
 afterEach(() => { vi.restoreAllMocks(); cleanStoreRoots(); });
-const conditional = ['projects', 'remote-settings', 'install', 'update', 'use', 'link', 'unlink',
-  'server-install', 'server-deploy', 'server-uninstall'];
+const conditional = ['projects', 'remote-settings', 'server-install', 'server-deploy', 'server-uninstall'];
 
 it.each(conditional)('the %s entry and reads leave an empty home untouched', command => {
   const root = storeRoot();
@@ -48,6 +47,13 @@ it.each(conditional)('the %s entry seeds an existing install without changing it
   expect(readInstallMarker(root)?.kind).toBe('test');
   expect(existsSync(join(root, '.versions/agent-accounts.json/HEAD'))).toBe(true);
   expect(readFileSync(home.agentAccounts, 'utf8')).toBe(bytes);
+});
+
+it.each(['install', 'update', 'versions', 'use', 'link', 'unlink'])('the removed managed command %s prepares no Home', command => {
+  const root = storeRoot();
+  const home = homePaths(root, join(root, 'cache'), root);
+  expect(prepareOperatorHome(home, command)).toBe(home);
+  expect(readdirSync(root)).toEqual([]);
 });
 
 it('keeps backup listing and invalid restore input read-only, and a valid restore unconditional', () => {
