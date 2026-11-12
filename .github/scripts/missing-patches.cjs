@@ -51,16 +51,34 @@ function splitPatches(patch) {
   return starts.map((start, k) => patch.subarray(start, starts[k + 1] ?? patch.length));
 }
 
+/** Status letters of `git diff --name-status -z`, one per changed file; R and C name two paths. */
+function statusLetters(nameStatus) {
+  const tokens = nameStatus.split('\0');
+  const letters = [];
+  for (let i = 0; i < tokens.length && tokens[i]; i += /^[RC]/.test(tokens[i]) ? 3 : 2) letters.push(tokens[i][0]);
+  return letters;
+}
+
 /**
  * Each changed file's numstat counts, paths and patch facts, with renames on as on GitHub.
- * Two whole-range reads in Git's one file order, so no pathspec can select a second file.
+ * Whole-range reads in Git's one file order, so no pathspec can select a second file. A type
+ * change (T) is one file with two patch blocks: its facts cover both.
  * `read(args)` runs git with those arguments and returns its stdout as a Buffer.
  */
 function localPatches(read, from, to) {
-  const rows = numstatRows(read([...PATCH_DIFF, '--find-renames', '--numstat', '-z', from, to]).toString('utf8'));
-  const patches = splitPatches(read([...PATCH_DIFF, '--find-renames', from, to]));
-  if (patches.length !== rows.length) throw new Error(`git diff gave ${patches.length} file patches for ${rows.length} changed files`);
-  return rows.map((row, k) => ({ ...row, facts: patchFacts(patches[k]) }));
+  const range = [...PATCH_DIFF, '--find-renames'];
+  const rows = numstatRows(read([...range, '--numstat', '-z', from, to]).toString('utf8'));
+  const letters = statusLetters(read([...range, '--name-status', '-z', from, to]).toString('utf8'));
+  const patches = splitPatches(read([...range, from, to]));
+  const blocks = letters.reduce((sum, letter) => sum + (letter === 'T' ? 2 : 1), 0);
+  if (letters.length !== rows.length || patches.length !== blocks) {
+    throw new Error(`git diff gave ${patches.length} patch blocks and ${letters.length} statuses for ${rows.length} changed files`);
+  }
+  let next = 0;
+  return rows.map((row, k) => {
+    const own = patches.slice(next, next += letters[k] === 'T' ? 2 : 1);
+    return { ...row, facts: patchFacts(Buffer.concat(own)) };
+  });
 }
 
 /** Why GitHub returned no patch for a file, from its local patch facts. */
@@ -148,4 +166,4 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   return report(core, missingPatches(files, stats, pr.changed_files, local));
 }
 
-module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, diffStats, numstatRows, splitPatches, localPatches, patchFacts, patchCause, missingPatches, checkPullRequest };
+module.exports = { GITHUB_PATCH_LIMITS, PATCH_DIFF, diffStats, numstatRows, statusLetters, splitPatches, localPatches, patchFacts, patchCause, missingPatches, checkPullRequest };

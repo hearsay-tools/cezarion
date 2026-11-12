@@ -90,7 +90,7 @@ const ok = out => ({ code: 0, out, err: '' });
 const live = (testFiles, lint) => JSON.stringify({ available: true, daemon: { state: 'alive' }, selection: { testFiles }, lint });
 const doneLint = { failing: 0, pending: 0, stale: 0, unknown: 0 };
 
-function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tscripts/x.mjs\0', patch = 'diff --git a/scripts/x.mjs b/scripts/x.mjs\n+small\n', clock = { t: 0 }, noBase = false } = {}) {
+function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tscripts/x.mjs\0', nameStatus = 'M\0scripts/x.mjs\0', patch = 'diff --git a/scripts/x.mjs b/scripts/x.mjs\n+small\n', clock = { t: 0 }, noBase = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -103,7 +103,7 @@ function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', numstat = '1\t0\tsc
     sleep: async ms => { clock.t += ms; },
     now: () => clock.t,
     git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
-    gitBytes: (...a) => Buffer.from(a.includes('--numstat') ? numstat : patch),
+    gitBytes: (...a) => Buffer.from(a.includes('--numstat') ? numstat : a.includes('--name-status') ? nameStatus : patch),
   };
 }
 
@@ -330,4 +330,16 @@ test('patch limits measure a file replaced by a directory as separate patches', 
   const [line, ...rest] = patchLimitLines('main', io);
   assert.deepEqual(rest, []);
   assert.equal(line.ok, true, line.text);
+});
+
+test('patch limits read a type change, which Git writes as two patch blocks for one file', async t => {
+  const io = fixtureRepo(t, cwd => {
+    fs.rmSync(path.join(cwd, 'link'));
+    fs.writeFileSync(path.join(cwd, 'link'), 'now a file\n');
+    fs.writeFileSync(path.join(cwd, 'after.md'), 'after\n');
+  }, cwd => fs.symlinkSync('target', path.join(cwd, 'link')));
+  const [line, ...rest] = patchLimitLines('main', io);
+  assert.deepEqual(rest, []);
+  assert.equal(line.ok, true, line.text);
+  assert.match(line.text, /3 changed lines \(\+2\/-1\) in 2 files/);
 });
