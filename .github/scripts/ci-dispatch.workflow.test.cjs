@@ -40,7 +40,7 @@ function classify(jobName, { pr = prFixture(), number = '42', apiFails = false, 
   files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' }, rebrand } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-dispatch-'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
-  const context = { needs: { 'pr-test-input': { outputs: { sha: '' } }, 'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } } }, github: { event_name: 'workflow_dispatch', sha: HEAD,
+  const context = { needs: { 'pr-test-input': { outputs: { sha: '' } }: { result: 'skipped', outputs: { verified: 'false' } } }, github: { event_name: 'workflow_dispatch', sha: HEAD,
     repository: 'owner/repo', token: '', head_ref: '', event: { pull_request: { head: {}, base: {}, user: {} }, merge_group: {} } },
     vars: { RELEASE_APP_BOT_LOGIN: appLogin }, inputs: { pr_number: number }, steps: {}, format: (s, n) => s.replace('{0}', n) };
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_WORKSPACE: dir,

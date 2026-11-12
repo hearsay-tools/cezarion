@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { resolvePrTestInput, attestationName } = require('./pr-test-input.cjs');
+const { resolvePrTestInput } = require('./pr-test-input.cjs');
 const MERGE = 'a'.repeat(40), BASE = 'b'.repeat(40), HEAD = 'c'.repeat(40), TREE = 'd'.repeat(40);
 function fixture() {
   const s = { pull: { merge_commit_sha: MERGE }, merge: { sha: MERGE, parents: [{ sha: BASE }, { sha: HEAD }], tree: { sha: TREE } },
@@ -19,9 +19,8 @@ function fixture() {
     } } };
   return { s, options, run: () => resolvePrTestInput(options) };
 }
-test('pins an up-to-date same-repository PR to its immutable head and names its trusted attestation', async () => {
+test('pins an up-to-date same-repository PR to its immutable head when its tree matches the merge', async () => {
   const h = fixture(); assert.deepEqual(await h.run(), { sha: HEAD, reusable: true });
-  assert.equal(attestationName(BASE, HEAD), `Attest PR test inputs / ${BASE} / ${HEAD}`);
   assert.ok(h.s.calls.every(c => c.args.request.timeout <= 10000));
 });
 test('uses the supported pull endpoint when synthetic Git refs are unavailable', async () => {
@@ -40,7 +39,7 @@ for (const [name, mutate] of Object.entries({
   'diverged base': h => { h.s.compare.merge_base_commit.sha = MERGE; },
   'missing comparison': h => { h.s.compare = {}; },
   'optional API error': h => { h.s.failAt = 3; },
-})) test(`pins immutable merge and withholds attestation: ${name}`, async () => {
+})) test(`pins immutable merge and keeps full verification: ${name}`, async () => {
   const h = fixture(); mutate(h); assert.deepEqual(await h.run(), { sha: MERGE, reusable: false });
 });
 for (const [name, mutate] of Object.entries({

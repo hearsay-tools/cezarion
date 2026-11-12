@@ -16,7 +16,7 @@ function evaluate(value, root, steps = {}) {
   if (!value) return true;
   const expression = value.startsWith('${{') ? value.slice(3, -2) : value;
   return runInNewContext(expression.replace(/needs\.([\w-]+)/g, "needs['$1']"), {
-    needs: { 'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } } },
+    needs: { },
     hashFiles: file => fs.existsSync(path.join(root, file)) ? 'present-lockfile-hash' : '',
     steps,
   });

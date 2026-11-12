@@ -29,7 +29,7 @@ function context(event, { surface = 'full-matrix', bump = 'false', verified = 'f
     needs: {
       'queue-proof': { result: 'success', outputs: { verified } },
       'pr-test-input': { result: 'success', outputs: { sha: '' } },
-      'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } },
+
       'change-surface': { result: 'success', outputs: { surface } },
       'classify-pr': { result: 'success', outputs: { bump_pr: bump } },
       vitest: { result: shards },
@@ -58,7 +58,7 @@ test('coverage publication follows eligible shards, including failures, but neve
   const merge = jobs['vitest-coverage-merge'].if;
   const upload = named(jobs.vitest, 'Upload shard coverage').if;
   const missing = named(jobs.vitest, 'Report a missing shard coverage report').if;
-  const shardContext = (event, options) => ({ ...context(event, options), steps: { collect: { outcome: 'skipped' }, upload: { outcome: 'skipped' } }, always: () => true });
+  const shardContext = (event, options) => ({ ...context(event, options), steps: { collect: { outcome: 'skipped' }, 'collect_pr': { outcome: 'skipped' }, upload: { outcome: 'skipped' } }, always: () => true });
   for (const event of ['pull_request_target', 'workflow_dispatch']) {
     assert.equal(expression(upload, context(event)), true);
     assert.equal(expression(merge, context(event)), true);

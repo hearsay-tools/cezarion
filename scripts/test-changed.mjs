@@ -4,12 +4,15 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { unitFiles } from './ci-test-selection.mjs';
 
 // CI's docs-only rule: skip exactly the paths that skip CI's Vitest shards.
 const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change-surface.cjs');
 
-const options = { plan: false, base: undefined };
-for (const arg of process.argv.slice(2)) {
+const options = { plan: false, base: undefined, ci: false, forward: [] };
+const argv = process.argv.slice(2);
+for (const [index, arg] of argv.entries()) {
+  if (arg === '--' && options.ci) { options.forward = argv.slice(index + 1); break; }
   if (arg === '--help' || arg === '-h') {
     await new Promise(resolve => process.stdout.write(`Usage: npm run test:changed -- [--base=<ref>] [--plan] [--help | -h]
 
@@ -18,6 +21,8 @@ Selection rules:
   branch commits and staged, unstaged, and untracked files. No fetch is made.
   --base=<ref> overrides the comparison ref; its merge-base with HEAD is used.
   --plan prints the selection as JSON without running tests.
+  --ci resolves test files first; a selector error or no match runs full Vitest.
+  With --ci, arguments after -- go to Vitest (including shard and coverage flags).
   Inspect --plan before running tests. If it selects the full suite, choose
   focused checks and leave full verification to CI.
 
@@ -44,6 +49,7 @@ runtime dependency. CI's gate is final.
     process.exit(0);
   }
   else if (arg === '--plan') options.plan = true;
+  else if (arg === '--ci') options.ci = true;
   else if (arg.startsWith('--base=') && arg.length > 7) options.base = arg.slice(7);
   else {
     console.error(`Unknown argument: ${arg}. Use --base=<ref>, --plan, or --help.`);
@@ -98,13 +104,19 @@ function select() {
   }
 }
 
-const selection = select();
+let selection = select();
+if (options.ci) {
+  const files = unitFiles(selection);
+  selection = files === null
+    ? { ...selection, mode: 'full', reason: 'CI full fallback: unsafe, failed or empty selection', args: ['test', '--', ...options.forward] }
+    : { ...selection, args: ['test', '--', ...files, ...options.forward, '--passWithNoTests=true'] };
+}
 if (options.plan) console.log(JSON.stringify(selection, null, 2));
 else {
   console.log(`[test:changed] ${selection.mode}: ${selection.reason}`);
-  console.log('[test:changed] Iteration feedback only; the final validation gate is unchanged.');
+  console.log(options.ci ? '[test:changed] PR selection; the merge queue runs the full suite.' : '[test:changed] Iteration feedback only; the final validation gate is unchanged.');
   if (selection.mode !== 'skip') {
-    if (selection.mode === 'changed') console.log('[test:changed] If no tests match, run npm test; do not treat that as a pass.');
+    if (selection.mode === 'changed' && !options.ci) console.log('[test:changed] If no tests match, run npm test; do not treat that as a pass.');
     const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', selection.args, {
       cwd: selection.cwd, stdio: 'inherit', shell: process.platform === 'win32',
     });

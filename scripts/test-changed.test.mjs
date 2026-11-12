@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -179,20 +179,23 @@ test('clean changes skip without invoking the test command', t => {
   assert.match(result.stdout, /skip:/);
 });
 
-test('changed mode executes only related tests with the installed Vitest', t => {
+for (const ci of [false, true]) test(`changed mode executes related tests with installed Vitest (CI: ${ci})`, t => {
   const { cwd, git, put } = fixture(t);
   const vitest = fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url));
+  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(cwd, 'node_modules'), 'dir');
   put('package.json', JSON.stringify({ type: 'module', scripts: {
     test: `${JSON.stringify(process.execPath)} ${JSON.stringify(vitest)} run`,
   } }));
   put('.gitignore', 'node_modules/\n');
-  put('vitest.config.mjs', 'export default {test: {globals: true, passWithNoTests: true, maxWorkers: 1, include: ["packages/web/src/*.test.ts"]}};');
+  put('vitest.config.mjs', 'export default {test: {name: "web", globals: true, passWithNoTests: true, maxWorkers: 1, include: ["packages/web/src/*.test.ts"]}};');
   put('packages/web/src/a.test.ts', 'import { value } from "./a"; test("related passes", () => expect(value).toBe(2));');
   put('packages/web/src/b.test.ts', 'test("unrelated must not run", () => { throw new Error("unrelated selected"); });');
   git('add', '.'); git('commit', '-m', 'test fixtures');
   git('branch', '-f', 'main', 'HEAD');
   put('packages/web/src/a.ts', 'export const value = 2;');
-  const result = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  const flags = ci ? ['--ci'] : [];
+  // bound: each child runs the installed Vitest against two tiny fixture suites.
+  const result = spawnSync(process.execPath, [script, ...flags], { cwd, encoding: 'utf8', timeout: 30_000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /1 passed/);
   assert.doesNotMatch(result.stdout, /unrelated must not run/);
@@ -200,27 +203,31 @@ test('changed mode executes only related tests with the installed Vitest', t => 
   // A tracked change must not hide a failing untracked test/source pair.
   put('packages/web/src/added.ts', 'export const added = 3;');
   put('packages/web/src/added.test.ts', 'import { added } from "./added"; test("untracked regression", () => expect(added).toBe(2));');
-  const untracked = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  // bound: each child runs the installed Vitest against three tiny fixture suites.
+  const untracked = spawnSync(process.execPath, [script, ...flags], { cwd, encoding: 'utf8', timeout: 30_000 });
   assert.equal(untracked.status, 1, untracked.stdout + untracked.stderr);
   assert.match(untracked.stdout + untracked.stderr, /untracked regression/);
   assert.doesNotMatch(untracked.stdout + untracked.stderr, /unrelated must not run/);
   put('packages/web/src/added.ts', 'export const added = 2;');
-  const fixed = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  // bound: each child runs the installed Vitest against three tiny fixture suites.
+  const fixed = spawnSync(process.execPath, [script, ...flags], { cwd, encoding: 'utf8', timeout: 30_000 });
   assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
   assert.match(fixed.stdout, /2 passed/);
   rmSync(join(cwd, 'packages/web/src/added.ts'));
   rmSync(join(cwd, 'packages/web/src/added.test.ts'));
 
   put('packages/web/src/a.ts', 'export const value = 3;');
-  const failed = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  // bound: a selected test failure must propagate without a full-suite retry.
+  const failed = spawnSync(process.execPath, [script, ...flags], { cwd, encoding: 'utf8', timeout: 30_000 });
   assert.equal(failed.status, 1, failed.stdout + failed.stderr);
   git('restore', 'packages/web/src/a.ts');
   put('packages/web/src/orphan.ts', 'export const orphan = true;');
   const orphanPlan = plan(cwd);
   assert.equal(orphanPlan.mode, 'changed', JSON.stringify(orphanPlan));
-  const unmatched = spawnSync(process.execPath, [script], { cwd, encoding: 'utf8', timeout: 30_000 });
+  // bound: an empty CI selection must run the fixture's full suite.
+  const unmatched = spawnSync(process.execPath, [script, ...flags], { cwd, encoding: 'utf8', timeout: 30_000 });
   assert.equal(unmatched.status, 1, unmatched.stdout + unmatched.stderr);
-  assert.match(unmatched.stdout + unmatched.stderr, /No test files found/);
+  assert.match(unmatched.stdout + unmatched.stderr, ci ? /unrelated must not run/ : /No test files found/);
 });
 
 test('unknown flags cannot silently weaken selection', t => {

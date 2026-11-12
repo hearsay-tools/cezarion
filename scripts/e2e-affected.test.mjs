@@ -275,6 +275,30 @@ test('a --map file that cannot be read is an error, not a full run', t => {
   assert.match(result.stderr, /cannot read the spec map at .*missing\.json/);
 });
 
+test('CI runs selected specs with shard flags and uses full fallback for empty or failed selection', t => {
+  const { dir, put, map } = repository(t);
+  put('.ai/scripts/e2e.sh', 'printf "arg=%s\\n" "$@"; exit 19\n');
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  git('add', '.'); git('commit', '-qm', 'browser command');
+  const mapFlag = map();
+  put('packages/web/src/routes/task-thread/markdown.tsx', 'export function Markdown() { return 1 }\n');
+  const selected = affected(dir, '--ci', '--shard=2/8', mapFlag);
+  assert.equal(selected.status, 19, selected.stdout + selected.stderr);
+  assert.match(selected.stdout, /arg=--shard=2\/8/);
+  assert.match(selected.stdout, /arg=packages\/web\/e2e\/artifact-project-links.e2e.ts/);
+  assert.match(selected.stdout, /arg=packages\/web\/e2e\/chat-code-fence.e2e.ts/);
+  assert.doesNotMatch(selected.stdout, /arg=.*smoke.e2e.ts/);
+  assert.match(selected.stdout, /arg=--passWithNoTests=true/);
+  git('restore', 'packages/web/src/routes/task-thread/markdown.tsx');
+  for (const flag of [mapFlag, '--map=missing.json']) {
+    const fallback = affected(dir, '--ci', '--shard=2/8', flag);
+    assert.equal(fallback.status, 19, fallback.stdout + fallback.stderr);
+    assert.match(fallback.stdout, /Selected 3 of 3 specs/);
+    assert.match(fallback.stdout, /arg=--shard=2\/8/);
+    assert.doesNotMatch(fallback.stdout, /arg=.*e2e.ts|passWithNoTests/);
+  }
+});
+
 test('mock function edits select only specs that executed that function, plus incomplete specs', () => {
   const file = 'packages/cezar/scripts/mock-codex.mjs';
   const map = sampleMap({ incomplete: [spec('smoke')], functions: { [file]: [

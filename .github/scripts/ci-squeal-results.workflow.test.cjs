@@ -22,13 +22,12 @@ function expression(raw, context) {
   return runInNewContext(code, context);
 }
 
-function context(event, { vitest = 'success', proof = 'success', verified = 'false', exported = 'success', trial = false, pr = '' } = {}) {
+function context(event, { vitest = 'success', exported = 'success', trial = false, pr = '' } = {}) {
   return {
     github: { event_name: event },
     inputs: { pr_number: pr, squeal_gate_trial: trial },
     needs: {
       vitest: { result: vitest },
-      'pr-test-proof': { result: proof, outputs: { verified } },
       'squeal-export': { result: exported },
     },
     steps: { squeal: { outcome: 'success' } },
@@ -68,13 +67,10 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
     ['workflow_dispatch', { trial: true }, true], ['workflow_dispatch', { trial: true, pr: '42' }, false],
     ['workflow_dispatch', { trial: 'true' }, false], ['pull_request_target', { trial: true }, false]];
   for (const [event, inputs, recording] of runs) {
-    for (const [proof, verified] of [['success', 'false'], ['failure', ''], ['success', 'true']]) {
-      const ctx = context(event, { proof, verified, ...inputs });
-      const reused = proof === 'success' && verified === 'true';
-      const name = `${event} ${JSON.stringify(inputs)}`;
-      assert.equal(expression(collect.if, ctx), !reused && !recording, `${name} collect`);
-      for (const s of recorded) assert.equal(expression(s.if, ctx), !reused && recording, `${name} ${s.name}`);
-    }
+    const ctx = context(event, inputs);
+    const name = `${event} ${JSON.stringify(inputs)}`;
+    assert.equal(expression(collect.if, ctx), event !== 'pull_request_target' && !recording, `${name} collect`);
+    for (const s of recorded) assert.equal(expression(s.if, ctx), recording, `${name} ${s.name}`);
   }
   assert.equal(record.env.VITEST_FILE_DURATION_CAP, collect.env.VITEST_FILE_DURATION_CAP);
   // Test failures block: a merge group continues past them only to its rerun, which blocks
@@ -137,11 +133,10 @@ const SQUEAL_JOBS = ['squeal-export', 'squeal-publish', 'squeal-gate-trial'];
 test('squeal-export runs after passing merge-group shards and only reads', () => {
   const { jobs, permissions } = ci();
   const job = jobs['squeal-export'];
-  assert.deepEqual(job.needs, ['vitest', 'pr-test-proof']);
+  assert.deepEqual(job.needs, ['vitest']);
   for (const event of EVENTS) assert.equal(expression(job.if, context(event)), event === 'merge_group', event);
   for (const vitest of ['failure', 'skipped', 'cancelled']) assert.equal(expression(job.if, context('merge_group', { vitest })), false, vitest);
-  assert.equal(expression(job.if, context('merge_group', { verified: 'true' })), false, 'reused shards record nothing');
-  assert.equal(expression(job.if, context('merge_group', { proof: 'skipped', verified: '' })), true);
+  assert.equal(expression(job.if, context('merge_group')), true);
   assert.deepEqual(job.permissions, { contents: 'read' });
   assert.deepEqual(permissions, { contents: 'read' });
   const checkout = job.steps.find((s) => s.uses?.startsWith('actions/checkout@'));

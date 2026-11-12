@@ -13,7 +13,7 @@ function context(event = 'pull_request_target', base = 'main') {
     needs: { preflight: { result: 'success' }, 'review-result': { result: 'success' },
       'queue-proof': { result: 'success', outputs: { verified: 'false' } },
       'pr-test-input': { result: 'success', outputs: { sha: '' } },
-      'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } },
+
       'change-surface': { outputs: { surface: 'full-matrix' } }, 'classify-pr': { outputs: { bump_pr: 'false' } } },
     cancelled: () => false, always: () => true };
 }
@@ -59,7 +59,7 @@ test('a targeted review rerun reaches only the aggregate and its dependents, nev
   // GitHub reruns a job together with every job that depends on it.
   const rerun = descendants('review-result');
   assert.ok(rerun.includes('verify'));
-  for (const id of [...heavy, 'vitest-coverage-merge', 'pr-test-attestation', 'pr-test-input']) {
+  for (const id of [...heavy, 'vitest-coverage-merge', 'pr-test-input']) {
     assert.ok(!rerun.includes(id), `${id} must not rerun with review`);
   }
   for (const id of rerun) assert.ok(id === 'verify' || ancestors(id).includes('verify'), `${id} reruns with review`);
