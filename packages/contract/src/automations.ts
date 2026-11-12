@@ -148,6 +148,11 @@ export const automationHistoryScanSchema = z.object({
 
 /** The longest `lastError` the scheduler stores. */
 export const AUTOMATION_LAST_ERROR_MAX = 1_000;
+/** `github` kind: the error of the last failed check and when it failed, until a check succeeds. */
+export const automationLastErrorShape = {
+  lastError: z.string().max(AUTOMATION_LAST_ERROR_MAX).optional(),
+  lastErrorAt: z.string().datetime().optional(),
+};
 export const automationRuntimeStateSchema = z.object({
   /** The definition revision this state belongs to; activation or history-policy changes re-arm. */
   revision: z.number().optional(),
@@ -168,9 +173,7 @@ export const automationRuntimeStateSchema = z.object({
   etags: z.record(z.string(), z.string()).optional(),
   backoffUntil: z.string().optional(),
   consecutiveFailures: z.number().optional(),
-  /** `github` kind: the error of the last failed check and when it failed, until a check succeeds. */
-  lastError: z.string().max(AUTOMATION_LAST_ERROR_MAX).optional(),
-  lastErrorAt: z.string().datetime().optional(),
+  ...automationLastErrorShape,
   /** `once` schedules: why it stopped without a task — its launch failed, or it started past its cutoff. */
   onceOutcome: z.enum(['failed', 'missed']).optional(),
 });
