@@ -8,7 +8,7 @@ import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import { resolveProfileEnvForRoot, resolveRuntimeAuthVerificationTarget } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { listProjects, registerProject, removeProject } from '../workspace/projects.ts';
-import { registryEntry } from '../runs/webhook.ts';
+import { registryEntry } from '../workspace/registry-entry.ts';
 import { createWorkspaceProjects } from '../server/workspace-projects.ts';
 import { resolveServerDeps } from '../server/server-deps.ts';
 import { modelLockRefusal as startRefusal } from '../server/start-run-options.ts';

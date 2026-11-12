@@ -53,11 +53,10 @@ import { useActiveProviderAvailability } from './active-provider'
 import { ThreadLoading } from './thread-loading'
 import { threadRenderMode } from './thread-scroll'
 import { JumpToLatestPill, useThreadScroll, type ThreadScrollControls } from './thread-scroller'
-import { AskOriginMarker, pinnedAnswerControl, pinnedAskFocus } from './pending-ask-navigation'
+import { AskOriginMarker, PENDING_ASK_SECTION_ID, pinnedAnswerControl, pinnedAskFocus } from './pending-ask-navigation'
 import { useRevealAskOrigin } from './use-reveal-ask-origin'
 import { useSessionViewport } from './session-viewport'
 import {
-  PENDING_ASK_SECTION_ID,
   SessionTranscript,
   askRow,
   buildTranscriptRows,

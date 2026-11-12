@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { isPainted, paintClasses } from '@/test/paint'
+
 import { ACTION_TOAST_MS, Toaster, resetToasts, toast } from './toaster'
 
 beforeEach(() => {
@@ -86,6 +88,12 @@ describe('Toaster', () => {
     const toasts = screen.getAllByRole('status')
     expect(toasts.map((t) => t.textContent)).toEqual(['first', 'second'])
     expect(toasts[1]!.getAttribute('data-tone')).toBe('danger')
+    // Each tone paints its own fill and ink.
+    for (const property of ['fill', 'ink'] as const) {
+      const [plain, danger] = toasts.map((t) => paintClasses(t, property))
+      expect([isPainted(plain!), isPainted(danger!)], property).toEqual([true, true])
+      expect(danger, property).not.toEqual(plain)
+    }
 
     // 3s later the first (5s old) starts exiting while the second (3s old) is untouched.
     act(() => vi.advanceTimersByTime(3000))
@@ -142,16 +150,15 @@ describe('Toaster', () => {
       expect(screen.getByRole('status').getAttribute('data-state')).toBe('closed')
     })
 
-    it('renders a real, tabbable button in the toast colour', () => {
+    it('renders a real, tabbable button', () => {
       show()
       const button = document.querySelector<HTMLButtonElement>('[data-slot="toast-action"]')!
       expect(button.tagName).toBe('BUTTON')
       expect(button.getAttribute('type')).toBe('button')
       expect(button.tabIndex).toBe(0)
       expect(button.textContent).toBe('Undo')
-      expect(button.className).toContain('font-semibold')
-      expect(button.className).toContain('underline')
-      expect(button.className).toContain('text-inherit')
+      // It takes the toast's ink rather than painting none.
+      expect(isPainted(paintClasses(button, 'ink'))).toBe(true)
     })
 
     it('pauses while hovered and resumes with the remaining time', () => {

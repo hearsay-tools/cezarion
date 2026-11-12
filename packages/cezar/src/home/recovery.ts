@@ -9,7 +9,6 @@ import { restorePinnedRecovery } from '../workspace/backup-cli.ts';
 import { homeFileLocation, homePathLocation } from './file-location.ts';
 import { getLegacyRecovery, resolveLegacyRecovery } from './legacy-recovery.ts';
 import { REBRAND_SWITCH } from './switch.ts';
-export { subscribeHomeRecovery } from './recovery-watch.ts';
 
 interface CachedFile { fingerprint: string; state: HomeRecoveryFile | undefined; pinnedPath?: string | undefined }
 const caches = new Map<string, Map<HomeFile, CachedFile>>();

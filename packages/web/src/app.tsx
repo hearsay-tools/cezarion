@@ -6,6 +6,7 @@ import { GlobalEventsProvider } from './api/global-events'
 import { HomeRecoveryController } from './components/home-recovery-controller'
 import { createQueryClient } from './api/query-client'
 import { attachQueryIdle } from './lib/cez-idle'
+import { ProjectRouteMatcherContext } from './lib/project-route-matcher'
 import { AppErrorBoundary } from './components/app-error-boundary'
 import { AppShellContainer } from './components/app-shell-container'
 import { AppearanceProvider } from './components/appearance-provider'
@@ -14,7 +15,7 @@ import { ReferenceStatusRegistry } from './components/reference-status'
 import { RunNotifications } from './components/run-notifications'
 import { ThemeProvider } from './components/theme-provider'
 import { Toaster } from './components/ui/toaster'
-import { AppRoutes } from './routes'
+import { AppRoutes, matchProjectRoute } from './routes'
 
 /** Real URLs, no basename: the cockpit is always mounted at the origin root, and the server
  *  serves index.html for every non-/api GET (src/server/static-ui.ts), so a deep link like
@@ -57,11 +58,15 @@ export function App() {
                     asking for itself was several round trips and a staggered wave of colour. They
                     register what they are painting here instead, and it goes out as one request per
                     project. */}
-                <ReferenceStatusRegistry>
-                  <AppShellContainer>
-                    <AppRoutes />
-                  </AppShellContainer>
-                </ReferenceStatusRegistry>
+                {/* The project switch (rail, ⌘K) matches remembered pages against the router's own
+                    table; it gets the matcher here so it does not import the route tree. */}
+                <ProjectRouteMatcherContext.Provider value={matchProjectRoute}>
+                  <ReferenceStatusRegistry>
+                    <AppShellContainer>
+                      <AppRoutes />
+                    </AppShellContainer>
+                  </ReferenceStatusRegistry>
+                </ProjectRouteMatcherContext.Provider>
                 {/* One toast outlet for the whole app — `toast()` is a module-level call. */}
                 <Toaster />
               </BrowserRouter>

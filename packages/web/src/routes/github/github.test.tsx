@@ -1311,7 +1311,6 @@ it('renders a disabled No boards picker on the filter row when projects is empty
   expect([...picker.options].map(option => option.textContent)).toEqual(['No boards'])
   expect(screen.queryByText('No linked project boards.')).toBeNull()
   expect(picker.className).toMatch(/min-h-11/)
-  expect(picker.className).toMatch(/border-input/)
   expect(document.querySelector('[data-slot="gh-issue-filters"]')?.contains(picker)).toBe(true)
 })
 

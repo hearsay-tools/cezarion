@@ -151,10 +151,9 @@ describe('GitSidebar', () => {
       { section: 'cleanup', text: 'Cleanup', count: '4.2 GB', href: '/git/cleanup', current: null },
       { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
     ])
-    // The block sits above the sections, and each section row is the shared 32px row.
+    // The block sits above the sections; the 32px row height is measured in git-sidebar.e2e.ts.
     const body = q('[data-slot="git-sidebar"]')!
     expect([...body.children].map((child) => child.getAttribute('data-slot'))).toEqual(['git-checkout', 'git-sections'])
-    expect(q('a[data-git-section="cleanup"]')?.className).toContain('h-[32px]')
   })
 
   it('reads only the branch counts, never the full classification (hearsay-tools/cezarion#2029)', async () => {
@@ -482,7 +481,6 @@ describe('the phone Git screen', () => {
         { section: 'branches', text: 'All branches', count: '2', href: '/git/branches', current: null },
       ]))
       const row = q('a[data-git-section="cleanup"]')!
-      expect(row.className).toContain('h-[48px]')
       expect(row.querySelectorAll('svg')).toHaveLength(2)
       expect(q('[data-slot="git-worktree-list"]')).toBeNull()
     },

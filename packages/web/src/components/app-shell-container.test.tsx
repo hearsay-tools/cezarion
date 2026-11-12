@@ -16,6 +16,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { AppShellContainer, repoChipOf } from '@/components/app-shell-container'
 import { ThemeProvider } from '@/components/theme-provider'
+import { ProjectRouteMatcherContext } from '@/lib/project-route-matcher'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -91,6 +92,9 @@ function serve(routes: Record<string, unknown>): void {
   })
 }
 
+/** No project memory is stored here, so the rail's switch never consults the route table. */
+const noRoutes = () => null
+
 function renderShell(entry = '/', client: QueryClient = createQueryClient()) {
   return {
     client,
@@ -98,9 +102,11 @@ function renderShell(entry = '/', client: QueryClient = createQueryClient()) {
     <QueryClientProvider client={client}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[entry]}>
-          <AppShellContainer>
-            <p>route content</p>
-          </AppShellContainer>
+          <ProjectRouteMatcherContext.Provider value={noRoutes}>
+            <AppShellContainer>
+              <p>route content</p>
+            </AppShellContainer>
+          </ProjectRouteMatcherContext.Provider>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
@@ -326,9 +332,11 @@ describe('sidebar wiring', () => {
       <QueryClientProvider client={client}>
         <ThemeProvider>
           <MemoryRouter initialEntries={['/p/shop/']}>
-            <AppShellContainer>
-              <ProjectScopeProvider projectId={scope}><p>route content</p></ProjectScopeProvider>
-            </AppShellContainer>
+            <ProjectRouteMatcherContext.Provider value={noRoutes}>
+              <AppShellContainer>
+                <ProjectScopeProvider projectId={scope}><p>route content</p></ProjectScopeProvider>
+              </AppShellContainer>
+            </ProjectRouteMatcherContext.Provider>
           </MemoryRouter>
         </ThemeProvider>
       </QueryClientProvider>
