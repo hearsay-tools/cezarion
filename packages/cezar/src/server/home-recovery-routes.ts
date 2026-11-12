@@ -1,7 +1,8 @@
 import { Hono, type Context } from 'hono';
 import { homeRecoveryActionSchema } from '@open-mercato/cezar-contract/home-recovery';
 import type { Home } from '../home/home.ts';
-import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, restoreHomeRecovery, subscribeHomeRecovery } from '../home/recovery.ts';
+import { acceptHomeRecovery, getHomeRecovery, importHomeRecovery, restoreHomeRecovery } from '../home/recovery.ts';
+import { subscribeHomeRecovery } from '../home/recovery-watch.ts';
 import { REBRAND_SWITCH } from '../home/switch.ts';
 import { jsonZodValidator } from './validators.ts';
 import type { SocketHub, TopicPublisher } from './ws.ts';
