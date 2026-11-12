@@ -1067,6 +1067,11 @@ export function useProjectRuns(projectId: string, enabled = true, boot = false) 
     queryKey: [projectAddress({ projectId, boot }).cacheScope, 'runs', 'list'] as const,
     queryFn: ({ signal }) => getRuns(projectAddress({ projectId, boot }), { signal }),
     enabled,
+    // Health or the registry can name the boot project after the list has answered under the
+    // project's own id. The key then moves to the `'default'` alias, which has no data yet. Keep
+    // the same project's list on screen until that fetch answers, so the sidebar rows do not
+    // unmount (hearsay-tools/squawk#3048). Any other key change starts empty.
+    placeholderData: (previous, previousQuery) => (boot && previousQuery?.queryKey[0] === projectId ? previous : undefined),
   })
 }
 
