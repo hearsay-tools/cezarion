@@ -1,4 +1,4 @@
-import { POWERSHELL, powershellEnv } from '../detached-process.ts';
+import { POWERSHELL, powershellEnv } from '../core/process-stat.ts';
 import { execFileSync } from 'node:child_process';
 import { REBRAND_SWITCH } from './switch.ts';
 import type { HomeLayout } from './kind-roots.ts';

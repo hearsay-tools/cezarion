@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Home } from './home.ts';
-import { recordedProcessLive } from '../delegation/process-liveness.ts';
+import { recordedProcessLive } from '../core/process-stat.ts';
 import { assertHomeReadable } from './install-marker.ts';
 import { privateDirectory, replacePrivate } from './private-files.ts';
 import { withHomeLock } from './write-lock.ts';

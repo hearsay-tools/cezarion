@@ -190,10 +190,9 @@ describe('autonomous turn-end parity — #426', () => {
                 expect(semaphore.busy()).toBe(1);
                 expect(store.getRun(runId)?.status).toBe('running');
                 // The mock delays SIGTERM exit: neither end() nor late readiness
-                // may release the slot or resurrect the timed-out boundary.
+                // may release the slot or resurrect the timed-out boundary. The readiness
+                // handler runs synchronously, so its outcome is visible on return.
                 lateReady?.();
-                // bound: observe the real mock's delayed SIGTERM-exit boundary for 50 ms; the active session must retain its busy slot until native exit.
-                await new Promise(resolve => setTimeout(resolve, 50));
                 expect(manager.isActive(runId)).toBe(true);
                 expect(semaphore.busy()).toBe(1);
               }
@@ -269,6 +268,26 @@ describe('autonomous turn-end parity — #426', () => {
           const warnings = vi.spyOn(console, 'warn');
           const askRefusals = () => warnings.mock.calls.filter(([message]) => String(message).includes('wait registration refused: autonomous_run')).length;
           const startSeq = store.readEvents(runId).length;
+          // A native ask parks mid-turn, and nothing may answer it on the wire. Every write to a
+          // session this run opens after the ask is recorded, so a synthetic answer shows when it is
+          // sent, without waiting for the wire to react to it.
+          const writesAfterAsk: string[] = [];
+          if (row.id === 'A9') {
+            const work = fixtureWork(manager);
+            const track = work.trackSession.bind(work);
+            const tracked = vi.spyOn(work, 'trackSession').mockImplementation(((session, closed) => {
+              for (const method of ['sendMessage', 'sendAgentMessage', 'respondPermission'] as const) {
+                const original = session[method] as ((...args: unknown[]) => unknown) | undefined;
+                if (!original) continue;
+                Object.assign(session, { [method]: (...args: unknown[]) => {
+                  if (store.readEvents(runId).slice(startSeq).some(e => e.type === 'ask.requested')) writesAfterAsk.push(method);
+                  return original.apply(session, args);
+                } });
+              }
+              return track(session, closed);
+            }) as typeof work.trackSession);
+            onTestFinished(() => { tracked.mockRestore(); });
+          }
           if (mode === 'continuation') expect(manager.continueRun(runId, { text: promptFor(backend, row.scenario) }).ok).toBe(true);
           else manager.enqueueOwnedRun(runId);
           // Done rows reach their terminal outcome before we check publication history.
@@ -281,10 +300,6 @@ describe('autonomous turn-end parity — #426', () => {
             () => store.getRun(runId)?.automaticWakes,
             ROW_SETTLE_MS,
           );
-          // A native ask parks mid-turn. Let that wire advance if it incorrectly
-          // receives a synthetic answer; no manager-injected normalized event.
-          // bound: observe the real runner's native mid-turn ask boundary for 150 ms; an incorrect synthetic answer would start another native turn.
-          if (row.id === 'A9') await new Promise(resolve => setTimeout(resolve, 150));
           const events = store.readEvents(runId).slice(startSeq);
           const notes = nudges(events);
           function assertCapOutcome(): void {
@@ -296,7 +311,11 @@ describe('autonomous turn-end parity — #426', () => {
           function assertParkedOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(0);
-            if (row.id === 'A9') expect(events.some(e => e.type === 'ask.requested')).toBe(true);
+            if (row.id === 'A9') {
+              expect(events.some(e => e.type === 'ask.requested')).toBe(true);
+              // No synthetic answer reached the wire.
+              expect(writesAfterAsk).toEqual([]);
+            }
             // The agent's own timer is the run's wake, so no autonomous nudge goes beside it.
             if (row.id === 'A7') expect(store.getRun(runId)?.waits?.filter(wait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open)).toHaveLength(1);
             if (row.id === 'A10') {

@@ -1,6 +1,6 @@
 import { observationClock } from '../core/observation-clock.testkit.ts';
 // Register the external CI mock before loading RunManager.
-import { success, ciWaitOf, lastCiWaitOf, github, register, githubByPr, registerPr } from './ci-wait-fixture.testkit.ts';
+import { success, ciWaitOf, lastCiWaitOf, github, register, githubByPr, registerPr, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import * as runners from '../core/runner-factory.ts';
 import type { AgentEvent, AgentRunResult, AgentRunner, AgentSession } from '../core/agent-runner.ts';
@@ -14,7 +14,7 @@ import { controlledWire, manager, parent, root, semaphore, store, until, useWork
 
 
 describe('CI wait delivery', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
   it('requeues a settled wake dequeued after losing its turn boundary', async () => {
     const external = github();

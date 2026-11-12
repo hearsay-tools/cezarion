@@ -13,8 +13,8 @@ vi.mock('node:child_process', async importOriginal => {
   Object.defineProperty(execFile, promisify.custom, { value: async (bin: string, args: string[]) => ({ stdout: tools.output(bin, args), stderr: '' }) });
   return { ...actual, execFile };
 });
-vi.mock('../git-worktree.ts', async importOriginal => ({
-  ...await importOriginal<typeof import('../git-worktree.ts')>(), autosaveCommit: async () => 'clean',
+vi.mock('../autosave-commit.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../autosave-commit.ts')>(), autosaveCommit: async () => 'clean',
 }));
 
 import { createDraftPr } from '../server/forge/draft-pr.ts';

@@ -9,6 +9,7 @@ import { RunStoreOpenError } from './runs/store-open-error.ts';
 import type { RunStore } from './runs/store.ts';
 import type { Home } from './home/home.ts';
 import { RunManager } from './workflows/run.ts';
+import { acquireCiResources } from './ci-wait/resources.ts';
 import { createRunner } from './core/runner-factory.ts';
 import { loadWorkflows } from './workflows/load.ts';
 import { ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
@@ -108,7 +109,7 @@ export async function runHeadless(
     // 2.5) — one refreshed semaphore, even with just one manager in play.
     const semaphore = new deps.WorkspaceSemaphore({ home });
     await semaphore.refresh();
-    const manager = new deps.RunManager(store, repoRoot, { home, createRunner: deps.createRunner, semaphore });
+    const manager = new deps.RunManager(store, repoRoot, { home, createRunner: deps.createRunner, semaphore, acquireCiResources });
     delegation.attachProject({ id: 'headless', root: repoRoot, store, manager, home });
 
     store.on('event', ({ event }) => printHeadlessEvent(event, deps.console));

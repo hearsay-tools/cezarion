@@ -2,20 +2,8 @@ import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:chi
 import { readdirSync, readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
-
-// Windows PowerShell spawns live here: this module is copied alone into scratch trees, so it imports only node builtins.
-/** Windows PowerShell 5.1, the one PowerShell every supported Windows host has. */
-export const POWERSHELL = 'powershell.exe';
-
-/**
- * The environment for a Windows PowerShell 5.1 child. PowerShell 7 exports its own `PSModulePath`,
- * and a 5.1 child that inherits it finds PowerShell 7's built-in modules first, so autoloading
- * cmdlets such as `Set-Acl` or `Get-CimInstance` fails. Without the variable, 5.1 builds its
- * default module path. Windows environment names ignore case, so every spelling goes.
- */
-export function powershellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => name.toUpperCase() !== 'PSMODULEPATH'));
-}
+import { POWERSHELL, powershellEnv, processStartToken, exitedStat, statFields } from './core/process-stat.ts';
+export { POWERSHELL, powershellEnv, processStartToken, exitedStat, parseProcStat, linuxBootId } from './core/process-stat.ts';
 
 /**
  * Starts a process that outlives the call that started it, and later stops it
@@ -28,7 +16,7 @@ export function powershellEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Proc
  * another process.
  *
  * `.ai/scripts` imports this file from source, before any build, through Node's type stripping.
- * So it imports only Node builtins and uses only TypeScript syntax that strips to JavaScript.
+ * It and its process-stat leaf use only Node builtins and TypeScript syntax that strips to JavaScript.
  */
 
 /** A process's start identity: one incarnation, so a reused pid never matches. It reads a zombie
@@ -47,48 +35,6 @@ export interface GroupLeader {
 }
 
 const POLL_MS = 100;
-
-/** The fields after `comm` in a `/proc/<pid>/stat` line; `comm` may hold spaces and `)`, so the split is after the LAST `)`. */
-function statFields(stat: string): string[] {
-  return stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-}
-
-/** Whether the `/proc/<pid>/stat` fields are of an exited process. A leader whose main thread
- *  exited reads Z while its other threads run and keep its files open, a listening port among them,
- *  so it is exited only once `num_threads` (field 20) counts no thread but its own. */
-export function exitedStat(fields: readonly string[]): boolean {
-  return /^[ZX]$/.test(fields[0] ?? '') && Number(fields[17]) <= 1;
-}
-
-/** `/proc/<pid>/stat` field 3 (`state`) and field 22 (`starttime`). */
-export function parseProcStat(stat: string): { state: string; startToken: string } | undefined {
-  const fields = statFields(stat);
-  return stat.includes(')') && fields.length >= 20 && /^\d+$/.test(fields[19]!)
-    ? { state: fields[0]!, startToken: fields[19]! } : undefined;
-}
-
-let bootId: string | null | undefined;
-/** `starttime` counts ticks since boot, so it repeats across reboots; the boot id scopes it. */
-export function linuxBootId(): string | undefined {
-  if (bootId === undefined) { try { bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { bootId = null; } }
-  return bootId ?? undefined;
-}
-
-/** One process incarnation, so a reused PID never matches. Absent when the platform cannot say. */
-export function processStartToken(pid: number, platform: NodeJS.Platform = process.platform): string | undefined {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
-  if (platform === 'linux') {
-    let start: string | undefined;
-    try { start = parseProcStat(readFileSync(`/proc/${pid}/stat`, 'utf8'))?.startToken; } catch { /* gone or unreadable */ }
-    const boot = linuxBootId();
-    return start && boot ? `${boot}:${start}` : start;
-  }
-  if (platform !== 'darwin') return undefined;
-  // `lstart` is locale- and zone-formatted; pin both so the token is stable across Squawk processes.
-  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
-  const token = ps.status === 0 ? ps.stdout.trim() : '';
-  return token || undefined;
-}
 
 /** A `detached: true` spawn. On POSIX the child leads a new process group, so `stopGroup`
  *  reaches every member it forks; on Windows it gets a console of its own. */

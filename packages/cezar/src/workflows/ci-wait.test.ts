@@ -1,7 +1,7 @@
 import { observationClock } from '../core/observation-clock.testkit.ts';
 import { WAKE_RETRY_BACKOFF } from '../delegation/retry-backoff.ts';
 // Register the external CI mock before loading RunManager.
-import { externalResource, pr, identity, success, ciWaitOf, lastCiWaitOf, parked, github, register } from './ci-wait-fixture.testkit.ts';
+import { externalResource, pr, identity, success, ciWaitOf, lastCiWaitOf, parked, github, register, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +18,7 @@ import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 
 describe('CI wait recovery and conversations', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
 
   it('rebuilds a parked wait after restart without launching a model before settlement', async () => {

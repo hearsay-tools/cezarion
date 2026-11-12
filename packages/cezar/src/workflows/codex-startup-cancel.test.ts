@@ -11,6 +11,7 @@ import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
+import { acquireInertCiResources } from '../ci-wait/inert-ci-resources.testkit.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import type { WorkflowDef } from './types.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -41,7 +42,7 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-codex-startup-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     const work = new TrackedWork();
-    const manager = new RunManager(store, root, { createRunner, home: testHome(), semaphore, work });
+    const manager = new RunManager(store, root, { acquireCiResources: acquireInertCiResources, createRunner, home: testHome(), semaphore, work });
     const result = { root, store, manager, work };
     projects.push(result);
     return result;

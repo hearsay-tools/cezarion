@@ -10,7 +10,7 @@ import type { AgentEvent, ContentBlock } from '../../core/agent-runner.ts';
 import { inputDeliveryOf } from '../../core/agent-runner.ts';
 import { startManagedSession } from '../../core/managed-session.ts';
 import { pastedAttachmentsText, type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
-import type { AutosaveReason } from '../../git-worktree.ts';
+import type { AutosaveReason } from '../../autosave-commit.ts';
 import { continuationOpening } from './opening.ts';
 import { createSessionEventHandler, launchPreamble } from './session-events.ts';
 import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText } from './prompts.ts';

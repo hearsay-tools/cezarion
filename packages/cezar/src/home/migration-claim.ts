@@ -1,7 +1,7 @@
 import { closeSync, fsyncSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { recordedProcessLive } from '../delegation/process-liveness.ts';
+import { recordedProcessLive } from '../core/process-stat.ts';
 import { assertHomePath } from './boundary.ts';
 import { ownProcessStartToken } from './process-identity.ts';
 import { privateDirectory, syncDirectory } from './private-files.ts';

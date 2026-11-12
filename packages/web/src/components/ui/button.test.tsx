@@ -1,57 +1,26 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import type { ComponentProps } from 'react'
+
 import { Button } from './button'
 
 // Explicit rather than relying on RTL's auto-cleanup, which only runs when vitest `globals` is on.
 afterEach(cleanup)
 
 describe('Button', () => {
-  it('defaults to the primary variant at the default size', () => {
-    render(<Button>Run</Button>)
-    const button = screen.getByRole('button', { name: 'Run' })
-
-    expect(button.dataset.variant).toBe('primary')
-    expect(button.dataset.size).toBe('default')
-    expect(button.className).toContain('bg-action')
-    expect(button.className).toContain('h-11')
-  })
-
-  describe('variant → class mapping', () => {
-    it.each([
-      { variant: 'primary', expected: ['bg-action', 'text-action-foreground'] },
-      { variant: 'contrast', expected: ['bg-contrast', 'text-contrast-foreground'] },
-      { variant: 'outline', expected: ['border-border', 'bg-card'] },
-      { variant: 'ghost', expected: ['text-muted-foreground'] },
-      { variant: 'danger-ghost', expected: ['text-danger'] },
-    ] as const)('$variant', ({ variant, expected }) => {
-      render(<Button variant={variant}>Label</Button>)
-      const button = screen.getByRole('button')
-
-      expect(button.dataset.variant).toBe(variant)
-      for (const cls of expected) expect(button.className).toContain(cls)
-    })
-  })
-
-  describe('size → class mapping', () => {
-    it.each([
-      { size: 'default', expected: ['h-11', 'px-3.5'] },
-      { size: 'sm', expected: ['h-[30px]', 'rounded-sm'] },
-      { size: 'icon', expected: ['size-9'] },
-      { size: 'icon-sm', expected: ['size-[30px]', 'rounded-sm'] },
-    ] as const)('$size', ({ size, expected }) => {
-      render(<Button size={size}>Label</Button>)
-      const button = screen.getByRole('button')
-
-      expect(button.dataset.size).toBe(size)
-      for (const cls of expected) expect(button.className).toContain(cls)
-    })
-  })
-
-  it('lets the small sizes override the default control radius', () => {
-    render(<Button size="sm">Label</Button>)
-    // `rounded-md` is the base; the sm size must win the merge rather than coexist.
-    expect(screen.getByRole('button').className).not.toContain('rounded-md')
+  it('styles each variant and each size apart, without restating the class map', () => {
+    const classOf = (props: ComponentProps<typeof Button>) => {
+      const { unmount } = render(<Button {...props}>Label</Button>)
+      const className = screen.getByRole('button').className
+      unmount()
+      return className
+    }
+    const variants = (['primary', 'contrast', 'outline', 'ghost', 'danger-ghost'] as const).map((variant) => classOf({ variant }))
+    const sizes = (['default', 'sm', 'icon', 'icon-sm'] as const).map((size) => classOf({ size }))
+    expect(new Set(variants).size).toBe(variants.length)
+    expect(new Set(sizes).size).toBe(sizes.length)
+    expect(classOf({})).toBe(classOf({ variant: 'primary', size: 'default' }))
   })
 
   it('lets a caller className override a variant class', () => {

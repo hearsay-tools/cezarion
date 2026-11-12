@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
+import type { RunStore } from '../runs/store.ts';
+import type { RunManager } from '../workflows/run.ts';
+import { fixtureWork } from '../workflows/fixture-manager.testkit.ts';
 import { HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 
@@ -13,6 +16,15 @@ import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 describe('unread agent input is resubmitted (#505)', () => {
   const late = (parentRunId: string): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
     text: 'mock:agent-echo late parent guidance', createdAt: new Date().toISOString() });
+
+  /** The run is idle: parked, every input read, and no turn-end bookkeeping pending. That
+   * bookkeeping is where unread input goes back to the queue, so a resubmission holds this false
+   * until its own turn has ended. */
+  const settled = (store: RunStore, manager: RunManager, runId: string): boolean => {
+    const run = store.getRun(runId);
+    return run?.status === 'waiting' && !!run.agentInputs?.every(input => !!input.consumedAt) &&
+      ![...fixtureWork(manager).pending.values()].includes('recordTurnEnd');
+  };
 
   /** A test-owned steer window: CEZ_MOCK_STEER_GATE holds the mock's steering window (the
    * steer-late tail, the steer-tool hold) open until `release`, so a mock timer never ends the
@@ -45,8 +57,7 @@ describe('unread agent input is resubmitted (#505)', () => {
         // Codex marks it read when it enters the thread history, before the reply text lands.
         const echoes = () => store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
         await waitFor(() => echoes().length > 0, 15_000);
-        // bound: negative window. A second resubmission of the same input would reach the mock within a few event-loop turns of the first echo; 300 ms covers them.
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await waitFor(() => settled(store, manager, runId), 15_000);
         expect(echoes()).toHaveLength(1);
       }, { env: { CEZ_MOCK_STEER_GATE: gate } });
     } finally { cleanup(); }
@@ -108,8 +119,7 @@ describe('unread agent input is resubmitted (#505)', () => {
         // Re-delivered exactly once after the restart.
         const echoes = () => store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
         await waitFor(() => echoes().length > 0, 15_000);
-        // bound: negative window. A second delivery after the restart would reach the mock within a few event-loop turns of the first echo; 500 ms covers them.
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await waitFor(() => settled(store, manager, runId), 15_000);
         expect(echoes()).toHaveLength(1);
       }, { env: { CEZ_MOCK_STEER_GATE: gate } });
     } finally { cleanup(); }

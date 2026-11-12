@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
+import { processStartToken, recordedProcessLive } from '../core/process-stat.ts';
 import { privateDirectory } from './private-files.ts';
 import { ownProcessStartToken } from './process-identity.ts';
 import { assertHomeMetadata, assertHomePath } from './boundary.ts';

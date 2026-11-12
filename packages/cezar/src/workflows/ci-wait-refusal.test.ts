@@ -14,6 +14,7 @@ import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callSquawkWait } from '../ci-wait/client.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, toolGenerationOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
@@ -38,7 +39,7 @@ const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.ki
 // the replacement on every runner's native wire: CI registers beside a pending and a settled
 // worker wait, and the worker result is still delivered once.
 describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezarion#1235', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources });
   afterEach(() => vi.restoreAllMocks());
 
   it.each(RUNNER_IDS)('%s registers CI beside a pending and a settled worker wait, and delivers the worker result once', async runner => {

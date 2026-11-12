@@ -20,6 +20,7 @@ import type { RunnerId } from '../../packages/cezar/src/core/agent-runner.ts';
 import { planOwnedWorkspace } from '../../packages/cezar/src/delegation/workspace.ts';
 import { RunStore } from '../../packages/cezar/src/runs/store.ts';
 import { RunManager } from '../../packages/cezar/src/workflows/run.ts';
+import { acquireCiResources } from '../../packages/cezar/src/ci-wait/resources.ts';
 import { createRunner } from '../../packages/cezar/src/core/runner-factory.ts';
 import { installWindowsIdentityStore } from '../../packages/cezar/src/delegation/windows-identity-store.ts';
 
@@ -49,7 +50,7 @@ const workspace = await planOwnedWorkspace(repoRoot, workerId, git('rev-parse', 
 store.createOwnedRun({ title: 'worker', task: TASK, workflow: 'quick-task', runner: backend, ...(model ? { model } : {}),
   steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), { role: 'worker', parentRunId: parent.id, permissions: [], workspace },
 'a'.repeat(64), { kind: 'internal' });
-const manager = new RunManager(store, repoRoot, { home, createRunner });
+const manager = new RunManager(store, repoRoot, { home, createRunner, acquireCiResources });
 const events = (type: string) => store.readEvents(workerId).filter(event => event.type === type);
 const until = async (predicate: () => boolean, ms = 240_000) => {
   const start = Date.now();
