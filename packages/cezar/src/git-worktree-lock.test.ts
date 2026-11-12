@@ -3,8 +3,9 @@ import { writeFileSync } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createWorktree, pruneOrphans, removeWorktree } from './git-worktree.ts';
 import { withWorktreeMutation } from './git-worktree-lock.ts';
 import { readMutationClaim } from './git-worktree-lock-helper.ts';
@@ -138,13 +139,29 @@ it('withdraws timed-out cleanup without running its queued mutation after unlock
   const ready = new Promise<void>(resolve => { entered = resolve; });
   const held = withWorktreeMutation(root, async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); });
   await ready;
+  // bound: a hang guard; the waiter below gives up on its own clock, not on this release.
   const timer = setTimeout(() => release(), 2_000);
+  // The waiting keeper runs on a clock that moves only when it sleeps, and records how far it moved:
+  // the budget it enforces, whatever the host speed.
+  const elapsed = join(root, 'keeper-clock');
+  const clock = join(root, 'keeper-clock.mjs');
+  await writeFile(clock, [
+    "import { writeFileSync } from 'node:fs';",
+    'const sleep = globalThis.setTimeout; const start = Date.now(); let now = start;',
+    'Date.now = () => now;',
+    `globalThis.setTimeout = (callback, ms = 0, ...args) => { now += ms; writeFileSync(${JSON.stringify(elapsed)}, String(now - start)); return sleep(callback, 0, ...args); };`,
+  ].join('\n'));
   let ran = false;
   try {
+    vi.stubEnv('NODE_OPTIONS', `${process.env.NODE_OPTIONS ?? ''} --import ${pathToFileURL(clock).href}`.trim());
     await expect(withWorktreeMutation(root, async () => { ran = true; }, { waitMs: 100 })).rejects.toThrow(/timed out waiting for worktree mutation lock/);
+    vi.unstubAllEnvs();
     expect(ran).toBe(false);
     expect(await readdir(join(root, '.git/cezar-worktree-mutations'))).toHaveLength(1);
-  } finally { clearTimeout(timer); release(); await held; }
+    // It gave up at its 100 ms budget: one 25 ms poll past it at most.
+    expect(Number(await readFile(elapsed, 'utf8'))).toBeGreaterThanOrEqual(100);
+    expect(Number(await readFile(elapsed, 'utf8'))).toBeLessThanOrEqual(125);
+  } finally { vi.unstubAllEnvs(); clearTimeout(timer); release(); await held; }
   await withWorktreeMutation(root, async () => {});
   expect(ran).toBe(false);
   expect(await readdir(join(root, '.git/cezar-worktree-mutations'))).toEqual([]);
