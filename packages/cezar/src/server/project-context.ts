@@ -496,6 +496,9 @@ export class ProjectContexts {
     const project = projects.find((p) => p.id === projectId);
     if (!project) throw new ProjectContextError('unknown-project', projectId);
     if (project.status === 'missing') throw new ProjectContextError('missing-root', projectId);
+    // Before any claim or migration side effect: a caller without a factory cannot build a context.
+    const createManager = this.deps.createManager;
+    if (!createManager) throw new Error('ProjectContexts needs a createManager factory to build a project context');
 
     // An unfinished migration finishes first, before any read; this build then keeps the claim it took.
     // With the release switch, an idle legacy project then moves before its first read or task start.
@@ -504,12 +507,10 @@ export class ProjectContexts {
     noticeLegacyProject(project.root);
     // Asked after the move: a moved project's write root is `.ai/squawk/`.
     const dataDir = projectPaths(project.root).write;
-    return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale), (error) => { throw error; });
+    return withProjectAdmission(dataDir, this.open.bind(this, project, dataDir, stale, createManager), (error) => { throw error; });
   }
 
-  private async open(project: ProjectContextSource, dataDir: string, stale: () => boolean): Promise<ProjectContext> {
-    const createManager = this.deps.createManager;
-    if (!createManager) throw new Error('ProjectContexts needs a createManager factory to build a project context');
+  private async open(project: ProjectContextSource, dataDir: string, stale: () => boolean, createManager: RunManagerFactory): Promise<ProjectContext> {
     const projectId = project.id;
     await this.deps.ownership?.acquire(dataDir);
     if (stale()) throw new ProjectContextsClosedError();

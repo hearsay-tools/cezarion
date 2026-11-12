@@ -172,6 +172,18 @@ describe('early recovery of an unfinished project migration', () => {
     expect(existsSync(warm.journal)).toBe(false);
   });
 
+  it('refuses a lazy build without a manager factory before it recovers or claims the project', async () => {
+    const lazy = journaled();
+    const ownership = owner();
+    const contexts = new ProjectContexts({ createRunner, home: testHome(), ownership,
+      listProjects: async () => [{ id: 'lazy', root: lazy.root, status: 'not-git' as const }] });
+    disposers.push(() => contexts.disposeAll());
+    await expect(contexts.context('lazy')).rejects.toThrow('ProjectContexts needs a createManager factory');
+    expect(existsSync(lazy.journal)).toBe(true);
+    expect(ownership.owns(lazy.dataDir)).toBe(false);
+    expect(existsSync(join(lazy.dataDir, 'cockpit.lock'))).toBe(false);
+  });
+
   it('stops preparing projects once the cockpit is closing', async () => {
     const first = journaled(), second = journaled();
     let closing = false;
