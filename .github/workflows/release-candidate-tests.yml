@@ -14,6 +14,11 @@ on:
         description: Published package name to install
         required: true
         type: string
+      alias:
+        description: Published alias package that users install through; empty when there is none
+        required: false
+        type: string
+        default: ''
       version:
         description: Exact published version to test
         required: true
@@ -56,21 +61,28 @@ jobs:
           node-version: ${{ matrix.node }}
           check-latest: true
 
+      # Every published install path: the package, and the alias when one exists.
       - name: Clean install, boot and cockpit
         shell: bash
         env:
-          PACKAGE: ${{ inputs.package }}
+          PACKAGES: ${{ inputs.package }} ${{ inputs.alias }}
           VERSION: ${{ inputs.version }}
-        run: node scripts/release-smoke.mjs --package "$PACKAGE" --version "$VERSION"
+        run: |
+          for package in $PACKAGES; do
+            node scripts/release-smoke.mjs --package "$package" --version "$VERSION"
+          done
 
       - name: Upgrade from latest with existing state
         if: inputs.previous != ''
         shell: bash
         env:
-          PACKAGE: ${{ inputs.package }}
+          PACKAGES: ${{ inputs.package }} ${{ inputs.alias }}
           VERSION: ${{ inputs.version }}
           PREVIOUS: ${{ inputs.previous }}
-        run: node scripts/release-smoke.mjs --package "$PACKAGE" --version "$VERSION" --upgrade-from "$PREVIOUS"
+        run: |
+          for package in $PACKAGES; do
+            node scripts/release-smoke.mjs --package "$package" --version "$VERSION" --upgrade-from "$PREVIOUS"
+          done
 
   browser:
     name: Shuffled browser specs shard ${{ matrix.shard }}/4

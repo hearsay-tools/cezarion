@@ -22,6 +22,12 @@ function releasePackages(root = repoRoot, rebrand) {
   return { dirs, source, publication };
 }
 
+// The name users install through: the alias, or the compatibility alias after the rebrand.
+function installAlias(root = repoRoot, rebrand) {
+  const { publication } = releasePackages(root, rebrand);
+  return (publication.alias ?? publication.legacyAlias)?.name ?? '';
+}
+
 function packChecks({ root = repoRoot, rebrand, execute = execFileSync } = {}) {
   const { dirs, source, publication } = releasePackages(root, rebrand);
   const options = { cwd: root, stdio: 'inherit' };
@@ -61,4 +67,4 @@ if (require.main === module) {
   } else throw new Error('Expected pack-check or cleanup');
 }
 
-module.exports = { releasePackages, packChecks, cleanupTags };
+module.exports = { releasePackages, installAlias, packChecks, cleanupTags };

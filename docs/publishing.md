@@ -143,8 +143,8 @@ One dispatch takes one **candidate commit** through every stage
    stable version, whatever its dist-tag; a caret range does not match a prerelease.
 3. **Test the published candidate**
    ([`release-candidate-tests.yml`](../.github/workflows/release-candidate-tests.yml)).
-   [`scripts/release-smoke.mjs`](../scripts/release-smoke.mjs) installs the candidate
-   from the registry into an empty prefix, boots it and loads the cockpit, then boots
+   [`scripts/release-smoke.mjs`](../scripts/release-smoke.mjs) installs the candidate,
+   and its alias when one is published, from the registry into an empty prefix, boots it and loads the cockpit, then boots
    the current `latest` on a fresh home and project and upgrades it to the candidate.
    It runs on Linux, macOS and Windows, on the `engines.node` floor and the current
    LTS. The browser specs run shuffled on the candidate's source commit: the published
@@ -152,13 +152,15 @@ One dispatch takes one **candidate commit** through every stage
 4. **Promote.** The gates are checked again, so a blocker opened during the
    candidate tests stops the release. Then `scripts/release.mjs` publishes the stable
    version of the same commit with `--tag latest` (intra-release dependencies keep a
-   **caret** range, unlike the exact-pinned snapshots and candidates), installs it
-   through the alias and boots it, opens a version-bump PR and cuts a GitHub Release
+   **caret** range, unlike the exact-pinned snapshots and candidates), checks that
+   every published name's stable dist-tag points to it, installs it through the alias
+   and boots it, opens a version-bump PR and cuts a GitHub Release
    tagged `v<version>` at the candidate commit. The bump PR targets the dispatched
    branch; the workflow never pushes to that branch.
 
 The release scripts run from the dispatch commit; the package is built from the
-candidate commit in `source/`. Both publishing jobs are gated behind the `production`
+candidate commit in `source/`. Neither checkout keeps a token while dependencies install and the builds
+run; only the version-bump push gets one, with Git hooks off. Both publishing jobs are gated behind the `production`
 environment, so a release can require reviewer approval — and the trusted publisher
 on npmjs.com is pinned to that same environment name. Outside Actions, with neither
 `NODE_AUTH_TOKEN` nor the OIDC request env, the script degrades to a loud dry run.

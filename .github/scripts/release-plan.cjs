@@ -200,11 +200,12 @@ async function releaseSource({ github, context, git, registry, bump, branch, now
   return { sourceSha, version: sourceVersion({ git, sha: sourceSha, bump, branch, registry }) };
 }
 
-function planOutputs({ rollback, packageName, sourceSha, version, registry, context, inputs, branch, ignore }) {
+function planOutputs({ rollback, packageName, aliasName, sourceSha, version, registry, context, inputs, branch, ignore }) {
   const candidate = nextCandidateVersion(version, registry.versions);
   return {
     mode: rollback ? 'rollback' : 'release',
     package: packageName,
+    alias: aliasName ?? '',
     source_sha: sourceSha,
     dispatch_sha: context.sha,
     version,
@@ -222,7 +223,7 @@ function planOutputs({ rollback, packageName, sourceSha, version, registry, cont
   };
 }
 
-async function planRelease({ github, context, inputs, packageName, now = Date.now(), git, view = npmView }) {
+async function planRelease({ github, context, inputs, packageName, aliasName, now = Date.now(), git, view = npmView }) {
   const branch = context.ref.replace(/^refs\/heads\//, '');
   if (branch !== 'main' && !branch.startsWith('release/')) throw new Error('Dispatch the Release workflow from main or a release/** branch.');
   const rollback = inputs.rollback === true || inputs.rollback === 'true';
@@ -235,7 +236,7 @@ async function planRelease({ github, context, inputs, packageName, now = Date.no
   if (!SHA.test(sourceSha)) throw new Error('The candidate commit did not resolve.');
   const reasons = await readGates({ github, repo: context.repo, rollback, latest: registry.distTags.latest, ignore });
   if (reasons.length) throw new Error(`Release refused:\n- ${reasons.join('\n- ')}`);
-  return planOutputs({ rollback, packageName, sourceSha, version, registry, context, inputs, branch, ignore });
+  return planOutputs({ rollback, packageName, aliasName, sourceSha, version, registry, context, inputs, branch, ignore });
 }
 
 // A plan is only good for the registry it read. A rerun of an older run reuses its plan,

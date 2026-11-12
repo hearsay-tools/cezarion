@@ -145,3 +145,33 @@ test('release App preflight rejects missing setup and mismatched identity before
   assert.equal(run(identity, { APP_SLUG: 'cezar-release', EXPECTED_LOGIN: valid.RELEASE_APP_BOT_LOGIN }).status, 0);
   assert.equal(run(identity, { APP_SLUG: 'another', EXPECTED_LOGIN: valid.RELEASE_APP_BOT_LOGIN }).status, 1);
 });
+
+test('no build step holds a token; only the bump push gets one', async () => {
+  const { jobs } = await parsed();
+  for (const name of ['stage', 'release']) {
+    for (const step of jobs[name].steps.filter(entry => String(entry.uses).startsWith('actions/checkout@'))) {
+      assert.equal(step.with['persist-credentials'], false, `${name}: ${step.name}`);
+    }
+  }
+  const names = jobs.release.steps.map(step => step.name);
+  const credential = names.indexOf('Give the bump push its credential');
+  assert.equal(credential, names.indexOf('Open version-bump PR (patch/minor/major only)') - 1);
+  assert.ok(credential > names.indexOf('Build the candidate') && credential > names.indexOf('Publish release'));
+  const step = jobs.release.steps[credential];
+  assert.equal(step['working-directory'], '${{ needs.plan.outputs.bump_dir }}');
+  assert.match(step.run, /core\.hooksPath \/dev\/null/);
+});
+
+test('the promotion checks each stable dist-tag and the candidate tests cover the alias', async () => {
+  const { jobs } = await parsed();
+  const names = jobs.release.steps.map(step => step.name);
+  assert.ok(names.indexOf('Publish release') < names.indexOf('Check the dist-tags'));
+  assert.ok(names.indexOf('Check the dist-tags') < names.indexOf('Install through the alias and boot'));
+  const check = jobs.release.steps.find(step => step.name === 'Check the dist-tags');
+  assert.equal(check.env.TAG, '${{ needs.plan.outputs.stable_tag }}');
+  assert.equal(jobs.candidate.with.alias, '${{ needs.plan.outputs.alias }}');
+  const tests = (await import('yaml')).parse(fs.readFileSync(path.join(__dirname, '..', 'workflows', 'release-candidate-tests.yml'), 'utf8'));
+  for (const step of tests.jobs.install.steps.filter(entry => /release-smoke/.test(entry.run ?? ''))) {
+    assert.equal(step.env.PACKAGES, '${{ inputs.package }} ${{ inputs.alias }}', step.name);
+  }
+});

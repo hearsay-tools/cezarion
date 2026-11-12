@@ -126,7 +126,7 @@ function fixture({ issues = [], nightly = 'success', time = { '1.2.0': '2026-11-
     throw new Error(`unexpected git ${args.join(' ')}`);
   };
   const context = { ref, sha: sha(3), repo: { owner: 'o', repo: 'r' } };
-  const run = inputs => plan.planRelease({ github, context, git, packageName: '@scope/pkg', now: NOW, view: () => ({ versions, time, distTags }), inputs });
+  const run = inputs => plan.planRelease({ github, context, git, packageName: '@scope/pkg', aliasName: 'pkg', now: NOW, view: () => ({ versions, time, distTags }), inputs });
   return { run, calls };
 }
 
@@ -144,6 +144,7 @@ test('a release on main takes the newest verified commit, older than the dispatc
   assert.equal(result.bump_sha, sha(2));
   assert.equal(result.bump_dir, 'source');
   assert.equal(result.previous, '1.2.0');
+  assert.equal(result.alias, 'pkg');
   const ciRuns = calls.find(([kind, args]) => kind === 'runs' && args.workflow_id === 'ci.yml')[1];
   assert.deepEqual([ciRuns.event, ciRuns.branch, ciRuns.status], ['push', 'main', 'success']);
 });

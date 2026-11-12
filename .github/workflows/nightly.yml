@@ -51,6 +51,7 @@ jobs:
       publish: ${{ steps.decide.outputs.publish }}
       candidate: ${{ steps.candidate.outputs.sha }}
       previous: ${{ steps.candidate.outputs.previous }}
+      alias: ${{ steps.candidate.outputs.alias }}
 
     steps:
       - name: Check out repository
@@ -96,12 +97,13 @@ jobs:
           script: |
             const { execFileSync } = require('node:child_process');
             const { verifiedMainCommit, npmView } = require('./.github/scripts/release-plan.cjs');
-            const { releasePackages } = require('./.github/scripts/release-packages.cjs');
+            const { releasePackages, installAlias } = require('./.github/scripts/release-packages.cjs');
             const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
             const sha = await verifiedMainCommit({ github, repo: context.repo, git, head: context.sha });
             const previous = npmView(releasePackages().publication.cezar.name).distTags.latest ?? '';
             core.setOutput('sha', sha);
             core.setOutput('previous', previous);
+            core.setOutput('alias', installAlias());
             await core.summary.addRaw(`Rehearsal candidate: ${sha}; upgrade from ${previous || 'nothing'}.\n`).write();
 
       - name: Write workflow summary
@@ -144,6 +146,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.decide.outputs.candidate }}
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -205,6 +208,7 @@ jobs:
     uses: ./.github/workflows/release-candidate-tests.yml
     with:
       package: ${{ fromJSON(needs.nightly.outputs.result).rootName }}
+      alias: ${{ needs.decide.outputs.alias }}
       version: ${{ fromJSON(needs.nightly.outputs.result).version }}
       previous: ${{ needs.decide.outputs.previous }}
       ref: ${{ needs.decide.outputs.candidate }}
@@ -212,7 +216,9 @@ jobs:
   blocker:
     name: File the rehearsal blocker
     needs: [decide, suite, nightly, rehearsal]
-    if: ${{ always() && needs.decide.outputs.publish == 'true' && contains(join(needs.*.result, ' '), 'failure') }}
+    # A decide job that failed before it set `publish` (no verified candidate) is a failed
+    # rehearsal too.
+    if: ${{ always() && (needs.decide.result == 'failure' || (needs.decide.outputs.publish == 'true' && contains(join(needs.*.result, ' '), 'failure'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

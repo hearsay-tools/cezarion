@@ -28,6 +28,7 @@ test('a failed rehearsal files a release-blocker issue from a job that runs no c
   const { jobs } = read('nightly.yml');
   assert.deepEqual(jobs.blocker.needs, ['decide', 'suite', 'nightly', 'rehearsal']);
   assert.match(jobs.blocker.if, /always\(\)/);
+  assert.match(jobs.blocker.if, /needs\.decide\.result == 'failure'/, 'a decide job that found no verified candidate files a blocker too');
   assert.match(jobs.blocker.if, /contains\(join\(needs\.\*\.result, ' '\), 'failure'\)/);
   assert.match(jobs.blocker.steps.at(-1).with.script, /kind: 'rehearsal'/);
   assert.deepEqual(jobs.blocker.permissions, { contents: 'read', issues: 'write' });
