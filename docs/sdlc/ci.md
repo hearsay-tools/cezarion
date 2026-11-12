@@ -42,6 +42,28 @@ TypeScript files with the files reached by those invoked compiler configs. It fa
 when executable TypeScript falls outside both phases; it does not build or run the
 post-build package check.
 
+### Before the PR
+
+<a id="before-the-pr"></a>
+
+`npm run prepr` is the one local gate before a PR opens. It prints one verdict and the
+evidence block for the PR body. It reads Squeal's results for the changed files and for
+lint, and runs typecheck (not for a docs-only change), citations and clones. Run it on
+the committed head. Its exit code is non-zero on a failing test, a lint finding, a type
+error, a bare citation or a new clone.
+
+- The Squeal wait is bounded at 2 minutes (`--wait-ms`). When it ends with no failure,
+  the command names the files with no result and passes. CI runs them.
+- With no Squeal daemon for the worktree, the command says so and runs
+  `npm run test:changed` (unless its selection is the full suite, which is left to CI) and
+  `npm run lint`.
+- Local `npm run test:parity`, local browser specs and coverage runs are not duties
+  before a PR. CI runs them. Run one only to debug a failure.
+- The changed-function quality check ([`check-code-quality`](../../.ai/skills/check-code-quality/SKILL.md))
+  runs beside the push, not before it, and reuses Squeal's stored results.
+- Regression proof ([regression-proof.md](regression-proof.md)) stays: it is part of
+  writing the test.
+
 ### Local iteration versus final verification
 
 Before adding a YAML, shell or Markdown reader, read [Script readers](script-readers.md).
@@ -80,37 +102,18 @@ not a final gate. `.ai/agentic.config.json` records CI's complete final command 
 
 <a id="squeal-wait-bound"></a>
 
-<!-- until: hearsay-tools/squeal#146 -->
-**A wait for one file's verdict has a bound.** Squeal's skill says to wait again
-when `squeal status --wait` returns on timeout. In this repo, stop waiting for a
-unit test file's verdict when either case holds:
+**A wait for a verdict has a bound.** Squeal's skill says to wait again when
+`squeal status --wait` returns on timeout. In this repo, do not wait again. `npm run prepr`
+waits at most 2 minutes for the changed files and for lint, then names the files
+with no result (the first ten and a count when more) and passes when none failed.
 
-- Squeal reports the file unknown: for example, it timed out at the per-file
-  cap (`runner.timeoutMs` in `squeal.config.json`), or it was never queued.
-  Waiting again does not change an unknown result, and `squeal retry` runs the
-  file again under the same cap.
-- The file is still pending after the per-file cap plus five minutes, counted
-  from your first wait at the revision you will push.
-
-Then do these three things:
-
-1. Run the tests in that file that the change adds, changes or reads:
-   `npm test -- <file> -t '<name>'`. Check that each run reports passed tests,
-   not only skipped ones. Run the whole file (`npm test -- <file>`) only when no
-   test name covers the change, for example after an edit to a shared testkit.
-2. In the PR's Verification, record the file and its Squeal state (unknown and
-   its reason, or pending and for how long). Also record the load average
-   (`uptime`), the logical CPU count (`nproc`), and each command with its passed
-   and skipped counts.
-3. Let CI's four Vitest shards give the file's full verdict. A focused pass is
-   not a full pass, and the PR does not merge until the shards pass.
-
-A file that gets a verdict must pass: the bound covers a missing verdict, never
-a failure. The bound also covers a test file that Squeal re-runs only because
-the change edited a document it reads. For example, an edit to
-`AGENT_PROTOCOL.md` prose re-runs
-`packages/cezar/src/core/harness-parity.test.ts`, and the focused run is
-`npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"`.
+Record the named files and their Squeal state in the PR's Verification. A missing verdict
+is covered by CI's shards, which give the full verdict; a failing verdict is never
+covered, and the PR does not merge until the shards pass. To check one test file by hand,
+run `npm test -- <file> -t '<name>'` and confirm it reports passed tests, not only skipped
+ones. This also covers a file Squeal re-runs only because the change edited a document it
+reads, for example `AGENT_PROTOCOL.md` prose, which re-runs
+`packages/cezar/src/core/harness-parity.test.ts`.
 
 ### Clone comparison
 
@@ -607,7 +610,7 @@ only a successful run whose head carries the final workflow files. From the
 final pushed PR head, compare the cited run's workflow files with `HEAD`:
 
 ```bash
-sha=$(gh run view <run-id> --repo hearsay-tools/cezarion --json headSha --jq .headSha)
+sha=$(gh run view <run-id> --repo hearsay-tools/squawk --json headSha --jq .headSha)
 git diff --quiet "$sha" HEAD -- .github/workflows/ && echo current || echo stale
 ```
 
@@ -745,10 +748,10 @@ green CI shards are. A failure in a file the branch touches never qualifies: fix
 Count a test file's observed CI failure annotations across rerun attempts with:
 
 ```bash
-node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/squawk --runs 20
 # Or select runs by creation time (inclusive UTC timestamps):
 
-node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/squawk --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
 ```
 
 The command uses authenticated `gh` reads and defaults to the current repository's
@@ -775,9 +778,9 @@ rerun it can show the passing log. Read a failed attempt that a rerun replaced
 by its job ID:
 
 ```bash
-gh api --allow-escape-sequences repos/hearsay-tools/cezarion/actions/jobs/<job-id>/logs > job.log
+gh api --allow-escape-sequences repos/hearsay-tools/squawk/actions/jobs/<job-id>/logs > job.log
 # List the job IDs of one attempt of a run:
-gh api repos/hearsay-tools/cezarion/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
+gh api repos/hearsay-tools/squawk/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
 ```
 
 Without `--allow-escape-sequences`, `gh api` exits 1 and writes no log.

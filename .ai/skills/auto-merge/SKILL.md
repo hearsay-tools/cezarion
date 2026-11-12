@@ -24,9 +24,9 @@ the never-lists of paths and diff content. Its constants are the rules. Then
 confirm the rules the script cannot see:
 
 - The owner has not paused auto-merge:
-  `gh api repos/hearsay-tools/cezarion --jq .allow_auto_merge` prints `true`.
+  `gh api repos/hearsay-tools/squawk --jq .allow_auto_merge` prints `true`.
 - You are opening this PR in this task, from a branch of
-  `hearsay-tools/cezarion`, into `main`.
+  `hearsay-tools/squawk`, into `main`.
 - The user did not ask to review the PR before it merges.
 - Every issue the PR closes (`Closes #N`, `Fixes #N`) is complete with this PR.
   When part of an issue stays open or moved elsewhere, write `Refs #N`.

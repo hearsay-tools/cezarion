@@ -47,7 +47,7 @@ jobs:
                 context.payload.repository?.id !== repoId ||
                 context.payload.sender?.id !== authorId ||
                 context.repo.owner !== 'hearsay-tools' ||
-                context.repo.repo !== 'cezarion' ||
+                context.repo.repo !== 'squawk' ||
                 !/^[1-9][0-9]*$/.test(n) || !Number.isSafeInteger(Number(n)) ||
                 !/^[a-f0-9]{40}$/.test(sha)) return fail();
 
