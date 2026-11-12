@@ -1,6 +1,11 @@
 import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import type { HighlighterCore } from 'shiki/core'
 
+import { highlighterLoads, highlighterSettledForTests } from './highlighter-loads'
+
+// Kept importable from here; the web test setup imports the leaf directly.
+export { highlighterSettledForTests }
+
 /**
  * One lazy Shiki core with the JavaScript regex engine and an explicit grammar allowlist.
  * Unknown languages use plaintext. Share the CSS-variable theme and instance across Markdown and
@@ -144,13 +149,11 @@ export function langForPath(path: string): string | null {
 // ---- singleton state --------------------------------------------------------------------------
 
 let core: HighlighterCore | null = null
-let corePromise: Promise<HighlighterCore> | null = null
 const loadedLangs = new Set<string>()
-const langPromises = new Map<string, Promise<void>>()
 
 /** Boot the core exactly once: `shiki/core` + the JS regex engine, both as lazy chunks. */
 function ensureCore(): Promise<HighlighterCore> {
-  corePromise ??= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(
+  highlighterLoads.core ??= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(
     async ([{ createHighlighterCore }, { createJavaScriptRegexEngine }]) => {
       core = await createHighlighterCore({
         themes: [SYN_THEME],
@@ -162,14 +165,14 @@ function ensureCore(): Promise<HighlighterCore> {
       return core
     },
   )
-  return corePromise
+  return highlighterLoads.core
 }
 
 /** Load one grammar (idempotent). Resolves even on failure — failure means plaintext, not error. */
 export function ensureLang(lang: string): Promise<void> {
   const canonical = canonicalLang(lang)
   if (canonical === null || loadedLangs.has(canonical)) return Promise.resolve()
-  let pending = langPromises.get(canonical)
+  let pending = highlighterLoads.langs.get(canonical)
   if (!pending) {
     pending = ensureCore()
       .then(async (highlighter) => {
@@ -179,9 +182,9 @@ export function ensureLang(lang: string): Promise<void> {
       .catch(() => {
         // A failed grammar fetch must not wedge the promise cache in a rejected state forever —
         // drop it so a later render can retry, and let the caller fall back to plaintext now.
-        langPromises.delete(canonical)
+        highlighterLoads.langs.delete(canonical)
       })
-    langPromises.set(canonical, pending)
+    highlighterLoads.langs.set(canonical, pending)
   }
   return pending
 }
@@ -243,19 +246,10 @@ export async function highlight(code: string, lang: string, options: HighlightOp
   return highlightSync(code, lang, options) ?? plaintext(code)
 }
 
-/**
- * Test seam: resolve once the core boot and every in-flight grammar load have settled. A render
- * starts those loads un-awaited, so without this they run on past cleanup into the next case
- * (#601). Rejections are swallowed — callers already degrade a failed load to plaintext.
- */
-export async function highlighterSettledForTests(): Promise<void> {
-  await Promise.allSettled([corePromise, ...langPromises.values()])
-}
-
 /** Test seam: drop the singleton so a suite can assert cold-boot behavior. */
 export function resetHighlighterForTests(): void {
   core = null
-  corePromise = null
+  highlighterLoads.core = null
   loadedLangs.clear()
-  langPromises.clear()
+  highlighterLoads.langs.clear()
 }
