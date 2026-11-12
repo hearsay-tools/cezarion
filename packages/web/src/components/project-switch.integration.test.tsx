@@ -16,6 +16,8 @@ import { ProjectRail } from '@/components/project-rail'
 import { ThemeProvider } from '@/components/theme-provider'
 import { useProjectSwitch } from '@/components/use-project-switch'
 import { PROJECT_LOCATIONS_STORAGE_KEY } from '@/lib/last-location'
+import { ProjectRouteMatcherContext } from '@/lib/project-route-matcher'
+import { matchProjectRoute } from '@/routes'
 
 /**
  * The real controller + the real rail + the real resolver, in one router: the seams the unit
@@ -87,9 +89,11 @@ function mount(path: string) {
     <QueryClientProvider client={client}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[path]}>
-          <LastLocationController />
-          <Rail />
-          <Controls />
+          <ProjectRouteMatcherContext.Provider value={matchProjectRoute}>
+            <LastLocationController />
+            <Rail />
+            <Controls />
+          </ProjectRouteMatcherContext.Provider>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
@@ -227,5 +231,29 @@ describe('switch intent', () => {
     fireEvent.click(screen.getByRole('button', { name: 'explicit' }))
     await settle('c')
     expect(at()).toBe('/p/boot/skills?q=1')
+  })
+})
+
+describe('route matcher wiring', () => {
+  it('fails loudly when no route matcher is provided, instead of sending every switch home', () => {
+    function Bare() {
+      useProjectSwitch()
+      return null
+    }
+    // React logs the render error before it rethrows; the assertion below is the signal.
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() =>
+        render(
+          <QueryClientProvider client={createQueryClient()}>
+            <MemoryRouter initialEntries={['/p/boot/']}>
+              <Bare />
+            </MemoryRouter>
+          </QueryClientProvider>,
+        ),
+      ).toThrow('useProjectSwitch needs a ProjectRouteMatcherContext provider')
+    } finally {
+      quiet.mockRestore()
+    }
   })
 })

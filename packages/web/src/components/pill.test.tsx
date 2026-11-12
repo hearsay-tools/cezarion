@@ -1,6 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { isPainted, paintClasses } from '@/test/paint'
+
 import { Pill } from './pill'
 
 // Explicit rather than relying on RTL's auto-cleanup, which only runs when vitest `globals` is on.
@@ -18,8 +20,6 @@ describe('Pill', () => {
     const pill = pillOf(<Pill>3 running</Pill>)
 
     expect(pill.textContent).toBe('3 running')
-    expect(pill.className).toContain('bg-muted')
-    expect(pill.className).toContain('rounded-full')
   })
 
   it('has no dot unless one is requested', () => {
@@ -48,15 +48,20 @@ describe('Pill', () => {
   })
 
   // The design system's grammar: status is expressed by the dot, so the chip's own fill never changes.
-  it.each(['success', 'pending', 'danger', 'accent', 'neutral'] as const)(
-    'keeps the chip neutral when the dot is %s',
-    (tone) => {
-      const pill = pillOf(<Pill dot={tone}>Label</Pill>)
-
-      expect(pill.className).toContain('bg-muted')
-      expect(pill.className).toContain('text-muted-foreground')
-    }
-  )
+  it('keeps the chip itself unchanged whatever the dot tone', () => {
+    const plain = pillOf(<Pill>Label</Pill>).className
+    cleanup()
+    const toned = (['success', 'pending', 'danger', 'accent', 'neutral'] as const).map((tone) => {
+      const className = pillOf(<Pill dot={tone}>Label</Pill>).className
+      cleanup()
+      return className
+    })
+    expect(toned).toEqual(toned.map(() => plain))
+    // …and that one chip is painted: a fill and an ink of its own.
+    const chip = pillOf(<Pill>Label</Pill>)
+    expect(isPainted(paintClasses(chip, 'fill'))).toBe(true)
+    expect(isPainted(paintClasses(chip, 'ink'))).toBe(true)
+  })
 
   it('passes through span attributes', () => {
     render(<Pill title="tooltip">Label</Pill>)

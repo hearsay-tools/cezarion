@@ -5,6 +5,7 @@ import { useHealth, useProjects } from '@/api/queries'
 import { githubRepoBase } from '@/lib/tasks-table'
 import { readStoredProjectLocation } from '@/lib/last-location'
 import { pathnameProjectId } from '@/lib/project-router'
+import { ProjectRouteMatcherContext } from '@/lib/project-route-matcher'
 import {
   projectSwitchTarget,
   reportSwitchHost,
@@ -35,6 +36,8 @@ export function useProjectSwitch(): {
   target: (projectId: string) => ProjectSwitchTarget
   go: (projectId: string) => Promise<void>
 } {
+  const matchRoute = React.useContext(ProjectRouteMatcherContext)
+  if (matchRoute === null) throw new Error('useProjectSwitch needs a ProjectRouteMatcherContext provider (App provides matchProjectRoute)')
   const registry = useProjects().data
   const health = useHealth().data
   const capabilities = health?.capabilities
@@ -57,15 +60,15 @@ export function useProjectSwitch(): {
     (projectId: string): ProjectSwitchTarget =>
       projectId === currentProjectId
         ? { href: currentHref, verify: false }
-        : projectSwitchTarget(projectId, readStoredProjectLocation(projectId), { registry, capabilities }),
-    [registry, capabilities, currentProjectId, currentHref],
+        : projectSwitchTarget(projectId, readStoredProjectLocation(projectId), { registry, capabilities, matchRoute }),
+    [registry, capabilities, matchRoute, currentProjectId, currentHref],
   )
   const go = React.useCallback(
     async (projectId: string) => {
       if (projectId === currentProjectId) return supersedeProjectSwitch()
-      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, capabilities, repoBaseOf })
+      await switchToProject(projectId, readStoredProjectLocation(projectId), { registry, capabilities, repoBaseOf, matchRoute })
     },
-    [registry, capabilities, repoBaseOf, currentProjectId],
+    [registry, capabilities, repoBaseOf, matchRoute, currentProjectId],
   )
   return { target, go }
 }

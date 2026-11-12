@@ -1,5 +1,6 @@
 import { productName } from '../home/display.ts';
 import { productEnv } from '../core/product-env.ts';
+import { automationsEnabled } from '../automations/enabled.ts';
 import { squawkAskRequestSchema, squawkCancelWaitRequestSchema, squawkDoneRequestSchema, squawkWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
@@ -13,7 +14,7 @@ export function previewToolEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 
 /** Automations are on unless the value is exactly `0` (spec 2026-10-02-scheduled-automations). */
 export function automationsToolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return productEnv('AUTOMATIONS', env) !== '0';
+  return automationsEnabled(env);
 }
 
 /**

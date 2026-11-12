@@ -1,10 +1,11 @@
-import { chmodSync, mkdirSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { chmodSync, mkdirSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from './store.ts';
 
 const dirs: string[] = [];
@@ -24,8 +25,28 @@ async function directory(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
+
+/**
+ * Watch every file the store commits by rename, and optionally fail one: `fail(name)` throws
+ * before the rename of the file it names lands, as a full disk would.
+ */
+function watchRenames(fail: (name: string) => Error | undefined = () => undefined): string[] {
+  const committed: string[] = [];
+  const rename = fs.renameSync;
+  vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    const name = basename(String(to));
+    const error = fail(name);
+    if (error) throw error;
+    committed.push(name);
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  return committed;
+}
 
 describe('AutomationStore', () => {
   it('writes definitions atomically at private permissions and preserves unknown fields', async () => {
@@ -530,9 +551,7 @@ describe('AutomationStore arm (state before definition)', () => {
     const store = AutomationStore.open(dir);
     const created = store.create(schedule as never, 'nightly');
     store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z' }));
-    const order: string[] = [];
-    const write = (store as any).atomicJson.bind(store) as (filename: string, value: unknown) => void;
-    (store as any).atomicJson = (filename: string, value: unknown) => { order.push(filename); write(filename, value); };
+    const order = watchRenames();
     const seen: unknown[] = [];
     const updated = store.update('nightly', created.revision, { ...schedule, enabled: true } as never, (definition, previous) => {
       seen.push(previous?.enabled, definition.enabled);
@@ -561,11 +580,7 @@ describe('AutomationStore arm (state before definition)', () => {
     const store = AutomationStore.open(dir);
     const created = store.create(schedule as never, 'nightly');
     store.setState('nightly', (current) => ({ ...current, revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z', consecutiveFailures: 2 }));
-    const write = (store as any).atomicJson.bind(store) as (filename: string, value: unknown) => void;
-    (store as any).atomicJson = (filename: string, value: unknown) => {
-      if (filename === 'automations.json') throw new Error('disk full');
-      write(filename, value);
-    };
+    watchRenames((name) => name === 'automations.json' ? new Error('disk full') : undefined);
     expect(() => store.update('nightly', created.revision, { ...schedule, enabled: true } as never, () => ({ nextRunAt: '2026-10-04T04:00:00.000Z' }))).toThrow('disk full');
     const fresh = AutomationStore.open(dir);
     expect(fresh.state('nightly')).toEqual({ revision: 1, nextRunAt: '2026-01-01T04:00:00.000Z', consecutiveFailures: 2 });

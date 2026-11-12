@@ -34,6 +34,8 @@ import { ListViewProvider } from '@/components/list-view'
 import { orderSkills } from '@/lib/skills'
 import { ThemeProvider } from '@/components/theme-provider'
 import { THEME_STORAGE_KEY, type Theme } from '@/lib/theme'
+import { ProjectRouteMatcherContext } from '@/lib/project-route-matcher'
+import { matchProjectRoute } from '@/routes'
 
 afterEach(cleanup)
 
@@ -187,11 +189,13 @@ function renderPalette({
     <QueryClientProvider client={createQueryClient()}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[entry]}>
-          <ListViewProvider>
-            <CommandPalette />
-            <LocationProbe />
-            <input data-testid="outside-input" aria-label="outside" />
-          </ListViewProvider>
+          <ProjectRouteMatcherContext.Provider value={matchProjectRoute}>
+            <ListViewProvider>
+              <CommandPalette />
+              <LocationProbe />
+              <input data-testid="outside-input" aria-label="outside" />
+            </ListViewProvider>
+          </ProjectRouteMatcherContext.Provider>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
