@@ -45,8 +45,9 @@ test('typecheck keeps minimum Node, its bounded retry and an independent full ch
     { name: 'Typecheck', run: 'npm run typecheck' },
   ]);
   assert.equal(build.steps.some(step => step.run === 'npm run typecheck'), false);
-  const prepare = build.steps.findIndex(step => step.run === 'npm run build:server');
-  assert.ok(prepare >= 0 && prepare < build.steps.findIndex(step => step.run === 'npm run test:unit'));
+  const index = run => build.steps.findIndex(step => step.run === run);
+  assert.ok(index('npm run test:unit') >= 0 && index('npm run test:unit') < index('npm run build'), 'unit tests run from source, before the build');
+  assert.equal(index('npm run build:server'), -1);
   assert.deepEqual(build.needs, ['queue-proof', 'preflight'], 'heavy build follows preflight, beside review');
 });
 

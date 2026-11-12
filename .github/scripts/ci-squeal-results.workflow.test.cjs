@@ -235,7 +235,8 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
   assert.equal(job.steps.find((s) => s.uses?.startsWith('pnpm/action-setup@')).with.version, '12.11.2');
   const runs = job.steps.map((s) => s.run).filter(Boolean);
   assert.ok(runs.includes('pnpm install --frozen-lockfile'));
-  assert.ok(runs.includes('npm run build:server'), 'the export checkout holds what the shards read');
+  const builds = (j) => j.steps.some((s) => s.run === 'npm run build:server');
+  assert.equal(builds(job), builds(jobs.vitest), 'the export checkout holds what the shards read');
   assert.equal(runs.some((run) => /npm (test|run test)|vitest run/.test(run)), false, 'the job runs no test command');
   assert.equal(step(job, 'Download Squeal parts').with.pattern, 'squeal-parts-shard-*');
   assert.match(step(job, 'Export Squeal results').run,
