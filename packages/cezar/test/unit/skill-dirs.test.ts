@@ -8,7 +8,7 @@ import { SKILL_DIRS } from '../../src/skills.js';
 /**
  * The cockpit's "no skills yet" hint names the directories to drop files into from a hand-copy
  * (`SKILL_PROJECT_DIRS` in packages/web/src/components/skill-empty-hint.tsx): the bundle cannot
- * import the server (#374). This reads that copy and compares it with the server's discovery list.
+ * import the server. This reads that copy and compares it with the server's discovery list.
  */
 test('the project skill dirs the cockpit hint names are the ones discovery scans, in order', () => {
   const hint = readFileSync(new URL('../../../web/src/components/skill-empty-hint.tsx', import.meta.url), 'utf8');
