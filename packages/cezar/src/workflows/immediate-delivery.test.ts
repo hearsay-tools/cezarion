@@ -150,7 +150,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     const w = await worker(p.id);
     const held = conversation(p.id)(w.id, p.id, 'progress', 'finding held behind the question');
     manager.deliverConversationInput(p.id);
-    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:auth-error answer' }])).toBe(true);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:request-error answer' }])).toBe(true);
     await until(() => !manager.isActive(p.id));
     expect(inputOf(p.id, held.id)?.deliveredAt).toBeUndefined();
     expect(inputOf(p.id, held.id)?.awaitingRead).toBeUndefined();
@@ -163,7 +163,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     manager.finish(w.id); await until(() => !manager.isActive(w.id));
     const now = new Date().toISOString();
     const opening: ConversationMessage = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request',
-      text: 'mock:auth-error resume instruction', createdAt: now, deadline: new Date(Date.now() + 600_000).toISOString(),
+      text: 'mock:request-error resume instruction', createdAt: now, deadline: new Date(Date.now() + 600_000).toISOString(),
       requestHash: 'a'.repeat(64), state: 'accepted', resumed: true };
     const openingInput: AgentInput = { id: opening.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: opening.text, createdAt: now,
       conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } };

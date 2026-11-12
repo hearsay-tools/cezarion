@@ -30,7 +30,7 @@ describe('Cursor scenario wire and native dispatch', () => {
   it.each(['mock:autonomous', 'mock:hold-cezar-done', 'mock:agent-echo'])('keeps provider failure before %s', prompt => {
     const { frames } = run(prompt, 'normal', true);
     expect(frames.map(frame => frame.type)).toEqual(['system', 'result']);
-    expect(frames[1]).toMatchObject({ is_error: true, result: 'RetriableError: provider unavailable' });
+    expect(frames[1]).toMatchObject({ is_error: true, result: 'ConnectError: [invalid_argument] HTTP 400 Bad Request: invalid_request_error: messages must be non-empty' });
   });
   it.each(['mock:autonomous', 'mock:cezar-done', 'mock:agent-echo'])('keeps after-init modes before %s', prompt => {
     const { frames } = run(prompt, 'no-result');

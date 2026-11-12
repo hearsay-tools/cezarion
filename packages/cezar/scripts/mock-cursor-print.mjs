@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { CURSOR_FAILURES } from './mock-provider-failures.mjs';
 import { loadControls } from './mock-controls.mjs';
-import { scenarioFor, play } from './mock-scenario.mjs';
+import { scenarioFor, play, PROVIDER_HOLD_SCENARIOS } from './mock-scenario.mjs';
 import { waitForRelease } from './mock-lifecycle.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -111,7 +112,7 @@ if (mode === 'model-rejection-held') {
 }
 if (mode === 'unrelated-startup-error') { process.stderr.write('Account unavailable\n'); process.exit(1); }
 const sharedNames = ['autonomous', 'silent-tail', 'tool-tail', 'crash-stderr', 'cezar-tool', 'ci-wait',
-  'multi-pr-refs', 'turn-messages', 'agent-echo', 'provider-error', 'hold-cezar-done', 'hold-cezar-ask',
+  'multi-pr-refs', 'turn-messages', 'agent-echo', 'provider-error', ...PROVIDER_HOLD_SCENARIOS.map(([name]) => name), 'hold-cezar-done', 'hold-cezar-ask',
   'cezar-done', 'cezar-ask', 'busy-progress', 'no-progress', 'hold-gated', 'hold', 'deferred-turn-start'];
 // Print has no persistent input, steering, child transcript or cezar-wait reply.
 const unsupported = ['ack-only', 'steer-tool', 'steer-late', 'subagent-after-park', 'cezar-wait'];
@@ -166,7 +167,7 @@ function encoder(selected) {
     reply: () => prompt === 'inspect the working tree' || prompt.includes('mock:baseline') ? baselineReply() : defaultReply(),
     end(step) {
       const empty = selected.name === 'turn-messages' || ['silent-tail', 'tool-tail'].includes(selected.name) && !prompt.includes(NO_WAIT_NUDGE_PREFIX);
-      result(step.error === 'provider' ? 'RetriableError: provider unavailable' : empty ? '' : text, step.error === 'provider');
+      result(step.error ? CURSOR_FAILURES[step.error] : empty ? '' : text, Boolean(step.error));
     },
   };
 }
@@ -201,7 +202,7 @@ if (mode === 'native-question') {
 const selectedFailure = failureControl?.failureFor(prompt);
 const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
 if (failureControl ? nativeFailure === 'provider' : mode === 'provider-error') {
-  result('RetriableError: provider unavailable', true);
+  result(CURSOR_FAILURES.provider, true);
   process.exit(0);
 }
 if (silentOrigin) (await import('./mock-silent-tail.mjs')).noteSilentTailPrompt(`mock:${origin}`);
@@ -215,7 +216,7 @@ await dispatch([
   { when: () => process.env.CEZ_MOCK_CI_PR, reply: async () => finish(JSON.stringify((await (await tools()).probeCiTool('cursor', args)).response)) },
   ...['no-progress', 'busy-progress', 'hold-cezar-done', 'hold-cezar-ask', 'hold-gated', 'multi-pr-refs', 'turn-messages'].map(name => ({ name })),
   { when: () => prompt.includes('mock:ask-bad'), reply: () => finish('Malformed question skipped.') },
-  { name: 'provider-error' },
+  { name: 'provider-error' }, ...PROVIDER_HOLD_SCENARIOS.map(([name]) => ({ name })),
   { when: () => resumeId && /Library:|Tests:|Plan:/.test(prompt), reply: async () => finish(await done('Done.')) },
   { name: 'cezar-done' },
   { name: 'cezar-ask', when: () => !resumeId || prompt.includes('mock:cezar-ask-reply-late') },

@@ -104,7 +104,7 @@ describe.each(RUNNER_IDS)('%s native failure control', runner => {
     const control = fixture({ mode: 'gated-once' });
     expectSuccess(await run(runner, control.path, 'inspect the working tree'));
     expect(control.held()).toBe(false);
-    const observation = await driveSeam(runner, 'provider-error', {
+    const observation = await driveSeam(runner, 'provider-error-controlled', {
       spec: { env: { CEZ_MOCK_FAILURE_CONTROL: control.path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' } },
       whileOpen: async (_session, { v1 }) => {
         try {
@@ -115,7 +115,7 @@ describe.each(RUNNER_IDS)('%s native failure control', runner => {
       },
     });
     expectFailure(observation);
-    expectSuccess(await run(runner, control.path, HARNESS_ADAPTERS[runner].scenarios['provider-error']!));
+    expectSuccess(await run(runner, control.path, HARNESS_ADAPTERS[runner].scenarios['provider-error-controlled']!));
     expectSuccess(await run(runner, control.path, 'Resume to receive the queued CI observation.'));
   });
 

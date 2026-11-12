@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { loadControls } from './mock-controls.mjs';
 import { waitForRelease } from './mock-lifecycle.mjs';
-import { scenarioFor, play } from './mock-scenario.mjs';
+import { scenarioFor, play, PROVIDER_HOLD_SCENARIOS } from './mock-scenario.mjs';
+import { OPENCODE_FAILURES } from './mock-provider-failures.mjs';
 import { isAckOnlyNudge, finalMessageNudgeKind } from './mock-silent-tail.mjs';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
@@ -608,7 +609,6 @@ async function replyWithEarlyProviderError(body) {
   // #505 review: the provider rejects before any assistant message exists.
   send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired' } } } });
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
-  return;
 }
 async function replyWithNativeFailure(body) {
   const selectedFailure = failureControl?.failureFor(body);
@@ -871,7 +871,7 @@ function scenarioEncoder(scenario, url, body) {
     progress: () => send({ type: 'server.heartbeat', properties: {} }),
     readSteers(step) { if (step.late) turnLate = true; },
     end(step) {
-      if (step.error === 'provider') { sendProviderFailure(); return; }
+      if (step.error) { sendProviderFailure(step.error); return; }
       if (['hold', 'hold-gated', 'hold-cezar-ask', 'hold-cezar-done', 'cezar-ask', 'cezar-done'].includes(name)) sendUsageThenIdle();
       else {
         if (name === 'busy-progress') send({ type: 'message.updated', properties: { info: info({ cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } }) } });
@@ -920,11 +920,11 @@ function playScenarioChild(step, playChild, encoder) {
   if (result instanceof Promise) return result.then(barrier);
   barrier();
 }
-function sendProviderFailure() {
+function sendProviderFailure(kind = 'provider', [statusCode, message] = OPENCODE_FAILURES[kind]) {
   // A failed model call never reads steers queued behind its opening prompt.
   turnLate = true;
   send({ type: 'message.part.updated', properties: { part: { id: 'prt_mock_perr', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: 'Starting the review' } } });
-  send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'ProviderAuthError', data: { message: 'API key expired — run `opencode auth login`' } } } });
+  send({ type: 'session.error', properties: { sessionID: SESSION_ID, error: { name: 'APIError', data: { message, statusCode, isRetryable: statusCode !== 400 } } } });
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
 }
 
@@ -978,7 +978,7 @@ async function streamPrompt(url, body, silent) {
   if (await playSlot(['steer-tool', 'steer-late', 'cezar-tool', 'ci-wait', 'multi-pr-refs', 'turn-messages', 'agent-echo', 'subagent-after-park'], url, body)) return;
   if (body.includes('mock:subagent')) { await replyWithSubagent(body); return; }
   if (await dispatchNativeReply(body)) return;
-  if (await playSlot(['autonomous'], url, body)) return;
+  if (await playSlot([...PROVIDER_HOLD_SCENARIOS.map(([name]) => name), 'autonomous'], url, body)) return;
   if (silent && await play(silent, scenarioEncoder(silent, url, body)) === 'handled') return;
   if (await dispatchReply(nativeReplies, body)) return;
   if (await playSlot(['hold-cezar-done', 'cezar-done', 'hold-cezar-ask', 'cezar-ask', 'no-progress', 'busy-progress', 'hold-gated', 'hold'], url, body)) return;

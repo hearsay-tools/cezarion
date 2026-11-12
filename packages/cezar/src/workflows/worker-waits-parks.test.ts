@@ -105,7 +105,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
 
   it('provider failure with a worker wait open parks and the next resolution delivers', async () => {
     const wire = gatedProviderFailure(root, 'claude');
-    const p = await parent(HARNESS_ADAPTERS.claude.scenarios['provider-error']!);
+    const p = await parent(HARNESS_ADAPTERS.claude.scenarios['provider-error-controlled']!);
     await until(wire.held);
     const w = await worker(p.id);
     const entry = manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait');

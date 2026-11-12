@@ -64,7 +64,7 @@ describe('a failed Continue on a root parked at an earlier workflow step', () =>
     store.flush();
     manager = createFixtureManager(store, repoRoot);
 
-    expect(manager.continueRun(id, { text: 'mock:auth-error resume' })).toEqual({ ok: true });
+    expect(manager.continueRun(id, { text: 'mock:request-error resume' })).toEqual({ ok: true });
     await expect.poll(() => store.getRun(id)?.status, { timeout: 20_000 }).toBe(RUN_STATUS.failed);
     expect(stepStatus(id, 'a')).toBe(STEP_STATUS.waiting);
 

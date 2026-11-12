@@ -34,7 +34,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         await until(() => currentUsage(p.id) !== undefined);
         manager.dispose();
         const snapshot = JSON.stringify(store.getRun(p.id));
-        if (completion === 'error') session.sendMessage([{ type: 'text', text: 'mock:auth-error' }]);
+        if (completion === 'error') session.sendMessage([{ type: 'text', text: 'mock:request-error' }]);
         else session.end();
         await Promise.all(executions.splice(0));
         expect(store.getRun(p.id)?.status).toBe('waiting');

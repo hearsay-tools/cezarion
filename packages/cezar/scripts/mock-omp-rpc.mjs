@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { productEnv } from './product-env.mjs';
+import { OMP_FAILURES } from './mock-provider-failures.mjs';
 import { loadControls } from './mock-controls.mjs';
 import { scenarioFor, play } from './mock-scenario.mjs';
 import readline from 'node:readline';
@@ -197,7 +198,7 @@ function beginTurn(command) {
  * `all`, the first otherwise), then the terminal `agent_end`, one `prompt_result` per admitted
  * prompt, and `session_settled` (rpc-prompt-results.ts, rpc-session-settle, v18.4.11).
  */
-function endTurn({ status = 'completed', error, settle = true } = {}) {
+function endTurn({ status = 'completed', error, kind, settle = true } = {}) {
   const turn = activeTurn;
   activeTurn = null;
   const readNow = steeringMode === 'all' ? turn.steers : turn.steers.slice(0, 1);
@@ -213,7 +214,7 @@ function endTurn({ status = 'completed', error, settle = true } = {}) {
   }
   for (const steer of readNow) {
     userMessage(steer.message);
-    if (status === 'error') providerFailure();
+    if (status === 'error') providerFailure(kind);
     else assistantText([steer.message], { usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } } });
   }
   write({ type: 'turn_end' });
@@ -421,14 +422,16 @@ const promptScenarios = [
 const beforeNativeFailure = new Set(['busy-progress', 'no-progress', 'cezar-ask',
   'subagent-after-park', 'steer-late', 'hold-cezar-done', 'hold-cezar-ask', 'cezar-done']);
 
-function providerFailure() {
-  const error = { message: 'Not Found', provider: 'anthropic', model: 'claude-mock', retryable: false };
-  assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: 'Not Found' } });
+
+function providerFailure(kind = 'provider') {
+  const message = OMP_FAILURES[kind];
+  const error = { message, provider: 'anthropic', model: 'claude-mock', retryable: kind !== 'provider' };
+  assistantText([], { stopReason: 'error', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } }, extra: { errorMessage: message } });
   return error;
 }
 
-function providerError() {
-  endTurn({ status: 'error', error: providerFailure() });
+function providerError(kind = 'provider') {
+  endTurn({ status: 'error', error: providerFailure(kind), kind });
 }
 
 function toolFrame(kind, call, child = false) {
@@ -475,7 +478,7 @@ function scenarioEncoder(command, ack, state = { acknowledged: false, opened: fa
     child: scenarioChild,
     progress: () => write({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', args: { command: 'build' }, partialResult: { content: [{ type: 'text', text: 'working' }] } }),
     readSteers(step) { if (step.late) activeTurn.late = true; },
-    end(step) { if (step.error === 'provider') providerError(); else endTurn(); },
+    end(step) { if (step.error) providerError(step.error); else endTurn(); },
   };
 }
 

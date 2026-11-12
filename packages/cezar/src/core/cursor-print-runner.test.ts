@@ -184,7 +184,7 @@ describe('Cursor print logical session', () => {
       .startSession(spec, event => events.push(event));
     await session.result;
     expect(logs(log)).toHaveLength(1);
-    expect(events.some(event => event.type === 'error' && /provider unavailable/i.test(event.message))).toBe(true);
+    expect(events.some(event => event.type === 'error' && /HTTP 400 Bad Request/.test(event.message))).toBe(true);
     expect(events.filter(event => event.type === 'done')).toHaveLength(1);
   });
 

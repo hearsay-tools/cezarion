@@ -25,7 +25,7 @@ it.each(['unresponsive', 'cancel', 'finish'] as const)('opencode provider failur
       if (stop === 'unresponsive') {
         expect(store.getRun(runId)?.status).toBe('failed');
         const errors = store.readEvents(runId).filter(event => event.type === 'error').map(event => event.message);
-        expect(errors).toEqual([expect.stringContaining('API key expired')]);
+        expect(errors).toEqual([expect.stringContaining('(HTTP 400)')]);
       } else {
         expect(stop === 'cancel' ? ['cancelled'] : ['done', 'review']).toContain(store.getRun(runId)?.status);
       }

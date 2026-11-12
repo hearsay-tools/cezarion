@@ -36,14 +36,21 @@ export const SEAM_ROWS = [
 
 /** The run tier: a real `RunManager` over the native wire, read once the run settles. */
 export const RUN_ROWS = [
-  { id: 'R17', scenario: 'provider-unavailable', name: 'R17 bounds an unavailable provider and preserves its failure reason' },
+  { id: 'R17', scenario: 'provider-unavailable', name: 'R17 holds the run on an unavailable provider and preserves its failure reason' },
   { id: 'R1', scenario: 'cezar-done', name: 'R1 takes a declared-complete run to its review gate' },
-  { id: 'R2', scenario: 'provider-error', name: 'R2 fails the run on a provider failure instead of parking it as Needs You' },
+  { id: 'R2', scenario: 'provider-error', name: 'R2 fails the run on a provider request rejection instead of parking it as Needs You' },
   { id: 'R3', scenario: 'ask', name: 'R3 parks as waiting and emits exactly one ask card' },
   { id: 'R4', scenario: 'ask-bad', name: 'R4 renders no card for a malformed ask and still ends the turn' },
   { id: 'R5', scenario: 'cezar-wait', name: 'R5 parks a declared monitoring turn on an open monitoring timer, not as a plain wait' },
   { id: 'R12', scenario: 'subagent', name: 'R12 keeps monitoring parked when child text follows the parent cezar_wait' },
+  // hearsay-tools/squawk#3337: a provider error on a step holds the run and retries it with back-off.
+  { id: 'R126', scenario: 'provider-rate-limit', name: 'R126 holds the run on a provider rate limit and retries it with back-off' },
+  { id: 'R127', scenario: 'provider-not-found', name: 'R127 holds the run on a model endpoint 404 and retries it with back-off' },
+  { id: 'R128', scenario: 'provider-credit', name: 'R128 holds the run on a spent credit balance and retries it with back-off' },
 ] as const satisfies readonly ParityRow[];
+
+/** The run-tier rows the provider part runs: the provider holds a run instead of failing it. */
+export const PROVIDER_HOLD_ROW_IDS: readonly string[] = ['R17', 'R126', 'R127', 'R128'];
 
 /** Agent input that reaches a running turn. */
 export const INPUT_ROWS = [

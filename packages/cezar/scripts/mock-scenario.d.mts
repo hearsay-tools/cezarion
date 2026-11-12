@@ -32,7 +32,9 @@ export interface ReasoningStep { kind: 'reasoning'; text: string; index?: number
 export interface ToolStep { kind: 'toolStart' | 'toolEnd'; call: ToolCall }
 export interface ChildStep { kind: 'child'; id: string; phase: 'start' | 'end'; steps: Iterable<Step> }
 export interface ReadSteersStep { kind: 'readSteers'; late?: boolean; receive?: (texts: string[] | void) => void }
-export interface EndStep { kind: 'end'; error?: 'provider' }
+/** `provider`: a 400 request rejection, which fails the run. The others are provider errors the run holds on. */
+export type ProviderFailureKind = 'provider' | 'unavailable' | 'rate-limit' | 'not-found' | 'credit';
+export interface EndStep { kind: 'end'; error?: ProviderFailureKind }
 export type Step = OpenStep | TextStep | ReasoningStep | ToolStep | ChildStep | ReadSteersStep | EndStep
   | { kind: 'effect'; run: () => void | Promise<unknown> }
   | { kind: 'reply'; prompt: string }
@@ -69,3 +71,5 @@ export interface Encoder {
 export function scenarioFor(prompt: string, context: ScenarioContext): Scenario | undefined;
 export function play(scenario: Pick<Scenario, 'steps' | 'result'>, encoder: Encoder): PlaybackResult | Promise<PlaybackResult>;
 export function afterParityPark(prompt: string): Promise<void>;
+
+export declare const PROVIDER_HOLD_SCENARIOS: readonly (readonly [string, Exclude<ProviderFailureKind, 'provider'>])[];

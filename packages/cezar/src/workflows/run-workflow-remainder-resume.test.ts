@@ -157,7 +157,7 @@ describe('RunManager workflow remainder resume', () => {
         cancelled = fixture.manager.cancel(record.id);
       }
     });
-    expect(fixture.manager.continueRun(record.id, { text: 'mock:auth-error answer' })).toEqual({ ok: true });
+    expect(fixture.manager.continueRun(record.id, { text: 'mock:request-error answer' })).toEqual({ ok: true });
     await waitFor(record.id, candidate => candidate?.status === 'cancelled');
     expect(cancelled).toBe(true);
   }, 30_000);

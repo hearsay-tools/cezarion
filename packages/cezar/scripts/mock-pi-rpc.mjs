@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { PI_FAILURES } from './mock-provider-failures.mjs';
 import { loadControls } from './mock-controls.mjs';
 import { scenarioFor, play } from './mock-scenario.mjs';
 import { closeSync } from 'node:fs';
@@ -203,9 +204,9 @@ function respondState(command) {
 }
 
 function respondProviderError(command) {
-  // An assistant `message_end` whose stopReason is `error`, carrying the
-  // transport diagnostic — wire shape copied from
-  // `src/core/__fixtures__/pi/provider-error.ndjson`. #54: this arrived
+  // An assistant `message_end` whose stopReason is `error` — the wire shape of
+  // `src/core/__fixtures__/pi/provider-error.ndjson`, with a 400 detail instead
+  // of its transport diagnostic (hearsay-tools/squawk#3337). #54: this arrived
   // before `agent_settled` and the run parked as "Needs You" instead of
   // failing (harness parity S7).
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
@@ -214,7 +215,8 @@ function respondProviderError(command) {
   sendProviderError();
 }
 
-function sendProviderError() {
+
+function sendProviderError(kind = 'provider') {
   send({ type: 'message_end', message: {
     role: 'assistant',
     content: [],
@@ -223,8 +225,7 @@ function sendProviderError() {
     model: 'gpt-5.6-sol',
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
     stopReason: 'error',
-    diagnostics: [{ type: 'provider_transport_failure', error: { name: 'Error', message: 'WebSocket error' } }],
-    errorMessage: 'Not Found',
+    errorMessage: PI_FAILURES[kind],
   } });
   send({ type: 'agent_settled' });
 }
@@ -387,7 +388,7 @@ function scenarioEncoder(command, scenario) {
     // Pi reads admitted steers in sendNow's settlement path, in native order.
     readSteers(step) { if (step.late) activeTurn.late = true; },
     end(step) {
-      if (step.error === 'provider') sendProviderError();
+      if (step.error) sendProviderError(step.error);
       else {
         sendTurnEnd();
         if (scenario.name === 'cezar-wait' || scenario.name === 'deferred-turn-start') sendBackendResume(command);
