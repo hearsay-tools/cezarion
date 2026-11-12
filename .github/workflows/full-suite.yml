@@ -76,9 +76,6 @@ jobs:
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build server for unit tests
-        run: npm run build:server
-
       - name: Run unit tests
         run: npm run test:unit
 
@@ -124,9 +121,6 @@ jobs:
 
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Build server dependencies
-        run: npm run build:server
 
       - name: Run server and cockpit unit suites
         env:
