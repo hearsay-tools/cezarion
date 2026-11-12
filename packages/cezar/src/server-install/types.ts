@@ -13,6 +13,10 @@ import { z } from 'zod';
 export const PLATFORM_IDS = ['ubuntu-vps', 'macosx-ngrok'] as const;
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 
+/** Platforms whose strategies support reversible group migration and service control.
+ * Keep in sync with the registry; strategies.test.ts checks the capability contract. */
+export const MIGRATABLE_PLATFORM_IDS: readonly PlatformId[] = ['ubuntu-vps', 'macosx-ngrok'];
+
 /** Per-step lifecycle. `failed` resumes identically to `pending`. */
 export const STEP_STATUSES = ['pending', 'done', 'skipped', 'failed'] as const;
 export type StepStatus = (typeof STEP_STATUSES)[number];

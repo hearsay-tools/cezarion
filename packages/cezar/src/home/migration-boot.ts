@@ -12,7 +12,7 @@ import { readMigrationRecord } from './migration-record.ts';
 import { migrateLegacyHome } from './migrate.ts';
 import { finishDeferredAccounts } from './migration-accounts.ts';
 import { listServerInstances } from '../server-install/state.ts';
-import { getStrategy, supportsServerMigration } from '../server-install/strategies.ts';
+import { MIGRATABLE_PLATFORM_IDS } from '../server-install/types.ts';
 
 export interface MigrationBootOptions { enabled?: boolean; legacy?: Home; deferFresh?: boolean }
 export type MigrationBootResult = { kind: 'ready' } | { kind: 'staged' } | { kind: 'fresh'; prepare: () => void } | { kind: 'legacy'; home: Home };
@@ -77,7 +77,7 @@ function migrateAtBoot(home: Home, legacy: Home, env: NodeJS.ProcessEnv): Migrat
 /** Only a completed server install needs the explicit group migration command. */
 function hasInstalledServer(legacy: Home): boolean {
   return listServerInstances(legacy).some(({ state }) =>
-    state.installed && !state.dryRun && supportsServerMigration(getStrategy(state.platform ?? '')));
+    state.installed && !state.dryRun && MIGRATABLE_PLATFORM_IDS.some((id) => id === state.platform));
 }
 
 /** A crash without stagedAt must restart migration instead of serving partial copies. */
