@@ -14,6 +14,27 @@ tag can consume its five-minute job budget before classification. Only the PR
 baseline and patch checks read history; § CI verification says what each gate fetches.
 For pull requests, the PR-shape check requires GitHub to return a patch for every file, except binary files and files with no content change, and rejects incomplete file lists.
 
+<a id="github-patch-limits"></a>
+
+**GitHub patch limits.** GitHub returns no API patch for a file in three cases. The check
+reads the PR's local `git diff` to name the case for each file, and prints the PR's total
+changed lines:
+
+- **Per-file size.** The file's diff is over `GITHUB_PATCH_LIMITS.fileBytes` in
+  [`.github/scripts/missing-patches.cjs`](../../.github/scripts/missing-patches.cjs), the
+  one place the number is kept. It counts bytes, not lines: a one-line file over the bound
+  gets no patch either. The value lies between the largest local diff that got a patch
+  and the smallest that did not, on this repository's PRs.
+- **NUL byte.** The diff contains a NUL byte. Git reads only the start of a file to find
+  binary content, so a later NUL leaves the file text to Git but not to GitHub.
+- **Total size.** A file under both limits that still has no patch. GitHub may drop
+  patches for a very large PR, but no measured PR shows a line bound, so `npm run prepr`
+  does not refuse on total size.
+
+`npm run prepr` (§ Before the PR) refuses the first two cases on the committed branch, so
+a split happens before the push. Split a file's change across PRs, or generate large data
+at test time.
+
 Main PRs start heavy verification (unit tests, build/package, Vitest and browser shards)
 as soon as their queue proof, change classification and immutable PR inputs are ready.
 **Unit tests (package)** and **Unit tests (scripts)** run the two groups of
@@ -56,9 +77,10 @@ post-build package check.
 
 `npm run prepr` is the one local gate before a PR opens. It prints one verdict and the
 evidence block for the PR body. It reads Squeal's results for the changed files and for
-lint, and runs typecheck (not for a docs-only change), citations and clones. Run it on
-the committed head. Its exit code is non-zero on a failing test, a lint finding, a type
-error, a bare citation or a new clone.
+lint, and runs typecheck (not for a docs-only change), citations, clones and the
+[GitHub patch limits](#github-patch-limits). Run it on the committed head. Its exit code
+is non-zero on a failing test, a lint finding, a type error, a bare citation, a new clone,
+or a committed file diff over the per-file patch limit or with a NUL byte.
 
 - The Squeal wait is bounded at 2 minutes (`--wait-ms`). When it ends with no failure,
   the command names the files with no result and passes. CI runs them.
