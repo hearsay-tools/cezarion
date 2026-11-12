@@ -43,7 +43,10 @@ function stepLines(log, step) {
 function normalizeIdentity(text) {
   // Hash full diagnostic identity; display redaction is deliberately lossy and
   // must never collapse distinct test paths into one cause.
-  return stripAnsi(text).replace(/0x[\da-f]+/gi, '<address>')
+  // GitHub request IDs and timestamps differ on every repeat of one error.
+  return stripAnsi(text).replace(/\b\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|\s?UTC|[+-]\d\d:?\d\d)?/g, '<timestamp>')
+    .replace(/\b[\dA-F]{3,8}(?::[\dA-F]{3,10}){4}\b/g, '<request-id>')
+    .replace(/0x[\da-f]+/gi, '<address>')
     .replace(/\b\d+(?:\.\d+)?(?:ms|s)\b/g, '<duration>').replace(/\s+/g,' ').trim();
 }
 function causesForStep({run, job, step, log}) {

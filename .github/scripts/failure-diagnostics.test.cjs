@@ -118,3 +118,14 @@ test('excerpt boundaries cannot expose private key tails',()=>{
  const a=release();a.log='-----BEGIN PRIVATE KEY-----\n'+'a'.repeat(64)+'\n'+('b'.repeat(64)+'\n').repeat(40)+'short-private-fragment\n-----END PRIVATE KEY-----';
  assert.doesNotMatch(causesForStep(a)[0].excerpt,/short-private-fragment/);
 });
+
+test('GitHub request IDs and timestamps do not split one error into many causes',()=>{
+ // hearsay-tools/squawk#3416 to hearsay-tools/squawk#3423: eight shards, one error, eight signatures.
+ const line=(id,at)=>`##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID ${id} and timestamp ${at}. For more on scraping GitHub, review our Terms of Service.`;
+ const causes=[['D078:25955F:A505FA:204CE77:6AF6013F','2026-11-12 18:11:11 UTC'],['08C0:1C9592:4FCCB:842A3:6AF6010B','2026-11-12 18:10:19 UTC'],['1440:4495E:83B2DE:1A20552:6AF6012D','2026-11-12T18:10:53Z']]
+  .map(([id,at])=>causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Set up Node.js'},log:line(id,at)})[0]);
+ assert.equal(new Set(causes.map(cause=>cause.signature)).size,1);
+ assert.equal(causes[0].failureIdentity,'##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID <request-id> and timestamp <timestamp>. For more on scraping GitHub, review our Terms of Service.');
+ const other=causesForStep({run:{id:1,run_attempt:1},job:{id:2},step:{number:5,name:'Set up Node.js'},log:'##[error]Unable to find Node version 24.21.0 for platform linux'})[0];
+ assert.notEqual(other.signature,causes[0].signature);
+});

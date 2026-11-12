@@ -47,7 +47,11 @@ jobs:
           retries: 0
           script: |
             let manifest = { version: 1, complete: false, problems: [{ code: 'entrypoint-failure' }], reports: { issues: 0, occurrences: 0 } };
+            let calls;
             try {
+              // No API floor here: a skipped day would leave its window uncovered.
+              // The sweep's own request cap and coverage manifest bound it.
+              calls = require('./.github/scripts/api-budget.cjs').countApiCalls(github);
               const { sweepCiFailures } = require('./.github/scripts/sweep-ci-failures.cjs');
               manifest = await sweepCiFailures({
                 github,
@@ -71,6 +75,7 @@ jobs:
             core.summary.addRaw(`Observed reporting-workflow failures: ${manifest.reporterFailures || 0}.\n\n`);
             core.summary.addRaw(`Evidence gaps (unavailable, expired or oversized logs): ${(manifest.problems || []).filter(p => p.code === 'logs-unavailable' || p.code === 'log-size').length}.\n\n`);
             core.summary.addRaw('The coverage artifact lists processed intervals, numeric source IDs, fixed problem codes and replay windows. Later retries of runs created before this window require a manual replay of their creation window.\n');
+            if (calls) core.info(calls.summary());
             if (!manifest.complete) {
               core.setFailed('CI failure sweep incomplete. Inspect the coverage artifact and replay the indicated window; split it into smaller windows if a limit was reached.');
             }

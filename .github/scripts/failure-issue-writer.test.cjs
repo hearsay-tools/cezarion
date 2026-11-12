@@ -12,8 +12,13 @@ function input(h, log=h.state.log) {
 }
 async function create(h, limits={}) {
   assert.equal(typeof writerModule.createFailureWriter,'function','shared failure writer is implemented');
-  return writerModule.createFailureWriter({...h.options,...limits});
+  return writerModule.createFailureWriter({...h.options,since:h.state.run.created_at,...limits});
 }
+// The 2026-11-12 browser shard log line: one per job, each with its own request ID and time.
+const rateLimited=(id,at)=>`##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID ${id} and timestamp ${at} UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service.`;
+const issueReads=h=>h.calls.filter(([route])=>route==='GET /repos/{owner}/{repo}/issues').map(([,args])=>({state:args.state,since:args.since}));
+const commentReads=h=>h.calls.filter(([route])=>route==='GET /repos/{owner}/{repo}/issues/{issue_number}/comments').map(([,args])=>args.issue_number);
+const before=run=>new Date(Date.parse(run.created_at)-24*60*60*1000).toISOString();
 
 test('factory exposes all non-PR issues and mutable cached comments',async()=>{
   const h=harness();
@@ -102,4 +107,57 @@ test('custom labels and body factory apply only when creating an issue',async()=
   assert.deepEqual(result.issue.labels,['area-web']);assert.match(result.issue.body,/custom/);
   assert.equal(received.length,1);assert.equal(received[0].cause.kind,'test');
   assert.doesNotMatch(result.issue.body,/testIdentity|failureIdentity/);
+});
+
+test('a bounded writer reads open issues and issues updated since the run, not every issue',async()=>{
+  const h=harness();await (await create(h)).reportStep(input(h));
+  // An older open owner of the same cause: last updated a day before the next run.
+  h.state.issues[0].updated_at=before(h.state.run);h.state.run.id=123;h.calls.length=0;
+  const result=await (await create(h)).reportStep(input(h));
+  assert.equal(result[0].reported,true);assert.equal(result[0].issue.number,1);
+  assert.deepEqual(issueReads(h),[{state:'open',since:undefined},{state:'all',since:h.state.run.created_at}]);
+  // Its comments cannot hold this run's occurrence, so they are not read.
+  assert.deepEqual(commentReads(h),[]);
+  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,2);
+});
+
+test('an occurrence on an issue updated since the run is found again',async()=>{
+  const h=harness();await (await create(h)).reportStep(input(h));
+  h.state.issues[0].state='closed';h.calls.length=0;
+  const replay=await (await create(h)).reportStep(input(h));
+  assert.equal(replay[0].reported,false);assert.equal(replay[0].issue.number,1);
+  assert.deepEqual(commentReads(h),[1]);
+  assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
+});
+
+test('a recurrence links an old closed report found through search, or no link when search fails',async()=>{
+  for(const failSearch of [false,true]) {
+    const h=harness();await (await create(h)).reportStep(input(h));
+    Object.assign(h.state.issues[0],{state:'closed',updated_at:before(h.state.run)});
+    h.state.run.id=123;h.state.failSearch=failSearch;
+    const [result]=await (await create(h)).reportStep(input(h));
+    assert.equal(result.reported,true);assert.equal(result.issue.number,2);
+    const search=h.calls.find(([route])=>route==='GET /search/issues');
+    assert.match(search[1].q,new RegExp(`^repo:hearsay-tools/cezarion is:issue is:closed ${result.cause.signature}$`));
+    if(failSearch) {
+      assert.doesNotMatch(h.state.issues[1].body,/Previous closed report/);
+      assert.ok(h.messages.includes('Could not search for a previous closed report; the new issue has no previous-report link.'));
+      assert.doesNotMatch(h.messages.join('\n'),/secret/);
+    } else assert.match(h.state.issues[1].body,/\[Previous closed report\]\(https:\/\/github\.com\/hearsay-tools\/cezarion\/issues\/1\)/);
+  }
+});
+
+test('GitHub API rate-limit errors are logged, never filed',async()=>{
+  const h=harness(), writer=await create(h);
+  const results=await writer.reportStep(input(h,rateLimited('D078:25955F:A505FA:204CE77:6AF6013F','2026-11-12 18:11:11')));
+  assert.deepEqual(results,[]);assert.equal(h.state.issues.length,0);assert.equal(h.state.comments.length,0);
+  assert.match(h.messages.at(-1),/job \d+, step 8: hit the GitHub API rate limit; no issue filed for this transient cause\.$/);
+  const secondary=await writer.reportStep(input(h,'##[error]You have exceeded a secondary rate limit. Please wait a few minutes before you try again.'));
+  assert.deepEqual(secondary,[]);assert.equal(h.state.issues.length,0);
+});
+
+test('a test that fails on rate-limit text still reports',async()=>{
+  const h=harness();
+  const [result]=await (await create(h)).reportStep(input(h,'FAIL src/a.test.ts > maps errors\nAssertionError: expected API rate limit exceeded to be mapped'));
+  assert.equal(result.reported,true);assert.equal(result.cause.kind,'test');assert.equal(h.state.issues.length,1);
 });

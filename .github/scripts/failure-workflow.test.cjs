@@ -9,10 +9,10 @@ const workflow=()=>yaml.parse(fs.readFileSync(workflowPath,'utf8'));
 const AsyncFunction=Object.getPrototypeOf(async()=>{}).constructor;
 async function execute(h) {
  const w=workflow(), script=w.jobs.report.steps.find(step=>step.uses?.startsWith('actions/github-script@')).with.script;
- const summary=[],errors=[];
- const core={info:()=>{},setFailed:m=>errors.push(m),summary:{addRaw:m=>{summary.push(m);return core.summary;},write:async()=>{}}};
+ const summary=[],errors=[],info=[];
+ const core={info:m=>info.push(m),setFailed:m=>errors.push(m),summary:{addRaw:m=>{summary.push(m);return core.summary;},write:async()=>{}}};
  await new AsyncFunction('require','github','context','core',script)(p=>require(path.resolve(__dirname,'../..',p)),h.options.github,{repo:{owner:'hearsay-tools',repo:'cezarion'},payload:h.options.event},core);
- return {errors,summary};
+ return {errors,summary,info};
 }
 test('completion consumer scopes trigger, credentials and checkout to trusted code',()=>{
  const w=workflow();assert.deepEqual(w.on.workflow_run,{workflows:['CI','Release','Nightly'],types:['completed']});
@@ -43,4 +43,17 @@ test('concurrent completion jobs serialized by declared Actions group create one
  const enqueue=()=>{const next=lock.then(()=>execute(h));lock=next;return next;};
  const results=await Promise.all([enqueue(),enqueue(),enqueue()]);
  assert.ok(results.every(r=>r.errors.length===0));assert.equal(h.state.issues.length,1);assert.equal(h.state.comments.length,1);
+});
+test('the entrypoint logs the API calls the job spent',async()=>{
+ const h=harness();const result=await execute(h);
+ assert.equal(result.errors.length,0);assert.equal(h.state.issues.length,1);
+ const spent=h.calls.filter(([route])=>route!=='GET /rate_limit').length;
+ assert.equal(result.info.at(-1),`GitHub API calls: ${spent} (core remaining ${h.state.coreRemaining})`);
+});
+test('under the API floor the reporter stands down successfully without reading issues',async()=>{
+ const h=harness();h.state.coreRemaining=799;const result=await execute(h);
+ assert.deepEqual(result.errors,[]);assert.equal(h.state.issues.length,0);
+ assert.deepEqual(h.calls.map(([route])=>route),['GET /rate_limit']);
+ assert.match(result.summary.join(''),/core remaining 799 is under the floor of 800[\s\S]*Failure reporting skipped\. Rerun this reporting job after the quota resets/);
+ assert.equal(result.info.at(-1),'GitHub API calls: 0 (core remaining unknown)');
 });

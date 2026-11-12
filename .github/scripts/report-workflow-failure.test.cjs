@@ -184,3 +184,17 @@ test('routing failure retries without duplicating saved evidence or routing clos
  h.state.issues.find(issue=>issue.body.includes('cez-main-ci-attempt:')).state='closed';await reportFailure(h.options);
  assert.equal(h.calls.filter(([route])=>route.endsWith('/labels')).length,count);
 });
+
+test('main CI that failed only on the GitHub API rate limit files nothing and routes no summary',async()=>{
+ const h=harness();mainCi(h);
+ h.state.log='##[error]API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 08C0:1C9592:4FCCB:842A3:6AF6010B and timestamp 2026-11-12 18:10:19 UTC.';
+ const result=await reportFailure(h.options);
+ assert.equal(result.reported,0);assert.equal(h.state.issues.length,0);
+ assert.ok(!h.calls.some(([route])=>route.startsWith('POST ')));
+ assert.match(h.messages.at(-1),/failed only for transient causes; nothing to report\.$/);
+});
+test('the reporter reads issues updated since the failed run was created',async()=>{
+ const h=harness();await reportFailure(h.options);
+ const reads=h.calls.filter(([route])=>route==='GET /repos/{owner}/{repo}/issues').map(([,args])=>[args.state,args.since]);
+ assert.deepEqual(reads,[['open',undefined],['all',h.state.run.created_at]]);
+});
