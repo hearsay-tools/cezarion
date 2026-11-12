@@ -11,6 +11,7 @@ import type { HealthResponse, RunRecord, RunSummary, VoiceAnswer, VoiceDecision 
 import { CommandPalette } from '@/components/command-palette'
 import { ListViewProvider } from '@/components/list-view'
 import { ThemeProvider } from '@/components/theme-provider'
+import { ProjectRouteMatcherContext } from '@/lib/project-route-matcher'
 import { resetVoiceStoreForTests, voiceStore } from '@/lib/voice/proposal-store'
 
 const mocks = vi.hoisted(() => ({ voiceDecide: vi.fn(), reportVoiceOutcome: vi.fn() }))
@@ -101,10 +102,13 @@ function renderPalette({ voice, runs = [], entry = '/' }: { voice: boolean; runs
     <QueryClientProvider client={createQueryClient()}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[entry]}>
-          <ListViewProvider>
-            <CommandPalette />
-            <LocationProbe />
-          </ListViewProvider>
+          {/* No project memory is stored here, so the switch never consults the route table. */}
+          <ProjectRouteMatcherContext.Provider value={() => null}>
+            <ListViewProvider>
+              <CommandPalette />
+              <LocationProbe />
+            </ListViewProvider>
+          </ProjectRouteMatcherContext.Provider>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
