@@ -3,7 +3,7 @@ import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import type { WorkerDestroy, WorkerDestroyResult } from '@open-mercato/cezar-contract/delegation';
 import type { RunRecord } from '../runs/store.ts';
-import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
+import { releaseThenRemoveOwnedWorkspace } from './owned-workspace-release.ts';
 import { collectWorkerEvidence } from './results.ts';
 import { DelegationPolicyError } from './policy.ts';
 import { gitCommonDir } from './workspace-git.ts';
