@@ -12,6 +12,8 @@ import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision }
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   discoveryRequestSchema,
   type DiscoveryRequest,
@@ -375,8 +377,12 @@ export class DelegationService {
     if (this.currentConversation(project, this.ledgerFor(pair, request)).messages.some(message => message.id === request.id)) return;
     if (recipient.delegation?.role !== 'worker' || recipient.delegation.destroy || !freshWorkerSession(recipient) && recipient.status !== 'cancelled') return;
     if (['queued', 'running', 'waiting'].includes(recipient.status)) return;
-    try { await verifyOwnedWorkspace(project.root, recipient); }
-    catch (error) {
+    try {
+      const workspace = await verifyOwnedWorkspace(project.root, recipient);
+      // The branch is the work a fresh session reads from (its notice says `git log`): prove its ref too.
+      await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${workspace.branch}^{commit}`], { cwd: project.root, timeout: 30_000 })
+        .catch(() => { throw new Error(`branch ${workspace.branch} is missing`); });
+    } catch (error) {
       throw new DelegationPolicyError('incompatible_state', `Worker worktree or branch is gone (${error instanceof Error ? error.message : String(error)}); --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
     }
   }
@@ -786,3 +792,5 @@ export class DelegationService {
 /** No agent session was recorded, so a resume starts a fresh one (hearsay-tools/squawk#3337). */
 export const freshWorkerSession = (run: RunRecord): boolean => !run.steps.some(step => step.sessionId);
 export const FRESH_SESSION_NOTICE = 'Your earlier agent session is lost. Your work so far is in this worktree: read its files and its branch commits (git log) before you continue.';
+
+const execFileAsync = promisify(execFile);

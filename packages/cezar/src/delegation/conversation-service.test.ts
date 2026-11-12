@@ -11,6 +11,7 @@ import { runPersistence } from '../runs/run-store-open.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
@@ -221,6 +222,15 @@ describe('durable conversations', () => {
     if (delegation?.role !== 'worker') throw new Error('expected a worker');
     rmSync(delegation.workspace.path, { recursive: true, force: true });
     expect(await f.service.send(f.caller, request)).toMatchObject({ effect: 'unchanged', message: { id: sent.message.id, resumed: true } });
+  });
+  it('refuses --resume of a cancelled worker whose branch ref is gone, accepting nothing', async () => {
+    const w = await completedWorker('cancelled');
+    await ensureOwnedWorkspace(f.root, f.store.getRun(w.id)!);
+    const delegation = f.store.getRun(w.id)!.delegation;
+    if (delegation?.role !== 'worker') throw new Error('expected a worker');
+    execFileSync('git', ['update-ref', '-d', `refs/heads/${delegation.workspace.branch}`], { cwd: f.root });
+    await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Work', timeoutSeconds: 600, resume: true }))
+      .rejects.toMatchObject({ code: 'incompatible_state', message: expect.stringMatching(/branch .* is missing/) });
   });
   it('refuses --resume of a cancelled worker whose worktree is gone, accepting nothing', async () => {
     const w = await completedWorker('cancelled');
