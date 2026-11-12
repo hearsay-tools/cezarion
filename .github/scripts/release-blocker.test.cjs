@@ -54,3 +54,25 @@ test('a stable publish that failed before any name reached the registry files no
   assert.deepEqual(seen, ['pkg@1.2.1', 'alias@1.2.1']);
   assert.equal(publishedSome({ names: 'pkg', version: '1.2.1', view }), false);
 });
+
+test('the registry read tells a published version from a missing one and throws on other errors', t => {
+  const { viewVersion } = require('./release-blocker.cjs');
+  const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+  const { join } = require('node:path');
+  const dir = mkdtempSync(join(require('node:os').tmpdir(), 'npm-view-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'npm'), [
+    '#!/bin/sh',
+    'case "$2" in',
+    '  pkg@1.2.1) echo 1.2.1 ;;',
+    '  pkg@9.9.9) echo "npm error code E404" >&2; exit 1 ;;',
+    '  *) echo "npm error code ETIMEDOUT" >&2; exit 1 ;;',
+    'esac', '',
+  ].join('\n'), { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${dir}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+  assert.equal(viewVersion('pkg', '1.2.1'), true);
+  assert.equal(viewVersion('pkg', '9.9.9'), false);
+  assert.throws(() => viewVersion('other', '1.0.0'), /Command failed/);
+});

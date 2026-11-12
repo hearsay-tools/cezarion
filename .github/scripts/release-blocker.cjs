@@ -78,4 +78,4 @@ async function fileReleaseBlocker({ github, repo, kind, version, stage, runUrl }
   return { number: data.number, url: data.html_url, created: true };
 }
 
-module.exports = { BLOCKER_LABEL, blockerVersion, fileReleaseBlocker, marker, publishedSome };
+module.exports = { BLOCKER_LABEL, blockerVersion, fileReleaseBlocker, marker, publishedSome, viewVersion };
