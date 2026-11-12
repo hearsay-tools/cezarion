@@ -9,7 +9,7 @@ const SIGNAL_PATH = '.github/workflows/coderabbit-review-signal.yml';
 const SKIPPED_CONCLUSIONS = new Set(['cancelled', 'skipped']);
 const SUPERSEDE_PAGE = 10;
 async function superseded(read, source) {
-  const number = source.pull_requests[0]?.number;
+  const number = source.pull_requests?.length === 1 ? source.pull_requests[0]?.number : null;
   if (!positive(number) || !positive(source.workflow_id) || typeof source.head_sha !== 'string') return false;
   try {
     // Newest first. Any status counts: a queued or running successor completes later.
@@ -40,8 +40,6 @@ async function signalTarget(read, payload, fullName) {
   const source = payload.workflow_run;
   if (payload.action !== 'completed' || source?.name !== 'CodeRabbit review signal'
     || !positive(source.id) || !positive(source.run_attempt)) return null;
-  // associationTarget on the live run returns null for this run too; skip its reads.
-  if (!Array.isArray(source.pull_requests) || source.pull_requests.length !== 1) return null;
   if (SKIPPED_CONCLUSIONS.has(source.conclusion) && await superseded(read, source)) return null;
   const workflow = await read('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}', { workflow_id: 'coderabbit-review-signal.yml' });
   if (!positive(workflow?.id) || workflow.path !== SIGNAL_PATH || workflow.state !== 'active') return null;

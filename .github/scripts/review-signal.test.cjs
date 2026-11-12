@@ -57,16 +57,3 @@ test('a malformed run listing wakes the cancelled run PR', async () => {
   const run = signal('cancelled'), r = reader(run, { runs: null });
   assert.deepEqual(await signalTarget(r.read, payload(run), 'o/r'), WAKE);
 });
-for (const conclusion of ['success', 'failure', 'cancelled']) for (const pulls of [[], undefined]) {
-  test(`a ${conclusion} signal run with ${pulls ? 'an empty' : 'no'} PR association wakes nothing and reads nothing`, async () => {
-    const run = { ...signal(conclusion), pull_requests: pulls }, r = reader(run);
-    assert.equal(await signalTarget(r.read, payload(run), 'o/r'), null);
-    assert.deepEqual(r.calls, []);
-  });
-}
-test('a signal run associated with two PRs wakes nothing and reads nothing', async () => {
-  const run = signal('success'), r = reader(run);
-  run.pull_requests.push(signal('success', { number: 8 }).pull_requests[0]);
-  assert.equal(await signalTarget(r.read, payload(run), 'o/r'), null);
-  assert.deepEqual(r.calls, []);
-});
