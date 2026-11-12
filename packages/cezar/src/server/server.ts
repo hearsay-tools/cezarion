@@ -100,8 +100,7 @@ import { jsonZodValidator, paramZodValidator, queryZodValidator } from './valida
 import { RecentVoiceActions } from '../voice/decision-log.ts';
 import { selectVoiceEngine } from '../voice/engine.ts';
 import { createVoiceRoutes } from '../voice/routes.ts';
-import { deliverOnce, sendAgentReport, TaskWebhooks } from '../runs/webhook.ts';
-import { registryEntry } from '../workspace/registry-entry.ts';
+import { deliverOnce, registryEntry, sendAgentReport, TaskWebhooks } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { repoPullInputSchema, deleteBranchesInputSchema } from '@open-mercato/cezar-contract/repo';
