@@ -84,7 +84,12 @@ test('the trial reads only, holds no token, never fails its job, and installs th
     (s) => s.run === 'pnpm install --frozen-lockfile', (s) => s.id === 'gate']) assert.ok(at(later) > commits);
   assert.equal(step(job, 'Set up pnpm').with.version, step(jobs['squeal-gate-trial'], 'Set up pnpm').with.version);
   assert.equal(step(job, 'Set up Squeal').uses, step(jobs.vitest, 'Set up Squeal').uses);
-  assert.equal(step(job, 'gate').if, "steps.commits.outcome == 'success'", 'never the gate on the unchanged checkout');
+  assert.equal(step(job, 'gate').if,
+    "steps.commits.outcome == 'success' && steps.pnpm.outcome == 'success' && steps.node.outcome == 'success' && steps.install.outcome == 'success' && steps.squeal_setup.outcome == 'success'",
+    'never the gate on the unchanged checkout or an unprepared environment');
+  for (const [id, name] of [['pnpm', 'Set up pnpm'], ['node', 'Set up Node.js'], ['install', 'Install pnpm dependencies'], ['squeal_setup', 'Set up Squeal']])
+    assert.equal(job.steps.find((s) => s.name === name).id, id, name);
+  assert.match(step(job, 'Report the trial').env.SETUP, /steps\.pnpm\.outcome.*steps\.node\.outcome.*steps\.install\.outcome.*steps\.squeal_setup\.outcome/);
   for (const name of ['Report the trial', 'Upload the trial report']) assert.equal(step(job, name).if, 'always()', name);
   const upload = step(job, 'Upload the trial report');
   assert.equal(upload.with.name, JOB);
@@ -293,8 +298,10 @@ test('without a report the summary says why; without trial commits it says the g
   assert.match(failed.summary, /^No report: exit 2, a setup or usage error after 4 s\. The gate's last stderr lines:$/m);
   assert.match(failed.summary, /^squeal code: --base squeal-package-trial-base: no such ref$/m);
   const none = sandbox(t);
-  const skipped = runStep(none, s, { GATE: 'skipped' });
+  const setup = 'pnpm success, Node.js failure, install skipped, Squeal skipped';
+  const skipped = runStep(none, s, { GATE: 'skipped', SETUP: setup });
   assert.equal(skipped.status, 0, skipped.stderr);
   assert.match(skipped.summary, /^No trial commits: the step that builds them failed \(see its log\)\.$/m);
-  assert.match(skipped.summary, /^No report: the gate did not run \(gate step: skipped\)\.$/m);
+  // A failed setup step is named, so a skipped gate is never read as a trial result.
+  assert.match(skipped.summary, /^No report: the gate did not run \(gate step: skipped; setup: pnpm success, Node\.js failure, install skipped, Squeal skipped\)\.$/m);
 });

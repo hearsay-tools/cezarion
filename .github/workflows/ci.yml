@@ -1543,6 +1543,7 @@ jobs:
           echo "Squeal packaged test trial: $head against $ref (merge base $merge); local base $base, head $trial."
 
       - name: Set up pnpm
+        id: pnpm
         continue-on-error: true
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -1550,6 +1551,7 @@ jobs:
 
       # After the trial commits: the measured tree's Node and lockfile.
       - name: Set up Node.js
+        id: node
         continue-on-error: true
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1558,11 +1560,13 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install pnpm dependencies
+        id: install
         continue-on-error: true
         run: pnpm install --frozen-lockfile
 
       # Squeal's action, as in the shards; it never fails the job (hearsay-tools/squeal spec 018 D20).
       - name: Set up Squeal
+        id: squeal_setup
         continue-on-error: true
         uses: hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a # v0.1.443
 
@@ -1571,7 +1575,9 @@ jobs:
       # the report has each run's time. The step keeps the exit code, time and stderr, and exits 0.
       - name: Run the Squeal quality gate with the packaged tests
         id: gate
-        if: steps.commits.outcome == 'success'
+        # Never on the unchanged checkout, nor on an unprepared environment: a failed setup step
+        # keeps its outcome under continue-on-error, so each one is checked.
+        if: steps.commits.outcome == 'success' && steps.pnpm.outcome == 'success' && steps.node.outcome == 'success' && steps.install.outcome == 'success' && steps.squeal_setup.outcome == 'success'
         continue-on-error: true
         run: |
           out="$RUNNER_TEMP/squeal-package-trial"
@@ -1588,6 +1594,7 @@ jobs:
         continue-on-error: true
         env:
           GATE: ${{ steps.gate.outcome }}
+          SETUP: "pnpm ${{ steps.pnpm.outcome }}, Node.js ${{ steps.node.outcome }}, install ${{ steps.install.outcome }}, Squeal ${{ steps.squeal_setup.outcome }}"
           PACKAGED_TESTS: packages/cezar/test/e2e/
         run: |
           report_filter='
@@ -1626,7 +1633,7 @@ jobs:
             if jq -e '.format == "squeal-code-gate/1"' "$out/report.json" > /dev/null 2>&1; then
               jq -r --arg code "$code" --arg seconds "$seconds" --arg packaged "$PACKAGED_TESTS" "$report_filter" "$out/report.json"
             elif [ "$code" = none ]; then
-              echo "No report: the gate did not run (gate step: ${GATE:-skipped})."
+              echo "No report: the gate did not run (gate step: ${GATE:-skipped}; setup: $SETUP)."
             else
               echo "No report: exit $code$([ "$code" = 2 ] && echo ', a setup or usage error') after $seconds s. The gate's last stderr lines:"
               echo
