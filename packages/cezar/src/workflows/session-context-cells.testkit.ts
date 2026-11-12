@@ -174,7 +174,7 @@ export function describeSessionContext(rows: readonly string[], suite = { descri
         const recovered = messages()[before]!;
         expect(count(recovered, '<cezar-context id="handoff"')).toBe(1);
         expect(prefixOf(recovered)).toContain(handoffBlock(run.id));
-        expect(recovered).toContain('cezar process restarted');
+        expect(recovered).toContain('process restarted while you were working');
       }, 60_000);
 
       if (rows.includes('R124') && runsOn('session-context', 'R124', runner)) suite.it(`${runner} R124 renders an owned worker's own handoff and worker rules, never the parent's`, async () => {

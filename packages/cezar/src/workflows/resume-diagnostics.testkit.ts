@@ -131,7 +131,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.split('\n')[0]).toContain(failed.error);
-      expect(prompt.split('\n')[0]).toContain('cezar process restarted');
+      expect(prompt.split('\n')[0]).toContain('process restarted while you were working');
       expect(prompt).toContain(`\n${text}`);
       expect(prompt).toContain(path);
       expect(readFileSync(path, 'utf8')).toBe('brief-1380');
@@ -152,7 +152,7 @@ function restartContext(runner: RunnerId, it: typeof registerTest = registerTest
       await semaphore.release();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
-      expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
+      expect(prompt.match(/process restarted while you were working/g)).toHaveLength(1);
       expect(prompt.split('\n')[0]).toContain('verify their state before restarting');
     }, 60_000);
 }
@@ -180,8 +180,8 @@ function savedContinuation(runner: RunnerId, it: typeof registerTest = registerT
         await semaphore.release();
         await until(() => messages().length > before);
         const prompt = messages()[before]!;
-        expect(prompt.split('\n')[0]).toContain('cezar process restarted');
-        expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
+        expect(prompt.split('\n')[0]).toContain('process restarted while you were working');
+        expect(prompt.match(/process restarted while you were working/g)).toHaveLength(1);
         expect(prompt).toContain(`\n${text}`);
       }, 60_000);
     }
