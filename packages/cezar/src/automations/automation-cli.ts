@@ -15,6 +15,7 @@ import {
 import { parseDurationMinutes, resolveDelay, SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { isValidTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import type { AutomationEvent, CreateAutomationInput } from '@open-mercato/cezar-contract';
+import { AUTOMATION_FAILURE_NOTICE_AFTER, automationFailureNotice, type AutomationRuntimeState } from '@open-mercato/cezar-contract/automations';
 import { EXIT } from '../task-cli/cli.ts';
 import { resolveCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
 import { fetchJson, refuse, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
@@ -70,6 +71,8 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
   run <id>                                 schedule: launch it once now (a one-time schedule is then archived)
   cancel <id>                              one-time schedule: archive it without a task
   list [--archived include|only] | show <id> | enable <id> | pause <id> | delete <id>
+                                           list adds "failing" (the last error and retry time) to an
+                                           enabled GitHub poll after ${AUTOMATION_FAILURE_NOTICE_AFTER} checks fail in a row
 
 Address: CEZ_COCKPIT_URL + CEZ_PROJECT_ID (set inside a task). --url <origin>, --repo <dir> or CEZ_URL look
 for a cockpit instead.`);
@@ -486,7 +489,7 @@ async function executeList(ctx: ExecuteContext): Promise<number> {
     reason?: string;
     automations: Array<Definition & {
       events?: string[]; intervalSeconds?: number; nextRunAt?: string;
-      counts: Record<string, number>; state?: { nextCheckAt?: string }; onceStatus?: string;
+      counts: Record<string, number>; state?: AutomationRuntimeState; onceStatus?: string;
     }>;
   };
   ctx.print({
@@ -494,6 +497,7 @@ async function executeList(ctx: ExecuteContext): Promise<number> {
     ...(data.reason ? { reason: data.reason } : {}),
     automations: data.automations.map((item) => {
       const next = item.enabled ? item.nextRunAt ?? item.state?.nextCheckAt : undefined;
+      const failing = item.enabled ? automationFailureNotice(item.state) : undefined;
       return {
         id: item.id,
         name: item.name,
@@ -504,6 +508,7 @@ async function executeList(ctx: ExecuteContext): Promise<number> {
           : `every ${item.intervalSeconds ?? 300}s on ${(item.events ?? []).join(',')}`,
         counts: item.counts,
         ...(next ? { next } : {}),
+        ...(failing ? { failing } : {}),
         ...onceFields(item.schedule),
         ...(item.onceStatus ? { onceStatus: item.onceStatus } : {}),
         url: automationPageUrl(ctx.cockpit, item.id),

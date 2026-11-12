@@ -66,6 +66,21 @@ describe('cez automation', () => {
     expect((last().automations as unknown[]).length).toBe(32);
   }, 30_000);
 
+  it('list shows the last error of an enabled poll whose recent checks all failed', async () => {
+    const poll = (name: string, enabled: boolean, consecutiveFailures: number) => ({
+      id: name, name, enabled, kind: 'github', events: ['issue.labeled'], intervalSeconds: 300, counts: {},
+      state: { consecutiveFailures, lastError: 'gh: Validation Failed (HTTP 422)', lastErrorAt: '2026-11-11T20:17:00.000Z', backoffUntil: '2026-11-11T20:21:00.000Z' },
+    });
+    const automations = [poll('failing', true, 3), poll('recovering', true, 2), poll('paused', false, 9)];
+    const http: AutomationIo['http'] = async () => ({ status: 200, data: { available: true, automations } });
+    expect(await run(['list'], env(), { http })).toBe(EXIT.ok);
+    const listed = last().automations as Array<Record<string, unknown>>;
+    expect(listed[0]!.failing).toEqual({
+      consecutiveFailures: 3, lastError: 'gh: Validation Failed (HTTP 422)', lastErrorAt: '2026-11-11T20:17:00.000Z', retryAt: '2026-11-11T20:21:00.000Z',
+    });
+    expect(listed.slice(1).map(item => 'failing' in item)).toEqual([false, false]);
+  });
+
   it('create fills the poll defaults the schema reference documents, so a minimal poll is accepted', async () => {
     // A poll is refused on a project without a github.com remote; give the test repo one.
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: harness.repoRoot });

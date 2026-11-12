@@ -1227,7 +1227,8 @@ describe('scheduler mutation boundaries', () => {
     try {
       await expect(schedulerFixture(store, async () => { throw 'provider refused'; }, { onChange }).check(definition)).rejects.toBe('provider refused');
       const until = new Date(now + Math.min(21_600_000, 60_000 * 2 ** failures)).toISOString();
-      expect(store.state(definition.id)).toEqual({ consecutiveFailures: failures + 1, backoffUntil: until, nextCheckAt: until });
+      expect(store.state(definition.id)).toEqual({ consecutiveFailures: failures + 1, backoffUntil: until, nextCheckAt: until,
+        lastError: 'provider refused', lastErrorAt: candidate.timestamp });
       expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'error', reason: 'provider refused' });
       expect(onChange).toHaveBeenCalledWith(definition.id, definition.revision);
     } finally { clock.mockRestore(); }
@@ -1272,7 +1273,7 @@ describe('scheduler receipt guards', () => {
 
   it.each(['legacy', 'other repo', 'pull request'] as const)('allows an issue when an earlier receipt is for %s', async kind => {
     const { store, definition } = await setup();
-    const earlier = { ...candidate, eventId: 'other-event', ...(kind === 'other repo' ? { repo: 'acme/other' } : {}),
+    const earlier = { ...candidate, eventId: 'other-event', ...(kind === 'other repo' ? { repo: 'acme/other', nodeId: 'I_other' } : {}),
       ...(kind === 'pull request' ? { event: 'pull_request.opened' as const } : {}) };
     store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: earlier.eventId,
       ...(kind === 'legacy' ? {} : { candidate: earlier }) });
@@ -1481,7 +1482,7 @@ describe('scheduler dependency failures', () => {
   it('does not audit duplicates after launch deletes the automation', async () => {
     const { store, definition } = await setup();
     store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: candidate.eventId, candidate });
-    const fresh = { ...candidate, number: 8, eventId: 'new-item' };
+    const fresh = { ...candidate, number: 8, nodeId: 'I_8', eventId: 'new-item' };
     await schedulerFixture(store, async options => {
       expect(options.accept!(candidate)).toBe(false);
       expect(options.accept!(fresh)).toBe(true);

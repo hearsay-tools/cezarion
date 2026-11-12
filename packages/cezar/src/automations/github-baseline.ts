@@ -16,6 +16,8 @@ export function githubBaselineState(
     backlogAfter: undefined,
     backoffUntil: undefined,
     consecutiveFailures: 0,
+    lastError: undefined,
+    lastErrorAt: undefined,
     nextCheckAt: new Date(now + definition.intervalSeconds * 1_000).toISOString(),
   };
 }

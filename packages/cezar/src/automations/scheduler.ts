@@ -1,6 +1,8 @@
+import { AUTOMATION_LAST_ERROR_MAX } from '@open-mercato/cezar-contract/automations';
 import { githubBaselineState } from './github-baseline.ts';
 import type { AutomationCoordinator } from './coordinator.ts';
 import { AutomationCandidateChangedError, type GithubCandidate, type GithubPoller, type GithubPollResult } from './github-poller.ts';
+import { readUnderCanonicalName, type GithubRepository } from './github-repository.ts';
 import { AutomationProjectUnavailableError, ScheduleRunner, type ScheduleLauncher } from './schedule-runner.ts';
 import { ProjectMigrationFencedError } from '../server/cockpit-ownership.ts';
 import type { AutomationLease, AutomationStore } from './store.ts';
@@ -23,7 +25,7 @@ export interface ProjectAutomationHandle {
   store: AutomationStore;
   /** The zone schedules are evaluated in — the server's own (`localTimeZone()`). */
   timeZone: string;
-  github?: { owner: string; repo: string; poller: GithubPoller };
+  github?: GithubRepository & { poller: GithubPoller };
   launch?: AutomationLauncher | undefined;
   launchSchedule?: ScheduleLauncher;
   onChange?: (automationId: string, revision: number) => void;
@@ -51,6 +53,9 @@ export class LeaseHeldError extends Error {
   constructor() { super('automation polling lease is held by another process'); }
 }
 
+/** A check refused during backoff: it counts as a failure, but the cause is the error before it. */
+class AutomationBackedOffError extends Error {}
+
 class ObsoleteAutomationCheck extends Error {
   constructor() { super('Automation changed while the check was in progress; discarded the obsolete result.'); }
 }
@@ -74,17 +79,17 @@ export class ProjectAutomationScheduler {
       this.assertCurrent(definition);
       const state = store.state(definition.id) ?? {};
       if (state.backoffUntil && Date.parse(state.backoffUntil) > Date.now()) {
-        throw new Error(`automation is backed off until ${state.backoffUntil}`);
+        throw new AutomationBackedOffError(`automation is backed off until ${state.backoffUntil}`);
       }
       const { baseline, overlapSince } = pollWindow(definition, state, mode);
       const duplicates: GithubCandidate[] = [];
       const accept = candidateAcceptor(definition, baseline, mode, store, candidate => duplicates.push(candidate));
-      const result = await githubRequests.run(() => github.poller.poll(
-        github.owner,
-        github.repo,
+      const result = await githubRequests.run(() => readUnderCanonicalName(github, ({ owner, repo }) => github.poller.poll(
+        owner,
+        repo,
         definition,
         { since: overlapSince, accept, ...(mode === 'execute' && state.historyScan ? { historyScan: state.historyScan } : {}) },
-      ));
+      )));
       this.assertCurrent(definition);
       const eligible = result.candidates.filter(candidate => afterBaseline(candidate, definition, baseline));
       if (mode === 'execute') await this.launchCandidates(definition, eligible);
@@ -155,6 +160,8 @@ export class ProjectAutomationScheduler {
         nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
         consecutiveFailures: 0,
         backoffUntil: undefined,
+        lastError: undefined,
+        lastErrorAt: undefined,
       }));
     } else if (detectionOnly) {
       store.setState(definition.id, (current) => ({
@@ -213,8 +220,7 @@ export class ProjectAutomationScheduler {
     const previous = candidate.event.startsWith('issue.')
       ? [...this.handle.store.latestReceipts().values()].find((receipt) => receipt.status !== 'released' && receipt.automationId === definition.id
         && receipt.candidate?.event.startsWith('issue.')
-        && receipt.candidate.repo.toLowerCase() === candidate.repo.toLowerCase()
-        && receipt.candidate.number === candidate.number)
+        && receipt.candidate.nodeId === candidate.nodeId)
       : undefined;
     if (previous) {
       await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
@@ -259,6 +265,7 @@ export class ProjectAutomationScheduler {
   }
 
   private async recordFailure(definition: GithubAutomationDefinition, error: unknown): Promise<void> {
+    const reason = error instanceof Error ? error.message : String(error);
     this.handle.store.setState(definition.id, (current) => {
       this.currentState(definition, current);
       const failures = (current.consecutiveFailures ?? 0) + 1;
@@ -268,9 +275,13 @@ export class ProjectAutomationScheduler {
         consecutiveFailures: failures,
         backoffUntil: new Date(Date.now() + delay).toISOString(),
         nextCheckAt: new Date(Date.now() + delay).toISOString(),
+        ...(error instanceof AutomationBackedOffError ? {} : {
+          lastError: reason.slice(0, AUTOMATION_LAST_ERROR_MAX),
+          lastErrorAt: new Date(Date.now()).toISOString(),
+        }),
       };
     });
-    await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
+    await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason });
     this.handle.onChange?.(definition.id, definition.revision);
   }
 }
@@ -315,11 +326,11 @@ function candidateAcceptor(definition: GithubAutomationDefinition, baseline: str
   };
 }
 
-/** Issue receipts own the item across transitions; PR receipts own their opened event. */
+/** Issue receipts own the item across transitions; PR receipts own their opened event. An issue is
+ *  keyed by its node ID, which a repository rename keeps, so a receipt recorded under the old name
+ *  still covers it. */
 function candidateKey(candidate: GithubCandidate): string {
-  return candidate.event.startsWith('issue.')
-    ? `${candidate.repo.toLowerCase()}:issue:${candidate.number}`
-    : candidate.eventId;
+  return candidate.event.startsWith('issue.') ? `issue:${candidate.nodeId}` : candidate.eventId;
 }
 
 function laterCursor(

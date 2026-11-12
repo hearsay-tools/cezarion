@@ -73,6 +73,7 @@ import { createAutomationService, onceCreateAnswer } from '../automations/servic
 import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { GithubPoller } from '../automations/github-poller.ts';
+import { githubRepository, type GithubRepository } from '../automations/github-repository.ts';
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
@@ -274,7 +275,7 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
+import { forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import { projectAdmissionRefusal, withProjectAdmission, type CockpitOwnership } from './cockpit-ownership.ts';
@@ -3055,14 +3056,13 @@ export function createApp(deps: ServerDeps) {
       void withProjectAdmission(project.dataDir, async function manualCheck() {
         check.status = 'running';
         try {
-          const repoRemote = (await getRepoInfo(project.root))?.remote;
-          const remote = parseRemote(repoRemote ?? '');
-          if (!remote || forgeKindOfRemote(repoRemote) !== 'github') throw new Error('No GitHub remote is configured');
+          const repository = githubRepository(project.root, (await getRepoInfo(project.root))?.remote);
+          if (!repository) throw new Error('No GitHub remote is configured');
           const scheduler = new ProjectAutomationScheduler({
             projectId: project.id,
             store,
             timeZone: localTimeZone(),
-            github: { owner: remote.owner, repo: remote.repo, poller: new GithubPoller() },
+            github: { ...repository, poller: new GithubPoller() },
             launch: parsed.data.mode === 'execute'
               ? (definition, candidate, receiptId) => launchAutomationRun({ root: project.root, manager: project.manager, store: project.store, definition, candidate, receiptId })
               : undefined,
@@ -5138,14 +5138,10 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   attachHomeLifecycle(server);
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
   // a github.com remote, and only then does the project's handle poll.
-  const automationProjects = new Map<string, { root: string; github?: { owner: string; repo: string } }>();
+  const automationProjects = new Map<string, { root: string; github?: GithubRepository }>();
   const rememberAutomationProject = async (id: string, root: string): Promise<void> => {
-    const repoRemote = (await getRepoInfo(root))?.remote;
-    const parsed = parseRemote(repoRemote ?? '');
-    automationProjects.set(id, {
-      root,
-      ...(parsed && forgeKindOfRemote(repoRemote) === 'github' ? { github: { owner: parsed.owner, repo: parsed.repo } } : {}),
-    });
+    const github = githubRepository(root, (await getRepoInfo(root))?.remote);
+    automationProjects.set(id, { root, ...(github ? { github } : {}) });
   };
   const emitWorkspaceAutomationChange = (projectId: string) => (automationId: string, revision: number) =>
     workspaceEvents.emit('automation-change', { project: projectId, automationId, revision });
