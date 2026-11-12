@@ -16,6 +16,11 @@ const repoRoot = path.join(__dirname, '..', '..');
 const ci = () => yaml.parse(fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8'));
 const EVENTS = ['pull_request_target', 'workflow_dispatch', 'merge_group', 'push'];
 const step = (job, id) => job.steps.find((s) => s.id === id || s.name === id);
+// Squeal's GitHub Action (hearsay-tools/squeal spec 018 D20) puts `squeal` on the PATH and never
+// fails the job. Like every action here it is pinned to a full commit SHA; the comment names its
+// release tag.
+const SQUEAL_ACTION = 'hearsay-tools/squeal/ci@ebd52be86287031f36c0f4fae8d4afbc90f2568a';
+const SQUEAL_PIN = `uses: ${SQUEAL_ACTION} # v0.1.443`;
 
 function expression(raw, context) {
   const code = String(raw).replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([\w]+-[\w-]+)/g, "needs['$1']");
@@ -30,7 +35,6 @@ function context(event, { vitest = 'success', exported = 'success', trial = fals
       vitest: { result: vitest },
       'squeal-export': { result: exported },
     },
-    steps: { squeal: { outcome: 'success' } },
     cancelled: () => false,
   };
 }
@@ -61,7 +65,7 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
   const vitest = ci().jobs.vitest;
   const collect = step(vitest, 'collect');
   const record = step(vitest, 'record');
-  const recorded = ['squeal', 'record', 'Upload Squeal parts'].map((id) => step(vitest, id));
+  const recorded = ['Set up Squeal', 'record', 'Upload Squeal parts'].map((id) => step(vitest, id));
   // [event, inputs, recorded]: only a dispatch with squeal_gate_trial and no pr_number takes the trial.
   const runs = [...EVENTS.map((event) => [event, {}, event === 'merge_group']),
     ['workflow_dispatch', { trial: true }, true], ['workflow_dispatch', { trial: true, pr: '42' }, false],
@@ -78,7 +82,7 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
   for (const [event, inputs] of runs) {
     assert.equal(expression(record['continue-on-error'], context(event, inputs)), event === 'merge_group', `${event} ${JSON.stringify(inputs)}`);
   }
-  assert.equal(step(vitest, 'squeal')['continue-on-error'], true, 'a failed fetch must not fail the shard');
+  assert.equal(step(vitest, 'Set up Squeal').uses, SQUEAL_ACTION);
   // The recorded command is the shard command without its own V8 coverage, which only the plain
   // command adds: Squeal's provider yields to a project's coverage (squeal spec 020 D13.1).
   const command = record.run.split('\n')[0];
@@ -92,37 +96,31 @@ test('merge groups and Squeal gate trial dispatches run the shard under squeal c
   assert.equal(upload.with.path, "${{ runner.temp }}/${{ steps.rerun.outcome == 'skipped' && 'squeal-parts' || 'squeal-parts-rerun' }}/");
   assert.equal(record.env.PARTS_DIR, 'squeal-parts');
   assert.equal(upload.with['retention-days'], 3);
-  assert.match(upload.if, /steps\.squeal\.outcome == 'success'/);
   // A shard whose tests failed still uploads its parts: the condition carries its own status
-  // function, so GitHub adds no success() (cezarion#3264 review).
+  // function, so GitHub adds no success() (cezarion#3264 review). It reads no setup step: when
+  // Squeal cannot run, the action passes the command through and there are no parts to upload.
+  assert.doesNotMatch(upload.if, /steps\./);
   assert.match(String(upload.if), /^!cancelled\(\) && /);
 });
 
-test('the merge-group step returns the test command\'s exit code and output, recorded or not', () => {
+test('the merge-group step runs the test command under squeal ci record and returns its exit code and output', () => {
   const record = step(ci().jobs.vitest, 'record');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-squeal-record-'));
   try {
     const bin = path.join(temp, 'bin');
     fs.mkdirSync(bin);
-    for (const [name, code] of [['node', 7], ['npm', 3]]) {
-      fs.writeFileSync(path.join(bin, name), `#!/bin/sh\necho "${name} $*"\nexit ${code}\n`, { mode: 0o755 });
-    }
-    const run = (fetched) => spawnSync('bash', ['-e', '-c', script(record.run, 'merge_group', 2)], {
-      encoding: 'utf8',
-      env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: fetched, PARTS_DIR: record.env.PARTS_DIR },
+    // `squeal ci record` returns the command's code, as the action's pass-through does when Squeal cannot run.
+    fs.writeFileSync(path.join(bin, 'squeal'), '#!/bin/sh\necho "squeal $*"\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\necho "npm $*"\nexit 3\n', { mode: 0o755 });
+    const run = (event) => spawnSync('bash', ['-e', '-c', script(record.run, event, 2)], {
+      encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', PARTS_DIR: record.env.PARTS_DIR },
     });
-    const recorded = run('success');
-    assert.equal(recorded.status, 7, 'squeal ci record returns the command\'s code');
-    assert.equal(recorded.stdout.trim(), 'node /runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci record --out /runner/temp/squeal-parts -- npm test -- --shard=2/8 --maxWorkers=4');
-    const plain = run('failure');
-    assert.equal(plain.status, 3);
-    assert.match(plain.stdout, /::warning title=Squeal release not fetched::Shard 2\/8/);
-    assert.match(plain.stdout, /^npm test -- --shard=2\/8 --maxWorkers=4$/m);
+    const recorded = run('merge_group');
+    assert.equal(recorded.status, 3, 'the step\'s exit code is the command\'s');
+    assert.equal(recorded.stdout, 'squeal ci record --out /runner/temp/squeal-parts -- npm test -- --shard=2/8 --maxWorkers=4\n'
+      + 'npm test -- --shard=2/8 --maxWorkers=4\n');
     // A trial dispatch records the same command, with no --coverage.enabled for Squeal's provider to yield to.
-    const trial = spawnSync('bash', ['-e', '-c', script(record.run, 'workflow_dispatch', 2)], {
-      encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', SQUEAL_FETCHED: 'success', PARTS_DIR: record.env.PARTS_DIR },
-    });
-    assert.equal(trial.stdout, recorded.stdout);
+    assert.equal(run('workflow_dispatch').stdout, recorded.stdout);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -164,11 +162,11 @@ test('squeal-publish alone writes contents, after the export, and runs no reposi
   assert.equal(checkout.with['fetch-depth'], 0, 'pruning places refs on the first-parent line');
   assert.equal(checkout.with['persist-credentials'], false, 'no token on disk');
   assert.deepEqual(job.steps.map((s) => s.uses?.split('@')[0]).filter(Boolean),
-    ['actions/checkout', 'actions/setup-node', 'actions/download-artifact']);
+    ['actions/checkout', 'actions/setup-node', 'hearsay-tools/squeal/ci', 'actions/download-artifact']);
   assert.equal(job.steps.find((s) => s.uses?.startsWith('actions/setup-node@')).with['package-manager-cache'], false);
   for (const s of job.steps.filter((s) => s.run)) {
     assert.doesNotMatch(s.run, /\b(npm|pnpm|npx|yarn|corepack)\b|build|\.\/|node_modules/, `${s.name} runs repository code`);
-    assert.doesNotMatch(s.run, /^\s*node (?!"\$RUNNER_TEMP\/squeal\/)/m, `${s.name} runs a script outside the Squeal release`);
+    assert.doesNotMatch(s.run, /^\s*node\b/m, `${s.name} runs a script outside Squeal's action`);
   }
   // The token reaches only the publish step, as git configuration in its environment.
   const tokened = Object.entries(jobs).flatMap(([id, other]) => (other.steps ?? []).map((s) => ({ id, s })))
@@ -176,21 +174,21 @@ test('squeal-publish alone writes contents, after the export, and runs no reposi
   assert.deepEqual(tokened.map(({ s }) => s.name), ['Publish Squeal results']);
   assert.deepEqual(Object.keys(step(job, 'Publish Squeal results').env), ['GH_TOKEN']);
   assert.match(step(job, 'Publish Squeal results').run,
-    /squeal\.mjs" ci publish "\$RUNNER_TEMP\/squeal-results\/squeal-results\.json\.gz" --keep 100$/m);
+    /^\s*squeal ci publish "\$RUNNER_TEMP\/squeal-results\/squeal-results\.json\.gz" --keep 100$/m);
 });
 
 test('the publish step hands git the token as an extra header and masks it', () => {
   const publish = step(ci().jobs['squeal-publish'], 'Publish Squeal results');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-squeal-publish-'));
   try {
-    fs.writeFileSync(path.join(temp, 'node'), '#!/bin/sh\necho "count=$GIT_CONFIG_COUNT key=$GIT_CONFIG_KEY_0 value=$GIT_CONFIG_VALUE_0 args=$*"\nexit 4\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(temp, 'squeal'), '#!/bin/sh\necho "count=$GIT_CONFIG_COUNT key=$GIT_CONFIG_KEY_0 value=$GIT_CONFIG_VALUE_0 args=$*"\nexit 4\n', { mode: 0o755 });
     const result = spawnSync('bash', ['-e', '-c', publish.run], {
       encoding: 'utf8', env: { PATH: `${temp}:/usr/bin:/bin`, RUNNER_TEMP: '/runner/temp', GH_TOKEN: 'tok' },
     });
     const basic = Buffer.from('x-access-token:tok').toString('base64');
     assert.equal(result.status, 4, 'the publish exit code is the step\'s');
     assert.equal(result.stdout, `::add-mask::${basic}\ncount=1 key=http.https://github.com/.extraheader value=AUTHORIZATION: basic ${basic} `
-      + 'args=/runner/temp/squeal/plugins/claude-code/dist/cli/squeal.mjs ci publish /runner/temp/squeal-results/squeal-results.json.gz --keep 100\n');
+      + 'args=ci publish /runner/temp/squeal-results/squeal-results.json.gz --keep 100\n');
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
@@ -217,15 +215,8 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
       assert.match(s.uses, /@[0-9a-f]{40}( |$)/, s.uses);
       assert.ok(others.has(s.uses.split(' ')[0]), `${s.uses} matches the pin the rest of ci.yml uses`);
     }
-    const vitestFetch = step(jobs.vitest, 'squeal');
-    const fetch = step(jobs[id], 'Fetch the Squeal release');
-    assert.deepEqual(fetch.env, vitestFetch.env, `${id}: one Squeal release for record, export and publish`);
-    assert.equal(fetch.run, vitestFetch.run);
     for (const s of jobs[id].steps) if (s.run) assert.equal(/\$\{\{/.test(s.run), false, `${id} ${s.name}: no expression in a script`);
   }
-  const fetch = step(jobs.vitest, 'squeal');
-  assert.match(fetch.env.SQUEAL_COMMIT, /^[0-9a-f]{40}$/);
-  assert.match(fetch.run, /rev-parse HEAD\)" = "\$SQUEAL_COMMIT"/);
   const job = jobs['squeal-export'];
   assert.equal(job.steps.find((s) => s.uses?.startsWith('pnpm/action-setup@')).with.version, '12.11.2');
   const runs = job.steps.map((s) => s.run).filter(Boolean);
@@ -241,13 +232,43 @@ test('squeal-export keys the shard parts in a fresh checkout; squeal-publish pus
   assert.equal(parts.length, 8);
   assert.deepEqual(parts.filter((name) => !name.startsWith(pattern.slice(0, -1))), []);
   assert.match(step(job, 'Export Squeal results').run,
-    /squeal\.mjs" ci export --parts "\$RUNNER_TEMP"\/squeal-parts\/squeal-parts-shard-\* --out "\$RUNNER_TEMP\/squeal-results\.json\.gz"$/);
+    /^squeal ci export --parts "\$RUNNER_TEMP"\/squeal-parts\/squeal-parts-shard-\* --out "\$RUNNER_TEMP\/squeal-results\.json\.gz"$/);
   const upload = step(job, 'Upload Squeal results');
   assert.equal(upload.with.path, '${{ runner.temp }}/squeal-results.json.gz');
   assert.equal(upload.with['retention-days'], 3);
   const download = step(jobs['squeal-publish'], 'Download Squeal results');
   assert.equal(download.with.name, upload.with.name);
   assert.equal(download.with.path, '${{ runner.temp }}/squeal-results');
+});
+
+test('every job that runs squeal sets up Squeal\'s pinned action once, after its Node and before the first squeal call', () => {
+  const { jobs } = ci();
+  const text = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+  assert.doesNotMatch(text, /squeal\.mjs|SQUEAL_TAG|SQUEAL_COMMIT|SQUEAL_FETCHED|steps\.squeal\b|hearsay-tools\/squeal\.git/, 'no clone of a Squeal release');
+  // One pin for the whole workflow: an exact commit with its release tag in the comment.
+  const pins = text.match(/^\s*uses: hearsay-tools\/squeal\/ci@.*$/gm);
+  assert.ok(pins.length > 0);
+  for (const pin of pins) assert.equal(pin.trim(), SQUEAL_PIN);
+  const users = Object.entries(jobs).filter(([, job]) => (job.steps ?? []).some((s) => /(^|\s)squeal (ci|code)\b/m.test(s.run ?? '')))
+    .map(([id]) => id);
+  assert.deepEqual(users.sort(), ['squeal-export', 'squeal-gate-trial', 'squeal-publish', 'vitest']);
+  for (const [id, job] of Object.entries(jobs)) {
+    const { steps = [] } = job;
+    const action = steps.filter((s) => s.uses?.startsWith('hearsay-tools/squeal/'));
+    if (!users.includes(id)) {
+      assert.deepEqual(action, [], `${id} runs no squeal`);
+      continue;
+    }
+    assert.equal(action.length, 1, `${id}: one Squeal action step`);
+    assert.equal(action[0].name, 'Set up Squeal', id);
+    assert.equal(action[0].uses, SQUEAL_ACTION, id);
+    assert.equal(action[0].with, undefined, `${id}: the action takes no inputs`);
+    const at = steps.indexOf(action[0]);
+    // The action runs Squeal with the Node on the PATH, so it comes after setup-node.
+    assert.ok(steps.findIndex((s) => s.uses?.startsWith('actions/setup-node@')) < at, `${id}: after setup-node`);
+    const first = steps.findIndex((s) => /(^|\s)squeal (ci|code)\b/m.test(s.run ?? ''));
+    assert.ok(first > at, `${id}: before the first squeal call`);
+  }
 });
 
 test('squeal.config.json reads the shared results ref squeal-publish writes', () => {

@@ -510,12 +510,18 @@ Merge groups publish their Vitest results for Squeal, so a new worktree at a mai
 can import those passes instead of running the same test files again
 (hearsay-tools/squeal spec 018, D8, D9, D13 and D17).
 
-- In a merge group, each `Vitest shard N/8` job fetches the pinned Squeal release (tag and
-  commit in the `Fetch the Squeal release` step) and runs its unchanged `npm test` command
-  under `squeal ci record --out "$RUNNER_TEMP/squeal-parts" --`. The command's output and
-  exit code are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3
-  days. If the fetch fails, the shard runs the plain command with a warning. Other events run
-  the command exactly as before.
+- Every job that runs Squeal sets it up with Squeal's GitHub Action after its Node setup:
+  `uses: hearsay-tools/squeal/ci@<commit> # v<version>`, pinned to a full commit SHA like
+  every other action, with the release tag in the comment. The action puts `squeal` on the
+  `PATH` and runs it with that Node. It never fails the job: when Squeal cannot run, it
+  warns, `squeal ci record` runs the command alone with its exit code, and `squeal ci export`
+  and `squeal ci publish` warn and exit 0. Only a usage error fails the step
+  (hearsay-tools/squeal spec 018 D20).
+- In a merge group, each `Vitest shard N/8` job runs its unchanged `npm test` command under
+  `squeal ci record --out "$RUNNER_TEMP/squeal-parts" --`. The command's output and exit code
+  are the shard's own. The part files upload as `squeal-parts-shard-N`, kept 3 days. When
+  Squeal cannot run, the shard runs the plain command with a warning and uploads no parts.
+  Other events run the command exactly as before.
 - A shard that reruns after a failed first run (§ Rerun of a failed queue shard) records
   the rerun into `$RUNNER_TEMP/squeal-parts-rerun`, and only those parts upload. Each shard
   so has one complete part, which `squeal ci export` needs: it refuses two parts for one
@@ -527,8 +533,8 @@ can import those passes instead of running the same test files again
   kept 3 days. It runs the queued code, so it never holds write access.
 - The `Publish Squeal shared results` job (`squeal-publish`) is the only job with
   `contents: write`, and it runs no repository code: no install, build or package script. It
-  checks out the same commit with full history and no stored credentials, sets up Node,
-  fetches the Squeal release, downloads the export and runs `squeal ci publish --keep 100`.
+  checks out the same commit with full history and no stored credentials, sets up Node and
+  Squeal's action, downloads the export and runs `squeal ci publish --keep 100`.
   That pushes `refs/squeal/<sha>` and deletes refs beyond the newest 100 main commits; it
   runs only git and reads `squeal.config.json`. The token reaches only that step, as a git
   extra header in its environment.
@@ -545,11 +551,11 @@ can import those passes instead of running the same test files again
   the tests' input files while the command runs.
 
 `.github/scripts/ci-squeal-results.workflow.test.cjs` pins the event selection, the
-unchanged command and exit code, both jobs' permissions, the publish job's token handling
-and their absence from required checks. `.github/scripts/main-ci-escalation.test.cjs` pins
-the ref check.
-To move to another Squeal release, change `SQUEAL_TAG` and `SQUEAL_COMMIT` in the vitest job's
-`Fetch the Squeal release` step; both Squeal jobs reuse it.
+unchanged command and exit code, the action's pin and its place after Node in each job, both
+jobs' permissions, the publish job's token handling and their absence from required checks.
+`.github/scripts/main-ci-escalation.test.cjs` pins the ref check.
+To move to another Squeal release, change the commit and the `# v<version>` comment on every
+`Set up Squeal` step in `ci.yml` together; the workflow test requires one pin.
 
 ### Squeal quality gate trial
 
@@ -572,7 +578,7 @@ gh workflow run ci.yml --ref <branch> -f squeal_gate_trial=true
   `squeal-parts-shard-N`; the run collects and merges no V8 coverage.
 - The `Squeal quality gate trial` job (`squeal-gate-trial`) runs after the shards pass or
   fail. It checks out the dispatched commit with the history of main, installs dependencies,
-  fetches the pinned Squeal release, downloads the parts and runs
+  sets up Squeal's action, downloads the parts and runs
   `squeal code --base origin/main --json --parts <shard directories>`. A selected test file
   whose part certifies its inputs here comes from the parts; the gate runs the others itself,
   for up to 600 seconds.
