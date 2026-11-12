@@ -189,6 +189,10 @@ describe('mobile drawer', () => {
     fireEvent.click(menuButton())
     const [current, toolkit, failed, finished, idle] = rows() as [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement]
     expect(current.getAttribute('aria-current')).toBe('page')
+    // The current row sits on its own resting fill; an ordinary row has none of its own.
+    const restFill = (el: Element) => (el.closest('[data-slot="drawer-project-current"]') ?? el).className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
+    expect(restFill(current)).not.toEqual([])
+    expect(restFill(current)).not.toEqual(restFill(toolkit))
     expect(current.querySelector('svg[data-design-icon="check"]')).not.toBeNull()
     expect(toolkit.getAttribute('aria-current')).toBeNull()
 

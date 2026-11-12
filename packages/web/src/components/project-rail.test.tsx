@@ -327,13 +327,18 @@ describe('ProjectRail expanded rows (#711)', () => {
     expect(link.getAttribute('title')).toBeNull()
   })
 
-  it('marks the current row and drops the left bar', () => {
+  it('fills the current row apart from the others and drops the left bar', () => {
     // Name and state-word contrast on default, hovered and selected rows: project-rail.e2e.ts.
     renderExpanded()
-    expect(row('toolkit-dev').getAttribute('aria-current')).toBe('page')
-    expect(document.querySelector('[data-slot="rail-current-bar"]')).toBeNull()
+    const current = row('toolkit-dev')
     const other = row('open_mercato')
+    expect(current.getAttribute('aria-current')).toBe('page')
     expect(other.getAttribute('aria-current')).toBeNull()
+    // The resting fill (not a hover variant) is what shows which project is open.
+    const restFill = (el: Element) => el.className.split(/\s+/).filter((cls) => cls.startsWith('bg-'))
+    expect(restFill(current)).not.toEqual([])
+    expect(restFill(current)).not.toEqual(restFill(other))
+    expect(document.querySelector('[data-slot="rail-current-bar"]')).toBeNull()
     expect(other.querySelector('[data-slot="rail-project-state"]')?.textContent).toBe('idle')
   })
 
