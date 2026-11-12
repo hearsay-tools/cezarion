@@ -12,8 +12,6 @@ import { withPrivateIndex, type IndexGit, type LiveIndexCheck, type DiffRefusal 
 import { isSafeGitRef } from './git-refs.ts';
 import { withWorktreeMutation, type WorktreeGit } from './git-worktree-lock.ts';
 
-export { autosaveCommit, type AutosaveCommitOptions, type AutosaveOutcome, type AutosaveReason, type AutosaveResult } from './autosave-commit.ts';
-
 /** One worktree per task (spec 006). Only createWorktree throws; its caller reports failure. */
 
 export const DIFF_CAP = 400_000;
