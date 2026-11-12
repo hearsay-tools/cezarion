@@ -61,3 +61,10 @@ test('a setup failure fails the gate', () => {
 test('absent lint evidence is incomplete', () => {
   assert.equal(judgeSqueal(0, { selection: { testFiles: [] } }).state, 'incomplete');
 });
+
+test('lint that is off or failed is incomplete, not clean', () => {
+  for (const reason of [{ off: 'no oxlint installed' }, { failed: 'could not key lint inputs' }, { unreadable: 'x' }]) {
+    const lint = { files: 0, failing: 0, pending: 0, stale: 0, unknown: 0, linting: { done: 0, total: 0 }, ...reason };
+    assert.equal(judgeSqueal(0, { selection: { testFiles: [] }, lint }).state, 'incomplete');
+  }
+});

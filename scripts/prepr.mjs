@@ -30,6 +30,7 @@ export function judgeSqueal(exitCode, status, ignorePath = () => false) {
 function lintOf(status) {
   const l = status?.lint;
   if (!l) return { failing: 0, unfinished: 1 };
+  if (l.off || l.failed || l.unreadable) return { failing: l.failing ?? 0, unfinished: 1, unavailable: String(l.off ?? l.failed ?? l.unreadable) };
   const notDone = Math.max(0, (l.linting?.total ?? 0) - (l.linting?.done ?? 0));
   return { failing: l.failing ?? 0, unfinished: (l.pending ?? 0) + (l.stale ?? 0) + (l.unknown ?? 0) + notDone };
 }
