@@ -29,7 +29,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('rejects duplicate sets, excessive deadlines and foreign workers; an identical wait stays the open one beside a pending ask', async () => {
     const p = await parent(); const w = await worker(p.id);
     expect(() => register(p.id, [w.id, w.id])).toThrow();
-    expect(() => register(p.id, [w.id], 1801)).toThrow();
+    expect(() => register(p.id, [w.id], 7201)).toThrow();
     expect(() => register(p.id, [randomUUID()])).toThrow();
     const wait = manager.registerWorkerWait(p.id, { workerIds: [w.id] } as never);
     expect(Date.parse(wait.deadline!) - Date.now()).toBeGreaterThan(599_000);

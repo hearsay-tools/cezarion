@@ -41,7 +41,10 @@ exit. Design approval does not grant merge authority.
    below and a freshly discovered runner/model/effort. Use `hsq task start`
    with `--task-file <prompt>` and the selected execution controls. An owned
    worker cannot delegate; phase coordinators need root-task capabilities.
-5. **Wait.** Register `hsq message wait --peer <coordinator id>`. Answer from
+5. **Wait.** Keep one long peer wait per active coordinator: register
+   `hsq message wait --peer <coordinator id> --timeout-seconds 7200`, rather
+   than renewing 30-minute waits. Put the request deadline in the first line
+   of each coordinator request and set its matching `--timeout-seconds`. Answer from
    approved decisions; route new product questions to the owner. Prepare the
    next phase while this one runs, then repeat its verification against main.
 6. **Accept.** Read the coordinator's report and recheck the phase exit on main.
@@ -74,5 +77,7 @@ Previous handoff/state: <paths, if present>.
 Planner task: <id>. Report with hsq message progress when the phase is
 accepted: merged PRs, main SHA, exit evidence, metrics, scope changes,
 exclusions, blockers and friction. Route product questions as explicit
-requests to the planner; acceptance of a message is not a decision reply.
+requests to the planner. Put the request deadline in the first line and set
+its matching --timeout-seconds (up to 7200); acceptance of a message is not a
+decision reply.
 ```

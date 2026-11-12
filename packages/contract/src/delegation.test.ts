@@ -211,8 +211,8 @@ describe('worker spawn, steer and wait requests', () => {
 
   it('defaults and bounds the worker wait deadline and limits one mode to one worker', () => {
     expect(workerWaitRequestSchema.parse({ workerIds: [U1] })).toEqual({ workerIds: [U1], timeoutSeconds: 600 });
-    for (const timeoutSeconds of [1, 900, 1800]) accepts(workerWaitRequestSchema, { workerIds: [U1, U2], timeoutSeconds, mode: 'all' });
-    for (const timeoutSeconds of [0, 1801, 1.5]) refuses(workerWaitRequestSchema, { workerIds: [U1], timeoutSeconds });
+    for (const timeoutSeconds of [1, 900, 7200]) accepts(workerWaitRequestSchema, { workerIds: [U1, U2], timeoutSeconds, mode: 'all' });
+    for (const timeoutSeconds of [0, 7201, 1.5]) refuses(workerWaitRequestSchema, { workerIds: [U1], timeoutSeconds });
     refuses(workerWaitRequestSchema, { workerIds: [U1, U1] });
     refuses(workerWaitRequestSchema, { workerIds: [U1], extra: true });
     expect(issuesOf(workerWaitRequestSchema, { workerIds: [U1, U2], mode: 'one' }))
@@ -222,8 +222,8 @@ describe('worker spawn, steer and wait requests', () => {
 
   it('defaults and bounds the peer wait deadline', () => {
     expect(peerWaitRequestSchema.parse({ peerIds: [U1] })).toEqual({ peerIds: [U1], timeoutSeconds: 600 });
-    for (const timeoutSeconds of [1, 900, 1800]) accepts(peerWaitRequestSchema, { peerIds: [U1, U2], timeoutSeconds });
-    for (const timeoutSeconds of [0, 1801]) refuses(peerWaitRequestSchema, { peerIds: [U1], timeoutSeconds });
+    for (const timeoutSeconds of [1, 900, 7200]) accepts(peerWaitRequestSchema, { peerIds: [U1, U2], timeoutSeconds });
+    for (const timeoutSeconds of [0, 7201]) refuses(peerWaitRequestSchema, { peerIds: [U1], timeoutSeconds });
     refuses(peerWaitRequestSchema, { peerIds: [U1], extra: true });
   });
 });

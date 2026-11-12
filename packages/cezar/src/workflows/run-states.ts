@@ -51,7 +51,7 @@ export const RUN_STATES: { readonly [S in RunState]: RunStateSpec } = {
   },
   'waiting:usage-limit': { final: false, note: 'A usage-limit hold: no session and no slot until the resume time.' },
   'waiting:workers': { final: false, note: 'No slot; the idle timer is armed.' },
-  'waiting:peer': { final: false, note: 'Named peer root tasks (hearsay-tools/cezarion#1995). No slot; the idle timer is armed. The deadline (1 to 1,800 s) is its automatic exit.' },
+  'waiting:peer': { final: false, note: 'Named peer root tasks (hearsay-tools/cezarion#1995). No slot; the idle timer is armed. The deadline (1 to 7,200 s) is its automatic exit.' },
   'waiting:subagents': { final: false, note: 'Native subagents the turn left running (hearsay-tools/cezarion#2431). Keeps its session, which holds the children, and a slot in the monitoring pool, so the idle close never applies. The 30-minute deadline after the last child event is its automatic exit when no child signal comes.' },
   'waiting:pr': { final: false, note: 'Keeps a slot in the monitoring pool.' },
   'waiting:process': { final: false, note: 'Keeps a slot in the monitoring pool.' },

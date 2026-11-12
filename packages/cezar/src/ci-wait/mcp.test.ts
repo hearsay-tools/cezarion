@@ -71,7 +71,7 @@ describe('cezar-ci MCP server instructions', () => {
         expect(properties[key!].description).toMatch(new RegExp(`^kind "${kind}":`));
       }
       expect(properties.mode.enum).toEqual(['one', 'any', 'all']);
-      expect(properties.timeout_seconds.description).toMatch(/kind "worker", "request" or "peer": 1–1800, default 600/);
+      expect(properties.timeout_seconds.description).toMatch(/kind "worker", "request" or "peer": 1–7200, default 600/);
       expect(wait.description).toMatch(/worker/);
       expect((await client.listTools()).tools.find(tool => tool.name === 'cezar_cancel_wait')!.description).toMatch(/worker/);
     } finally { await close(); }

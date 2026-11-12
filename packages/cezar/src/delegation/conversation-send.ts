@@ -40,7 +40,7 @@ export function sendAdmission(pair: ConversationPair, root: RunRecord, request: 
   // The extended bound belongs to a new continuation, not merely the flag.
   // Exact retries have already returned above, even if that continuation is now active.
   if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
-    throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
+    throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept 1–7200 seconds');
   }
   assertSendResume(recipient, resume, destroyed);
   const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'

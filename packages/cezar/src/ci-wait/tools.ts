@@ -55,7 +55,7 @@ function flatWaitInputSchema() {
       request_ids: field('request_ids', 'kind "request": the requests you sent, to a worker, your parent or a peer task, to wait for a reply to (1–32 unique ids).'),
       peer_ids: field('peer_ids', 'kind "peer": the peer root tasks of this project to wait for (1–32 unique task ids; find them with `hsq message tasks`). A message from one of them, or one of them settling, ends the wait; other messages wake you and keep it open.'),
       mode: field('mode', 'kind "worker" or "request": "any" wakes you when one selected id settles (default), "all" when every one has, "one" takes exactly one id.'),
-      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "pr": 1–7200, default 1800. kind "worker", "request" or "peer": 1–1800, default 600 (the default shown is the pr one). kind "process": 1–7200, default 1800.'),
+      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "pr": 1–7200, default 1800. kind "worker", "request" or "peer": 1–7200, default 600 (the default shown is the pr one). kind "process": 1–7200, default 1800.'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
       pid: field('pid', 'kind "process": the PID of the background command: the `pid` the job start command printed.'),
       exit_file: field('exit_file', 'kind "process": optional. Only a file that your own wrapper writes the exit code to, in $TMPDIR or the worktree, with a new name for each command. Leave it out for a command that is already running or that writes its status file somewhere else.'),

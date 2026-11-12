@@ -367,8 +367,8 @@ export class WaitEngine {
     const state = this.host.active(runId);
     const resolvedAt = new Date().toISOString();
     const settled = settledWaitEntry(latest, result, observed, resolvedAt);
-    // The count includes a timer batch still awaiting its acknowledgement. A subagent wait charges
-    // by how it resolved, so the resolved entry is what this reads (hearsay-tools/cezarion#2431).
+    // The count includes a batch still awaiting acknowledgement. The kind row reads the durable
+    // result so an empty dependency deadline is free, including at a spent budget.
     if (chargesBudget(settled) && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
       this.host.wakeCapReached(runId, [latest], state);
       return;

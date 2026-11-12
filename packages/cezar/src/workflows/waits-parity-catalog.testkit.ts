@@ -10,7 +10,7 @@ import { familyCells, SHARED_RUNNERS } from '../core/parity-classes.testkit.ts';
 // Earlier runner/base/worker splits: hearsay-tools/cezarion#1301, hearsay-tools/cezarion#1288.
 // Process and entry axes stay separate (hearsay-tools/cezarion#1525); the once file
 // checks registration and runs the single-runner cells.
-export const WAIT_PARITY_PARTS = ['registration', 'input', 'delivery', 'asks', 'done', 'answers', 'mixed', 'recovery', 'conversations', 'refusal', 'completion', 'completion-replies', 'closed', 'process', 'entries'] as const;
+export const WAIT_PARITY_PARTS = ['registration', 'input', 'delivery', 'asks', 'done', 'answers', 'mixed', 'recovery', 'conversations', 'refusal', 'completion', 'completion-replies', 'closed', 'process', 'deadlines', 'entries'] as const;
 export type WaitParityPart = typeof WAIT_PARITY_PARTS[number];
 /** One part's cells, registered for each runner in `runners`. */
 export type WaitCells = (runners: RunnerId[], it?: typeof registerTest) => void;
@@ -65,7 +65,7 @@ type WaitFoldGroup = {
   readonly families?: { readonly [P in FamilyPart]?: readonly (keyof typeof ROW_FAMILIES[P])[] };
 };
 export const WAIT_FOLDS = {
-  'base-registration': { parts: ['registration', 'process'] },
+  'base-registration': { parts: ['registration', 'process', 'deadlines'] },
   base: { parts: ['input', 'asks', 'done', 'answers'] },
   'base-delivery': { parts: ['delivery'] },
   workers: { parts: ['mixed', 'recovery', 'conversations'] },
