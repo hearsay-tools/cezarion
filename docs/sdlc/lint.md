@@ -69,7 +69,7 @@ appropriate boundary or checker explicitly.
 | `cez/card-2-contrast` | Unsafe small text on card-2 (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423) | `packages/web/src/test/card-2-contrast.baseline.json`, shrink-only |
 | `cez/contract-root-import` | A runtime import of a contract package root (hearsay-tools/cezarion#1237) | `contract-root-import.baseline.json`, shrink-only |
 | `cez/design-guardian` | The ten original cockpit design checks; each finding names its original rule, reason and token (hearsay-tools/cezarion#2422) | Original inline allowed predicates and reason comments; tests keep their original scope and the guardian suite excludes itself |
-| `cez/home-boundary` | `squawkHomeDir` references, `resolveHome` outside `home/` and CLI dispatch, unlisted `homedir()` calls in non-test `packages/cezar/src/`, and test-side CEZ_HOME writes/stubs/deletes | `home-readers.baseline.json`: reasoned OS-user readers with exact call counts, shrink-only; shared `vitest.setup.ts` selects test homes |
+| `cez/home-boundary` | `cezarHomeDir` references, `resolveHome` outside `home/` and CLI dispatch, unlisted `homedir()` calls in non-test `packages/cezar/src/`, and test-side CEZ_HOME writes/stubs/deletes | `home-readers.baseline.json`: reasoned OS-user readers with exact call counts, shrink-only; shared `vitest.setup.ts` selects test homes |
 | `cez/test-home-write` | Guarded home names in calls, destructuring, runtime import/export specifiers and member references in test code | Same-line `// test-home-read: <reason>` for a deliberate use; use an explicit sandbox path for writes (hearsay-tools/cezarion#2813) |
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
@@ -146,7 +146,7 @@ their `m`/`c` variants, including JSX source in these files. The shared pattern 
 checks on the same test surfaces. Oxlint scans package tests. The lint
 runner applies the same two scanners to tracked and unignored new test files outside
 `packages/`, including the two node:test projects. Neither rule has a test baseline.
-The guarded names are `homedir`, legacy `squawkHomeDir` and `resolveHome`.
+The guarded names are `homedir`, legacy `cezarHomeDir` and `resolveHome`.
 `home/resolve.ts` exports only `resolveHome` as an environment-to-Home resolver.
 The Squawk path helpers in `paths.ts` take an explicit `Home`; its agent-home
 and tilde APIs remain separate APIs.

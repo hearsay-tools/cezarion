@@ -48,11 +48,11 @@ describe('opencode-task-scope plugin (hearsay-tools/cezarion#2279)', () => {
       ['another task\'s root session', 'A', 'B'],
       ['another task\'s subagent', 'A1', 'B1'],
     ])('%s', async (_name, sessionID, target) => {
-      await expect((await hook(SESSIONS))(...call(sessionID, { task_id: target }))).rejects.toThrow(/cez message/);
+      await expect((await hook(SESSIONS))(...call(sessionID, { task_id: target }))).rejects.toThrow(/hsq message/);
     });
 
     it('refuses when a lookup fails rather than letting the call through', async () => {
-      await expect((await hook(SESSIONS, 'A'))(...call('A1', { task_id: 'A1' }))).rejects.toThrow(/cez message/);
+      await expect((await hook(SESSIONS, 'A'))(...call('A1', { task_id: 'A1' }))).rejects.toThrow(/hsq message/);
     });
   });
 });

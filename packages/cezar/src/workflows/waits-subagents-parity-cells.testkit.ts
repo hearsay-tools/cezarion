@@ -1,3 +1,4 @@
+import { productName } from '../home/display.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -126,7 +127,7 @@ export function subagentCells(runners: readonly RunnerId[]): void {
         await restart();
         await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered);
         expect(settledOf(id, wait.id)).toMatchObject({ result: { reason: 'interrupted' } });
-        expect(wakeInputs(id, wait.id).map(input => input.text)).toEqual([expect.stringContaining('Cezar restarted, and the 1 native subagent still running')]);
+        expect(wakeInputs(id, wait.id).map(input => input.text)).toEqual([expect.stringContaining(`${productName('Cezar')} restarted, and the 1 native subagent still running`)]);
         expect(wakes(id)).toBe(0);
       });
     });

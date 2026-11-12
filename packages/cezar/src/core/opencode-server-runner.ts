@@ -1363,7 +1363,7 @@ class OpencodeSession implements AgentSession {
     this.agentInputReady = false;
     this.cancelAutoEnd();
     if (!parsed.success) {
-      this.emit({ type: 'note', message: 'opencode: rejected an OpenCode permission request that could not be read' });
+      this.emit({ type: 'note', message: 'opencode: rejected an OpenCode permission request it could not read' });
       void this.rejectPermission(pending, 'cezar could not read this permission request');
       return;
     }
