@@ -660,10 +660,11 @@ function heldStepRunner(run: RunRecord): RunnerId | undefined {
   return run.steps.find(step => step.id === run.workflowResumeStepId)?.backend;
 }
 
-/** A provider-error retry still in flight (queued or running, its attempt counted) keeps the held
- *  step's runner across a restart, as its admission chose (hearsay-tools/squawk#3337). */
+/** A provider-error retry keeps the held step's runner across a restart, as its admission chose
+ *  (hearsay-tools/squawk#3337). The reason and the held step are on the record from the hold's own
+ *  write, so a crash right after admission cannot lose them. */
 function retryInFlightRunner(run: RunRecord): RunnerId | undefined {
-  return run.autoResumeReason === 'provider-error' && run.autoResumeAttempts !== undefined ? heldStepRunner(run) : undefined;
+  return run.autoResumeReason === 'provider-error' ? heldStepRunner(run) : undefined;
 }
 
 function ciWorkflowResumeStepIndex(run: RunRecord): number {

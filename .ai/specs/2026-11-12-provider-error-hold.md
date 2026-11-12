@@ -132,6 +132,7 @@ Rows live in `RUN_TRIGGERS` (`workflows/run-states.ts`); this table is the desig
 | waiting:usage-limit | Stop with open waits, per-task cancel, archive | human | `withdraw-hold` → failed, as today (hold.stop, hold.cancel, hold.archive). A Stop also cancels a root's live workers |
 | failed (root) with live workers | Stop | human | Accepted: its live workers are cancelled, the root stays failed (`cancelRunWithoutSession`) |
 | waiting:usage-limit | One of its waits resolves | watcher | Stays held; the retry delivers it (hold.wait-resolves) |
+| queued (a fresh-session retry or worker resume) | Restart before it starts | recovery | Revived as that pending continuation with no session (`reviveQueuedRun`), on the held step's runner; never as the workflow job |
 | waiting:usage-limit | Restart, no session in memory | recovery | Re-armed from `autoResumeAt` and `autoResumeReason`; an older row without the reason reads as `usage-limit` (hold.restart) |
 | failed (root) | Its live worker runs on and settles | worker | No cancel. The worker's result waits for `collect` after the parent's Continue |
 | failed (root) | Restart | recovery | Its workers' routed questions close; its workers recover and run on (`recoveryLeavesWorkerToRoot`) |

@@ -53,8 +53,10 @@ export async function reviveQueuedRun(context: RunModuleContext, host: QueuedRev
   const sessionStep = queuedContinuation
     ? [...run.steps].reverse().find((step) => step.id !== queuedContinuation.id && step.sessionId)
     : undefined;
-  if (queuedContinuation && sessionStep?.sessionId) {
-    reviveQueuedContinuation(context, host, run, reason, queuedContinuation.id, sessionStep);
+  // A provider retry or a worker resume with no earlier session queues a fresh-session
+  // continuation (hearsay-tools/squawk#3337): it revives as that continuation, never as the job.
+  if (queuedContinuation) {
+    reviveQueuedContinuation(context, host, run, reason, queuedContinuation.id, sessionStep?.sessionId ? sessionStep : queuedContinuation);
     return;
   }
   if (run.delegation?.role === 'worker') {
