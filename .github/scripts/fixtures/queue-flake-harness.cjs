@@ -13,7 +13,7 @@ const VITEST_FIRST = 'Run server and cockpit unit suites with Squeal recording';
 const VITEST_RERUN = 'Rerun server and cockpit unit suites with Squeal recording';
 
 function shardJob(id, name, first, rerun, rerunConclusion) {
-  return { id, name, conclusion: rerunConclusion === 'failure' ? 'failure' : 'success', steps: [
+  return { id, name, conclusion: rerunConclusion === 'failure' ? 'failure' : 'success', started_at: '2026-11-12T01:05:00Z', completed_at: '2026-11-12T01:40:00Z', steps: [
     { number: 1, name: 'Set up job', conclusion: 'success' },
     // A failed `continue-on-error` step reads `success` in the jobs API.
     { number: 7, name: first, conclusion: 'success' },
@@ -54,7 +54,10 @@ function routes(state) {
     },
     'GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts': (args) => artifactList(state)
       .filter((artifact) => artifact.name === args.name)
-      .map(({ id, name, bytes }) => ({ id, name, expired: false, size_in_bytes: bytes.length, workflow_run: { id: state.run.id } })),
+      .map(({ id, name, bytes }) => ({
+        id, name, expired: false, size_in_bytes: bytes.length, workflow_run: { id: state.run.id },
+        created_at: state.artifactTimes[name] ?? '2026-11-12T01:20:00Z',
+      })),
     'GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/{archive_format}': (args) => {
       assert.equal(args.archive_format, 'zip'); assert.equal(args.request.redirect, 'manual');
       return { headers: { location: `https://blob.example/${args.artifact_id}` } };
@@ -87,6 +90,7 @@ function harness({ jobs = [vitestJob(2)], artifacts, tree } = {}) {
     artifacts: artifacts ?? { 'failed-test-files-vitest-shard-2': listArchive(names) },
     tree: tree ?? [...names, 'packages/web/src/board.test.tsx', 'packages/web/e2e/specs/board.spec.ts', 'README.md'],
     blobs: {},
+    artifactTimes: {},
   };
   const calls = [];
   const fetches = [];

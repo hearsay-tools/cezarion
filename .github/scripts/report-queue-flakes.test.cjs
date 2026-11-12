@@ -94,6 +94,29 @@ test('a retry of the same run attempt writes nothing twice, after a lost create 
   assert.equal(h.state.comments.length, 1);
 });
 
+// Each attempt overwrites the shard's artifact under the same name, and the artifact API names
+// no attempt. Only an artifact created while the flaked job ran belongs to that attempt.
+test('a replay of an earlier attempt never quotes a later attempt\'s files', async () => {
+  const h = harness();
+  const second = structuredClone(h.state.jobs);
+  second[0].started_at = '2026-11-12T02:05:00Z';
+  second[0].completed_at = '2026-11-12T02:40:00Z';
+  h.state.run.run_attempt = 2;
+  h.state.jobs = second;
+  h.state.artifacts['failed-test-files-vitest-shard-2'] = listArchive([BOARD]);
+  h.state.artifactTimes['failed-test-files-vitest-shard-2'] = '2026-11-12T02:20:00Z';
+  await reportQueueFlakes(h.options());
+  assert.ok(h.state.issues[0].body.includes(MARK.file(BOARD)));
+  h.state.run.run_attempt = 1;
+  h.state.jobs = harness().state.jobs;
+  await reportQueueFlakes(h.options());
+  assert.equal(h.state.issues.length, 2);
+  const replay = h.state.issues[1].body;
+  assert.ok(replay.includes(MARK.occurrence(KEY)));
+  assert.ok(!replay.includes(BOARD), 'the second attempt\'s file stays out of the first attempt\'s report');
+  assert.match(replay, /No failed-file list from this run attempt/);
+});
+
 test('a name that is not a test file in the merge group\'s tree is dropped', async () => {
   const h = harness({
     artifacts: { 'failed-test-files-vitest-shard-2': listArchive([MANAGER, 'packages/cezar/src/gone.test.ts', 'README.md', 'src/`x`.test.ts']) },
@@ -107,7 +130,7 @@ test('a name that is not a test file in the merge group\'s tree is dropped', asy
 
 test('without usable names the report is filed without names and says why', async () => {
   const cases = [
-    ['no artifact', {}, /uploaded no failed-file list/],
+    ['no artifact', {}, /No failed-file list from this run attempt/],
     ['a malformed artifact', { 'failed-test-files-vitest-shard-2': Buffer.from('not a zip') }, /failed-file list was malformed/],
     ['an empty list', { 'failed-test-files-vitest-shard-2': listArchive([]) }, /before any test file finished/],
     ['only foreign names', { 'failed-test-files-vitest-shard-2': listArchive(['packages/cezar/src/gone.test.ts']) }, /1 name dropped/],
@@ -126,7 +149,7 @@ test('an expired artifact or an oversized tree also files the report without nam
   const gone = harness();
   gone.state.blobs['failed-test-files-vitest-shard-2'] = null;
   await reportQueueFlakes(gone.options());
-  assert.match(gone.state.issues[0].body, /uploaded no failed-file list/);
+  assert.match(gone.state.issues[0].body, /No failed-file list from this run attempt/);
   const big = harness();
   big.state.truncated = true;
   await reportQueueFlakes(big.options());

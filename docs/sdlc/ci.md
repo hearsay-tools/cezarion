@@ -967,13 +967,15 @@ hearsay-tools/cezarion#3291).
   step concluded `success`: the rerun runs only after a failed first run (§ Rerun of a
   failed queue shard). A shard whose rerun failed is a failure, not a flake.
 - **The names.** It downloads the shard's `failed-test-files-*-shard-N` artifact through
-  the Actions API, into memory, with a 64 KiB limit, and never writes it to disk. It
+  the Actions API, into memory, with a 64 KiB limit, and never writes it to disk. Every
+  attempt of a run uploads under the same name and overwrites the last, and the API
+  names no attempt, so it takes only an artifact created while the flaked job ran. It
   reads the archive as untrusted bytes: exactly one `failed-test-files.txt`, stored or
   deflated, valid UTF-8. It keeps only paths with safe characters and a `.test.*` or
   `.spec.*` suffix that are regular files in the merge group's tree, read through the
   Git API (`git/trees/<sha>?recursive=1`). A report quotes each name as code and names
   at most 50.
-- **No names.** With no artifact, an expired or malformed one, a list emptied by the
+- **No names.** With no artifact from the attempt, an expired or malformed one, a list emptied by the
   tree check, or a tree too large for one API read, the report says so and names no
   file.
 - **One issue per merge group, keyed by test file.** The body carries

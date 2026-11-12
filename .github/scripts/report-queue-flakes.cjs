@@ -34,7 +34,7 @@ const MARK = {
   file: (name) => `<!-- cez-flake-file:v1:${name} -->`,
 };
 const NOTES = {
-  absent: 'The shard uploaded no failed-file list.',
+  absent: 'No failed-file list from this run attempt is available.',
   malformed: 'The failed-file list was malformed.',
   empty: 'The first run failed before any test file finished.',
   tree: 'The merge group\'s tree was too large to check the names against.',
@@ -78,7 +78,7 @@ function findFlakes(jobs) {
     const step = (name) => (job.steps ?? []).find((item) => item.name === name);
     const first = step(found.kind.first);
     if (first && first.conclusion !== 'skipped' && step(found.kind.rerun)?.conclusion === 'success') {
-      flakes.push({ ...found, jobId: job.id, names: [], dropped: 0, notes: [] });
+      flakes.push({ ...found, jobId: job.id, ran: [Date.parse(job.started_at), Date.parse(job.completed_at)], names: [], dropped: 0, notes: [] });
     }
   }
   return flakes;
@@ -132,14 +132,19 @@ async function downloadArchive(github, args, fetchImpl) {
   return readCapped(blob.body, MAX_ARCHIVE_BYTES);
 }
 
-async function artifactFor(github, base, run, name) {
+// Every attempt of a run uploads under the same name with `overwrite: true`, and the artifact API
+// names no attempt. Only an artifact created while the flaked job ran belongs to this attempt.
+async function artifactFor(github, base, run, flake) {
+  const name = `${flake.kind.artifact}${flake.shard}`;
+  const [started, completed] = flake.ran;
   const artifacts = await github.paginate('GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts', { ...base, run_id: run.id, name, per_page: 100 });
-  return artifacts.filter((item) => item.name === name && !item.expired && item.workflow_run?.id === run.id && Number.isSafeInteger(item.id))
+  return artifacts.filter((item) => item.name === name && !item.expired && item.workflow_run?.id === run.id && Number.isSafeInteger(item.id)
+    && Date.parse(item.created_at) >= started && Date.parse(item.created_at) <= completed)
     .sort((a, b) => b.id - a.id)[0];
 }
 
 async function readShardNames({ github, base, run, flake, fetchImpl }) {
-  const artifact = await artifactFor(github, base, run, `${flake.kind.artifact}${flake.shard}`);
+  const artifact = await artifactFor(github, base, run, flake);
   if (!artifact) return flake.notes.push(NOTES.absent);
   if (artifact.size_in_bytes > MAX_ARCHIVE_BYTES) return flake.notes.push(NOTES.malformed);
   let text;
