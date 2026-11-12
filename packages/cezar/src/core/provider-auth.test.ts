@@ -734,7 +734,7 @@ describe('ProviderAuthService', () => {
         now: () => now,
         runCommand: async (executable) => {
           probes += 1;
-          if (probes > 6) await gate; // only the SECOND round of probes hangs
+          if (probes > ROSTER) await gate; // only the SECOND round of probes hangs
           return resultFor(executable);
         },
       });
@@ -748,11 +748,11 @@ describe('ProviderAuthService', () => {
           expect.objectContaining({ provider: 'claude', status: 'connected' }),
         ]),
       });
-      expect(probes).toBe(12); // …and it did kick the refresh off
+      expect(probes).toBe(2 * ROSTER); // …and it did kick the refresh off
 
       // A reader arriving mid-revalidation is served from cache too, not attached to the probe.
       await expect(service.status()).resolves.toBeDefined();
-      expect(probes).toBe(12); // no second refresh piled on top
+      expect(probes).toBe(2 * ROSTER); // no second refresh piled on top
       release();
     });
 
