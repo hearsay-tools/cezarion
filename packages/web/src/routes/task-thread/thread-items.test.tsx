@@ -704,23 +704,27 @@ describe('AssistantMessage copy actions', () => {
   })
 
   it('places the reply markdown source on the clipboard as text/plain', async () => {
-    const writeText = vi.fn(async () => {})
+    const writeText = vi.fn(() => new Promise<void>(resolve => {
+      setTimeout(resolve, 0) // bound: one macrotask after writeText is called
+    }))
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
     render(<MemoryRouter><AssistantMessage text={SOURCE} /></MemoryRouter>)
     fireEvent.click(markdownButton())
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(SOURCE))
-    expect(markdownButton().textContent).toContain('Copied')
+    await waitFor(() => expect(markdownButton().textContent).toContain('Copied')) // bound: Copied commits after writeText resolves (hearsay-tools/squawk#3200)
+    expect(writeText).toHaveBeenCalledWith(SOURCE)
   })
 
   it('places rendered HTML and markdown on the clipboard together', async () => {
-    const write = vi.fn(async () => {})
+    const write = vi.fn(() => new Promise<void>(resolve => {
+      setTimeout(resolve, 0) // bound: one macrotask after write is called
+    }))
     vi.stubGlobal('ClipboardItem', class ClipboardItem {
       constructor(public items: Record<string, Blob>) {}
     })
     vi.stubGlobal('navigator', { ...navigator, clipboard: { write, writeText: vi.fn() } })
     render(<MemoryRouter><AssistantMessage text={SOURCE} /></MemoryRouter>)
     fireEvent.click(copyButton())
-    await waitFor(() => expect(write).toHaveBeenCalled())
+    await waitFor(() => expect(copyButton().textContent).toContain('Copied')) // bound: Copied commits after write resolves (hearsay-tools/squawk#3200)
     const item = writtenItem(write)
     expect(await item.items['text/plain']!.text()).toBe(SOURCE)
     const html = await item.items['text/html']!.text()
@@ -730,7 +734,6 @@ describe('AssistantMessage copy actions', () => {
     expect(html).toMatch(/<a\b/i)
     expect(html).toContain('https://example.com')
     expect(html).not.toContain('<button')
-    expect(copyButton().textContent).toContain('Copied')
   })
 
   it('does not let a fenced URL steal a markdown link href', async () => {
