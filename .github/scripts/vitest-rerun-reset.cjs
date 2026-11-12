@@ -16,36 +16,41 @@ function cacheFiles(root) {
 }
 
 // Each entry is ["<project>:<path relative to the root>", { duration, failed }].
-function failedFiles(cache, root) {
+function failedFiles(cache, root, cwd) {
   const { results } = JSON.parse(fs.readFileSync(cache, 'utf8'));
   return results.filter(([, result]) => result?.failed === true)
-    .map(([key]) => path.relative(process.cwd(), path.resolve(root, key.slice(key.indexOf(':') + 1))));
+    .map(([key]) => path.relative(cwd, path.resolve(root, key.slice(key.indexOf(':') + 1))));
 }
 
-function resetResults(root, list) {
-  const caches = cacheFiles(root);
+// `root` and `list` resolve against `cwd`; the list names files relative to it.
+function resetResults(root, list, { cwd = process.cwd(), log = console.log } = {}) {
+  const rootDir = path.resolve(cwd, root);
+  const caches = cacheFiles(rootDir);
   const names = new Set();
   for (const cache of caches) {
     try {
-      for (const name of failedFiles(cache, root)) names.add(name);
+      for (const name of failedFiles(cache, rootDir, cwd)) names.add(name);
     } catch (error) {
-      console.log(`::warning title=Unreadable Vitest results cache::${cache}: ${error.message}. The failed-file list leaves its files out.`);
+      log(`::warning title=Unreadable Vitest results cache::${cache}: ${error.message}. The failed-file list leaves its files out.`);
     }
   }
   const sorted = [...names].sort();
-  fs.writeFileSync(list, sorted.map((name) => `${name}\n`).join(''));
+  fs.writeFileSync(path.resolve(cwd, list), sorted.map((name) => `${name}\n`).join(''));
   for (const cache of caches) fs.rmSync(cache);
+  log(`First run failed files (${sorted.length}):${sorted.map((name) => `\n  ${name}`).join('')}`);
   return sorted;
 }
 
-if (require.main === module) {
-  const [root, list] = process.argv.slice(2);
+function main(args) {
+  const [root, list] = args;
   if (!root || !list) {
     console.error('usage: vitest-rerun-reset.cjs <vitest root> <failed-file list>');
-    process.exit(2);
+    return 2;
   }
-  const names = resetResults(root, list);
-  console.log(`First run failed files (${names.length}):${names.map((name) => `\n  ${name}`).join('')}`);
+  resetResults(root, list);
+  return 0;
 }
 
-module.exports = { resetResults };
+if (require.main === module) process.exitCode = main(process.argv.slice(2));
+
+module.exports = { main, resetResults };

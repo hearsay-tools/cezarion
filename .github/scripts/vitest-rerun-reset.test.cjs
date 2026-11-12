@@ -10,6 +10,8 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const { main, resetResults } = require('./vitest-rerun-reset.cjs');
+
 const repoRoot = path.join(__dirname, '..', '..');
 const script = path.join(__dirname, 'vitest-rerun-reset.cjs');
 const vitestBin = path.join(repoRoot, 'node_modules', 'vitest', 'vitest.mjs');
@@ -34,8 +36,11 @@ function runVitest(root) {
   });
 }
 
-function reset(repo, ...args) {
-  return spawnSync(process.execPath, [script, ...args], { cwd: repo, encoding: 'utf8' });
+// The reset as the workflow step calls it, from the repository root, with its log lines.
+function reset(repo) {
+  const lines = [];
+  const names = resetResults('pkg', 'failed.txt', { cwd: repo, log: (line) => lines.push(line) });
+  return { names, log: lines.join('\n') };
 }
 
 function cacheFiles(root) {
@@ -60,11 +65,11 @@ test('records the first run\'s failed files from the repository root and deletes
   const { repo, root } = fixture(t);
   assert.equal(runVitest(root).status, 1, 'the fixture\'s first run fails');
   assert.equal(cacheFiles(root).length, 1, 'Vitest wrote its results cache where the reset looks');
-  const result = reset(repo, 'pkg', 'failed.txt');
-  assert.equal(result.status, 0, result.stderr);
+  const result = reset(repo);
+  assert.deepEqual(result.names, ['pkg/sub/fails.test.js']);
   assert.equal(fs.readFileSync(path.join(repo, 'failed.txt'), 'utf8'), 'pkg/sub/fails.test.js\n');
   assert.deepEqual(cacheFiles(root), []);
-  assert.match(result.stdout, /pkg\/sub\/fails\.test\.js/);
+  assert.equal(result.log, 'First run failed files (1):\n  pkg/sub/fails.test.js');
 });
 
 test('the rerun sorts the shard as the first run did, and without the reset it would not', async (t) => {
@@ -73,14 +78,13 @@ test('the rerun sorts the shard as the first run did, and without the reset it w
   assert.deepEqual(first, ['passes.test.js', path.join('sub', 'fails.test.js')]);
   runVitest(root);
   assert.notDeepEqual(await order(root), first, 'Vitest runs a cached failure first');
-  assert.equal(reset(repo, 'pkg', 'failed.txt').status, 0);
+  reset(repo);
   assert.deepEqual(await order(root), first);
 });
 
-test('with no results cache it writes an empty list and succeeds', (t) => {
+test('with no results cache it writes an empty list', (t) => {
   const { repo } = fixture(t);
-  const result = reset(repo, 'pkg', 'failed.txt');
-  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(reset(repo).names, []);
   assert.equal(fs.readFileSync(path.join(repo, 'failed.txt'), 'utf8'), '');
 });
 
@@ -89,18 +93,22 @@ test('an unreadable results cache names no file, warns, and is still deleted', (
   const cache = path.join(root, 'node_modules', '.vite', 'vitest', 'hash', 'results.json');
   fs.mkdirSync(path.dirname(cache), { recursive: true });
   fs.writeFileSync(cache, '{"results": 7');
-  const result = reset(repo, 'pkg', 'failed.txt');
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^::warning title=Unreadable Vitest results cache::/m);
+  const result = reset(repo);
+  assert.match(result.log, /^::warning title=Unreadable Vitest results cache::/m);
+  assert.deepEqual(result.names, []);
   assert.equal(fs.readFileSync(path.join(repo, 'failed.txt'), 'utf8'), '');
   assert.deepEqual(cacheFiles(root), []);
 });
 
-test('it refuses to run without a Vitest root and a list file', (t) => {
-  const { repo } = fixture(t);
-  const result = reset(repo, 'pkg');
-  assert.equal(result.status, 2);
-  assert.match(result.stderr, /usage/);
+test('the command takes a Vitest root and a list file, relative to the working directory', (t) => {
+  const { repo, root } = fixture(t);
+  runVitest(root);
+  const result = spawnSync(process.execPath, [script, 'pkg', 'failed.txt'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(repo, 'failed.txt'), 'utf8'), 'pkg/sub/fails.test.js\n');
+  assert.match(result.stdout, /First run failed files \(1\)/);
+  assert.equal(main(['pkg']), 2, 'no list file');
+  assert.equal(main([]), 2, 'no Vitest root');
 });
 
 test('the shard configs keep their results caches where the reset looks', async () => {
