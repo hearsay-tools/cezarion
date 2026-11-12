@@ -2,10 +2,10 @@ name: Mobile apps
 
 on:
   pull_request:
-    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', 'docs/mobile.md', '.github/workflows/mobile-check.yml']
+    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', 'docs/mobile.md', '.github/workflows/mobile-check.yml', '.github/actions/node-dist/**']
   push:
     branches: [main]
-    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', '.github/workflows/mobile-check.yml']
+    paths: ['packages/mobile/**', 'packages/cezar/src/home/switch.ts', 'packages/cezar/src/home/identity.ts', 'packages/cezar/scripts/product-identity.mjs', '.github/workflows/mobile-check.yml', '.github/actions/node-dist/**']
   workflow_dispatch:
 
 permissions:

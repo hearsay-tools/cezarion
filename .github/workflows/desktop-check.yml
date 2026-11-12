@@ -19,6 +19,7 @@ on:
       - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
+      - '.github/actions/node-dist/**'
       - '.github/workflows/desktop-release.yml'
   push:
     branches:
@@ -30,6 +31,7 @@ on:
       - 'packages/cezar/src/home/switch.ts'
       - 'packages/cezar/scripts/product-identity.mjs'
       - '.github/workflows/desktop-check.yml'
+      - '.github/actions/node-dist/**'
   workflow_dispatch:
 
 permissions:

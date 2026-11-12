@@ -55,15 +55,26 @@ jobs:
           version: '12.11.2'
 
       - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: ./.github/actions/node-dist
         with:
           node-version: '24.21.0'
 
       - name: Set up Node.js
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
           token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Node.js without node-dist
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -97,16 +108,27 @@ jobs:
           version: '12.11.2'
 
       - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: ./.github/actions/node-dist
         with:
           node-version: '24.21.0'
 
       # The engines.node minimum, as in ci.yml: the build and packaged CLI tests prove the floor.
       - name: Set up Node.js
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
           token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Node.js without node-dist
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -133,16 +155,27 @@ jobs:
           version: '12.11.2'
 
       - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: ./.github/actions/node-dist
         with:
           node-version: '24.21.0'
 
       # The engines.node minimum, as in ci.yml: the build and packaged CLI tests prove the floor.
       - name: Set up Node.js
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
           token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Node.js without node-dist
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -183,15 +216,26 @@ jobs:
           version: '12.11.2'
 
       - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: ./.github/actions/node-dist
         with:
           node-version-file: .node-version
 
       - name: Set up Node.js
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Node.js without node-dist
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -224,15 +268,27 @@ jobs:
           version: '12.11.2'
 
       - name: Install Node.js from nodejs.org
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: ./.github/actions/node-dist
         with:
           node-version-file: .node-version
 
       - name: Set up Node.js
+        if: hashFiles('.github/actions/node-dist/action.yml') != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           token: ''
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Set up Node.js without node-dist
+        # The checked-out ref predates the node-dist action: the previous setup.
+        if: hashFiles('.github/actions/node-dist/action.yml') == ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          check-latest: true
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

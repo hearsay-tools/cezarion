@@ -481,6 +481,13 @@ Jobs that check out a ref that can predate the action (a rollback release candid
 Squeal results trial, the LXC canary) first check out the action from the workflow's own
 commit into `node-dist-tooling`, install Node, and then check out their ref.
 
+Other jobs that check out a commit other than the workflow's own (the merge-group base in the
+complexity and clone gates, a PR merge ref, a nightly or release candidate) keep their
+checkout and run the action only under `if: hashFiles('.github/actions/node-dist/action.yml') != ''`.
+When the tree lacks it, the step before this change runs instead, so a base-checkout gate
+never runs tooling from the queued head. `setup-node-api-free.workflow.test.cjs` enforces both
+patterns.
+
 The only job that still follows `lts/*` is the `lts/*` leg of the release-candidate install
 matrix (`release-candidate-tests.yml`, run by Nightly and Release). It keeps `check-latest`
 and the token, because resolving `lts/*` needs the manifest. When it shows a newer LTS line

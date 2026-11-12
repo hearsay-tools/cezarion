@@ -37,7 +37,7 @@ test('typecheck uses the smallest Blacksmith runner only for PRs and dispatches'
 test('typecheck keeps minimum Node, its bounded download retry and an independent full check', () => {
   const build = ci.jobs['build-and-package'];
   const setups = job => job.steps.filter(step => step.uses?.startsWith('actions/setup-node@') || step.uses === './.github/actions/node-dist');
-  assert.equal(setups(leaf).length, 2, 'the node-dist download, then setup-node');
+  assert.equal(setups(leaf).length, 3, 'the node-dist download, setup-node, and the fallback for a merge ref without node-dist');
   assert.deepEqual(setups(leaf), setups(build));
   assert.equal(leaf['timeout-minutes'], build['timeout-minutes']);
   assert.deepEqual(leaf.steps.filter(step => step.run && ['Install dependencies', 'Install pnpm dependencies', 'Typecheck'].includes(step.name)), [

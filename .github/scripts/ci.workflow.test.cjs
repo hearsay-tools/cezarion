@@ -536,7 +536,9 @@ test('a stalled minimum Node download is bounded and retried once inside the job
   const { ATTEMPTS, ATTEMPT_TIMEOUT_MS } = require('../actions/node-dist/index.cjs');
   const job = workflow().jobs['build-and-package'];
   assert.equal(job['timeout-minutes'], 15);
-  const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@'));
+  // The fallback runs only when the checked-out merge ref predates node-dist (setup-node-api-free.workflow.test.cjs).
+  const fallback = "hashFiles('.github/actions/node-dist/action.yml') == ''";
+  const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@') && s.if !== fallback);
   assert.equal(setups.length, 1, 'setup-node downloads nothing, so it needs no retry step');
   assert.equal(setups[0]['continue-on-error'], undefined, 'a failed setup must fail the job');
   const install = job.steps.findIndex(s => s.uses === './.github/actions/node-dist');
