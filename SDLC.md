@@ -1,7 +1,7 @@
 # Software delivery process
 
 This file holds the labels, claims, QA gate and merge rules for
-`hearsay-tools/cezarion`. Each rule here is true today and an agent can follow
+`hearsay-tools/squawk`. Each rule here is true today and an agent can follow
 it. Add a rule only when its absence causes a real failure.
 
 ## Labels
