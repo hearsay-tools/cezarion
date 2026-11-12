@@ -19,7 +19,11 @@ export function stall(prompt, { closeInput } = {}) {
   }
   if (prompt.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
-    process.on('SIGTERM', () => {});
+    process.on('SIGTERM', () => {
+      // Receipt for tests: this handler ran and returned. The default action, or a handler
+      // that exits, never writes it.
+      try { writePid('sigterm-ignored.pid', String(process.pid)); } catch { /* the test removed cwd */ }
+    });
     // Test-cleanup backstop, deliberately longer than the asserted teardown bound.
     setTimeout(() => process.exit(0), 12_000);
   }

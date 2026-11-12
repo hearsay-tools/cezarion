@@ -11,7 +11,8 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import { previewStopResult } from '../preview/registration.ts';
-import { askErrorMessage, askInvalidInput, ciErrorMessage, toolsUnavailableMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
+import { askErrorMessage, askInvalidInput, ciErrorMessage, ToolsUnavailableError, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
+export { ToolsUnavailableError } from './errors.ts';
 import { automationsToolEnabled, previewToolEnabled } from './tool-catalog.ts';
 import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduleTaskRequestSchema, scheduledTasksAnswerSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduleTaskRequest, type ScheduledTasksAnswer, type ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { squawkAskAnswerSchema, squawkAskRequestSchema, squawkCancelWaitAnswerSchema, squawkCancelWaitRequestSchema, squawkDoneAnswerSchema, squawkDoneRequestSchema, squawkWaitAnswerSchema, squawkWaitRequestSchema, type SquawkAskAnswer, type SquawkAskRequest, type SquawkCancelWaitAnswer, type SquawkCancelWaitRequest, type SquawkDoneAnswer, type SquawkDoneRequest, type SquawkWaitAnswer, type SquawkWaitRequestInput, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
@@ -66,17 +67,6 @@ function socketRoot(): string | undefined {
 function startFailureDetail(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error';
-}
-
-/**
- * hearsay-tools/cezarion#2397: every agent session needs the lifecycle tools, so a controller that
- * cannot start fails the launch with this error. Its message names the cause and the fix.
- */
-export class ToolsUnavailableError extends Error {
-  constructor(readonly detail: string, readonly directory: string | undefined) {
-    super(toolsUnavailableMessage(detail, directory));
-    this.name = 'ToolsUnavailableError';
-  }
 }
 
 /** Separate from the cockpit and delegation APIs. No TCP listener or durable credentials. */

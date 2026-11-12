@@ -2,6 +2,7 @@ import { logPrefix } from '../home/display.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CiToolController, ToolsUnavailableError } from './controller.ts';
 import { acquireCiResources } from './resources.ts';
+import { acquireInertCiResources } from './inert-ci-resources.testkit.ts';
 
 // hearsay-tools/cezarion#2397: every agent session needs the lifecycle tools, so a failed start is
 // never kept. The next launch after a repair starts the controller again.
@@ -73,4 +74,35 @@ describe('the shared check progress', () => {
     expect(again.progress).not.toBe(first.progress);
     again.release();
   });
+});
+
+// The pool keeps one supervisor per workspace. A test's inert stand-in and the real watcher must
+// never share one: the stand-in would break real CI waits, and the real one would hide the guard.
+describe('one supervisor kind per workspace', () => {
+  const kinds = { real: acquireCiResources, inert: acquireInertCiResources };
+  for (const [firstKind, secondKind] of [['real', 'inert'], ['inert', 'real']] as const) {
+    it(`refuses the ${secondKind} kind on a workspace that holds the ${firstKind} kind, and counts no reference for it`, () => {
+      const workspace = {};
+      const first = kinds[firstKind](workspace);
+      expect(() => kinds[secondKind](workspace)).toThrow(/another supervisor factory/);
+      // The refused acquire took no reference: one release empties the workspace.
+      first.release();
+      const next = kinds[secondKind](workspace);
+      expect(next.progress).not.toBe(first.progress);
+      next.release();
+    });
+  }
+  for (const kind of ['real', 'inert'] as const) {
+    it(`shares one ${kind} supervisor between acquires of the same kind`, () => {
+      const workspace = {};
+      const first = kinds[kind](workspace);
+      const second = kinds[kind](workspace);
+      try {
+        expect(second.supervisor).toBe(first.supervisor);
+        expect(second.progress).toBe(first.progress);
+      } finally {
+        first.release(); second.release();
+      }
+    });
+  }
 });

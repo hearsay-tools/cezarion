@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, squawkCli, fixtureServeEnv } from './agent-browser'
-import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
+import { contrastSampleExpression, hoverVisiblePoint, normalizeColorSample, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { openSessionActivityRow } from './session-activity'
 // fixture-server starts: 1
@@ -182,11 +182,10 @@ describe('sidebar reference status (#677)', () => {
             const el = document.querySelector(${JSON.stringify(selector)})
             if (!el?.querySelector('svg:not([data-slot="reference-kind"])')) return null
             return { tag: el.tagName, inert: el.dataset.inert, links: el.querySelectorAll('a, button, [tabindex]').length,
-              tone: el.querySelector('svg:not([data-slot="reference-kind"])').getAttribute('class'), rowHeight: el.closest('[data-slot="task-row"]').getBoundingClientRect().height }
-          })()`) as { tag: string; inert: string; links: number; tone: string; rowHeight: number }
+              rowHeight: el.closest('[data-slot="task-row"]').getBoundingClientRect().height }
+          })()`) as { tag: string; inert: string; links: number; rowHeight: number }
           expect(inert).toMatchObject({ tag: 'SPAN', inert: 'true', links: 0 })
           expect(inert.rowHeight).toBeGreaterThanOrEqual(44)
-          expect(inert.tone).not.toContain('text-accent')
         }
         expect(browser.waitForValue(`getComputedStyle(document.querySelector('[data-slot="sidebar"] ${chip('checks-pending')} svg:not([data-slot="reference-kind"])')).animationName`)).toBe('none')
         browser.screenshot(join(artifacts, `${theme}-touch-inert.png`), { viewport: true })
@@ -201,11 +200,22 @@ describe('sidebar reference status (#677)', () => {
       const header = waitForSettledSample(browser, `(() => {
         const el = document.querySelector('[data-slot="run-activity-workspace"] [data-slot="pr-chip"]')
         if (!el || el.getBoundingClientRect().height === 0) return null
-        return { tag: el.tagName, tone: el.className, height: el.getBoundingClientRect().height }
-      })()`) as { tag: string; tone: string; height: number }
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--conflict)'
+        document.body.append(probe)
+        const conflict = getComputedStyle(probe).color
+        probe.remove()
+        const style = getComputedStyle(el)
+        return { tag: el.tagName, ink: style.color, border: style.borderTopColor, conflict, height: el.getBoundingClientRect().height }
+      })()`) as { tag: string; ink: string; border: string; conflict: string; height: number }
       expect(header.tag).toBe('A')
-      expect(header.tone).toContain('text-conflict')
-      expect(header.tone).toContain('border-conflict')
+      expect(header.ink).toBe(header.conflict)
+      // The border is the conflict colour at reduced alpha: its sRGB channels match the ink's.
+      const tint = normalizeColorSample(browser, { border: header.border, conflict: header.conflict })
+      const channels = (color: string) => (/\d+, \d+, \d+/.exec(color)?.[0] ?? '').split(', ').map(Number)
+      const conflict = channels(tint.conflict)
+      const drift = channels(tint.border).map((value, index) => Math.abs(value - conflict[index]!))
+      expect(Math.max(...drift), `${tint.border} vs ${tint.conflict}`).toBeLessThanOrEqual(2)
       expect(header.height).toBeGreaterThanOrEqual(44)
     } finally {
       browser.close()

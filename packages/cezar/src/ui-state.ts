@@ -1,5 +1,5 @@
 import { projectPaths, readProjectPath } from './project-paths.ts';
-import { assertProjectWritable } from './server/cockpit-ownership.ts';
+import { assertProjectWritable } from './project-fence.ts';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';

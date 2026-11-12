@@ -1,49 +1,15 @@
-import { logPrefix } from '../home/display.ts';
-import { CiToolController } from './controller.ts';
-import { CiProgressRegistry } from './progress.ts';
+import { acquirePooledCiResources, type CiResources } from './resource-pool.ts';
+import type { CiProgressRegistry } from './progress.ts';
 import { CiWatcherSupervisor } from './supervisor.ts';
+export type { CiResources, CiSupervisorLike } from './resource-pool.ts';
 
-/** The workspace semaphore is shared by cockpit projects; headless callers have one too. */
-const workspaces = new WeakMap<object, {
-  refs: number;
-  supervisor: CiWatcherSupervisor;
-  /** The check progress the supervisor publishes, for the activity view. */
-  progress: CiProgressRegistry;
-  controller?: Promise<CiToolController> | undefined;
-}>();
+/** The workspace's shared CI watcher and tool controller. A composition root passes this to each
+ *  `RunManager`; managers on one semaphore share one supervisor and one controller. */
+export function acquireCiResources(workspace: object): CiResources<CiWatcherSupervisor> {
+  return acquirePooledCiResources(workspace, createCiWatcherSupervisor);
+}
 
-export function acquireCiResources(workspace: object) {
-  let resource = workspaces.get(workspace);
-  if (!resource) {
-    const progress = new CiProgressRegistry();
-    resource = { refs: 0, supervisor: new CiWatcherSupervisor({ progress }), progress };
-    workspaces.set(workspace, resource);
-  }
-  const shared = resource;
-  shared.refs++;
-  let released = false;
-  return {
-    supervisor: shared.supervisor,
-    progress: shared.progress,
-    // hearsay-tools/cezarion#2397: only a started controller is kept. A failed start is forgotten,
-    // so the next launch after a repair starts it again.
-    controller: () => {
-      if (shared.controller) return shared.controller;
-      const starting = CiToolController.start();
-      shared.controller = starting;
-      starting.catch((error: unknown) => {
-        if (shared.controller === starting) shared.controller = undefined;
-        console.warn(`${logPrefix()} ${error instanceof Error ? error.message : String(error)}`);
-      });
-      return starting;
-    },
-    release() {
-      if (released) return;
-      released = true;
-      if (--shared.refs !== 0) return;
-      workspaces.delete(workspace);
-      shared.supervisor.close();
-      void shared.controller?.then(controller => controller.close()).catch(() => {});
-    },
-  };
+/** One function for every acquire: the pool tells supervisor factories apart by identity. */
+function createCiWatcherSupervisor(progress: CiProgressRegistry): CiWatcherSupervisor {
+  return new CiWatcherSupervisor({ progress });
 }

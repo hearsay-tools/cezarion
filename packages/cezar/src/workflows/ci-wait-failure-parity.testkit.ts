@@ -15,21 +15,20 @@ import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { eventCheckpoint, manager, restart, root, semaphore, store, toolGenerationOf, until, useWorkerWaitFixture, work } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from './types.ts';
 import { gatedProviderFailure } from './waits-parity.testkit.ts';
+import { acquireCiResources } from '../ci-wait/resources.ts';
 
 // hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
 // on a waiting run.
 const ciWaitOf = (id: string) => { return store.getRun(id)?.waits?.find(entry => entry.kind === 'pr'); };
 const lastCiWaitOf = (id: string) => { return [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'pr'); };
 
-const externalResource = vi.hoisted(() => ({ supervisor: undefined as Pick<import('../ci-wait/supervisor.ts').CiWatcherSupervisor, 'resolve' | 'watch' | 'close'> | undefined }));
-vi.mock('../ci-wait/resources.ts', async importOriginal => {
-  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
-  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: {
-    resolve: (...args: Parameters<import('../ci-wait/supervisor.ts').CiWatcherSupervisor['resolve']>) => externalResource.supervisor!.resolve(...args),
-    watch: (...args: Parameters<import('../ci-wait/supervisor.ts').CiWatcherSupervisor['watch']>) => externalResource.supervisor!.watch(...args),
-    close() {},
-  } }) };
-});
+const externalResource = { supervisor: undefined as Pick<import('../ci-wait/supervisor.ts').CiWatcherSupervisor, 'resolve' | 'watch' | 'close'> | undefined };
+/** Pass to `useWorkerWaitFixture`: the real CI resources, with the supervisor `github()` sets. */
+const acquireExternalCiResources = (workspace: object) => ({ ...acquireCiResources(workspace), supervisor: {
+  resolve: (...args: Parameters<import('../ci-wait/supervisor.ts').CiWatcherSupervisor['resolve']>) => externalResource.supervisor!.resolve(...args),
+  watch: (...args: Parameters<import('../ci-wait/supervisor.ts').CiWatcherSupervisor['watch']>) => externalResource.supervisor!.watch(...args),
+  close() {},
+} });
 
 const identity = { prUrl: 'https://github.com/acme/repo/pull/12', repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 function github() {
@@ -71,7 +70,7 @@ async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
 
 export function registerCiFailureGroup(group: CiFailureGroup): void {
  describe('CI wait failure history through every native runner (hearsay-tools/cezarion#994)', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
   for (const row of CI_FAILURE_GROUPS[group] as readonly CiFailureRow[]) {
    if (row.family === 'final') {

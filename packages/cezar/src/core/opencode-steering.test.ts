@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, SessionOptions } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
-import { OpencodeServerRunner } from './opencode-server-runner.ts';
+import { observationClock } from './observation-clock.testkit.ts';
+import { OPENCODE_LOST_WAKE_GRACE_MS, OpencodeServerRunner } from './opencode-server-runner.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const mockBin = fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url));
@@ -56,6 +57,7 @@ describe('opencode agent input steering (#505)', () => {
   it('opens a new turn when the server runs steered input after going idle', async () => {
     // The steer lands as the first turn ends; the mock runs it as its own server run.
     const consumed: string[][] = [];
+    const grace = observationClock(delay => delay === OPENCODE_LOST_WAKE_GRACE_MS);
     const { session, events, ui } = start('inspect the working tree', { onAgentInputConsumed: ids => consumed.push([...ids]) });
     await waitUntil(() => events.some(e => e.type === 'turn-end'));
     await session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo next 0' }], ['n0']);
@@ -63,8 +65,8 @@ describe('opencode agent input steering (#505)', () => {
     await waitUntil(() => consumed.flat().includes('n1'));
     // bound: wait for the native idle that closes the last consumed input turn.
     await waitUntil(() => events.filter(event => event.type === 'turn-end').length === 3);
-    // bound: observe past OpenCode's 2,000 ms lost-wake grace after the child consumed n1.
-    await new Promise(resolve => setTimeout(resolve, 2_500));
+    // Run every lost-wake grace window the turns armed: none finds n1 unread.
+    await grace.advance(OPENCODE_LOST_WAKE_GRACE_MS);
     expect(events.some(e => e.type === 'input-unconsumed')).toBe(false);
     // Opening turn, n0's turn, and the server run that answered n1 each end once.
     expect(events.filter(e => e.type === 'turn-end')).toHaveLength(3);

@@ -44,33 +44,33 @@ test('reuses only complete official queue verification of the exact main commit'
   assert.equal(proof.verified, true); assert.equal(proof.sha, SHA); assert.equal(proof.runId, 20); assert.equal(proof.attempt, 1);
   for (const { args } of h.state.calls) assert.ok(args.request.timeout <= 10000);
 });
-for (const [label, change] of Object.entries({
-  'different SHA even with the same tree': s => { s.run.head_sha = 'b'.repeat(40); },
-  'foreign repository': s => { s.run.repository.full_name = 'evil/r'; },
-  'foreign head': s => { s.run.head_repository.full_name = 'evil/r'; },
-  'PR run': s => { s.run.event = 'pull_request_target'; },
-  'dispatch': s => { s.run.event = 'workflow_dispatch'; },
-  'wrong workflow': s => { s.run.workflow_id = 4; },
-  'wrong path': s => { s.run.path = '.github/workflows/other.yml'; },
-  'wrong queue': s => { s.run.head_branch = 'gh-readonly-queue/release/pr-7'; },
-  'failed latest attempt': s => { s.run.run_attempt = 2; s.run.conclusion = 'failure'; },
-  'skipped aggregate': s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'skipped'; },
-  'missing typecheck': s => { s.jobs = s.jobs.filter(j => j.name !== 'Typecheck'); },
-  'missing browser shard': s => { s.jobs = s.jobs.filter(j => j.name !== 'Cockpit browser E2E shard 8/8'); },
-  'duplicate required job': s => { s.jobs.push({ ...s.jobs[0], id: 999 }); },
-  'missing history': s => { s.runs = []; },
-  'incomplete pagination': s => { s.count = 201; },
-  'incomplete jobs': s => { s.jobCount = 201; },
-  'missing admission job': s => { s.jobs = s.jobs.filter(j => j.name !== 'Validate reviewed queue entry'); },
-  'neutral leaf': s => { s.jobs[2].conclusion = 'neutral'; },
-  'API error': s => { s.fail = true; },
-  'newer failed run': s => { s.runs.push({ ...s.run, id: 21, conclusion: 'failure' }); },
+for (const [label, [reason, change]] of Object.entries({
+  'different SHA even with the same tree': ['no-exact-queue-run', s => { s.run.head_sha = 'b'.repeat(40); }],
+  'foreign repository': ['no-exact-queue-run', s => { s.run.repository.full_name = 'evil/r'; }],
+  'foreign head': ['no-exact-queue-run', s => { s.run.head_repository.full_name = 'evil/r'; }],
+  'PR run': ['no-exact-queue-run', s => { s.run.event = 'pull_request_target'; }],
+  'dispatch': ['no-exact-queue-run', s => { s.run.event = 'workflow_dispatch'; }],
+  'wrong workflow': ['no-exact-queue-run', s => { s.run.workflow_id = 4; }],
+  'wrong path': ['no-exact-queue-run', s => { s.run.path = '.github/workflows/other.yml'; }],
+  'wrong queue': ['no-exact-queue-run', s => { s.run.head_branch = 'gh-readonly-queue/release/pr-7'; }],
+  'failed latest attempt': ['source-not-successful', s => { s.run.run_attempt = 2; s.run.conclusion = 'failure'; }],
+  'skipped aggregate': ['incomplete-gate', s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'skipped'; }],
+  'missing typecheck': ['incomplete-gate', s => { s.jobs = s.jobs.filter(j => j.name !== 'Typecheck'); }],
+  'missing browser shard': ['incomplete-gate', s => { s.jobs = s.jobs.filter(j => j.name !== 'Cockpit browser E2E shard 8/8'); }],
+  'duplicate required job': ['incomplete-gate', s => { s.jobs.push({ ...s.jobs[0], id: 999 }); }],
+  'missing history': ['no-exact-queue-run', s => { s.runs = []; }],
+  'incomplete pagination': ['proof-unavailable', s => { s.count = 201; }],
+  'incomplete jobs': ['proof-unavailable', s => { s.jobCount = 201; }],
+  'missing admission job': ['incomplete-gate', s => { s.jobs = s.jobs.filter(j => j.name !== 'Validate reviewed queue entry'); }],
+  'neutral leaf': ['incomplete-gate', s => { s.jobs[2].conclusion = 'neutral'; }],
+  'API error': ['proof-unavailable', s => { s.fail = true; }],
+  'newer failed run': ['source-changed', s => { s.runs.push({ ...s.run, id: 21, conclusion: 'failure' }); }],
 })) test(`full CI fallback: ${label}`, async () => {
-  const h = fixture(); change(h.state); assert.equal((await queueCiProof(h.options)).verified, false);
+  const h = fixture(); change(h.state); assert.deepEqual(await queueCiProof(h.options), { verified: false, reason });
 });
 test('pending queue completion gets a bounded wait and then full fallback', async () => {
   const h = fixture(); h.state.run.status = 'in_progress'; h.state.run.conclusion = null;
-  assert.equal((await queueCiProof(h.options)).verified, false); assert.equal(h.state.now, 60000);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'source-pending' }); assert.equal(h.state.now, 60000);
 });
 test('completion during the short metadata wait is accepted', async () => {
   const h = fixture(); h.state.run.status = 'in_progress'; h.state.run.conclusion = null;
@@ -80,17 +80,17 @@ test('completion during the short metadata wait is accepted', async () => {
 test('a new attempt while jobs are read invalidates old proof', async () => {
   const h = fixture(); let reads = 0;
   h.state.onRead = () => { if (++reads === 2) h.state.run.run_attempt++; };
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'source-changed' });
 });
 for (const eventName of ['merge_group', 'pull_request_target', 'workflow_dispatch']) test(`${eventName} never recursively reuses proof`, async () => {
   const h = fixture(); h.options.eventName = eventName;
-  assert.equal((await queueCiProof(h.options)).verified, false); assert.equal(h.state.calls.length, 0);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'not-main-push' }); assert.equal(h.state.calls.length, 0);
 });
 
 
 test('metadata request consuming the deadline falls back without unbounded retry', async () => {
   const h = fixture(); h.state.onRequest = () => { h.state.now += 60001; };
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'proof-unavailable' });
   assert.equal(h.state.calls.length, 1);
 });
 test('newer run arriving after jobs are read invalidates proof', async () => {
@@ -98,28 +98,29 @@ test('newer run arriving after jobs are read invalidates proof', async () => {
   h.state.onRequest = route => {
     if (route.endsWith('/workflows/{workflow_id}/runs') && ++lists === 2) h.state.runs.push({ ...h.state.run, id: 21, status: 'in_progress' });
   };
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'source-changed' });
 });
 
 for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out']) {
   test(`eighth unit shard ${conclusion} forces full CI fallback`, async () => {
     const h = fixture();
     h.state.jobs.find(job => job.name === 'Vitest shard 8/8').conclusion = conclusion;
-    assert.equal((await queueCiProof(h.options)).verified, false);
+    assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'incomplete-gate' });
   });
 }
 test('missing or duplicate eighth unit shard and legacy three- and four-cell proof force fallback', async () => {
   const missing = fixture();
   missing.state.jobs = missing.state.jobs.filter(job => job.name !== 'Vitest shard 8/8');
-  assert.equal((await queueCiProof(missing.options)).verified, false);
+  const gap = { verified: false, reason: 'incomplete-gate' };
+  assert.deepEqual(await queueCiProof(missing.options), gap);
   const duplicate = fixture();
   duplicate.state.jobs.push({ ...duplicate.state.jobs.find(job => job.name === 'Vitest shard 8/8'), id: 999 });
-  assert.equal((await queueCiProof(duplicate.options)).verified, false);
+  assert.deepEqual(await queueCiProof(duplicate.options), gap);
   for (const count of [3, 4]) {
     const legacy = fixture();
     legacy.state.jobs = legacy.state.jobs.filter(job => !job.name.startsWith('Vitest shard '));
     legacy.state.jobs.push(...Array.from({ length: count }, (_, i) => ({ id: 200 + i, name: `Vitest shard ${i + 1}/${count}`, status: 'completed', conclusion: 'success' })));
-    assert.equal((await queueCiProof(legacy.options)).verified, false, `${count} cells`);
+    assert.deepEqual(await queueCiProof(legacy.options), gap, `${count} cells`);
   }
 });
 
@@ -163,7 +164,7 @@ for (const [label, change] of Object.entries({
 })) test(`skipped queue suites force full CI fallback: ${label}`, async () => {
   const h = fixture(); skippedSuites(h.state); h.options.surfaceOf = () => 'docs-only';
   change(h.state, h.options);
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'incomplete-gate' });
 });
 
 test('mainCommitSurface classifies the queued commit from its group base with the base classifier', () => {
@@ -228,7 +229,7 @@ test('a push of a group head based on the previous group head reuses its own que
 });
 test('a push over two group heads cannot reuse the skipped head\'s run', async () => {
   const { h, second } = speculative(); h.options.sha = second; h.state.runs[1].conclusion = 'failure';
-  assert.equal((await queueCiProof(h.options)).verified, false);
+  assert.deepEqual(await queueCiProof(h.options), { verified: false, reason: 'source-not-successful' });
   assert.ok(!h.state.calls.some(({ args }) => args.run_id === 20));
 });
 test('a push of entry 1 ignores the newer queue run of entry 2', async () => {

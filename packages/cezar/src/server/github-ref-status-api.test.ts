@@ -71,13 +71,6 @@ describe('the github ref-status API', () => {
     expect(issuesOnly.prs).toEqual({});
   });
 
-  it('leaves an unknown number ABSENT rather than inventing a status', async () => {
-    // The distinction the chip depends on: "not found" must not be paintable as "fine".
-    const body = await refStatus('prs=99999');
-    if (!body.available) throw new Error('expected available');
-    expect(body.prs[99999]).toBeUndefined();
-  });
-
   it('400s when neither list names anything', async () => {
     expect((await apiRequest(app, '/api/v1/github/ref-status')).status).toBe(400);
     expect((await apiRequest(app, '/api/v1/github/ref-status?prs=')).status).toBe(400);

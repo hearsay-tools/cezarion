@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expectTypeOf, it } from 'vitest';
 import type { CheckoutProgressEvent, RunEvent as WebRunEvent, UiEvent as WebUiEvent } from '@open-mercato/cezar-api-client';
 import type { UiEvent } from '../core/ui-events.ts';
 import type { RunEvent } from '../runs/store.ts';
@@ -44,14 +44,6 @@ describe('the shapes that cannot come from a route are still mirrored faithfully
   type KeyPaths<T> = T extends readonly (infer E)[] ? `[]${KeyPaths<E>}`
     : T extends object ? { [K in keyof T & string]-?: `${Tag<T>}.${K}` | `${Tag<T>}.${K}${KeyPaths<T[K]>}` }[keyof T & string] : never;
 
-  const guards = {
-    /** `GET /api/v1/runs/:id/events` and `/api/v1/events` — the run event stream. */
-    runEvent: true satisfies Exact<RunEvent, WebRunEvent>,
-    /** The v2 events inside that stream, against the api-client's hand-kept copy. */
-    uiEvent: true satisfies Exact<Wire<UiEvent>, Wire<WebUiEvent>>,
-    /** `Exact` is blind to a missing optional property, and `UiEvent` is a union, so compare key paths. */
-    uiEventKeys: true satisfies Exact<KeyPaths<UiEvent>, KeyPaths<WebUiEvent>>,
-  };
 
   /**
    * No `ExactKeys` pair here, deliberately. `RunEvent` carries a string index signature, and
@@ -63,18 +55,20 @@ describe('the shapes that cannot come from a route are still mirrored faithfully
    */
   type _KeysNotApplicable = ExactKeys<{ a: 1 }, { a: 1 }>;
 
-  it('holds every pair above', () => {
-    // The compiler does the real work. This only stops a future edit from deleting the pairs and
-    // leaving a green file that checks nothing.
-    expect(Object.keys(guards).length).toBeGreaterThan(0);
-    expect(Object.values(guards).every(Boolean)).toBe(true);
+  // Compile-time only: `npm run typecheck` fails when a mirror drifts.
+  it('holds every pair', () => {
+    /** `GET /api/v1/runs/:id/events` and `/api/v1/events` — the run event stream. */
+    expectTypeOf<Exact<RunEvent, WebRunEvent>>().toEqualTypeOf<true>();
+    /** The v2 events inside that stream, against the api-client's hand-kept copy. */
+    expectTypeOf<Exact<Wire<UiEvent>, Wire<WebUiEvent>>>().toEqualTypeOf<true>();
+    /** `Exact` is blind to a missing optional property, and `UiEvent` is a union, so compare key paths. */
+    expectTypeOf<Exact<KeyPaths<UiEvent>, KeyPaths<WebUiEvent>>>().toEqualTypeOf<true>();
   });
 
   it('records why the other SSE shape has no pair here', () => {
     // `checkout-progress` frames are assembled inline in the workspace-events handler, so there
     // is no server-side type to pin the mirror against. Noted so its absence above reads as
     // deliberate rather than as an oversight.
-    const phases: CheckoutProgressEvent['phase'][] = ['cloning', 'done', 'error'];
-    expect(phases).toHaveLength(3);
+    expectTypeOf<'cloning' | 'done' | 'error'>().toExtend<CheckoutProgressEvent['phase']>();
   });
 });

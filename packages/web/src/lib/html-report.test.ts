@@ -113,10 +113,9 @@ describe('prepareReport', () => {
   it.each(['#', '#section%202', '#résultats'])('keeps fragment %s inside the srcdoc document for links and image maps', href => {
     const { srcdoc, blocked } = prepareReport(`<a href="${href}" target="_blank">Section</a><map name="toc"><area href="${href}" target="_top"></map>`)
     const doc = parse(srcdoc)
-    for (const link of doc.querySelectorAll('a, area')) {
-      expect(link.getAttribute('href')).toBe(`about:srcdoc${href}`)
-      expect(link.hasAttribute('target')).toBe(false)
-    }
+    expect([...doc.querySelectorAll('a, area')].map(link => [link.localName, link.getAttribute('href'), link.getAttribute('target')])).toEqual([
+      ['a', `about:srcdoc${href}`, null], ['area', `about:srcdoc${href}`, null],
+    ])
     expect(blocked).toEqual({ scripts: 0, remote: 0, relative: 0, forms: 0, embeds: 0 })
   })
 

@@ -1,5 +1,5 @@
 // Register the external CI mock before loading RunManager.
-import { externalResource, generationOf, prUrl, registerPr, registerTimer, waitById, settledById, inputsFor, fireTimer, timerFired, flushMicrotasks, githubByPr, waitingParent, expectNoWaitHumanWait } from './ci-wait-fixture.testkit.ts';
+import { externalResource, generationOf, prUrl, registerPr, registerTimer, waitById, settledById, inputsFor, fireTimer, timerFired, flushMicrotasks, githubByPr, waitingParent, expectNoWaitHumanWait, acquireExternalCiResources } from './ci-wait-fixture.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { writeFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ import { controlledWire, manager, parent, root, semaphore, store, until, useWork
 
 
 describe('Wait list registration and resolution', { timeout: 30_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ acquireCiResources: acquireExternalCiResources });
   afterEach(() => vi.restoreAllMocks());
 
   it('two CI waits for different PRs and a timer are open at once and resolve independently', async () => {

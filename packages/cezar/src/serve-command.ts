@@ -15,6 +15,7 @@ import { TaskWebhooks } from './runs/webhook.ts';
 import type { RunStore } from './runs/store.ts';
 import type { Home } from './home/home.ts';
 import { RunManager } from './workflows/run.ts';
+import { acquireCiResources } from './ci-wait/resources.ts';
 import { createRunner } from './core/runner-factory.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
 import { ProviderRuntimeAuthObserver } from './server/provider-auth-runtime.ts';
@@ -99,7 +100,7 @@ export async function serveCommand(
   // across projects, and the activity route reads every project's runs from it.
   const toolActivity = new deps.ToolActivityTracker();
   const manager: RunManager = new deps.RunManager(store, repoRoot, {
-    home, createRunner: deps.createRunner, semaphore, preview: previewHost, squawkPort, cockpit, toolActivity,
+    home, createRunner: deps.createRunner, semaphore, preview: previewHost, squawkPort, cockpit, toolActivity, acquireCiResources,
     sweepBranches: (keep) => void deps.sweepMergedBranches({ root: repoRoot, store, manager, home }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
   });
   const delegation = await deps.DelegationController.start();
@@ -134,7 +135,7 @@ export async function serveCommand(
   deps.warnServeBind(bindHost, port);
   const server = deps.startServer({
     home,
-    createManager: (...args) => new deps.RunManager(...args),
+    createManager: (store, root, options) => new deps.RunManager(store, root, { ...options, acquireCiResources }),
     ownership,
     delegation,
     repoRoot,

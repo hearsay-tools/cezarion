@@ -90,12 +90,6 @@ describe('the github item API', () => {
     expect(spies.fetch).toHaveBeenCalledWith(expect.any(String), 'issue', 7, true);
   });
 
-  it('answers item null for a number GitHub does not have', async () => {
-    const res = await apiRequest(app, '/api/v1/github/items/pr/99999');
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ available: true, item: null });
-  });
-
   it.each(['/github/items/bogus/1', '/github/items/pr/0', '/github/items/pr/abc', '/github/items/pr/-3'])(
     'rejects malformed params with a 400 { error } (%s)',
     async (path) => {

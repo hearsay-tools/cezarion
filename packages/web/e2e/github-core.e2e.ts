@@ -9,11 +9,11 @@ import type { GitHubFixture, GithubPayload } from './github-fixture'
  *
  * Reachability: under `CEZ_DRY_RUN=1` the forge driver reports AVAILABLE and `/api/v1/github`
  * serves the bundled mock issues/PRs — so the lists, the detail pane and the cmdk dropdowns
- * are honestly reachable here and are covered below. The forge-OFF branch (nav item hidden,
- * unavailable explainer) is NOT reachable in this env; it is asserted structurally in the
- * unit suites (nav-items/app-shell/command-palette tests, github.test.tsx), and the gating
- * spec below asserts whichever branch the LIVE health payload actually reports rather than
- * assuming one. Strictly read-only: no run is started (`POST /api/v1/runs` is unit-pinned) —
+ * are honestly reachable here and are covered below. Every test asserts that precondition, so
+ * a forge that stops reporting available fails here instead of passing with no assertions.
+ * The forge-OFF branch (nav item hidden, unavailable explainer) is NOT reachable in this env;
+ * it is asserted structurally in the unit suites (nav-items/app-shell/command-palette tests,
+ * github.test.tsx). Strictly read-only: no run is started (`POST /api/v1/runs` is unit-pinned) —
  * the shared env's run list must not grow side effects.
  */
 
@@ -44,21 +44,16 @@ afterAll(() => {
 })
 
 describe('the GitHub tab against the live dry-run server', () => {
-  it('the nav gates on the live forge payload — item present iff the driver is available', () => {
+  it('the nav shows the GitHub item when the live forge payload reports the driver available', () => {
+    expect(forgeAvailable).toBe(true)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="sidebar"] nav') !== null`)
-    if (forgeAvailable) {
-      // The item waits on the health answer — poll rather than sample.
-      browser.waitForFunction(`document.querySelector('nav a[href="${scoped('/github')}"]') !== null`)
-    } else {
-      // Health has answered (other chips render from it) and still no GitHub item.
-      browser.waitForFunction(`document.querySelector('[data-slot="version-chip"]') !== null`)
-      expect(browser.count(`nav a[href="${scoped('/github')}"]`)).toBe(0)
-    }
+    // The item waits on the health answer — poll rather than sample.
+    browser.waitForFunction(`document.querySelector('nav a[href="${scoped('/github')}"]') !== null`)
   })
 
   it('/github lists the real issues and PRs with honest counts', async () => {
-    if (!forgeAvailable) return // covered by the gating spec + unit suites
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     expect(gh.available).toBe(true)
 
@@ -70,7 +65,7 @@ describe('the GitHub tab against the live dry-run server', () => {
 
     expect(browser.text('[data-slot="gh-tabs"]')).toContain(`Issues · ${gh.issues.length}`)
     expect(browser.text('[data-slot="gh-tabs"]')).toContain(`Pull requests · ${gh.prs.length}`)
-    if (gh.repo) expect(browser.text('[data-slot="gh-repo"]')).toBe(gh.repo)
+    expect(browser.text('[data-slot="gh-repo"]')).toBe(gh.repo)
 
     clickGitHubTab('/github/prs')
     browser.waitForFunction(
@@ -85,11 +80,10 @@ describe('the GitHub tab against the live dry-run server', () => {
   })
 
   it('opens an issue’s detail: meta, labels, markdown body, hand-to-agent dropdowns', async () => {
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     const first = gh.issues[0]
-    expect(first).toBeDefined()
-    if (!first) return
+    if (!first) throw new Error('the dry-run catalog serves no issue')
 
     await openGitHub('/github')
     clickGitHubTab('/github')
@@ -133,10 +127,10 @@ describe('the GitHub tab against the live dry-run server', () => {
     // The sibling spec (#499) called for thread e2e coverage and it never landed, so before #525
     // this file had NO thread assertions at all. Under CEZ_DRY_RUN=1 the mock thread serves both
     // comments and timeline events, so the whole interleave is honestly reachable here.
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     const pr = gh.prs[0]
-    if (!pr) return
+    if (!pr) throw new Error('the dry-run catalog serves no pull request')
 
     await openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-thread"]') !== null`)
@@ -187,10 +181,10 @@ describe('the GitHub tab against the live dry-run server', () => {
   })
 
   it('shows the guarded merge box and confirms before merging', async () => {
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     const pr = gh.prs[0]
-    if (!pr) return
+    if (!pr) throw new Error('the dry-run catalog serves no pull request')
 
     await openGitHub(`/github/prs/${pr.number}`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-merge-box"]') !== null`)
@@ -208,10 +202,10 @@ describe('the GitHub tab against the live dry-run server', () => {
   })
 
   it('reviews a pull request file-by-file in the Changes view', async () => {
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     const pr = gh.prs[0]
-    if (!pr) return
+    if (!pr) throw new Error('the dry-run catalog serves no pull request')
 
     await openGitHub(`/github/prs/${pr.number}/changes`)
     browser.waitForFunction(`document.querySelector('[data-slot="gh-pr-changes"]') !== null`)
@@ -225,10 +219,10 @@ describe('the GitHub tab against the live dry-run server', () => {
   })
 
   it('below md the list and selected detail stack in document flow with a way back', async () => {
-    if (!forgeAvailable) return
+    expect(forgeAvailable).toBe(true)
     const gh = await api<GithubPayload>('/api/v1/github')
     const first = gh.issues[0]
-    if (!first) return
+    if (!first) throw new Error('the dry-run catalog serves no issue')
 
     browser.setViewport(IPHONE.width, IPHONE.height)
     try {
@@ -252,31 +246,31 @@ describe('the GitHub tab against the live dry-run server', () => {
         browser.evaluate(`document.querySelector('[data-slot="gh-back"]').getAttribute('href')`),
       ).toBe(`${scoped('/github')}?filter=all`)
 
-      if (gh.issues.length > 2) {
-        const visibleRowsCountJs = (count: number) =>
-          `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length === ${count}`
-        const visibleRows = () => waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
-        const selectedIndex = Number(browser.evaluate(
-          `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row-item"]')].findIndex(item => item.querySelector("[aria-current='page']"))`,
-        ))
-        const compactedVisible = 2 + (selectedIndex >= 2 ? 1 : 0)
-        // Wait on both observables the toggle drives, never on a clock (#341): the control's
-        // own state and the row visibility the assertions count. One React commit flips them
-        // together today, so waiting on the count costs one poll — and if that atomicity ever
-        // breaks, this settles to the committed state instead of sampling mid-flight.
-        const toggleList = (expanded: 'true' | 'false', expectedVisible: number) => {
-          browser.evaluate(`document.querySelector('[data-slot="gh-expand-list"]').scrollIntoView({ block: 'center', behavior: 'instant' })`)
-          browser.click('[data-slot="gh-expand-list"]')
-          browser.waitForFunction(`document.querySelector('[data-slot="gh-expand-list"]').getAttribute('aria-expanded') === '${expanded}'`)
-          browser.waitForFunction(visibleRowsCountJs(expectedVisible))
-        }
-        browser.waitForFunction(visibleRowsCountJs(compactedVisible))
-        expect(visibleRows()).toBe(compactedVisible)
-        toggleList('true', gh.issues.length)
-        expect(visibleRows()).toBe(gh.issues.length)
-        toggleList('false', compactedVisible)
-        expect(visibleRows()).toBe(compactedVisible)
+      // The mock catalog serves three issues, so the compacted list has rows to hide.
+      expect(gh.issues.length).toBeGreaterThan(2)
+      const visibleRowsCountJs = (count: number) =>
+        `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length === ${count}`
+      const visibleRows = () => waitForSettledSample(browser, `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row"]')].filter(row => row.offsetParent !== null).length`)
+      const selectedIndex = Number(browser.evaluate(
+        `[...document.querySelectorAll('[data-slot="gh-rows"] [data-slot="gh-row-item"]')].findIndex(item => item.querySelector("[aria-current='page']"))`,
+      ))
+      const compactedVisible = 2 + (selectedIndex >= 2 ? 1 : 0)
+      // Wait on both observables the toggle drives, never on a clock (#341): the control's
+      // own state and the row visibility the assertions count. One React commit flips them
+      // together today, so waiting on the count costs one poll — and if that atomicity ever
+      // breaks, this settles to the committed state instead of sampling mid-flight.
+      const toggleList = (expanded: 'true' | 'false', expectedVisible: number) => {
+        browser.evaluate(`document.querySelector('[data-slot="gh-expand-list"]').scrollIntoView({ block: 'center', behavior: 'instant' })`)
+        browser.click('[data-slot="gh-expand-list"]')
+        browser.waitForFunction(`document.querySelector('[data-slot="gh-expand-list"]').getAttribute('aria-expanded') === '${expanded}'`)
+        browser.waitForFunction(visibleRowsCountJs(expectedVisible))
       }
+      browser.waitForFunction(visibleRowsCountJs(compactedVisible))
+      expect(visibleRows()).toBe(compactedVisible)
+      toggleList('true', gh.issues.length)
+      expect(visibleRows()).toBe(gh.issues.length)
+      toggleList('false', compactedVisible)
+      expect(visibleRows()).toBe(compactedVisible)
       browser.screenshot(`${artifactsDir}/github-iphone.png`)
     } finally {
       browser.setViewport(DESKTOP.width, DESKTOP.height)

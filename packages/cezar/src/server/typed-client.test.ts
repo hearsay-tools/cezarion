@@ -113,26 +113,22 @@ describe('createSquawkClient<AppType>', () => {
     expectTypeOf<Parameters<typeof call>[0]>().toExtend<{ param: { projectId: string } }>();
   });
 
+  // The three cases below are compile-time only: `npm run typecheck` fails when the client
+  // gains the path.
   it('rejects a path the service does not serve', () => {
-    // @ts-expect-error — `/api/v1/nope` is not a route, and the client knows it. The compile
-    // error IS the assertion; if the surface ever gains this path, this line stops erroring
-    // and the suite fails loudly.
-    expect(() => client.api.v1.nope.$get).toBeDefined();
+    // `/api/v1/nope` is not a route, and the client knows it.
+    expectTypeOf(client.api.v1).not.toHaveProperty('nope');
   });
 
   it('does not offer the legacy surface', () => {
     // Only `/api/v1/*` is typed: the legacy paths stay frozen for existing callers
     // (BACKWARD_COMPATIBILITY.md) rather than being advertised to new ones.
-    // @ts-expect-error — `client.api['agent-config']` is not part of the typed contract.
-    expect(() => client.api['agent-config']).toBeDefined();
+    expectTypeOf(client.api).not.toHaveProperty('agent-config');
   });
 
   it('does not offer the legacy surface for workspace routes either', () => {
-    // Workspace families are mounted through a deliberately UN-chained holder on the `/api`
-    // side (see `workspaceLegacy` in server.ts). Mounting them straight onto the chain would
-    // have typed their legacy spelling too — this is the assertion that keeps that split real.
-    // @ts-expect-error — `client.api.projects` is the frozen spelling, not the typed contract.
-    expect(() => client.api.projects).toBeDefined();
+    // Workspace families must not be typed under their legacy `/api` spelling either.
+    expectTypeOf(client.api).not.toHaveProperty('projects');
   });
 
   it('covers the whole surface now that every family is chained', async () => {

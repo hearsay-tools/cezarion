@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 import { expect, it, vi } from 'vitest';
 import { withHeldAck } from './owned-input-delivery.testkit.ts';
+import { autoEndObservationClock } from './observation-clock.testkit.ts';
+import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 
 import { driveSeam, waitFor } from './harness-parity.testkit.ts';
 import { withOwnedInputRun } from './workflow-parity.testkit.ts';
@@ -12,24 +14,32 @@ import { withOwnedInputRun } from './workflow-parity.testkit.ts';
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend} a completed turn with a delayed ACK holds auto-end and resumes it after acceptance`, async () => {
     await withHeldAck(backend, async release => {
-      await driveSeam(backend, 'hold', {
-        sessionOptions: { autoEndAfterFirstTurn: true },
-        whileOpen: async (session, { v1 }) => {
-          await waitFor(() => v1.some(event => event.type === 'turn-end'));
-          const ack = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo delay-owned-ack' }]);
-          expect(ack).toBeInstanceOf(Promise);
-          let accepted = false;
-          if (!ack) throw new Error('expected reserved submission');
-          void ack.then(() => { accepted = true; }, () => {});
-          await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
-          // bound: observe past the real runner's 250 ms auto-end timer while its native ACK is held by the fixture.
-          await new Promise(resolve => setTimeout(resolve, 400));
-          expect(accepted).toBe(false); expect(session.open).toBe(true);
-          expect(session.sendAgentMessage([{ type: 'text', text: 'duplicate' }])).toBe(false);
-          release(); await ack; await session.result;
-          expect(session.open).toBe(false);
-        },
-      });
+      const autoEnd = autoEndObservationClock();
+      try {
+        await driveSeam(backend, 'hold', {
+          sessionOptions: { autoEndAfterFirstTurn: true },
+          whileOpen: async (session, { v1 }) => {
+            await waitFor(() => v1.some(event => event.type === 'turn-end'));
+            const ack = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo delay-owned-ack' }]);
+            expect(ack).toBeInstanceOf(Promise);
+            let accepted = false;
+            if (!ack) throw new Error('expected reserved submission');
+            void ack.then(() => { accepted = true; }, () => {});
+            await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
+            // The turn end arms its close window in the same handler: a held ACK arms none.
+            expect(autoEnd.pending).toBe(0);
+            await autoEnd.advance(AUTO_END_DELAY_MS);
+            expect(accepted).toBe(false); expect(session.open).toBe(true);
+            expect(session.sendAgentMessage([{ type: 'text', text: 'duplicate' }])).toBe(false);
+            release(); await ack;
+            // Acceptance resumes the close window.
+            await waitFor(() => autoEnd.pending === 1);
+            await autoEnd.advance(AUTO_END_DELAY_MS);
+            await session.result;
+            expect(session.open).toBe(false);
+          },
+        });
+      } finally { autoEnd.restore(); }
     });
   }, 60_000);
 

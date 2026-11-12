@@ -46,6 +46,8 @@ function useSubagentFixture(options: Parameters<typeof useWorkerWaitFixture>[0])
   });
   afterEach(() => { idleClock.restore(); vi.restoreAllMocks(); });
 }
+/** The grace a child end arms (`SubagentWaits.armGrace`), on a fake clock the test moves. */
+const graceClock = () => observationClock(() => /SubagentWaits\.armGrace/.test(new Error().stack ?? ''));
 async function noIdleClose(id: string) {
   await idleClock.advance(IDLE_TIMEOUT_MS);
   expect(manager.isActive(id)).toBe(true);
@@ -182,11 +184,14 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
 
   it('a parent turn that starts in the grace sees the ends itself: no settled wake, its turn end cancels the wait', async () => {
     const gate = join(root, `human-${randomUUID()}`);
+    const grace = graceClock();
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], undefined, gate);
     endChild(id, 'toolu_bg_01');
+    expect(grace.pending).toBe(1);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'human answer mock:hold' }])).toBe(true);
     await until(() => store.getRun(id)?.status === RUN_STATUS.running);
-    await new Promise(resolve => setTimeout(resolve, 150)); // bound: outlasts the 50 ms grace while the human's turn is held
+    // The grace runs out while the human's turn is held.
+    await grace.advance(50);
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
     writeFileSync(gate, 'release');
     await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.cancelled);
@@ -195,11 +200,12 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
 
   it('a child end whose checkpoint fails starts no grace, so no wake settles a stale snapshot', async () => {
     const deadline = observationClock(() => /WaitEngine\.armWait/.test(new Error().stack ?? ''));
+    const grace = graceClock();
     const { id, wait } = await parkedOnSubagents();
     const commit = vi.spyOn(store, 'commitWait').mockImplementationOnce(() => { throw Error('injected: disk full'); });
     endChild(id, 'toolu_bg_01');
     expect(commit).toHaveBeenCalledTimes(1);
-    await new Promise(resolve => setTimeout(resolve, 150)); // bound: outlasts the 50 ms grace
+    expect(grace.captured).toBe(0);
     // The saved wait still reads the child running; its armed deadline is the fallback.
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }] });
     expect(deadline.pending).toBe(1);
@@ -299,14 +305,17 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     // The subagents outrank the timer, so the park reads them.
     expect(deriveAttention(store.getRun(id)!).rung).toBe('waiting-on-subagents');
     const inputs = store.getRun(id)?.agentInputs?.length ?? 0;
+    const grace = graceClock();
     endChild(id, 'toolu_bg_01');
+    expect(grace.pending).toBe(1);
     emitUi(id, { type: 'turn.started', turnId: 'turn_runner' });
     expect(store.getRun(id)?.status).toBe(RUN_STATUS.running);
     expect(settledOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.cancelled, result: { reason: 'superseded' } });
     expect(settledOf(id, timerId)).toMatchObject({ phase: WAIT_PHASE.cancelled });
     expect(store.getRun(id)?.waits ?? []).toEqual([]);
-    // Past the grace no wake goes: the runner's own turn is the only one.
-    await new Promise(resolve => setTimeout(resolve, 200)); // bound: proves the cancelled grace never fires
+    // The runner's turn cleared the grace, and past it no wake goes: the runner's own turn is the only one.
+    expect(grace.pending).toBe(0);
+    await grace.advance(50);
     expect(store.getRun(id)?.agentInputs?.length ?? 0).toBe(inputs);
     expect(wakes(id)).toBe(0);
   });

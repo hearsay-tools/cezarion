@@ -52,21 +52,13 @@ let browser: AgentBrowser
 let baseUrl: string
 let forgeAvailable = false
 let createdSkillsDir = false
-/** The task-thread view's subject — an existing run when the env has one, else a dry run
- *  started (and settled) by this spec. */
+/** The task-thread view's subject: a dry run this spec starts and settles. */
 let threadRunId: string
 
 async function api<T>(path: string): Promise<T> {
   const res = await fetch(`${baseUrl}${path}`)
   if (!res.ok) throw new Error(`cezar e2e: GET ${path} answered ${res.status}`)
   return (await res.json()) as T
-}
-
-interface RunRecord {
-  id: string
-  status: string
-  createdAt: string
-  archived?: boolean
 }
 
 
@@ -83,32 +75,23 @@ beforeAll(async () => {
     'utf8',
   )
 
-  // The thread view needs a run. Prefer whatever the shared env already holds (newest live
-  // record); only when the list is empty does this spec start one dry run — and then settles it
-  // via /finish, so the shared env is never left holding an open session another spec would
-  // trip over. The run lands in `.ai/cezar/` (gitignored runtime state), same class of shared-env
-  // write as the smoke spec's todos.json.
-  const runs = await api<RunRecord[]>('/api/v1/runs')
-  const existing = [...runs]
-    .filter((r) => !r.archived)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
-  if (existing) {
-    threadRunId = existing.id
-  } else {
-    const created = (await (
-      await fetch(`${baseUrl}/api/v1/runs`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ task: 'Say hello to the iOS sweep.', workflow: 'quick-task' }),
-      })
-    ).json()) as { id: string }
-    threadRunId = created.id
-    // The dry-run mock makes no cezar_done call, so the run parks at `waiting`.
-    const status = await waitForStatus(baseUrl, threadRunId, ['waiting', 'review', 'done', 'failed'])
-    if (status === 'waiting') {
-      await fetch(`${baseUrl}/api/v1/runs/${threadRunId}/finish`, { method: 'POST' })
-      await waitForStatus(baseUrl, threadRunId, ['review', 'done', 'failed'])
-    }
+  // The thread view needs a run. The spec starts its own dry run rather than reading whatever an
+  // earlier spec left on the shared server, so the swept thread is the same in every order. It
+  // settles the run via /finish, so the shared env is never left holding an open session another
+  // spec would trip over.
+  const created = (await (
+    await fetch(`${baseUrl}/api/v1/runs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ task: 'Say hello to the iOS sweep.', workflow: 'quick-task' }),
+    })
+  ).json()) as { id: string }
+  threadRunId = created.id
+  // The dry-run mock makes no cezar_done call, so the run parks at `waiting`.
+  const status = await waitForStatus(baseUrl, threadRunId, ['waiting', 'review', 'done', 'failed'])
+  if (status === 'waiting') {
+    await fetch(`${baseUrl}/api/v1/runs/${threadRunId}/finish`, { method: 'POST' })
+    await waitForStatus(baseUrl, threadRunId, ['review', 'done', 'failed'])
   }
 
   browser = AgentBrowser.open(sessionId)
@@ -179,9 +162,8 @@ describe('iOS sweep — every primary view at 390×844', () => {
   })
 
   it('/github (forge-gated, like github.e2e.ts)', () => {
-    // Forge OFF is not reachable in this env — the gate itself is asserted live in
-    // github.e2e.ts and structurally in the unit suites (see the header comment).
-    if (!forgeAvailable) return
+    // The shared env runs under CEZ_DRY_RUN=1, whose forge driver always reports available.
+    expect(forgeAvailable).toBe(true)
     // Bare /github is the filter index at phone width (#622); the sweep wants the list.
     sweep('github', '/github?filter=all', '[data-slot="gh-header"]')
   })

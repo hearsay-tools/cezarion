@@ -1,6 +1,6 @@
 import { registrationToolHandler } from './wait-registration-tool.ts';
 import { randomUUID } from 'node:crypto';
-import type { acquireCiResources } from '../../ci-wait/resources.ts';
+import type { CiResources } from '../../ci-wait/resource-pool.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../../preview/registration.ts';
 import type { RunStore, RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -99,7 +99,7 @@ export function toolSessionRefusal(run: RunRecord | undefined, state: ActiveRun 
 
 export interface CiSessionHost {
   active: ReadonlyMap<string, ActiveRun>;
-  ciResources(): ReturnType<typeof acquireCiResources>;
+  ciResources(): CiResources;
   squawkToolHandlers(runId: string, generation: string): SquawkToolHandlers;
   preview(): PreviewHostLike | undefined;
   cockpit(): { origin: string; projectId: string } | undefined;

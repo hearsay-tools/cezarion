@@ -55,6 +55,18 @@ async function waitFor(predicate: () => boolean, what: string, ms = 15_000): Pro
 
 const settled = ['done', 'failed', 'cancelled', 'review'];
 
+/** Settle every pump on these managers, including the re-run an in-flight pump picks up. A pump
+ *  marks each run it admits as starting before it returns, so `semaphore.busy()` counts an
+ *  admission once this resolves: no time window is needed to see one. */
+async function pumpsSettled(...managers: RunManager[]): Promise<void> {
+  for (;;) {
+    const pumps = managers.flatMap(manager => [...fixtureWork(manager).pending]
+      .filter(([, label]) => label === 'pump').map(([operation]) => operation));
+    if (pumps.length === 0) return;
+    await Promise.all(pumps);
+  }
+}
+
 const releaseSlotHolders: Array<() => void> = [];
 
 /** A real check-step subprocess that holds a slot until the test releases it. */
@@ -166,9 +178,9 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     // Third run, third project slot — but the WORKSPACE cap is 2, so it must
     // queue even though manager A alone only holds one slot.
     const third = a.manager.startRun(INSTANT, { task: 'third — must queue' });
-    // bound: negative window. A pump that wrongly admitted the run would start it within a few event-loop turns of startRun; 300 ms is far longer.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await pumpsSettled(a.manager, b.manager);
     expect(a.store.getRun(third.id)?.status).toBe('queued');
+    expect(semaphore.busy()).toBe(2);
 
     // Capacity returns as the holders settle — the queued run then completes.
     holder.release();
@@ -202,9 +214,9 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     );
 
     const queued = b.manager.startRun(INSTANT, { task: 'queued in the OTHER project' });
-    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await pumpsSettled(a.manager, b.manager);
     expect(b.store.getRun(queued.id)?.status).toBe('queued');
+    expect(semaphore.busy()).toBe(2);
 
     // Nothing else happens in B — the only event is A's runs settling.
     holder.release();
@@ -231,10 +243,10 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const newerGate = slotHolder(roots);
     const newer = a.manager.startRun(newerGate.workflow, { task: 'queued second, same project' });
-    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await pumpsSettled(a.manager, b.manager);
     expect(b.store.getRun(older.id)?.status).toBe('queued');
     expect(a.store.getRun(newer.id)?.status).toBe('queued');
+    expect(semaphore.busy()).toBe(1);
 
     gate.release();
     await waitFor(
@@ -313,9 +325,9 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const a1 = a.manager.startRun(holder.workflow, { task: 'A slot 1' });
     const a2 = a.manager.startRun(holder.workflow, { task: 'A slot 2 — must queue on A per-project cap' });
     await waitFor(() => a.store.getRun(a1.id)?.status === 'running', 'A first run to run');
-    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await pumpsSettled(a.manager, b.manager);
     expect(a.store.getRun(a2.id)?.status).toBe('queued'); // blocked by A's own cap, not the workspace
+    expect(semaphore.busy()).toBe(1);
 
     // B inherits the workspace cap (no override) — it runs two concurrently.
     const b1 = b.manager.startRun(holder.workflow, { task: 'B slot 1' });
@@ -371,8 +383,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       () => runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
       'four runs to fill the owning project cap',
     );
-    // bound: negative window. A fifth admission would come within a few event-loop turns of the fourth run starting; 300 ms is far longer.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await pumpsSettled(manager);
 
     expect(runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
       JSON.stringify(runs.map(run => ({ status: store.getRun(run.id)?.status, error: store.getRun(run.id)?.error }))),
@@ -571,9 +582,9 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const holder = a.manager.startRun(gate.workflow, { task: 'hold the only slot' });
     const queued = a.manager.startRun(INSTANT, { task: 'wait for capacity' });
     await waitFor(() => a.store.getRun(holder.id)?.status === 'running', 'the holder to run');
-    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await pumpsSettled(a.manager);
     expect(a.store.getRun(queued.id)?.status).toBe('queued');
+    expect(semaphore.busy()).toBe(1);
 
     // The workspace cache hook (boot / PUT /api/v1/workspace/config, step 2.7):
     // bump the config, refresh — the pump fires and the queued run proceeds

@@ -103,6 +103,7 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
   const { RunStore } = await import('../src/runs/store.ts');
   const { ProjectContexts } = await import('../src/server/project-context.ts');
   const { RunManager: RealRunManager } = await import('../src/workflows/run.ts');
+  const { acquireCiResources } = await import('../src/ci-wait/resources.ts');
   const { createRunner } = await import('../src/core/runner-factory.ts');
   const { listProjects, registerProject, clearProjectProbeCache } = await import('../src/workspace/projects.ts');
   const { WorkspaceEventBus, createApp } = await import('../src/server/server.ts');
@@ -118,7 +119,7 @@ async function benchmark(argv: string[], cleanups: Array<() => unknown>): Promis
 
   clearProjectProbeCache();
   const store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-  const contexts = new ProjectContexts({ createRunner, createManager: (...args) => new RealRunManager(...args), home: selectedHome, listProjects: () => listProjects(undefined, selectedHome) });
+  const contexts = new ProjectContexts({ createRunner, createManager: (store, root, options) => new RealRunManager(store, root, { ...options, acquireCiResources }), home: selectedHome, listProjects: () => listProjects(undefined, selectedHome) });
   cleanups.push(() => { contexts.disposeAll(); store.flush(); });
   await registerProject(repoRoot, undefined, selectedHome);
   const app = createApp({
