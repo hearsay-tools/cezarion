@@ -640,3 +640,24 @@ for (const [label, checkRuns, reads, cardState] of [
   assert.equal(github.calls.length, reads);
   assert.deepEqual(cards(board), cardState);
 });
+
+// The board follows before the rerun attempt: a POST that fails or stays
+// ambiguous cannot leave a card In review once admission is lost.
+for (const [label, accepted] of [['a rejected', false], ['an ambiguous but accepted', true]]) {
+  test(`${label} rerun POST still moves the cards to In progress`, async () => {
+    const github = fakeGithub();
+    github.state.checks[0].conclusion = 'failure';
+    github.state.writeError = true;
+    const request = github.request;
+    github.request = async (route, params) => {
+      if (accepted && github.state.writes.length && route.endsWith('/runs/{run_id}')) github.state.run.run_attempt = 2;
+      return request(route, params);
+    };
+    const board = fakeBoard({ current: 'In review' });
+    const result = reconcile({ ...eventArgs({ github, projectGithub: board }), pullNumber: 7 });
+    if (accepted) assert.equal(await result, 'rerun-requested');
+    else await assert.rejects(result, /acceptance not yet visible/);
+    assert.deepEqual(github.state.writes, [30], 'one POST, never retried');
+    assert.deepEqual(cards(board), IN_PROGRESS);
+  });
+}

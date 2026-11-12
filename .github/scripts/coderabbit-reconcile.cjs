@@ -171,8 +171,10 @@ async function rerunIfChanged({ args, read, write, owner, repo, pr, proof, polic
   return 'rerun-requested';
 }
 // One read of native proof and admission serves both the rerun and the board.
-// Each read happens only when its result can change a decision.
-async function reconcilePull({ github, read, write, owner, repo, pr, checks, board, releaseAppBotLogin, now, deadline, sleep, log }) {
+// Each read happens only when its result can change a decision. The board
+// follows before the rerun attempt, so a rejected or ambiguous POST that throws
+// cannot leave a card In review.
+async function reconcilePull({ github, read, write, owner, repo, pr, checks, board, followBoard, releaseAppBotLogin, now, deadline, sleep, log }) {
   const args = { github, owner, repo, now, deadline };
   // Before any review check run on the head completes, the native job cannot be
   // complete and no required check set can be green. Unreadable checks read on.
@@ -183,10 +185,10 @@ async function reconcilePull({ github, read, write, owner, repo, pr, checks, boa
   const admission = () => readCodeRabbitAdmission({ ...args, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin });
   const first = native.job || boardNeedsAdmission ? await readAdmission(admission) : null;
   if (first?.error) log(`PR ${pr.number}: fresh review admission unavailable.`);
-  const outcome = native.job
-    ? await rerunIfChanged({ args, read, write, owner, repo, pr, proof, ...native, first, admission, now, sleep, log })
+  await followBoard(Boolean(boardNeedsAdmission && first?.result?.admitted));
+  return native.job
+    ? rerunIfChanged({ args, read, write, owner, repo, pr, proof, ...native, first, admission, now, sleep, log })
     : native.outcome;
-  return { outcome, admitted: Boolean(boardNeedsAdmission && first?.result?.admitted) };
 }
 async function headChecks(read, pr, log) {
   try { return await readHeadChecks(read, pr.head.sha); }
@@ -249,9 +251,8 @@ async function reconcile({ github, readGithub = github, projectGithub = null, ow
   // The admitted event is only a wake hint. Queue only PR identity, then prove
   // the newest live head/run at the lock head; never carry historical proof.
   const checks = await headChecks(read, pr, log);
-  const { outcome, admitted } = await reconcilePull({ github: readGithub, read, write: reader(github, owner, repo, deadline, now),
-    owner, repo, pr, checks, board: Boolean(projectGithub), releaseAppBotLogin, now, deadline, sleep, log });
-  await followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log });
-  return outcome;
+  return reconcilePull({ github: readGithub, read, write: reader(github, owner, repo, deadline, now),
+    owner, repo, pr, checks, board: Boolean(projectGithub), releaseAppBotLogin, now, deadline, sleep, log,
+    followBoard: admitted => followBoard({ read, projectGithub, owner, repo, pr, checks, admitted, log }) });
 }
 module.exports = { discover, reconcile, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };
