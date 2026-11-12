@@ -1,5 +1,10 @@
 import type { AgentEvent, AgentRunner, AgentRunSpec, AgentSession, SessionOptions } from './agent-runner.ts';
 import { DEFAULT_NO_PROGRESS_TIMEOUT_MS } from './runner-runtime.ts';
+import { classifyProviderError } from './provider-error.ts';
+
+/** The events that show the model working again, which forget a provider-retry note. Session,
+ *  usage and cost metadata do not (hearsay-tools/squawk#3337). */
+const MODEL_PROGRESS: ReadonlySet<AgentEvent['type']> = new Set(['text', 'tool-call', 'tool-result', 'image']);
 
 /** Wall-clock limits and open-turn liveness are independent. Native stream
  * activity refreshes this guard even when a mapper/coalescer emits no UI event.
@@ -17,6 +22,9 @@ export function startManagedSession(
   let stopped = false;
   let phase = 0;
   const pendingPermissions = new Set<string>();
+  // The runner's last provider-retry note in this turn (hearsay-tools/squawk#3337): a kill during
+  // the provider's own retries names it, so the run holds on the provider error instead of failing.
+  let providerNote: string | undefined;
   const pause = (): void => {
     phase += 1;
     turnOpen = false;
@@ -29,7 +37,8 @@ export function startManagedSession(
     clearTimeout(timer);
     timer = setTimeout(() => {
       stop();
-      onEvent({ type: 'error', message: `Agent made no progress for ${DEFAULT_NO_PROGRESS_TIMEOUT_MS / 60_000} minutes during an open turn and was terminated` });
+      const failing = providerNote ? `; the provider was failing: ${providerNote}` : '';
+      onEvent({ type: 'error', message: `Agent made no progress for ${DEFAULT_NO_PROGRESS_TIMEOUT_MS / 60_000} minutes during an open turn and was terminated${failing}` });
       session?.interrupt();
     }, DEFAULT_NO_PROGRESS_TIMEOUT_MS);
     timer.unref?.();
@@ -39,6 +48,8 @@ export function startManagedSession(
   begin();
   try {
     session = runner.startSession(spec, event => {
+      if (event.type === 'note') providerNote = classifyProviderError(event.message) ? event.message : providerNote;
+      else if (MODEL_PROGRESS.has(event.type)) providerNote = undefined;
       if (event.type === 'turn-end') pause();
       if (event.type === 'error' || event.type === 'done') stop();
       onEvent(event);

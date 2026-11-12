@@ -386,6 +386,18 @@ export class ClaudeCliRunner implements AgentRunner {
       return true;
     };
 
+    /** Claude Code retries a failing API call itself and says so in a `system`/`api_retry` frame.
+     *  A note names the provider error, so a no-progress kill during the retries holds the run
+     *  instead of failing it (hearsay-tools/squawk#3337). */
+    const noteApiRetry = (msg: ClaudeStreamMessage): void => {
+      if (msg.type !== 'system' || msg.subtype !== 'api_retry') return;
+      const frame = msg as Record<string, unknown>;
+      const status = typeof frame.error_status === 'number' ? ` ${frame.error_status}` : '';
+      const error = typeof frame.error === 'string' ? ` ${frame.error}` : '';
+      const attempt = typeof frame.attempt === 'number' ? ` (attempt ${frame.attempt})` : '';
+      onEvent?.({ type: 'note', message: `Claude API retry: API Error:${status}${error}${attempt}` });
+    };
+
     /** Record the reported model and session, mark attempt work, and return the identity. */
     const observeFrame = (msg: ClaudeStreamMessage): string | undefined => {
       if (msg.type === 'system' && msg.subtype === 'init') {
@@ -546,6 +558,7 @@ export class ClaudeCliRunner implements AgentRunner {
       announceQueuedTurn(msg);
       if (consumeReplay(msg)) return;
       opts.onActivity?.();
+      noteApiRetry(msg);
       const identity = observeFrame(msg);
       if (scheduleRefusalRetry(msg, identity)) return;
       if (!deliverFrame(msg)) return;

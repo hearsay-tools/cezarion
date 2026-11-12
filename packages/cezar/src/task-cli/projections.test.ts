@@ -14,6 +14,12 @@ describe('attentionFields', () => {
     });
   });
 
+  it('names a provider-error hold (hearsay-tools/squawk#3337)', () => {
+    const autoResumeAt = '2026-10-21T14:05:00.000Z';
+    expect(attentionFields({ status: RUN_STATUS.waiting, autoResumeAt, autoResumeReason: 'provider-error' }).attentionLabel)
+      .toBe(`provider error, resumes ${autoResumeAt}`);
+  });
+
   it('leaves every other label as the cockpit says it', () => {
     expect(attentionFields({ status: RUN_STATUS.failed })).toEqual({ attention: 'error', attentionLabel: 'failed' });
   });

@@ -3,7 +3,7 @@ import { useTestHome } from '../../home/test-home.testkit.ts';
 import { testHome } from '../../home/test-home.testkit.ts';
 // Load compile-only fixture functions so the quality report can measure their bodies.
 import '../launch-read-resolver.types.testkit.ts';
-import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { STEP_KIND, STEP_STATUS, RUN_STATUS, makeRunRecord, makeStepState } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,7 @@ import { createActiveRun } from '../active-run.ts';
 import { RunStore } from '../../runs/store.ts';
 import { WorkspaceSemaphore } from '../../workspace/semaphore.ts';
 import { atContinue, atStepOpen, atTaskHead, bindLaunchSource } from './launch-read-resolver.ts';
+import { retryPrompt } from './auto-resume.ts';
 import { TrackedWork } from './tracked-work.ts';
 import type { RunModuleContext } from './types.ts';
 import { noRunners } from '../../core/runners-under-test.testkit.ts';
@@ -185,4 +186,47 @@ it('P6-25 task metadata reads the current model lock after input acceptance', as
   mkdirSync(join(root, '.ai/cezar'), { recursive: true });
   writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({ modelsLocked: true }));
   expect(await atTaskHead.modelIdentity(root, 'claude', bindLaunchSource(input), testHome())).toBeUndefined();
+});
+
+// hearsay-tools/squawk#3337: the workflow step a provider-error hold resumes, and what a fresh retry asks.
+const twoAgentSteps = { name: 'two', source: 'built-in' as const, steps: [
+  { id: 'build', name: 'Build', prompt: 'Build: {{task}}' },
+  { id: 'review', name: 'Review', prompt: 'Review this change: {{task}}. Do not edit files.' },
+] };
+const heldRun = (statuses: Record<string, (typeof STEP_STATUS)[keyof typeof STEP_STATUS]>, currentStepId: string) => makeRunRecord({
+  status: RUN_STATUS.running, task: 'add the parser', workflowDef: twoAgentSteps, currentStepId,
+  steps: Object.entries(statuses).map(([stepId, status]) => makeStepState({ id: stepId, name: stepId, kind: STEP_KIND.agent, status })),
+});
+it('holds the failing workflow step, not an earlier one a retry already recovered', () => {
+  expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.failed }, 'review'))).toBe('review');
+  expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.pending }, 'build'))).toBe('build');
+  expect(atContinue.heldStep({ ...heldRun({ build: STEP_STATUS.failed }, 'build'), workflowResumeStepId: 'build' })).toBe('build');
+  // A later Continue's failure, after the recovered workflow finished, is no workflow step's.
+  expect(atContinue.heldStep(heldRun({ build: STEP_STATUS.failed, review: STEP_STATUS.done, 'continue-2': STEP_STATUS.failed }, 'continue-2'))).toBeUndefined();
+});
+it('gives a fresh retry the held step\'s own prompt', () => {
+  const run = { ...heldRun({ build: STEP_STATUS.done, review: STEP_STATUS.failed }, 'review'), workflowResumeStepId: 'review' };
+  expect(atContinue.task(run)).toBe('Review this change: add the parser. Do not edit files.');
+  expect(atContinue.task(makeRunRecord({ task: 'add the parser' }))).toBe('add the parser');
+});
+it('sends the held step\'s prompt with every provider retry, a launch id alone included', () => {
+  const held = { ...heldRun({ build: STEP_STATUS.done, review: STEP_STATUS.failed }, 'review'), workflowResumeStepId: 'review', autoResumeReason: 'provider-error' as const };
+  const launched = { ...held, steps: held.steps.map(step => ({ ...step, sessionId: 'launch-uuid' })) };
+  expect(retryPrompt(held)).toContain('before its agent session started');
+  for (const run of [held, launched]) expect(retryPrompt(run)).toContain('Review this change: add the parser. Do not edit files.');
+  expect(retryPrompt({ ...launched, autoResumeReason: 'usage-limit' })).not.toContain('Review this change');
+});
+it('keeps a queued provider retry on the held step\'s runner across a restart', () => {
+  const host = { workerStep: () => undefined, resumableSessionId: () => 'claude-session' } as unknown as Parameters<typeof atTaskHead.queuedResumeSession>[1];
+  const step = makeStepState({ id: 'review', kind: STEP_KIND.agent, status: STEP_STATUS.failed, sessionId: 'claude-session', backend: 'claude' });
+  // No attempt count: admission's write can land before the counter's debounced one.
+  const retry = makeRunRecord({ status: RUN_STATUS.queued, runner: 'codex', steps: [step], workflowResumeStepId: 'review', autoResumeReason: 'provider-error' });
+  expect(atTaskHead.queuedResumeSession(context, host, retry, step)).toMatchObject({ backend: 'claude', recoveredSessionId: 'claude-session' });
+  // The held step's account too, not the run's.
+  const ownedStep = { ...step, profileId: 'work-account' };
+  expect(atTaskHead.queuedResumeSession(context, host, { ...retry, agentProfile: 'personal', steps: [ownedStep] }, ownedStep)).toMatchObject({ backend: 'claude', sameAccount: true, recoveredSessionId: 'claude-session' });
+  // A step with no recorded account ran on the default one; the run's own profile does not move it.
+  expect(atTaskHead.queuedResumeSession(context, host, { ...retry, agentProfile: 'personal' }, step)).toMatchObject({ backend: 'claude', sameAccount: true, recoveredSessionId: 'claude-session' });
+  // Any other queued Continue keeps the run's runner, as before.
+  expect(atTaskHead.queuedResumeSession(context, host, { ...retry, autoResumeReason: undefined }, step)).toMatchObject({ backend: 'codex', recoveredSessionId: undefined });
 });

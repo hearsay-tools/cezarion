@@ -977,6 +977,24 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', u
   });
 });
 
+describe('Claude API retries (hearsay-tools/squawk#3337)', () => {
+  it('turns an api_retry frame into a note that names the provider error', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'cez-claude-api-retry-'));
+    const bin = join(dir, 'claude-retry.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+if (process.argv.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
+console.log(JSON.stringify({ type: 'system', subtype: 'api_retry', attempt: 3, max_retries: 10, retry_delay_ms: 4000, error_status: 529, error: 'overloaded_error' }));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', usage: { input_tokens: 1, output_tokens: 1 } }));
+`, { mode: 0o755 });
+    const events: AgentEvent[] = [];
+    try {
+      await new ClaudeCliRunner({ bin, timeoutMs: 10_000 }).run({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'hello', cwd: dir }, event => events.push(event));
+      expect(events).toContainEqual({ type: 'note', message: 'Claude API retry: API Error: 529 overloaded_error (attempt 3)' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe('Claude queued-turn announcement with a synchronous follow-up (#505 local review)', () => {
   const mockBin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
   it('announces a turn submitted from the turn-end callback exactly once', async () => {

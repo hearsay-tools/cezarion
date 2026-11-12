@@ -225,7 +225,7 @@ const skillSourceReads = {
 export const atTaskHead = { executionPayload, queuedPayload, resumedPayload, acceptedWorkflowFields, recordedRunner, defaultRunner, runnerless, heldFor, accountFor, workerStep, executionInput, executionWorkflow, requeueJob, baseBranch, worktreeSetup: continuationWorktreeSetup, jobInput, jobWorkflow, resumedJob, storedWorkflow, interruptedIndex, interruptedDefinition, heldAccount, worktree: inputWorktree, workflowName, images: acceptedImages, task: acceptedTask, skillHint: acceptedSkillHint, ownedJob, verifyIdentity: verifyWorkerIdentity, autonomous: inputAutonomous, reviveWorkflow, queuedResumeSession, recoveryInput: queuedRecoveryInput, registry: discoverRunSkills, acceptedRunFields, acceptInput, modelIdentity: taskModelIdentity, config: readLaunchConfig, runner: taskRunner, systemPrompt: taskSystemPrompt, hydrateQueuedInput, attachments: readPersistedAttachments };
 export const atStepOpen = { afterStepPayload, sessionPayload, sessionWaitPayload, retryIndex, workflowLength, workflowStep, workflowSlice, workflowChainNote, runner: stepRunner, prompt: stepPrompt, skill: stepSkill, toolGrant: continuationToolGrant, enabledSkills: skillSourceReads.enabledSkills, disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, contextVariables, model: stepModel, effort: stepEffort, openingInputs, agentEnvForStep, workerStep };
 export const atLiveInput = { disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, queuedMessages: queuedMessageSource, taskAttachmentUrls, enabledSkills: skillSourceReads.enabledSkills };
-export const atContinue = { resumedStep, storedWorkflow, workflowStep, workflowLength, agentEnvForStep, workerStep, registry: discoverRunSkills, enabledSkills: skillSourceReads.enabledSkills, disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, isPrintTransport: printSessionTransport, skill: continuedSkill, checkpoint: continuedCheckpoint, prompt: continuedPrompt, rejoinLine: rejoinContinuationLine, verifyIdentity: verifyWorkerIdentity, waitingBeforeFinalWorkflowStep, waitingWorkflowStepIndex, continuationNextStep, ciWorkflowResumeStepIndex, resumableSessionId, continuedSessionId, isSyntheticContinuation, owningStep: continuationOwningStep, definitionStep: continuationDefStep, toolGrant: continuationToolGrant, extraSystemPrompt: continuedSystemPrompt, recordedProfile: continuedProfileId, definitionId: continuationStepId, model: continuationModel, effort: continuationEffort, runner: continuationRunner, hydrateQueuedContinuation, config: readLaunchConfig, worktreeSetup: continuationWorktreeSetup, opening: continuationOpening, openingImages: continuationImages };
+export const atContinue = { task: retriedTask, heldStep: heldWorkflowStepId, heldRunner: heldStepRunner, resumedStep, storedWorkflow, workflowStep, workflowLength, agentEnvForStep, workerStep, registry: discoverRunSkills, enabledSkills: skillSourceReads.enabledSkills, disabledSkills: readDisabledTeamSkills, projectUiState: readProjectUiState, projectUiStateSync: readProjectUiStateSync, teamSkills, filterSkills: filterDisabledTeamSkills, isPrintTransport: printSessionTransport, skill: continuedSkill, checkpoint: continuedCheckpoint, prompt: continuedPrompt, rejoinLine: rejoinContinuationLine, verifyIdentity: verifyWorkerIdentity, waitingBeforeFinalWorkflowStep, waitingWorkflowStepIndex, continuationNextStep, ciWorkflowResumeStepIndex, resumableSessionId, continuedSessionId, isSyntheticContinuation, owningStep: continuationOwningStep, definitionStep: continuationDefStep, toolGrant: continuationToolGrant, extraSystemPrompt: continuedSystemPrompt, recordedProfile: continuedProfileId, definitionId: continuationStepId, model: continuationModel, effort: continuationEffort, runner: continuationRunner, hydrateQueuedContinuation, config: readLaunchConfig, worktreeSetup: continuationWorktreeSetup, opening: continuationOpening, openingImages: continuationImages };
 
 function hydrateQueuedInput(context: RunModuleContext, readAttachments: AttachmentReader, runId: string, input: StartRunInput): StartRunInput {
     const run = context.store.getRun(runId);
@@ -588,10 +588,11 @@ function queuedResumeSession(context: RunModuleContext, host: QueuedRevivalHost,
   let resumeIdentity: WorkerStepIdentity | undefined;
   try { resumeIdentity = host.workerStep(run.id, continuationDefStep(context.store, run, sessionStep.sessionId)?.id); }
   catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
-  const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
+  const backend = resumeIdentity?.account.provider ?? retryInFlightRunner(run) ?? run.runner ?? 'claude';
   const sessionBackend = sessionStep.backend ?? backend;
   const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-  const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
+  // A provider retry keeps the held step's account, resolved as `sessionAccount` is (hearsay-tools/squawk#3337).
+  const agentProfile = resumeIdentity?.account.profileId ?? (retryInFlightRunner(run) ? sessionAccount : run.agentProfile);
   const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
   const recoveredSessionId = sessionBackend === backend && sameAccount
     ? host.resumableSessionId(run.id, sessionStep) : undefined;
@@ -642,6 +643,29 @@ function continuationNextStep(store: Pick<RunStore, 'getRun'>, runId: string, wa
   const run = store.getRun(runId);
   const index = run?.workflowDef ? waitingWorkflowStepIndex(run) : -1;
   return index >= 0 ? run!.workflowDef!.steps[index + 1] : undefined;
+}
+
+/** The workflow agent step a provider-error hold resumes (hearsay-tools/squawk#3337): the failed one,
+ *  so a successful retry runs the steps after it instead of settling the run. */
+function heldWorkflowStepId(run: RunRecord): string | undefined {
+  if (run.workflowResumeStepId) return run.workflowResumeStepId;
+  // Only the workflow step the run is on, and only when it failed. An earlier step a retry already
+  // recovered keeps its failed status (`settleResumedWorkflowStep`), and a later Continue's own
+  // failure is no workflow step's, so neither becomes the cursor.
+  const current = run.workflowDef?.steps.find(step => step.id === run.currentStepId && stepKind(step) === 'agent');
+  return current && run.steps.find(persisted => persisted.id === current.id)?.status === 'failed' ? current.id : undefined;
+}
+
+/** The runner the held workflow step ran on, which its retry keeps (hearsay-tools/squawk#3337). */
+function heldStepRunner(run: RunRecord): RunnerId | undefined {
+  return run.steps.find(step => step.id === run.workflowResumeStepId)?.backend;
+}
+
+/** A provider-error retry keeps the held step's runner across a restart, as its admission chose
+ *  (hearsay-tools/squawk#3337). The reason and the held step are on the record from the hold's own
+ *  write, so a crash right after admission cannot lose them. */
+function retryInFlightRunner(run: RunRecord): RunnerId | undefined {
+  return run.autoResumeReason === 'provider-error' ? heldStepRunner(run) : undefined;
 }
 
 function ciWorkflowResumeStepIndex(run: RunRecord): number {
@@ -727,6 +751,12 @@ function ownedJob(context: RunModuleContext, host: { historyDeletionPending(runI
 
 function acceptedImages(input: StartRunInput): PastedContent[] | undefined { return input.images; }
 function acceptedTask(input: StartRunInput): string { return input.task; }
+/** A provider-error retry that starts the first session carries what that step was asked
+ *  (hearsay-tools/squawk#3337): the held workflow step's own prompt, rendered with the task. */
+function retriedTask(run: RunRecord): string {
+  const step = run.workflowDef?.steps.find(candidate => candidate.id === run.workflowResumeStepId);
+  return step ? applyTemplate(step.prompt ?? '{{task}}', run.task) : run.task;
+}
 function acceptedSkillHint(workflow: WorkflowDef): string | undefined {
   return workflow.steps.find(candidate => stepKind(candidate) === 'agent' && candidate.skill)?.skill?.trim();
 }

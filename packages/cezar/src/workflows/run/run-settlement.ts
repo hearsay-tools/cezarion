@@ -274,6 +274,7 @@ export class RunSettlement {
       this.host.move(runId, 'park', { error: `continue failed: ${message}` });
       return;
     }
+    if (this.autoResumeScheduler.holdFailure(runId, `continue failed: ${message}`)) return;
     this.host.move(runId, 'fail-continue', { error: `continue failed: ${message}` });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
     if (delivery === 'capped') this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });
@@ -322,6 +323,7 @@ export class RunSettlement {
 
   /** The failed settlement. A capped wake delivery adds the cap's note. */
   settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
+    if (this.autoResumeScheduler.holdFailure(runId, runError)) return;
     this.host.move(runId, 'fail', { error: runError });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
     if (deliveryCapped) this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });
@@ -509,7 +511,7 @@ export class RunSettlement {
     // manager, and a pump reads the hold off the records. Publishing the schedule afterwards
     // left a window — measured as exactly one extra task — where the queue saw a free slot and
     // an account that looked healthy, and started work that was already doomed.
-    this.autoResumeScheduler.scheduleAutoResumeIfLimited(runId);
+    this.autoResumeScheduler.armHeldResume(runId);
     // Closed-session success may have parked a completion wait without a live wire. The global
     // pass covers the families still in memory (#779); this run's own family may have just left
     // the live set with it, so it is reconciled by name first.

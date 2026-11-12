@@ -162,7 +162,8 @@ export const workerCollectedResultSchema = z.object({
   workspace: workerWorkspaceSchema.extend({ state: z.enum(['available', 'unavailable', 'deleted']).optional() }),
   cleanup: z.enum(['retained', 'requested', 'terminating', 'cleaning', 'complete', 'incomplete']),
   summary: z.discriminatedUnion('state', [
-    z.object({ state: z.literal('available'), text: z.string().min(1).max(4000), source: z.literal('assistant'), seq: z.number().int().nonnegative(), truncated: z.boolean() }).strict(),
+    // `failure`: the worker failed, and the text names the runner's failure reason (hearsay-tools/squawk#3337).
+    z.object({ state: z.literal('available'), text: z.string().min(1).max(4000), source: z.enum(['assistant', 'failure']), seq: z.number().int().nonnegative(), truncated: z.boolean() }).strict(),
     unavailableEvidenceSchema, deletedEvidenceSchema,
   ]),
   head: z.discriminatedUnion('state', [

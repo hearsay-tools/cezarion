@@ -12,6 +12,8 @@ import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision }
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   discoveryRequestSchema,
   type DiscoveryRequest,
@@ -77,7 +79,7 @@ import type { Caller } from './credentials.ts';
 import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError, MESSAGING_OFF, requireWorkersAllowed } from './policy.ts';
-import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline } from './workspace.ts';
+import { planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, verifyOwnedWorkspace } from './workspace.ts';
 import { WorkerCleanup, type WorkerCleanupOptions } from './worker-cleanup.ts';
 
 export type DelegationManager = Pick<RunManager,
@@ -362,8 +364,27 @@ export class DelegationService {
     const request = conversationSendRequestSchema.parse(value);
     const initial = this.conversationPair(caller, request.recipientRunId, true);
     return this.serialized(`conversation:${initial.project.id}:${this.ledgerFor(initial, request).id}`, async () => {
+      if (request.resume) await this.assertResumableWorkspace(caller, request);
       return this.sendLocked(caller, request);
     });
+  }
+  /** A cancelled or session-less worker restarts from its worktree and branch (hearsay-tools/squawk#3337),
+   *  so --resume proves both still exist before anything is accepted. */
+  private async assertResumableWorkspace(caller: Caller, request: ConversationSendRequest): Promise<void> {
+    const pair = this.conversationPair(caller, request.recipientRunId, true);
+    const { project, recipient } = pair;
+    // An exact retry returns its stored receipt, whatever became of the workspace since.
+    if (this.currentConversation(project, this.ledgerFor(pair, request)).messages.some(message => message.id === request.id)) return;
+    if (recipient.delegation?.role !== 'worker' || recipient.delegation.destroy || !freshWorkerSession(recipient) && recipient.status !== 'cancelled') return;
+    if (['queued', 'running', 'waiting'].includes(recipient.status)) return;
+    try {
+      const workspace = await verifyOwnedWorkspace(project.root, recipient);
+      // The branch is the work a fresh session reads from (its notice says `git log`): prove its ref too.
+      await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${workspace.branch}^{commit}`], { cwd: project.root, timeout: 30_000 })
+        .catch(() => { throw new Error(`branch ${workspace.branch} is missing`); });
+    } catch (error) {
+      throw new DelegationPolicyError('incompatible_state', `Worker worktree or branch is gone (${error instanceof Error ? error.message : String(error)}); --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
+    }
   }
   /** Runs entirely under the ledger lock; mutable records are read at the queue head. */
   private sendLocked(caller: Caller, request: ConversationSendRequest): ConversationSendResult {
@@ -432,8 +453,9 @@ export class DelegationService {
     if (resume) {
       try { assertConversationIdFree(root, input, id => project.store.getRun(id), (runId, id) => project.store.hasProjection(runId, id)); }
       catch (error) { if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message); throw error; }
+      const fresh = freshWorkerSession(recipient) ? `${FRESH_SESSION_NOTICE}\n` : '';
       const result = project.manager.continueRun(recipient.id, {
-        text: `Your parent resumed this worker with a new instruction.\nAgent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
+        text: `Your parent resumed this worker with a new instruction.\n${fresh}Agent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
       }, true, { rootId: root.id, state: next, input });
       if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; resolve this condition and retry the same command`);
     } else commitAccepted(project.store, root.id, next, enqueue ? input : undefined, peer && !recipient.delegation);
@@ -766,3 +788,9 @@ export class DelegationService {
     return this.cleanups.get(project.id)!.request(workerId, check);
   }
 }
+
+/** No agent session was recorded, so a resume starts a fresh one (hearsay-tools/squawk#3337). */
+export const freshWorkerSession = (run: RunRecord): boolean => !run.steps.some(step => step.sessionId);
+export const FRESH_SESSION_NOTICE = 'Your earlier agent session is lost. Your work so far is in this worktree: read its files and its branch commits (git log) before you continue.';
+
+const execFileAsync = promisify(execFile);

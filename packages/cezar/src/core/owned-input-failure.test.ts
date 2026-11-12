@@ -98,14 +98,14 @@ it.each(['fresh', 'continuation'] as const)('%s provider failure is recorded bef
     vi.spyOn(session, 'interrupt').mockImplementation(() => {
       observedProviderInterrupt = true;
       expect(store.readEvents(runId).some(event => event.type === 'error' &&
-        typeof event.message === 'string' && event.message.includes('API key expired'))).toBe(true);
+        typeof event.message === 'string' && event.message.includes('invalid_request_error'))).toBe(true);
       interrupt();
     });
     expect(manager.sendMessage(runId, [{ type: 'text', text: 'mock:provider-error' }])).toBe(true);
     await waitFor(() => !manager.isActive(runId));
     expect(observedProviderInterrupt).toBe(true);
-    expect(store.readEvents(runId).some(event => event.type === 'error' && typeof event.message === 'string' && event.message.includes('API key expired'))).toBe(true);
+    expect(store.readEvents(runId).some(event => event.type === 'error' && typeof event.message === 'string' && event.message.includes('invalid_request_error'))).toBe(true);
     expect(store.getRun(runId)?.status).toBe('failed');
-    expect(store.getRun(runId)?.error).toContain('API key expired');
+    expect(store.getRun(runId)?.error).toContain('(HTTP 400)');
   });
 }, 60_000);

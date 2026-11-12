@@ -85,7 +85,13 @@ describe('parent-owned collected worker results', () => {
     setRunStatus(f.store, run.id, RUN_STATUS.failed, { error: 'provider interrupted' });
     f.store.appendEvent(run.id, { type: 'item.completed', item: { kind: 'message', role: 'assistant', text: 'Partial analysis' } });
     result = await f.service.collect(f.caller, { workerId: run.id });
-    expect(result).toMatchObject({ outcome: 'failed', partial: true, error: 'provider interrupted', summary: { state: 'available', text: 'Partial analysis' } });
+    expect(result).toMatchObject({ outcome: 'failed', partial: true, error: 'provider interrupted', summary: { state: 'available', source: 'failure', text: 'Runner failure: provider interrupted' } });
+  });
+  it('names the runner failure reason in a failed worker summary with no assistant output', async () => {
+    const run = await worker();
+    setRunStatus(f.store, run.id, RUN_STATUS.failed, { error: 'API Error: 429 rate_limit_error' });
+    const result = await f.service.collect(f.caller, { workerId: run.id });
+    expect(result.summary).toMatchObject({ state: 'available', source: 'failure', text: 'Runner failure: API Error: 429 rate_limit_error', truncated: false });
   });
   it('rejects collection that races a new accepted execution revision', async () => {
     const run = await worker();

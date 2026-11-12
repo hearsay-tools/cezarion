@@ -25,6 +25,15 @@ export type ContinueRunOptions = {
   agentProfile?: string | undefined;
   /** The parent reply this continuation delivers as the answer to a routed question. */
   answerInputId?: string;
+  /** A provider-error retry of a run that never recorded a session starts a fresh one
+   *  (hearsay-tools/squawk#3337). */
+  freshSession?: true;
+  /** A provider-error retry runs on the held step's own runner, without rewriting the run's
+   *  (hearsay-tools/squawk#3337): a mixed-runner workflow's step keeps its runner and model. */
+  retryRunner?: RunnerId;
+  /** Set by the provider-error retry alone. Any other continuation drops the hold's reason in its
+   *  own accepted write, so a restart cannot take it for the retry (hearsay-tools/squawk#3337). */
+  providerRetry?: true;
 };
 
 export type ContinuationRefusal = { ok: false; error: string };
@@ -38,14 +47,15 @@ export function modelLockRefusal(repoRoot: string, opts: ContinueRunOptions, hom
 
 export function parentMessageRefusal(run: RunRecord, defer: boolean, conversation: ContinuationConversation): ContinuationRefusal | undefined {
   if (conversation && (!defer || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== conversation.rootId ||
-    !['done', 'review', 'failed'].includes(run.status))) {
+    !['done', 'review', 'failed', 'cancelled'].includes(run.status))) {
     return { ok: false, error: 'Only a settled owned worker can be resumed by its parent message' };
   }
 }
 
-/** The refusal of a Continue on a worker whose parent is settled (hearsay-tools/cezarion#2410). */
+/** The refusal of a Continue on a worker whose parent is settled (hearsay-tools/cezarion#2410). A
+ *  failed parent leaves its workers running, so they continue and retry (hearsay-tools/squawk#3337). */
 export function settledParentRefusalError(parentId: string, status: RunRecord['status']): string | undefined {
-  return ['done', 'review', 'failed', 'cancelled'].includes(status) ? `Parent task ${parentId} is ${status}; continue the parent before its worker.` : undefined;
+  return ['done', 'review', 'cancelled'].includes(status) ? `Parent task ${parentId} is ${status}; continue the parent before its worker.` : undefined;
 }
 
 export function stoppingRefusal(run: RunRecord): ContinuationRefusal | undefined {
@@ -77,19 +87,22 @@ export function answerRefusal(run: RunRecord, opts: ContinueRunOptions, defer: b
   }
 }
 
-export function sessionRefusal(sessionStep: StepState | undefined, untouched: boolean): ContinuationRefusal | undefined {
-  if (!sessionStep?.sessionId && !untouched) return { ok: false, error: 'no agent session to resume' };
+/** A parent's resume of its owned worker starts a fresh session when none was recorded
+ *  (hearsay-tools/squawk#3337): the work so far is in the worker's worktree and branch. */
+export function sessionRefusal(sessionStep: StepState | undefined, untouched: boolean, freshAllowed = false): ContinuationRefusal | undefined {
+  if (!sessionStep?.sessionId && !untouched && !freshAllowed) return { ok: false, error: 'no agent session to resume' };
 }
 
 /** Session ids belong to their provider and account, including mixed-chain worker steps. */
 export function sessionAffinity(run: RunRecord, opts: ContinueRunOptions, identity: WorkerStepIdentity | undefined,
   sessionStep: StepState | undefined, untouched: boolean) {
-  const originalRunner = identity?.account.provider ?? run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
+  const originalRunner = identity?.account.provider ?? opts.retryRunner ?? run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
   const targetRunner = opts.runner ?? originalRunner;
   // Legacy sessions without explicit affinity belong to the run's current runner/account.
   const sessionBackend = sessionStep?.backend ?? run.runner ?? 'claude';
   const sessionAccount = sessionStep?.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-  const accountSwitched = (opts.agentProfile ?? identity?.account.profileId ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
+  // A provider retry keeps the held step's account, as it keeps its runner (hearsay-tools/squawk#3337).
+  const accountSwitched = (opts.agentProfile ?? identity?.account.profileId ?? (opts.retryRunner ? undefined : run.agentProfile) ?? sessionAccount) !== sessionAccount;
   const resume = sessionBackend === targetRunner && !accountSwitched;
   return { originalRunner, targetRunner, resume };
 }
@@ -317,7 +330,7 @@ export class ContinuationChecks {
     const sessionStep = [...run.steps].reverse().find(s => s.sessionId);
     // Command/check steps may have changed the repo; only an untouched workflow can restart.
     const untouched = this.reads.untouched(run);
-    const absent = sessionRefusal(sessionStep, untouched);
+    const absent = sessionRefusal(sessionStep, untouched, (run.delegation?.role === 'worker' && !!this.conversation) || this.opts.freshSession === true);
     if (absent) return absent;
     const affinity = sessionAffinity(run, this.opts, identity, sessionStep, untouched);
     const resumeSessionId = affinity.resume ? this.reads.sessionId(sessionStep) : undefined;

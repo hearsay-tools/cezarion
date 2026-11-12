@@ -101,7 +101,7 @@ export const PARITY_FAMILIES = {
   'harness:owner': everyRunner(`R50 parks on the ask scenario: ${NATIVE_ASK_SCENARIO}`),
   // Harness run tier: RunManager cells whose outcome is Cezar's.
   'harness:run': shared('RunManager cells over the native wire', {
-    R1: SMOKE, R2: 'a provider error is the runner\'s own', R3: `R3 ${NATIVE_ASK_SCENARIO}`,
+    R1: SMOKE, R2: 'a provider request rejection is the runner\'s own', R3: `R3 ${NATIVE_ASK_SCENARIO}`,
   }),
   'harness:monitoring': shared('the monitoring wrap-up is decided in run.ts', {
     R36: 'parses each runner\'s own prompt channel', R37: 'parses each runner\'s own prompt channel',
@@ -244,6 +244,9 @@ export const SCENARIO_CLASSES: Readonly<Record<ScenarioName, readonly [ScenarioC
   // end, and an end once interrupted), so what a row reads above it is Cezar's.
   'provider-error-controlled': ['shared', 'S44 holds each runner\'s mapping of the failure control\'s provider error on every runner; Cezar decides the outcome'],
   'provider-unavailable': ['runner-code', OWN_ERROR],
+  'provider-rate-limit': ['runner-code', OWN_ERROR],
+  'provider-not-found': ['runner-code', OWN_ERROR],
+  'provider-credit': ['runner-code', OWN_ERROR],
   'post-success-refusal': ['runner-code', 'each runner maps its own model refusal after a successful turn'],
   'skill-warning': ['runner-code', 'each wire reports skill diagnostics its own way'],
   'auto-resumed': ['runner-code', 'only the OMP wire reports restored history at start'],

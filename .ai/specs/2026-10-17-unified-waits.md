@@ -1121,7 +1121,8 @@ list, except phase 3a's completion park rows, which this table replaces. One row
 | | An admitted Continue | The user | Supersedes the question; the worker continues. A refused Continue leaves it intact |
 | | The worker's process exits cleanly, its session idle-closes (15 minutes), or a restart finds no process | The close path, the idle timer, recovery | Supersedes the question; the worker goes on as the plain park did (a workflow continues; an idle-closed worker settles and its parent can collect it) |
 | | The parent cannot receive | `routeWorkerQuestion` | `worker-question-fallback`; the question waits for a human (Needs you); a human message answers it |
-| | The parent finishes, stops or fails | The parent's terminal path | Live owned workers are cancelled with their root, as before |
+| | The parent finishes or stops | The parent's terminal path | Live owned workers are cancelled with their root, as before |
+| | The parent fails | The parent's failure path | The question closes; live owned workers keep running (hearsay-tools/squawk#3337) |
 | | The parent goes to review | The parent's review path | Workers keep running; the routed question falls back to the human |
 | | A human message | The user | Refused while the question is routed to the parent (as for a worker's own routed question); after `worker-question-fallback` it answers it and the worker resumes |
 | | Stop, delete | The user | Settles |

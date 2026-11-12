@@ -324,6 +324,8 @@ export const runRecordSchema = z.object({
   autoResumeAt: z.string().optional(),
   /** Consecutive automatic resumes since the last human turn, against the safety cap. */
   autoResumeAttempts: z.number().optional(),
+  /** Why the hold waits: `usage-limit`, or a `provider-error` retried with back-off (hearsay-tools/squawk#3337). */
+  autoResumeReason: z.enum(['usage-limit', 'provider-error']).optional(),
   createdAt: z.string(),
   startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
@@ -482,6 +484,8 @@ export const runSummarySchema = z.object({
    *  it, so without it here a cross-project row would show a red "failed" dot and land in
    *  Recently finished for work that is simply waiting for its appointment. */
   autoResumeAt: z.string().optional(),
+  /** Which hold it is (hearsay-tools/squawk#3337): the row names a provider error instead of a usage limit. */
+  autoResumeReason: runRecordSchema.shape.autoResumeReason,
   /** The workflow the run executes — the global Tasks page shows it in a column and groups by
    *  it. Always present on the record (`RunRecord.workflow`), so required here. The display
    *  name, which reads a `(planned)` chain as its first agent's name, is `workflowLabel` below. */
@@ -571,7 +575,7 @@ export type RunIndexEntry = z.infer<typeof runIndexEntrySchema>;
 /** Keys a summary copies verbatim from the record when the record has them. */
 const SUMMARY_OPTIONAL_KEYS = [
   'titleSummary', 'titleOrigin', 'hasPendingPermission', 'finishedAt', 'seenAt',
-  'autoResumeAt', 'branch', 'startedAt', 'pullRequestUrl', 'pullRequests', 'referencedPullRequestUrl', 'prNumber',
+  'autoResumeAt', 'autoResumeReason', 'branch', 'startedAt', 'pullRequestUrl', 'pullRequests', 'referencedPullRequestUrl', 'prNumber',
   'issueNumber', 'referencedIssueUrl', 'markerRefs', 'costUsd', 'peakRssBytes', 'peakProcCount',
   'groupId', 'variant', 'pinned', 'runner', 'model', 'notify', 'diffStat', 'inputTokens',
   'outputTokens', 'currentStepId', 'error', 'worktreePath',

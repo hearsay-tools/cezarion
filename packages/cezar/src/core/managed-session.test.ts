@@ -3,6 +3,7 @@ import type { AgentEvent, AgentRunner, AgentRunResult, AgentSession, SessionOpti
 import { startManagedSession } from './managed-session.ts';
 import { DEFAULT_NO_PROGRESS_TIMEOUT_MS as LIMIT } from './runner-runtime.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { classifyProviderError } from './provider-error.ts';
 
 function fixture(respondPermission?: (requestId: string, optionId: string) => boolean) {
   vi.useFakeTimers();
@@ -24,6 +25,30 @@ function fixture(respondPermission?: (requestId: string, optionId: string) => bo
 }
 afterEach(() => vi.useRealTimers());
 describe('managed open-turn watchdog', () => {
+  // hearsay-tools/squawk#3337: a kill during the provider's own retries names the provider error.
+  it('names the provider error a kill interrupts, so the run holds instead of failing', async () => {
+    const f = fixture();
+    f.emit({ type: 'note', message: 'Claude API retry: API Error: 529 overloaded_error (attempt 7)' });
+    // Metadata is no model progress: the provider note survives it.
+    f.emit({ type: 'session', sessionId: 'new-session' });
+    f.emit({ type: 'token-usage', tokensUsed: 10 });
+    await vi.advanceTimersByTimeAsync(LIMIT);
+    const message = (f.events.find(e => e.type === 'error') as { message: string }).message;
+    expect(message).toContain('no progress for 30 minutes');
+    expect(message).toContain('the provider was failing: Claude API retry: API Error: 529');
+    expect(classifyProviderError(message)?.kind).toBe('overloaded');
+  });
+  it('forgets a provider retry once the turn makes progress again', async () => {
+    const f = fixture();
+    f.emit({ type: 'note', message: 'Reconnecting... 2/5 — stream disconnected before completion' });
+    f.emit({ type: 'text', text: 'working again' });
+    f.emit({ type: 'note', message: 'opencode: optional skill skipped' });
+    await vi.advanceTimersByTimeAsync(LIMIT);
+    const message = (f.events.find(e => e.type === 'error') as { message: string }).message;
+    expect(message).not.toContain('provider was failing');
+    expect(classifyProviderError(message)).toBeNull();
+  });
+
   it('defaults to 30 minutes, resets on activity, and retains the slot until actual exit', async () => {
     expect(LIMIT).toBe(30 * 60_000);
     const f = fixture();

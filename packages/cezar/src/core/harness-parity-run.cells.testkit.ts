@@ -11,6 +11,7 @@ import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { IDLE_TIMEOUT_MS } from '../workflows/run.ts';
 import { exemptionFor, HARNESS_ADAPTERS, promptFor, waitFor } from './harness-parity-core.testkit.ts';
+import { PROVIDER_HOLD_ROW_IDS } from './harness-parity-rows.testkit.ts';
 import { driveObservedRun, openTimerWait, RUN_CRITERIA, runRows, TERMINAL, timerWakeOf } from './harness-parity-run-tier.testkit.ts';
 import { observationClock } from './observation-clock.testkit.ts';
 import { driveRun, withOwnedInputRun, type RunObservation } from './workflow-parity-core.testkit.ts';
@@ -82,7 +83,7 @@ export const RUN_GROUPS = {
 
   run(r: HarnessRegistrar) {
     const { describeRunners } = r;
-    describeRunners('run', 'harness parity — run tier', () => runRows(r, RUN_CRITERIA.filter(row => row.id !== 'R17')));
+    describeRunners('run', 'harness parity — run tier', () => runRows(r, RUN_CRITERIA.filter(row => !PROVIDER_HOLD_ROW_IDS.includes(row.id))));
   },
 
   // #121/#401: release native child frames only AFTER the manager has parked.

@@ -195,8 +195,10 @@ export class FamilyReconciler {
    * A parent that can no longer answer ends what its workers wait on it for
    * (hearsay-tools/cezarion#2410). A parent being stopped closes their questions now, however long its
    * stop takes. A settled one also cancels its worker waits, which lets a stored wait upgraded onto a
-   * finished root go (hearsay-tools/cezarion#1301), and its live workers. A recovering parent is left
-   * to recovery. True when the parent is settled, so the pass skips the rest.
+   * finished root go (hearsay-tools/cezarion#1301), and its live workers. A failed parent keeps its
+   * live workers (hearsay-tools/squawk#3337): they run to their own end, and the parent collects
+   * them after a Continue. A recovering parent is left to recovery. True when the parent is settled,
+   * so the pass skips the rest.
    */
   private endStoppedParent(parent: RunRecord): boolean {
     const recovering = this.host.recoveringRun(parent);
@@ -206,6 +208,7 @@ export class FamilyReconciler {
     const stale = WAIT_KINDS.worker.select(parent.waits ?? []).filter(wait => wait.phase === 'open' || wait.phase === 'resolved').map(wait => wait.id);
     if (stale.length) this.host.waitEngine.cancel(parent.id, stale);
     this.host.closeRoutedQuestions(parent.id);
+    if (parent.status === 'failed') return true;
     for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
       if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
     }

@@ -12,7 +12,7 @@ import { RUN_ROWS } from './harness-parity-rows.testkit.ts';
 import { observationClock } from './observation-clock.testkit.ts';
 import { driveRun, driveUnavailableProvider, type RunObservation } from './workflow-parity-core.testkit.ts';
 
-/** The run tier's row cells (R1–R17) and the run drive the run-level parts share. */
+/** The run tier's row cells (R1–R17, R126–R128) and the run drive the run-level parts share. */
 
 /** One row of the run tier. `settled` says when the run has reached the state
  *  the row is about, so a row waits for its own condition rather than a sleep. */
@@ -58,16 +58,40 @@ export function driveObservedRun(
   });
 }
 
+/** Settle on the hold or a terminal status; a hold that settles as `failed` fails the assertion. */
+const providerHold = () => ({
+  settled: (record: RunObservation['record']) => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
+});
+
+/**
+ * The provider-error hold (hearsay-tools/squawk#3337): the run waits with a retry time and its error
+ * kept, and is never `failed` on the way. Its lifecycle line names the error class and the first
+ * attempt, and its retry time is the first back-off delay (1 minute) after the turn failed, read
+ * against the hold's lifecycle line.
+ */
+function assertProviderHold(obs: RunObservation, label: string): void {
+  expect(obs.statuses).not.toContain('failed');
+  expect(obs.record).toMatchObject({ status: RUN_STATUS.waiting, autoResumeReason: 'provider-error' });
+  expect(obs.record?.autoResumeAt).toBeDefined();
+  expect(obs.record?.error?.trim()).toBeTruthy();
+  const holds = obs.events.filter(event => event.type === 'lifecycle' && String(event.message).startsWith('provider error ('));
+  expect(holds).toHaveLength(1);
+  expect(String(holds[0]!.message)).toMatch(new RegExp(`^provider error \\(${label}: .+\\) — retrying automatically at .+ \\(attempt 1 of 12\\)$`));
+  // Measured from the hold's own lifecycle line, written with the hold, so host load does not move it.
+  const delay = Date.parse(obs.record!.autoResumeAt!) - Date.parse(String(holds[0]!.ts));
+  expect(delay).toBeGreaterThan(55_000);
+  expect(delay).toBeLessThanOrEqual(60_000);
+}
+
 const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
   R17: {
-    // #550: Codex keeps its turn open and emits retryable errors; other wires
-    // use their native provider rejection. Every runner must leave running.
+    // hearsay-tools/squawk#3337: an unavailable provider holds the run and retries it. Codex keeps
+    // its turn open and emits retryable errors (#550) until its no-progress bound ends the turn;
+    // the other wires answer 503 at once.
     timeoutMs: 75_000,
-    settled: record => TERMINAL.includes(record?.status ?? '') || record?.status === 'waiting',
+    ...providerHold(),
     assert: obs => {
-      expect(obs.record?.status).toBe('failed');
-      expect(obs.statuses).not.toContain('waiting');
-      expect(obs.record?.error?.trim()).toBeTruthy();
+      assertProviderHold(obs, 'provider server error');
       if (obs.record?.runner === 'codex') {
         expect(obs.record.error).toContain('Connection failed: error sending request');
         expect(obs.events).toContainEqual(expect.objectContaining({
@@ -77,6 +101,9 @@ const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
       }
     },
   },
+  R126: { ...providerHold(), assert: obs => assertProviderHold(obs, 'rate limit') },
+  R127: { ...providerHold(), assert: obs => assertProviderHold(obs, 'model endpoint not found') },
+  R128: { ...providerHold(), assert: obs => assertProviderHold(obs, 'credit balance') },
   R1: {
     // Group 7 — a run whose agent DECLARED completion reaches cezar's review
     // gate, which is a non-attention terminal state (cezar never auto-merges).
@@ -90,7 +117,8 @@ const RUN_CELLS: Cells<typeof RUN_ROWS, RunCriterion> = {
   },
   R2: {
     // Group 1 / #53, #54 — the row that would have caught both on whichever
-    // backend shipped the bug second. `statuses` rather than the final status:
+    // backend shipped the bug second. The scenario is a request the provider rejects as invalid
+    // (HTTP 400): no retry can succeed, so the run fails rather than holding (hearsay-tools/squawk#3337). `statuses` rather than the final status:
     // the defect was a park, and a run that parked and later failed anyway is
     // still the bug the user saw.
     // `waiting` settles too, so the defect fails on the assertion below rather

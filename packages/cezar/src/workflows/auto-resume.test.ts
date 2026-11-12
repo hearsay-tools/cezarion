@@ -24,6 +24,7 @@ import {
   RunManager,
 } from './run.ts';
 import type { WorkflowDef } from './types.ts';
+import { AutoResumeScheduler } from './run/auto-resume.ts';
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -155,6 +156,103 @@ describe('a run stopped by a usage limit resumes itself', () => {
       .toBeDefined();
     expect(store.getRun(record.id)?.status).toBe('waiting');
   }, 40_000);
+
+  // hearsay-tools/squawk#3337: a provider error holds the run and retries with back-off.
+  it('holds a run on a provider error and retries it with back-off', async () => {
+    manager = createFixtureManager(store, repoRoot);
+    const before = Date.now();
+    const record = manager.startRun(workflow, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    const held = store.getRun(record.id)!;
+    expect(held).toMatchObject({ status: RUN_STATUS.waiting, autoResumeReason: 'provider-error', error: expect.stringContaining('API Error: 429') });
+    const delay = Date.parse(held.autoResumeAt!) - before;
+    expect(delay).toBeGreaterThanOrEqual(60_000);
+    expect(delay).toBeLessThan(60_000 + 20_000);
+    const messages = store.readEvents(record.id).map(event => String(event.message ?? ''));
+    expect(messages.some(message => /provider error \(rate limit: .*429.*\) — retrying automatically at .* \(attempt 1 of 12\)/.test(message))).toBe(true);
+    // One status write: the run never read as failed on its way to the hold.
+    expect(messages.some(message => message.startsWith('run failed'))).toBe(false);
+  }, 30_000);
+
+  it('retries again after a failed retry, then fails with a note at the cap', async () => {
+    const first = createFixtureManager(store, repoRoot);
+    const record = first.startRun(workflow, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    first.dispose();
+    store.updateRun(record.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
+    const second = createFixtureManager(store, repoRoot);
+    await second.recover();
+    await expect.poll(() => store.getRun(record.id)?.autoResumeAttempts, { timeout: 20_000 }).toBe(1);
+    await expect.poll(() => store.readEvents(record.id).some(event => String(event.message ?? '').includes('(attempt 2 of 12)')), { timeout: 20_000 }).toBe(true);
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeReason: 'provider-error' });
+    second.dispose();
+
+    store.updateRun(record.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString(), autoResumeAttempts: MAX_AUTO_RESUMES - 1 });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    await expect.poll(() => store.getRun(record.id)?.status, { timeout: 20_000 }).toBe('failed');
+    expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
+    expect(store.readEvents(record.id).some(event => String(event.message ?? '').includes(`provider retry limit reached (${MAX_AUTO_RESUMES})`))).toBe(true);
+  }, 60_000);
+
+  it('retries a provider error that left no session in a fresh session', async () => {
+    const first = createFixtureManager(store, repoRoot);
+    const record = first.startRun(workflow, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    first.dispose();
+    for (const step of store.getRun(record.id)?.steps ?? []) store.updateStep(record.id, step.id, { sessionId: undefined });
+    store.updateRun(record.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString(), task: 'mock:cezar-done ship it' });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    await expect.poll(() => store.getRun(record.id)?.steps.find(step => step.id === 'continue-1')?.status, { timeout: 20_000 }).toBe('done');
+    // Before hearsay-tools/squawk#3337 admission refused this resume: "no agent session to resume".
+    expect(store.readEvents(record.id).some(event => String(event.message ?? '').includes('could not start'))).toBe(false);
+  }, 40_000);
+
+  it('runs the steps after the failed one once a provider retry succeeds', async () => {
+    const twoSteps: WorkflowDef = { name: 'two-steps', source: 'built-in', steps: [
+      { id: 'work', name: 'Work', prompt: '{{task}}' },
+      { id: 'check', name: 'Check', prompt: 'mock:cezar-done check the work' },
+    ] };
+    const first = createFixtureManager(store, repoRoot);
+    const record = first.startRun(twoSteps, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    first.dispose();
+    expect(store.getRun(record.id)?.workflowResumeStepId).toBe('work');
+    store.updateRun(record.id, { autoResumeAt: new Date(Date.now() - 1_000).toISOString(), task: 'mock:cezar-done ship it' });
+    manager = createFixtureManager(store, repoRoot);
+    await manager.recover();
+    await expect.poll(() => store.getRun(record.id)?.steps.find(step => step.id === 'check')?.status, { timeout: 30_000 }).toBe('done');
+  }, 60_000);
+
+  it('a human Continue on a provider hold drops the retry reason in its own write', async () => {
+    manager = createFixtureManager(store, repoRoot);
+    const record = manager.startRun(workflow, { task: 'mock:rate-limit ship it', worktree: false });
+    await settle(record.id);
+    expect(store.getRun(record.id)?.autoResumeReason).toBe('provider-error');
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-done take it from here' }, true)).toEqual({ ok: true });
+    // A restart before the Continue starts must not take it for the automatic retry.
+    expect(readPersistedRuns(join(repoRoot, '.ai/cezar')).find(run => run.id === record.id)?.autoResumeReason).toBeUndefined();
+  }, 30_000);
+
+  it('plans no hold for a run a Stop already cancelled', () => {
+    const scheduler = new AutoResumeScheduler({ store, semaphore: new WorkspaceSemaphore({ home: testHome() }) } as unknown as ConstructorParameters<typeof AutoResumeScheduler>[0],
+      { move: () => undefined, continueRun: () => ({ ok: true }), pump: async () => undefined });
+    const run = store.createRun({ title: 'stopped', task: 'ship it', workflow: 'quick-task', steps: [] });
+    const error = 'step "work" failed: API Error: 429 rate_limit_error';
+    setRunStatus(store, run.id, RUN_STATUS.failed, { error });
+    expect(scheduler.holdFor(run.id, error)).toMatchObject({ autoResumeReason: 'provider-error' });
+    setRunStatus(store, run.id, RUN_STATUS.cancelled);
+    expect(scheduler.holdFor(run.id, error)).toBeUndefined();
+  });
+
+  it('fails a run plainly on a request error, which is no provider error', async () => {
+    manager = createFixtureManager(store, repoRoot);
+    const record = manager.startRun(workflow, { task: 'mock:request-error ship it', worktree: false });
+    await settle(record.id);
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('invalid_request_error') });
+    expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
+  }, 30_000);
 
   it('never leaves a deadline behind: a record with no armed timer heals on the next sweep', async () => {
     // The shape every "timer lost" case reduces to — a restart between the write and the arm, a

@@ -33,6 +33,13 @@ that has worker receipts; a lone task finishes as before, and Finish closes its 
 A session's instructions follow the settings at launch. Turning a setting on reaches the agent at
 its next session; turning one off is enforced by the server at once.
 
+Workers outlive a parent failure (hearsay-tools/squawk#3337,
+[spec](../../.ai/specs/2026-11-12-provider-error-hold.md)). A provider error holds the parent
+instead of failing it, and a parent that fails for any other reason leaves its live workers
+running; only a human Stop of the parent, or a parent that ends `done` or `review`, cancels them.
+`--resume` restarts a `cancelled` worker whose worktree and branch exist, in a fresh session when
+none was recorded. Destroy stays the permanent end.
+
 ## Consequences
 
 AGENTS.md asks for features that widen exposure or cost to be opt-in behind an off-by-default

@@ -1,10 +1,13 @@
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { parseUsageLimit } from '../../core/usage-limit.ts';
+import { classifyProviderError, PROVIDER_ERROR_LABELS } from '../../core/provider-error.ts';
+import { noJitter, PROVIDER_RETRY_BACKOFF, retryDelayMs } from '../../delegation/retry-backoff.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import { formatWakeInstant } from '../run-scheduling.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
+import { atContinue } from './launch-read-resolver.ts';
 
 interface AutoResumeHost {
   move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
@@ -41,6 +44,27 @@ export const AUTO_RESUME_MISSED_WINDOW_MS = 24 * 60 * 60_000;
 const AUTO_RESUME_PROMPT =
   'The provider usage limit that interrupted this task has reset. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
 
+const PROVIDER_RETRY_PROMPT =
+  'A provider error interrupted this task, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) to recover context, then continue the task from where you left off.';
+
+/** A provider error before the step's first session: the retry starts one, so it carries the step's prompt. */
+const freshRetryPrompt = (prompt: string) =>
+  `A provider error stopped this step before its agent session started, and Cezar retried it after a wait. Read the handoff file (HSQ_HANDOFF_FILE (CEZ_HANDOFF_FILE fallback)) for any context. Your instructions:\n\n${prompt}`;
+
+/**
+ * What a resume says. A provider retry always carries the held step's own prompt: a native runner
+ * that failed before it reported its session leaves only Cezar's launch id, and that retry opens a
+ * new session too (hearsay-tools/squawk#3337).
+ */
+export function retryPrompt(run: RunRecord): string {
+  if (run.autoResumeReason !== 'provider-error') return AUTO_RESUME_PROMPT;
+  if (!run.steps.some((step) => step.sessionId)) return freshRetryPrompt(atContinue.task(run));
+  return `${PROVIDER_RETRY_PROMPT}\n\nIf this session does not hold the step's earlier work, your instructions:\n\n${atContinue.task(run)}`;
+}
+
+/** Why a run is on hold and when it resumes; written in the same status write as the hold. */
+export type HoldPlan = { autoResumeAt: string; autoResumeReason: 'usage-limit' | 'provider-error'; message: string };
+
 export class AutoResumeScheduler {
   /** Armed usage-limit resumes, keyed by run id (spec
    *  2026-08-03-auto-resume-after-usage-limit). The DEADLINE itself lives on the record
@@ -57,45 +81,69 @@ export class AutoResumeScheduler {
   }
 
   /**
-   * A run just failed: if the provider said "usage limit, back at T", promise to resume it at
-   * `T + AUTO_RESUME_GRACE_MS` instead of leaving the task dead until someone notices.
-   *
-   * Every refusal below is silent-but-honest — the run stays `failed` with its Continue button,
-   * which is exactly the pre-feature behavior — except the safety cap, which says so on the
-   * transcript, because a run that stops resuming itself needs to explain why.
+   * The hold a failing run takes instead of `failed` (hearsay-tools/squawk#3337), or undefined when
+   * it fails. A usage limit with a reset time resumes at that time plus the grace; any other
+   * provider error retries after `PROVIDER_RETRY_BACKOFF` (1 minute, doubling to 30). The caller
+   * writes the hold in the failure's own status write, so no reader sees a transient `failed`:
+   * no worker cascade, and no parent's worker wait resolves on it. At the cap it says so once and
+   * the run fails.
    */
-  scheduleAutoResumeIfLimited(runId: string): void {
-    if (this.autoResumeTimers.has(runId)) return; // already promised
+  holdFor(runId: string, error: string | undefined): HoldPlan | undefined {
     const run = this.context.store.getRun(runId);
-    if (!run || run.status !== 'failed') return;
-    // Archiving IS resigning from a task. Reviving one because a window happened to reopen would
-    // be the feature working against the clearest signal the user can give it.
-    if (run.archived) return;
-    const limit = parseUsageLimit(run.error);
-    if (!limit) return;
-    if (!this.context.semaphore.autoResumeOnUsageLimit()) return;
-    // No session to resume = nothing this feature can do; `continueRun` would refuse anyway.
-    if (!run.steps.some((step) => step.sessionId)) return;
+    // A Stop that recorded `cancelled` before the failure settled wins: the failure takes `fail-continue`.
+    if (!run || run.archived || run.status === 'cancelled' || !error || !this.context.semaphore.autoResumeOnUsageLimit()) return undefined;
+    // A root that asked to Finish ends with its failure: the Finish intent retires with it.
+    if (run.delegation?.role === 'root' && run.delegation.finishRequestedAt) return undefined;
+    const limit = parseUsageLimit(error);
+    const provider = limit ? undefined : classifyProviderError(error);
+    // A usage limit resumes its session; no session is nothing that path can resume.
+    if (limit && !run.steps.some((step) => step.sessionId)) return undefined;
+    if (!limit && !provider) return undefined;
     const attempts = run.autoResumeAttempts ?? 0;
     if (attempts >= MAX_AUTO_RESUMES) {
-      this.context.store.appendEvent(runId, {
-        type: 'note',
-        message: `automatic resume cap reached (${MAX_AUTO_RESUMES}) — continue this task manually`,
-      });
-      return;
+      this.context.store.appendEvent(runId, { type: 'note', message: limit
+        ? `automatic resume cap reached (${MAX_AUTO_RESUMES}) — continue this task manually`
+        : `provider retry limit reached (${MAX_AUTO_RESUMES}) — continue this task manually` });
+      return undefined;
     }
-    const wakeAt = new Date(limit.resetAt.getTime() + AUTO_RESUME_GRACE_MS);
-    this.armAutoResume(runId, wakeAt.getTime());
-    this.context.store.appendEvent(runId, {
-      type: 'lifecycle',
-      message: `usage limit reached — resuming automatically at ${formatWakeInstant(wakeAt)}`,
-    });
+    if (limit) {
+      const at = new Date(limit.resetAt.getTime() + AUTO_RESUME_GRACE_MS);
+      return { autoResumeAt: at.toISOString(), autoResumeReason: 'usage-limit', message: `usage limit reached — resuming automatically at ${formatWakeInstant(at)}` };
+    }
+    const at = new Date(Date.now() + retryDelayMs(attempts, PROVIDER_RETRY_BACKOFF, noJitter));
+    return { autoResumeAt: at.toISOString(), autoResumeReason: 'provider-error',
+      message: `provider error (${PROVIDER_ERROR_LABELS[provider!.kind]}: ${provider!.detail}) — retrying automatically at ${formatWakeInstant(at)} (attempt ${attempts + 1} of ${MAX_AUTO_RESUMES})` };
+  }
+
+  /**
+   * Hold a failing run in its failure's own status write (exit `hold-failure`), so its workers
+   * keep running and a parent waiting on it sees no failure. `afterDropActive` arms the timer
+   * before the slot is released. True when the run is held.
+   */
+  holdFailure(runId: string, error: string): boolean {
+    const plan = this.holdFor(runId, error);
+    if (!plan) return false;
+    const run = this.context.store.getRun(runId);
+    const resumeStep = run ? atContinue.heldStep(run) : undefined;
+    this.host.move(runId, 'hold-failure', { error, autoResumeAt: plan.autoResumeAt, autoResumeReason: plan.autoResumeReason,
+      ...(resumeStep ? { workflowResumeStepId: resumeStep } : {}) });
+    this.context.store.appendEvent(runId, { type: 'lifecycle', message: plan.message });
+    return true;
+  }
+
+  /** Arm the timer of a hold the settlement wrote. Runs before the slot is released (see the caller). */
+  armHeldResume(runId: string): void {
+    if (this.autoResumeTimers.has(runId)) return;
+    const run = this.context.store.getRun(runId);
+    if (!run || !isUsageLimitHold(run)) return;
+    const deadline = Date.parse(run.autoResumeAt);
+    if (Number.isFinite(deadline)) this.armAutoResume(runId, deadline);
   }
 
   /** Publish the deadline on the record (the cockpit's only source) and arm the timer for it. The
    *  run waits for it (hearsay-tools/cezarion#1236): `waiting`, its error kept for a withdrawal. */
-  private armAutoResume(runId: string, deadline: number): void {
-    this.host.move(runId, 'hold', { autoResumeAt: new Date(deadline).toISOString() });
+  private armAutoResume(runId: string, deadline: number, reason?: HoldPlan['autoResumeReason']): void {
+    this.host.move(runId, 'hold', { autoResumeAt: new Date(deadline).toISOString(), ...(reason ? { autoResumeReason: reason } : {}) });
     const timer = setTimeout(() => this.fireAutoResume(runId), Math.max(0, deadline - Date.now()));
     timer.unref?.();
     this.autoResumeTimers.set(runId, timer);
@@ -117,9 +165,14 @@ export class AutoResumeScheduler {
       return;
     }
     const attempts = (run.autoResumeAttempts ?? 0) + 1;
+    const provider = run.autoResumeReason === 'provider-error';
+    // A provider error before the first session leaves none to resume: the retry starts one.
+    const fresh = provider && !run.steps.some((step) => step.sessionId);
+    const text = retryPrompt(run);
     // `continueRun` retires the pending resume (timer + record fields) on the way in — this is a
     // resume, not a user turn, so the counter is put back straight after.
-    const resumed = this.host.continueRun(runId, { text: AUTO_RESUME_PROMPT }, true);
+    const retryRunner = provider ? atContinue.heldRunner(run) : undefined;
+    const resumed = this.host.continueRun(runId, { text, ...(provider ? { providerRetry: true as const } : {}), ...(fresh ? { freshSession: true as const } : {}), ...(retryRunner ? { retryRunner } : {}) }, true);
     if (!resumed.ok) {
       // Refusals happen before `continueRun` retires anything, so the deadline is still on the
       // record — and a deadline in the past is a promise the cockpit keeps displaying and the
@@ -130,7 +183,8 @@ export class AutoResumeScheduler {
     this.context.store.updateRun(runId, { autoResumeAttempts: attempts });
     this.context.store.appendEvent(runId, {
       type: 'lifecycle',
-      message: `usage limit reset — resuming automatically (${attempts}/${MAX_AUTO_RESUMES})`,
+      message: provider ? `provider error — retrying automatically (${attempts}/${MAX_AUTO_RESUMES})`
+        : `usage limit reset — resuming automatically (${attempts}/${MAX_AUTO_RESUMES})`,
     });
     // A deferred continuation only ENQUEUES itself; the queue moves when something pumps it, and
     // `recover()` — the other deferring caller — pumps once after its whole bulk sweep. A timer
@@ -227,7 +281,7 @@ export class AutoResumeScheduler {
     }
     // Any resume time, not `isUsageLimitHold`: it retires a stale one too.
     if (run.autoResumeAt !== undefined || run.autoResumeAttempts !== undefined) {
-      this.context.store.updateRun(runId, { autoResumeAt: undefined, autoResumeAttempts: undefined });
+      this.context.store.updateRun(runId, { autoResumeAt: undefined, autoResumeAttempts: undefined, autoResumeReason: undefined });
     }
   }
 

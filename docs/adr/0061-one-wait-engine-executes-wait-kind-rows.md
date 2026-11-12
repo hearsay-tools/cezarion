@@ -40,6 +40,11 @@ shares no code with the table. The web package does not change. The CLI keeps th
 `WorkerWait` answer shape as a boundary view (`BACKWARD_COMPATIBILITY.md`). Every refusal code and
 message stays as it was. One P4 slice changes one refusal, in its own pull request.
 
+A provider-error or usage-limit hold is a run state, not a wait-kind row
+(hearsay-tools/squawk#3337). A held worker is `waiting`, so its parent's worker wait stays open
+until the worker retries to an end or its hold is withdrawn; a held parent keeps its own waits,
+and a wait that resolves during the hold is delivered by the retry.
+
 ADR 0021 still holds: waits are durable, an outcome commits with what it depends on, and
 `RunManager` owns waits at its public surface. ADR 0053 and ADR 0056 still hold.
 

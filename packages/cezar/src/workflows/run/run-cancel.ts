@@ -91,20 +91,30 @@ export class RunCancel {
     }
     if (cancelledFinish) return true;
     const run = this.context.store.getRun(runId);
-    // Stop on a failed run that held wait results discards them, and the automatic resume that
-    // would start a session on it later; the run stays failed. A usage-limit hold is that failed
-    // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
-    if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
-      this.context.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
-      this.host.cancelAutoResume(runId);
-      this.context.store.flush();
-      return true;
-    }
+    if (run && (run.status === 'failed' || isUsageLimitHold(run)) && this.stopFailedRun(run, hadWaits, retiredRefusal)) return true;
     if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
       this.host.move(runId, 'cancel');
       return true;
     }
     return false;
+  }
+
+  /**
+   * Stop on a failed run that held wait results discards them, and the automatic resume that
+   * would start a session on it later; the run stays failed. A usage-limit hold is that failed run
+   * waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way. A failed
+   * or held root keeps its live workers (hearsay-tools/squawk#3337) until a human stops it, which
+   * cancels them. False when there is nothing to stop.
+   */
+  private stopFailedRun(run: RunRecord, hadWaits: boolean, retiredRefusal: boolean): boolean {
+    const liveWorkers = run.delegation?.role === 'root'
+      ? this.context.store.listWorkersOf(run.id).filter(child => ['queued', 'running', 'waiting'].includes(child.status)) : [];
+    if (!hadWaits && !retiredRefusal && !liveWorkers.length) return false;
+    if (hadWaits || retiredRefusal) this.context.store.appendEvent(run.id, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
+    this.host.cancelAutoResume(run.id);
+    for (const child of liveWorkers) this.cancel(child.id);
+    this.context.store.flush();
+    return true;
   }
 
   requestWorkerStop(runId: string): WorkerStopResult {

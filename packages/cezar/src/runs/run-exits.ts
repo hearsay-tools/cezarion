@@ -155,6 +155,9 @@ export const RUN_EXITS = {
   'park-release': { durability: 'committed', from: ['running', 'queued', 'waiting'], to: 'waiting', settle: settleParkRelease, steps: parkedStep },
   'park-for-wake': { durability: 'debounced', from: ['queued', 'waiting'], to: 'waiting' },
   hold: { durability: 'debounced', from: ['failed', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }) },
+  // A provider error or usage limit holds the failing run in its failure's own write
+  // (hearsay-tools/squawk#3337): never a transient `failed` a worker cascade or a parent's wait reads.
+  'hold-failure': { durability: 'debounced', from: ['running', 'waiting'], to: 'waiting', fields: () => ({ finishedAt: undefined }), steps: failedStep },
   resume: { durability: 'debounced', from: ['waiting'], to: 'running' },
   succeed: { durability: 'debounced', from: ['running', 'waiting'], to: 'done', fields: succeeded, steps: succeededStep },
   'succeed-review': { durability: 'debounced', from: ['running', 'waiting'], to: 'review', fields: succeeded, steps: succeededStep },
@@ -174,7 +177,7 @@ export const RUN_EXITS = {
   'fail-crash': { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'failed', steps: failedStep },
   // A crash right after the withdrawal must not find it on disk (hearsay-tools/cezarion#1236).
   'withdraw-hold': { durability: 'committed', from: ['waiting'], to: 'failed', guard: isUsageLimitHold,
-    settle: run => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined }), steps: failedStep },
+    settle: run => ({ ...run, autoResumeAt: undefined, autoResumeAttempts: undefined, autoResumeReason: undefined }), steps: failedStep },
   cancel: { durability: 'debounced', from: ['queued', 'running', 'waiting'], to: 'cancelled', steps: cancelledStep, event: RUN_CANCELLED },
   // Cancellation supersedes a root's pending Finish; from cancelled it repairs a snapshot an older
   // controller left with the intent.

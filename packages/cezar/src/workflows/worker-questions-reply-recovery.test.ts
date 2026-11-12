@@ -25,6 +25,20 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     expectSettledParentRefusal(f.w.id, f.p.id, 'cancelled');
   });
 
+// hearsay-tools/squawk#3337: a failed parent closes its workers' questions but leaves them running.
+  it('closes a routed question on recovery when the parent failed, and keeps the worker', async () => {
+    const f = await askedPair();
+    f.close();
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'failed';
+    await restart(false, disk, events);
+    await until(() => closedAs(f.w.id).length === 1);
+    expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
+    noHumanCard(f.w.id);
+    expect(store.getRun(f.w.id)?.status).not.toBe('cancelled');
+  });
+
 it('answers the worker after a crash between accepting the reply and delivering it', async () => {
     const f = await askedPair();
     f.close();

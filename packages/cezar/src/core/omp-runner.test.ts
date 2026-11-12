@@ -653,7 +653,7 @@ ${settleTurn()}
   it('a provider failure that settles is a v1 error before the turn-end', async () => {
     const { events } = await runSession(spec('mock:provider-error'));
     const error = events.findIndex(event => event.type === 'error');
-    expect(events[error]).toEqual({ type: 'error', message: 'omp: anthropic/claude-mock request failed: Not Found' });
+    expect(events[error]).toEqual({ type: 'error', message: 'omp: anthropic/claude-mock request failed: 400 {"type":"error","error":{"type":"invalid_request_error","message":"messages: text content blocks must be non-empty"}}' });
     expect(error).toBeLessThan(events.findIndex(event => event.type === 'turn-end'));
     expect(turnEnds(events)).toBe(1);
   });

@@ -108,7 +108,7 @@ describe('RunManager reported cost accounting', () => {
     process.env.CEZ_DRY_RUN = '1';
     try {
       const record = manager.startRun(workflow, {
-        task: 'mock:auth-error', runner: 'claude', worktree: false,
+        task: 'mock:request-error', runner: 'claude', worktree: false,
       });
       await waitForProduct(manager, store, () => store.getRun(record.id)?.status === 'failed');
       expect(store.getRun(record.id)?.costUsd).toBe(0);

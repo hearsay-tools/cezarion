@@ -169,14 +169,14 @@ describe('successful run settlement (#473)', () => {
     store.commitAgentInputs(record.id, [{ id: randomUUID(), parentRunId: record.id, source: 'lifecycle',
       text: 'pending', createdAt: new Date().toISOString() }]);
     let raced = false;
-    let failedSnapshot: ReturnType<RunStore['getRun']>;
+    let heldSnapshot: ReturnType<RunStore['getRun']>;
     const lateWait = makeTimerWait({ id: randomUUID(), registeredAt: new Date().toISOString(),
       deadline: new Date(Date.now() + 3_600_000).toISOString() });
     const commitLateWait = ({ runId, event }: { runId: string; event: { type: string; message?: string } }) => {
-      if (!late || runId !== record.id || event.type !== 'lifecycle' || !event.message?.startsWith('run failed') || raced) return;
+      if (!late || runId !== record.id || event.type !== 'lifecycle' || !event.message?.startsWith('usage limit reached') || raced) return;
       raced = true;
       store.commitWait(record.id, lateWait);
-      failedSnapshot = structuredClone(store.getRun(record.id));
+      heldSnapshot = structuredClone(store.getRun(record.id));
     };
     store.on('event', commitLateWait);
     const releaseSlot = semaphore.release.bind(semaphore);
@@ -189,8 +189,13 @@ describe('successful run settlement (#473)', () => {
       await waitForProduct(manager, store, () => !!store.getRun(record.id)?.autoResumeAt && !manager.isActive(record.id));
       await fixtureWorkSettled(root);
       expect(raced).toBe(late);
-      if (late) expect(failedSnapshot).toMatchObject({ status: RUN_STATUS.failed, waits: undefined,
-        lastWaits: expect.arrayContaining([expect.objectContaining({ id: lateWait.id, phase: WAIT_PHASE.cancelled })]) });
+      // The hold is the failure's own write (hearsay-tools/squawk#3337): a wait committed as it lands
+      // stays open on the held run, and the retry delivers it (hold.wait-resolves).
+      if (late) {
+        expect(heldSnapshot).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: expect.any(String),
+          waits: expect.arrayContaining([expect.objectContaining({ id: lateWait.id, phase: WAIT_PHASE.open })]) });
+        expect(store.getRun(record.id)?.waits).toContainEqual(expect.objectContaining({ id: lateWait.id, phase: WAIT_PHASE.open }));
+      }
       expect(startSession).toHaveBeenCalledOnce();
       expect(release).toHaveBeenCalled();
       expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: expect.any(String) });
@@ -202,7 +207,7 @@ describe('successful run settlement (#473)', () => {
   }
 
   it('publishes a usage-limit resume before releasing a failed run', () => usageLimitFailure(false));
-  it('a timer wait committed as the run fails is cancelled without queuing a wake', () => usageLimitFailure(true));
+  it('a timer wait committed as the run holds stays open without queuing a wake', () => usageLimitFailure(true));
 
   it('uses current step statuses after diff I/O, retaining a concurrent failure', async () => {
     const id = seed();

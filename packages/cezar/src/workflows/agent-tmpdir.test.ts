@@ -111,7 +111,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     writeFileSync(join(scratch, 'scratch'), 'x', 'utf8');
     if (status === 'review') writeFileSync(join(store.getRun(run.id)!.worktreePath!, 'change.txt'), 'review this');
     if (status === 'cancelled') manager.cancel(run.id);
-    else if (status === 'failed') expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:auth-error' }])).toBe(true);
+    else if (status === 'failed') expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:request-error' }])).toBe(true);
     else expect(manager.finish(run.id)).toBe(true);
     // bound: status and registry release follow the owned runner's exit.
     await vi.waitFor(() => {

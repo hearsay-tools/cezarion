@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { productEnv } from './product-env.mjs';
+import { CODEX_FAILURES } from './mock-provider-failures.mjs';
 import { loadControls } from './mock-controls.mjs';
 import { waitForRelease } from './mock-lifecycle.mjs';
-import { scenarioFor, play, afterParityPark } from './mock-scenario.mjs';
+import { scenarioFor, play, afterParityPark, PROVIDER_HOLD_SCENARIOS } from './mock-scenario.mjs';
 import { closeSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
@@ -209,6 +210,7 @@ function scenarioEncoder(msg, prompt, scenario, alreadyOpened = false) {
     },
     end(step) {
       if (step.error === 'provider') return handleNativeFailure(prompt, msg, scenario, this);
+      if (step.error) return emit(providerFailureCompletion(step.error));
       if (name === 'turn-messages' && messages.length) emitChannelMessages(messages, prompt.includes('mock:channel-missing'), prompt.includes('mock:channel-refresh'));
       if (['hold-cezar-done', 'hold-cezar-ask', 'cezar-done', 'hold-gated', 'hold'].includes(name)) nativeUsage();
       if (name === 'steer-tool' || name === 'steer-late') return completeSteerTurn('turn_mock_1');
@@ -646,14 +648,20 @@ function replyWithOrdinaryTurn() {
   emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
 }
 
+
+function providerFailureCompletion(kind) {
+  const { status, type, message } = CODEX_FAILURES[kind];
+  const error = { message: JSON.stringify({ type: 'error', status, error: { type, message } }), codexErrorInfo: 'other', additionalDetails: null };
+  return { method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', items: [], itemsView: 'notLoaded', status: 'failed', error, startedAt: 1788632328, completedAt: 1788632331, durationMs: 3502 } } };
+}
+
 async function handleNativeFailure(turnText, msg, scenario, encoder) {
   const selectedFailure = failureControl?.failureFor(turnText);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
-  if (failureControl ? nativeFailure === 'provider' : scenario?.name === 'provider-error' || turnText.includes('mock:empty-success')) {
-    // Derived from the 0.147 rollout and upstream envelope; see the source
-    // core/__fixtures__/codex/provider-error.md and its independent golden NDJSON.
-    const completion = {"method": "turn/completed", "params": {"threadId": "th_mock_1", "turn": {"id": "turn_mock_1", "items": [], "itemsView": "notLoaded", "status": "failed", "error": {"message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}", "codexErrorInfo": "other", "additionalDetails": null}, "startedAt": 1788632328, "completedAt": 1788632331, "durationMs": 3502}}};
-    if (turnText.includes('mock:empty-success')) {
+  const kind = (failureControl ? nativeFailure === 'provider' : scenario?.name === 'provider-error') ? 'provider' : undefined;
+  if (kind || !failureControl && turnText.includes('mock:empty-success')) {
+    const completion = providerFailureCompletion(kind ?? 'provider');
+    if (!kind) {
       completion.params.turn.status = 'completed';
       completion.params.turn.error = null;
     }
@@ -716,7 +724,7 @@ async function dispatchOpenedTurn(msg, prompt, scenarios) {
       if (match) return reply(prompt, msg, match);
     }
   }
-  const failure = scenarios.get('provider-error');
+  const failure = ['provider-error', ...PROVIDER_HOLD_SCENARIOS.map(([name]) => name)].map(name => scenarios.get(name)).find(Boolean);
   return handleNativeFailure(prompt, msg, failure, scenarioEncoder(msg, prompt, failure, true));
 }
 

@@ -48,7 +48,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `hold` | delay the terminal turn signal after the last content event |
  * | `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close (#486) |
  * | `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park (#486) |
- * | `provider-error` | a runtime provider rejection in its native error shape |
+ * | `provider-error` | a request the provider rejects as invalid (HTTP 400) in its native error shape; the run fails |
+ * | `provider-error-controlled` | the same 400, raised by the mock's failure control (`failure: 'provider'`) |
+ * | `provider-unavailable` | the provider is unreachable or answers 503 (Codex: its own stream retries); the run holds |
+ * | `provider-rate-limit` | a 429 with no reset time in its native error shape; the run holds |
+ * | `provider-not-found` | a 404 from the model endpoint in its native error shape; the run holds |
+ * | `provider-credit` | a spent credit balance in its native error shape; the run holds |
  * | `approval` | a native permission request cezar routes to the cockpit; no turn end until it is answered |
  * | `permission-default` | a native built-in default permission ask cezar answers itself, then call `cezar_done` (#1266) |
  * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `cezar_done` |
@@ -130,6 +135,9 @@ export const SCENARIOS = [
   'provider-error',
   'provider-error-controlled',
   'provider-unavailable',
+  'provider-rate-limit',
+  'provider-not-found',
+  'provider-credit',
   'post-success-refusal',
   'ask',
   'ask-resume',
@@ -402,9 +410,10 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-single': 'mock:crash-stderr-single',
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      // Claude's mock has carried an auth-rejection branch since #430.
-      'provider-error': 'mock:auth-error', 'provider-error-controlled': 'mock:auth-error',
-      'provider-unavailable': 'mock:auth-error',
+      // `mock:auth-error` is a gated failure-control prompt; the control's provider failure is a 400.
+      'provider-error': 'mock:request-error', 'provider-error-controlled': 'mock:auth-error',
+      'provider-unavailable': 'mock:provider-unavailable',
+      'provider-rate-limit': 'mock:provider-rate-limit', 'provider-not-found': 'mock:provider-not-found', 'provider-credit': 'mock:provider-credit',
       'post-success-refusal': 'mock:model-refusal:always',
       ask: 'mock:cezar-ask',
       'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
@@ -461,6 +470,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
       'provider-unavailable': 'mock:stream-retry',
+      'provider-rate-limit': 'mock:provider-rate-limit', 'provider-not-found': 'mock:provider-not-found', 'provider-credit': 'mock:provider-credit',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
       'ask-resume': 'mock:native-codex-ask mock:resume-cezar-done',
@@ -520,7 +530,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
-      'provider-unavailable': 'mock:provider-error',
+      'provider-unavailable': 'mock:provider-unavailable',
+      'provider-rate-limit': 'mock:provider-rate-limit', 'provider-not-found': 'mock:provider-not-found', 'provider-credit': 'mock:provider-credit',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-cezar-done',
@@ -554,7 +565,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single', 'cezar-done': 'mock:cezar-done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress', 'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
-      'provider-unavailable': 'mock:provider-error',
+      'provider-unavailable': 'mock:provider-unavailable',
+      'provider-rate-limit': 'mock:provider-rate-limit', 'provider-not-found': 'mock:provider-not-found', 'provider-credit': 'mock:provider-credit',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:cezar-ask',
       'ask-resume': 'mock:cezar-ask mock:resume-cezar-done', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:cezar-ask-reply-late' },
@@ -587,7 +599,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
-      'provider-unavailable': 'mock:provider-error',
+      'provider-unavailable': 'mock:provider-unavailable',
+      'provider-rate-limit': 'mock:provider-rate-limit', 'provider-not-found': 'mock:provider-not-found', 'provider-credit': 'mock:provider-credit',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:cezar-ask',
       'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
@@ -636,7 +649,8 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'provider-error': 'mock:provider-error', 'provider-error-controlled': 'mock:provider-error',
-      'provider-unavailable': 'mock:provider-error',
+      'provider-unavailable': 'mock:provider-unavailable',
+      'provider-rate-limit': 'mock:provider-rate-limit', 'provider-not-found': 'mock:provider-not-found', 'provider-credit': 'mock:provider-credit',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:cezar-ask',
       'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',

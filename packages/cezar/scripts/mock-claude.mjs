@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { productEnv } from './product-env.mjs';
+import { CLAUDE_FAILURES } from './mock-provider-failures.mjs';
 import { loadControls } from './mock-controls.mjs';
 import { scenarioFor, play, afterParityPark } from './mock-scenario.mjs';
 import { closeSync } from 'node:fs';
@@ -85,7 +86,7 @@ emit({ type: 'system', subtype: 'init' });
 
 let turn = 0;
 const scenarioContext = {
-  runner: 'claude', lifecycle, session: {}, unsupported: ['provider-error', 'steer-late'],
+  runner: 'claude', lifecycle, session: {}, unsupported: ['provider-error', 'provider-unavailable', 'provider-rate-limit', 'provider-not-found', 'provider-credit', 'steer-late'],
   nativeFailureControl: Boolean(failureControl),
   toolPrompt: async prompt => (await tools()).toolPrompt('claude', process.argv.slice(2), prompt),
   ciPrompt: async prompt => (await tools()).ciPrompt('claude', process.argv.slice(2), prompt),
@@ -563,6 +564,15 @@ async function replyWithAuthenticationFailure(userText, uuid) {
   return;
 }
 
+const API_ERROR_MARKERS = [
+  ['mock:request-error', 'provider'], ['mock:provider-unavailable', 'unavailable'], ['mock:rate-limit', 'rate-limit'],
+  ['mock:provider-rate-limit', 'rate-limit'], ['mock:provider-not-found', 'not-found'], ['mock:provider-credit', 'credit'],
+];
+
+function replyWithApiError(kind) {
+  emit({ type: 'result', subtype: 'success', is_error: true, result: CLAUDE_FAILURES[kind], usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0 });
+}
+
 // `mock:limit` → the envelope Claude Code emits when the subscription window is
 // exhausted: an `is_error` result whose text is the machine-readable
 // `Claude AI usage limit reached|<epoch seconds>` marker. Makes the auto-resume path
@@ -587,8 +597,12 @@ async function replyWithNativeFailure(userText) {
   const selectedFailure = failureControl?.failureFor(userText);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
   if (nativeFailure === 'unread') process.exit(1);
-  if (failureControl?.failure === 'provider' ? nativeFailure === 'provider' : userText.includes('mock:auth-error')) { await replyWithAuthenticationFailure(); return true; }
+  // The failure control's `provider` is a request rejection, as in every native mock.
+  if (failureControl?.failure === 'provider') { if (nativeFailure === 'provider') { replyWithApiError('provider'); return true; } }
+  else if (userText.includes('mock:auth-error')) { await replyWithAuthenticationFailure(); return true; }
   if (failureControl?.failure === 'usage-limit' ? nativeFailure === 'usage-limit' : userText.includes('mock:limit')) { await replyWithUsageLimit(); return true; }
+  const marked = API_ERROR_MARKERS.find(([marker]) => userText.includes(marker));
+  if (marked) { replyWithApiError(marked[1]); return true; }
   return false;
 }
 

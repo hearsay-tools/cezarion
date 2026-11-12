@@ -236,12 +236,17 @@ export class RunRecovery {
   }
 
   /** True when a worker's root takes no more work from it: a settled root cancels the worker
-   *  (hearsay-tools/cezarion#2410), and a finishing root leaves it as it is. */
+   *  (hearsay-tools/cezarion#2410), and a finishing root leaves it as it is. A failed root only
+   *  closes its workers' questions: the workers recover and run on (hearsay-tools/squawk#3337). */
   private recoveryLeavesWorkerToRoot(run: RunRecord): boolean {
     if (run.delegation?.role !== 'worker') return false;
     const parent = this.context.store.getRun(run.delegation.parentRunId);
     if (parent?.delegation?.role !== 'root') return false;
-    if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) {
+    if (parent.status === 'failed') {
+      this.workerQuestions.closeRoutedQuestions(parent.id);
+      return false;
+    }
+    if (['done', 'review', 'cancelled'].includes(parent.status)) {
       // The family pass skips a parent while recovery holds it: its workers' questions close here,
       // before the cancel, an accepted reply still waiting included (hearsay-tools/cezarion#2410).
       this.workerQuestions.closeRoutedQuestions(parent.id);

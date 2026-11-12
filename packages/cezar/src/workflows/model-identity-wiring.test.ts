@@ -284,11 +284,11 @@ describe('model identity wiring (dry run)', () => {
     expect(capturedModel(0)).toBe('deepseek/deepseek-v4-flash');
   }, 30_000);
 
-  it('fails a run when the runner reports a model error instead of parking it as active', async () => {
-    const id = await runToEnd({ task: 'mock:auth-error' });
+  it('fails a run when the provider rejects its request instead of parking it as active', async () => {
+    const id = await runToEnd({ task: 'mock:request-error' });
     const record = store.getRun(id);
     expect(record?.status).toBe('failed');
-    expect(record?.error).toContain('Failed to authenticate');
+    expect(record?.error).toContain('invalid_request_error');
     expect(record?.steps.find((step) => step.id === 'work')?.status).toBe('failed');
   }, 30_000);
 

@@ -140,6 +140,7 @@ export class ContinuationAcceptance {
     // The recoverable status and original input must commit before startup can await anything.
     const acceptedPatch = {
       continuationMessage: continuation.acceptedMessage(message, stepId, prompt, resumeContext, recovered, conversation, opts, deferForCapacity),
+      ...(!opts.providerRetry && run.autoResumeReason === 'provider-error' ? { autoResumeReason: undefined } : {}),
       ...(toLine ? {} : { currentStepId: stepId }),
       invalidAsk: undefined,
       archived: false,
