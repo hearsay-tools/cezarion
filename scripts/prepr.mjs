@@ -45,8 +45,9 @@ export function daemonAlive(status) {
 
 function run(cmd, args, options = {}) {
   return new Promise(resolve => {
-    const win = process.platform === 'win32';
-    const child = spawn(win && cmd === 'npm' ? 'npm.cmd' : cmd, args, { shell: win, stdio: ['ignore', 'pipe', 'pipe'], ...options });
+    // Only npm, whose arguments are fixed here, goes through the Windows shell: never a file name.
+    const npmOnWindows = process.platform === 'win32' && cmd === 'npm';
+    const child = spawn(npmOnWindows ? 'npm.cmd' : cmd, args, { shell: npmOnWindows, stdio: ['ignore', 'pipe', 'pipe'], ...options });
     let out = '';
     let err = '';
     child.stdout.on('data', d => { out += d; });
@@ -58,6 +59,7 @@ function run(cmd, args, options = {}) {
 
 const tail = (text, n = 15) => text.trim().split('\n').slice(-n).join('\n');
 
+const KILL_GRACE_MS = 10_000;
 const LINTED = /^packages\/.*\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const NO_SQUEAL = { daemon: true, state: 'pass', count: 0, failed: [], missing: [], lint: { failing: 0, unfinished: 0 } };
 
@@ -72,7 +74,7 @@ export async function squealChecks(paths, waitMs, io = realIo) {
   const deadline = io.now() + waitMs;
   const lintExpected = paths.some(p => LINTED.test(p));
   const ignore = p => p.endsWith('.e2e.ts') || isDocsPath(p);
-  const wait = await io.run('squeal', ['status', '--wait', String(waitMs), '--json', ...paths]);
+  const wait = await io.run('squeal', ['status', '--wait', String(waitMs), '--json', ...paths], { timeout: waitMs + KILL_GRACE_MS });
   let status;
   try { status = JSON.parse(wait.out); } catch { status = undefined; }
   if (wait.code === 127 || !daemonAlive(status)) return { daemon: false };
@@ -80,7 +82,8 @@ export async function squealChecks(paths, waitMs, io = realIo) {
   // The named-file wait settles on tests alone: give lint the rest of the bound.
   while (result.state === 'incomplete' && !result.missing.length && io.now() < deadline) {
     await io.sleep(Math.min(3000, Math.max(0, deadline - io.now())));
-    const poll = await io.run('squeal', ['status', '--json']);
+    if (io.now() >= deadline) break;
+    const poll = await io.run('squeal', ['status', '--json'], { timeout: Math.max(1000, deadline - io.now()) });
     try { result = judgeSqueal(wait.code, { ...status, lint: JSON.parse(poll.out).lint }, ignore, lintExpected); } catch { break; }
   }
   return { daemon: true, ...result };
@@ -92,7 +95,7 @@ export async function focusedTests(base, io = realIo) {
   const plan = await io.run('node', ['scripts/test-changed.mjs', baseArg, '--plan']);
   let mode;
   try { mode = JSON.parse(plan.out).mode; } catch { mode = 'unknown'; }
-  if (mode === 'full' || mode === 'unknown') return { skipped: `the selection is the full suite (mode ${mode}); CI runs it` };
+  if (mode === 'full') return { skipped: 'the selection is the full suite; CI runs it' };
   if (mode === 'skip') return { skipped: 'no tests selected' };
   return io.run('node', ['scripts/test-changed.mjs', baseArg]);
 }
@@ -128,10 +131,11 @@ export async function fallbackLines(base, io = realIo) {
 }
 
 function changedFiles(base, io) {
-  const mergeBase = io.git('merge-base', base, 'HEAD').trim() || base;
-  const tracked = io.git('diff', '--name-only', '--no-renames', mergeBase);
-  const untracked = io.git('ls-files', '--others', '--exclude-standard');
-  return [...new Set(`${tracked}\n${untracked}`.split('\n').filter(Boolean))];
+  const mergeBase = io.git('merge-base', base, 'HEAD').trim();
+  if (!mergeBase) throw new Error(`No merge base with ${base}: run \`git fetch origin main\` first.`);
+  const tracked = io.git('diff', '--name-only', '--no-renames', '-z', mergeBase);
+  const untracked = io.git('ls-files', '--others', '--exclude-standard', '-z');
+  return [...new Set(`${tracked}\0${untracked}`.split('\0').filter(Boolean))];
 }
 
 export async function prepr({ base = 'origin/main', waitMs = SQUEAL_WAIT_MS, io = realIo } = {}) {
@@ -163,8 +167,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (args.includes('--help')) {
     console.log('Usage: npm run prepr -- [--base <ref>] [--wait-ms <ms>]\nOne verdict and the PR-body evidence block. Squeal wait bound: 120000 ms.');
   } else {
-    const { failed, report } = await prepr({ base: opt('--base'), waitMs: Number(opt('--wait-ms')) || undefined });
-    console.log(report);
-    process.exitCode = failed ? 1 : 0;
+    try {
+      const { failed, report } = await prepr({ base: opt('--base'), waitMs: Number(opt('--wait-ms')) || undefined });
+      console.log(report);
+      process.exitCode = failed ? 1 : 0;
+    } catch (error) {
+      console.error(`prepr: ${error.message}`);
+      process.exitCode = 2;
+    }
   }
 }

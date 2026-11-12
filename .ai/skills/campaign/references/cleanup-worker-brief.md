@@ -58,7 +58,7 @@ Before the PR, in this order:
 Read auto-merge before opening the PR. The campaign's owner-merge control
 requires owner review; leave automatic merging off in that case. Workers
 leave the merge action to the coordinator/owner under the recorded authority.
-Run npm run prepr before the push; it covers steps 2 and 3. Repeat the steps
+Run git fetch origin main, then npm run prepr before the push; it covers steps 2 and 3. Repeat the steps
 after any later code change. Leave full suites to Squeal and CI. Missing or
 incomplete one-shot evidence blocks the merge; there is no bundled fallback.
 

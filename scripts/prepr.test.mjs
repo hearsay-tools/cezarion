@@ -84,7 +84,7 @@ const ok = out => ({ code: 0, out, err: '' });
 const live = (testFiles, lint) => JSON.stringify({ available: true, daemon: { state: 'alive' }, selection: { testFiles }, lint });
 const doneLint = { failing: 0, pending: 0, stale: 0, unknown: 0 };
 
-function fakeIo({ responses = {}, files = 'scripts/x.mjs\n', clock = { t: 0 } } = {}) {
+function fakeIo({ responses = {}, files = 'scripts/x.mjs\0', clock = { t: 0 }, noBase = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -96,7 +96,7 @@ function fakeIo({ responses = {}, files = 'scripts/x.mjs\n', clock = { t: 0 } } 
     },
     sleep: async ms => { clock.t += ms; },
     now: () => clock.t,
-    git: (...a) => (a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
+    git: (...a) => (a[0] === 'merge-base' ? (noBase ? '' : 'base123\n') : a[0] === 'diff' ? files : a[0] === 'status' ? '' : a[0] === 'rev-parse' ? 'abc1234\n' : ''),
   };
 }
 
@@ -136,7 +136,7 @@ test('squealChecks stops polling when a poll is unreadable', async () => {
 test('focusedTests skips a full or unreadable selection and runs a narrow one', async () => {
   const plan = out => fakeIo({ responses: { node: ok(out) } });
   assert.match((await focusedTests('b', plan('{"mode":"full"}'))).skipped, /full suite/);
-  assert.match((await focusedTests('b', plan('oops'))).skipped, /unknown/);
+  assert.equal((await focusedTests('b', plan('oops'))).code, 0);
   assert.match((await focusedTests('b', plan('{"mode":"skip"}'))).skipped, /no tests/);
   const io = plan('{"mode":"changed"}');
   assert.equal((await focusedTests('b', io)).code, 0);
@@ -169,7 +169,7 @@ test('prepr passes on a clean change and skips typecheck for docs only', async (
   assert.equal(r.failed, false);
   assert.match(r.report, /^prepr: PASS/);
   assert.ok(clean.calls.some(c => c.includes('typecheck')));
-  const docs = await prepr({ io: fakeIo({ files: 'docs/x.md\n', responses: { squeal: ok(live([], doneLint)) } }), waitMs: 1000 });
+  const docs = await prepr({ io: fakeIo({ files: 'docs/x.md\0', responses: { squeal: ok(live([], doneLint)) } }), waitMs: 1000 });
   assert.match(docs.report, /skipped: typecheck/);
 });
 
@@ -182,4 +182,20 @@ test('prepr fails when a direct check fails, and with no daemon runs the fallbac
   assert.match(none.report, /No Squeal daemon/);
   const empty = await prepr({ io: fakeIo({ files: '' }), waitMs: 1000 });
   assert.match(empty.report, /0 changed file/);
+});
+
+test('prepr keeps unusual path names whole and fails on a missing base', async () => {
+  const io = fakeIo({ files: 'docs/caf\u00e9\tx.md\0docs/y.md\0', responses: { squeal: ok(live([], doneLint)) } });
+  await prepr({ io, waitMs: 1000 });
+  assert.ok(io.calls[0].includes('docs/caf\u00e9\tx.md') || io.calls.some(c => c.includes('docs/caf\u00e9\tx.md')));
+  await assert.rejects(prepr({ io: fakeIo({ noBase: true }), waitMs: 1000 }), /No merge base/);
+});
+
+test('squealChecks passes a process timeout to the wait', async () => {
+  const io = fakeIo({ responses: { squeal: ok(live([], doneLint)) } });
+  let options;
+  const run = io.run;
+  io.run = async (cmd, args, o) => { options ??= o; return run(cmd, args, o); };
+  await squealChecks(['a.ts'], 1000, io);
+  assert.equal(options.timeout, 11_000);
 });

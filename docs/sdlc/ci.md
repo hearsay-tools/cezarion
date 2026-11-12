@@ -55,7 +55,8 @@ error, a bare citation or a new clone.
 - The Squeal wait is bounded at 2 minutes (`--wait-ms`). When it ends with no failure,
   the command names the files with no result and passes. CI runs them.
 - With no Squeal daemon for the worktree, the command says so and runs
-  `npm run test:changed` and `npm run lint`.
+  `npm run test:changed` (unless its selection is the full suite, which is left to CI) and
+  `npm run lint`.
 - Local `npm run test:parity`, local browser specs and coverage runs are not duties
   before a PR. CI runs them. Run one only to debug a failure.
 - The changed-function quality check ([`check-code-quality`](../../.ai/skills/check-code-quality/SKILL.md))
@@ -103,8 +104,8 @@ not a final gate. `.ai/agentic.config.json` records CI's complete final command 
 
 **A wait for a verdict has a bound.** Squeal's skill says to wait again when
 `squeal status --wait` returns on timeout. In this repo, do not wait again. `npm run prepr`
-waits at most 2 minutes for the changed files and for lint, then names every file
-with no result and passes when none failed.
+waits at most 2 minutes for the changed files and for lint, then names the files
+with no result (the first ten and a count when more) and passes when none failed.
 
 Record the named files and their Squeal state in the PR's Verification. A missing verdict
 is covered by CI's shards, which give the full verdict; a failing verdict is never
